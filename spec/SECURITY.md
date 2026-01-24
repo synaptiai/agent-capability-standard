@@ -251,9 +251,9 @@ Signs of security issues:
 
 Please report security vulnerabilities privately:
 
-**Email**: security@example.com (replace with actual contact)
+**Email**: security@synapti.ai
 
-**PGP Key**: Available at [link to key]
+**PGP Key**: Available upon request
 
 ### 7.2 What to Include
 

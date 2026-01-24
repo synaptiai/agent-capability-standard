@@ -6219,7 +6219,7 @@ nodes:
       confidence: low|med|high
       assumptions: array
   description: ''
-  layer: SAFETY
+  layer: MEMORY
   mutation: true
   requires_checkpoint: false
   requires_approval: false

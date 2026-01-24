@@ -109,7 +109,7 @@ Change things through execution and generation.
 **Transformation (1):**
 - `transform` - Transform data between formats
 
-### SAFETY (8)
+### SAFETY (7)
 Protect and verify through checkpointing, auditing, and constraints.
 
 | Skill | Description |
@@ -119,7 +119,6 @@ Protect and verify through checkpointing, auditing, and constraints.
 | `constrain` | Apply constraints to operations |
 | `improve` | Suggest improvements |
 | `mitigate` | Apply mitigation strategies |
-| `persist` | Persist data to storage |
 | `rollback` | Rollback to previous state |
 | `verify` | Verify conditions or results |
 
@@ -135,11 +134,12 @@ Self-reflection through discovery and introspection.
 | `discover-outcome` | Discover potential outcomes |
 | `discover-relationship` | Discover relationships |
 
-### MEMORY (1)
-Persistence through recall.
+### MEMORY (2)
+Persistence through storage and recall.
 
 | Skill | Description |
 |-------|-------------|
+| `persist` | Persist data to durable storage |
 | `recall` | Recall previously stored data |
 
 ### COORDINATION (3)
