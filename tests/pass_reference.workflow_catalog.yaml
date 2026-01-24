@@ -65,6 +65,16 @@ debug_code_change:
     retry: null
     store_as: plan_out
     failure_modes: []
+  - capability: checkpoint
+    purpose: Create checkpoint before mutation.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: checkpoint_out
+    failure_modes: []
   - capability: act-plan
     purpose: Apply fix, run tests, and produce diff summary.
     risk: high
@@ -134,10 +144,10 @@ debug_code_change:
           type: object
     previous_world_state:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
     world_state_out:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
 world_model_build:
   goal: Construct a structured world model for a domain (real or digital) with dynamics
     and uncertainty.
@@ -278,10 +288,10 @@ world_model_build:
           type: object
     previous_world_state:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
     world_state_out:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
 capability_gap_analysis:
   goal: Assess a project/system to identify missing capabilities and propose new skills.
   risk: low
@@ -380,10 +390,10 @@ capability_gap_analysis:
           type: object
     previous_world_state:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
     world_state_out:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
 digital_twin_sync_loop:
   goal: Synchronize digital twin state with incoming signals, detect drift, decide
     and execute safe actions, and record provenance.
@@ -443,8 +453,8 @@ digital_twin_sync_loop:
       source: '${receive_out.messages: array<object>}'
       target_schema: canonical_event
     gates: []
-    mapping_ref: docs/schemas/transform_mapping_rawlog_to_observation.yaml
-    output_conforms_to: docs/schemas/event_schema.yaml#/event
+    mapping_ref: schemas/transforms/transform_mapping_rawlog_to_observation.yaml
+    output_conforms_to: schemas/event_schema.yaml#/event
   - capability: integrate
     purpose: Merge canonical events with existing twin snapshot; resolve conflicts
       via strategy.
@@ -498,7 +508,7 @@ digital_twin_sync_loop:
       observations: '${integrate_out.unified_model.observations: array<object>}'
       domain: ${integrate_out.unified_model.meta.world_id}
     gates: []
-    output_conforms_to: docs/schemas/world_state_schema.yaml#/world_state
+    output_conforms_to: schemas/world_state_schema.yaml#/world_state
   - capability: diff-world-state
     purpose: Compute diff between previous snapshot and updated snapshot.
     store_as: diff_world_state_out
@@ -620,6 +630,18 @@ digital_twin_sync_loop:
       message: No checkpoint created. Do not mutate.
     condition: ${constrain_out.policy_ok} == true
     skip_if_false: true
+  - capability: model-schema
+    purpose: Define invariants for verification.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: model_schema_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
   - capability: verify
     purpose: 'Verify outcome: PASS/FAIL with evidence.'
     risk: medium
@@ -700,10 +722,10 @@ digital_twin_sync_loop:
           type: object
     previous_world_state:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
     world_state_out:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
 digital_twin_bootstrap:
   goal: Initialize a digital twin from scratch then run a first sync loop.
   risk: high
@@ -753,7 +775,7 @@ digital_twin_bootstrap:
           type: object
     previous_world_state:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state
     world_state_out:
       type: object
-      ref: docs/schemas/world_state_schema.yaml#/world_state
+      ref: schemas/world_state_schema.yaml#/world_state

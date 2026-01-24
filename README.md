@@ -43,12 +43,9 @@ See [skills/README.md](./skills/README.md) for the complete skill index.
 
 ### Safety Hooks
 
-Pre-configured hooks for safe agent operation:
-- `pretooluse_block_secrets.sh` - Block writes containing secrets
-- `pretooluse_detect_injection.sh` - Detect command injection patterns
-- `pretooluse_require_checkpoint.sh` - Require checkpoint before high-impact changes
-- `posttooluse_format_repo.sh` - Auto-format modified files
-- `posttooluse_log_tool.sh` - Audit trail logging
+Hooks implementing SAFETY layer capabilities from the spec:
+- `pretooluse_require_checkpoint.sh` - Enforce checkpoint before mutations (implements `checkpoint` capability)
+- `posttooluse_log_tool.sh` - Audit trail logging (implements `audit` capability)
 
 ### Validation Tools
 
@@ -79,7 +76,7 @@ agent-capability-standard/
 │   ├── memory/              # 1 skill
 │   ├── coordination/        # 3 skills
 │   └── workflows/           # 4 composed workflows
-├── hooks/                   # 5 safety hooks
+├── hooks/                   # 2 spec-aligned safety hooks
 ├── schemas/                 # Ontology + workflow + world state schemas
 │   └── transforms/          # Type coercion mappings
 ├── tools/                   # Workflow validator
@@ -92,11 +89,11 @@ agent-capability-standard/
 ## Documentation
 
 - **Standard Specification:** `spec/STANDARD-v1.0.0.md`
-- **RFC Motivation:** `docs/RFC-0001-*.md`
-- **Whitepaper:** `docs/WHITEPAPER.md`
-- **Conformance Tests:** `docs/CONFORMANCE.md`
-- **Governance:** `docs/GOVERNANCE.md`
-- **Security Model:** `docs/SECURITY.md`
+- **RFC Motivation:** `spec/RFC-0001-agent-capability-ontology-and-workflow-dsl.md`
+- **Whitepaper:** `spec/WHITEPAPER.md`
+- **Conformance Tests:** `spec/CONFORMANCE.md`
+- **Governance:** `spec/GOVERNANCE.md`
+- **Security Model:** `spec/SECURITY.md`
 
 ## Quick Start
 
@@ -117,8 +114,8 @@ claude> /agent-capability-standard:detect-anomaly input.json
 
 ## Contributing
 
-See `docs/GOVERNANCE.md` for contribution guidelines.
+See `spec/GOVERNANCE.md` for contribution guidelines.
 
 ## License
 
-CC-BY-4.0 - See [LICENSE](./LICENSE) for details.
+See [LICENSE](./LICENSE) for details.

@@ -65,6 +65,16 @@ debug_code_change:
     retry: null
     store_as: plan_out
     failure_modes: []
+  - capability: checkpoint
+    purpose: Create checkpoint before mutation.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: checkpoint_out
+    failure_modes: []
   - capability: act-plan
     purpose: Apply fix, run tests, and produce diff summary.
     risk: high
@@ -620,6 +630,18 @@ digital_twin_sync_loop:
       message: No checkpoint created. Do not mutate.
     condition: ${constrain_out.policy_ok} == true
     skip_if_false: true
+  - capability: model-schema
+    purpose: Define invariants for verification.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: model_schema_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
   - capability: verify
     purpose: 'Verify outcome: PASS/FAIL with evidence.'
     risk: medium

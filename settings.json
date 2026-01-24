@@ -1,29 +1,14 @@
 {
   "$schema": "https://claude.ai/schemas/settings/v1.json",
   "hooks": {
-    "pretooluse_block_secrets": {
-      "enabled": true,
-      "description": "Block writes containing secrets or sensitive data",
-      "configurable": true
-    },
-    "pretooluse_detect_injection": {
-      "enabled": true,
-      "description": "Detect potential command injection patterns",
-      "configurable": true
-    },
     "pretooluse_require_checkpoint": {
-      "enabled": false,
-      "description": "Require checkpoint before high-impact file modifications",
-      "configurable": true
-    },
-    "posttooluse_format_repo": {
-      "enabled": false,
-      "description": "Auto-format modified files according to repo standards",
+      "enabled": true,
+      "description": "Require checkpoint before high-impact file modifications (SAFETY layer)",
       "configurable": true
     },
     "posttooluse_log_tool": {
-      "enabled": false,
-      "description": "Log all tool usage for audit trail",
+      "enabled": true,
+      "description": "Log all tool usage for audit trail (SAFETY layer)",
       "configurable": true
     }
   },

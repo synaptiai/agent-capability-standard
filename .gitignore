@@ -1,2 +1,12 @@
+# OS artifacts
 .DS_Store
+
+# Python
 .venv/
+*.pyc
+__pycache__/
+
+# Tool output artifacts
+validator_suggestions.json
+validator_patch.diff
+conformance_results.json

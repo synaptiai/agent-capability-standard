@@ -9412,6 +9412,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "policy_ok": {
+            "type": "boolean",
+            "description": "Whether the constrained action passes policy checks"
           }
         }
       },
@@ -9893,7 +9897,19 @@
             }
           },
           "unified_model": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+              "observations": {
+                "type": "array",
+                "items": { "type": "object" }
+              },
+              "meta": {
+                "type": "object",
+                "properties": {
+                  "world_id": { "type": "string" }
+                }
+              }
+            }
           },
           "conflicts": {
             "type": "array",
@@ -10077,6 +10093,13 @@
             "items": {
               "type": "object"
             }
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string" }
+            }
           }
         }
       },
@@ -10199,7 +10222,11 @@
         ],
         "properties": {
           "result": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "world_state_out": { "type": "object" }
+            }
           },
           "evidence_anchors": {
             "type": "array",

@@ -172,11 +172,11 @@
       },
       "previous_world_state": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       },
       "world_state_out": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       }
     }
   },
@@ -351,11 +351,11 @@
       },
       "previous_world_state": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       },
       "world_state_out": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       }
     }
   },
@@ -481,11 +481,11 @@
       },
       "previous_world_state": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       },
       "world_state_out": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       }
     }
   },
@@ -559,8 +559,8 @@
           "target_schema": "canonical_event"
         },
         "gates": [],
-        "mapping_ref": "schemas/transforms/transform_mapping_rawlog_to_observation.yaml",
-        "output_conforms_to": "schemas/event_schema.yaml#/event"
+        "mapping_ref": "transforms/transform_mapping_rawlog_to_observation.yaml",
+        "output_conforms_to": "event_schema.yaml#/event"
       },
       {
         "capability": "integrate",
@@ -626,7 +626,7 @@
           "domain": "${integrate_out.unified_model.meta.world_id}"
         },
         "gates": [],
-        "output_conforms_to": "schemas/world_state_schema.yaml#/world_state"
+        "output_conforms_to": "world_state_schema.yaml#/world_state"
       },
       {
         "capability": "diff-world-state",
@@ -880,11 +880,11 @@
       },
       "previous_world_state": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       },
       "world_state_out": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       }
     }
   },
@@ -951,11 +951,11 @@
       },
       "previous_world_state": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       },
       "world_state_out": {
         "type": "object",
-        "ref": "schemas/world_state_schema.yaml#/world_state"
+        "$ref": "world_state_schema.yaml#/world_state"
       }
     }
   }
