@@ -1,53 +1,180 @@
-# Agent Capability Standard (v1.0.0)
+# Agent Capability Standard
 
-A comprehensive capability ontology and skill library for AI agents, providing 103 composable skills across 8 layers with workflow composition, world modeling, and safety primitives.
+> **Grounded Agency**: A framework for building AI agents that know what they don't know.
 
-**Status:** Candidate Standard v1.0.0
-**Release date:** 2026-01-24
+[![Conformance](https://github.com/danielbentes/agent-capability-standard/actions/workflows/conformance.yml/badge.svg)](https://github.com/danielbentes/agent-capability-standard/actions/workflows/conformance.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](spec/STANDARD-v1.0.0.md)
 
-## Installation (Claude Code Plugin)
+---
+
+## What Is This?
+
+**Agent Capability Standard** is the technical specification. **Grounded Agency** is the philosophy behind it.
+
+Most AI agent systems fail in production because:
+- Composition is implicit (no contracts between capabilities)
+- State is ungrounded (no provenance for claims)
+- Conflict resolution is undefined (no trust model)
+- Safety is retrofitted (no checkpoints or rollback)
+
+This standard fixes that by making reliability *structural*—not optional.
+
+### The Core Idea
+
+Every agent action should be:
+1. **Grounded** — backed by evidence, not hallucination
+2. **Auditable** — with provenance and lineage
+3. **Safe** — mutations require checkpoints
+4. **Composable** — typed contracts between capabilities
+
+## Quick Start (5 minutes)
 
 ```bash
-# Install as a Claude Code plugin
-claude plugin install https://github.com/danielbentes/agent-capability-standard
-
-# Or clone and install locally
+# Clone the repository
 git clone https://github.com/danielbentes/agent-capability-standard.git
-claude plugin install ./agent-capability-standard
+cd agent-capability-standard
+
+# Set up Python environment
+python -m venv .venv && source .venv/bin/activate
+pip install pyyaml
+
+# Validate the example workflows
+python tools/validate_workflows.py
+# → VALIDATION PASS
+
+# Run conformance tests
+python scripts/run_conformance.py
+# → Conformance PASSED (5/5)
 ```
+
+**Next:** See [QUICKSTART.md](docs/QUICKSTART.md) for a guided walkthrough.
 
 ## What's Included
 
-### 103 Skills Across 8 Layers
+### 99 Atomic Capabilities
 
-| Layer | Count | Purpose |
-|-------|-------|---------|
-| PERCEPTION | 4 | Observe the world (inspect, search, retrieve, receive) |
-| MODELING | 45 | Build understanding (detect, identify, estimate, forecast, world-state) |
-| REASONING | 20 | Think and decide (compare, plan, decide, critique, explain) |
-| ACTION | 12 | Change things (act, generate, transform, send) |
-| SAFETY | 8 | Protect and verify (verify, checkpoint, rollback, audit, constrain) |
-| META | 6 | Self-reflection (discover, discover-relationship) |
-| MEMORY | 1 | Persistence (recall) |
-| COORDINATION | 3 | Multi-agent (delegate, synchronize, invoke-workflow) |
-| + WORKFLOWS | 4 | Composed multi-step skills |
+Organized across 8 layers with explicit input/output schemas and prerequisites:
 
-See [skills/README.md](./skills/README.md) for the complete skill index.
+| Layer | Count | Examples |
+|-------|-------|----------|
+| **PERCEPTION** | 4 | inspect, search, retrieve, receive |
+| **MODELING** | 45 | detect-*, identify-*, estimate-*, world-state |
+| **REASONING** | 20 | compare-*, plan, decide, critique, explain |
+| **ACTION** | 12 | act-plan, generate-*, transform, send |
+| **SAFETY** | 8 | verify, checkpoint, rollback, audit, constrain |
+| **META** | 6 | discover-*, prioritize |
+| **MEMORY** | 1 | recall |
+| **COORDINATION** | 3 | delegate, synchronize, invoke-workflow |
 
-### Schemas & Ontology
+### 5 Reference Workflows
 
-- **Capability Ontology** - 99 atomic capabilities with input/output schemas, layer assignments, and prerequisites
-- **Workflow Catalog** - Composable workflows with bindings, gates, and recovery loops
-- **World State Schema** - Grounded observations with provenance and uncertainty
-- **Trust & Identity Policies** - Authority ranking, alias scoring, merge/split
+Production-ready workflow compositions with gates, recovery loops, and typed bindings:
+
+| Workflow | Goal | Risk |
+|----------|------|------|
+| `debug_code_change` | Safely diagnose and fix bugs | High |
+| `world_model_build` | Construct grounded world model | Low |
+| `capability_gap_analysis` | Identify missing capabilities | Medium |
+| `digital_twin_sync_loop` | Synchronize digital twin state | High |
+| `digital_twin_bootstrap` | Initialize and run first sync | High |
+
+### Canonical Schemas
+
+- **Capability Ontology** — 99 capabilities with I/O contracts
+- **Workflow DSL** — Typed bindings, gates, recovery loops
+- **World State** — Observations with provenance and uncertainty
+- **Trust Model** — Authority ranking with time decay
 
 ### Safety Hooks
 
-Hooks implementing SAFETY layer capabilities from the spec:
-- `pretooluse_require_checkpoint.sh` - Enforce checkpoint before mutations (implements `checkpoint` capability)
-- `posttooluse_log_tool.sh` - Audit trail logging (implements `audit` capability)
+Hooks implementing SAFETY layer capabilities:
 
-### Validation Tools
+| Hook | Capability | Purpose |
+|------|------------|---------|
+| `pretooluse_require_checkpoint.sh` | `checkpoint` | Enforce checkpoint before mutations |
+| `posttooluse_log_tool.sh` | `audit` | Maintain audit trail |
+
+## Documentation
+
+### For Users
+
+| Document | Purpose |
+|----------|---------|
+| [QUICKSTART.md](docs/QUICKSTART.md) | Validate a workflow in 10 minutes |
+| [TUTORIAL.md](docs/TUTORIAL.md) | Build your first workflow (30 min) |
+| [GLOSSARY.md](docs/GLOSSARY.md) | Key terms and definitions |
+| [FAQ.md](docs/FAQ.md) | Common questions |
+
+### For Implementers
+
+| Document | Purpose |
+|----------|---------|
+| [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Formal specification |
+| [CONFORMANCE.md](spec/CONFORMANCE.md) | Conformance levels and testing |
+| [SECURITY.md](spec/SECURITY.md) | Threat model and mitigations |
+
+### For Contributors
+
+| Document | Purpose |
+|----------|---------|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [GOVERNANCE.md](spec/GOVERNANCE.md) | RFC process |
+| [ROADMAP.md](spec/ROADMAP.md) | Future plans |
+
+### Background
+
+| Document | Purpose |
+|----------|---------|
+| [WHITEPAPER.md](spec/WHITEPAPER.md) | Design rationale and philosophy |
+| [RFC-0001](spec/RFC-0001-agent-capability-ontology-and-workflow-dsl.md) | Original proposal |
+
+## Directory Structure
+
+```
+agent-capability-standard/
+├── skills/                  # 99+ capability skills by layer
+│   ├── perception/          # inspect, search, retrieve, receive
+│   ├── modeling/            # detect, identify, estimate, forecast...
+│   ├── reasoning/           # compare, plan, decide, critique...
+│   ├── action/              # act, generate, transform, send
+│   ├── safety/              # verify, checkpoint, rollback, audit
+│   ├── meta/                # discover, prioritize
+│   ├── memory/              # recall
+│   ├── coordination/        # delegate, synchronize, invoke-workflow
+│   └── workflows/           # Composed multi-step workflows
+├── schemas/                 # Ontology + workflow + world state schemas
+│   ├── capability_ontology.json
+│   ├── workflow_catalog.yaml
+│   ├── world_state_schema.yaml
+│   └── transforms/          # Type coercion mappings
+├── hooks/                   # Safety hooks (checkpoint, audit)
+├── tools/                   # Validator CLI
+├── tests/                   # Conformance fixtures
+├── spec/                    # Standard documentation
+├── docs/                    # User documentation
+├── examples/                # Usage examples
+└── templates/               # Skill templates
+```
+
+## Installation
+
+### As a Claude Code Plugin
+
+```bash
+claude plugin install https://github.com/danielbentes/agent-capability-standard
+```
+
+### Local Development
+
+```bash
+git clone https://github.com/danielbentes/agent-capability-standard.git
+cd agent-capability-standard
+python -m venv .venv && source .venv/bin/activate
+pip install pyyaml
+```
+
+## Validation
 
 ```bash
 # Validate workflow definitions
@@ -60,62 +187,37 @@ python tools/validate_workflows.py --emit-patch
 python scripts/run_conformance.py
 ```
 
-## Directory Structure
+## Design Philosophy
 
-```
-agent-capability-standard/
-├── plugin.json              # Plugin manifest
-├── settings.json            # Plugin settings
-├── skills/                  # 103 skills by layer
-│   ├── perception/          # 4 skills
-│   ├── modeling/            # 45 skills
-│   ├── reasoning/           # 20 skills
-│   ├── action/              # 12 skills
-│   ├── safety/              # 8 skills
-│   ├── meta/                # 6 skills
-│   ├── memory/              # 1 skill
-│   ├── coordination/        # 3 skills
-│   └── workflows/           # 4 composed workflows
-├── hooks/                   # 2 spec-aligned safety hooks
-├── schemas/                 # Ontology + workflow + world state schemas
-│   └── transforms/          # Type coercion mappings
-├── tools/                   # Workflow validator
-├── templates/               # Shared skill templates
-├── spec/                    # Standard documentation
-├── examples/                # Usage examples
-└── tests/                   # Conformance fixtures
-```
+This standard embodies the **Grounded Agency** approach:
 
-## Documentation
+1. **Grounded Claims** — Every claim is evidence-backed or explicitly inferred
+2. **Auditable Transforms** — Deterministic or documented loss
+3. **Safety by Construction** — Mutation requires checkpoints; actions require plans
+4. **Composable Atoms** — Workflows orchestrate; capabilities do one thing
+5. **Explicit Contracts** — I/O schemas are first-class
 
-- **Standard Specification:** `spec/STANDARD-v1.0.0.md`
-- **RFC Motivation:** `spec/RFC-0001-agent-capability-ontology-and-workflow-dsl.md`
-- **Whitepaper:** `spec/WHITEPAPER.md`
-- **Conformance Tests:** `spec/CONFORMANCE.md`
-- **Governance:** `spec/GOVERNANCE.md`
-- **Security Model:** `spec/SECURITY.md`
+## License
 
-## Quick Start
+Apache License 2.0. See [LICENSE](LICENSE) for details.
 
-```python
-# Example: Invoke a skill programmatically
-from pathlib import Path
-import yaml
+## Citation
 
-skill_path = Path("skills/modeling/detect/SKILL.md")
-content = skill_path.read_text()
-# Parse YAML frontmatter and execute workflow
-```
+If you use this standard in research, please cite:
 
-```bash
-# Example: Use via Claude Code
-claude> /agent-capability-standard:detect-anomaly input.json
+```bibtex
+@misc{agentcapabilitystandard2026,
+  title={Agent Capability Standard: A Framework for Grounded Agency},
+  author={Bentes, Daniel},
+  year={2026},
+  url={https://github.com/danielbentes/agent-capability-standard}
+}
 ```
 
 ## Contributing
 
-See `spec/GOVERNANCE.md` for contribution guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [spec/GOVERNANCE.md](spec/GOVERNANCE.md) for the RFC process.
 
-## License
+---
 
-See [LICENSE](./LICENSE) for details.
+**Status:** Candidate Standard v1.0.0 | **Released:** 2026-01-24
