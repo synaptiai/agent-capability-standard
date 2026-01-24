@@ -1,0 +1,71 @@
+{
+  "$schema": "https://claude.ai/schemas/plugin/v1.json",
+  "name": "agent-capability-standard",
+  "version": "1.0.0",
+  "description": "Comprehensive capability skill library for AI agents with 103 skills covering perception, reasoning, generation, world-modeling, agentic operations, communication, and data management",
+  "author": "Agent Capability Standard Contributors",
+  "license": "CC-BY-4.0",
+  "repository": "https://github.com/danielbentes/agent-capability-standard",
+  "keywords": [
+    "ai-capabilities",
+    "agent-skills",
+    "world-modeling",
+    "perception",
+    "reasoning",
+    "generation",
+    "agentic"
+  ],
+  "skills": {
+    "directory": "skills"
+  },
+  "hooks": [
+    {
+      "event": "PreToolUse",
+      "matcher": {
+        "tool_name": "Write|Edit|Bash"
+      },
+      "script": "hooks/pretooluse_block_secrets.sh",
+      "description": "Block writes containing secrets or sensitive data"
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": {
+        "tool_name": "Bash"
+      },
+      "script": "hooks/pretooluse_detect_injection.sh",
+      "description": "Detect potential command injection patterns"
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": {
+        "tool_name": "Write|Edit"
+      },
+      "script": "hooks/pretooluse_require_checkpoint.sh",
+      "description": "Require checkpoint before high-impact file modifications"
+    },
+    {
+      "event": "PostToolUse",
+      "matcher": {
+        "tool_name": "Write|Edit"
+      },
+      "script": "hooks/posttooluse_format_repo.sh",
+      "description": "Auto-format modified files according to repo standards"
+    },
+    {
+      "event": "PostToolUse",
+      "matcher": {
+        "tool_name": "*"
+      },
+      "script": "hooks/posttooluse_log_tool.sh",
+      "description": "Log all tool usage for audit trail"
+    }
+  ],
+  "resources": {
+    "schemas": "schemas",
+    "tools": "tools",
+    "templates": "templates"
+  },
+  "settings": {
+    "file": "settings.json"
+  }
+}

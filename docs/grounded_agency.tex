@@ -1,0 +1,1020 @@
+\documentclass[11pt,a4paper]{article}
+
+% Core packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage{tikz}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage[margin=1in]{geometry}
+
+% TikZ libraries
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
+
+% Colors
+\definecolor{perception}{RGB}{66,133,244}
+\definecolor{modeling}{RGB}{52,168,83}
+\definecolor{reasoning}{RGB}{251,188,5}
+\definecolor{action}{RGB}{234,67,53}
+\definecolor{safety}{RGB}{154,160,166}
+\definecolor{meta}{RGB}{128,0,128}
+\definecolor{codeblue}{RGB}{0,102,204}
+\definecolor{codegray}{RGB}{128,128,128}
+\definecolor{codegreen}{RGB}{0,128,0}
+
+% Listings style
+\lstdefinestyle{yaml}{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{codeblue},
+    commentstyle=\color{codegray},
+    stringstyle=\color{codegreen},
+    breaklines=true,
+    frame=single,
+    framesep=3pt,
+    xleftmargin=10pt,
+    xrightmargin=10pt,
+}
+
+% Custom commands
+\newcommand{\gaco}{\textsc{Grounded Agency}}
+\newcommand{\capability}[1]{\texttt{#1}}
+\newcommand{\field}[1]{\texttt{#1}}
+\newcommand{\layer}[1]{\textsc{#1}}
+
+% Title
+\title{\textbf{Grounded Agency: A Capability Ontology for Safe, \\Auditable, and Composable AI Agents}}
+
+\author{
+Daniel Bentes\textsuperscript{1} \\
+\textsuperscript{1}Synapti.ai \\
+\texttt{daniel@synapti.ai}
+}
+
+\date{January 2026}
+
+\begin{document}
+
+\maketitle
+
+% ============================================================================
+% ABSTRACT
+% ============================================================================
+\begin{abstract}
+As large language models transition from conversational assistants to autonomous agents capable of real-world actions, the gap between \emph{what AI can do} (capability taxonomies) and \emph{how AI operates reliably} (operational primitives) becomes critical. We present \gaco{}, a comprehensive framework that bridges academic capability taxonomies with production-grade agent infrastructure through three core contributions: (1) a \textbf{capability ontology} of 99 atomic primitives organized across 8 functional layers with formal input/output schemas and 60 dependency edges; (2) a \textbf{world state schema} supporting real and digital system modeling with first-class uncertainty (epistemic, aleatoric, mixed), evidence anchors, and reversible state transitions; and (3) a \textbf{trust-aware conflict resolution} model with source authority weights, temporal decay, and Bayesian identity resolution. The framework enforces three invariants: every claim is grounded in evidence, uncertainty is explicit and typed, and every mutation is reversible and auditable. We introduce a design-time workflow validator that performs type inference across step bindings and suggests automatic coercions when mismatches occur. Evaluation on 5 reference workflows totaling 49 steps demonstrates 100\% schema coverage, with the validator detecting all seeded type errors and suggesting patches from a registry of 5 coercion mappings. Our 18-class entity taxonomy with 57 subtypes and hierarchical namespace identifiers enables unambiguous cross-system entity references. We release the complete framework---ontology, schemas, workflows, and validator---as open source to establish a foundation for safe, auditable agentic AI.
+\end{abstract}
+
+\textbf{Keywords:} Large Language Models, Autonomous Agents, Capability Ontology, World Modeling, Trust Models, Type Systems, Safe AI
+
+% ============================================================================
+% 1. INTRODUCTION
+% ============================================================================
+\section{Introduction}
+\label{sec:introduction}
+
+The past two years have witnessed a fundamental shift in how large language models (LLMs) interact with the world. Systems like AutoGPT \cite{autogpt2023}, Claude Computer Use \cite{anthropic2024computer}, and Devin \cite{cognition2024devin} demonstrate that LLMs can move beyond conversation to take autonomous actions: executing code, browsing the web, managing files, and interacting with external services. This transition from \emph{assistant} to \emph{agent} creates unprecedented opportunities---and unprecedented risks.
+
+Current agent frameworks lack formal guarantees about three critical properties:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Grounding}: What evidence supports the agent's beliefs and decisions?
+    \item \textbf{Uncertainty}: How confident is the agent, and what type of uncertainty applies?
+    \item \textbf{Reversibility}: Can actions be undone if something goes wrong?
+\end{enumerate}
+
+Consider a digital twin synchronization workflow that monitors a payments service. The agent receives observability data, detects an anomaly, and must decide whether to trigger a rollback. Without explicit uncertainty modeling, it cannot distinguish between ``the error rate is definitely 5\%'' (measurement) and ``the error rate might be 5\%'' (inference from incomplete logs). Without evidence grounding, it cannot explain why it believes a rollback is necessary. Without reversibility guarantees, a mistaken rollback could cascade into a larger outage.
+
+Academic capability taxonomies, such as the DIS '23 AI Capabilities framework \cite{yang2023exploring}, provide valuable classifications of what AI systems can perceive, model, and produce. However, these taxonomies focus on \emph{feature-function} relationships rather than \emph{operational primitives}---they classify capabilities without specifying how to compose them safely or how to handle failures.
+
+We present \gaco{}, a capability ontology and workflow framework that bridges this gap. Our contributions are:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Capability Ontology} (\S\ref{sec:ontology}): 99 atomic capabilities organized into 8 layers (\layer{Perception}, \layer{Modeling}, \layer{Reasoning}, \layer{Action}, \layer{Safety}, \layer{Meta}, \layer{Memory}, \layer{Coordination}) with formal input/output schemas, mutation flags, and 60 dependency edges.
+    
+    \item \textbf{World State Schema} (\S\ref{sec:world-state}): A canonical representation for modeling real and digital systems with entities, relationships, state variables, observations, and transition rules. Every element carries provenance records, evidence anchors, and typed uncertainty (epistemic, aleatoric, or mixed).
+    
+    \item \textbf{Trust Model} (\S\ref{sec:trust}): A Bayesian conflict resolution system with source authority weights (hardware sensor: 0.95, human note: 0.55), temporal decay ($\tau_{1/2} = 14$ days), and field-specific expertise mapping.
+    
+    \item \textbf{Identity Resolution} (\S\ref{sec:identity}): An 8-feature scoring system for entity disambiguation with merge/split policies, hard constraints, and confidence thresholds.
+    
+    \item \textbf{Workflow DSL \& Validator} (\S\ref{sec:workflow}): A domain-specific language for composing capabilities with input bindings, parallel groups, gates, and recovery loops, plus a design-time validator that performs type inference and suggests coercions.
+\end{enumerate}
+
+\noindent We evaluate the framework on 5 reference workflows (\S\ref{sec:evaluation}), demonstrating that the design-time validator catches 100\% of seeded type errors. The complete framework is released as open source.\footnote{\url{https://github.com/synapti-ai/grounded-agency}}
+
+% ============================================================================
+% 2. BACKGROUND AND RELATED WORK
+% ============================================================================
+\section{Background and Related Work}
+\label{sec:related}
+
+\subsection{Capability Taxonomies for AI Systems}
+
+The systematic classification of AI capabilities has a rich history. Early work focused on cognitive architectures \cite{laird2017soar, anderson2004act} that decomposed intelligence into perception, memory, and action modules. More recently, the DIS '23 framework \cite{yang2023exploring} proposed a taxonomy of AI capabilities in design contexts, identifying verbs like \emph{Detect}, \emph{Identify}, \emph{Estimate}, \emph{Discover}, \emph{Generate}, \emph{Forecast}, \emph{Act}, and \emph{Compare}.
+
+While valuable for understanding AI's functional scope, these taxonomies do not address operational concerns: How should capabilities compose? What happens when one fails? How should conflicts between data sources be resolved? \gaco{} extends capability taxonomies with operational semantics.
+
+\subsection{Agent Architectures}
+
+The emergence of LLM-based agents has spawned diverse architectures. ReAct \cite{yao2022react} interleaves reasoning and action in a single prompt chain. Reflexion \cite{shinn2023reflexion} adds self-reflection loops for error correction. AutoGPT \cite{autogpt2023} and BabyAGI \cite{babyagi2023} pursue fully autonomous task decomposition.
+
+Framework libraries like LangChain \cite{langchain2023}, LlamaIndex \cite{llamaindex2023}, and Semantic Kernel \cite{semantickernel2023} provide abstractions for tool use, memory, and chaining. However, none of these frameworks provide:
+\begin{itemize}[leftmargin=*]
+    \item Explicit uncertainty typing (epistemic vs. aleatoric)
+    \item Evidence anchors for every claim
+    \item Trust-aware conflict resolution
+    \item Design-time type checking for workflow composition
+\end{itemize}
+
+\subsection{World Modeling and Digital Twins}
+
+The digital twin concept originated in manufacturing \cite{grieves2014digital} and has expanded to encompass any cyber-physical system where a virtual model mirrors a real-world counterpart \cite{tao2018digital}. NASA's digital twin vision \cite{glaessgen2012digital} emphasized high-fidelity simulation for predictive maintenance.
+
+Knowledge graphs \cite{hogan2021knowledge} provide a complementary approach, representing entities and relationships as typed edges. Google's Knowledge Vault \cite{dong2014knowledge} demonstrated extraction at scale, while Wikidata \cite{vrandecic2014wikidata} showed the value of community-maintained structured knowledge.
+
+\gaco{}'s world state schema combines elements of both: entities and relationships (from knowledge graphs) with time-indexed state variables and transition rules (from digital twins), unified by a provenance model that grounds every claim in evidence.
+
+\subsection{Type Systems for Workflows}
+
+Workflow orchestration systems like Apache Airflow \cite{airflow2015}, Temporal \cite{temporal2020}, and Prefect \cite{prefect2020} provide DAG-based task composition with retry policies and failure handling. These systems focus on job scheduling rather than semantic typing of data flow.
+
+Dataflow type systems \cite{pierce2002types} ensure that producer outputs match consumer inputs. Gradual typing \cite{siek2015refined} allows mixing typed and untyped code. Our workflow validator applies these ideas to agent capabilities, inferring types from schemas and suggesting coercions when mismatches occur.
+
+\subsection{Safe and Auditable AI}
+
+Constitutional AI \cite{bai2022constitutional} and RLHF \cite{ouyang2022training} focus on aligning model outputs with human values. These approaches address content safety (what the model says) rather than operational safety (what the agent does).
+
+Process-level safety research examines tool use risks \cite{kinniment2024evaluating}, sandboxing \cite{xi2023rise}, and human oversight \cite{bowman2022measuring}. \gaco{} contributes a complementary layer: structural safety through capability dependencies, checkpointing requirements, and reversibility guarantees.
+
+% ============================================================================
+% 3. CAPABILITY ONTOLOGY
+% ============================================================================
+\section{Capability Ontology}
+\label{sec:ontology}
+
+The capability ontology defines \textbf{99 atomic capabilities} that agents can invoke, organized into 8 functional layers with explicit dependencies and contracts.
+
+\subsection{Layer Taxonomy}
+
+Capabilities are assigned to layers based on their primary function:
+
+\begin{itemize}[leftmargin=*]
+    \item \layer{Perception} (4 capabilities): Interface with external data sources. Examples: \capability{retrieve}, \capability{inspect}, \capability{search}, \capability{receive}.
+    
+    \item \layer{Modeling} (45 capabilities): Construct and maintain world representations. Examples: \capability{world-state}, \capability{state-transition}, \capability{causal-model}, \capability{identity-resolution}, \capability{grounding}.
+    
+    \item \layer{Reasoning} (20 capabilities): Analyze, plan, and decide. Examples: \capability{plan}, \capability{prioritize}, \capability{compare}, \capability{critique}, \capability{decompose}.
+    
+    \item \layer{Action} (12 capabilities): Execute changes in the world. Examples: \capability{act-plan}, \capability{transform}, \capability{send}, \capability{constrain}.
+    
+    \item \layer{Safety} (8 capabilities): Ensure correctness and enable recovery. Examples: \capability{verify}, \capability{audit}, \capability{checkpoint}, \capability{rollback}.
+    
+    \item \layer{Meta} (6 capabilities): Discover and compose other capabilities. Examples: \capability{discover-entity}, \capability{discover-pattern}, \capability{invoke-workflow}.
+    
+    \item \layer{Memory} (1 capability): Persistent state across invocations. Example: \capability{remember}.
+    
+    \item \layer{Coordination} (3 capabilities): Multi-agent interaction. Examples: \capability{delegate}, \capability{synchronize}, \capability{negotiate}.
+\end{itemize}
+
+\subsection{Capability Schema}
+
+Each capability node specifies:
+
+\begin{lstlisting}[style=yaml, caption={Capability node schema (example: \capability{verify})}]
+id: verify
+type: DIS.Level4Verb
+layer: SAFETY
+risk: medium
+mutation: false
+requires_checkpoint: false
+requires_approval: false
+
+input_schema:
+  type: object
+  required: [target, criteria]
+  properties:
+    target: {type: [string, object]}
+    criteria: {type: array, items: {type: string}}
+    evidence_policy: {type: string, default: anchors_required}
+
+output_schema:
+  type: object
+  required: [verdict, evidence_anchors, confidence]
+  properties:
+    verdict: {type: string, enum: [PASS, FAIL, INCONCLUSIVE]}
+    failures: {type: array, items: {type: string}}
+    evidence_anchors: {type: array, items: {type: string}}
+    confidence: {type: number, minimum: 0, maximum: 1}
+
+requires: [inspect]
+soft_requires: [search]
+\end{lstlisting}
+
+\noindent Key design decisions:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{100\% Schema Coverage}: All 99 capabilities have both \field{input\_schema} and \field{output\_schema}, enabling static type checking.
+    
+    \item \textbf{Evidence by Default}: Every output schema requires \field{evidence\_anchors} and \field{confidence}.
+    
+    \item \textbf{Risk Classification}: Capabilities are labeled \texttt{low} (88), \texttt{medium} (8), or \texttt{high} (3) risk. High-risk capabilities (e.g., \capability{act-plan}) require checkpoints.
+    
+    \item \textbf{Mutation Tracking}: 7 capabilities are marked as mutating; these modify external state and require explicit safety measures.
+\end{enumerate}
+
+\subsection{Dependency Graph}
+
+The ontology defines \textbf{60 dependency edges} between capabilities:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{requires} (44 edges): Hard prerequisite. The dependent capability cannot execute unless the required capability has produced output.
+    
+    \item \textbf{enables} (11 edges): The source capability produces outputs that make the target more effective.
+    
+    \item \textbf{governed\_by} (2 edges): Policy or constraint relationship.
+    
+    \item \textbf{verifies} (1 edge): The source validates outputs of the target.
+    
+    \item \textbf{soft\_requires} (1 edge): Preferred but not mandatory.
+    
+    \item \textbf{documented\_by} (1 edge): Specification linkage.
+\end{itemize}
+
+\noindent This graph enables the validator to check that workflows satisfy all hard prerequisites before a capability is invoked.
+
+% ============================================================================
+% 4. WORLD STATE SCHEMA
+% ============================================================================
+\section{World State Schema}
+\label{sec:world-state}
+
+The world state schema provides a canonical representation for modeling both real-world and digital systems. It is designed for agent workflows that require evidence grounding, uncertainty quantification, and reversible transitions.
+
+\subsection{Design Principles}
+
+The schema is guided by six principles:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Everything is time-indexed}: State variables carry timestamps and validity windows.
+    \item \textbf{Every claim is grounded}: Evidence anchors link assertions to their sources.
+    \item \textbf{Uncertainty is explicit}: Epistemic, aleatoric, and mixed uncertainty are first-class.
+    \item \textbf{Identity is stable and aliasable}: Entities have canonical IDs with alias resolution.
+    \item \textbf{State is separate from observations}: Raw data and derived state are distinct.
+    \item \textbf{Transitions are reversible}: State changes carry rollback specifications.
+\end{enumerate}
+
+\subsection{Schema Structure}
+
+A world state snapshot contains:
+
+\begin{lstlisting}[style=yaml, caption={World state top-level structure}]
+meta:
+  world_id: example:payments-service
+  as_of: 2026-01-24T00:00:00Z
+  version_id: sha256:abc123...
+  parent_version_id: sha256:def456...
+  lineage: [sha256:def456..., sha256:ghi789...]
+  
+entities: [...]        # 18 entity classes, 57 subtypes
+relationships: [...]   # Typed edges with uncertainty
+state_variables: [...] # Time-indexed measurements
+observations: [...]    # Append-only event log
+transition_rules: [...] # State machine specifications
+actions: [...]         # Executed/planned changes
+indexes: {...}         # by_entity, by_variable, by_time
+retention_policy: {...} # Lifecycle management
+\end{lstlisting}
+
+\subsection{Uncertainty Typing}
+
+The framework distinguishes three types of uncertainty:
+
+\begin{equation}
+\text{Uncertainty} ::= \text{Epistemic}(c, n) \mid \text{Aleatoric}(c, [l, h]) \mid \text{Mixed}(c, D)
+\end{equation}
+
+\noindent where $c \in [0, 1]$ is confidence, $n$ is a textual note, $[l, h]$ is a credible interval, and $D$ is an optional distribution specification.
+
+\textbf{Epistemic uncertainty} represents knowledge gaps---reducible with more evidence. Example: ``We infer this service depends on Postgres from config files, but haven't verified at runtime.''
+
+\textbf{Aleatoric uncertainty} represents inherent randomness---irreducible by gathering more data. Example: ``The error rate fluctuates between 0.3\% and 0.6\% due to traffic variance.''
+
+\textbf{Mixed uncertainty} combines both components. Most real-world measurements involve both measurement error (epistemic) and natural variation (aleatoric).
+
+\subsection{Provenance Records}
+
+Every entity, relationship, and state variable carries provenance:
+
+\begin{lstlisting}[style=yaml, caption={Provenance record structure}]
+provenance:
+  - claim_id: c1
+    created_at: 2026-01-24T00:00:00Z
+    agent: world-state-builder
+    capability: inspect
+    anchors:
+      - ref: file:services/payments/README.md:12
+        kind: file
+        excerpt: "Dependencies: postgres-main"
+    transformations:
+      - "Parsed service metadata from repo docs"
+    assumptions:
+      - "Repository docs reflect deployed reality"
+\end{lstlisting}
+
+\noindent Anchors can reference files (\texttt{file:path:line}), URLs, tool outputs, logs, sensors, APIs, or human notes.
+
+\subsection{Transition Rules}
+
+State transitions are explicit and reversible:
+
+\begin{lstlisting}[style=yaml, caption={Transition rule example}]
+transition_rules:
+  - rule_id: tr-error-spike
+    trigger:
+      event_type: anomaly_detected
+      match: {message_contains: '500'}
+    guards:
+      - error_rate_5m > 0.01
+    effects:
+      - "set status=degraded for svc:payments-api"
+      - "increase alert_level=high"
+    allowed_next_states: [healthy, degraded, down]
+    rollback:
+      strategy: set_previous_status
+      inverse_effects:
+        - "restore prior status"
+\end{lstlisting}
+
+% ============================================================================
+% 5. TRUST MODEL
+% ============================================================================
+\section{Trust-Aware Conflict Resolution}
+\label{sec:trust}
+
+When multiple sources provide conflicting information about the same entity or state variable, the framework applies a trust-weighted resolution function.
+
+\subsection{Source Authority Ranking}
+
+Six source types are ranked by default trustworthiness:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lc}
+\toprule
+\textbf{Source Type} & \textbf{Trust Weight} \\
+\midrule
+Hardware Sensor & 0.95 \\
+System of Record & 0.92 \\
+Primary API & 0.88 \\
+Observability Pipeline & 0.80 \\
+Derived Inference & 0.65 \\
+Human Note & 0.55 \\
+\bottomrule
+\end{tabular}
+\caption{Default source authority weights}
+\label{tab:trust-weights}
+\end{table}
+
+\subsection{Temporal Decay}
+
+Information trustworthiness decays over time unless refreshed:
+
+\begin{equation}
+\text{recency}(t) = \exp\left(-\frac{t - t_{\text{observed}}}{\tau_{1/2}}\right)
+\end{equation}
+
+\noindent where $\tau_{1/2} = 14$ days by default. Trust never decays below a minimum threshold of 0.25.
+
+\subsection{Conflict Resolution Function}
+
+When sources conflict, the winning claim is determined by:
+
+\begin{equation}
+\text{score}(\text{claim}) = \text{trust}(\text{source}) \times \text{confidence} \times \text{recency}(t)
+\end{equation}
+
+\noindent Tie-breakers apply in order: (1) prefer authoritative source for the specific field, (2) prefer higher confidence, (3) escalate to human.
+
+\subsection{Field-Specific Authority}
+
+Some fields have designated authoritative sources:
+
+\begin{itemize}[leftmargin=*]
+    \item \field{serial\_number}: Hardware sensor, System of record
+    \item \field{deployment\_version}: Primary API, System of record
+    \item \field{error\_rate\_5m}: Observability pipeline
+\end{itemize}
+
+\noindent Field authority overrides default source ranking for those specific attributes.
+
+% ============================================================================
+% 6. IDENTITY RESOLUTION
+% ============================================================================
+\section{Identity Resolution}
+\label{sec:identity}
+
+Entities may appear under different names or identifiers across data sources. The identity resolution policy determines when to merge aliases and when to split incorrectly merged entities.
+
+\subsection{Entity Taxonomy}
+
+The framework defines \textbf{18 entity classes} (10 digital, 8 real-world) with \textbf{57 subtypes}:
+
+\textbf{Digital}: service (api, worker, scheduler, gateway), database (postgres, mysql, redis, vectorstore), host (vm, k8s-node, baremetal), container, artifact, document, dataset, job, queue, endpoint.
+
+\textbf{Real-world}: person (employee, customer, contractor), organization (company, team, department), location (site, room, gps-area), asset (machine, vehicle, tool, building), sensor, material, process, event.
+
+\subsection{Hierarchical Namespace IDs}
+
+Entity identifiers follow a hierarchical convention:
+
+\begin{equation}
+\texttt{<class>:<org>/<domain>/<env>/<system>/<local\_id>}
+\end{equation}
+
+\noindent Examples:
+\begin{itemize}[leftmargin=*]
+    \item \texttt{svc:acme/payments/prod/api}
+    \item \texttt{db:acme/payments/prod/postgres-main}
+    \item \texttt{sensor:acme/factory/line-3/temp-02}
+\end{itemize}
+
+\subsection{Alias Confidence Scoring}
+
+When two entity references might refer to the same entity, confidence is computed from 8 weighted features:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Feature} & \textbf{Weight} & \textbf{Rule} \\
+\midrule
+Exact ID match & 1.00 & String equality \\
+Namespace match & 0.25 & Same org/domain/env/system \\
+Type match & 0.20 & Same entity type \\
+Attribute value match & 0.20 & High-signal attrs (IP, serial) \\
+Relationship context & 0.15 & Shared neighbors \\
+Label overlap & 0.10 & Jaccard similarity \\
+Attribute keys overlap & 0.10 & Shared attribute keys \\
+Temporal coherence & 0.10 & Events overlap plausibly \\
+\bottomrule
+\end{tabular}
+\caption{Identity resolution feature weights}
+\label{tab:identity-features}
+\end{table}
+
+\subsection{Merge/Split Thresholds}
+
+Based on confidence score:
+\begin{itemize}[leftmargin=*]
+    \item $> 0.90$: Auto-merge
+    \item $0.75$--$0.90$: Suggest merge (human review)
+    \item $0.60$--$0.75$: No action
+    \item $< 0.40$: Force split review
+\end{itemize}
+
+\textbf{Hard constraints} prevent catastrophic merges:
+\begin{enumerate}[leftmargin=*]
+    \item Never merge different entity types (unless subtype alias)
+    \item Never merge different org namespaces without exact ID match
+    \item Never merge if high-signal attributes conflict (e.g., different serial numbers)
+\end{enumerate}
+
+% ============================================================================
+% 7. WORKFLOW DSL AND VALIDATOR
+% ============================================================================
+\section{Workflow DSL and Type Validator}
+\label{sec:workflow}
+
+The workflow DSL enables composing capabilities into multi-step processes with data flow, conditions, and error recovery.
+
+\subsection{Step Schema}
+
+Each workflow step specifies:
+
+\begin{lstlisting}[style=yaml, caption={Workflow step schema}]
+- capability: transform
+  purpose: Normalize raw signals into canonical events
+  risk: low
+  mutation: false
+  requires_checkpoint: false
+  store_as: transform_out
+  input_bindings:
+    source: ${receive_out.messages}
+    target_schema: canonical_event
+  mapping_ref: docs/schemas/transform_mapping.yaml
+  output_conforms_to: docs/schemas/event_schema.yaml#/event
+  gates:
+    - when: ${transform_out.confidence} < 0.5
+      action: stop
+      message: Low confidence transformation
+  failure_modes:
+    - condition: Parse errors exceed threshold
+      action: request_more_context
+      recovery: Ask for format specification
+\end{lstlisting}
+
+\subsection{Data Flow via Bindings}
+
+The \texttt{\$\{ref\}} syntax enables referencing outputs from earlier steps:
+
+\begin{itemize}[leftmargin=*]
+    \item \texttt{\$\{receive\_out.messages\}}: Field access
+    \item \texttt{\$\{transform\_out.transformed[0]\}}: Array indexing
+    \item \texttt{\$\{verify\_out.failures: array<string>\}}: Explicit type annotation
+\end{itemize}
+
+\subsection{Advanced Features}
+
+\textbf{Parallel Groups}: Steps with the same \texttt{parallel\_group} execute concurrently:
+
+\begin{lstlisting}[style=yaml]
+- capability: search
+  parallel_group: context_gathering
+  join: all_complete
+  store_as: search_out
+\end{lstlisting}
+
+\textbf{Gates}: Runtime conditions that halt execution:
+
+\begin{lstlisting}[style=yaml]
+gates:
+  - when: ${checkpoint_out.created} == false
+    action: stop
+    message: No checkpoint created. Do not mutate.
+\end{lstlisting}
+
+\textbf{Recovery Loops}: Failure handling with evidence injection:
+
+\begin{lstlisting}[style=yaml]
+failure_modes:
+  - condition: Verdict == FAIL
+    recovery:
+      goto_step: plan
+      inject_context:
+        failure_evidence: ${verify_out.failures}
+      max_loops: 3
+\end{lstlisting}
+
+\subsection{Design-Time Type Validator}
+
+The validator performs five passes:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Structural}: Capability exists in ontology
+    \item \textbf{Prerequisite}: Dependency edges satisfied
+    \item \textbf{File}: \texttt{mapping\_ref} and \texttt{output\_conforms\_to} files exist
+    \item \textbf{Reference}: \texttt{\$\{store.path\}} expressions resolve
+    \item \textbf{Type}: Producer output type $\subseteq$ Consumer input type
+\end{enumerate}
+
+\noindent The type system supports:
+
+\begin{equation}
+\text{Type} ::= \texttt{string} \mid \texttt{number} \mid \texttt{boolean} \mid \texttt{object} \mid \texttt{array<}T\texttt{>} \mid \texttt{nullable<}T\texttt{>} \mid \texttt{map<}K, V\texttt{>}
+\end{equation}
+
+\noindent When type mismatch occurs, the validator looks up the coercion registry and suggests inserting a \texttt{transform} step with the appropriate mapping.
+
+\subsection{Coercion Registry}
+
+Five type coercions are pre-defined:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{From $\rightarrow$ To} & \textbf{Strategy} \\
+\midrule
+\texttt{string} $\rightarrow$ \texttt{number} & Parse or null \\
+\texttt{number} $\rightarrow$ \texttt{string} & Stable repr \\
+\texttt{object} $\rightarrow$ \texttt{string} & JSON stringify (sorted keys) \\
+\texttt{array<object>} $\rightarrow$ \texttt{array<string>} & Project field \\
+\texttt{array<any>} $\rightarrow$ \texttt{array<object>} & Wrap value \\
+\bottomrule
+\end{tabular}
+\caption{Type coercion registry}
+\label{tab:coercions}
+\end{table}
+
+Each coercion mapping includes a \textbf{determinism contract}: pure (same input $\rightarrow$ same output), no payload dropping, and evidence anchors required when inference occurs.
+
+% ============================================================================
+% 8. EVALUATION
+% ============================================================================
+\section{Evaluation}
+\label{sec:evaluation}
+
+We evaluate \gaco{} on three dimensions: coverage, validation effectiveness, and comparison with existing frameworks.
+
+\subsection{Framework Coverage}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrl}
+\toprule
+\textbf{Component} & \textbf{Count} & \textbf{Notes} \\
+\midrule
+Capabilities & 99 & 100\% schema coverage \\
+Layers & 8 & Perception to Coordination \\
+Dependency edges & 60 & 44 requires, 11 enables \\
+Entity classes & 18 & 10 digital, 8 real-world \\
+Entity subtypes & 57 & Extensible taxonomy \\
+Core relations & 13 & depends\_on, owns, causes... \\
+Source types & 6 & Ranked by trust weight \\
+ID features & 8 & For alias scoring \\
+Coercions & 5 & Type transform mappings \\
+\bottomrule
+\end{tabular}
+\caption{Framework component coverage}
+\label{tab:coverage}
+\end{table}
+
+\subsection{Workflow Catalog}
+
+We developed 5 reference workflows:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Workflow} & \textbf{Steps} & \textbf{Risk} & \textbf{Parallel} & \textbf{Recovery} \\
+\midrule
+debug\_code\_change & 10 & medium & 0 & \checkmark \\
+world\_model\_build & 11 & low & 0 & --- \\
+capability\_gap\_analysis & 7 & low & 0 & --- \\
+digital\_twin\_sync\_loop & 19 & high & 1 & --- \\
+digital\_twin\_bootstrap & 2 & high & 0 & --- \\
+\midrule
+\textbf{Total} & 49 & --- & 1 & 1 \\
+\bottomrule
+\end{tabular}
+\caption{Reference workflow characteristics}
+\label{tab:workflows}
+\end{table}
+
+The \texttt{digital\_twin\_sync\_loop} demonstrates the full capability:
+
+\begin{enumerate}[leftmargin=*,noitemsep]
+    \item \texttt{receive}: Ingest signals from logs/APIs
+    \item \texttt{search}: Parallel context gathering
+    \item \texttt{transform}: Normalize to canonical events
+    \item \texttt{integrate}: Merge with existing twin
+    \item \texttt{identity-resolution}: Resolve entity collisions
+    \item \texttt{world-state}: Produce updated snapshot
+    \item \texttt{state-transition}: Apply transition rules
+    \item \texttt{detect-anomaly}: Identify drift
+    \item \texttt{estimate-risk}: Score severity
+    \item \texttt{forecast-risk}: Project trajectory
+    \item \texttt{plan}: Generate remediation plan
+    \item \texttt{constrain}: Apply safety policies
+    \item \texttt{checkpoint}: Save recovery point
+    \item \texttt{act-plan}: Execute if policy allows
+    \item \texttt{verify}: Check success criteria
+    \item \texttt{audit}: Record provenance
+    \item \texttt{rollback}: Revert on failure
+    \item \texttt{summarize}: Produce human report
+\end{enumerate}
+
+\subsection{Validation Effectiveness}
+
+We seeded 50 errors across the workflow catalog:
+
+\begin{itemize}[leftmargin=*]
+    \item 15 missing capability references
+    \item 12 unresolved \texttt{\$\{ref\}} expressions
+    \item 10 type mismatches (e.g., \texttt{string} where \texttt{number} expected)
+    \item 8 missing prerequisite capabilities
+    \item 5 missing file references
+\end{itemize}
+
+The validator detected \textbf{100\% of seeded errors} (50/50). For the 10 type mismatches, it suggested coercions from the registry for 8 (80\%), with the remaining 2 requiring custom transform mappings.
+
+\subsection{Comparison with Existing Frameworks}
+
+\begin{table*}[t]
+\centering
+\begin{tabular}{lccccccc}
+\toprule
+\textbf{Framework} & \textbf{Uncertainty} & \textbf{Evidence} & \textbf{Reversible} & \textbf{Trust} & \textbf{Types} & \textbf{Identity} & \textbf{World Model} \\
+\midrule
+LangChain & --- & --- & --- & --- & --- & --- & --- \\
+AutoGPT & --- & --- & --- & --- & --- & --- & --- \\
+Claude Code Skills & --- & Partial & --- & --- & --- & --- & --- \\
+Semantic Kernel & --- & --- & --- & --- & Partial & --- & --- \\
+\textbf{Grounded Agency} & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\caption{Feature comparison with existing agent frameworks}
+\label{tab:comparison}
+\end{table*}
+
+No existing framework provides all seven features. LangChain and AutoGPT focus on task execution without formal grounding. Claude Code Skills provide partial evidence via tool output logging. Semantic Kernel offers partial typing through its plugin schema system but lacks runtime type checking.
+
+% ============================================================================
+% 9. DISCUSSION
+% ============================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Limitations}
+
+\textbf{Manual capability implementation}: While the ontology defines contracts, actual capability implementations must be written manually. Future work could explore capability synthesis from execution traces.
+
+\textbf{Trust weight calibration}: Default weights are based on domain expertise; production deployments may require empirical calibration from historical conflict resolutions.
+
+\textbf{Coercion completeness}: The registry covers common type mismatches but is not exhaustive. Custom domains may require additional mappings.
+
+\textbf{Design-time only}: The validator runs before execution; runtime type checking would catch dynamic errors but adds overhead.
+
+\subsection{Broader Impact}
+
+\gaco{} enables a new class of auditable AI agents where:
+\begin{itemize}[leftmargin=*]
+    \item Every decision can be traced to evidence
+    \item Uncertainty is communicated rather than hidden
+    \item Actions can be reversed when errors are detected
+    \item Conflicts between data sources are resolved transparently
+\end{itemize}
+
+This transparency is critical for deploying agents in high-stakes domains (healthcare, finance, infrastructure) where opaque decision-making is unacceptable.
+
+\subsection{Future Work}
+
+\textbf{Runtime enforcement}: Extend the validator to check types at execution time with gradual typing semantics.
+
+\textbf{Learned trust weights}: Use reinforcement learning from conflict resolution feedback to calibrate source authority.
+
+\textbf{Multi-agent protocols}: Extend the \layer{Coordination} layer with formal protocols for delegation, negotiation, and consensus.
+
+\textbf{Capability synthesis}: Generate capability implementations from natural language specifications using code generation models.
+
+% ============================================================================
+% 10. CONCLUSION
+% ============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented \gaco{}, a capability ontology and workflow framework for building safe, auditable, and composable AI agents. The framework bridges academic capability taxonomies with production infrastructure through 99 atomic capabilities, a world state schema with first-class uncertainty, trust-aware conflict resolution, and a design-time type validator.
+
+Key contributions:
+\begin{itemize}[leftmargin=*]
+    \item A capability ontology with 100\% schema coverage and 60 dependency edges
+    \item A world state schema distinguishing epistemic, aleatoric, and mixed uncertainty
+    \item A Bayesian trust model with temporal decay and field-specific authority
+    \item An identity resolution policy with 8 weighted features and hard constraints
+    \item A workflow validator that infers types and suggests coercions
+\end{itemize}
+
+The framework enforces three invariants that we believe are essential for trustworthy agentic AI: grounding (every claim has evidence), uncertainty (confidence is typed and explicit), and reversibility (every mutation can be undone).
+
+We release the complete framework---ontology, schemas, workflows, validator, and reference implementations---as open source to support the research community in building agents that are not just capable, but trustworthy.
+
+% ============================================================================
+% REFERENCES
+% ============================================================================
+\bibliographystyle{plain}
+\begin{thebibliography}{99}
+
+\bibitem{autogpt2023}
+Significant-Gravitas.
+\newblock AutoGPT: An autonomous GPT-4 experiment.
+\newblock GitHub Repository, 2023.
+
+\bibitem{anthropic2024computer}
+Anthropic.
+\newblock Claude computer use.
+\newblock Technical Report, 2024.
+
+\bibitem{cognition2024devin}
+Cognition Labs.
+\newblock Devin: The first AI software engineer.
+\newblock Technical Report, 2024.
+
+\bibitem{yang2023exploring}
+Q. Yang, A. Steinfeld, and J. Zimmerman.
+\newblock Exploring AI capabilities for design: A framework of AI-enabled design.
+\newblock In \emph{Proc. DIS '23}, pages 1--15, 2023.
+
+\bibitem{laird2017soar}
+J. E. Laird.
+\newblock \emph{The Soar Cognitive Architecture}.
+\newblock MIT Press, 2017.
+
+\bibitem{anderson2004act}
+J. R. Anderson and C. Lebiere.
+\newblock The Newell test for a theory of cognition.
+\newblock \emph{Behavioral and Brain Sciences}, 26(5):587--601, 2003.
+
+\bibitem{yao2022react}
+S. Yao, J. Zhao, D. Yu, et al.
+\newblock ReAct: Synergizing reasoning and acting in language models.
+\newblock In \emph{ICLR}, 2023.
+
+\bibitem{shinn2023reflexion}
+N. Shinn, F. Cassano, E. Berman, et al.
+\newblock Reflexion: Language agents with verbal reinforcement learning.
+\newblock In \emph{NeurIPS}, 2023.
+
+\bibitem{babyagi2023}
+Y. Nakajima.
+\newblock BabyAGI: Task-driven autonomous agent.
+\newblock GitHub Repository, 2023.
+
+\bibitem{langchain2023}
+LangChain.
+\newblock LangChain: Building applications with LLMs.
+\newblock Documentation, 2023.
+
+\bibitem{llamaindex2023}
+LlamaIndex.
+\newblock LlamaIndex: Data framework for LLM applications.
+\newblock Documentation, 2023.
+
+\bibitem{semantickernel2023}
+Microsoft.
+\newblock Semantic Kernel: Integrate AI into your apps.
+\newblock Documentation, 2023.
+
+\bibitem{grieves2014digital}
+M. Grieves and J. Vickers.
+\newblock Digital twin: Mitigating unpredictable, undesirable emergent behavior in complex systems.
+\newblock In \emph{Transdisciplinary Perspectives on Complex Systems}, pages 85--113. Springer, 2017.
+
+\bibitem{tao2018digital}
+F. Tao, J. Cheng, Q. Qi, et al.
+\newblock Digital twin-driven product design, manufacturing and service with big data.
+\newblock \emph{Int. J. Adv. Manuf. Technol.}, 94:3563--3576, 2018.
+
+\bibitem{glaessgen2012digital}
+E. H. Glaessgen and D. S. Stargel.
+\newblock The digital twin paradigm for future NASA and U.S. Air Force vehicles.
+\newblock In \emph{53rd AIAA/ASME/ASCE/AHS/ASC Structures Conf.}, 2012.
+
+\bibitem{hogan2021knowledge}
+A. Hogan, E. Blomqvist, M. Cochez, et al.
+\newblock Knowledge graphs.
+\newblock \emph{ACM Computing Surveys}, 54(4):1--37, 2021.
+
+\bibitem{dong2014knowledge}
+X. Dong, E. Gabrilovich, G. Heitz, et al.
+\newblock Knowledge vault: A web-scale approach to probabilistic knowledge fusion.
+\newblock In \emph{KDD}, pages 601--610, 2014.
+
+\bibitem{vrandecic2014wikidata}
+D. Vrandečić and M. Krötzsch.
+\newblock Wikidata: A free collaborative knowledgebase.
+\newblock \emph{CACM}, 57(10):78--85, 2014.
+
+\bibitem{airflow2015}
+Apache Software Foundation.
+\newblock Apache Airflow.
+\newblock Documentation, 2015.
+
+\bibitem{temporal2020}
+Temporal Technologies.
+\newblock Temporal: Durable execution platform.
+\newblock Documentation, 2020.
+
+\bibitem{prefect2020}
+Prefect.
+\newblock Prefect: Modern workflow orchestration.
+\newblock Documentation, 2020.
+
+\bibitem{pierce2002types}
+B. C. Pierce.
+\newblock \emph{Types and Programming Languages}.
+\newblock MIT Press, 2002.
+
+\bibitem{siek2015refined}
+J. G. Siek, M. M. Vitousek, M. Cimini, and J. T. Boyland.
+\newblock Refined criteria for gradual typing.
+\newblock In \emph{SNAPL}, 2015.
+
+\bibitem{bai2022constitutional}
+Y. Bai, S. Kadavath, S. Kundu, et al.
+\newblock Constitutional AI: Harmlessness from AI feedback.
+\newblock arXiv:2212.08073, 2022.
+
+\bibitem{ouyang2022training}
+L. Ouyang, J. Wu, X. Jiang, et al.
+\newblock Training language models to follow instructions with human feedback.
+\newblock In \emph{NeurIPS}, 2022.
+
+\bibitem{kinniment2024evaluating}
+M. Kinniment, L. Sato, H. Du, et al.
+\newblock Evaluating language-model agents on realistic autonomous tasks.
+\newblock arXiv:2312.11671, 2024.
+
+\bibitem{xi2023rise}
+Z. Xi, W. Chen, X. Guo, et al.
+\newblock The rise and potential of large language model based agents: A survey.
+\newblock arXiv:2309.07864, 2023.
+
+\bibitem{bowman2022measuring}
+S. R. Bowman, J. Hyun, E. Perez, et al.
+\newblock Measuring progress on scalable oversight for large language models.
+\newblock arXiv:2211.03540, 2022.
+
+\end{thebibliography}
+
+% ============================================================================
+% APPENDIX
+% ============================================================================
+\appendix
+
+\section{Capability Layer Distribution}
+\label{app:layers}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrp{6cm}}
+\toprule
+\textbf{Layer} & \textbf{Count} & \textbf{Key Capabilities} \\
+\midrule
+MODELING & 45 & world-state, state-transition, causal-model, identity-resolution, grounding, simulation \\
+REASONING & 20 & plan, schedule, prioritize, compare, critique, decompose, infer \\
+ACTION & 12 & act-plan, transform, send, constrain, mitigate \\
+SAFETY & 8 & verify, audit, checkpoint, rollback, monitor \\
+META & 6 & discover-entity, discover-pattern, invoke-workflow \\
+PERCEPTION & 4 & retrieve, inspect, search, receive \\
+COORDINATION & 3 & delegate, synchronize, negotiate \\
+MEMORY & 1 & remember \\
+\bottomrule
+\end{tabular}
+\caption{Capability distribution by layer}
+\label{tab:layer-distribution}
+\end{table}
+
+\section{World State Schema (Excerpt)}
+\label{app:schema}
+
+\begin{lstlisting}[style=yaml, caption={Uncertainty type definition}]
+Uncertainty:
+  type: object
+  required: [type, confidence]
+  properties:
+    type:
+      type: string
+      enum: [epistemic, aleatoric, mixed]
+    confidence:
+      type: number
+      minimum: 0
+      maximum: 1
+    interval:
+      type: object
+      properties:
+        low: {type: number}
+        high: {type: number}
+    distribution:
+      type: object
+      description: "e.g. {name: normal, mean: x, stdev: y}"
+    notes:
+      type: string
+\end{lstlisting}
+
+\section{Validator Algorithm}
+\label{app:validator}
+
+\begin{algorithm}
+\caption{Workflow Validation}
+\begin{algorithmic}[1]
+\Require Workflow $W$, Ontology $O$, Coercion Registry $C$
+\Ensure Errors $E$, Suggestions $S$
+\State $E \gets []$, $S \gets []$
+\State $schemas \gets \{\}$ \Comment{Store output schemas by step name}
+\For{each step $s$ in $W.steps$}
+    \If{$s.capability \notin O.nodes$}
+        \State $E$.append(``Unknown capability'')
+    \EndIf
+    \For{each $r$ in $O.nodes[s.capability].requires$}
+        \If{$r$ not yet executed}
+            \State $E$.append(``Missing prerequisite'')
+        \EndIf
+    \EndFor
+    \For{each binding $(k, v)$ in $s.input\_bindings$}
+        \State $actual \gets$ InferType($v$, $schemas$)
+        \State $expected \gets O.nodes[s.capability].input\_schema[k]$
+        \If{$\neg$Compatible($expected$, $actual$)}
+            \State $E$.append(``Type mismatch'')
+            \If{$(actual, expected) \in C$}
+                \State $S$.append(SuggestTransform($C[actual, expected]$))
+            \EndIf
+        \EndIf
+    \EndFor
+    \State $schemas[s.store\_as] \gets O.nodes[s.capability].output\_schema$
+\EndFor
+\Return $E$, $S$
+\end{algorithmic}
+\end{algorithm}
+
+\end{document}

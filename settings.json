@@ -1,0 +1,41 @@
+{
+  "$schema": "https://claude.ai/schemas/settings/v1.json",
+  "hooks": {
+    "pretooluse_block_secrets": {
+      "enabled": true,
+      "description": "Block writes containing secrets or sensitive data",
+      "configurable": true
+    },
+    "pretooluse_detect_injection": {
+      "enabled": true,
+      "description": "Detect potential command injection patterns",
+      "configurable": true
+    },
+    "pretooluse_require_checkpoint": {
+      "enabled": false,
+      "description": "Require checkpoint before high-impact file modifications",
+      "configurable": true
+    },
+    "posttooluse_format_repo": {
+      "enabled": false,
+      "description": "Auto-format modified files according to repo standards",
+      "configurable": true
+    },
+    "posttooluse_log_tool": {
+      "enabled": false,
+      "description": "Log all tool usage for audit trail",
+      "configurable": true
+    }
+  },
+  "validation": {
+    "strict_mode": false,
+    "require_provenance": true,
+    "trust_decay_enabled": true,
+    "default_trust_level": 0.8
+  },
+  "world_modeling": {
+    "enable_digital_twin": false,
+    "state_persistence": "memory",
+    "max_state_history": 100
+  }
+}
