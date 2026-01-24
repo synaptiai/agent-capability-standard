@@ -9,6 +9,16 @@ context: fork
 agent: explore
 ---
 
+## Live Context
+
+Current environment state for anomaly baseline:
+
+- Recent log entries: !`tail -50 logs/*.log 2>/dev/null || tail -50 *.log 2>/dev/null || echo "No log files found"`
+- Recent errors: !`grep -i "error\|fail\|exception" logs/*.log 2>/dev/null | tail -10 || echo "No error logs found"`
+- System uptime: !`uptime 2>/dev/null || echo "uptime unavailable"`
+- Disk usage: !`df -h . 2>/dev/null | tail -1 || echo "df unavailable"`
+- Recent file changes: !`find . -type f -mmin -60 -not -path './.git/*' 2>/dev/null | head -10 || echo "None in last hour"`
+
 ## Intent
 
 Determine whether anomalies, outliers, or deviations from expected patterns exist in the target data. This is an existence check that answers "is there something unusual here?" rather than classifying what type of anomaly it is.

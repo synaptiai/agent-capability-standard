@@ -361,6 +361,47 @@ assumptions:
 - Note when validation is incomplete
 - Be careful with false positives
 
+## Bundled Scripts
+
+This skill includes utility scripts for schema validation:
+
+### validate-schema.sh
+
+Located at: `scripts/validate-schema.sh`
+
+**Usage:**
+```bash
+./scripts/validate-schema.sh <schema_file> <data_file> [options]
+```
+
+**Options:**
+- `--format json|yaml` - Specify data format (default: auto-detect)
+- `--verbose` - Show detailed validation output
+- `--help` - Show help message
+
+**Supported Tools (auto-detected):**
+- `ajv-cli` - Full JSON Schema validation
+- `jsonschema` (Python) - JSON Schema validation
+- `jq` - Basic JSON syntax validation
+- `yq` - YAML validation and conversion
+
+**Examples:**
+```bash
+# Validate JSON against schema
+./scripts/validate-schema.sh schemas/user.json data/user-input.json
+
+# Validate YAML configuration
+./scripts/validate-schema.sh schemas/config.yaml config/production.yaml --format yaml
+
+# Verbose output
+./scripts/validate-schema.sh schema.json data.json --verbose
+```
+
+**Exit Codes:**
+- `0` - Validation passed
+- `1` - Validation failed
+- `2` - Missing validation tool
+
 ## Composition Patterns
 
 **Commonly follows:**

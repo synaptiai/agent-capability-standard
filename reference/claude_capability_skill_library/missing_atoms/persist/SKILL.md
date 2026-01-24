@@ -7,6 +7,52 @@ user-invocable: true
 allowed-tools: Read, Edit
 context: fork
 agent: general-purpose
+hooks:
+  PreToolUse:
+    - matcher: "Edit"
+      hooks:
+        - type: prompt
+          prompt: |
+            PERSIST DATA VALIDATION CHECK
+
+            Target file: {{tool_input.file_path}}
+            Content to write: {{tool_input.new_string}}
+
+            Verify before persisting:
+            1. NO credentials, API keys, or secrets in content
+            2. NO personally identifiable information (PII)
+            3. NO executable code that could be malicious
+            4. File is within project scope (not system files)
+            5. Content is stable knowledge (not ephemeral data)
+
+            Also check:
+            - Is this a duplicate of existing content?
+            - Does this contradict existing persisted facts?
+
+            Reply ALLOW if content is safe to persist.
+            Reply BLOCK with specific reason if validation fails.
+          once: false
+        - type: command
+          command: |
+            # Validate target file is not a sensitive system file
+            TARGET="{{tool_input.file_path}}"
+            # Block writes to system directories
+            if echo "$TARGET" | grep -qE "^(/etc/|/usr/|/bin/|/sbin/|~/.ssh/|~/.aws/|~/.config/)"; then
+              echo "BLOCK: Cannot persist to system or credential directories"
+              exit 1
+            fi
+            # Block writes to credential files
+            if echo "$TARGET" | grep -qiE "(\.env|credentials|secrets|password|\.pem|\.key)$"; then
+              echo "BLOCK: Cannot persist to credential files"
+              exit 1
+            fi
+            exit 0
+  PostToolUse:
+    - matcher: "Edit"
+      hooks:
+        - type: command
+          command: |
+            echo "[PERSIST] $(date -u +%Y-%m-%dT%H:%M:%SZ) | File: {{tool_input.file_path}} | Success" >> .audit/persist-operations.log 2>/dev/null || true
 ---
 
 ## Intent

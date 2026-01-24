@@ -7,6 +7,52 @@ user-invocable: true
 allowed-tools: Read, Bash, Git
 context: fork
 agent: general-purpose
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: prompt
+          prompt: |
+            ROLLBACK SAFETY VALIDATION
+
+            Rollback command: {{tool_input.command}}
+
+            Before executing rollback, verify:
+            1. Target checkpoint ID exists and is valid
+            2. Checkpoint has not expired
+            3. Current state has been captured (for audit)
+            4. Rollback scope matches intended restore scope
+            5. No ongoing operations that would conflict
+
+            CRITICAL CHECKS:
+            - Is checkpoint integrity verified (hash match)?
+            - Will any data be irreversibly lost?
+            - Are there uncommitted changes that would be overwritten?
+
+            Reply ALLOW if rollback is safe to execute.
+            Reply BLOCK with reason if:
+            - Checkpoint is missing or corrupted
+            - Rollback would cause data loss beyond intended scope
+            - Current state needs to be preserved first
+          once: false
+        - type: command
+          command: |
+            # Verify checkpoint exists before rollback
+            CMD="{{tool_input.command}}"
+            if echo "$CMD" | grep -q "git stash"; then
+              # Check if there are stashes to pop
+              if ! git stash list 2>/dev/null | head -1 | grep -q .; then
+                echo "BLOCK: No git stash found to restore"
+                exit 1
+              fi
+            fi
+            exit 0
+  PostToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: |
+            echo "[ROLLBACK] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Command: {{tool_input.command}} | Exit: {{tool_output.exit_code}}" >> .audit/rollback-operations.log 2>/dev/null || true
 ---
 
 ## Intent

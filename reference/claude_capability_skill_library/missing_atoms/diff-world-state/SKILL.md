@@ -9,6 +9,16 @@ context: fork
 agent: explore
 ---
 
+## Live Context
+
+Current state for diff comparison:
+
+- Git diff from last commit: !`git diff HEAD~1 --stat 2>/dev/null | tail -10 || echo "No previous commit"`
+- Uncommitted changes: !`git diff --stat 2>/dev/null | tail -10 || echo "No uncommitted changes"`
+- Files changed today: !`git log --since="midnight" --name-only --format="" 2>/dev/null | sort | uniq | head -15 || echo "None"`
+- Recent commits summary: !`git log --oneline -5 2>/dev/null || echo "No git history"`
+- Branch divergence: !`git rev-list --left-right --count origin/main...HEAD 2>/dev/null || echo "Cannot compare with origin"`
+
 ## Intent
 
 Perform **world state diff** to identify what changed between two snapshots of a world model. This is essential for drift detection, change auditing, debugging, and understanding system evolution.

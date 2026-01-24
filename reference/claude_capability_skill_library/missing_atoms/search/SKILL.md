@@ -9,6 +9,16 @@ context: fork
 agent: explore
 ---
 
+## Live Context
+
+Available search context:
+
+- Current directory: !`pwd`
+- File types available: !`find . -type f -not -path './.git/*' 2>/dev/null | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -10`
+- Total searchable files: !`find . -type f -not -path './.git/*' 2>/dev/null | wc -l | tr -d ' '`
+- Common directories: !`find . -type d -maxdepth 2 -not -path './.git/*' 2>/dev/null | head -10`
+- README files: !`find . -name 'README*' -not -path './.git/*' 2>/dev/null | head -5`
+
 ## Intent
 
 Execute **search** to find relevant information when you don't know exactly where to look. Unlike `retrieve` (which fetches known items), search explores under uncertainty and ranks results by relevance.

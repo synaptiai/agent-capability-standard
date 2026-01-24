@@ -273,6 +273,55 @@ assumptions:
 - Do not present projections as certainties
 - Stop and clarify when impact dimensions are ambiguous
 
+## Bundled Scripts
+
+This skill includes utility scripts for generating comparison tables:
+
+### compare-table.sh
+
+Located at: `scripts/compare-table.sh`
+
+**Usage:**
+```bash
+./scripts/compare-table.sh <before_file> <after_file> [options]
+```
+
+**Options:**
+- `--format markdown|csv|json` - Output format (default: markdown)
+- `--output <file>` - Write to file instead of stdout
+- `--help` - Show help message
+
+**Features:**
+- JSON diff with path-level change tracking
+- Change type classification (added/removed/modified)
+- Markdown tables for documentation
+- CSV export for spreadsheet analysis
+- JSON export for programmatic use
+
+**Examples:**
+```bash
+# Generate markdown comparison table
+./scripts/compare-table.sh state-v1.json state-v2.json
+
+# Export as CSV
+./scripts/compare-table.sh before.json after.json --format csv --output changes.csv
+
+# Generate JSON diff
+./scripts/compare-table.sh old-config.json new-config.json --format json
+```
+
+**Output Formats:**
+
+*Markdown:*
+| Path | Change Type | Before | After |
+|------|-------------|--------|-------|
+| `user.email` | Modified | `old@ex.com` | `new@ex.com` |
+
+*JSON:*
+```json
+{"changes": [{"path": "user.email", "type": "modified", "before": "old@ex.com", "after": "new@ex.com"}]}
+```
+
 ## Composition Patterns
 
 **Commonly follows:**

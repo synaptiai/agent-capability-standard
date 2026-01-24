@@ -7,6 +7,43 @@ user-invocable: true
 allowed-tools: Read, Grep, Bash
 context: fork
 agent: general-purpose
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: prompt
+          prompt: |
+            OUTBOUND COMMUNICATION SAFETY CHECK
+
+            Command: {{tool_input.command}}
+
+            This skill sends data to external systems. Verify:
+            1. Destination is in the approved allowlist
+            2. No sensitive data (API keys, passwords, PII) in payload
+            3. User has explicitly approved this send operation
+            4. Checkpoint exists for state recovery
+            5. Rate limits are not being exceeded
+
+            CRITICAL: External sends are IRREVERSIBLE.
+
+            Reply ALLOW only if ALL conditions are verified.
+            Reply BLOCK with specific violation if any check fails.
+          once: false
+        - type: command
+          command: |
+            # Block if trying to send to localhost or internal networks without approval
+            CMD="{{tool_input.command}}"
+            if echo "$CMD" | grep -qE "(curl|wget|http)" && echo "$CMD" | grep -qE "(127\.0\.0\.1|localhost|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01]))"; then
+              echo "BLOCK: Internal network access requires explicit approval"
+              exit 1
+            fi
+            exit 0
+  PostToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: |
+            echo "[SEND] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Command: {{tool_input.command}} | Status: {{tool_output.exit_code}}" >> .audit/send-operations.log 2>/dev/null || true
 ---
 
 ## Intent

@@ -7,7 +7,34 @@ user-invocable: true
 allowed-tools: Read, Grep
 context: fork
 agent: explore
+hooks:
+  PostToolUse:
+    - matcher: "Read"
+      hooks:
+        - type: command
+          command: |
+            # Record audit data access for meta-audit
+            mkdir -p .audit 2>/dev/null || true
+            echo "[AUDIT-READ] $(date -u +%Y-%m-%dT%H:%M:%SZ) | File: {{tool_input.file_path}} | Accessed for audit" >> .audit/audit-meta.log
+    - matcher: "Grep"
+      hooks:
+        - type: command
+          command: |
+            # Record audit search operations
+            mkdir -p .audit 2>/dev/null || true
+            echo "[AUDIT-SEARCH] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Pattern: {{tool_input.pattern}} | Searched for audit" >> .audit/audit-meta.log
 ---
+
+## Live Context
+
+Current audit context:
+
+- Recent git commits: !`git log --oneline -10 2>/dev/null || echo "No git history"`
+- Git authors today: !`git log --since="midnight" --format="%an" 2>/dev/null | sort | uniq -c || echo "None"`
+- Uncommitted changes: !`git status --short 2>/dev/null || echo "Not a git repo"`
+- Recent file modifications: !`find . -type f -mtime -1 -not -path './.git/*' 2>/dev/null | wc -l | tr -d ' '` files in last 24h
+- Audit log exists: !`ls -la .audit/ 2>/dev/null | head -5 || echo "No .audit/ directory"`
+- Checkpoint log exists: !`ls -la .checkpoints/ 2>/dev/null | head -5 || echo "No .checkpoints/ directory"`
 
 ## Intent
 

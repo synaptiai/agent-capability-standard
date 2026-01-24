@@ -7,6 +7,47 @@ user-invocable: true
 allowed-tools: Read, Edit, Bash, Git
 context: fork
 agent: general-purpose
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: prompt
+          prompt: |
+            SAFETY CHECK for act-plan execution.
+
+            Command to execute: {{tool_input.command}}
+
+            Verify ALL of the following:
+            1. Command matches an action defined in the current plan
+            2. Command is NOT destructive (no rm -rf, DROP TABLE, force push)
+            3. Command is reversible OR a checkpoint exists
+            4. Command does not access files outside the plan scope
+
+            Reply ALLOW if all checks pass.
+            Reply BLOCK with specific reason if any check fails.
+          once: false
+    - matcher: "Edit"
+      hooks:
+        - type: prompt
+          prompt: |
+            EDIT SAFETY CHECK for act-plan execution.
+
+            File: {{tool_input.file_path}}
+            Edit: {{tool_input.old_string}} -> {{tool_input.new_string}}
+
+            Verify:
+            1. File is in the plan's declared scope
+            2. Edit matches a planned modification
+            3. Checkpoint exists for rollback
+
+            Reply ALLOW or BLOCK with reason.
+          once: false
+  PostToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: |
+            echo "[ACT-PLAN] $(date -u +%Y-%m-%dT%H:%M:%SZ) Executed: {{tool_input.command}} | Exit: {{tool_output.exit_code}}" >> .checkpoints/act-plan-audit.log 2>/dev/null || true
 ---
 
 ## Intent

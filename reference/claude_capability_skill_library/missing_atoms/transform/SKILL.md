@@ -7,6 +7,35 @@ user-invocable: true
 allowed-tools: Read, Grep
 context: fork
 agent: explore
+hooks:
+  PreToolUse:
+    - matcher: "Read"
+      hooks:
+        - type: prompt
+          prompt: |
+            TRANSFORM SOURCE VALIDATION
+
+            Reading file for transformation: {{tool_input.file_path}}
+
+            Before transforming data, verify:
+            1. Source file exists and is readable
+            2. Source format is understood (JSON, YAML, CSV, etc.)
+            3. Data does not contain sensitive information that would be exposed by transformation
+            4. Transformation will be logged for audit
+
+            If source contains sensitive data:
+            - Ensure output will be appropriately redacted
+            - Flag for additional review if PII detected
+
+            Reply ALLOW to proceed with reading source.
+            Reply BLOCK if source appears to contain unprotected sensitive data.
+          once: true
+  PostToolUse:
+    - matcher: "Read"
+      hooks:
+        - type: command
+          command: |
+            echo "[TRANSFORM] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Source: {{tool_input.file_path}} | Read for transformation" >> .audit/transform-operations.log 2>/dev/null || true
 ---
 
 ## Intent

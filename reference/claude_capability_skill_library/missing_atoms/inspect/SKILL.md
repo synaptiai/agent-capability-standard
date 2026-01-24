@@ -9,6 +9,16 @@ context: fork
 agent: explore
 ---
 
+## Live Context
+
+Current environment context for inspection:
+
+- Working directory: !`pwd`
+- Directory contents: !`ls -la 2>/dev/null | head -20`
+- Git branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
+- File count: !`find . -type f -not -path './.git/*' 2>/dev/null | wc -l | tr -d ' '`
+- Directory structure: !`find . -type d -not -path './.git/*' -maxdepth 2 2>/dev/null | head -15`
+
 ## Intent
 
 Transform an unknown or partially known target into a **structured observation** that can be used by downstream capabilities. Inspection is read-only reconnaissance that answers: "What is this, how is it organized, what are its key properties, and what is its current condition?"

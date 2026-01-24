@@ -9,6 +9,15 @@ context: fork
 agent: general-purpose
 ---
 
+## Live Context
+
+Before verification, gather current state:
+
+- Working directory: !`pwd`
+- Git status: !`git status --short 2>/dev/null || echo "Not a git repo"`
+- Recent commits: !`git log --oneline -5 2>/dev/null || echo "No git history"`
+- Last modified files: !`find . -type f -mmin -30 -not -path './.git/*' 2>/dev/null | head -10 || echo "None"`
+
 ## Intent
 
 Execute **verify** to determine whether an artifact (code, configuration, state, output) conforms to a specification, passes tests, or satisfies declared invariants.
@@ -216,6 +225,38 @@ Apply the following verification patterns:
 - Stop and clarify if spec is ambiguous or missing
 - Timeout all external test execution (default 5 minutes)
 - Do not access paths outside the workspace for verification
+
+## Bundled Scripts
+
+This skill includes utility scripts for automated verification:
+
+### verify-state.sh
+
+Located at: `scripts/verify-state.sh`
+
+**Usage:**
+```bash
+./scripts/verify-state.sh [--git] [--files] [--tests] [--all]
+```
+
+**Options:**
+- `--git` - Verify git state (uncommitted changes, branch status)
+- `--files` - Verify file integrity (broken symlinks, empty files)
+- `--tests` - Execute project tests (auto-detects npm/pytest/rspec)
+- `--all` - Run all verification checks (default)
+
+**Output:**
+- Console output with color-coded PASS/FAIL results
+- JSON report saved to `.verification-report.json`
+
+**Example:**
+```bash
+# Run all checks
+./scripts/verify-state.sh --all
+
+# Check only git and file integrity
+./scripts/verify-state.sh --git --files
+```
 
 ## Composition Patterns
 
