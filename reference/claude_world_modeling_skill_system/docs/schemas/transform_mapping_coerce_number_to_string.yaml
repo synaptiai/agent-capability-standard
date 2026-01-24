@@ -1,0 +1,12 @@
+mapping_id: coerce_number_to_string
+version: 1.0.0
+determinism_contract:
+  pure: true
+  drop_raw_payload: false
+  anchors_required_on_inference: false
+rules:
+- id: r1_to_string
+  description: Convert number to string with stable formatting.
+  input: raw.value
+  output: canonical.value_string
+  strategy: repr_stable

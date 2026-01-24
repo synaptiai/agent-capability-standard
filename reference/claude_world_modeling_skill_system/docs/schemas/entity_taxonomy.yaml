@@ -1,0 +1,192 @@
+schema:
+  name: canonical_entity_taxonomy
+  version: 1.0.0
+  generated_at: '2026-01-24T02:46:43.275637Z'
+  description: Canonical entity taxonomy for real+digital world modeling with hierarchical
+    namespaces and stable IDs.
+  principles:
+  - IDs are stable and globally unique within a world_id namespace.
+  - Entity IDs encode class + local identifier (human-readable).
+  - Namespaces are hierarchical for disambiguation (org/project/env/system).
+  - Entity types are extensible via subtypes and labels.
+id_convention:
+  format: <class>:<namespace>/<local_id>
+  examples:
+  - svc:acme/payments/prod/api
+  - db:acme/payments/prod/postgres-main
+  - host:acme/oslo/cluster-a/node-7
+  - person:acme/hr/employee/12345
+  - doc:acme/payments/specs/prd-v2
+  - asset:acme/factory/line-3/robot-12
+  - sensor:acme/factory/line-3/temp-02
+  namespace_components:
+  - org
+  - domain
+  - environment
+  - system
+  - subsystem(optional)
+classes:
+  digital:
+    service:
+      aliases:
+      - svc
+      examples:
+      - api
+      - worker
+      - cron
+      subtypes:
+      - api
+      - worker
+      - scheduler
+      - gateway
+    database:
+      aliases:
+      - db
+      subtypes:
+      - postgres
+      - mysql
+      - redis
+      - vectorstore
+    host:
+      aliases:
+      - host
+      - node
+      subtypes:
+      - vm
+      - k8s-node
+      - baremetal
+    container:
+      aliases:
+      - ctr
+      subtypes:
+      - docker
+      - pod
+    artifact:
+      aliases:
+      - art
+      subtypes:
+      - binary
+      - image
+      - package
+      - model
+    document:
+      aliases:
+      - doc
+      subtypes:
+      - spec
+      - runbook
+      - invoice
+      - contract
+    dataset:
+      aliases:
+      - ds
+      subtypes:
+      - table
+      - stream
+      - lake
+    job:
+      aliases:
+      - job
+      subtypes:
+      - batch
+      - scheduled
+      - streaming
+    queue:
+      aliases:
+      - q
+      subtypes:
+      - kafka-topic
+      - sqs-queue
+    endpoint:
+      aliases:
+      - ep
+      subtypes:
+      - http
+      - grpc
+      - ws
+  real_world:
+    person:
+      aliases:
+      - person
+      subtypes:
+      - employee
+      - customer
+      - contractor
+    organization:
+      aliases:
+      - org
+      subtypes:
+      - company
+      - team
+      - department
+    location:
+      aliases:
+      - loc
+      subtypes:
+      - site
+      - room
+      - gps-area
+    asset:
+      aliases:
+      - asset
+      subtypes:
+      - machine
+      - vehicle
+      - tool
+      - building
+    sensor:
+      aliases:
+      - sensor
+      subtypes:
+      - temperature
+      - pressure
+      - camera
+      - gps
+    material:
+      aliases:
+      - mat
+      subtypes:
+      - component
+      - ingredient
+    process:
+      aliases:
+      - proc
+      subtypes:
+      - manufacturing
+      - logistics
+      - approval
+    event:
+      aliases:
+      - evt
+      subtypes:
+      - incident
+      - delivery
+      - maintenance
+entity_fields_minimum:
+  required:
+  - id
+  - type
+  - labels
+  - aliases
+  - attributes
+  - provenance
+  recommended:
+  - status
+  - uncertainty
+relationships_taxonomy:
+  core_relations:
+  - depends_on
+  - owns
+  - belongs_to
+  - located_in
+  - member_of
+  - produces
+  - consumes
+  - connected_to
+  - controls
+  - observes
+  - causes
+  - blocks
+  - enables
+  notes: Edges should use stable relation names. Domain-specific edges are allowed
+    but must be documented.

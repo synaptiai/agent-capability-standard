@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this standard, please cite it."
+title: "Agent Capability Ontology + Workflow DSL"
+version: "1.0.0"
+date-released: "2026-01-24"
+authors:
+  - family-names: "Synapti"
+    given-names: "Community"
+license: "Apache-2.0"

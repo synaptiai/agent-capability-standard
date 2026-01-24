@@ -1,0 +1,13 @@
+mapping_id: coerce_string_to_number
+version: 1.0.0
+determinism_contract:
+  pure: true
+  drop_raw_payload: false
+  anchors_required_on_inference: true
+rules:
+- id: r1_parse_number
+  description: Parse numeric value from string. If parse fails, set null and add inference
+    warning.
+  input: raw.value
+  output: canonical.value_number
+  strategy: float_or_null

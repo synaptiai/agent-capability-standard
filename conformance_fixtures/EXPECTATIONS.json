@@ -1,0 +1,18 @@
+{
+  "pass_reference": {
+    "should_pass": true
+  },
+  "fail_unknown_capability": {
+    "should_pass": false
+  },
+  "fail_bad_binding_path": {
+    "should_pass": false
+  },
+  "fail_ambiguous_untyped": {
+    "should_pass": false
+  },
+  "fail_consumer_contract_mismatch": {
+    "should_pass": false,
+    "should_emit_suggestions": true
+  }
+}

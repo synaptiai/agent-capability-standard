@@ -1,0 +1,26 @@
+registry:
+  name: transform_coercion_registry
+  version: 1.0.0
+  description: Canonical coercion mappings for type mismatches detected by the workflow
+    validator.
+  principles:
+  - Never drop raw payload
+  - Always emit evidence_anchors if inference occurs
+  - Prefer deterministic transformations
+  - If lossy, record transformation_loss explicitly
+coercions:
+- from: string
+  to: number
+  mapping_ref: docs/schemas/transform_mapping_coerce_string_to_number.yaml
+- from: number
+  to: string
+  mapping_ref: docs/schemas/transform_mapping_coerce_number_to_string.yaml
+- from: object
+  to: string
+  mapping_ref: docs/schemas/transform_mapping_stringify_object.yaml
+- from: array<object>
+  to: array<string>
+  mapping_ref: docs/schemas/transform_mapping_project_array_object_to_array_string.yaml
+- from: array<any>
+  to: array<object>
+  mapping_ref: docs/schemas/transform_mapping_wrap_any_to_object.yaml

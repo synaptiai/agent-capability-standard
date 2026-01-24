@@ -1,0 +1,759 @@
+debug_code_change:
+  goal: Safely diagnose and fix a bug/regression in a codebase.
+  risk: medium
+  steps:
+  - capability: nonexistent-capability
+    purpose: Observe failing behavior, logs, and relevant code paths.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: inspect_out
+    failure_modes:
+    - condition: No relevant signals found
+      action: request_more_context
+      recovery: Ask for reproduction steps or additional artifacts.
+  - capability: search
+    purpose: Find related code, configs, and error patterns.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: search_out
+    failure_modes: []
+  - capability: map-relationships
+    purpose: Build dependency graph around failing component.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: map_relationships_out
+    failure_modes: []
+  - capability: model-schema
+    purpose: Define invariants/spec expectations for the component.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: model_schema_out
+    failure_modes: []
+  - capability: critique
+    purpose: List likely failure modes + edge cases.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: critique_out
+    failure_modes: []
+  - capability: plan
+    purpose: Produce minimal fix plan with checkpoints.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: plan_out
+    failure_modes: []
+  - capability: act-plan
+    purpose: Apply fix, run tests, and produce diff summary.
+    risk: high
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: 5m
+    retry: null
+    store_as: act_plan_out
+    failure_modes:
+    - condition: Unexpected side effects
+      action: pause_and_checkpoint
+      recovery: Checkpoint and require human approval.
+  - capability: verify
+    purpose: Run targeted verification and return PASS/FAIL.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry:
+      max: 3
+      backoff: exponential
+    store_as: verify_out
+    failure_modes:
+    - condition: Verdict == FAIL
+      action: rollback
+      recovery: Rollback, then return to critique/plan with new evidence.
+  - capability: audit
+    purpose: Record what changed and why.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    failure_modes: []
+  - capability: rollback
+    purpose: If verify FAIL, revert safely.
+    risk: medium
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    failure_modes: []
+  success:
+  - Bug fixed or root cause isolated
+  - Verification PASS
+  - Audit trail produced
+  risk_propagation:
+    strategy: max_step_risk
+    computed_risk: high
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output is stored under store_as and may be referenced by later
+      steps.
+  inputs:
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+        constraints:
+          type: object
+    previous_world_state:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+    world_state_out:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+world_model_build:
+  goal: Construct a structured world model for a domain (real or digital) with dynamics
+    and uncertainty.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Collect authoritative domain sources and constraints.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: retrieve_out
+    failure_modes: []
+  - capability: inspect
+    purpose: Observe current system/world artifacts (docs, logs, sensors).
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: inspect_out
+    failure_modes:
+    - condition: No relevant signals found
+      action: request_more_context
+      recovery: Ask for reproduction steps or additional artifacts.
+  - capability: identity-resolution
+    purpose: Define entities and resolve aliases across sources.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: identity_resolution_out
+    failure_modes: []
+  - capability: world-state
+    purpose: Define state variables and current estimates.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: world_state_out
+    failure_modes: []
+  - capability: state-transition
+    purpose: 'Define dynamics: transitions, triggers, guards.'
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: state_transition_out
+    failure_modes: []
+  - capability: causal-model
+    purpose: Define causal assumptions and intervention effects.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: causal_model_out
+    failure_modes: []
+  - capability: uncertainty-model
+    purpose: Attach uncertainty types and confidence.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: uncertainty_model_out
+    failure_modes: []
+  - capability: provenance
+    purpose: Establish lineage for claims and transformations.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: provenance_out
+    failure_modes: []
+  - capability: grounding
+    purpose: Anchor each model element to evidence references.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: grounding_out
+    failure_modes: []
+  - capability: simulation
+    purpose: Run scenarios to stress-test model and identify fragility.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: simulation_out
+    failure_modes: []
+  - capability: summarize
+    purpose: Produce a decision-ready world model brief.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: summarize_out
+    failure_modes: []
+  success:
+  - Model is structured (YAML/JSON)
+  - Every claim is grounded
+  - Uncertainty explicitly represented
+  - Scenario results provided
+  risk_propagation:
+    strategy: max_step_risk
+    computed_risk: low
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output is stored under store_as and may be referenced by later
+      steps.
+  inputs:
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+        constraints:
+          type: object
+    previous_world_state:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+    world_state_out:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+capability_gap_analysis:
+  goal: Assess a project/system to identify missing capabilities and propose new skills.
+  risk: low
+  steps:
+  - capability: inspect
+    purpose: Read project docs and current skill coverage.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: inspect_out
+    failure_modes:
+    - condition: No relevant signals found
+      action: request_more_context
+      recovery: Ask for reproduction steps or additional artifacts.
+  - capability: map-relationships
+    purpose: Map existing workflows vs capabilities.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: map_relationships_out
+    failure_modes: []
+  - capability: discover-relationship
+    purpose: Find hidden dependencies or unmodeled interactions.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: discover_relationship_out
+    failure_modes: []
+  - capability: compare-plans
+    purpose: Compare alternative skill architectures.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: compare_plans_out
+    failure_modes: []
+  - capability: prioritize
+    purpose: Rank missing capabilities by leverage and risk reduction.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: prioritize_out
+    failure_modes: []
+  - capability: generate-plan
+    purpose: Generate an implementation plan for new skills.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: generate_plan_out
+    failure_modes: []
+  - capability: audit
+    purpose: Record rationale + decision lineage.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    failure_modes: []
+  success:
+  - Missing capability list
+  - Prioritized backlog
+  - Proposed skill specs
+  risk_propagation:
+    strategy: max_step_risk
+    computed_risk: medium
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output is stored under store_as and may be referenced by later
+      steps.
+  inputs:
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+        constraints:
+          type: object
+    previous_world_state:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+    world_state_out:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+digital_twin_sync_loop:
+  goal: Synchronize digital twin state with incoming signals, detect drift, decide
+    and execute safe actions, and record provenance.
+  risk: high
+  success:
+  - Twin snapshot updated and grounded
+  - Drift assessed with risk score
+  - Any actions are approved/checkpointed/verified
+  - Audit trail produced
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output stored as `store_as`; later steps may reference it.
+  steps:
+  - capability: receive
+    purpose: Ingest new signals/events from sources (logs/APIs/messages).
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry:
+      max: 3
+      backoff: exponential
+    store_as: receive_out
+    failure_modes:
+    - condition: No messages/events available
+      action: stop
+      recovery: Wait for signals or confirm source configuration.
+    input_bindings: {}
+    gates: []
+  - capability: search
+    purpose: 'Parallel enrichment: search for existing twin snapshot or relevant context
+      while ingesting events.'
+    parallel_group: context_gathering
+    join: all_complete
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: search_out
+    input_bindings:
+      target: ${receive_out.source.name}
+    failure_modes: []
+  - capability: transform
+    purpose: Normalize raw signals into canonical events compatible with world_state.observations.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: transform_out
+    failure_modes: []
+    input_bindings:
+      source: '${receive_out.messages: array<object>}'
+      target_schema: canonical_event
+    gates: []
+    mapping_ref: docs/schemas/transform_mapping_rawlog_to_observation.yaml
+    output_conforms_to: docs/schemas/event_schema.yaml#/event
+  - capability: integrate
+    purpose: Merge canonical events with existing twin snapshot; resolve conflicts
+      via strategy.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: integrate_out
+    failure_modes:
+    - condition: Conflicts exceed threshold
+      action: request_more_context
+      recovery: Ask for resolution strategy or authoritative source preference.
+    input_bindings:
+      sources:
+      - '${transform_out.transformed: object}'
+      - '${previous_world_state: object}'
+      resolution_strategy: prefer_authoritative_sources
+    gates: []
+    resolution_strategy: prefer_authoritative_sources
+    conflict_resolution_strategies:
+    - prefer_authoritative_sources
+    - prefer_recent
+    - prefer_high_confidence
+    - merge_with_uncertainty
+    - escalate_to_human
+  - capability: identity-resolution
+    purpose: Resolve entity identity collisions/aliases introduced by new data.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: identity_resolution_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
+  - capability: world-state
+    purpose: Produce updated canonical world-state snapshot with uncertainty + provenance.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: world_state_out
+    failure_modes: []
+    input_bindings:
+      observations: '${integrate_out.unified_model.observations: array<object>}'
+      domain: ${integrate_out.unified_model.meta.world_id}
+    gates: []
+    output_conforms_to: docs/schemas/world_state_schema.yaml#/world_state
+  - capability: diff-world-state
+    purpose: Compute diff between previous snapshot and updated snapshot.
+    store_as: diff_world_state_out
+    input_bindings:
+      state_a: '${previous_world_state: object}'
+      state_b: '${world_state_out: object}'
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    failure_modes: []
+  - capability: state-transition
+    purpose: Apply transition rules triggered by new observations; compute next states.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: state_transition_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
+  - capability: detect-anomaly
+    purpose: Detect drift/anomalies between expected and observed state.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: detect_anomaly_out
+    failure_modes: []
+    input_bindings:
+      context: ${world_state_out}
+    gates: []
+  - capability: estimate-risk
+    purpose: Estimate risk impact/probability from drift and transitions.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: estimate_risk_out
+    failure_modes: []
+    input_bindings:
+      context: ${detect_anomaly_out}
+    gates: []
+  - capability: forecast-risk
+    purpose: Forecast near-term risk trajectory and triggers.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: forecast_risk_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
+  - capability: plan
+    purpose: Plan safe action(s) to reduce risk, with verification criteria and rollback
+      plan.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: plan_out
+    failure_modes: []
+    input_bindings:
+      context: ${forecast_risk_out}
+    gates: []
+  - capability: constrain
+    purpose: Enforce policy and least privilege for planned actions.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: constrain_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
+  - capability: checkpoint
+    purpose: Create checkpoint marker before any mutation/side-effect step.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: checkpoint_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
+  - capability: act-plan
+    purpose: Execute action plan (if approved), then run verification.
+    risk: high
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: 5m
+    retry: null
+    store_as: act_plan_out
+    failure_modes:
+    - condition: Unexpected side effects
+      action: pause_and_checkpoint
+      recovery: Require human approval to proceed.
+    input_bindings: {}
+    gates:
+    - when: ${checkpoint_out.created} == false
+      action: stop
+      message: No checkpoint created. Do not mutate.
+    condition: ${constrain_out.policy_ok} == true
+    skip_if_false: true
+  - capability: verify
+    purpose: 'Verify outcome: PASS/FAIL with evidence.'
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry:
+      max: 3
+      backoff: exponential
+    store_as: verify_out
+    failure_modes:
+    - condition: Verdict == FAIL
+      action: rollback
+      recovery:
+        goto_step: plan
+        inject_context:
+          failure_evidence: ${verify_out.failures}
+        max_loops: 3
+    input_bindings: {}
+    gates:
+    - when: ${verify_out.verdict} == 'FAIL'
+      action: rollback
+      message: Verification failed. Rolling back.
+    - when: '${verify_out.verdict: string} == ''FAIL'''
+      action: rollback
+      message: Verification failed. Rolling back.
+  - capability: audit
+    purpose: Record provenance, tool usage, diffs, and decision rationale.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
+  - capability: rollback
+    purpose: If verify FAIL or side effects detected, rollback to checkpoint.
+    risk: medium
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
+  - capability: summarize
+    purpose: 'Produce decision-ready sync report: drift, actions, verification, next
+      steps.'
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: summarize_out
+    failure_modes: []
+    input_bindings: {}
+    gates: []
+  workflow_extensions:
+    supports_input_bindings: true
+    supports_conditions: true
+    supports_parallel_groups: true
+    supports_recovery_loops: true
+    supports_gates: true
+  inputs:
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+        constraints:
+          type: object
+    previous_world_state:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+    world_state_out:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+digital_twin_bootstrap:
+  goal: Initialize a digital twin from scratch then run a first sync loop.
+  risk: high
+  success:
+  - World model built
+  - First sync completed
+  - Audit produced
+  steps:
+  - capability: invoke-workflow
+    purpose: Build initial world model baseline
+    workflow_id: world_model_build
+    store_as: world_model_out
+    condition: ${world_state_out} == null
+    skip_if_false: true
+    input_bindings:
+      inputs:
+        domain: ${user_input.domain}
+        constraints: ${user_input.constraints}
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    failure_modes: []
+  - capability: invoke-workflow
+    purpose: Run initial sync loop using baseline
+    workflow_id: digital_twin_sync_loop
+    store_as: sync_out
+    input_bindings:
+      inputs:
+        world_state: ${world_model_out.result.world_state_out}
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    failure_modes: []
+  inputs:
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+        constraints:
+          type: object
+    previous_world_state:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state
+    world_state_out:
+      type: object
+      ref: docs/schemas/world_state_schema.yaml#/world_state

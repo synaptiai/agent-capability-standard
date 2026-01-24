@@ -1,0 +1,16 @@
+mapping_id: project_array_object_to_array_string
+version: 1.0.0
+determinism_contract:
+  pure: true
+  drop_raw_payload: false
+  anchors_required_on_inference: true
+parameters:
+  field_path: string
+  default: name
+rules:
+- id: r1_project_field
+  description: Map array<object> to array<string> by extracting field_path; if missing,
+    stringify element.
+  input: raw.items[]
+  output: canonical.items_string[]
+  strategy: project_or_stringify

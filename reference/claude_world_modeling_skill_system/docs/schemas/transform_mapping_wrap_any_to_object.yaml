@@ -1,0 +1,12 @@
+mapping_id: wrap_any_to_object
+version: 1.0.0
+determinism_contract:
+  pure: true
+  drop_raw_payload: false
+  anchors_required_on_inference: false
+rules:
+- id: r1_wrap
+  description: Wrap primitive into object under key 'value'.
+  input: raw.any
+  output: canonical.obj
+  strategy: wrap_value

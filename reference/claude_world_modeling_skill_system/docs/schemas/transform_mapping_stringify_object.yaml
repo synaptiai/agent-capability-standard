@@ -1,0 +1,12 @@
+mapping_id: stringify_object
+version: 1.0.0
+determinism_contract:
+  pure: true
+  drop_raw_payload: false
+  anchors_required_on_inference: false
+rules:
+- id: r1_json_stringify
+  description: Stable JSON stringify (sorted keys).
+  input: raw.obj
+  output: canonical.text
+  strategy: json_sorted

@@ -1,0 +1,86 @@
+schema:
+  name: identity_resolution_policy
+  version: 1.0.0
+  generated_at: '2026-01-24T02:46:43.281418Z'
+  description: Policy for hierarchical namespaces, alias confidence scoring, and merge/split
+    rules.
+  principles:
+  - Prefer stable IDs; aliases are supporting evidence.
+  - Never merge entities across namespaces unless strong evidence.
+  - Keep uncertainty explicit; escalate ambiguous merges.
+  - Splits are allowed when one entity was incorrectly merged.
+inputs:
+  candidates: list of entity records + alias observations
+  context: world_id, namespace, time window, evidence anchors
+alias_confidence_scoring:
+  score_range:
+  - 0.0
+  - 1.0
+  features:
+  - name: exact_id_match
+    weight: 1.0
+    rule: id string equality
+  - name: namespace_match
+    weight: 0.25
+    rule: same org/domain/env/system
+  - name: type_match
+    weight: 0.2
+    rule: same entity.type
+  - name: label_overlap
+    weight: 0.1
+    rule: Jaccard(labels)
+  - name: attribute_keys_overlap
+    weight: 0.1
+    rule: shared attribute keys
+  - name: attribute_value_match
+    weight: 0.2
+    rule: 'high-signal attrs match: ip, url, serial, employee_id'
+  - name: relationship_context
+    weight: 0.15
+    rule: shared neighbors/edges
+  - name: temporal_coherence
+    weight: 0.1
+    rule: events overlap in time plausibly
+  thresholds:
+    auto_merge: 0.9
+    suggest_merge: 0.75
+    no_merge: 0.6
+    force_split_review: 0.4
+  output:
+    alias_proposal: entity_a <-> entity_b
+    confidence: float 0..1
+    evidence: anchors + feature contributions
+    action: merge|suggest|ignore|split_review
+merge_rules:
+  hard_constraints:
+  - Do not merge different entity types unless one is a subtype alias mapping.
+  - Do not merge different org namespaces unless exact stable identifiers match.
+  - Do not merge if both entities have conflicting high-signal attributes (e.g. different
+    serial numbers).
+  merge_strategy:
+    id: merge_with_provenance_and_uncertainty
+    steps:
+    - Create new canonical entity id (choose higher-trust id or deterministic rule).
+    - Union aliases; keep alias confidence records.
+    - 'Merge attributes: prefer authoritative sources; conflicting attrs widen uncertainty
+      or keep both with provenance.'
+    - Rewire relationships to canonical id; keep back-references for audit.
+    - Record merge ActionRecord with anchors and decision rationale.
+split_rules:
+  split_triggers:
+  - Conflicting high-signal attributes appear (serial/ip/url mismatch).
+  - Two disjoint relationship neighborhoods persist over time.
+  - Observed events alternate between incompatible locations/timezones.
+  - Confidence drops below force_split_review threshold.
+  split_strategy:
+    id: split_into_separate_entities
+    steps:
+    - Fork entity into entity_A and entity_B with new stable ids.
+    - Assign aliases/attributes to best-fitting child based on evidence.
+    - Reassign relationships and state_variables by temporal + context coherence.
+    - Record split ActionRecord and link to original entity id as deprecated.
+outputs:
+  identity_map: alias -> canonical entity_id
+  merge_actions: list of merges performed/suggested
+  split_actions: list of splits performed/suggested
+  unresolved: items requiring human decision
