@@ -22,34 +22,10 @@
     {
       "event": "PreToolUse",
       "matcher": {
-        "tool_name": "Write|Edit|Bash"
-      },
-      "script": "hooks/pretooluse_block_secrets.sh",
-      "description": "Block writes containing secrets or sensitive data"
-    },
-    {
-      "event": "PreToolUse",
-      "matcher": {
-        "tool_name": "Bash"
-      },
-      "script": "hooks/pretooluse_detect_injection.sh",
-      "description": "Detect potential command injection patterns"
-    },
-    {
-      "event": "PreToolUse",
-      "matcher": {
         "tool_name": "Write|Edit"
       },
       "script": "hooks/pretooluse_require_checkpoint.sh",
-      "description": "Require checkpoint before high-impact file modifications"
-    },
-    {
-      "event": "PostToolUse",
-      "matcher": {
-        "tool_name": "Write|Edit"
-      },
-      "script": "hooks/posttooluse_format_repo.sh",
-      "description": "Auto-format modified files according to repo standards"
+      "description": "Require checkpoint before high-impact file modifications (maps to checkpoint capability)"
     },
     {
       "event": "PostToolUse",
@@ -57,7 +33,7 @@
         "tool_name": "*"
       },
       "script": "hooks/posttooluse_log_tool.sh",
-      "description": "Log all tool usage for audit trail"
+      "description": "Log all tool usage for audit trail (maps to audit capability)"
     }
   ],
   "resources": {

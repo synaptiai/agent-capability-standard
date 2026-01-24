@@ -82,6 +82,18 @@
         "failure_modes": []
       },
       {
+        "capability": "checkpoint",
+        "purpose": "Create checkpoint before mutation.",
+        "risk": "medium",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": false,
+        "timeout": null,
+        "retry": null,
+        "store_as": "checkpoint_out",
+        "failure_modes": []
+      },
+      {
         "capability": "act-plan",
         "purpose": "Apply fix, run tests, and produce diff summary.",
         "risk": "high",
@@ -775,6 +787,20 @@
         ],
         "condition": "${constrain_out.policy_ok} == true",
         "skip_if_false": true
+      },
+      {
+        "capability": "model-schema",
+        "purpose": "Define invariants for verification.",
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": false,
+        "timeout": null,
+        "retry": null,
+        "store_as": "model_schema_out",
+        "failure_modes": [],
+        "input_bindings": {},
+        "gates": []
       },
       {
         "capability": "verify",
