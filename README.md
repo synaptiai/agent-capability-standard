@@ -2,7 +2,7 @@
 
 > **Grounded Agency**: A framework for building AI agents that know what they don't know.
 
-[![Conformance](https://github.com/danielbentes/agent-capability-standard/actions/workflows/conformance.yml/badge.svg)](https://github.com/danielbentes/agent-capability-standard/actions/workflows/conformance.yml)
+[![Conformance](https://github.com/synaptiai/agent-capability-standard/actions/workflows/conformance.yml/badge.svg)](https://github.com/synaptiai/agent-capability-standard/actions/workflows/conformance.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](spec/STANDARD-v1.0.0.md)
 
@@ -32,7 +32,7 @@ Every agent action should be:
 
 ```bash
 # Clone the repository
-git clone https://github.com/danielbentes/agent-capability-standard.git
+git clone https://github.com/synaptiai/agent-capability-standard.git
 cd agent-capability-standard
 
 # Set up Python environment
@@ -162,13 +162,13 @@ agent-capability-standard/
 ### As a Claude Code Plugin
 
 ```bash
-claude plugin install https://github.com/danielbentes/agent-capability-standard
+claude plugin install https://github.com/synaptiai/agent-capability-standard
 ```
 
 ### Local Development
 
 ```bash
-git clone https://github.com/danielbentes/agent-capability-standard.git
+git clone https://github.com/synaptiai/agent-capability-standard.git
 cd agent-capability-standard
 python -m venv .venv && source .venv/bin/activate
 pip install pyyaml
@@ -210,7 +210,7 @@ If you use this standard in research, please cite:
   title={Agent Capability Standard: A Framework for Grounded Agency},
   author={Bentes, Daniel},
   year={2026},
-  url={https://github.com/danielbentes/agent-capability-standard}
+  url={https://github.com/synaptiai/agent-capability-standard}
 }
 ```
 

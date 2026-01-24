@@ -5,11 +5,11 @@
   "description": "Comprehensive capability skill library for AI agents with 103 skills covering perception, reasoning, generation, world-modeling, agentic operations, communication, and data management",
   "author": {
     "name": "Agent Capability Standard Contributors",
-    "url": "https://github.com/danielbentes/agent-capability-standard"
+    "url": "https://github.com/synaptiai/agent-capability-standard"
   },
-  "homepage": "https://github.com/danielbentes/agent-capability-standard",
-  "repository": "https://github.com/danielbentes/agent-capability-standard",
-  "license": "CC-BY-4.0",
+  "homepage": "https://github.com/synaptiai/agent-capability-standard",
+  "repository": "https://github.com/synaptiai/agent-capability-standard",
+  "license": "Apache-2.0",
   "keywords": [
     "ai-capabilities",
     "agent-skills",

@@ -11,7 +11,7 @@ Get up and running with the Agent Capability Standard in 10 minutes.
 
 ```bash
 # Clone the repository
-git clone https://github.com/danielbentes/agent-capability-standard.git
+git clone https://github.com/synaptiai/agent-capability-standard.git
 cd agent-capability-standard
 
 # Create virtual environment

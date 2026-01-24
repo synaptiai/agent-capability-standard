@@ -230,8 +230,8 @@ Yes. The standard is Apache 2.0 licensed. You can use, modify, and distribute it
 
 ### Where can I get help?
 
-- GitHub Issues: [Report bugs or ask questions](https://github.com/danielbentes/agent-capability-standard/issues)
-- Discussions: [Join the conversation](https://github.com/danielbentes/agent-capability-standard/discussions)
+- GitHub Issues: [Report bugs or ask questions](https://github.com/synaptiai/agent-capability-standard/issues)
+- Discussions: [Join the conversation](https://github.com/synaptiai/agent-capability-standard/discussions)
 
 ---
 
@@ -257,4 +257,4 @@ They are complementary: MCP for connection, this standard for capability semanti
 
 ---
 
-Still have questions? [Open an issue](https://github.com/danielbentes/agent-capability-standard/issues/new).
+Still have questions? [Open an issue](https://github.com/synaptiai/agent-capability-standard/issues/new).
