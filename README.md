@@ -2,9 +2,15 @@
 
 > **Grounded Agency**: A framework for building AI agents that know what they don't know.
 
+[![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet?logo=anthropic)](https://github.com/synaptiai/agent-capability-standard)
 [![Conformance](https://github.com/synaptiai/agent-capability-standard/actions/workflows/conformance.yml/badge.svg)](https://github.com/synaptiai/agent-capability-standard/actions/workflows/conformance.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](spec/STANDARD-v1.0.0.md)
+
+```bash
+# Install as Claude Code plugin
+claude plugin install https://github.com/synaptiai/agent-capability-standard
+```
 
 ---
 
@@ -67,7 +73,24 @@ This standard makes failures **visible and recoverable**:
 
 ---
 
-## Quick Start (5 minutes)
+## Quick Start
+
+### Option 1: Claude Code Plugin (Recommended)
+
+Install directly into Claude Code:
+
+```bash
+claude plugin install https://github.com/synaptiai/agent-capability-standard
+```
+
+This gives you:
+- 99 capability skills organized by layer
+- Workflow validation commands
+- Safety hooks (checkpoint enforcement, audit logging)
+
+### Option 2: Standalone Validation
+
+Use the validator independently:
 
 ```bash
 # Clone the repository
@@ -78,7 +101,7 @@ cd agent-capability-standard
 python -m venv .venv && source .venv/bin/activate
 pip install pyyaml
 
-# Validate the example workflows
+# Validate workflows
 python tools/validate_workflows.py
 # → VALIDATION PASS
 
@@ -198,11 +221,21 @@ agent-capability-standard/
 
 ## Installation
 
-### As a Claude Code Plugin
+### Claude Code Plugin
 
 ```bash
 claude plugin install https://github.com/synaptiai/agent-capability-standard
 ```
+
+**What the plugin provides:**
+
+| Component | Description |
+|-----------|-------------|
+| **99 Skills** | Capability implementations organized by layer (perception, modeling, reasoning, action, safety, meta, memory, coordination) |
+| **Workflows** | 5 production-ready workflow compositions with gates and recovery |
+| **Safety Hooks** | Pre-tool hooks that enforce checkpoints before mutations |
+| **Audit Hooks** | Post-tool hooks that maintain action lineage |
+| **Validator** | Design-time validation for custom workflows |
 
 ### Local Development
 
