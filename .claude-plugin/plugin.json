@@ -1,6 +1,6 @@
 {
   "name": "agent-capability-standard",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Grounded Agency: 99 atomic capabilities with typed contracts, safety-by-construction, and grounded reasoning for reliable AI agents",
   "author": {
     "name": "Agent Capability Standard Contributors",
@@ -18,6 +18,5 @@
     "generation",
     "agentic"
   ],
-  "skills": "./skills/",
-  "hooks": "./hooks/hooks.json"
+  "skills": "./skills/"
 }
