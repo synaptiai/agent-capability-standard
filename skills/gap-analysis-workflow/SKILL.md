@@ -161,7 +161,7 @@ current_state:
     - "action"
   evidence_anchors:
     - "file:schemas/capability_ontology.json"
-    - "file:skills/reasoning/critique/SKILL.md"
+    - "file:skills/critique/SKILL.md"
 gaps_identified:
   total: 8
   by_layer:

@@ -25,11 +25,11 @@ python scripts/run_conformance.py
 
 ## Example Workflows
 
-See `skills/workflows/` for composed workflow examples:
-- `debug_code_change/` - Debug and fix code issues
-- `capability_gap_analysis/` - Identify missing capabilities
-- `digital_twin_bootstrap/` - Initialize world model
-- `digital_twin_sync_loop/` - Continuous world model synchronization
+See `skills/` for composed workflow examples:
+- `debug-workflow/` - Debug and fix code issues
+- `gap-analysis-workflow/` - Identify missing capabilities
+- `world-model-workflow/` - Initialize world model
+- `digital-twin-sync-workflow/` - Continuous world model synchronization
 
 ## Using Skills via Claude Code
 

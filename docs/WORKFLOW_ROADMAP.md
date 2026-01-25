@@ -34,14 +34,14 @@ The following workflows are fully defined in `schemas/workflow_catalog.json`:
 
 ## Workflow Skill Directories
 
-Each workflow has a corresponding skill directory in `skills/workflows/`:
+Each workflow has a corresponding skill directory in `skills/`:
 
 | Workflow | Skill Directory |
 |----------|-----------------|
-| `debug_code_change` | `skills/workflows/debug-workflow/` |
-| `capability_gap_analysis` | `skills/workflows/gap-analysis-workflow/` |
-| `digital_twin_sync_loop` | `skills/workflows/digital-twin-sync-workflow/` |
-| `world_model_build` | `skills/workflows/world-model-workflow/` |
+| `debug_code_change` | `skills/debug-workflow/` |
+| `capability_gap_analysis` | `skills/gap-analysis-workflow/` |
+| `digital_twin_sync_loop` | `skills/digital-twin-sync-workflow/` |
+| `world_model_build` | `skills/world-model-workflow/` |
 
 ## Future Workflow Candidates
 
@@ -85,7 +85,7 @@ To propose a new workflow:
 
 2. Follow the structure in `schemas/workflow_catalog.json`
 
-3. Create corresponding skill directory in `skills/workflows/`
+3. Create corresponding skill directory in `skills/`
 
 4. Add conformance tests
 
