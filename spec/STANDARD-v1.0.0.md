@@ -554,9 +554,9 @@ Validators SHOULD warn if version header is missing.
 | MODELING | 45 | detect-*, identify-*, estimate-*, world-state, model-schema |
 | REASONING | 20 | compare-*, plan, decide, critique, explain |
 | ACTION | 12 | act-plan, generate-*, transform, send |
-| SAFETY | 8 | verify, checkpoint, rollback, audit, constrain |
+| SAFETY | 7 | verify, checkpoint, rollback, audit, constrain, mitigate, improve |
 | META | 6 | discover-*, prioritize |
-| MEMORY | 1 | recall |
+| MEMORY | 2 | persist, recall |
 | COORDINATION | 3 | delegate, synchronize, invoke-workflow |
 
 ## Appendix B: Reserved Identifiers

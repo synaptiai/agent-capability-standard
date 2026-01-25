@@ -62,9 +62,9 @@ Organized across 8 layers with explicit input/output schemas and prerequisites:
 | **MODELING** | 45 | detect-*, identify-*, estimate-*, world-state |
 | **REASONING** | 20 | compare-*, plan, decide, critique, explain |
 | **ACTION** | 12 | act-plan, generate-*, transform, send |
-| **SAFETY** | 8 | verify, checkpoint, rollback, audit, constrain |
+| **SAFETY** | 7 | verify, checkpoint, rollback, audit, constrain, mitigate, improve |
 | **META** | 6 | discover-*, prioritize |
-| **MEMORY** | 1 | recall |
+| **MEMORY** | 2 | persist, recall |
 | **COORDINATION** | 3 | delegate, synchronize, invoke-workflow |
 
 ### 5 Reference Workflows

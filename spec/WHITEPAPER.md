@@ -125,9 +125,9 @@ We organize capabilities into 8 layers:
 | MODELING | Build understanding | No | 45 |
 | REASONING | Think and decide | No | 20 |
 | ACTION | Change things | Yes | 12 |
-| SAFETY | Protect and verify | Varies | 8 |
+| SAFETY | Protect and verify | Varies | 7 |
 | META | Self-reflection | No | 6 |
-| MEMORY | Persistence | Varies | 1 |
+| MEMORY | Persistence | Varies | 2 |
 | COORDINATION | Multi-agent | Varies | 3 |
 
 This organization provides several benefits:
@@ -561,9 +561,9 @@ Production agents require architecture, not vibes. This standard provides that a
 | MODELING | 45 | detect-*, identify-*, estimate-*, world-state |
 | REASONING | 20 | compare-*, plan, decide, critique |
 | ACTION | 12 | act-plan, generate-*, transform, send |
-| SAFETY | 8 | verify, checkpoint, rollback, audit |
+| SAFETY | 7 | verify, checkpoint, rollback, audit, constrain, mitigate, improve |
 | META | 6 | discover-*, prioritize |
-| MEMORY | 1 | recall |
+| MEMORY | 2 | persist, recall |
 | COORDINATION | 3 | delegate, synchronize, invoke-workflow |
 | **Total** | **99** | |
 
@@ -580,5 +580,5 @@ Production agents require architecture, not vibes. This standard provides that a
 ---
 
 *Agent Capability Standard v1.0.0*
-*Copyright 2026 Daniel Bentes*
+*Copyright 2026 Synapti.ai*
 *Licensed under Apache 2.0*
