@@ -529,15 +529,125 @@ Validators SHOULD warn if version header is missing.
 
 ---
 
-## 12. References
+## 12. Decision Frameworks
 
-### 12.1 Normative References
+This section provides guidance for common decisions when applying the standard.
+
+### 12.1 When to Use Checkpoints
+
+Use this decision tree:
+
+```
+Does the step modify external state?
+├── No → Checkpoint not required
+└── Yes → Is the modification reversible by other means?
+    ├── Yes (idempotent, can retry) → Checkpoint recommended but optional
+    └── No → Checkpoint REQUIRED
+```
+
+**Examples:**
+
+| Operation | Checkpoint Required? | Reason |
+|-----------|---------------------|--------|
+| Read file contents | No | No mutation |
+| Write to database | Yes | State change, may not be reversible |
+| Send HTTP GET | No | Read-only |
+| Send HTTP POST | Yes | May cause side effects |
+| Rename file | Yes | May overwrite existing file |
+| Append to log | Optional | Append-only, can ignore duplicate |
+
+### 12.2 When to Require Typed Bindings
+
+Typed annotations are REQUIRED when:
+
+| Scenario | Example | Solution |
+|----------|---------|----------|
+| Union schemas | `anyOf: [string, object]` | Add `: string` or `: object` |
+| Open schemas | `additionalProperties: true` | Add explicit type |
+| Array item ambiguity | `items: {}` | Add `: array<object>` |
+| Cross-workflow references | Dynamic binding | Always annotate |
+
+Typed annotations are OPTIONAL when:
+- Producer schema has explicit, unambiguous type
+- Single possible type interpretation exists
+
+### 12.3 Choosing Conflict Resolution Strategy
+
+| Scenario | Recommended Strategy |
+|----------|---------------------|
+| Hardware sensor vs. derived inference | `prefer_authoritative_sources` |
+| Recent data vs. stale data | `prefer_recent` |
+| High-confidence vs. low-confidence | `prefer_high_confidence` |
+| Both sources equally valid | `merge_with_uncertainty` |
+| Critical decision, ambiguous data | `escalate_to_human` |
+
+### 12.4 Selecting Conformance Level
+
+| Your situation | Start with | Target |
+|----------------|------------|--------|
+| New to the standard | L1 | L2 within 1 month |
+| Existing workflows, want validation | L2 | L3 within 1 quarter |
+| Production system, high reliability needed | L3 | L4 for auto-fix |
+| Compliance/audit requirements | L3 minimum | L4 recommended |
+
+### 12.5 Common Patterns
+
+**Pattern: Safe Mutation**
+```yaml
+- capability: plan
+  store_as: plan_out
+- capability: checkpoint
+  store_as: checkpoint_out
+- capability: act-plan
+  requires_checkpoint: true
+  input_bindings:
+    plan: ${plan_out}
+- capability: verify
+  store_as: verify_out
+- capability: audit
+  store_as: audit_out
+```
+
+**Pattern: Multi-Source Integration**
+```yaml
+- capability: retrieve
+  store_as: source_a
+- capability: retrieve
+  store_as: source_b
+- capability: integrate
+  input_bindings:
+    sources: [${source_a}, ${source_b}]
+  store_as: integrated
+- capability: identity-resolution
+  input_bindings:
+    entities: ${integrated.entities}
+```
+
+**Pattern: Recovery Loop**
+```yaml
+- capability: verify
+  store_as: verify_out
+  failure_modes:
+    - condition: verdict == FAIL
+      action: rollback
+      recovery:
+        goto_step: plan
+        inject_context:
+          failure_evidence: ${verify_out.failures}
+        max_loops: 3
+```
+
+---
+
+## 13. References
+
+### 13.1 Normative References
 
 - [JSON Schema](https://json-schema.org/)
 - [YAML 1.2](https://yaml.org/spec/1.2.2/)
 - [Semantic Versioning](https://semver.org/)
 
-### 12.2 Informative References
+### 13.2 Informative References
 
 - [RFC-0001: Agent Capability Ontology](RFC-0001-agent-capability-ontology-and-workflow-dsl.md)
 - [Whitepaper: Grounded Agency](WHITEPAPER.md)

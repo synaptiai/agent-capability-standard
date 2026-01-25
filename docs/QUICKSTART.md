@@ -2,6 +2,31 @@
 
 Get up and running with the Agent Capability Standard in 10 minutes.
 
+---
+
+## What You'll Gain
+
+After completing this quickstart, you'll be able to:
+
+- **Validate workflows before runtime** — Catch type mismatches, missing prerequisites, and invalid bindings before they cause production failures
+- **Understand conformance levels** — Know what safety guarantees your workflows provide
+- **Use the toolchain** — Run the validator on your own workflows
+- **Read workflow definitions** — Understand how capabilities compose into reliable pipelines
+
+### Why Validation Matters
+
+Without validation, workflow errors surface at runtime—often in production, often at 2 AM.
+
+The validator catches issues that would otherwise fail silently:
+- **Missing capability prerequisites** — `act-plan` without `checkpoint` means no rollback
+- **Type mismatches** — Passing an array where an object is expected
+- **Invalid bindings** — Referencing outputs that don't exist
+- **Ungrounded claims** — Data flowing without provenance
+
+Fixing these statically saves hours of runtime debugging and prevents data corruption from half-executed workflows.
+
+---
+
 ## Prerequisites
 
 - Python 3.9+

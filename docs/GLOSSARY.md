@@ -1,6 +1,6 @@
 # Glossary
 
-Key terms used in the Agent Capability Standard.
+Key terms used in the Agent Capability Standard. Each term includes context on **why it matters** and **what problems it solves**.
 
 ---
 
@@ -14,6 +14,10 @@ An atomic primitive that does one thing well. Capabilities have:
 - `requires` (hard prerequisites) and `soft_requires` (recommended prerequisites)
 
 Example: `detect-anomaly`, `checkpoint`, `act-plan`
+
+**Why it matters:** Capabilities with explicit contracts enable static validation. You know before runtime whether outputs will match expected inputs.
+
+**What it prevents:** Runtime type errors, silent failures from incompatible data, and debugging sessions that trace data through multiple steps
 
 ### Workflow
 An ordered, conditional, or parallel composition of capabilities. Workflows define:
@@ -61,12 +65,24 @@ Traceability record for claims and transformations. Provenance answers:
 ### Grounding
 Anchoring claims to evidence. A grounded claim has explicit references to the observations or sources that support it. Ungrounded claims are explicitly marked as inferred.
 
+**Why it matters:** Without grounding, agents confidently state hallucinations. When asked "why did you conclude X?", there's no answer. Debugging requires manual verification of every claim.
+
+**What it prevents:**
+- Hallucinated facts propagating through workflows
+- Untraceable decision reasoning
+- Failed audits due to missing provenance
+- Hours of debugging to find where bad data entered
+
 ### Evidence Anchor
 A reference to the original source of information. Evidence anchors enable verification by pointing to:
 - Source documents
 - API responses
 - Log entries
 - Sensor readings
+
+**Why it matters:** Evidence anchors make claims verifiable. Instead of "the error rate is 5%", you get "the error rate is 5% (source: Prometheus query at 2024-01-24T10:00:00Z)".
+
+**What it prevents:** Unverifiable claims that erode trust over time, and audit failures when you can't prove where data came from
 
 ---
 
@@ -77,6 +93,10 @@ Authority-weighted, confidence-weighted, recency-decayed score for a source or c
 - Source ranking weights (authoritative sources score higher)
 - Time decay (older information scores lower)
 - Field-specific authority preferences
+
+**Why it matters:** When sources conflict, you need a principled way to decide which to believe. Trust scores make conflict resolution transparent and consistent instead of arbitrary.
+
+**What it prevents:** Arbitrary "last source wins" resolution, inconsistent decisions about which data to trust, and unexplainable conflicts that require human intervention every time
 
 ### Identity Resolution
 Defining entities and resolving aliases across sources. Identity resolution:
@@ -142,17 +162,29 @@ A saved state that enables rollback. Checkpoints are required before:
 - Any step with `mutation: true`
 - Any step that may cause side effects
 
+**Why it matters:** Checkpoints are your safety net. When step 7 fails after steps 1-6 modified state, a checkpoint lets you restore to a known-good state in seconds instead of hours of manual cleanup.
+
+**What it prevents:** Corrupted state from partial execution, inconsistent data visible to users, and the nightmare of manually reversing changes across multiple systems
+
 ### Rollback
 Reverting to a previous checkpoint. Rollback is triggered when:
 - Verification fails
 - Unexpected side effects are detected
 - Gates block execution
 
+**Why it matters:** Rollback makes failures recoverable. Instead of "the workflow failed, now what?", you get "the workflow failed, reverting to checkpoint, state is now consistent."
+
+**What it prevents:** Permanent damage from failed mutations, manual recovery procedures that introduce new errors, and downtime while you figure out what state things are in
+
 ### Mutation
 A change to external state (files, databases, APIs). Steps with `mutation: true`:
 - Require a prior checkpoint
 - May require approval
 - Should have rollback plans
+
+**Why it matters:** Explicitly marking mutations makes dangerous operations visible. The validator enforces checkpoints before mutations—you can't accidentally skip safety.
+
+**What it prevents:** "Oops, I didn't realize that step modified the database" surprises, and the false confidence of thinking a workflow is read-only when it isn't
 
 ### Audit
 Recording what changed, why, and by whom. Audit trails include:
@@ -247,6 +279,10 @@ The degree to which an implementation satisfies the standard:
 - **L2**: Resolves schemas and infers types
 - **L3**: Validates binding types against consumer contracts
 - **L4**: Emits patch suggestions and uses coercion registry
+
+**Why it matters:** Conformance levels let you adopt incrementally. Start with L1 (basic validation) and progress to L4 (full type safety with auto-fix suggestions) as your workflows mature.
+
+**What it prevents:** All-or-nothing adoption that blocks progress, and uncertainty about what guarantees your implementation actually provides
 
 ### Prerequisite
 A capability that must be executed before another. Prerequisites are defined in the capability ontology:

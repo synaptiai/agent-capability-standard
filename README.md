@@ -28,6 +28,45 @@ Every agent action should be:
 3. **Safe** — mutations require checkpoints
 4. **Composable** — typed contracts between capabilities
 
+---
+
+## Why This Matters
+
+### The Problem
+
+AI agents in production fail silently. When a retrieval step hallucinates, downstream actions proceed with bad data. When conflicts arise between sources, there's no resolution strategy. When mutations fail, there's no rollback.
+
+These aren't edge cases—they're the norm. Most agent systems lack structural safeguards, so failures are discovered after the damage is done.
+
+### The Cost
+
+- **Debug time**: Hours tracing why an agent made a decision with no audit trail
+- **Data corruption**: Unrecoverable state from failed mutations without checkpoints
+- **Trust erosion**: Users lose confidence after unexplained failures
+- **Compliance risk**: Auditors ask "why did the agent do X?" and you can't answer
+
+### The Solution
+
+This standard makes failures **visible and recoverable**:
+
+- **Every claim traces to evidence** (or explicitly marks uncertainty)
+- **Every mutation has a checkpoint** (rollback is always possible)
+- **Every conflict has a resolution strategy** (trust model decides)
+- **Every decision has lineage** (audit answers "why")
+
+### When to Use This
+
+| If you have... | This standard provides... |
+|----------------|---------------------------|
+| Agents that sometimes give wrong answers | Grounding with provenance trails |
+| Workflows that fail mid-execution | Checkpoints and recovery loops |
+| Multiple data sources that conflict | Trust-weighted conflict resolution |
+| Compliance/audit requirements | Complete action lineage |
+| Complex multi-step agent pipelines | Typed contracts between capabilities |
+| Production systems where failures are costly | Safety by construction, not by hope |
+
+---
+
 ## Quick Start (5 minutes)
 
 ```bash

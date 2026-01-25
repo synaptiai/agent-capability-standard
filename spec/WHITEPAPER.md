@@ -4,6 +4,49 @@
 
 ---
 
+## Executive Summary
+
+**For decision-makers evaluating this framework:**
+
+### The Problem
+
+AI agents fail in production—not because the AI can't do the task, but because the *architecture* can't support reliable execution. Specifically:
+
+- **No contracts**: Capabilities compose through natural language, not typed interfaces. Type mismatches surface at runtime.
+- **No provenance**: When agents make mistakes, there's no trail to debug or explain.
+- **No recovery**: Failed mutations leave systems in inconsistent states requiring manual cleanup.
+- **No trust model**: Conflicting data sources are resolved arbitrarily or not at all.
+
+### The Solution
+
+The Agent Capability Standard provides structural reliability:
+
+| Problem | Solution |
+|---------|----------|
+| Implicit composition | 99 capabilities with typed I/O schemas |
+| Ungrounded claims | Evidence anchors and provenance tracking |
+| Undefined conflict resolution | Trust-weighted, time-decayed source ranking |
+| Retrofitted safety | Checkpoints required before mutations |
+
+### Business Impact
+
+| Metric | Expected Improvement |
+|--------|---------------------|
+| Debug time for agent issues | 50-80% reduction |
+| Data corruption from failed workflows | Near elimination |
+| Compliance audit preparation | Automatic decision lineage |
+| Integration bugs caught pre-production | 90%+ with L3 conformance |
+
+### Adoption Recommendation
+
+- **Start small**: Run the validator on existing workflows (1 day)
+- **Add safety**: Implement checkpoints for high-risk mutations (1 week)
+- **Expand**: Progress to full conformance as value is demonstrated (1 quarter)
+
+The standard is framework-agnostic and modular. Adopt what you need; expand as complexity grows.
+
+---
+
 ## Abstract
 
 Most AI agent systems fail in production because they lack three essential properties: compositional contracts between capabilities, grounded state representations with provenance, and safety semantics that make dangerous actions structurally difficult. We present the Agent Capability Standard—a specification for atomic agent capabilities and a workflow DSL with typed bindings, recovery semantics, and world-model schemas that integrate provenance, uncertainty, trust, and identity resolution. We also provide a compiler-grade validator that can automatically propose deterministic transform patches. This paper describes the motivation, design rationale, architecture, and evaluation approach for the standard.

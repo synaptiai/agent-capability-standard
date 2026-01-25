@@ -71,6 +71,22 @@ Some capabilities require others to run first:
 
 ## Part 2: Create a Simple Workflow (10 min)
 
+### Why Workflows Matter
+
+**Without workflows:**
+- Agent capabilities are invoked ad-hoc, with no guarantees about order
+- Outputs from one step may not match inputs of the next
+- Failures happen silently—no structured recovery
+
+**With workflows:**
+- Capabilities compose predictably through typed bindings
+- Prerequisites are enforced automatically (e.g., `checkpoint` before `act-plan`)
+- Failures trigger documented recovery paths
+
+The workflow DSL makes these guarantees structural, not aspirational.
+
+---
+
 Let's create a workflow that analyzes a file and reports findings.
 
 ### 2.1 Create the Workflow File
@@ -153,6 +169,34 @@ If you get errors, check:
 ---
 
 ## Part 3: Add Safety Mechanisms (10 min)
+
+### Why Checkpoints Matter
+
+**Without checkpoints:**
+- Workflow fails at step 7 of 10
+- Steps 1-6 already modified state (files, databases, APIs)
+- Manual cleanup required—error-prone and time-consuming
+- Users see inconsistent data during recovery
+
+**With checkpoints:**
+- Workflow fails at step 7
+- Automatic rollback to last checkpoint
+- State is consistent within seconds
+- Users never see partial updates
+
+**When to use checkpoints:**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Read-only workflow | Skip checkpoints (no mutations to recover from) |
+| Single mutation at end | Checkpoint immediately before the mutation |
+| Multiple sequential mutations | Checkpoint before each mutation |
+| Idempotent operations | Optional—can safely retry without rollback |
+| High-value data modifications | Checkpoint + verify + audit for full protection |
+
+The cost of a checkpoint (saving state) is almost always less than the cost of manual recovery from a failed mutation.
+
+---
 
 Now let's create a workflow that modifies files. This requires safety mechanisms.
 
@@ -280,6 +324,22 @@ The validator ensures:
 ---
 
 ## Part 4: Advanced Patterns (10 min)
+
+### Why Typed Bindings Matter
+
+**Without typed bindings:**
+- Step A produces `{items: [...]}`, Step B expects `items` to be strings
+- Error surfaces at runtime: "Expected string, got object"
+- Debugging requires tracing data through multiple steps
+
+**With typed bindings:**
+- Validator catches: "B203: TYPE_MISMATCH at step 5, binding 'items'"
+- Error message suggests: "Expected array<string>, got array<object>. Consider projecting a field."
+- Fix applied before any code runs
+
+Typed bindings shift debugging from runtime (production) to validation (development). The few seconds spent adding type annotations save hours of runtime debugging.
+
+---
 
 ### 4.1 Parallel Execution
 

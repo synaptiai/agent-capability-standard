@@ -1,5 +1,54 @@
 # Frequently Asked Questions
 
+## Strategic Questions
+
+### Is this worth adopting?
+
+**Yes, if you experience any of these pain points:**
+
+- [ ] Agent gives confident but wrong answers (no grounding)
+- [ ] Debugging agent decisions takes hours (no audit trail)
+- [ ] Workflow failures corrupt data without rollback (no checkpoints)
+- [ ] Audit asks "why did the agent do X?" and you can't answer (no lineage)
+- [ ] Multiple data sources give conflicting answers (no trust model)
+- [ ] Integration between agent steps is brittle (no typed contracts)
+
+Even one checked box means this standard can help. Three or more, and adoption is strongly recommended.
+
+### How do I convince my team?
+
+Lead with concrete problems this solves:
+
+1. **Reference past incidents**: "Remember when [agent failure] happened? This standard would have prevented that."
+2. **Connect to compliance**: "Audit asked for decision lineage—this provides it automatically."
+3. **Quantify debug time**: "We spent X hours debugging that agent issue. With grounding and audit trails, it's traceable in minutes."
+4. **Show the validator**: Run `python tools/validate_workflows.py` on an example—seeing errors caught statically is compelling.
+
+### What's the adoption path?
+
+Incremental adoption works. You don't need to adopt everything at once.
+
+| Timeline | Action | Outcome |
+|----------|--------|---------|
+| **Week 1** | Run validator on existing workflows | Find hidden issues |
+| **Week 2** | Add checkpoints to mutation-heavy workflows | Enable rollback |
+| **Month 1** | Implement grounding for high-risk capabilities | Traceable decisions |
+| **Quarter 1** | Achieve L2 conformance | Full type safety |
+| **Quarter 2** | Implement trust model for multi-source workflows | Conflict resolution |
+
+### What if we only need part of it?
+
+The standard is modular. Common partial adoptions:
+
+- **Checkpoints only**: Just add `checkpoint` before mutations. Immediate rollback capability.
+- **Validation only**: Use the validator without changing runtime. Catch errors statically.
+- **Audit only**: Add `audit` steps for compliance without other changes.
+- **Full safety layer**: Checkpoints + verification + rollback for high-risk workflows.
+
+Start where the pain is worst, then expand as you see value.
+
+---
+
 ## General
 
 ### What is the Agent Capability Standard?
