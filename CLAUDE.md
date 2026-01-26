@@ -22,7 +22,7 @@ pip install pyyaml
 
 ## Architecture
 
-This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with **35 atomic capabilities** across **9 cognitive layers**, plus 4 composed workflow skills.
+This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with **36 atomic capabilities** across **9 cognitive layers**, plus 6 composed workflow patterns.
 
 ### Core Philosophy: Grounded Agency
 
@@ -36,7 +36,7 @@ Every agent action must be:
 
 | File | Purpose |
 |------|---------|
-| `schemas/capability_ontology.json` | Master ontology defining all 35 capabilities with I/O contracts, risk levels, and edges |
+| `schemas/capability_ontology.json` | Master ontology defining all 36 capabilities with I/O contracts, risk levels, and edges |
 | `schemas/workflow_catalog.yaml` | Reference workflows that compose capabilities |
 | `skills/<name>/SKILL.md` | Individual skill implementations (flat structure, no nesting) |
 | `hooks/hooks.json` | Claude Code hooks for safety enforcement |
@@ -57,7 +57,7 @@ Capabilities are organized into 9 cognitive layers (defined in ontology):
 | EXECUTE | Changing the world | 3 | execute, mutate, send |
 | VERIFY | Correctness assurance | 5 | verify, checkpoint, rollback, constrain, audit |
 | REMEMBER | State persistence | 2 | persist, recall |
-| COORDINATE | Multi-agent interaction | 3 | delegate, synchronize, invoke |
+| COORDINATE | Multi-agent interaction | 4 | delegate, synchronize, invoke, inquire |
 
 ### Skill Structure
 
@@ -71,9 +71,9 @@ Skills are at `skills/<skill-name>/SKILL.md` (flat structure, not nested by cate
 
 ### Domain Parameterization
 
-The 35-capability model uses **domain parameters** instead of domain-specific variants:
+The 36-capability model uses **domain parameters** instead of domain-specific variants:
 
-| Old (99 model) | New (35 model) |
+| Old (99 model) | New (36 model) |
 |----------------|----------------|
 | `detect-anomaly`, `detect-entity` | `detect` with `domain: anomaly`, `domain: entity` |
 | `estimate-risk`, `estimate-impact` | `measure` with `domain: risk`, `domain: impact` |
@@ -92,13 +92,45 @@ Relationships between capabilities (in `capability_ontology.json`):
 - `soft_requires`: Recommended but not mandatory
 - `enables`: Unlocks other capabilities
 
-## Creating New Skills
+## Creating New Capabilities
 
-1. Use `templates/SKILL_TEMPLATE_ENHANCED.md` as the starting template
-2. Place skill at `skills/<name>/SKILL.md` (kebab-case name)
-3. Add corresponding node to `schemas/capability_ontology.json`
-4. Add edges connecting to related capabilities
-5. Run `python tools/validate_workflows.py` to verify
+When adding a new atomic capability, you MUST complete ALL of these steps:
+
+### 1. Update the Ontology
+- Add capability node to `schemas/capability_ontology.json` with full input/output schemas
+- Add edges connecting to related capabilities (`requires`, `soft_requires`, `enables`)
+- Update the layer's `capabilities` array in the `layers` section
+- Update the `meta.description` count (e.g., "36 atomic capabilities" → "37 atomic capabilities")
+
+### 2. Create the Skill
+- Use `templates/SKILL_TEMPLATE_ENHANCED.md` as the starting template
+- Place skill at `skills/<name>/SKILL.md` (kebab-case name)
+
+### 3. Update ALL Capability Count References
+Search and update capability counts in these files:
+- `CLAUDE.md` — Architecture section and layer table
+- `README.md` — Multiple references throughout
+- `spec/WHITEPAPER.md` — Summary and derivation sections
+- `docs/GROUNDED_AGENCY.md` — Capability ontology section
+- `docs/FAQ.md` — Capability count references
+- `docs/GLOSSARY.md` — Layer descriptions
+- `docs/WORKFLOW_PATTERNS.md` — Pattern references
+- `docs/TUTORIAL.md` — Tutorial references
+- `docs/methodology/EXTENSION_GOVERNANCE.md` — Governance references
+- `skills/README.md` — Layer counts and totals
+- `.claude-plugin/plugin.json` — Description field
+
+**Tip:** Use `grep -r "N atomic capabilit" .` and `grep -r "N capabilities" .` to find all references (where N is the old count).
+
+### 4. Validate
+```bash
+python tools/validate_workflows.py
+python -c "import json; json.load(open('schemas/capability_ontology.json'))"
+```
+
+### 5. Update Workflow Catalog (if adding workflow patterns)
+- Add workflow to `schemas/workflow_catalog.yaml`
+- Update workflow count in `skills/README.md`
 
 ## Safety Model
 

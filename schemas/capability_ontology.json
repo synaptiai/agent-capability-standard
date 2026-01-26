@@ -3,7 +3,7 @@
     "name": "Grounded Agency Capability Ontology",
     "version": "2.0.0",
     "generated_at": "2026-01-26T00:00:00.000Z",
-    "description": "35 atomic capabilities derived from first principles",
+    "description": "36 atomic capabilities derived from first principles",
     "principles": [
       "Capabilities are atomic and composable into workflows",
       "Every capability returns evidence anchors and confidence",
@@ -63,9 +63,9 @@
       "capabilities": ["persist", "recall"]
     },
     "COORDINATE": {
-      "description": "Multi-agent interaction",
+      "description": "Multi-agent and user interaction",
       "cognitive_mapping": "Multi-agent systems",
-      "capabilities": ["delegate", "synchronize", "invoke"]
+      "capabilities": ["delegate", "synchronize", "invoke", "inquire"]
     }
   },
   "nodes": [
@@ -1009,6 +1009,50 @@
           "evidence_anchors": {"type": "array"}
         }
       }
+    },
+    {
+      "id": "inquire",
+      "layer": "COORDINATE",
+      "description": "Request clarification when input is ambiguous",
+      "risk": "low",
+      "mutation": false,
+      "input_schema": {
+        "type": "object",
+        "required": ["ambiguous_input"],
+        "properties": {
+          "ambiguous_input": {"type": "any", "description": "The underspecified request or goal"},
+          "context": {"type": "object", "description": "Available context for question generation"},
+          "max_questions": {"type": "integer", "default": 3, "description": "Maximum clarifying questions to generate"}
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": ["questions", "ambiguity_analysis", "evidence_anchors", "confidence"],
+        "properties": {
+          "questions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "question": {"type": "string"},
+                "parameter": {"type": "string", "description": "What parameter this resolves"},
+                "options": {"type": "array", "description": "Suggested answers if bounded"}
+              }
+            },
+            "description": "Clarifying questions to resolve ambiguity"
+          },
+          "ambiguity_analysis": {
+            "type": "object",
+            "properties": {
+              "missing_parameters": {"type": "array"},
+              "conflicting_interpretations": {"type": "array"},
+              "confidence_without_clarification": {"type": "number"}
+            }
+          },
+          "evidence_anchors": {"type": "array", "description": "Evidence supporting the ambiguity assessment"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "Confidence that clarification is needed"}
+        }
+      }
     }
   ],
   "edges": [
@@ -1040,6 +1084,8 @@
     {"from": "plan", "to": "critique", "type": "soft_requires"},
     {"from": "execute", "to": "audit", "type": "soft_requires"},
     {"from": "mutate", "to": "persist", "type": "soft_requires"},
-    {"from": "predict", "to": "ground", "type": "soft_requires"}
+    {"from": "predict", "to": "ground", "type": "soft_requires"},
+    {"from": "critique", "to": "inquire", "type": "enables"},
+    {"from": "inquire", "to": "receive", "type": "soft_requires"}
   ]
 }

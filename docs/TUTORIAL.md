@@ -479,7 +479,7 @@ Every step should have:
 
 | Goal | Resource |
 |------|----------|
-| Understand all 35 capabilities | [Capability Ontology](../schemas/capability_ontology.json) |
+| Understand all 36 capabilities | [Capability Ontology](../schemas/capability_ontology.json) |
 | See production workflows | [Workflow Catalog](../schemas/workflow_catalog.yaml) |
 | Read the full spec | [STANDARD-v1.0.0.md](../spec/STANDARD-v1.0.0.md) |
 | Understand error codes | [STANDARD Section 9](../spec/STANDARD-v1.0.0.md#9-error-model) |

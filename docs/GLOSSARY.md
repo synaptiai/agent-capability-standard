@@ -338,7 +338,7 @@ Examples: `persist`, `recall`
 
 ### COORDINATE
 Capabilities for multi-agent and workflow orchestration.
-Examples: `delegate`, `synchronize`, `invoke`
+Examples: `delegate`, `synchronize`, `invoke`, `inquire`
 
 ---
 
@@ -359,6 +359,30 @@ The degree to which an implementation satisfies the standard:
 A capability that must be executed before another. Prerequisites are defined in the capability ontology:
 - `requires`: Hard prerequisite (must be satisfied)
 - `soft_requires`: Recommended but not mandatory
+
+---
+
+## Capability Definitions
+
+### Inquire
+Request clarification when input is ambiguous. The `inquire` capability generates targeted clarifying questions to resolve uncertainty in user requests before proceeding. Located in the COORDINATE layer because it handles agent-user coordination.
+
+**When to use:** When a user request has:
+- Missing required parameters
+- Conflicting interpretations
+- Insufficient constraints for reliable execution
+
+**Why it matters:** Agents that assume a single interpretation frustrate users who intended something different. Explicit clarification prevents wasted work and incorrect results.
+
+**What it prevents:**
+- Hallucinated assumptions about user intent
+- Incorrect results from underspecified requests
+- Frustrated users who expected different outcomes
+
+**Output includes:**
+- Clarifying questions targeting specific ambiguities
+- Ambiguity analysis (missing parameters, conflicting interpretations)
+- Confidence score indicating how certain the agent is that clarification is needed
 
 ---
 

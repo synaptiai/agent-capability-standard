@@ -1,6 +1,6 @@
 # Agent Capability Skills
 
-This directory contains **35 atomic capabilities** organized according to the capability ontology's **9 cognitive layers**, plus 4 composed workflow skills.
+This directory contains **36 atomic capabilities** organized according to the capability ontology's **9 cognitive layers**, plus 4 composed workflow skills.
 
 ## Skill Layers
 
@@ -14,12 +14,12 @@ This directory contains **35 atomic capabilities** organized according to the ca
 | EXECUTE | 3 | Change the world |
 | VERIFY | 5 | Ensure correctness |
 | REMEMBER | 2 | Persist state |
-| COORDINATE | 3 | Multi-agent interaction |
-| Workflows | 4 | Composed multi-step skills |
+| COORDINATE | 4 | Multi-agent and user interaction |
+| Workflows | 6 | Composed multi-step skills |
 
-**Total: 35 atomic capabilities + 4 composed workflows = 39 skills**
+**Total: 36 atomic capabilities + 6 composed workflows = 42 skills**
 
-## The 35 Atomic Capabilities
+## The 36 Atomic Capabilities
 
 ### PERCEIVE (4)
 Information acquisition from the world.
@@ -101,16 +101,17 @@ State persistence.
 | `persist` | Store data durably |
 | `recall` | Retrieve previously stored data |
 
-### COORDINATE (3)
-Multi-agent interaction.
+### COORDINATE (4)
+Multi-agent and user interaction.
 
 | Skill | Description |
 |-------|-------------|
 | `delegate` | Assign task to another agent |
 | `synchronize` | Achieve state agreement across agents |
 | `invoke` | Execute a composed workflow |
+| `inquire` | Request clarification when input is ambiguous |
 
-## Composed Workflows (4)
+## Composed Workflows (6)
 
 | Workflow | Description |
 |----------|-------------|
@@ -118,10 +119,12 @@ Multi-agent interaction.
 | `capability-gap-analysis` | Assess missing capabilities in a project |
 | `digital-twin-bootstrap` | Initialize a digital twin from scratch |
 | `digital-twin-sync-loop` | Synchronize digital twin state with reality |
+| `monitor-and-replan` | Detect world changes and trigger replanning |
+| `clarify-intent` | Resolve ambiguous user requests |
 
 ## Domain Parameterization
 
-The 35-capability model uses **domain parameters** instead of many domain-specific skills:
+The 36-capability model uses **domain parameters** instead of many domain-specific skills:
 
 ```yaml
 # Old model (99 capabilities)
@@ -129,7 +132,7 @@ The 35-capability model uses **domain parameters** instead of many domain-specif
 - detect-entity
 - detect-person
 
-# New model (35 capabilities)
+# New model (36 capabilities)
 - detect (domain: anomaly)
 - detect (domain: entity)
 - detect (domain: person)
