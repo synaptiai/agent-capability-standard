@@ -575,13 +575,13 @@ COORDINATE (4): delegate, synchronize, invoke, **inquire**  ← NEW
 ## 8. Implementation Checklist
 
 - [x] Research document complete (`docs/research/replanning_capabilities.md`)
-- [ ] Add `inquire` to `schemas/capability_ontology.json`
-- [ ] Add edges: `critique → inquire`, `inquire ~> receive`
-- [ ] Document `monitor-and-replan` workflow in `schemas/workflow_catalog.yaml`
-- [ ] Document `clarify-intent` workflow in `schemas/workflow_catalog.yaml`
-- [ ] Create skill for `inquire` at `skills/inquire/SKILL.md`
-- [ ] Update GLOSSARY.md with new terms
-- [ ] Run validator: `python tools/validate_workflows.py`
+- [x] Add `inquire` to `schemas/capability_ontology.json`
+- [x] Add edges: `critique → inquire`, `inquire ~> receive`
+- [x] Document `monitor-and-replan` workflow in `schemas/workflow_catalog.yaml`
+- [x] Document `clarify-intent` workflow in `schemas/workflow_catalog.yaml`
+- [x] Create skill for `inquire` at `skills/inquire/SKILL.md`
+- [x] Update GLOSSARY.md with new terms
+- [x] Run validator: `python tools/validate_workflows.py`
 
 ---
 

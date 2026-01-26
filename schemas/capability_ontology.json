@@ -63,7 +63,7 @@
       "capabilities": ["persist", "recall"]
     },
     "COORDINATE": {
-      "description": "Multi-agent interaction",
+      "description": "Multi-agent and user interaction",
       "cognitive_mapping": "Multi-agent systems",
       "capabilities": ["delegate", "synchronize", "invoke", "inquire"]
     }
