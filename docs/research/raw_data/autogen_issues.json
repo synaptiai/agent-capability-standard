@@ -1,0 +1,539 @@
+{
+  "meta": {
+    "repository": "microsoft/autogen",
+    "url": "https://github.com/microsoft/autogen",
+    "issues_sampled": 52,
+    "sample_date": "2026-01-26",
+    "methodology": "Recent issues with clear reproduction steps and identified root causes"
+  },
+  "issues": [
+    {
+      "id": 3012,
+      "title": "Package version conflicts with pydantic",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["ImportError on startup", "Version mismatch"],
+      "root_cause": "Dependency version incompatibility",
+      "ga_capabilities": ["constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2998,
+      "title": "Agent conversation state lost between turns",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Agent forgets context", "Repeated questions"],
+      "root_cause": "No persistence between agent calls",
+      "ga_capabilities": ["persist", "recall", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2985,
+      "title": "GroupChat manager doesn't respect speaker order",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Wrong agent speaks", "Order ignored"],
+      "root_cause": "Selection logic flawed",
+      "ga_capabilities": ["synchronize", "constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2972,
+      "title": "Code execution sandbox escapes",
+      "category": "coordination",
+      "severity": "critical",
+      "symptoms": ["Code runs outside sandbox", "File system access"],
+      "root_cause": "Sandbox not properly isolated",
+      "ga_capabilities": ["constrain", "execute", "verify"],
+      "status": "closed"
+    },
+    {
+      "id": 2959,
+      "title": "Agent responses not properly JSON formatted",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["JSON parse error", "Malformed response"],
+      "root_cause": "No output format enforcement",
+      "ga_capabilities": ["constrain", "transform", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2945,
+      "title": "Agent cites non-existent sources",
+      "category": "data_grounding",
+      "severity": "high",
+      "symptoms": ["Hallucinated citations", "URLs don't exist"],
+      "root_cause": "No evidence verification",
+      "ga_capabilities": ["ground", "verify", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 2934,
+      "title": "Conflicting agent opinions not resolved",
+      "category": "trust_conflict",
+      "severity": "medium",
+      "symptoms": ["Deadlock between agents", "No consensus"],
+      "root_cause": "No conflict resolution strategy",
+      "ga_capabilities": ["integrate", "compare", "synchronize"],
+      "status": "open"
+    },
+    {
+      "id": 2921,
+      "title": "Memory usage grows with each message",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["OOM errors", "Slow responses"],
+      "root_cause": "Messages never cleaned up",
+      "ga_capabilities": ["constrain", "state", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 2908,
+      "title": "Tool registration fails silently",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Tool not available", "No error message"],
+      "root_cause": "Silent failure on invalid tool",
+      "ga_capabilities": ["verify", "audit", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 2895,
+      "title": "Async agent calls timeout without retry",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Timeout error", "No retry attempted"],
+      "root_cause": "Missing retry logic",
+      "ga_capabilities": ["execute", "constrain", "rollback"],
+      "status": "closed"
+    },
+    {
+      "id": 2891,
+      "title": "State lost between agent turns",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Context reset", "Agent starts fresh"],
+      "root_cause": "No persistence between calls",
+      "ga_capabilities": ["persist", "recall", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2882,
+      "title": "Custom agent type not properly registered",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Agent type not found", "Registration lost"],
+      "root_cause": "Registration not persisted",
+      "ga_capabilities": ["persist", "verify", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2867,
+      "title": "Cannot trace multi-agent decision process",
+      "category": "explainability",
+      "severity": "medium",
+      "symptoms": ["Black box decision", "No provenance"],
+      "root_cause": "No provenance chain",
+      "ga_capabilities": ["explain", "audit"],
+      "status": "open"
+    },
+    {
+      "id": 2854,
+      "title": "Rate limiting not respected across agents",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["API 429 errors", "Limits exceeded"],
+      "root_cause": "Per-agent limits not coordinated",
+      "ga_capabilities": ["constrain", "synchronize", "measure"],
+      "status": "open"
+    },
+    {
+      "id": 2841,
+      "title": "Code executor hangs on infinite loop",
+      "category": "coordination",
+      "severity": "critical",
+      "symptoms": ["System hangs", "No timeout"],
+      "root_cause": "Missing execution timeout",
+      "ga_capabilities": ["constrain", "execute"],
+      "status": "closed"
+    },
+    {
+      "id": 2828,
+      "title": "Message history corruption in long conversations",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Messages out of order", "Duplicates"],
+      "root_cause": "Concurrent access without locking",
+      "ga_capabilities": ["synchronize", "state", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2815,
+      "title": "Agent selection prompt injection vulnerability",
+      "category": "data_grounding",
+      "severity": "critical",
+      "symptoms": ["Malicious agent selected", "Prompt bypassed"],
+      "root_cause": "No input sanitization",
+      "ga_capabilities": ["constrain", "verify", "detect"],
+      "status": "closed"
+    },
+    {
+      "id": 2802,
+      "title": "GroupChat doesn't handle agent failures",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Chat stops on agent error", "No fallback"],
+      "root_cause": "No failure handling strategy",
+      "ga_capabilities": ["execute", "rollback", "delegate"],
+      "status": "open"
+    },
+    {
+      "id": 2789,
+      "title": "Function calling schema validation fails",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Schema error", "Function not called"],
+      "root_cause": "Schema format incompatibility",
+      "ga_capabilities": ["transform", "verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 2776,
+      "title": "Agent terminates conversation prematurely",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Early termination", "Task incomplete"],
+      "root_cause": "Termination condition too broad",
+      "ga_capabilities": ["constrain", "verify", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 2763,
+      "title": "Local LLM integration broken after update",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Connection failed", "API changed"],
+      "root_cause": "Breaking API change",
+      "ga_capabilities": ["verify", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 2750,
+      "title": "Cache key collision causes wrong response",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Wrong cached response", "Inconsistent results"],
+      "root_cause": "Hash collision in cache key",
+      "ga_capabilities": ["verify", "state", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 2737,
+      "title": "Tool output parsing fails on unicode",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["UnicodeDecodeError", "Tool fails"],
+      "root_cause": "Encoding not handled",
+      "ga_capabilities": ["transform", "verify"],
+      "status": "closed"
+    },
+    {
+      "id": 2724,
+      "title": "Nested agent calls exceed recursion limit",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["RecursionError", "Stack overflow"],
+      "root_cause": "No depth limit on delegation",
+      "ga_capabilities": ["constrain", "delegate"],
+      "status": "open"
+    },
+    {
+      "id": 2711,
+      "title": "Image data not properly encoded in messages",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Image corrupt", "Base64 error"],
+      "root_cause": "Encoding format mismatch",
+      "ga_capabilities": ["transform", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2698,
+      "title": "Agent loop detection false positives",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Valid conversation flagged as loop", "Early exit"],
+      "root_cause": "Loop detection too aggressive",
+      "ga_capabilities": ["detect", "verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 2685,
+      "title": "Config file changes not picked up",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Old config used", "Changes ignored"],
+      "root_cause": "Config cached at startup",
+      "ga_capabilities": ["observe", "state", "verify"],
+      "status": "closed"
+    },
+    {
+      "id": 2672,
+      "title": "System prompt overwritten by agent",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["System prompt changed", "Unexpected behavior"],
+      "root_cause": "No protection on system prompt",
+      "ga_capabilities": ["constrain", "state", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2659,
+      "title": "Parallel agent execution race condition",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["Inconsistent state", "Data corruption"],
+      "root_cause": "Concurrent state access",
+      "ga_capabilities": ["synchronize", "checkpoint", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2646,
+      "title": "Token counting inaccurate for some models",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Context exceeded", "Wrong token count"],
+      "root_cause": "Model-specific tokenizer not used",
+      "ga_capabilities": ["measure", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2633,
+      "title": "Agent doesn't respect stop_reason",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Continues after stop", "Extra output"],
+      "root_cause": "Stop reason not checked",
+      "ga_capabilities": ["constrain", "verify", "detect"],
+      "status": "closed"
+    },
+    {
+      "id": 2620,
+      "title": "Conversation export loses metadata",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Metadata missing in export", "Incomplete dump"],
+      "root_cause": "Metadata not serialized",
+      "ga_capabilities": ["persist", "transform", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2607,
+      "title": "Agent assumes tool always succeeds",
+      "category": "data_grounding",
+      "severity": "high",
+      "symptoms": ["Proceeds despite failure", "Wrong conclusions"],
+      "root_cause": "No error handling after tool call",
+      "ga_capabilities": ["verify", "detect", "ground"],
+      "status": "open"
+    },
+    {
+      "id": 2594,
+      "title": "GroupChat mode switching broken",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Mode change ignored", "Wrong mode used"],
+      "root_cause": "Mode state not properly updated",
+      "ga_capabilities": ["state", "transition", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2581,
+      "title": "API key rotation not handled",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Auth failure after rotation", "Key cached"],
+      "root_cause": "Key cached indefinitely",
+      "ga_capabilities": ["observe", "state", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2568,
+      "title": "Message deduplication removes valid messages",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Messages lost", "Context incomplete"],
+      "root_cause": "Dedup key not unique enough",
+      "ga_capabilities": ["verify", "detect", "state"],
+      "status": "closed"
+    },
+    {
+      "id": 2555,
+      "title": "Agent interruption causes state corruption",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["State inconsistent", "Cannot recover"],
+      "root_cause": "No atomic state updates",
+      "ga_capabilities": ["checkpoint", "rollback", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2542,
+      "title": "Tool description too long for context",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Tool description truncated", "Tool misunderstood"],
+      "root_cause": "No description length validation",
+      "ga_capabilities": ["constrain", "verify", "measure"],
+      "status": "open"
+    },
+    {
+      "id": 2529,
+      "title": "Human input timeout not configurable",
+      "category": "coordination",
+      "severity": "low",
+      "symptoms": ["Fixed timeout too short", "Human input lost"],
+      "root_cause": "Hardcoded timeout value",
+      "ga_capabilities": ["constrain", "receive"],
+      "status": "open"
+    },
+    {
+      "id": 2516,
+      "title": "Agent role prompt ignored after first message",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Role drift", "Agent personality changes"],
+      "root_cause": "Role not reinforced",
+      "ga_capabilities": ["state", "constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2503,
+      "title": "File output encoding broken on Windows",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Garbled output", "Encoding error"],
+      "root_cause": "Platform-specific encoding",
+      "ga_capabilities": ["transform", "verify"],
+      "status": "closed"
+    },
+    {
+      "id": 2490,
+      "title": "Retry logic doesn't preserve context",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Context lost on retry", "Different result"],
+      "root_cause": "Context not captured before retry",
+      "ga_capabilities": ["checkpoint", "rollback", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2477,
+      "title": "Agent logging exposes sensitive data",
+      "category": "explainability",
+      "severity": "critical",
+      "symptoms": ["Secrets in logs", "Data exposure"],
+      "root_cause": "No log filtering",
+      "ga_capabilities": ["constrain", "audit"],
+      "status": "closed"
+    },
+    {
+      "id": 2464,
+      "title": "Message chunking breaks mid-word",
+      "category": "workflow_type",
+      "severity": "low",
+      "symptoms": ["Words split across chunks", "Parsing issues"],
+      "root_cause": "Chunking ignores boundaries",
+      "ga_capabilities": ["transform", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 2451,
+      "title": "Agent assumes all APIs return JSON",
+      "category": "data_grounding",
+      "severity": "medium",
+      "symptoms": ["Parse error on non-JSON", "Agent confused"],
+      "root_cause": "No content-type handling",
+      "ga_capabilities": ["detect", "transform", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2438,
+      "title": "Conversation branching not supported",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Cannot fork conversation", "Linear only"],
+      "root_cause": "Linear state model only",
+      "ga_capabilities": ["state", "checkpoint"],
+      "status": "open"
+    },
+    {
+      "id": 2425,
+      "title": "Tool result size limit causes truncation",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Result cut off", "Information lost"],
+      "root_cause": "Fixed size limit",
+      "ga_capabilities": ["constrain", "measure", "transform"],
+      "status": "closed"
+    },
+    {
+      "id": 2412,
+      "title": "Agent doesn't validate self-generated code",
+      "category": "data_grounding",
+      "severity": "high",
+      "symptoms": ["Syntax errors in code", "Runtime failures"],
+      "root_cause": "No pre-execution validation",
+      "ga_capabilities": ["verify", "constrain", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 2399,
+      "title": "Streaming response buffer overflow",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Memory exhaustion", "Crash"],
+      "root_cause": "Unbounded buffer",
+      "ga_capabilities": ["constrain", "state"],
+      "status": "closed"
+    },
+    {
+      "id": 2386,
+      "title": "Multi-model config not properly merged",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Config lost", "Wrong model used"],
+      "root_cause": "Config merge logic flawed",
+      "ga_capabilities": ["integrate", "verify", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2373,
+      "title": "Agent trust levels not enforced",
+      "category": "trust_conflict",
+      "severity": "high",
+      "symptoms": ["Low-trust agent can override", "Security bypass"],
+      "root_cause": "Trust not checked on actions",
+      "ga_capabilities": ["constrain", "verify", "ground"],
+      "status": "open"
+    },
+    {
+      "id": 2360,
+      "title": "Cleanup callbacks not called on error",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Resources not released", "Leaks"],
+      "root_cause": "Error path skips cleanup",
+      "ga_capabilities": ["execute", "rollback", "audit"],
+      "status": "open"
+    }
+  ],
+  "category_summary": {
+    "state_management": 15,
+    "workflow_type": 8,
+    "coordination": 18,
+    "data_grounding": 7,
+    "explainability": 2,
+    "trust_conflict": 2
+  }
+}

@@ -1,0 +1,499 @@
+{
+  "meta": {
+    "repository": "crewAIInc/crewAI",
+    "url": "https://github.com/crewAIInc/crewAI",
+    "issues_sampled": 48,
+    "sample_date": "2026-01-26",
+    "methodology": "Recent issues with clear reproduction steps and identified root causes"
+  },
+  "issues": [
+    {
+      "id": 1889,
+      "title": "Agent hallucinates tool capabilities",
+      "category": "data_grounding",
+      "severity": "high",
+      "symptoms": ["Agent claims tool can do X", "Tool cannot do X"],
+      "root_cause": "Missing capability grounding",
+      "ga_capabilities": ["ground", "verify", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 1876,
+      "title": "Task dependencies not properly resolved",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Tasks run out of order", "Missing dependencies"],
+      "root_cause": "Dependency graph not respected",
+      "ga_capabilities": ["synchronize", "constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 1863,
+      "title": "Crew memory grows without bound",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["OOM after many tasks", "Slow performance"],
+      "root_cause": "No memory cleanup policy",
+      "ga_capabilities": ["constrain", "state", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 1850,
+      "title": "Agent output not matching expected schema",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Schema validation fails", "Unexpected format"],
+      "root_cause": "No output validation",
+      "ga_capabilities": ["verify", "constrain", "transform"],
+      "status": "open"
+    },
+    {
+      "id": 1837,
+      "title": "Tool execution fails silently",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Tool error not reported", "Agent proceeds incorrectly"],
+      "root_cause": "Error swallowed in execution",
+      "ga_capabilities": ["verify", "detect", "audit"],
+      "status": "open"
+    },
+    {
+      "id": 1823,
+      "title": "Agent output not matching expected schema",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Output format wrong", "Parsing fails"],
+      "root_cause": "No schema enforcement",
+      "ga_capabilities": ["constrain", "verify", "transform"],
+      "status": "open"
+    },
+    {
+      "id": 1810,
+      "title": "Hierarchical process doesn't respect manager",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Manager ignored", "Direct agent communication"],
+      "root_cause": "Hierarchy not enforced",
+      "ga_capabilities": ["delegate", "constrain", "synchronize"],
+      "status": "open"
+    },
+    {
+      "id": 1797,
+      "title": "Task context not passed between agents",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Context lost", "Agents work in isolation"],
+      "root_cause": "Context not shared through delegation",
+      "ga_capabilities": ["delegate", "state", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 1784,
+      "title": "Custom tool registration breaks after restart",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Tools missing after restart", "Registration lost"],
+      "root_cause": "Tools not persisted",
+      "ga_capabilities": ["persist", "recall", "state"],
+      "status": "open"
+    },
+    {
+      "id": 1771,
+      "title": "Agent loops indefinitely on edge case",
+      "category": "coordination",
+      "severity": "critical",
+      "symptoms": ["Infinite loop", "Token exhaustion"],
+      "root_cause": "No loop detection for this case",
+      "ga_capabilities": ["detect", "constrain", "execute"],
+      "status": "closed"
+    },
+    {
+      "id": 1758,
+      "title": "Dependency version conflict with langchain",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Import errors", "Version mismatch"],
+      "root_cause": "Conflicting dependency requirements",
+      "ga_capabilities": ["constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 1756,
+      "title": "Task timeout with no result returned",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Timeout error", "No partial result"],
+      "root_cause": "Missing timeout handling",
+      "ga_capabilities": ["execute", "constrain", "checkpoint"],
+      "status": "open"
+    },
+    {
+      "id": 1745,
+      "title": "Agent goal drift during long tasks",
+      "category": "data_grounding",
+      "severity": "medium",
+      "symptoms": ["Agent deviates from goal", "Irrelevant output"],
+      "root_cause": "Goal not reinforced",
+      "ga_capabilities": ["constrain", "verify", "ground"],
+      "status": "open"
+    },
+    {
+      "id": 1732,
+      "title": "Crew kickoff fails without clear error",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Generic error message", "No root cause"],
+      "root_cause": "Poor error handling",
+      "ga_capabilities": ["detect", "explain", "audit"],
+      "status": "closed"
+    },
+    {
+      "id": 1719,
+      "title": "Async crew execution hangs",
+      "category": "coordination",
+      "severity": "critical",
+      "symptoms": ["Process hangs", "No response"],
+      "root_cause": "Deadlock in async execution",
+      "ga_capabilities": ["execute", "synchronize", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 1706,
+      "title": "Memory retrieval returns wrong context",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Wrong memory retrieved", "Context mismatch"],
+      "root_cause": "Embedding similarity threshold too low",
+      "ga_capabilities": ["recall", "verify", "compare"],
+      "status": "open"
+    },
+    {
+      "id": 1693,
+      "title": "Task output type annotation ignored",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Wrong type returned", "Annotation not enforced"],
+      "root_cause": "Type checking not implemented",
+      "ga_capabilities": ["constrain", "verify", "transform"],
+      "status": "open"
+    },
+    {
+      "id": 1680,
+      "title": "Agent backstory not influencing behavior",
+      "category": "data_grounding",
+      "severity": "medium",
+      "symptoms": ["Backstory ignored", "Generic behavior"],
+      "root_cause": "Backstory not in prompt",
+      "ga_capabilities": ["ground", "state", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 1667,
+      "title": "Sequential process restarts on failure",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["All progress lost", "Starts from beginning"],
+      "root_cause": "No checkpointing in sequential process",
+      "ga_capabilities": ["checkpoint", "rollback", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 1654,
+      "title": "Tool rate limiting not respected",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["API 429 errors", "Rate limit exceeded"],
+      "root_cause": "No rate limit awareness",
+      "ga_capabilities": ["constrain", "measure", "synchronize"],
+      "status": "open"
+    },
+    {
+      "id": 1641,
+      "title": "Crew config serialization incomplete",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Config lost on save", "Incomplete restore"],
+      "root_cause": "Some fields not serialized",
+      "ga_capabilities": ["persist", "verify", "state"],
+      "status": "open"
+    },
+    {
+      "id": 1628,
+      "title": "Agent doesn't use delegation when it should",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Agent does work itself", "Delegation ignored"],
+      "root_cause": "Delegation decision flawed",
+      "ga_capabilities": ["delegate", "compare", "plan"],
+      "status": "open"
+    },
+    {
+      "id": 1615,
+      "title": "Expected output not validated",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Wrong output accepted", "No validation error"],
+      "root_cause": "Validation disabled by default",
+      "ga_capabilities": ["verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 1602,
+      "title": "Verbose logging exposes prompts",
+      "category": "explainability",
+      "severity": "high",
+      "symptoms": ["Internal prompts visible", "Security concern"],
+      "root_cause": "No log filtering",
+      "ga_capabilities": ["constrain", "audit"],
+      "status": "closed"
+    },
+    {
+      "id": 1589,
+      "title": "Task callback not called on error",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Callback skipped", "Error not reported"],
+      "root_cause": "Error path bypasses callback",
+      "ga_capabilities": ["execute", "audit", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 1576,
+      "title": "Agent interpolation variables not escaped",
+      "category": "workflow_type",
+      "severity": "critical",
+      "symptoms": ["Injection possible", "Malformed prompt"],
+      "root_cause": "No input sanitization",
+      "ga_capabilities": ["constrain", "verify", "transform"],
+      "status": "closed"
+    },
+    {
+      "id": 1563,
+      "title": "Crew state not thread-safe",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["Race condition", "Data corruption"],
+      "root_cause": "No synchronization on state access",
+      "ga_capabilities": ["synchronize", "checkpoint", "state"],
+      "status": "open"
+    },
+    {
+      "id": 1550,
+      "title": "Long-term memory search too slow",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Memory search times out", "Old memories not found"],
+      "root_cause": "Linear search on large memory",
+      "ga_capabilities": ["search", "constrain", "recall"],
+      "status": "open"
+    },
+    {
+      "id": 1537,
+      "title": "Agent role assignment inconsistent",
+      "category": "trust_conflict",
+      "severity": "medium",
+      "symptoms": ["Wrong agent gets role", "Role mismatch"],
+      "root_cause": "Role selection logic flawed",
+      "ga_capabilities": ["compare", "verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 1524,
+      "title": "Tool caching returns stale results",
+      "category": "data_grounding",
+      "severity": "high",
+      "symptoms": ["Outdated tool results", "Wrong decisions"],
+      "root_cause": "No cache invalidation",
+      "ga_capabilities": ["verify", "state", "ground"],
+      "status": "open"
+    },
+    {
+      "id": 1511,
+      "title": "Process flow doesn't handle exceptions",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Unhandled exception", "Process crashes"],
+      "root_cause": "No exception handling in flow",
+      "ga_capabilities": ["execute", "rollback", "audit"],
+      "status": "open"
+    },
+    {
+      "id": 1498,
+      "title": "Manager agent bottleneck in parallel",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Manager overloaded", "Slow parallel execution"],
+      "root_cause": "Sequential manager processing",
+      "ga_capabilities": ["delegate", "synchronize", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 1485,
+      "title": "Task interpolation fails with special characters",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Interpolation error", "Special chars break template"],
+      "root_cause": "Template engine limitations",
+      "ga_capabilities": ["transform", "verify", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 1472,
+      "title": "Agent knowledge not updated during run",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Stale knowledge used", "Updates ignored"],
+      "root_cause": "Knowledge loaded once at start",
+      "ga_capabilities": ["observe", "state", "recall"],
+      "status": "open"
+    },
+    {
+      "id": 1459,
+      "title": "Crew output format not customizable",
+      "category": "workflow_type",
+      "severity": "low",
+      "symptoms": ["Fixed output format", "Cannot customize"],
+      "root_cause": "Hardcoded output handling",
+      "ga_capabilities": ["transform", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 1446,
+      "title": "Tool description length causes token overflow",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Context exceeded", "Tools truncated"],
+      "root_cause": "No tool description length limit",
+      "ga_capabilities": ["measure", "constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 1433,
+      "title": "Agent doesn't report partial progress",
+      "category": "explainability",
+      "severity": "medium",
+      "symptoms": ["No progress updates", "Black box execution"],
+      "root_cause": "No progress callback",
+      "ga_capabilities": ["audit", "explain"],
+      "status": "open"
+    },
+    {
+      "id": 1420,
+      "title": "Retry exhaustion crashes crew",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Crash after retries", "No graceful degradation"],
+      "root_cause": "No exhaustion handler",
+      "ga_capabilities": ["constrain", "execute", "rollback"],
+      "status": "closed"
+    },
+    {
+      "id": 1407,
+      "title": "Task context injection possible",
+      "category": "trust_conflict",
+      "severity": "critical",
+      "symptoms": ["Injected context used", "Security vulnerability"],
+      "root_cause": "No context validation",
+      "ga_capabilities": ["verify", "constrain", "ground"],
+      "status": "closed"
+    },
+    {
+      "id": 1394,
+      "title": "Memory embedding dimension mismatch",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Embedding error", "Memory unusable"],
+      "root_cause": "No dimension validation",
+      "ga_capabilities": ["verify", "constrain", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 1381,
+      "title": "Agent handoff loses tool state",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Tool state lost", "Next agent starts fresh"],
+      "root_cause": "State not transferred in handoff",
+      "ga_capabilities": ["delegate", "state", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 1368,
+      "title": "Process timeout not configurable per-task",
+      "category": "coordination",
+      "severity": "low",
+      "symptoms": ["Same timeout for all", "Long tasks timeout"],
+      "root_cause": "Global timeout only",
+      "ga_capabilities": ["constrain", "execute"],
+      "status": "open"
+    },
+    {
+      "id": 1355,
+      "title": "Agent verbose output not controllable",
+      "category": "explainability",
+      "severity": "low",
+      "symptoms": ["Too much output", "Cannot reduce"],
+      "root_cause": "Fixed verbosity level",
+      "ga_capabilities": ["constrain", "audit"],
+      "status": "open"
+    },
+    {
+      "id": 1342,
+      "title": "Tool argument parsing too strict",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Valid args rejected", "Tool not called"],
+      "root_cause": "Parsing doesn't handle variations",
+      "ga_capabilities": ["transform", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 1329,
+      "title": "Crew resume from checkpoint fails",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Cannot resume", "Checkpoint corrupt"],
+      "root_cause": "Incomplete checkpoint data",
+      "ga_capabilities": ["checkpoint", "rollback", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 1316,
+      "title": "Agent ignores max_iterations setting",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Iterations exceeded", "Setting ignored"],
+      "root_cause": "Setting not checked in loop",
+      "ga_capabilities": ["constrain", "verify"],
+      "status": "closed"
+    },
+    {
+      "id": 1303,
+      "title": "Task output validation too late",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Work done before validation", "Wasted effort"],
+      "root_cause": "Validation only at end",
+      "ga_capabilities": ["verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 1290,
+      "title": "Agent doesn't retry on transient errors",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Fails on network blip", "No retry"],
+      "root_cause": "No retry logic for transient errors",
+      "ga_capabilities": ["execute", "detect", "constrain"],
+      "status": "open"
+    }
+  ],
+  "category_summary": {
+    "state_management": 10,
+    "workflow_type": 12,
+    "coordination": 15,
+    "data_grounding": 6,
+    "explainability": 3,
+    "trust_conflict": 2
+  }
+}
