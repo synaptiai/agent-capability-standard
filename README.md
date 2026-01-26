@@ -132,7 +132,7 @@ claude plugin install agent-capability-standard
 ```
 
 This gives you:
-- 35 atomic capability skills organized by layer
+- 36 atomic capability skills organized by layer
 - Workflow patterns that compose capabilities
 - Safety hooks (checkpoint enforcement, audit logging)
 
@@ -162,7 +162,7 @@ python scripts/run_conformance.py
 
 ## What's Included
 
-### 35 Atomic Capabilities
+### 36 Atomic Capabilities
 
 Organized across 9 cognitive layers with explicit input/output schemas:
 
@@ -267,7 +267,7 @@ Hooks implementing SAFETY layer capabilities:
 
 ```
 agent-capability-standard/
-├── skills/                  # 35 atomic capability skills (flat structure)
+├── skills/                  # 36 atomic capability skills (flat structure)
 │   ├── retrieve/SKILL.md    # PERCEIVE layer
 │   ├── search/SKILL.md
 │   ├── observe/SKILL.md

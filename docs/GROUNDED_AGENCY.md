@@ -12,7 +12,7 @@ January 2026
 
 As large language models transition from conversational assistants to autonomous agents capable of real-world actions, the gap between what AI can do (capability taxonomies) and how AI operates reliably (operational primitives) becomes critical. We present **Grounded Agency**, a comprehensive framework that bridges academic capability taxonomies with production-grade agent infrastructure through three core contributions:
 
-1. A **capability ontology** of 35 atomic primitives organized across 9 cognitive layers with formal input/output schemas and typed contracts
+1. A **capability ontology** of 36 atomic primitives organized across 9 cognitive layers with formal input/output schemas and typed contracts
 2. A **world state schema** supporting real and digital system modeling with first-class uncertainty (epistemic, aleatoric, mixed), evidence anchors, and reversible state transitions
 3. A **trust-aware conflict resolution** model with source authority weights, temporal decay, and Bayesian identity resolution
 
@@ -233,9 +233,9 @@ The derivation process yielded 36 atomic capabilities across 9 cognitive layers:
 - 3 Execute (world changes)
 - 5 Verify (correctness assurance)
 - 2 Remember (persistence)
-- 3 Coordinate (multi-agent)
+- 4 Coordinate (multi-agent and user interaction)
 
-The key insight is **domain parameterization**: instead of 99 domain-specific capabilities (detect-anomaly, detect-entity, etc.), we use 35 atomic verbs with domain parameters (detect with domain: anomaly). This preserves expressiveness while maintaining a minimal ontology.
+The key insight is **domain parameterization**: instead of 99 domain-specific capabilities (detect-anomaly, detect-entity, etc.), we use 36 atomic verbs with domain parameters (detect with domain: anomaly). This preserves expressiveness while maintaining a minimal ontology.
 
 For full derivation details, see [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
 

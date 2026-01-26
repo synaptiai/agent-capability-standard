@@ -86,15 +86,15 @@ This standard makes reliability structural, not optional.
 
 ---
 
-## The 35 Capabilities
+## The 36 Capabilities
 
 ### Why exactly 36 capabilities?
 
-The number 35 emerges from first-principles derivation:
+The number 36 emerges from first-principles derivation:
 
 1. **Foundation**: Cognitive architectures (BDI, ReAct, SOAR) provide the theoretical basis
 2. **9 cognitive layers**: PERCEIVE, UNDERSTAND, REASON, MODEL, SYNTHESIZE, EXECUTE, VERIFY, REMEMBER, COORDINATE
-3. **Domain parameterization**: Instead of 99 domain-specific skills (detect-anomaly, detect-entity), we use 35 atomic verbs with domain parameters (detect with domain: anomaly)
+3. **Domain parameterization**: Instead of 99 domain-specific skills (detect-anomaly, detect-entity), we use 36 atomic verbs with domain parameters (detect with domain: anomaly)
 4. **Atomicity**: Each capability is truly irreducible and serves a single purpose
 
 For the full derivation, see [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
