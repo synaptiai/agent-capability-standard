@@ -1,0 +1,569 @@
+{
+  "meta": {
+    "repository": "langchain-ai/langchain",
+    "url": "https://github.com/langchain-ai/langchain",
+    "issues_sampled": 55,
+    "sample_date": "2026-01-26",
+    "methodology": "Recent issues with clear reproduction steps and identified root causes"
+  },
+  "issues": [
+    {
+      "id": 34891,
+      "title": "Structured output not working via proxy",
+      "category": "data_grounding",
+      "severity": "high",
+      "symptoms": ["LLM output not matching schema", "Proxy strips metadata"],
+      "root_cause": "Lost grounding context through proxy layer",
+      "ga_capabilities": ["ground", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34887,
+      "title": "Dict mutation during iteration causes RuntimeError",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["RuntimeError: dictionary changed size during iteration", "Concurrent access to shared state"],
+      "root_cause": "Race condition in shared state without locking",
+      "ga_capabilities": ["checkpoint", "state", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 34876,
+      "title": "Crash on empty messages in chain",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["NoneType error", "Empty array causes crash"],
+      "root_cause": "Missing null check on message content",
+      "ga_capabilities": ["verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 34875,
+      "title": "pretty_repr returns wrong format for list content",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Unexpected string format", "List not properly serialized"],
+      "root_cause": "Type handling gap in repr function",
+      "ga_capabilities": ["transform", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34874,
+      "title": "Inconsistent astream return types",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Different return types from same method", "Type errors in downstream"],
+      "root_cause": "No return type contract enforcement",
+      "ga_capabilities": ["verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 34856,
+      "title": "Multiple retriever sources give contradictory results",
+      "category": "trust_conflict",
+      "severity": "medium",
+      "symptoms": ["Conflicting answers from different sources", "No indication of contradiction"],
+      "root_cause": "No integration strategy for conflicting data",
+      "ga_capabilities": ["integrate", "compare", "ground"],
+      "status": "open"
+    },
+    {
+      "id": 34845,
+      "title": "Memory grows unbounded with long conversations",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["OOM errors", "Slow responses over time"],
+      "root_cause": "No bounds on conversation history",
+      "ga_capabilities": ["constrain", "state", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 34823,
+      "title": "Parallel tool calls fail silently",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Some tool calls not executed", "No error reported"],
+      "root_cause": "No error propagation in parallel execution",
+      "ga_capabilities": ["execute", "synchronize", "audit"],
+      "status": "open"
+    },
+    {
+      "id": 34812,
+      "title": "Chain state lost after serialization roundtrip",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["State different after load", "Some fields missing"],
+      "root_cause": "Incomplete serialization of internal state",
+      "ga_capabilities": ["persist", "verify", "state"],
+      "status": "closed"
+    },
+    {
+      "id": 34801,
+      "title": "Callback handler receives events out of order",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["End event before start", "Missing events"],
+      "root_cause": "Async event ordering not guaranteed",
+      "ga_capabilities": ["synchronize", "constrain", "audit"],
+      "status": "open"
+    },
+    {
+      "id": 34789,
+      "title": "No way to debug chain failures",
+      "category": "explainability",
+      "severity": "medium",
+      "symptoms": ["Black box errors", "Cannot trace failure point"],
+      "root_cause": "Missing step logging and provenance",
+      "ga_capabilities": ["explain", "audit"],
+      "status": "open"
+    },
+    {
+      "id": 34778,
+      "title": "Tool schema validation silently fails",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Invalid schema accepted", "Runtime errors later"],
+      "root_cause": "Lenient validation mode by default",
+      "ga_capabilities": ["verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 34765,
+      "title": "Embedding cache returns stale results",
+      "category": "data_grounding",
+      "severity": "medium",
+      "symptoms": ["Old embeddings used", "Results don't match updated docs"],
+      "root_cause": "No cache invalidation strategy",
+      "ga_capabilities": ["verify", "state", "ground"],
+      "status": "closed"
+    },
+    {
+      "id": 34752,
+      "title": "Agent loops infinitely on ambiguous query",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Infinite loop", "Token exhaustion"],
+      "root_cause": "No termination condition for ambiguity",
+      "ga_capabilities": ["constrain", "critique", "execute"],
+      "status": "open"
+    },
+    {
+      "id": 34743,
+      "title": "Vector store search returns duplicate results",
+      "category": "data_grounding",
+      "severity": "low",
+      "symptoms": ["Same document multiple times", "Inconsistent rankings"],
+      "root_cause": "Missing deduplication in results",
+      "ga_capabilities": ["search", "verify", "transform"],
+      "status": "closed"
+    },
+    {
+      "id": 34734,
+      "title": "Output parser fails on valid JSON",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Parser error on correct output", "Regex too strict"],
+      "root_cause": "Parser regex doesn't handle all valid cases",
+      "ga_capabilities": ["transform", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34721,
+      "title": "Streaming chunks arrive corrupted",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Garbled text", "Missing chunks"],
+      "root_cause": "Buffer handling error in stream",
+      "ga_capabilities": ["receive", "verify", "transform"],
+      "status": "open"
+    },
+    {
+      "id": 34708,
+      "title": "Retry logic causes duplicate API calls",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Extra API charges", "Duplicate work"],
+      "root_cause": "Retry state not properly tracked",
+      "ga_capabilities": ["state", "checkpoint", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 34695,
+      "title": "Custom prompts ignored in some chains",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Default prompt used instead", "Custom config lost"],
+      "root_cause": "Config override order incorrect",
+      "ga_capabilities": ["verify", "state"],
+      "status": "open"
+    },
+    {
+      "id": 34682,
+      "title": "Tool call arguments not validated before execution",
+      "category": "workflow_type",
+      "severity": "critical",
+      "symptoms": ["Invalid args passed to tool", "Tool crashes"],
+      "root_cause": "No pre-execution validation",
+      "ga_capabilities": ["constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34669,
+      "title": "Context window exceeded without warning",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Sudden API error", "No pre-check"],
+      "root_cause": "Token count not tracked before call",
+      "ga_capabilities": ["measure", "constrain", "predict"],
+      "status": "open"
+    },
+    {
+      "id": 34656,
+      "title": "Multi-modal input fails with certain image formats",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Image not processed", "Silent fallback to text"],
+      "root_cause": "Format validation incomplete",
+      "ga_capabilities": ["detect", "verify", "transform"],
+      "status": "open"
+    },
+    {
+      "id": 34643,
+      "title": "Batch processing loses some results",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Missing outputs", "Count mismatch"],
+      "root_cause": "Race condition in result collection",
+      "ga_capabilities": ["synchronize", "checkpoint", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34630,
+      "title": "SQL agent generates dangerous queries",
+      "category": "coordination",
+      "severity": "critical",
+      "symptoms": ["DROP TABLE generated", "DELETE without WHERE"],
+      "root_cause": "No query safety constraints",
+      "ga_capabilities": ["constrain", "verify", "critique"],
+      "status": "open"
+    },
+    {
+      "id": 34617,
+      "title": "Chat history not persisted across restarts",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["History lost", "Context reset"],
+      "root_cause": "In-memory only storage",
+      "ga_capabilities": ["persist", "recall"],
+      "status": "closed"
+    },
+    {
+      "id": 34604,
+      "title": "Agent claims tool succeeded when it failed",
+      "category": "data_grounding",
+      "severity": "high",
+      "symptoms": ["False success report", "Continues as if succeeded"],
+      "root_cause": "Error not checked after tool call",
+      "ga_capabilities": ["verify", "ground", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 34591,
+      "title": "Temperature setting ignored for some models",
+      "category": "workflow_type",
+      "severity": "low",
+      "symptoms": ["Unexpected randomness", "Config not applied"],
+      "root_cause": "Model-specific parameter handling",
+      "ga_capabilities": ["constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34578,
+      "title": "Runnable map doesn't preserve key order",
+      "category": "workflow_type",
+      "severity": "low",
+      "symptoms": ["Keys reordered", "Output format unexpected"],
+      "root_cause": "Dict iteration order assumption",
+      "ga_capabilities": ["transform", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 34565,
+      "title": "AsyncIO event loop conflicts",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["RuntimeError: event loop already running", "Deadlock"],
+      "root_cause": "Nested async calls in sync context",
+      "ga_capabilities": ["execute", "constrain", "synchronize"],
+      "status": "open"
+    },
+    {
+      "id": 34552,
+      "title": "Document loader hangs on large files",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["No progress", "Timeout"],
+      "root_cause": "No streaming for large file reads",
+      "ga_capabilities": ["retrieve", "constrain", "measure"],
+      "status": "open"
+    },
+    {
+      "id": 34539,
+      "title": "Agent doesn't use most relevant tools",
+      "category": "data_grounding",
+      "severity": "medium",
+      "symptoms": ["Wrong tool selected", "Better tool available"],
+      "root_cause": "Tool selection not grounded in capability",
+      "ga_capabilities": ["compare", "ground", "classify"],
+      "status": "open"
+    },
+    {
+      "id": 34526,
+      "title": "Few-shot examples cause format errors",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Output doesn't match examples", "Parsing fails"],
+      "root_cause": "Example format inconsistent with prompt",
+      "ga_capabilities": ["verify", "transform", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 34513,
+      "title": "Pydantic v1/v2 compatibility errors",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Import errors", "Validation fails"],
+      "root_cause": "Dependency version incompatibility",
+      "ga_capabilities": ["constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34500,
+      "title": "Structured output misses optional fields",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Optional fields always None", "Partial output"],
+      "root_cause": "Optional field handling inconsistent",
+      "ga_capabilities": ["verify", "transform"],
+      "status": "open"
+    },
+    {
+      "id": 34487,
+      "title": "Agent thoughts leak into final answer",
+      "category": "explainability",
+      "severity": "medium",
+      "symptoms": ["Internal reasoning visible", "Verbose output"],
+      "root_cause": "Output filtering not applied",
+      "ga_capabilities": ["constrain", "transform", "verify"],
+      "status": "closed"
+    },
+    {
+      "id": 34474,
+      "title": "Memory trimming loses important context",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Agent forgets key info", "Repeated questions"],
+      "root_cause": "Naive truncation strategy",
+      "ga_capabilities": ["state", "compare", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 34461,
+      "title": "Concurrent chain invocations share state",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["Cross-contamination", "Wrong results for user"],
+      "root_cause": "Mutable shared state without isolation",
+      "ga_capabilities": ["state", "checkpoint", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 34448,
+      "title": "Retry exhaustion not handled gracefully",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Crash after max retries", "No fallback"],
+      "root_cause": "No exhaustion handler",
+      "ga_capabilities": ["constrain", "execute", "rollback"],
+      "status": "closed"
+    },
+    {
+      "id": 34435,
+      "title": "Model binding doesn't preserve all options",
+      "category": "workflow_type",
+      "severity": "low",
+      "symptoms": ["Some options lost in bind", "Unexpected behavior"],
+      "root_cause": "Incomplete option forwarding",
+      "ga_capabilities": ["verify", "state"],
+      "status": "open"
+    },
+    {
+      "id": 34422,
+      "title": "Document metadata stripped during processing",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Source info lost", "Can't trace origin"],
+      "root_cause": "Metadata not propagated through chain",
+      "ga_capabilities": ["state", "persist", "ground"],
+      "status": "open"
+    },
+    {
+      "id": 34409,
+      "title": "Embedding dimension mismatch not caught",
+      "category": "workflow_type",
+      "severity": "high",
+      "symptoms": ["Vector store errors", "Search fails"],
+      "root_cause": "No dimension validation on insert",
+      "ga_capabilities": ["verify", "constrain", "detect"],
+      "status": "closed"
+    },
+    {
+      "id": 34396,
+      "title": "Agent gets stuck in tool error loop",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Infinite retry", "Same error repeated"],
+      "root_cause": "No error-based termination",
+      "ga_capabilities": ["detect", "constrain", "execute"],
+      "status": "open"
+    },
+    {
+      "id": 34383,
+      "title": "Async callbacks miss some events",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Events dropped", "Incomplete logs"],
+      "root_cause": "Async callback queue overflow",
+      "ga_capabilities": ["receive", "audit", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 34370,
+      "title": "Custom LLM wrapper breaks structured output",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Schema not applied", "Raw output returned"],
+      "root_cause": "Wrapper doesn't support structured calls",
+      "ga_capabilities": ["verify", "constrain", "transform"],
+      "status": "open"
+    },
+    {
+      "id": 34357,
+      "title": "Graph cycles cause infinite recursion",
+      "category": "coordination",
+      "severity": "critical",
+      "symptoms": ["Stack overflow", "Infinite loop"],
+      "root_cause": "No cycle detection in graph execution",
+      "ga_capabilities": ["detect", "constrain", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34344,
+      "title": "Stop token not respected",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Output continues past stop", "Extra tokens generated"],
+      "root_cause": "Stop sequence not passed to model",
+      "ga_capabilities": ["constrain", "execute"],
+      "status": "closed"
+    },
+    {
+      "id": 34331,
+      "title": "Checkpoint restore fails silently",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Old state used instead", "No error on failure"],
+      "root_cause": "Silent fallback to fresh state",
+      "ga_capabilities": ["checkpoint", "rollback", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 34318,
+      "title": "Tool execution timeout not configurable per-tool",
+      "category": "coordination",
+      "severity": "low",
+      "symptoms": ["All tools get same timeout", "Fast tools wait too long"],
+      "root_cause": "Global timeout only",
+      "ga_capabilities": ["constrain", "execute"],
+      "status": "open"
+    },
+    {
+      "id": 34305,
+      "title": "Human-in-the-loop breaks async flow",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Async chain blocked", "Timeout waiting for human"],
+      "root_cause": "Sync human input in async context",
+      "ga_capabilities": ["receive", "synchronize", "execute"],
+      "status": "open"
+    },
+    {
+      "id": 34292,
+      "title": "Rate limiter state not shared across instances",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["API rate exceeded", "Limiter bypassed"],
+      "root_cause": "In-process rate limit state only",
+      "ga_capabilities": ["state", "persist", "synchronize"],
+      "status": "open"
+    },
+    {
+      "id": 34279,
+      "title": "Partial output lost on error",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["All work lost on late failure", "No partial results"],
+      "root_cause": "No intermediate persistence",
+      "ga_capabilities": ["checkpoint", "persist", "rollback"],
+      "status": "closed"
+    },
+    {
+      "id": 34266,
+      "title": "Verbose mode exposes API keys in logs",
+      "category": "explainability",
+      "severity": "critical",
+      "symptoms": ["API keys in stdout", "Credentials leaked"],
+      "root_cause": "No secret redaction in logging",
+      "ga_capabilities": ["constrain", "audit"],
+      "status": "closed"
+    },
+    {
+      "id": 34253,
+      "title": "Tracing spans not properly closed",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Open spans accumulate", "Memory leak"],
+      "root_cause": "Missing span close on exception",
+      "ga_capabilities": ["audit", "state", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 34240,
+      "title": "Model fallback doesn't preserve messages",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Context lost on fallback", "Conversation reset"],
+      "root_cause": "Messages not transferred to fallback model",
+      "ga_capabilities": ["state", "rollback", "transform"],
+      "status": "open"
+    },
+    {
+      "id": 34227,
+      "title": "Concurrent embedding calls exceed rate limit",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["429 errors", "Batch fails"],
+      "root_cause": "No concurrency control on embeddings",
+      "ga_capabilities": ["constrain", "synchronize", "measure"],
+      "status": "open"
+    }
+  ],
+  "category_summary": {
+    "state_management": 12,
+    "workflow_type": 22,
+    "coordination": 10,
+    "data_grounding": 6,
+    "explainability": 3,
+    "trust_conflict": 2
+  }
+}

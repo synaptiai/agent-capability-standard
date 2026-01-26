@@ -1,0 +1,529 @@
+{
+  "meta": {
+    "repository": "Clawdbot (internal)",
+    "url": "internal",
+    "issues_sampled": 51,
+    "sample_date": "2026-01-26",
+    "methodology": "Recent issues with clear reproduction steps and identified root causes"
+  },
+  "issues": [
+    {
+      "id": 2415,
+      "title": "Internal errors leak to users",
+      "category": "explainability",
+      "severity": "high",
+      "symptoms": ["Stack traces shown to users", "Internal details exposed"],
+      "root_cause": "No error sanitization layer",
+      "ga_capabilities": ["constrain", "explain", "audit"],
+      "status": "closed"
+    },
+    {
+      "id": 2412,
+      "title": "Responses routed to wrong channel",
+      "category": "trust_conflict",
+      "severity": "critical",
+      "symptoms": ["Message in wrong channel", "Privacy breach"],
+      "root_cause": "Missing routing validation",
+      "ga_capabilities": ["verify", "constrain", "ground"],
+      "status": "closed"
+    },
+    {
+      "id": 2411,
+      "title": "DM threading ignored",
+      "category": "trust_conflict",
+      "severity": "medium",
+      "symptoms": ["Thread context lost", "Replies not threaded"],
+      "root_cause": "Channel type not checked for threading",
+      "ga_capabilities": ["detect", "verify", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2402,
+      "title": "Exec approval fire-and-forget doesn't wait",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Proceeds without approval", "Approval ignored"],
+      "root_cause": "No acknowledgment wait",
+      "ga_capabilities": ["synchronize", "receive", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2397,
+      "title": "Memory flush fires after compaction",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["Memory corruption", "Data loss"],
+      "root_cause": "Event ordering violation in async",
+      "ga_capabilities": ["synchronize", "state", "checkpoint"],
+      "status": "closed"
+    },
+    {
+      "id": 2392,
+      "title": "Context window calculation incorrect",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Context exceeded", "Truncation errors"],
+      "root_cause": "Token count algorithm bug",
+      "ga_capabilities": ["measure", "verify", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 2387,
+      "title": "Message queue unbounded during backpressure",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["Memory exhaustion", "Queue explosion"],
+      "root_cause": "No backpressure handling",
+      "ga_capabilities": ["constrain", "state", "measure"],
+      "status": "closed"
+    },
+    {
+      "id": 2384,
+      "title": "Unbounded memory growth in groupHistories",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["OOM errors", "Slow performance"],
+      "root_cause": "Missing cleanup policy for group histories",
+      "ga_capabilities": ["constrain", "state", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 2383,
+      "title": "Error details exposed to unauthenticated clients",
+      "category": "explainability",
+      "severity": "critical",
+      "symptoms": ["Security info leaked", "Auth bypass info exposed"],
+      "root_cause": "Missing auth check on error endpoint",
+      "ga_capabilities": ["constrain", "verify", "audit"],
+      "status": "closed"
+    },
+    {
+      "id": 2378,
+      "title": "Rate limiter state not persisted across restarts",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Rate limits reset on restart", "Limits bypassed"],
+      "root_cause": "In-memory rate limit state only",
+      "ga_capabilities": ["persist", "state", "recall"],
+      "status": "open"
+    },
+    {
+      "id": 2373,
+      "title": "Webhook retry logic creates duplicates",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Duplicate messages", "Retry causes re-send"],
+      "root_cause": "No idempotency tracking",
+      "ga_capabilities": ["state", "verify", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 2368,
+      "title": "Session timeout race with active request",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Request fails mid-stream", "Session gone"],
+      "root_cause": "Timeout doesn't check active requests",
+      "ga_capabilities": ["synchronize", "state", "verify"],
+      "status": "closed"
+    },
+    {
+      "id": 2363,
+      "title": "Long message chunking splits mid-word",
+      "category": "workflow_type",
+      "severity": "low",
+      "symptoms": ["Words broken across messages", "Readability issue"],
+      "root_cause": "Chunking ignores word boundaries",
+      "ga_capabilities": ["transform", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 2358,
+      "title": "Attachment processing hangs on large files",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Processing hangs", "No timeout"],
+      "root_cause": "No size limit on attachment processing",
+      "ga_capabilities": ["constrain", "measure", "execute"],
+      "status": "open"
+    },
+    {
+      "id": 2356,
+      "title": "Response based on outdated context",
+      "category": "data_grounding",
+      "severity": "high",
+      "symptoms": ["Stale information used", "Wrong answers"],
+      "root_cause": "Stale cache used without validation",
+      "ga_capabilities": ["verify", "ground", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2353,
+      "title": "Concurrent edits cause message loss",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["Messages disappear", "Edit overwrites"],
+      "root_cause": "No optimistic locking on edits",
+      "ga_capabilities": ["synchronize", "checkpoint", "state"],
+      "status": "closed"
+    },
+    {
+      "id": 2348,
+      "title": "Command parsing fails with quoted arguments",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Quotes not handled", "Args split wrong"],
+      "root_cause": "Parser doesn't support quotes",
+      "ga_capabilities": ["transform", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2343,
+      "title": "User preferences not applied consistently",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Preferences ignored sometimes", "Inconsistent behavior"],
+      "root_cause": "Preference cache invalidation race",
+      "ga_capabilities": ["state", "recall", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2338,
+      "title": "Reaction handler processes same reaction twice",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Duplicate processing", "Action repeated"],
+      "root_cause": "No deduplication on events",
+      "ga_capabilities": ["detect", "state", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2333,
+      "title": "Thread context not maintained across restarts",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Thread context lost", "Conversation reset"],
+      "root_cause": "Thread state in memory only",
+      "ga_capabilities": ["persist", "recall", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2328,
+      "title": "Slash command timeout too aggressive",
+      "category": "coordination",
+      "severity": "medium",
+      "symptoms": ["Commands timeout", "Response lost"],
+      "root_cause": "Fixed 3s timeout for all commands",
+      "ga_capabilities": ["constrain", "execute"],
+      "status": "open"
+    },
+    {
+      "id": 2323,
+      "title": "Image generation quota not enforced",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Quota exceeded", "No enforcement"],
+      "root_cause": "Quota check race condition",
+      "ga_capabilities": ["constrain", "measure", "verify"],
+      "status": "closed"
+    },
+    {
+      "id": 2318,
+      "title": "Streaming response drops characters",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Characters missing", "Incomplete output"],
+      "root_cause": "Buffer flush timing issue",
+      "ga_capabilities": ["verify", "transform", "synchronize"],
+      "status": "open"
+    },
+    {
+      "id": 2313,
+      "title": "Multi-modal input format detection fails",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Image not recognized", "Fallback to text"],
+      "root_cause": "MIME type detection incomplete",
+      "ga_capabilities": ["detect", "classify", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2308,
+      "title": "Conversation history truncation loses key messages",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Important context lost", "Agent confused"],
+      "root_cause": "FIFO truncation without importance scoring",
+      "ga_capabilities": ["state", "compare", "constrain"],
+      "status": "open"
+    },
+    {
+      "id": 2303,
+      "title": "Bot mention parsing inconsistent",
+      "category": "workflow_type",
+      "severity": "low",
+      "symptoms": ["Mentions sometimes missed", "Inconsistent behavior"],
+      "root_cause": "Multiple mention formats not all handled",
+      "ga_capabilities": ["detect", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2298,
+      "title": "Channel permission check cached too long",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Permission changes not reflected", "Access after revoke"],
+      "root_cause": "Permission cache TTL too long",
+      "ga_capabilities": ["observe", "verify", "state"],
+      "status": "closed"
+    },
+    {
+      "id": 2293,
+      "title": "Embed field limit exceeded without warning",
+      "category": "workflow_type",
+      "severity": "low",
+      "symptoms": ["Embed truncated", "No warning given"],
+      "root_cause": "Field limit not checked before send",
+      "ga_capabilities": ["constrain", "verify", "measure"],
+      "status": "open"
+    },
+    {
+      "id": 2288,
+      "title": "Database connection pool exhausted",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["Requests fail", "Connection timeout"],
+      "root_cause": "Connections not returned to pool",
+      "ga_capabilities": ["constrain", "state", "rollback"],
+      "status": "closed"
+    },
+    {
+      "id": 2283,
+      "title": "Scheduled message delivery fails silently",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Scheduled message not sent", "No error logged"],
+      "root_cause": "Scheduler error swallowed",
+      "ga_capabilities": ["execute", "audit", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2278,
+      "title": "User activity tracking race condition",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Activity count wrong", "Double counting"],
+      "root_cause": "Non-atomic increment",
+      "ga_capabilities": ["synchronize", "state", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2273,
+      "title": "Bot self-reply detection fails in threads",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Bot replies to itself", "Infinite loop risk"],
+      "root_cause": "Thread author check missing",
+      "ga_capabilities": ["detect", "verify", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 2268,
+      "title": "Webhook signature validation timing attack",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Potential security issue", "Timing variance"],
+      "root_cause": "Non-constant-time comparison",
+      "ga_capabilities": ["verify", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 2263,
+      "title": "Message edit history not tracked",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Cannot see edit history", "Context lost"],
+      "root_cause": "Edits overwrite without history",
+      "ga_capabilities": ["state", "persist", "audit"],
+      "status": "open"
+    },
+    {
+      "id": 2258,
+      "title": "Conversation handoff to human fails",
+      "category": "coordination",
+      "severity": "high",
+      "symptoms": ["Handoff not completed", "Human not notified"],
+      "root_cause": "Handoff state machine broken",
+      "ga_capabilities": ["delegate", "synchronize", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2253,
+      "title": "API response caching ignores query params",
+      "category": "data_grounding",
+      "severity": "medium",
+      "symptoms": ["Wrong cached response", "Params ignored"],
+      "root_cause": "Cache key doesn't include params",
+      "ga_capabilities": ["verify", "state", "ground"],
+      "status": "open"
+    },
+    {
+      "id": 2248,
+      "title": "File upload size limit not enforced early",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Large file uploaded before reject", "Wasted bandwidth"],
+      "root_cause": "Size check after full upload",
+      "ga_capabilities": ["constrain", "verify", "measure"],
+      "status": "open"
+    },
+    {
+      "id": 2243,
+      "title": "Bot status indicator stuck",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Status shows typing forever", "Not cleared"],
+      "root_cause": "Typing indicator not cleared on error",
+      "ga_capabilities": ["state", "rollback", "audit"],
+      "status": "closed"
+    },
+    {
+      "id": 2238,
+      "title": "Message queue ordering not guaranteed",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Messages out of order", "Confusion"],
+      "root_cause": "Parallel processing loses order",
+      "ga_capabilities": ["synchronize", "constrain", "state"],
+      "status": "open"
+    },
+    {
+      "id": 2233,
+      "title": "Emoji reactions counted incorrectly",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Wrong count displayed", "Off by one"],
+      "root_cause": "Race condition in counter",
+      "ga_capabilities": ["synchronize", "state", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2228,
+      "title": "Mention autocomplete suggests deleted users",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Deleted users shown", "Stale data"],
+      "root_cause": "User cache not invalidated on delete",
+      "ga_capabilities": ["state", "verify", "observe"],
+      "status": "open"
+    },
+    {
+      "id": 2223,
+      "title": "Rich embed preview generation fails silently",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["No preview shown", "No error"],
+      "root_cause": "Preview error not propagated",
+      "ga_capabilities": ["verify", "audit", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 2218,
+      "title": "Audit log writes fail under load",
+      "category": "explainability",
+      "severity": "high",
+      "symptoms": ["Audit gaps", "Missing entries"],
+      "root_cause": "Audit queue overflows",
+      "ga_capabilities": ["audit", "constrain", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 2213,
+      "title": "Session affinity breaks on scale event",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["Session lost on scale", "User disconnected"],
+      "root_cause": "Affinity not maintained during scaling",
+      "ga_capabilities": ["state", "synchronize", "persist"],
+      "status": "closed"
+    },
+    {
+      "id": 2208,
+      "title": "Typing indicator leaks across channels",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Typing shown in wrong channel", "Privacy issue"],
+      "root_cause": "Channel ID not scoped in indicator",
+      "ga_capabilities": ["state", "verify", "constrain"],
+      "status": "closed"
+    },
+    {
+      "id": 2203,
+      "title": "Message edit detection misses rapid edits",
+      "category": "state_management",
+      "severity": "low",
+      "symptoms": ["Rapid edits not all captured", "History incomplete"],
+      "root_cause": "Edit events debounced too aggressively",
+      "ga_capabilities": ["receive", "state", "persist"],
+      "status": "open"
+    },
+    {
+      "id": 2198,
+      "title": "Channel archive doesn't preserve attachments",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Attachments lost in archive", "Incomplete backup"],
+      "root_cause": "Attachments not included in archive",
+      "ga_capabilities": ["persist", "state", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2193,
+      "title": "Scheduled post timezone handling broken",
+      "category": "workflow_type",
+      "severity": "medium",
+      "symptoms": ["Post at wrong time", "Timezone ignored"],
+      "root_cause": "Timezone conversion bug",
+      "ga_capabilities": ["transform", "verify"],
+      "status": "open"
+    },
+    {
+      "id": 2188,
+      "title": "Pagination cursor corruption on filter change",
+      "category": "state_management",
+      "severity": "medium",
+      "symptoms": ["Pagination breaks", "Missing results"],
+      "root_cause": "Cursor not reset on filter change",
+      "ga_capabilities": ["state", "verify", "detect"],
+      "status": "open"
+    },
+    {
+      "id": 2183,
+      "title": "Bulk message delete race with new messages",
+      "category": "state_management",
+      "severity": "high",
+      "symptoms": ["New message deleted", "Wrong messages removed"],
+      "root_cause": "Delete list cached too long",
+      "ga_capabilities": ["synchronize", "verify", "state"],
+      "status": "closed"
+    },
+    {
+      "id": 2178,
+      "title": "OAuth token refresh race condition",
+      "category": "state_management",
+      "severity": "critical",
+      "symptoms": ["Auth fails during refresh", "Requests rejected"],
+      "root_cause": "Multiple refresh attempts",
+      "ga_capabilities": ["synchronize", "state", "verify"],
+      "status": "closed"
+    }
+  ],
+  "category_summary": {
+    "state_management": 34,
+    "workflow_type": 9,
+    "coordination": 3,
+    "data_grounding": 2,
+    "explainability": 3,
+    "trust_conflict": 0
+  }
+}
