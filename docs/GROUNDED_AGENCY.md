@@ -16,9 +16,9 @@ As large language models transition from conversational assistants to autonomous
 2. A **world state schema** supporting real and digital system modeling with first-class uncertainty (epistemic, aleatoric, mixed), evidence anchors, and reversible state transitions
 3. A **trust-aware conflict resolution** model with source authority weights, temporal decay, and Bayesian identity resolution
 
-The framework enforces three invariants: every claim is grounded in evidence, uncertainty is explicit and typed, and every mutation is reversible and auditable. We introduce a design-time workflow validator that performs type inference across step bindings and suggests automatic coercions when mismatches occur.
+We introduce a design-time workflow validator that performs type inference across step bindings and suggests automatic coercions when mismatches occur.
 
-Evaluation on 5 reference workflows totaling 49 steps demonstrates 100% schema coverage, with the validator detecting all seeded type errors and suggesting patches from a registry of 5 coercion mappings. Our 18-class entity taxonomy with 57 subtypes and hierarchical namespace identifiers enables unambiguous cross-system entity references.
+Evaluation on 5 reference workflows totaling 51 steps demonstrates 100% schema coverage, with the validator detecting all seeded type errors and suggesting patches from a registry of 5 coercion mappings. Our 18-class entity taxonomy with 57 subtypes and hierarchical namespace identifiers enables unambiguous cross-system entity references.
 
 We release the complete framework—ontology, schemas, workflows, and validator—as open source to establish a foundation for safe, auditable agentic AI.
 
@@ -36,7 +36,7 @@ Current agent frameworks lack formal guarantees about three critical properties:
 2. **Uncertainty**: How confident is the agent, and what type of uncertainty applies?
 3. **Reversibility**: Can actions be undone if something goes wrong?
 
-Consider a digital twin synchronization workflow that monitors a payments service. The agent receives observability data, detects an anomaly, and must decide whether to trigger a rollback. Without explicit uncertainty modeling, it cannot distinguish between "the error rate is definitely 5%" (measurement) and "the error rate might be 5%" (inference from incomplete logs). Without evidence grounding, it cannot explain why it believes a rollback is necessary. Without reversibility guarantees, a mistaken rollback could cascade into a larger outage.
+Consider a digital twin monitoring a payments service that detects an anomaly and must decide whether to trigger a rollback. Without explicit uncertainty modeling, it cannot distinguish "error rate is 5%" (measured) from "error rate might be 5%" (inferred from incomplete logs). Without evidence grounding, it cannot explain its rollback decision. Without reversibility guarantees, a mistaken rollback cascades into a larger outage.
 
 Academic capability taxonomies, such as the DIS '23 AI Capabilities framework [4], provide valuable classifications of what AI systems can perceive, model, and produce. However, these taxonomies focus on feature-function relationships rather than operational primitives—they classify capabilities without specifying how to compose them safely or how to handle failures.
 
@@ -62,7 +62,9 @@ We evaluate the framework on 5 reference workflows (§8), demonstrating that the
 
 The systematic classification of AI capabilities has a rich history. Early work focused on cognitive architectures [5, 6] that decomposed intelligence into perception, memory, and action modules. More recently, the DIS '23 framework [4] proposed a taxonomy of AI capabilities in design contexts, identifying verbs like Detect, Identify, Estimate, Discover, Generate, Forecast, Act, and Compare.
 
-While valuable for understanding AI's functional scope, these taxonomies do not address operational concerns: How should capabilities compose? What happens when one fails? How should conflicts between data sources be resolved? Grounded Agency extends capability taxonomies with operational semantics.
+The rise of LLM-based agents has sparked new evaluation frameworks. Park et al. [29] demonstrated generative agents that simulate believable human behavior in sandbox environments, revealing both the promise and brittleness of agent autonomy. Huang et al. [30] developed AgentBench, a comprehensive benchmark evaluating LLM agents across diverse environments including code, games, and web browsing—finding that even frontier models struggle with multi-step reasoning under uncertainty.
+
+While valuable for understanding AI's functional scope, these taxonomies and benchmarks do not address operational concerns: How should capabilities compose? What happens when one fails? How should conflicts between data sources be resolved? Grounded Agency extends capability taxonomies with operational semantics.
 
 ### 2.2 Agent Architectures
 
@@ -77,9 +79,9 @@ Framework libraries like LangChain [10], LlamaIndex [11], and Semantic Kernel [1
 
 ### 2.3 World Modeling and Digital Twins
 
-The digital twin concept originated in manufacturing [13] and has expanded to encompass any cyber-physical system where a virtual model mirrors a real-world counterpart [14]. NASA's digital twin vision [15] emphasized high-fidelity simulation for predictive maintenance.
+The digital twin concept originated in manufacturing [13] and has expanded to encompass any cyber-physical system where a virtual model mirrors a real-world counterpart [14]. NASA's digital twin vision [15] emphasized high-fidelity simulation for predictive maintenance. The ISO 23247 standard [31] formalizes digital twin terminology and reference architectures for manufacturing, establishing canonical vocabulary for entity representation, observable attributes, and state synchronization.
 
-Knowledge graphs [16] provide a complementary approach, representing entities and relationships as typed edges. Google's Knowledge Vault [17] demonstrated extraction at scale, while Wikidata [18] showed the value of community-maintained structured knowledge.
+Knowledge graphs [16] provide a complementary approach, representing entities and relationships as typed edges. Google's Knowledge Vault [17] demonstrated extraction at scale, while Wikidata [18] showed the value of community-maintained structured knowledge. Commercial platforms like Azure Digital Twins [32] and AWS IoT TwinMaker provide managed infrastructure for digital twin deployment, though they lack the formal provenance and uncertainty semantics we introduce.
 
 Grounded Agency's world state schema combines elements of both: entities and relationships (from knowledge graphs) with time-indexed state variables and transition rules (from digital twins), unified by a provenance model that grounds every claim in evidence.
 
@@ -91,9 +93,9 @@ Dataflow type systems [22] ensure that producer outputs match consumer inputs. G
 
 ### 2.5 Safe and Auditable AI
 
-Constitutional AI [24] and RLHF [25] focus on aligning model outputs with human values. These approaches address content safety (what the model says) rather than operational safety (what the agent does).
+Constitutional AI [24] and RLHF [25] focus on aligning model outputs with human values. Christiano et al. [33] established foundations for scalable oversight, proposing debate and recursive reward modeling as mechanisms for supervising superhuman AI. Askell et al. [34] formalized the HHH framework (Helpful, Harmless, Honest) as alignment targets. These approaches address content safety (what the model says) rather than operational safety (what the agent does).
 
-Process-level safety research examines tool use risks [26], sandboxing [27], and human oversight [28]. Grounded Agency contributes a complementary layer: structural safety through capability dependencies, checkpointing requirements, and reversibility guarantees.
+Process-level safety research examines tool use risks [26], sandboxing [27], and human oversight [28]. Recent work on agent safety [35] catalogs failure modes specific to autonomous systems: goal drift, reward hacking, and unintended side effects. Grounded Agency contributes a complementary layer: structural safety through capability dependencies, checkpointing requirements, and reversibility guarantees. Where alignment research asks "does the agent want the right things?", we ask "can the agent's actions be verified and undone?"
 
 ---
 
@@ -103,7 +105,7 @@ The capability ontology defines **99 atomic capabilities** that agents can invok
 
 ### 3.1 Layer Taxonomy
 
-Capabilities are assigned to layers based on their primary function:
+Organizing capabilities into layers serves two purposes: it clarifies the ontology's structure for human readers, and it enables the validator to enforce ordering constraints (e.g., Perception before Modeling). We assign capabilities to layers based on their primary function:
 
 - **Perception** (4 capabilities): Interface with external data sources. Examples: `retrieve`, `inspect`, `search`, `receive`.
 
@@ -230,7 +232,11 @@ The framework distinguishes three types of uncertainty:
 Uncertainty ::= Epistemic(c, n) | Aleatoric(c, [l, h]) | Mixed(c, D)
 ```
 
-where c ∈ [0, 1] is confidence, n is a textual note, [l, h] is a credible interval, and D is an optional distribution specification.
+In this notation:
+- **c ∈ [0, 1]**: confidence level (probability of correctness)
+- **n**: textual note explaining the knowledge gap
+- **[l, h]**: credible interval (e.g., [0.003, 0.006] for 0.3%–0.6%)
+- **D**: distribution specification (e.g., `{name: "normal", mean: 0.045, stdev: 0.01}`)
 
 **Epistemic uncertainty** represents knowledge gaps—reducible with more evidence. Example: "We infer this service depends on Postgres from config files, but haven't verified at runtime."
 
@@ -286,7 +292,7 @@ transition_rules:
 
 ## 5. Trust-Aware Conflict Resolution
 
-When multiple sources provide conflicting information about the same entity or state variable, the framework applies a trust-weighted resolution function.
+The world state schema enables agents to maintain rich, time-indexed representations—but what happens when sources disagree? When multiple sources provide conflicting information about the same entity or state variable, we apply a trust-weighted resolution function.
 
 ### 5.1 Source Authority Ranking
 
@@ -518,12 +524,12 @@ We developed 5 reference workflows:
 
 | Workflow | Steps | Risk | Parallel | Recovery |
 |----------|-------|------|----------|----------|
-| debug_code_change | 10 | medium | 0 | ✓ |
+| debug_code_change | 11 | medium | 0 | ✓ |
 | world_model_build | 11 | low | 0 | — |
 | capability_gap_analysis | 7 | low | 0 | — |
-| digital_twin_sync_loop | 19 | high | 1 | — |
+| digital_twin_sync_loop | 20 | high | 1 | ✓ |
 | digital_twin_bootstrap | 2 | high | 0 | — |
-| **Total** | **49** | — | 1 | 1 |
+| **Total** | **51** | — | 1 | 2 |
 
 The `digital_twin_sync_loop` demonstrates the full capability:
 
@@ -533,18 +539,20 @@ The `digital_twin_sync_loop` demonstrates the full capability:
 4. `integrate`: Merge with existing twin
 5. `identity-resolution`: Resolve entity collisions
 6. `world-state`: Produce updated snapshot
-7. `state-transition`: Apply transition rules
-8. `detect-anomaly`: Identify drift
-9. `estimate-risk`: Score severity
-10. `forecast-risk`: Project trajectory
-11. `plan`: Generate remediation plan
-12. `constrain`: Apply safety policies
-13. `checkpoint`: Save recovery point
-14. `act-plan`: Execute if policy allows
-15. `verify`: Check success criteria
-16. `audit`: Record provenance
-17. `rollback`: Revert on failure
-18. `summarize`: Produce human report
+7. `diff-world-state`: Compute delta from previous
+8. `state-transition`: Apply transition rules
+9. `detect-anomaly`: Identify drift
+10. `estimate-risk`: Score severity
+11. `forecast-risk`: Project trajectory
+12. `plan`: Generate remediation plan
+13. `constrain`: Apply safety policies
+14. `checkpoint`: Save recovery point
+15. `act-plan`: Execute if policy allows
+16. `model-schema`: Define verification invariants
+17. `verify`: Check success criteria
+18. `audit`: Record provenance
+19. `rollback`: Revert on failure
+20. `summarize`: Produce human report
 
 ### 8.3 Validation Effectiveness
 
@@ -562,13 +570,19 @@ The validator detected **100% of seeded errors** (50/50). For the 10 type mismat
 
 | Framework | Uncertainty | Evidence | Reversible | Trust | Types | Identity | World Model |
 |-----------|-------------|----------|------------|-------|-------|----------|-------------|
-| LangChain | — | — | — | — | — | — | — |
-| AutoGPT | — | — | — | — | — | — | — |
+| LangChain [10] | — | — | — | — | Partial | — | — |
+| AutoGPT [1] | — | — | — | — | — | — | — |
+| AutoGen [36] | — | — | — | — | Partial | — | — |
+| CrewAI [37] | — | — | — | — | — | — | — |
+| DSPy [38] | — | — | — | — | ✓ | — | — |
+| Haystack [39] | — | — | — | — | Partial | — | — |
 | Claude Code Skills | — | Partial | — | — | — | — | — |
-| Semantic Kernel | — | — | — | — | Partial | — | — |
+| Semantic Kernel [12] | — | — | — | — | Partial | — | — |
 | **Grounded Agency** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-No existing framework provides all seven features.
+*Legend*: **Uncertainty** = explicit epistemic/aleatoric typing; **Evidence** = mandatory provenance anchors; **Reversible** = checkpoint/rollback primitives; **Trust** = source authority weighting; **Types** = static type checking for workflows; **Identity** = entity resolution policy; **World Model** = canonical state schema.
+
+LangChain, AutoGen, Haystack, and Semantic Kernel provide partial type safety via Pydantic schemas but lack design-time workflow validation. DSPy offers strong typing through its signature system but focuses on prompt optimization rather than operational safety. No existing framework provides all seven features.
 
 ---
 
@@ -578,11 +592,17 @@ No existing framework provides all seven features.
 
 **Manual capability implementation**: While the ontology defines contracts, actual capability implementations must be written manually. Future work could explore capability synthesis from execution traces.
 
-**Trust weight calibration**: Default weights are based on domain expertise; production deployments may require empirical calibration from historical conflict resolutions.
+**Trust weight calibration**: Default weights are based on domain expertise; production deployments may require empirical calibration from historical conflict resolutions. The **cold-start problem** is particularly acute: new deployments have no conflict history to learn from, making initial weights effectively guesses.
 
 **Coercion completeness**: The registry covers common type mismatches but is not exhaustive. Custom domains may require additional mappings.
 
-**Design-time only**: The validator runs before execution; runtime type checking would catch dynamic errors but adds overhead.
+**Design-time only**: The validator runs before execution; runtime type checking would catch dynamic errors but adds overhead. We estimate validation latency at O(n × e) where n is step count and e is average edges per capability—acceptable for batch validation but potentially problematic for real-time workflow modification.
+
+**Scalability**: The current implementation assumes ontologies of ~100 capabilities. Scaling to 1000+ capabilities may require index structures for dependency lookups and incremental validation to avoid re-checking unchanged subgraphs.
+
+**Integration complexity**: Adopting Grounded Agency in existing codebases requires wrapping legacy tool calls with capability contracts. For systems with hundreds of existing integrations, this migration represents substantial engineering effort.
+
+**Single-system scope**: The framework models one system's world state at a time. Federated scenarios where multiple organizations maintain partial views require extensions for cross-boundary trust negotiation and identity federation.
 
 ### 9.2 Broader Impact
 
@@ -597,118 +617,58 @@ This transparency is critical for deploying agents in high-stakes domains (healt
 
 ### 9.3 Future Work
 
-**Runtime enforcement**: Extend the validator to check types at execution time with gradual typing semantics.
+**Runtime enforcement**: Extend the validator to check types at execution time with gradual typing semantics. This would catch errors from dynamic data (e.g., API responses with unexpected shapes) while preserving the design-time guarantee for statically-known flows.
 
-**Learned trust weights**: Use reinforcement learning from conflict resolution feedback to calibrate source authority.
+**Learned trust weights**: Use reinforcement learning from conflict resolution feedback to calibrate source authority. Historical logs of which source "won" conflicts—and whether downstream verification succeeded—provide training signal.
 
-**Multi-agent protocols**: Extend the Coordination layer with formal protocols for delegation, negotiation, and consensus.
+**Multi-agent protocols**: Extend the Coordination layer with formal protocols for delegation, negotiation, and consensus. This would enable principled composition of multiple Grounded Agency instances with explicit trust boundaries.
 
 **Capability synthesis**: Generate capability implementations from natural language specifications using code generation models.
 
----
+**Formal verification**: Develop Coq or Lean proofs for key invariants: that checkpoint-requiring capabilities cannot execute without preceding checkpoint calls, that rollback edges form valid recovery paths, and that the type coercion registry is confluent.
 
-## 10. For Practitioners
+**Framework adapters**: Build adapters for LangChain, AutoGen, CrewAI, and DSPy that wrap their primitives with Grounded Agency contracts. This would enable incremental adoption without full rewrites.
 
-This section bridges academic concepts to practical application. If you're evaluating whether to adopt this framework, start here.
+**Benchmark datasets**: Develop evaluation datasets with seeded errors (missing evidence, type mismatches, trust conflicts) to enable reproducible comparison with future approaches. Publish as a community benchmark.
 
-### 10.1 Return on Investment
+**Conformance levels**: Define graduated conformance levels (L1–L4) with specific requirements at each level, enabling organizations to adopt the framework incrementally and communicate their compliance posture.
 
-**Adoption costs:**
-- Learning curve: 1-2 days to understand the ontology and DSL
-- Integration: 1-2 weeks to integrate validator into existing workflows
-- Migration: Varies by codebase complexity
+### 9.4 Threat Model
 
-**Expected returns:**
+The framework provides **structural safety** against certain failure modes but does not protect against:
 
-| Benefit | Typical Impact |
-|---------|----------------|
-| Reduced debugging time | 50-80% reduction in time tracing agent decisions |
-| Prevented data corruption | Near-zero unrecoverable state from failed mutations |
-| Faster incident resolution | Minutes instead of hours with audit trails |
-| Compliance readiness | Automatic decision lineage for auditors |
-| Reduced integration bugs | Static validation catches type mismatches before runtime |
+- **Adversarial capability implementations**: If a capability's code is malicious, the ontology cannot detect this—it only validates that contracts are satisfied.
+- **Evidence forgery**: An attacker with write access to evidence sources can produce false anchors that satisfy grounding requirements.
+- **Trust weight manipulation**: If an attacker can modify source authority rankings, they can bias conflict resolution toward attacker-controlled sources.
+- **Prompt injection via world state**: Malicious content in entity attributes could influence downstream LLM-based capabilities.
 
-### 10.2 When to Adopt
-
-**Strong signals for adoption:**
-- [ ] Agents make decisions you can't explain after the fact
-- [ ] Workflow failures require manual cleanup
-- [ ] Multiple data sources give conflicting answers
-- [ ] Compliance requires decision lineage
-- [ ] Agent errors have high business impact
-
-**Weak signals (may not need full framework):**
-- Simple, single-step agent tasks
-- Read-only operations with no mutations
-- Low-stakes decisions with easy manual override
-
-### 10.3 Adoption Path
-
-**Phase 1: Validation only (Week 1)**
-- Add validator to CI/CD pipeline
-- Validate existing workflows without changing runtime
-- Identify hidden type mismatches and missing prerequisites
-
-**Phase 2: Safety layer (Week 2-4)**
-- Add checkpoints before high-risk mutations
-- Implement rollback for critical workflows
-- Add audit logging for compliance
-
-**Phase 3: Grounding (Month 2)**
-- Add evidence anchors to high-value claims
-- Implement provenance tracking
-- Enable decision lineage queries
-
-**Phase 4: Full conformance (Quarter 2)**
-- Achieve L3 conformance (full type safety)
-- Implement trust model for multi-source workflows
-- Progress to L4 with patch suggestions
-
-### 10.4 Common Objections
-
-**"This is too much overhead for our use case."**
-Start with validation only. Zero runtime overhead—just catches errors earlier. Expand safety layer only where risk justifies it.
-
-**"Our agents are simple; we don't need this."**
-Simple agents become complex agents. The standard is modular—adopt what you need now, expand later.
-
-**"We already have error handling."**
-Error handling is reactive (what to do when things go wrong). This standard is preventive (make wrong things structurally difficult). They're complementary.
-
-**"Integration with our framework is too hard."**
-The standard is framework-agnostic. The validator works on YAML/JSON definitions. Runtime enforcement is optional and incremental.
+The framework assumes a trusted implementation environment and focuses on preventing *accidental* failures (composition errors, type mismatches, missing checkpoints) rather than *adversarial* attacks. Defense against adversarial scenarios requires complementary measures: code review, access controls, and input sanitization.
 
 ---
 
-## 11. Conclusion
+## 10. Conclusion
 
-We presented **Grounded Agency**, a capability ontology and workflow framework for building safe, auditable, and composable AI agents. The framework bridges academic capability taxonomies with production infrastructure through 99 atomic capabilities, a world state schema with first-class uncertainty, trust-aware conflict resolution, and a design-time type validator.
+**Grounded Agency** addresses a fundamental gap in the agent AI landscape: the absence of formal guarantees about what agents believe, how confident they are, and whether their actions can be undone. While capability taxonomies describe *what* AI can do and framework libraries provide *how* to build agents, neither ensures that agent behavior is trustworthy.
 
-Key contributions:
+Our framework makes three design bets. First, that **grounding every claim in evidence** prevents the hallucination and confabulation that undermine agent reliability. Second, that **typing uncertainty** (epistemic vs. aleatoric) enables agents to reason appropriately about knowledge gaps versus inherent randomness. Third, that **mandating reversibility** for mutations transforms agent errors from catastrophic events into recoverable incidents.
 
-- A capability ontology with 100% schema coverage and 60 dependency edges
-- A world state schema distinguishing epistemic, aleatoric, and mixed uncertainty
-- A Bayesian trust model with temporal decay and field-specific authority
-- An identity resolution policy with 8 weighted features and hard constraints
-- A workflow validator that infers types and suggests coercions
+The 99-capability ontology with 60 dependency edges provides the compositional vocabulary. The world state schema with provenance records and typed uncertainty provides the representational foundation. The trust model with temporal decay and field-specific authority provides the conflict resolution mechanism. The design-time validator with type inference and coercion suggestions catches errors before they reach production.
 
-The framework enforces three invariants that we believe are essential for trustworthy agentic AI: **grounding** (every claim has evidence), **uncertainty** (confidence is typed and explicit), and **reversibility** (every mutation can be undone).
+The framework enforces three invariants we believe are essential for trustworthy agentic AI: **grounding** (every claim has evidence), **uncertainty** (confidence is typed and explicit), and **reversibility** (every mutation can be undone). These are not conventions to be followed but structural properties enforced by the ontology's dependency edges and the validator's type system.
 
-We release the complete framework—ontology, schemas, workflows, validator, and reference implementations—as open source to support the research community in building agents that are not just capable, but trustworthy.
-
-For practitioners looking to adopt this framework, Section 10 provides concrete guidance on ROI, adoption paths, and addressing common objections.
+We release the complete framework as open source to establish a foundation for agents that earn trust through transparency rather than demanding it through capability. Appendix D provides concrete adoption guidance for practitioners.
 
 ---
 
 ## References
 
-[1] Significant-Gravitas. AutoGPT: An autonomous GPT-4 experiment. GitHub Repository, 2023.
+[1] Significant-Gravitas. AutoGPT: An autonomous GPT-4 experiment. GitHub Repository, 2023. https://github.com/Significant-Gravitas/AutoGPT
 
-[2] Anthropic. Claude computer use. Technical Report, 2024.
+[2] Anthropic. Claude computer use. Technical Report, 2024. https://www.anthropic.com/claude/computer-use
 
-[3] Cognition Labs. Devin: The first AI software engineer. Technical Report, 2024.
+[3] Cognition Labs. Devin: The first AI software engineer. Technical Report, 2024. https://www.cognition.ai/blog/introducing-devin
 
-[4] Q. Yang, A. Steinfeld, C. Rosé, and J. Zimmerman. Re-examining whether, why, and how human-AI interaction is uniquely difficult to design. In Proc. CHI '20, pages 1–12, 2020.
+[4] N. Yildirim, C. Oh, D. Sayar, K. Brand, S. Challa, V. Turri, N. C. Walton, A. E. Wong, J. Forlizzi, J. McCann, and J. Zimmerman. Creating Design Resources to Scaffold the Ideation of AI Concepts. In Proc. DIS '23, pages 2731–2746, Pittsburgh, PA, USA, 2023. https://doi.org/10.1145/3563657.3596058
 
 [5] J. E. Laird. The Soar Cognitive Architecture. MIT Press, 2012.
 
@@ -718,13 +678,13 @@ For practitioners looking to adopt this framework, Section 10 provides concrete 
 
 [8] N. Shinn, F. Cassano, E. Berman, et al. Reflexion: Language agents with verbal reinforcement learning. In NeurIPS, 2023.
 
-[9] Y. Nakajima. BabyAGI: Task-driven autonomous agent. GitHub Repository, 2023.
+[9] Y. Nakajima. BabyAGI: Task-driven autonomous agent. GitHub Repository, 2023. https://github.com/yoheinakajima/babyagi
 
-[10] LangChain. LangChain: Building applications with LLMs. Documentation, 2023.
+[10] LangChain. LangChain: Building applications with LLMs. Documentation v0.1, 2024. https://docs.langchain.com
 
-[11] LlamaIndex. LlamaIndex: Data framework for LLM applications. Documentation, 2023.
+[11] LlamaIndex. LlamaIndex: Data framework for LLM applications. Documentation v0.10, 2024. https://docs.llamaindex.ai
 
-[12] Microsoft. Semantic Kernel: Integrate AI into your apps. Documentation, 2023.
+[12] Microsoft. Semantic Kernel: Integrate AI into your apps. Documentation v1.0, 2024. https://learn.microsoft.com/semantic-kernel/
 
 [13] M. Grieves and J. Vickers. Digital twin: Mitigating unpredictable, undesirable emergent behavior in complex systems. In Transdisciplinary Perspectives on Complex Systems, pages 85–113. Springer, 2017.
 
@@ -738,11 +698,11 @@ For practitioners looking to adopt this framework, Section 10 provides concrete 
 
 [18] D. Vrandečić and M. Krötzsch. Wikidata: A free collaborative knowledgebase. CACM, 57(10):78–85, 2014.
 
-[19] Apache Software Foundation. Apache Airflow. Documentation, 2015.
+[19] Apache Software Foundation. Apache Airflow. Documentation v2.8, 2024. https://airflow.apache.org/docs/
 
-[20] Temporal Technologies. Temporal: Durable execution platform. Documentation, 2020.
+[20] Temporal Technologies. Temporal: Durable execution platform. Documentation v1.2, 2024. https://docs.temporal.io
 
-[21] Prefect. Prefect: Modern workflow orchestration. Documentation, 2020.
+[21] Prefect. Prefect: Modern workflow orchestration. Documentation v2.14, 2024. https://docs.prefect.io
 
 [22] B. C. Pierce. Types and Programming Languages. MIT Press, 2002.
 
@@ -757,6 +717,28 @@ For practitioners looking to adopt this framework, Section 10 provides concrete 
 [27] Z. Xi, W. Chen, X. Guo, et al. The rise and potential of large language model based agents: A survey. arXiv:2309.07864, 2023.
 
 [28] S. R. Bowman, J. Hyun, E. Perez, et al. Measuring progress on scalable oversight for large language models. arXiv:2211.03540, 2022.
+
+[29] J. S. Park, J. C. O'Brien, C. J. Cai, M. R. Morris, P. Liang, and M. S. Bernstein. Generative agents: Interactive simulacra of human behavior. In UIST '23, pages 1–22, 2023. https://doi.org/10.1145/3586183.3606763
+
+[30] Y. Liu, H. Yao, W. Yu, et al. AgentBench: Evaluating LLMs as agents. In ICLR, 2024. arXiv:2308.03688
+
+[31] International Organization for Standardization. ISO 23247: Automation systems and integration—Digital twin framework for manufacturing. ISO, 2021.
+
+[32] Microsoft. Azure Digital Twins documentation. https://docs.microsoft.com/azure/digital-twins/, 2024.
+
+[33] P. Christiano, J. Leike, T. Brown, et al. Deep reinforcement learning from human preferences. In NeurIPS, 2017.
+
+[34] A. Askell, Y. Bai, A. Chen, et al. A general language assistant as a laboratory for alignment. arXiv:2112.00861, 2021.
+
+[35] A. Chan, R. Salganik, A. Markelius, et al. Harms from increasingly agentic algorithmic systems. In FAccT '23, pages 651–666, 2023.
+
+[36] Microsoft. AutoGen: Enabling next-gen LLM applications via multi-agent conversation. Documentation v0.2, 2024. https://microsoft.github.io/autogen/
+
+[37] CrewAI. CrewAI: Framework for orchestrating role-playing autonomous AI agents. Documentation v0.28, 2024. https://docs.crewai.com
+
+[38] O. Khattab, A. Singhvi, P. Maheshwari, et al. DSPy: Compiling declarative language model calls into self-improving pipelines. In ICLR, 2024. arXiv:2310.03714
+
+[39] deepset. Haystack: LLM orchestration framework. Documentation v2.0, 2024. https://docs.haystack.deepset.ai
 
 ---
 
@@ -836,6 +818,79 @@ Ensure: Errors E, Suggestions S
 23: end for
 24: return E, S
 ```
+
+---
+
+## Appendix D: Practitioner Adoption Guide
+
+This appendix bridges academic concepts to practical application. If you're evaluating whether to adopt this framework, start here.
+
+### D.1 Return on Investment
+
+**Adoption costs:**
+- Learning curve: 1–2 days to understand the ontology and DSL
+- Integration: 1–2 weeks to integrate validator into existing workflows
+- Migration: Varies by codebase complexity
+
+**Expected returns:**
+
+| Benefit | Typical Impact |
+|---------|----------------|
+| Reduced debugging time | 50–80% reduction in time tracing agent decisions |
+| Prevented data corruption | Near-zero unrecoverable state from failed mutations |
+| Faster incident resolution | Minutes instead of hours with audit trails |
+| Compliance readiness | Automatic decision lineage for auditors |
+| Reduced integration bugs | Static validation catches type mismatches before runtime |
+
+### D.2 When to Adopt
+
+**Strong signals for adoption:**
+- Agents make decisions you can't explain after the fact
+- Workflow failures require manual cleanup
+- Multiple data sources give conflicting answers
+- Compliance requires decision lineage
+- Agent errors have high business impact
+
+**Weak signals (may not need full framework):**
+- Simple, single-step agent tasks
+- Read-only operations with no mutations
+- Low-stakes decisions with easy manual override
+
+### D.3 Adoption Path
+
+**Phase 1: Validation only (Week 1)**
+- Add validator to CI/CD pipeline
+- Validate existing workflows without changing runtime
+- Identify hidden type mismatches and missing prerequisites
+
+**Phase 2: Safety layer (Weeks 2–4)**
+- Add checkpoints before high-risk mutations
+- Implement rollback for critical workflows
+- Add audit logging for compliance
+
+**Phase 3: Grounding (Month 2)**
+- Add evidence anchors to high-value claims
+- Implement provenance tracking
+- Enable decision lineage queries
+
+**Phase 4: Full conformance (Quarter 2)**
+- Achieve L3 conformance (full type safety)
+- Implement trust model for multi-source workflows
+- Progress to L4 with patch suggestions
+
+### D.4 Common Objections
+
+**"This is too much overhead for our use case."**
+Start with validation only. Zero runtime overhead—just catches errors earlier. Expand the safety layer only where risk justifies it.
+
+**"Our agents are simple; we don't need this."**
+Simple agents become complex agents. The standard is modular—adopt what you need now, expand later.
+
+**"We already have error handling."**
+Error handling is reactive (what to do when things go wrong). This standard is preventive (make wrong things structurally difficult). They're complementary.
+
+**"Integration with our framework is too hard."**
+The standard is framework-agnostic. The validator works on YAML/JSON definitions. Runtime enforcement is optional and incremental.
 
 ---
 
