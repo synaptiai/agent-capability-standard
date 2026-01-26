@@ -1,0 +1,40 @@
+{
+  "description": "Mock API responses for benchmark scenarios",
+  "conflicting_sources": {
+    "api_a": {
+      "type": "primary_api",
+      "trust_weight": 0.88,
+      "responses": [
+        {"user_id": "123", "status": "active", "timestamp_hours_ago": 3},
+        {"user_id": "456", "status": "suspended", "timestamp_hours_ago": 12},
+        {"user_id": "789", "status": "active", "timestamp_hours_ago": 0.5}
+      ]
+    },
+    "api_b": {
+      "type": "primary_api",
+      "trust_weight": 0.88,
+      "responses": [
+        {"user_id": "123", "status": "suspended", "timestamp_hours_ago": 1},
+        {"user_id": "456", "status": "active", "timestamp_hours_ago": 24},
+        {"user_id": "789", "status": "suspended", "timestamp_hours_ago": 2}
+      ]
+    },
+    "ground_truth": [
+      {"user_id": "123", "status": "suspended"},
+      {"user_id": "456", "status": "suspended"},
+      {"user_id": "789", "status": "active"}
+    ]
+  },
+  "trust_weights": {
+    "hardware_sensor": 0.95,
+    "system_of_record": 0.92,
+    "primary_api": 0.88,
+    "observability_pipeline": 0.80,
+    "derived_inference": 0.65,
+    "human_note": 0.55
+  },
+  "temporal_decay": {
+    "half_life_hours": 336,
+    "min_weight": 0.25
+  }
+}

@@ -1,0 +1,83 @@
+# Test workflow definitions for benchmark scenarios
+# These demonstrate type mismatches and capability gaps
+
+version: "1.0"
+description: "Workflows with intentional errors for testing"
+
+workflows:
+  # Valid workflow - should pass
+  - id: valid_retrieve_transform
+    name: "Valid Retrieve and Transform"
+    steps:
+      - capability: retrieve
+        store_as: raw_data
+        output_type: string
+      - capability: transform
+        input_binding: "${raw_data}"
+        input_expects: string
+        store_as: transformed_data
+    expected_result: pass
+
+  # Type mismatch - array to object
+  - id: type_mismatch_array_object
+    name: "Type Mismatch: Array to Object"
+    steps:
+      - capability: search
+        store_as: results
+        output_type: "array<string>"
+      - capability: transform
+        input_binding: "${results}"
+        input_expects: object
+    expected_result: fail
+    error_type: type_mismatch
+
+  # Coercible - string to number
+  - id: coercible_string_number
+    name: "Coercible: String to Number"
+    steps:
+      - capability: retrieve
+        store_as: raw_value
+        output_type: string
+      - capability: measure
+        input_binding: "${raw_value}"
+        input_expects: number
+    expected_result: fail
+    error_type: type_mismatch
+    coercion_available: transform_mapping_coerce_string_to_number
+
+  # Missing binding reference
+  - id: missing_binding
+    name: "Missing Binding Reference"
+    steps:
+      - capability: retrieve
+        store_as: data
+        output_type: string
+      - capability: transform
+        input_binding: "${nonexistent}"
+        input_expects: string
+    expected_result: fail
+    error_type: unresolved_reference
+
+  # Capability gap - missing send
+  - id: missing_send_capability
+    name: "Missing Send Capability"
+    steps:
+      - capability: retrieve
+      - capability: transform
+      - capability: generate
+      - capability: send
+    expected_result: blocked
+    missing_capabilities:
+      - send
+
+  # Capability gap - mutation without checkpoint
+  - id: mutation_without_checkpoint
+    name: "Mutation Without Checkpoint"
+    steps:
+      - capability: retrieve
+      - capability: transform
+      - capability: mutate
+    expected_result: blocked
+    missing_capabilities:
+      - checkpoint
+    note: "mutate requires checkpoint in GA"
