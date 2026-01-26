@@ -2,13 +2,13 @@
 
 **Document Status**: Reference
 **Last Updated**: 2026-01-26
-**Purpose**: Document how 35 atomic capabilities compose into reusable workflow patterns
+**Purpose**: Document how 36 atomic capabilities compose into reusable workflow patterns
 
 ---
 
 ## Overview
 
-The 35 atomic capabilities are **primitives**. Real agent behaviors emerge by **composing** these primitives into workflow patterns. This document catalogs common patterns that can be implemented as Skills.
+The 36 atomic capabilities are **primitives**. Real agent behaviors emerge by **composing** these primitives into workflow patterns. This document catalogs common patterns that can be implemented as Skills.
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -638,12 +638,12 @@ description: What the pattern does and when to use it
 | Coordination | orchestrate, handoff, consensus |
 | Compound | research, build, monitor |
 
-All patterns compose from the **35 atomic capabilities**. New patterns can be created by combining existing capabilities in new ways.
+All patterns compose from the **36 atomic capabilities**. New patterns can be created by combining existing capabilities in new ways.
 
 ---
 
 ## References
 
-- [capability_ontology.json](../schemas/capability_ontology.json) — The 35 atomic capabilities
+- [capability_ontology.json](../schemas/capability_ontology.json) — The 36 atomic capabilities
 - [FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md) — Derivation methodology
 - [Claude Skills Overview](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)

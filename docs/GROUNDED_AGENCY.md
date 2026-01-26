@@ -42,7 +42,7 @@ Academic capability taxonomies, such as the DIS '23 AI Capabilities framework [4
 
 We present **Grounded Agency**, a capability ontology and workflow framework that bridges this gap. Our contributions are:
 
-1. **Capability Ontology** (§3): 35 atomic capabilities organized into 9 cognitive layers (Perceive, Understand, Reason, Model, Synthesize, Execute, Verify, Remember, Coordinate) with formal input/output schemas, mutation flags, and safety constraints.
+1. **Capability Ontology** (§3): 36 atomic capabilities organized into 9 cognitive layers (Perceive, Understand, Reason, Model, Synthesize, Execute, Verify, Remember, Coordinate) with formal input/output schemas, mutation flags, and safety constraints.
 
 2. **World State Schema** (§4): A canonical representation for modeling real and digital systems with entities, relationships, state variables, observations, and transition rules. Every element carries provenance records, evidence anchors, and typed uncertainty (epistemic, aleatoric, or mixed).
 
@@ -101,7 +101,7 @@ Process-level safety research examines tool use risks [26], sandboxing [27], and
 
 ## 3. Capability Ontology
 
-The capability ontology defines **35 atomic capabilities** that agents can invoke, organized into 9 cognitive layers with explicit contracts and safety constraints.
+The capability ontology defines **36 atomic capabilities** that agents can invoke, organized into 9 cognitive layers with explicit contracts and safety constraints.
 
 ### 3.1 Layer Taxonomy
 
@@ -161,7 +161,7 @@ soft_requires: [search]
 
 Key design decisions:
 
-1. **100% Schema Coverage**: All 35 capabilities have both `input_schema` and `output_schema`, enabling static type checking.
+1. **100% Schema Coverage**: All 36 capabilities have both `input_schema` and `output_schema`, enabling static type checking.
 
 2. **Evidence by Default**: Every output schema requires `evidence_anchors` and `confidence`.
 
@@ -189,7 +189,7 @@ This graph enables the validator to check that workflows satisfy all hard prereq
 
 ### 3.4 Derivation Methodology
 
-The 35 capabilities were derived from first-principles analysis of cognitive architectures (BDI, ReAct, SOAR) and refined through atomicity testing.
+The 36 capabilities were derived from first-principles analysis of cognitive architectures (BDI, ReAct, SOAR) and refined through atomicity testing.
 
 #### 3.4.1 Foundation: DIS '23 Framework
 
@@ -224,7 +224,7 @@ A capability is included only if it:
 
 #### 3.4.4 The Number 35
 
-The derivation process yielded 35 atomic capabilities across 9 cognitive layers:
+The derivation process yielded 36 atomic capabilities across 9 cognitive layers:
 - 4 Perceive (information acquisition)
 - 6 Understand (sense-making)
 - 4 Reason (planning and analysis)

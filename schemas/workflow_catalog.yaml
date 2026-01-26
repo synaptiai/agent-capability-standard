@@ -1,4 +1,4 @@
-# Workflow Catalog (35-capability model)
+# Workflow Catalog (36-capability model)
 # Maps to capability_ontology.json
 #
 # Capability Mapping (old → new):
@@ -24,6 +24,276 @@
 #   estimate-risk → measure (with domain: risk)
 #   forecast-risk → predict (with domain: risk)
 #   invoke-workflow → invoke
+#
+# New workflow patterns (Issue #9):
+#   monitor-and-replan: Detect world changes and trigger replanning when needed
+#   clarify-intent: Resolve ambiguous user requests through clarification
+
+monitor_and_replan:
+  goal: Detect world changes that invalidate the current plan and trigger replanning when needed.
+  risk: medium
+  description: |
+    This workflow pattern continuously monitors world state against plan assumptions
+    and triggers replanning when significant divergence is detected. It's designed
+    to be invoked periodically during plan execution or when external events suggest
+    the world may have changed.
+  success:
+  - Plan assumptions validated OR violations detected
+  - If violations detected, revised plan generated
+  - Audit trail of assumption checks maintained
+  steps:
+  - capability: observe
+    purpose: Capture current world state for comparison.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: current_state_out
+    failure_modes:
+    - condition: Unable to observe relevant state
+      action: request_more_context
+      recovery: Request specific state aspects to monitor.
+  - capability: state
+    purpose: Create structured state representation.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: world_state_out
+    input_bindings:
+      scope: ${plan.scope}
+    failure_modes: []
+  - capability: compare
+    purpose: Compare current state against plan assumptions.
+    domain: assumption_validation
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: comparison_out
+    input_bindings:
+      options:
+      - ${world_state_out}
+      - ${plan.assumed_state}
+      criteria:
+      - assumption_validity
+      - state_divergence
+    failure_modes: []
+  - capability: detect
+    purpose: Detect assumption violations that affect plan validity.
+    domain: plan-invalidation
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: violations_out
+    input_bindings:
+      data: ${comparison_out}
+      pattern: assumption_violation
+    gates:
+    - when: ${comparison_out.confidence} > 0.9
+      action: stop
+      message: No significant divergence detected, plan remains valid.
+    failure_modes: []
+  - capability: critique
+    purpose: Assess impact of violations on current plan.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: critique_out
+    input_bindings:
+      target: ${plan}
+      criteria:
+      - step_validity
+      - goal_achievability
+      - resource_availability
+    failure_modes: []
+  - capability: plan
+    purpose: Generate revised plan incorporating new constraints.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: revised_plan_out
+    input_bindings:
+      goal: ${plan.goal}
+      constraints:
+      - ${violations_out.matches: array<object>}
+      - ${critique_out.suggestions: array<string>}
+    gates:
+    - when: ${critique_out.severity} == "minor"
+      action: skip
+      message: Minor violation, continue with current plan.
+    failure_modes:
+    - condition: Unable to find viable plan
+      action: stop
+      recovery: Escalate to human with violation details.
+  - capability: audit
+    purpose: Record assumption check and any replanning decision.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    input_bindings:
+      event:
+        type: assumption_check
+        original_plan: ${plan.id}
+        violations: ${violations_out.detected}
+        revised_plan: "${revised_plan_out.steps: array<object>}"
+    failure_modes: []
+  inputs:
+    plan:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+        goal: {type: string}
+        scope: {type: string}
+        assumed_state: {type: object}
+
+clarify_intent:
+  goal: Resolve ambiguous user requests through targeted clarification questions.
+  risk: low
+  description: |
+    This workflow analyzes a user request for ambiguity, generates clarifying
+    questions when needed, and integrates the clarification to produce a
+    well-specified request. It's designed to be invoked at the start of
+    any workflow when the initial request may be underspecified.
+  success:
+  - Request analyzed for ambiguity
+  - Clarifying questions generated if needed
+  - Clarification integrated into resolved request
+  steps:
+  - capability: critique
+    purpose: Analyze request for ambiguity and missing parameters.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: ambiguity_analysis_out
+    input_bindings:
+      target: ${user_request}
+      criteria:
+      - parameter_completeness
+      - interpretation_uniqueness
+      - constraint_clarity
+    failure_modes: []
+  - capability: inquire
+    purpose: Generate clarifying questions for ambiguous elements.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: clarification_request_out
+    input_bindings:
+      ambiguous_input: ${user_request}
+      context: ${conversation_context}
+      max_questions: 3
+    gates:
+    - when: ${ambiguity_analysis_out.confidence} > 0.85
+      action: skip
+      message: Request is sufficiently clear, no clarification needed.
+    failure_modes: []
+  - capability: send
+    purpose: Present clarifying questions to user.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: sent_questions_out
+    input_bindings:
+      destination: user
+      payload: ${clarification_request_out.questions}
+    gates:
+    - when: ${clarification_request_out.confidence} < 0.5
+      action: skip
+      message: No clarifying questions needed.
+    failure_modes: []
+  - capability: receive
+    purpose: Accept user's clarification response.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry: null
+    store_as: clarification_response_out
+    input_bindings:
+      channel: user
+      filter:
+        type: clarification_response
+    gates:
+    - when: ${sent_questions_out} == null
+      action: skip
+      message: No questions were sent, nothing to receive.
+    failure_modes:
+    - condition: Timeout waiting for response
+      action: stop
+      recovery: Proceed with best interpretation or escalate.
+  - capability: integrate
+    purpose: Merge clarification with original request.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: resolved_request_out
+    input_bindings:
+      sources:
+      - ${user_request}
+      - ${clarification_response_out.data}
+      strategy: parameter_merge
+      conflict_resolution: prefer_clarification
+    failure_modes: []
+  - capability: audit
+    purpose: Record clarification interaction for provenance.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    input_bindings:
+      event:
+        type: intent_clarification
+        original_request: ${user_request}
+        questions_asked: ${clarification_request_out.questions}
+        clarification_received: ${clarification_response_out.data}
+        resolved_request: ${resolved_request_out}
+    failure_modes: []
+  inputs:
+    user_request:
+      type: string
+      required: true
+      description: The potentially ambiguous user request
+    conversation_context:
+      type: object
+      required: false
+      description: Previous conversation context for better question generation
 
 debug_code_change:
   goal: Safely diagnose and fix a bug/regression in a codebase.

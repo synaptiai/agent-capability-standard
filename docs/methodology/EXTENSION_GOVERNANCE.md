@@ -267,7 +267,7 @@ If it works as a pattern, don't propose it as a capability.
 
 ## 9. Conclusion
 
-The 35 capabilities are not arbitrary, but they're also not final. This governance process ensures:
+The 36 capabilities are not arbitrary, but they're also not final. This governance process ensures:
 
 1. **Stability**: Changes are rare and justified
 2. **Quality**: New capabilities meet rigorous criteria
@@ -280,6 +280,6 @@ When in doubt, compose from existing capabilities. Only propose when composition
 
 ## References
 
-- [FIRST_PRINCIPLES_REASSESSMENT.md](FIRST_PRINCIPLES_REASSESSMENT.md) — How the 35 capabilities were derived
+- [FIRST_PRINCIPLES_REASSESSMENT.md](FIRST_PRINCIPLES_REASSESSMENT.md) — How the 36 capabilities were derived
 - [REJECTED_CANDIDATES.md](REJECTED_CANDIDATES.md) — Capabilities considered but rejected
 - [GOVERNANCE.md](../../spec/GOVERNANCE.md) — General governance process

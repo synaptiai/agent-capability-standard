@@ -54,7 +54,7 @@ Start where the pain is worst, then expand as you see value.
 ### What is the Agent Capability Standard?
 
 A formal specification for building reliable AI agent systems. It defines:
-- 35 atomic capabilities with typed I/O contracts across 9 cognitive layers
+- 36 atomic capabilities with typed I/O contracts across 9 cognitive layers
 - A workflow DSL for composing capabilities with safety semantics
 - Schemas for grounded world state and trust-aware conflict resolution
 - Validation tools and conformance tests
@@ -88,7 +88,7 @@ This standard makes reliability structural, not optional.
 
 ## The 35 Capabilities
 
-### Why exactly 35 capabilities?
+### Why exactly 36 capabilities?
 
 The number 35 emerges from first-principles derivation:
 
@@ -141,7 +141,7 @@ Instead of many domain-specific capabilities, use the atomic capability with a d
 - capability: detect-anomaly
   store_as: anomaly_out
 
-# New approach (35 capabilities)
+# New approach (36 capabilities)
 - capability: detect
   domain: anomaly
   store_as: anomaly_out
@@ -155,7 +155,7 @@ The analogy captures the design philosophy:
 
 | Chemistry | Grounded Agency |
 |-----------|-----------------|
-| ~118 elements | 35 capabilities |
+| ~118 elements | 36 capabilities |
 | Atoms are irreducible | Capabilities are atomic |
 | Molecules are compositions | Workflows are compositions |
 | Element groups (metals, gases) | Capability layers (9 cognitive layers) |

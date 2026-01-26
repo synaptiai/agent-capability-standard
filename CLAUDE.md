@@ -22,7 +22,7 @@ pip install pyyaml
 
 ## Architecture
 
-This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with **35 atomic capabilities** across **9 cognitive layers**, plus 4 composed workflow skills.
+This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with **36 atomic capabilities** across **9 cognitive layers**, plus 6 composed workflow patterns.
 
 ### Core Philosophy: Grounded Agency
 
@@ -36,7 +36,7 @@ Every agent action must be:
 
 | File | Purpose |
 |------|---------|
-| `schemas/capability_ontology.json` | Master ontology defining all 35 capabilities with I/O contracts, risk levels, and edges |
+| `schemas/capability_ontology.json` | Master ontology defining all 36 capabilities with I/O contracts, risk levels, and edges |
 | `schemas/workflow_catalog.yaml` | Reference workflows that compose capabilities |
 | `skills/<name>/SKILL.md` | Individual skill implementations (flat structure, no nesting) |
 | `hooks/hooks.json` | Claude Code hooks for safety enforcement |
@@ -57,7 +57,7 @@ Capabilities are organized into 9 cognitive layers (defined in ontology):
 | EXECUTE | Changing the world | 3 | execute, mutate, send |
 | VERIFY | Correctness assurance | 5 | verify, checkpoint, rollback, constrain, audit |
 | REMEMBER | State persistence | 2 | persist, recall |
-| COORDINATE | Multi-agent interaction | 3 | delegate, synchronize, invoke |
+| COORDINATE | Multi-agent interaction | 4 | delegate, synchronize, invoke, inquire |
 
 ### Skill Structure
 
@@ -71,7 +71,7 @@ Skills are at `skills/<skill-name>/SKILL.md` (flat structure, not nested by cate
 
 ### Domain Parameterization
 
-The 35-capability model uses **domain parameters** instead of domain-specific variants:
+The 36-capability model uses **domain parameters** instead of domain-specific variants:
 
 | Old (99 model) | New (35 model) |
 |----------------|----------------|

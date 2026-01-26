@@ -23,7 +23,7 @@ The Agent Capability Standard provides structural reliability:
 
 | Problem | Solution |
 |---------|----------|
-| Implicit composition | 35 capabilities with typed I/O schemas |
+| Implicit composition | 36 capabilities with typed I/O schemas |
 | Ungrounded claims | Evidence anchors and provenance tracking |
 | Undefined conflict resolution | Trust-weighted, time-decayed source ranking |
 | Retrofitted safety | Checkpoints required before mutations |
@@ -136,7 +136,7 @@ Our world state model builds on:
 
 The Agent Capability Standard synthesizes these approaches into a cohesive framework specifically designed for LLM-based agent systems. Our key contributions are:
 
-1. **Capability ontology with layered classification** organizing 35 atomic capabilities by function
+1. **Capability ontology with layered classification** organizing 36 atomic capabilities by function
 2. **Typed workflow DSL** with static validation of bindings and contracts
 3. **World state schema** with integrated provenance, uncertainty, and trust
 4. **Safety invariants** enforced at validation time, not just runtime
@@ -220,7 +220,7 @@ This distinction allows flexibility while ensuring critical safety properties.
 
 ### 3.5 Derivation Methodology
 
-The 35 capabilities were derived through first-principles analysis of cognitive architectures. This section summarizes the methodology; full documentation is available in [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](../docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
+The 36 capabilities were derived through first-principles analysis of cognitive architectures. This section summarizes the methodology; full documentation is available in [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](../docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
 
 #### Foundation: Cognitive Architectures
 
@@ -234,7 +234,7 @@ Rather than creating separate capabilities for each domain (detect-anomaly, dete
 # Old approach (99 capabilities)
 - capability: detect-anomaly
 
-# New approach (35 capabilities)
+# New approach (36 capabilities)
 - capability: detect
   domain: anomaly
 ```
@@ -251,7 +251,7 @@ Each capability was validated against atomicity criteria:
 
 #### The Number 35
 
-The derivation yielded 35 atomic capabilities across 9 cognitive layers:
+The derivation yielded 36 atomic capabilities across 9 cognitive layers:
 - 4 PERCEIVE (information acquisition)
 - 6 UNDERSTAND (sense-making)
 - 4 REASON (planning and analysis)
@@ -260,9 +260,9 @@ The derivation yielded 35 atomic capabilities across 9 cognitive layers:
 - 3 EXECUTE (state changes)
 - 5 VERIFY (correctness assurance)
 - 2 REMEMBER (persistence)
-- 3 COORDINATE (multi-agent)
+- 4 COORDINATE (multi-agent, user interaction)
 
-We do not claim 35 is a magic number. It emerges from principled derivation and may change through the extension governance process.
+We do not claim 36 is a magic number. It emerges from principled derivation and may change through the extension governance process.
 
 ---
 

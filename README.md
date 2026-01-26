@@ -39,7 +39,7 @@ Every agent action should be:
 
 ## The Periodic Table of Agent Capabilities
 
-Just as chemistry has ~118 elements that compose into infinite molecules, this standard defines **35 atomic capabilities** that compose into **infinite workflows**.
+Just as chemistry has ~118 elements that compose into infinite molecules, this standard defines **36 atomic capabilities** that compose into **infinite workflows**.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -61,9 +61,9 @@ Just as chemistry has ~118 elements that compose into infinite molecules, this s
 
 **The goal isn't more atoms—it's better molecules.**
 
-### Why 35?
+### Why 36?
 
-The 35 capabilities were systematically derived from first principles:
+The 36 capabilities were systematically derived from first principles:
 
 1. **Cognitive architecture analysis** (BDI, SOAR, ReAct patterns)
 2. **Industry tool patterns** (MCP, LangChain, Claude Skills)
@@ -176,7 +176,7 @@ Organized across 9 cognitive layers with explicit input/output schemas:
 | **EXECUTE** | 3 | execute, mutate, send |
 | **VERIFY** | 5 | verify, checkpoint, rollback, constrain, audit |
 | **REMEMBER** | 2 | persist, recall |
-| **COORDINATE** | 3 | delegate, synchronize, invoke |
+| **COORDINATE** | 4 | delegate, synchronize, invoke, inquire |
 
 ### Workflow Patterns
 
@@ -205,7 +205,7 @@ Production-ready workflow compositions with gates, recovery loops, and typed bin
 
 ### Canonical Schemas
 
-- **Capability Ontology** — 35 atomic capabilities with I/O contracts ([ontology](schemas/capability_ontology.json))
+- **Capability Ontology** — 36 atomic capabilities with I/O contracts ([ontology](schemas/capability_ontology.json))
 - **Workflow DSL** — Typed bindings, gates, recovery loops
 - **World State** — Observations with provenance and uncertainty
 - **Trust Model** — Authority ranking with time decay
@@ -250,11 +250,11 @@ Hooks implementing SAFETY layer capabilities:
 
 | Document | Purpose |
 |----------|---------|
-| [FIRST_PRINCIPLES_REASSESSMENT.md](docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md) | How 35 capabilities were derived |
+| [FIRST_PRINCIPLES_REASSESSMENT.md](docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md) | How 36 capabilities were derived |
 | [AGENT_ARCHITECTURE_RESEARCH.md](docs/methodology/AGENT_ARCHITECTURE_RESEARCH.md) | Industry patterns research |
 | [SKILLS_ALIGNMENT_EVALUATION.md](docs/methodology/SKILLS_ALIGNMENT_EVALUATION.md) | Validation against Claude Skills |
 | [WORKFLOW_PATTERNS.md](docs/WORKFLOW_PATTERNS.md) | Reusable composition patterns |
-| [EXTENSION_GOVERNANCE.md](docs/methodology/EXTENSION_GOVERNANCE.md) | When to add capability #36 |
+| [EXTENSION_GOVERNANCE.md](docs/methodology/EXTENSION_GOVERNANCE.md) | When to add new capabilities |
 
 ### Background
 
@@ -312,7 +312,7 @@ claude plugin install agent-capability-standard
 
 | Component | Description |
 |-----------|-------------|
-| **35 Skills** | Atomic capability implementations organized by cognitive layer |
+| **36 Skills** | Atomic capability implementations organized by cognitive layer |
 | **Workflow Patterns** | Reusable compositions (analyze, mitigate, optimize, orchestrate) |
 | **Safety Hooks** | Pre-tool hooks that enforce checkpoints before mutations |
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
