@@ -23,7 +23,7 @@ The Agent Capability Standard provides structural reliability:
 
 | Problem | Solution |
 |---------|----------|
-| Implicit composition | 99 capabilities with typed I/O schemas |
+| Implicit composition | 35 capabilities with typed I/O schemas |
 | Ungrounded claims | Evidence anchors and provenance tracking |
 | Undefined conflict resolution | Trust-weighted, time-decayed source ranking |
 | Retrofitted safety | Checkpoints required before mutations |
@@ -136,7 +136,7 @@ Our world state model builds on:
 
 The Agent Capability Standard synthesizes these approaches into a cohesive framework specifically designed for LLM-based agent systems. Our key contributions are:
 
-1. **Capability ontology with layered classification** organizing 99 atomic capabilities by function
+1. **Capability ontology with layered classification** organizing 35 atomic capabilities by function
 2. **Typed workflow DSL** with static validation of bindings and contracts
 3. **World state schema** with integrated provenance, uncertainty, and trust
 4. **Safety invariants** enforced at validation time, not just runtime
@@ -160,18 +160,19 @@ We designed the capability ontology around four principles:
 
 ### 3.2 Layer Organization
 
-We organize capabilities into 8 layers:
+We organize capabilities into 9 cognitive layers:
 
 | Layer | Purpose | Mutation | Count |
 |-------|---------|----------|-------|
-| PERCEPTION | Observe the world | No | 4 |
-| MODELING | Build understanding | No | 45 |
-| REASONING | Think and decide | No | 20 |
-| ACTION | Change things | Yes | 12 |
-| SAFETY | Protect and verify | Varies | 7 |
-| META | Self-reflection | No | 6 |
-| MEMORY | Persistence | Varies | 2 |
-| COORDINATION | Multi-agent | Varies | 3 |
+| PERCEIVE | Acquire information | No | 4 |
+| UNDERSTAND | Make sense of information | No | 6 |
+| REASON | Plan and analyze | No | 4 |
+| MODEL | Represent the world | No | 5 |
+| SYNTHESIZE | Create content | No | 3 |
+| EXECUTE | Change the world | Yes | 3 |
+| VERIFY | Ensure correctness | Varies | 5 |
+| REMEMBER | Persist state | Varies | 2 |
+| COORDINATE | Multi-agent | Varies | 3 |
 
 This organization provides several benefits:
 - **Risk assessment**: ACTION layer capabilities are inherently higher risk
@@ -180,19 +181,18 @@ This organization provides several benefits:
 
 ### 3.3 Key Capability Families
 
-**Detection and Identification** (MODELING layer)
-Capabilities like `detect-anomaly`, `detect-drift`, `identify-entity`, and `identify-cause` build understanding from observations. They produce typed outputs with confidence scores and evidence anchors.
+**Detection and Classification** (UNDERSTAND layer)
+Capabilities like `detect`, `classify`, `measure`, and `predict` build understanding from observations. They use domain parameters (e.g., `detect` with `domain: anomaly`) rather than separate capabilities for each domain.
 
-**Planning and Decision** (REASONING layer)
-Capabilities like `plan`, `decide`, `compare-options`, and `prioritize` produce structured decisions. Critically, `plan` produces a plan object that `act-plan` can execute.
+**Planning and Analysis** (REASON layer)
+Capabilities like `plan`, `decompose`, `critique`, and `explain` produce structured decisions and rationale. `plan` produces a plan object that `execute` or `mutate` can implement.
 
-**Action Execution** (ACTION layer)
-The `act-plan` capability is the primary mutation point. It requires:
-- A `plan` from the REASONING layer
-- A `checkpoint` from the SAFETY layer
+**State Changes** (EXECUTE layer)
+The `mutate` capability is the primary state-change point. It requires:
+- A `checkpoint` from the VERIFY layer
 - Optionally, `verify` to confirm the outcome
 
-**Safety Primitives** (SAFETY layer)
+**Safety Primitives** (VERIFY layer)
 - `checkpoint`: Save state for potential rollback
 - `rollback`: Restore to a checkpoint
 - `verify`: Check outcomes against invariants
@@ -203,25 +203,66 @@ The `act-plan` capability is the primary mutation point. It requires:
 
 We distinguish hard and soft dependencies:
 
-**Hard dependencies** (`requires`) MUST be satisfied. The validator rejects workflows that violate them.
+**Hard dependencies** are encoded through `requires_checkpoint: true` for mutating capabilities.
 
 ```json
 {
-  "id": "act-plan",
-  "requires": ["plan", "checkpoint"]
+  "id": "mutate",
+  "requires_checkpoint": true,
+  "requires_approval": true,
+  "risk": "high"
 }
 ```
 
-**Soft dependencies** (`soft_requires`) SHOULD be satisfied. The validator warns but does not reject.
-
-```json
-{
-  "id": "act-plan",
-  "soft_requires": ["verify"]
-}
-```
+**Safety constraints** are enforced structurally. Capabilities with `mutation: true` require explicit checkpoints.
 
 This distinction allows flexibility while ensuring critical safety properties.
+
+### 3.5 Derivation Methodology
+
+The 35 capabilities were derived through first-principles analysis of cognitive architectures. This section summarizes the methodology; full documentation is available in [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](../docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
+
+#### Foundation: Cognitive Architectures
+
+We analyzed established cognitive frameworks (BDI, ReAct, SOAR) to identify the fundamental operations agents must perform. This yielded 9 cognitive layers representing distinct phases of agent reasoning and action.
+
+#### Domain Parameterization
+
+Rather than creating separate capabilities for each domain (detect-anomaly, detect-entity, detect-drift), we use atomic verbs with domain parameters:
+
+```yaml
+# Old approach (99 capabilities)
+- capability: detect-anomaly
+
+# New approach (35 capabilities)
+- capability: detect
+  domain: anomaly
+```
+
+This preserves expressiveness while maintaining a minimal, learnable ontology.
+
+#### Atomicity Validation
+
+Each capability was validated against atomicity criteria:
+- **Irreducibility**: Cannot be expressed as a composition of other capabilities
+- **Single purpose**: Does one thing well
+- **Typed contract**: Has well-defined input and output schemas
+- **Domain-general**: Not specific to one tool or framework
+
+#### The Number 35
+
+The derivation yielded 35 atomic capabilities across 9 cognitive layers:
+- 4 PERCEIVE (information acquisition)
+- 6 UNDERSTAND (sense-making)
+- 4 REASON (planning and analysis)
+- 5 MODEL (world representation)
+- 3 SYNTHESIZE (content creation)
+- 3 EXECUTE (state changes)
+- 5 VERIFY (correctness assurance)
+- 2 REMEMBER (persistence)
+- 3 COORDINATE (multi-agent)
+
+We do not claim 35 is a magic number. It emerges from principled derivation and may change through the extension governance process.
 
 ---
 

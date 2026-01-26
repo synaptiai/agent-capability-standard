@@ -37,6 +37,49 @@ Every agent action should be:
 
 ---
 
+## The Periodic Table of Agent Capabilities
+
+Just as chemistry has ~118 elements that compose into infinite molecules, this standard defines **35 atomic capabilities** that compose into **infinite workflows**.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ CAPABILITIES (atoms)              →  WORKFLOWS (molecules)              │
+│                                                                         │
+│  observe + search + plan          →  debug_code_change                  │
+│  + checkpoint + execute                                                 │
+│  + verify + rollback                                                    │
+│                                                                         │
+│  receive + transform + integrate  →  digital_twin_sync_loop             │
+│  + detect + plan                                                        │
+│  + checkpoint + mutate + audit                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Capabilities are atoms**: Irreducible primitives with defined I/O contracts.
+
+**Workflows are molecules**: Compositions that solve real problems.
+
+**The goal isn't more atoms—it's better molecules.**
+
+### Why 35?
+
+The 35 capabilities were systematically derived from first principles:
+
+1. **Cognitive architecture analysis** (BDI, SOAR, ReAct patterns)
+2. **Industry tool patterns** (MCP, LangChain, Claude Skills)
+3. **Rigorous atomicity testing** (cannot be decomposed further)
+
+Each capability:
+- Performs exactly one irreducible cognitive operation
+- Has a well-defined I/O contract with evidence anchors
+- Maps to how agents actually work in production
+
+**Domain specializations become parameters**, not separate capabilities. `detect(domain: anomaly)` rather than `detect-anomaly`.
+
+For the full derivation methodology, see [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
+
+---
+
 ## Why This Matters
 
 ### The Problem
@@ -89,8 +132,8 @@ claude plugin install agent-capability-standard
 ```
 
 This gives you:
-- 99 capability skills organized by layer
-- Workflow validation commands
+- 35 atomic capability skills organized by layer
+- Workflow patterns that compose capabilities
 - Safety hooks (checkpoint enforcement, audit logging)
 
 ### Option 2: Standalone Validation
@@ -119,20 +162,34 @@ python scripts/run_conformance.py
 
 ## What's Included
 
-### 99 Atomic Capabilities
+### 35 Atomic Capabilities
 
-Organized across 8 layers with explicit input/output schemas and prerequisites:
+Organized across 9 cognitive layers with explicit input/output schemas:
 
-| Layer | Count | Examples |
-|-------|-------|----------|
-| **PERCEPTION** | 4 | inspect, search, retrieve, receive |
-| **MODELING** | 45 | detect-*, identify-*, estimate-*, world-state |
-| **REASONING** | 20 | compare-*, plan, decide, critique, explain |
-| **ACTION** | 12 | act-plan, generate-*, transform, send |
-| **SAFETY** | 7 | verify, checkpoint, rollback, audit, constrain, mitigate, improve |
-| **META** | 6 | discover-*, prioritize |
-| **MEMORY** | 2 | persist, recall |
-| **COORDINATION** | 3 | delegate, synchronize, invoke-workflow |
+| Layer | Count | Capabilities |
+|-------|-------|--------------|
+| **PERCEIVE** | 4 | retrieve, search, observe, receive |
+| **UNDERSTAND** | 6 | detect, classify, measure, predict, compare, discover |
+| **REASON** | 4 | plan, decompose, critique, explain |
+| **MODEL** | 5 | state, transition, attribute, ground, simulate |
+| **SYNTHESIZE** | 3 | generate, transform, integrate |
+| **EXECUTE** | 3 | execute, mutate, send |
+| **VERIFY** | 5 | verify, checkpoint, rollback, constrain, audit |
+| **REMEMBER** | 2 | persist, recall |
+| **COORDINATE** | 3 | delegate, synchronize, invoke |
+
+### Workflow Patterns
+
+Capabilities compose into reusable workflow patterns:
+
+| Pattern | Purpose | Key Capabilities |
+|---------|---------|------------------|
+| **analyze** | Examine data thoroughly | retrieve → detect → classify → explain |
+| **mitigate** | Reduce identified risks | detect → measure → plan → execute → verify |
+| **optimize** | Iteratively improve | observe → discover → compare → mutate → verify |
+| **orchestrate** | Coordinate multiple agents | decompose → delegate → synchronize → integrate |
+
+See [WORKFLOW_PATTERNS.md](docs/WORKFLOW_PATTERNS.md) for the complete pattern catalog.
 
 ### 5 Reference Workflows
 
@@ -148,7 +205,7 @@ Production-ready workflow compositions with gates, recovery loops, and typed bin
 
 ### Canonical Schemas
 
-- **Capability Ontology** — 99 capabilities with I/O contracts
+- **Capability Ontology** — 35 atomic capabilities with I/O contracts ([ontology](schemas/capability_ontology.json))
 - **Workflow DSL** — Typed bindings, gates, recovery loops
 - **World State** — Observations with provenance and uncertainty
 - **Trust Model** — Authority ranking with time decay
@@ -189,6 +246,16 @@ Hooks implementing SAFETY layer capabilities:
 | [GOVERNANCE.md](spec/GOVERNANCE.md) | RFC process |
 | [ROADMAP.md](spec/ROADMAP.md) | Future plans |
 
+### Methodology
+
+| Document | Purpose |
+|----------|---------|
+| [FIRST_PRINCIPLES_REASSESSMENT.md](docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md) | How 35 capabilities were derived |
+| [AGENT_ARCHITECTURE_RESEARCH.md](docs/methodology/AGENT_ARCHITECTURE_RESEARCH.md) | Industry patterns research |
+| [SKILLS_ALIGNMENT_EVALUATION.md](docs/methodology/SKILLS_ALIGNMENT_EVALUATION.md) | Validation against Claude Skills |
+| [WORKFLOW_PATTERNS.md](docs/WORKFLOW_PATTERNS.md) | Reusable composition patterns |
+| [EXTENSION_GOVERNANCE.md](docs/methodology/EXTENSION_GOVERNANCE.md) | When to add capability #36 |
+
 ### Background
 
 | Document | Purpose |
@@ -200,18 +267,23 @@ Hooks implementing SAFETY layer capabilities:
 
 ```
 agent-capability-standard/
-├── skills/                  # 99+ capability skills by layer
-│   ├── perception/          # inspect, search, retrieve, receive
-│   ├── modeling/            # detect, identify, estimate, forecast...
-│   ├── reasoning/           # compare, plan, decide, critique...
-│   ├── action/              # act, generate, transform, send
-│   ├── safety/              # verify, checkpoint, rollback, audit
-│   ├── meta/                # discover, prioritize
-│   ├── memory/              # recall
-│   ├── coordination/        # delegate, synchronize, invoke-workflow
-│   └── workflows/           # Composed multi-step workflows
+├── skills/                  # 35 atomic capability skills (flat structure)
+│   ├── retrieve/SKILL.md    # PERCEIVE layer
+│   ├── search/SKILL.md
+│   ├── observe/SKILL.md
+│   ├── detect/SKILL.md      # UNDERSTAND layer
+│   ├── classify/SKILL.md
+│   ├── plan/SKILL.md        # REASON layer
+│   ├── state/SKILL.md       # MODEL layer
+│   ├── generate/SKILL.md    # SYNTHESIZE layer
+│   ├── mutate/SKILL.md      # EXECUTE layer
+│   ├── verify/SKILL.md      # VERIFY layer
+│   ├── checkpoint/SKILL.md
+│   ├── persist/SKILL.md     # REMEMBER layer
+│   ├── delegate/SKILL.md    # COORDINATE layer
+│   └── ...                  # (35 total skills)
 ├── schemas/                 # Ontology + workflow + world state schemas
-│   ├── capability_ontology.json
+│   ├── capability_ontology.json     # 35-capability ontology
 │   ├── workflow_catalog.yaml
 │   ├── world_state_schema.yaml
 │   └── transforms/          # Type coercion mappings
@@ -219,7 +291,7 @@ agent-capability-standard/
 ├── tools/                   # Validator CLI
 ├── tests/                   # Conformance fixtures
 ├── spec/                    # Standard documentation
-├── docs/                    # User documentation
+├── docs/                    # User documentation + methodology
 ├── examples/                # Usage examples
 └── templates/               # Skill templates
 ```
@@ -240,8 +312,8 @@ claude plugin install agent-capability-standard
 
 | Component | Description |
 |-----------|-------------|
-| **99 Skills** | Capability implementations organized by layer (perception, modeling, reasoning, action, safety, meta, memory, coordination) |
-| **Workflows** | 5 production-ready workflow compositions with gates and recovery |
+| **35 Skills** | Atomic capability implementations organized by cognitive layer |
+| **Workflow Patterns** | Reusable compositions (analyze, mitigate, optimize, orchestrate) |
 | **Safety Hooks** | Pre-tool hooks that enforce checkpoints before mutations |
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
 | **Validator** | Design-time validation for custom workflows |

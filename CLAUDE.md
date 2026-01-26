@@ -22,7 +22,7 @@ pip install pyyaml
 
 ## Architecture
 
-This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with 99 atomic capabilities across 8 layers, plus 4 composed workflow skills.
+This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with **35 atomic capabilities** across **9 cognitive layers**, plus 4 composed workflow skills.
 
 ### Core Philosophy: Grounded Agency
 
@@ -36,36 +36,48 @@ Every agent action must be:
 
 | File | Purpose |
 |------|---------|
-| `schemas/capability_ontology.json` | Master ontology defining all 99 capabilities with I/O contracts, risk levels, and edges |
+| `schemas/capability_ontology.json` | Master ontology defining all 35 capabilities with I/O contracts, risk levels, and edges |
 | `schemas/workflow_catalog.yaml` | Reference workflows that compose capabilities |
 | `skills/<name>/SKILL.md` | Individual skill implementations (flat structure, no nesting) |
 | `hooks/hooks.json` | Claude Code hooks for safety enforcement |
 | `templates/SKILL_TEMPLATE_ENHANCED.md` | Template for creating new skills |
+| `_archive/` | Archived files from v1 (99-capability model) |
 
 ### Layer Architecture
 
-Capabilities are organized into 8 layers (defined in ontology):
+Capabilities are organized into 9 cognitive layers (defined in ontology):
 
-| Layer | Purpose | Count |
-|-------|---------|-------|
-| PERCEPTION | Input/sensing (retrieve, search, inspect, receive) | 4 |
-| MODELING | World understanding (detect-*, identify-*, estimate-*, forecast-*) | 45 |
-| REASONING | Analysis/planning (compare-*, plan, decide, critique) | 20 |
-| ACTION | Execution (act-plan, generate-*, transform, send) | 12 |
-| SAFETY | Guardrails (verify, checkpoint, rollback, audit) | 7 |
-| META | Discovery (discover-*) | 6 |
-| MEMORY | Persistence (persist, recall) | 2 |
-| COORDINATION | Multi-agent (delegate, synchronize, invoke-workflow) | 3 |
+| Layer | Purpose | Count | Capabilities |
+|-------|---------|-------|--------------|
+| PERCEIVE | Information acquisition | 4 | retrieve, search, observe, receive |
+| UNDERSTAND | Making sense of information | 6 | detect, classify, measure, predict, compare, discover |
+| REASON | Planning and analysis | 4 | plan, decompose, critique, explain |
+| MODEL | World representation | 5 | state, transition, attribute, ground, simulate |
+| SYNTHESIZE | Content creation | 3 | generate, transform, integrate |
+| EXECUTE | Changing the world | 3 | execute, mutate, send |
+| VERIFY | Correctness assurance | 5 | verify, checkpoint, rollback, constrain, audit |
+| REMEMBER | State persistence | 2 | persist, recall |
+| COORDINATE | Multi-agent interaction | 3 | delegate, synchronize, invoke |
 
 ### Skill Structure
 
 Skills are at `skills/<skill-name>/SKILL.md` (flat structure, not nested by category). Each skill has:
 
-- YAML frontmatter with `name`, `description`, `allowed-tools`, `agent` type
+- YAML frontmatter with `name`, `description`, `allowed-tools`, `agent` type, and `layer`
 - Intent and success criteria
-- Input/output contracts
+- Input/output contracts with `domain` parameter for specialization
 - Procedure steps with evidence grounding
 - Safety constraints from ontology
+
+### Domain Parameterization
+
+The 35-capability model uses **domain parameters** instead of domain-specific variants:
+
+| Old (99 model) | New (35 model) |
+|----------------|----------------|
+| `detect-anomaly`, `detect-entity` | `detect` with `domain: anomaly`, `domain: entity` |
+| `estimate-risk`, `estimate-impact` | `measure` with `domain: risk`, `domain: impact` |
+| `forecast-risk`, `forecast-time` | `predict` with `domain: risk`, `domain: time` |
 
 ### Hooks
 
@@ -76,10 +88,9 @@ The plugin enforces safety through Claude Code hooks:
 ### Ontology Edge Types
 
 Relationships between capabilities (in `capability_ontology.json`):
-- `requires`: Hard dependency
+- `requires`: Hard dependency (must be satisfied)
+- `soft_requires`: Recommended but not mandatory
 - `enables`: Unlocks other capabilities
-- `governed_by`: Safety constraint
-- `verifies`, `soft_requires`, `documented_by`
 
 ## Creating New Skills
 
@@ -91,9 +102,13 @@ Relationships between capabilities (in `capability_ontology.json`):
 
 ## Safety Model
 
-High-risk capabilities (`act`, `act-plan`, `send`) have:
+High-risk capabilities (`mutate`, `send`) have:
 - `mutation: true`
 - `requires_checkpoint: true`
 - `risk: "high"`
+
+Medium-risk capabilities (`execute`, `delegate`, `invoke`) have:
+- `requires_approval: true`
+- `risk: "medium"`
 
 These are enforced structurally—not by convention.

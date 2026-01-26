@@ -1,213 +1,203 @@
 # Agent Capability Skills
 
-This directory contains 103 skills organized according to the capability ontology's 8 layers plus composed workflows.
+This directory contains **35 atomic capabilities** organized according to the capability ontology's **9 cognitive layers**, plus 4 composed workflow skills.
 
-## Skill Layers (Ontology-Aligned)
+## Skill Layers
 
 | Layer | Count | Purpose |
 |-------|-------|---------|
-| [perception/](./perception) | 4 | Observe the world |
-| [modeling/](./modeling) | 45 | Build understanding |
-| [reasoning/](./reasoning) | 20 | Think and decide |
-| [action/](./action) | 12 | Change things |
-| [safety/](./safety) | 8 | Protect and verify |
-| [meta/](./meta) | 6 | Self-reflection |
-| [memory/](./memory) | 1 | Persistence |
-| [coordination/](./coordination) | 3 | Multi-agent operations |
-| [workflows/](./workflows) | 4 | Composed multi-step skills |
+| PERCEIVE | 4 | Acquire information from the world |
+| UNDERSTAND | 6 | Make sense of information |
+| REASON | 4 | Plan and analyze |
+| MODEL | 5 | Represent the world |
+| SYNTHESIZE | 3 | Create content |
+| EXECUTE | 3 | Change the world |
+| VERIFY | 5 | Ensure correctness |
+| REMEMBER | 2 | Persist state |
+| COORDINATE | 3 | Multi-agent interaction |
+| Workflows | 4 | Composed multi-step skills |
 
-**Total: 99 atomic capabilities + 4 composed workflows = 103 skills**
+**Total: 35 atomic capabilities + 4 composed workflows = 39 skills**
 
-## Layer Descriptions
+## The 35 Atomic Capabilities
 
-### PERCEPTION (4)
-Observe the world through sensors and inputs.
-
-| Skill | Description |
-|-------|-------------|
-| `inspect` | Examine objects in detail |
-| `receive` | Receive and process incoming messages |
-| `retrieve` | Retrieve data from external sources |
-| `search` | Search for information across sources |
-
-### MODELING (45)
-Build understanding through detection, identification, estimation, and forecasting.
-
-**Core Primitives (4):**
-- `detect` - Detect presence or absence
-- `identify` - Determine identity or classification
-- `estimate` - Produce approximate values
-- `forecast` - Predict future states
-
-**Detection Family (6):**
-- `detect-activity`, `detect-anomaly`, `detect-attribute`, `detect-entity`, `detect-person`, `detect-world`
-
-**Identification Family (7):**
-- `identify-activity`, `identify-anomaly`, `identify-attribute`, `identify-entity`, `identify-human-attribute`, `identify-person`, `identify-world`
-
-**Estimation Family (7):**
-- `estimate-activity`, `estimate-attribute`, `estimate-impact`, `estimate-outcome`, `estimate-relationship`, `estimate-risk`, `estimate-world`
-
-**Forecasting Family (6):**
-- `forecast-attribute`, `forecast-impact`, `forecast-outcome`, `forecast-risk`, `forecast-time`, `forecast-world`
-
-**World Modeling (15):**
-- `causal-model` - Build and query causal models
-- `diff-world-state` - Compute state differences
-- `digital-twin` - Manage digital twin representations
-- `grounding` - Ground abstract concepts to reality
-- `identity-resolution` - Resolve entity identities
-- `integrate` - Integrate multiple data sources
-- `map-relationships` - Map relationships between entities
-- `model-schema` - Define and validate schemas
-- `provenance` - Track data lineage
-- `simulation` - Run simulations
-- `spatial-reasoning` - Reason about spatial relationships
-- `state-transition` - Model state transitions
-- `temporal-reasoning` - Reason about temporal relationships
-- `uncertainty-model` - Model and propagate uncertainty
-- `world-state` - Manage world state representation
-
-### REASONING (20)
-Think and decide through comparison, evaluation, and planning.
-
-**Comparison (7):**
-- `compare` - Compare two or more items
-- `compare-attributes`, `compare-documents`, `compare-entities`, `compare-impact`, `compare-people`, `compare-plans`
-
-**Evaluation & Decision (6):**
-- `critique` - Provide critical feedback
-- `decide` - Make decisions between options
-- `decompose` - Break down complex tasks
-- `evaluate` - Evaluate options or outcomes
-- `optimize` - Optimize parameters or processes
-- `validate` - Validate data against rules
-
-**Planning & Scheduling (3):**
-- `plan` - Create execution plans
-- `prioritize` - Prioritize tasks or items
-- `schedule` - Schedule future actions
-
-**Communication (4):**
-- `explain` - Explain concepts or decisions
-- `generalize` - Abstract to general principles
-- `summarize` - Summarize content
-- `translate` - Translate between representations
-
-### ACTION (12)
-Change things through execution and generation.
-
-**Execution (3):**
-- `act` - Execute an action in the environment
-- `act-plan` - Plan and execute actions
-- `send` - Send messages to targets
-
-**Generation (8):**
-- `generate` - Create new content
-- `generate-attribute`, `generate-audio`, `generate-image`, `generate-numeric-data`, `generate-plan`, `generate-text`, `generate-world`
-
-**Transformation (1):**
-- `transform` - Transform data between formats
-
-### SAFETY (7)
-Protect and verify through checkpointing, auditing, and constraints.
+### PERCEIVE (4)
+Information acquisition from the world.
 
 | Skill | Description |
 |-------|-------------|
-| `audit` | Audit data or operations |
-| `checkpoint` | Create execution checkpoints |
-| `constrain` | Apply constraints to operations |
-| `improve` | Suggest improvements |
-| `mitigate` | Apply mitigation strategies |
-| `rollback` | Rollback to previous state |
-| `verify` | Verify conditions or results |
+| `retrieve` | Get specific data by reference (ID, path, URI) |
+| `search` | Query for data matching criteria |
+| `observe` | Watch and report current state |
+| `receive` | Accept pushed data or events |
 
-### META (6)
-Self-reflection through discovery and introspection.
+### UNDERSTAND (6)
+Making sense of information.
 
 | Skill | Description |
 |-------|-------------|
-| `discover` | Find previously unknown information |
-| `discover-activity` | Discover new activities |
-| `discover-anomaly` | Discover anomalies |
-| `discover-human-attribute` | Discover human traits |
-| `discover-outcome` | Discover potential outcomes |
-| `discover-relationship` | Discover relationships |
+| `detect` | Find patterns or occurrences in data |
+| `classify` | Assign labels or categories to items |
+| `measure` | Quantify values with uncertainty |
+| `predict` | Forecast future states or outcomes |
+| `compare` | Evaluate alternatives against criteria |
+| `discover` | Find previously unknown patterns |
 
-### MEMORY (2)
-Persistence through storage and recall.
-
-| Skill | Description |
-|-------|-------------|
-| `persist` | Persist data to durable storage |
-| `recall` | Recall previously stored data |
-
-### COORDINATION (3)
-Multi-agent operations through delegation and synchronization.
+### REASON (4)
+Planning and analysis.
 
 | Skill | Description |
 |-------|-------------|
-| `delegate` | Delegate to other agents |
-| `invoke-workflow` | Invoke workflow execution |
-| `synchronize` | Synchronize state across systems |
+| `plan` | Create action sequence to achieve goal |
+| `decompose` | Break problem into subproblems |
+| `critique` | Identify weaknesses and issues |
+| `explain` | Justify conclusions with reasoning |
 
-### WORKFLOWS (4)
-Composed multi-step workflow skills that orchestrate multiple capabilities.
+### MODEL (5)
+World representation.
+
+| Skill | Description |
+|-------|-------------|
+| `state` | Create representation of current world state |
+| `transition` | Define how state changes over time |
+| `attribute` | Establish cause-effect relationships |
+| `ground` | Anchor claims to evidence |
+| `simulate` | Run what-if scenarios |
+
+### SYNTHESIZE (3)
+Content creation.
+
+| Skill | Description |
+|-------|-------------|
+| `generate` | Produce new content |
+| `transform` | Convert between formats |
+| `integrate` | Merge data from multiple sources |
+
+### EXECUTE (3)
+Changing the world.
+
+| Skill | Description |
+|-------|-------------|
+| `execute` | Run code or script deterministically |
+| `mutate` | Change persistent state |
+| `send` | Transmit data to external system |
+
+### VERIFY (5)
+Correctness assurance.
+
+| Skill | Description |
+|-------|-------------|
+| `verify` | Check that conditions are met |
+| `checkpoint` | Save state for potential recovery |
+| `rollback` | Restore to previous checkpoint |
+| `constrain` | Enforce limits and policies |
+| `audit` | Record what happened and why |
+
+### REMEMBER (2)
+State persistence.
+
+| Skill | Description |
+|-------|-------------|
+| `persist` | Store data durably |
+| `recall` | Retrieve previously stored data |
+
+### COORDINATE (3)
+Multi-agent interaction.
+
+| Skill | Description |
+|-------|-------------|
+| `delegate` | Assign task to another agent |
+| `synchronize` | Achieve state agreement across agents |
+| `invoke` | Execute a composed workflow |
+
+## Composed Workflows (4)
 
 | Workflow | Description |
 |----------|-------------|
-| `debug-workflow` | Systematic debugging workflow |
-| `digital-twin-sync-workflow` | Synchronize digital twin state |
-| `gap-analysis-workflow` | Perform gap analysis |
-| `world-model-workflow` | Build and maintain world models |
+| `debug-workflow` | Systematic code debugging workflow |
+| `capability-gap-analysis` | Assess missing capabilities in a project |
+| `digital-twin-bootstrap` | Initialize a digital twin from scratch |
+| `digital-twin-sync-loop` | Synchronize digital twin state with reality |
+
+## Domain Parameterization
+
+The 35-capability model uses **domain parameters** instead of many domain-specific skills:
+
+```yaml
+# Old model (99 capabilities)
+- detect-anomaly
+- detect-entity
+- detect-person
+
+# New model (35 capabilities)
+- detect (domain: anomaly)
+- detect (domain: entity)
+- detect (domain: person)
+```
+
+Similarly:
+- `measure` replaces: estimate-risk, estimate-impact, estimate-outcome
+- `predict` replaces: forecast-risk, forecast-time, forecast-world
+- `compare` replaces: compare-plans, compare-entities, prioritize
 
 ## Skill Structure
 
-Each skill follows the standard SKILL.md format:
+Each skill follows the SKILL.md format:
 
 ```markdown
 ---
 name: skill-name
-description: Brief description
+description: Brief description with trigger keywords
 layer: LAYER_NAME
+allowed-tools: Read, Grep, ...
+agent: explore | general-purpose
 ---
 
-## Purpose
+## Intent
 What this skill accomplishes
 
-## When to Use
-Trigger conditions
+## Inputs
+Parameter table
 
-## Workflow
+## Procedure
 Step-by-step execution
 
-## Inputs/Outputs
-Schema definitions
+## Output Contract
+YAML schema for outputs
+
+## Safety Constraints
+Risk level and rules
 ```
 
-## Layer Execution Order
-
-The ontology defines a natural flow through layers:
+## Layer Execution Flow
 
 ```
-PERCEPTION → MODELING → REASONING → ACTION
-     ↓           ↓          ↓          ↓
-   MEMORY ←→ COORDINATION ←→ SAFETY ←→ META
+PERCEIVE → UNDERSTAND → REASON → EXECUTE
+    ↓           ↓          ↓        ↓
+  MODEL ←→ SYNTHESIZE ←→ VERIFY ←→ COORDINATE
+    ↓           ↓
+REMEMBER ←→ (persistence)
 ```
 
-- **PERCEPTION** feeds observations to **MODELING**
-- **MODELING** provides understanding to **REASONING**
-- **REASONING** drives **ACTION**
-- **SAFETY** can intercept at any point
-- **META** reflects on the entire process
-- **MEMORY** persists across cycles
-- **COORDINATION** enables multi-agent operations
+- **PERCEIVE** feeds observations to **UNDERSTAND**
+- **UNDERSTAND** provides patterns to **REASON**
+- **REASON** drives **EXECUTE** through plans
+- **MODEL** represents world state
+- **VERIFY** can intercept mutations
+- **COORDINATE** enables multi-agent operations
+- **REMEMBER** persists across cycles
+
+## Migration from v1 (99 capabilities)
+
+Domain-specific skills from v1 are archived in `_archive/skills/`. The capability mapping is documented in:
+- `schemas/workflow_catalog.yaml` (header comment)
+- `docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md`
 
 ## Usage
 
 Skills can be invoked via:
 1. Claude Code plugin skill invocation
 2. Direct SKILL.md reading and execution
-3. Workflow composition via `invoke-workflow`
+3. Workflow composition via `invoke`
 
-See the [plugin.json](../plugin.json) for plugin registration details.
+See `schemas/capability_ontology.json` for the authoritative ontology definition.

@@ -63,7 +63,7 @@ Suggestions written to: tools/validator_suggestions.json
 
 The validator checks:
 - All capabilities exist in the ontology
-- Prerequisites are satisfied (e.g., `act-plan` requires `plan` and `checkpoint`)
+- Prerequisites are satisfied (e.g., `mutate` requires `checkpoint`)
 - Binding references point to valid step outputs
 - Types are compatible between producers and consumers
 
@@ -105,18 +105,18 @@ debug_code_change:
   goal: Safely diagnose and fix a bug/regression in a codebase.
   risk: medium
   steps:
-  - capability: inspect
+  - capability: observe
     purpose: Observe failing behavior, logs, and relevant code paths.
-    store_as: inspect_out
+    store_as: observe_out
   - capability: search
     purpose: Find related code, configs, and error patterns.
     store_as: search_out
-  - capability: map-relationships
-    purpose: Build dependency graph around failing component.
-    store_as: map_relationships_out
-  - capability: model-schema
+  - capability: attribute
+    purpose: Build dependency graph and identify causal relationships.
+    store_as: attribute_out
+  - capability: constrain
     purpose: Define invariants/spec expectations for the component.
-    store_as: model_schema_out
+    store_as: constrain_out
   - capability: critique
     purpose: List likely failure modes + edge cases.
     store_as: critique_out
@@ -126,10 +126,10 @@ debug_code_change:
   - capability: checkpoint           # <-- Safety: checkpoint before mutation
     purpose: Create checkpoint before mutation.
     store_as: checkpoint_out
-  - capability: act-plan             # <-- Requires checkpoint (enforced)
+  - capability: execute              # <-- Requires checkpoint (enforced)
     purpose: Apply fix, run tests, and produce diff summary.
     requires_checkpoint: true
-    store_as: act_plan_out
+    store_as: execute_out
   - capability: verify
     purpose: Run targeted verification and return PASS/FAIL.
     store_as: verify_out
@@ -143,43 +143,49 @@ debug_code_change:
 
 Key observations:
 - **Capabilities are atomic**: Each step does one thing
-- **Safety by construction**: `checkpoint` before `act-plan` is required
+- **Safety by construction**: `checkpoint` before `execute` is required
 - **Outputs are named**: `store_as` enables later steps to reference outputs
 
 ## Step 5: Explore the Capability Ontology (2 min)
 
-Open `schemas/capability_ontology.json` and find the `act-plan` capability:
+Open `schemas/capability_ontology.json` and find the `mutate` capability:
 
 ```json
 {
-  "id": "act-plan",
-  "layer": "ACTION",
-  "description": "Execute a planned action...",
+  "id": "mutate",
+  "layer": "EXECUTE",
+  "description": "Change persistent state",
+  "risk": "high",
+  "mutation": true,
+  "requires_checkpoint": true,
+  "requires_approval": true,
   "input_schema": {
     "type": "object",
+    "required": ["target", "operation"],
     "properties": {
-      "plan": { "type": "object" },
-      "context": { "type": "object" }
-    },
-    "required": ["plan"]
+      "target": {"type": "string", "description": "What to modify"},
+      "operation": {"type": "object", "description": "Modification to apply"},
+      "checkpoint_id": {"type": "string", "description": "Recovery checkpoint"}
+    }
   },
   "output_schema": {
     "type": "object",
+    "required": ["success", "evidence_anchors"],
     "properties": {
-      "result": { "type": "object" },
-      "side_effects": { "type": "array" }
+      "success": {"type": "boolean"},
+      "previous_state": {"type": "any", "description": "State before mutation"},
+      "new_state": {"type": "any", "description": "State after mutation"},
+      "evidence_anchors": {"type": "array"}
     }
-  },
-  "requires": ["plan", "checkpoint"],
-  "soft_requires": ["verify"]
+  }
 }
 ```
 
 Key observations:
-- **Layer classification**: ACTION layer (causes side effects)
+- **Layer classification**: EXECUTE layer (causes state changes)
+- **Safety flags**: `mutation: true`, `requires_checkpoint: true`
 - **I/O schemas**: Typed contracts for inputs and outputs
-- **Prerequisites**: `requires` defines hard dependencies
-- **Soft dependencies**: `soft_requires` are recommended but not mandatory
+- **Evidence anchors**: Required in output for grounded agency
 
 ## What's Next?
 

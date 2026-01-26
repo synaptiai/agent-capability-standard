@@ -22,8 +22,8 @@ Let's look at a simple capability:
 
 ```json
 {
-  "id": "inspect",
-  "layer": "PERCEPTION",
+  "id": "observe",
+  "layer": "PERCEIVE",
   "description": "Observe and report on artifacts without modifying them",
   "input_schema": {
     "type": "object",
@@ -45,7 +45,7 @@ Let's look at a simple capability:
 ```
 
 Key observations:
-- `inspect` is in the PERCEPTION layer (observation, no mutation)
+- `observe` is in the PERCEIVE layer (observation, no mutation)
 - It takes a target and aspects to examine
 - It outputs findings and metadata
 - It has no prerequisites
@@ -63,9 +63,9 @@ Some capabilities require others to run first:
 
 | Capability | Requires | Why |
 |------------|----------|-----|
-| `act-plan` | `plan`, `checkpoint` | Can't execute blindly; need recovery point |
+| `mutate` | `plan`, `checkpoint` | Can't execute blindly; need recovery point |
 | `rollback` | `checkpoint`, `audit` | Need state to restore; need record of why |
-| `verify` | `model-schema` | Need invariants to check against |
+| `verify` | `constrain` | Need invariants to check against |
 
 ---
 
@@ -80,7 +80,7 @@ Some capabilities require others to run first:
 
 **With workflows:**
 - Capabilities compose predictably through typed bindings
-- Prerequisites are enforced automatically (e.g., `checkpoint` before `act-plan`)
+- Prerequisites are enforced automatically (e.g., `checkpoint` before `mutate`)
 - Failures trigger documented recovery paths
 
 The workflow DSL makes these guarantees structural, not aspirational.
@@ -100,17 +100,17 @@ analyze_file:
   risk: low
 
   steps:
-    - capability: inspect
+    - capability: observe
       purpose: Examine the file structure and content.
-      store_as: inspect_out
+      store_as: observe_out
 
-    - capability: detect-anomaly
+    - capability: detect
       purpose: Find unusual patterns in the file.
       store_as: anomaly_out
       input_bindings:
-        context: ${inspect_out}
+        context: ${observe_out}
 
-    - capability: summarize
+    - capability: explain
       purpose: Create a readable report of findings.
       store_as: summary_out
       input_bindings:
@@ -143,12 +143,12 @@ analyze_file:
 
 ```yaml
 input_bindings:
-  context: ${inspect_out}
+  context: ${observe_out}
 ```
 
-This tells `detect-anomaly` to use the output from `inspect` as its context. The validator checks:
-1. `inspect_out` exists (from a prior step)
-2. The type is compatible with what `detect-anomaly` expects
+This tells `detect` to use the output from `observe` as its context. The validator checks:
+1. `observe_out` exists (from a prior step)
+2. The type is compatible with what `detect` expects
 
 ### 2.4 Validate Your Workflow
 
@@ -212,15 +212,15 @@ fix_and_verify:
 
   steps:
     # 1. Understand the problem
-    - capability: inspect
+    - capability: observe
       purpose: Examine current state.
-      store_as: inspect_out
+      store_as: observe_out
 
-    - capability: detect-anomaly
+    - capability: detect
       purpose: Identify the issue.
       store_as: anomaly_out
       input_bindings:
-        context: ${inspect_out}
+        context: ${observe_out}
 
     # 2. Plan the fix
     - capability: plan
@@ -230,7 +230,7 @@ fix_and_verify:
         context: ${anomaly_out}
 
     # 3. Define what success looks like
-    - capability: model-schema
+    - capability: constrain
       purpose: Define invariants the fix must satisfy.
       store_as: schema_out
 
@@ -241,7 +241,7 @@ fix_and_verify:
       mutation: true
 
     # 5. Execute the fix (REQUIRES checkpoint)
-    - capability: act-plan
+    - capability: mutate
       purpose: Apply the fix.
       store_as: action_out
       mutation: true
@@ -253,7 +253,7 @@ fix_and_verify:
           action: stop
           message: "Cannot proceed without checkpoint"
 
-    # 6. Verify the fix worked (REQUIRES model-schema)
+    # 6. Verify the fix worked (REQUIRES constrain)
     - capability: verify
       purpose: Check that fix satisfies invariants.
       store_as: verify_out
@@ -317,8 +317,8 @@ python tools/validate_workflows.py examples/fix_and_verify.yaml
 ```
 
 The validator ensures:
-- `checkpoint` comes before `act-plan`
-- `model-schema` comes before `verify`
+- `checkpoint` comes before `mutate`
+- `constrain` comes before `verify`
 - All bindings are valid
 
 ---
@@ -372,7 +372,7 @@ steps:
 Skip steps based on conditions:
 
 ```yaml
-- capability: act-plan
+- capability: mutate
   purpose: Apply fix only if approved.
   store_as: action_out
   condition: ${approval_out.approved} == true
@@ -412,16 +412,16 @@ Reference external transform definitions:
 V101: UNKNOWN_CAPABILITY: 'detect-anamoly' not found
 ```
 
-**Fix:** Check spelling. It's `detect-anomaly`, not `detect-anamoly`.
+**Fix:** Check spelling. It's `detect`, not `detect-anamoly`.
 
 ### 5.2 Missing Prerequisite (V102)
 
 **Error:**
 ```
-V102: MISSING_PREREQUISITE: 'act-plan' requires 'checkpoint'
+V102: MISSING_PREREQUISITE: 'mutate' requires 'checkpoint'
 ```
 
-**Fix:** Add a `checkpoint` step before `act-plan`.
+**Fix:** Add a `checkpoint` step before `mutate`.
 
 ### 5.3 Invalid Binding Path (B201)
 
@@ -430,7 +430,7 @@ V102: MISSING_PREREQUISITE: 'act-plan' requires 'checkpoint'
 B201: INVALID_BINDING_PATH: 'insepct_out.findings' not found
 ```
 
-**Fix:** Check the `store_as` name. It's `inspect_out`, not `insepct_out`.
+**Fix:** Check the `store_as` name. It's `observe_out`, not `insepct_out`.
 
 ### 5.4 Ambiguous Type (B204)
 
@@ -454,8 +454,8 @@ input_bindings:
 | Element | Convention | Example |
 |---------|------------|---------|
 | Workflow | snake_case | `debug_code_change` |
-| Step store_as | snake_case with _out | `inspect_out` |
-| Capability | kebab-case | `detect-anomaly` |
+| Step store_as | snake_case with _out | `observe_out` |
+| Capability | kebab-case | `detect` |
 
 ### 6.2 Safety Checklist
 
@@ -479,7 +479,7 @@ Every step should have:
 
 | Goal | Resource |
 |------|----------|
-| Understand all capabilities | [Capability Ontology](../schemas/capability_ontology.json) |
+| Understand all 35 capabilities | [Capability Ontology](../schemas/capability_ontology.json) |
 | See production workflows | [Workflow Catalog](../schemas/workflow_catalog.yaml) |
 | Read the full spec | [STANDARD-v1.0.0.md](../spec/STANDARD-v1.0.0.md) |
 | Understand error codes | [STANDARD Section 9](../spec/STANDARD-v1.0.0.md#9-error-model) |

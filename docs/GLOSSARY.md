@@ -9,11 +9,11 @@ Key terms used in the Agent Capability Standard. Each term includes context on *
 ### Capability
 An atomic primitive that does one thing well. Capabilities have:
 - A unique `id`
-- A `layer` classification (PERCEPTION, MODELING, REASONING, ACTION, SAFETY, META, MEMORY, COORDINATION)
+- A `layer` classification (PERCEIVE, UNDERSTAND, REASON, MODEL, SYNTHESIZE, EXECUTE, VERIFY, REMEMBER, COORDINATE)
 - `input_schema` and `output_schema` defining typed contracts
-- `requires` (hard prerequisites) and `soft_requires` (recommended prerequisites)
+- `risk` level and `mutation` flag for safety classification
 
-Example: `detect-anomaly`, `checkpoint`, `act-plan`
+Example: `detect`, `checkpoint`, `mutate`
 
 **Why it matters:** Capabilities with explicit contracts enable static validation. You know before runtime whether outputs will match expected inputs.
 
@@ -35,6 +35,73 @@ A self-contained unit that implements a capability. Each skill has a `SKILL.md` 
 - Examples
 
 Skills are organized by layer in the `skills/` directory.
+
+---
+
+## Capability Theory
+
+### Atomic Capability
+A capability that cannot be decomposed into simpler operations without losing essential semantics. Atomicity criteria:
+- **Irreducibility**: Cannot be expressed as a composition of other capabilities
+- **Single purpose**: Does one thing well
+- **Typed contract**: Has well-defined input and output schemas
+- **Domain-general**: Not specific to one tool or framework
+
+**Why it matters:** Atomic capabilities are the true primitives. If a capability can be decomposed, it's not atomic—it's a pattern or workflow.
+
+**What it prevents:** Redundant capabilities, unclear boundaries, and explosion of capability count.
+
+### Workflow Composition
+The combination of multiple capabilities to achieve a goal. Workflows are "molecules" built from capability "atoms."
+
+Example: `debug_code_change` composes:
+```
+observe → search → plan → checkpoint → execute → verify → rollback
+```
+
+**Why it matters:** Value comes from compositions, not from primitive count. The goal is better workflows, not more capabilities.
+
+### Layer
+A functional category grouping capabilities by their primary purpose. The 9 cognitive layers are:
+- **PERCEIVE**: Acquire information from external sources (retrieve, search, observe, receive)
+- **UNDERSTAND**: Make sense of information (detect, classify, measure, predict, compare, discover)
+- **REASON**: Analyze and plan (plan, decompose, critique, explain)
+- **MODEL**: Represent the world (state, transition, attribute, ground, simulate)
+- **SYNTHESIZE**: Create content (generate, transform, integrate)
+- **EXECUTE**: Change the world (execute, mutate, send)
+- **VERIFY**: Ensure correctness (verify, checkpoint, rollback, constrain, audit)
+- **REMEMBER**: Persistence across invocations (persist, recall)
+- **COORDINATE**: Multi-agent interaction (delegate, synchronize, invoke)
+
+Layers are derived from cognitive architecture theory (BDI, SOAR, ReAct) and control theory.
+
+**Why it matters:** Layers provide cognitive organization and enable validation (e.g., PERCEIVE before UNDERSTAND).
+
+### Capability Derivation
+The systematic process by which capabilities are identified and justified. Grounded Agency derives capabilities from:
+1. The DIS '23 AI Capabilities framework (8 foundational verbs)
+2. Domain specialization (verb + domain → specific capability)
+3. Operational requirements for production agents
+4. Atomicity validation (ensure each is truly irreducible)
+
+See [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
+
+### Extension Governance
+The rules and process for adding new capabilities to the ontology. New capabilities must:
+- Be non-composable (cannot be built from existing capabilities)
+- Pass atomicity tests
+- Be used in at least one reference workflow
+- Fit clearly into exactly one layer
+
+See [docs/methodology/EXTENSION_GOVERNANCE.md](methodology/EXTENSION_GOVERNANCE.md).
+
+### Capability Tier
+A classification based on validation status:
+- **Core Tier**: Capabilities validated in reference workflows (stable)
+- **Extended Tier**: Capabilities designed but not fully validated (stable API, limited usage proof)
+- **Experimental Tier**: New proposals under evaluation (no stability guarantees)
+
+**Why it matters:** Tiers communicate maturity. Core capabilities are battle-tested; Extended are designed but less proven.
 
 ---
 
@@ -120,7 +187,7 @@ A reference from one step to another step's output. Bindings use the syntax:
 - `${store_as.field.path}` — reference a field
 - `${store_as.field.path: type}` — typed annotation
 
-Example: `${inspect_out.findings}`, `${world_state_out.entities: array<object>}`
+Example: `${observe_out.observation}`, `${state_out.entities: array<object>}`
 
 ### Gate
 A conditional check that can halt or redirect workflow execution. Gates define:
@@ -146,7 +213,7 @@ A documented way a step can fail, with recovery instructions:
 ### Store As
 The identifier used to store a step's output for later reference. Other steps can use this identifier in their bindings.
 
-Example: `store_as: inspect_out` allows later steps to use `${inspect_out.findings}`
+Example: `store_as: observe_out` allows later steps to use `${observe_out.observation}`
 
 ### Parallel Group
 Steps that can execute concurrently. Parallel groups define:
@@ -197,7 +264,7 @@ Recording what changed, why, and by whom. Audit trails include:
 Checking that outcomes match expectations. Verification:
 - Returns PASS or FAIL with evidence
 - May trigger rollback on failure
-- Requires `model-schema` to define expectations
+- Uses `constrain` to define expectations and policies
 
 ### Constrain
 Enforcing policy and least privilege. Constraints check:
@@ -237,37 +304,41 @@ A declarative specification for converting between schemas. Transform mappings:
 
 ## Layers
 
-### PERCEPTION
-Capabilities that observe the world without modifying it.
-Examples: `inspect`, `search`, `retrieve`, `receive`
+### PERCEIVE
+Capabilities that acquire information from external sources without modifying it.
+Examples: `retrieve`, `search`, `observe`, `receive`
 
-### MODELING
-Capabilities that build understanding and representations.
-Examples: `detect-*`, `identify-*`, `estimate-*`, `world-state`, `model-schema`
+### UNDERSTAND
+Capabilities that make sense of information and form beliefs.
+Examples: `detect`, `classify`, `measure`, `predict`, `compare`, `discover`
 
-### REASONING
-Capabilities that think, compare, and decide.
-Examples: `compare-*`, `plan`, `decide`, `critique`, `explain`
+### REASON
+Capabilities that analyze, plan, and decide.
+Examples: `plan`, `decompose`, `critique`, `explain`
 
-### ACTION
+### MODEL
+Capabilities that represent the world and its dynamics.
+Examples: `state`, `transition`, `attribute`, `ground`, `simulate`
+
+### SYNTHESIZE
+Capabilities that create new content.
+Examples: `generate`, `transform`, `integrate`
+
+### EXECUTE
 Capabilities that cause changes in the world.
-Examples: `act-plan`, `generate-*`, `transform`, `send`
+Examples: `execute`, `mutate`, `send`
 
-### SAFETY
+### VERIFY
 Capabilities that protect, verify, and enable recovery.
-Examples: `verify`, `checkpoint`, `rollback`, `audit`, `constrain`
+Examples: `verify`, `checkpoint`, `rollback`, `constrain`, `audit`
 
-### META
-Capabilities for self-reflection and discovery.
-Examples: `discover-*`, `prioritize`
-
-### MEMORY
+### REMEMBER
 Capabilities for persistence and recall.
-Examples: `recall`
+Examples: `persist`, `recall`
 
-### COORDINATION
+### COORDINATE
 Capabilities for multi-agent and workflow orchestration.
-Examples: `delegate`, `synchronize`, `invoke-workflow`
+Examples: `delegate`, `synchronize`, `invoke`
 
 ---
 

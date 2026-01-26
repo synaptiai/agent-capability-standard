@@ -54,7 +54,7 @@ Start where the pain is worst, then expand as you see value.
 ### What is the Agent Capability Standard?
 
 A formal specification for building reliable AI agent systems. It defines:
-- 99 atomic capabilities with typed I/O contracts
+- 35 atomic capabilities with typed I/O contracts across 9 cognitive layers
 - A workflow DSL for composing capabilities with safety semantics
 - Schemas for grounded world state and trust-aware conflict resolution
 - Validation tools and conformance tests
@@ -83,6 +83,86 @@ This standard makes reliability structural, not optional.
 - **Platform engineers** designing agent frameworks
 - **Researchers** studying agent architectures
 - **Organizations** deploying AI agents in critical applications
+
+---
+
+## The 35 Capabilities
+
+### Why exactly 35 capabilities?
+
+The number 35 emerges from first-principles derivation:
+
+1. **Foundation**: Cognitive architectures (BDI, ReAct, SOAR) provide the theoretical basis
+2. **9 cognitive layers**: PERCEIVE, UNDERSTAND, REASON, MODEL, SYNTHESIZE, EXECUTE, VERIFY, REMEMBER, COORDINATE
+3. **Domain parameterization**: Instead of 99 domain-specific skills (detect-anomaly, detect-entity), we use 35 atomic verbs with domain parameters (detect with domain: anomaly)
+4. **Atomicity**: Each capability is truly irreducible and serves a single purpose
+
+For the full derivation, see [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
+
+### What happened to the 99 capabilities?
+
+The original 99-capability model included many domain-specific variants. Through first-principles analysis, we discovered these could be unified:
+
+| Old Model (99) | New Model (35) | Pattern |
+|----------------|----------------|---------|
+| detect-anomaly, detect-entity, detect-person | detect (domain: anomaly/entity/person) | Domain parameterization |
+| estimate-risk, estimate-impact | measure (metric: risk/impact) | Metric parameterization |
+| forecast-risk, forecast-time | predict (horizon: risk/time) | Horizon parameterization |
+
+The archived 99-capability model is in `_archive/skills/` for reference.
+
+### Is 35 the final number?
+
+The ontology is **stable but extensible**. A 36th capability may be added if:
+- It cannot be expressed as a composition of existing capabilities
+- It passes atomicity tests (irreducible, single purpose, typed contract)
+- It's used in at least one reference workflow
+- It fits clearly into exactly one layer
+
+See [Extension Governance](methodology/EXTENSION_GOVERNANCE.md) for the RFC process.
+
+### Can I add my own capabilities?
+
+Yes, through the governance process:
+
+1. Open a GitHub issue proposing the capability
+2. Create an RFC if the issue gains support
+3. Demonstrate the capability meets all criteria (non-composable, atomic, useful)
+4. After review, capability may be accepted
+
+For most use cases, **composing existing capabilities** or **parameterizing with domains** is preferred.
+
+### How do domain parameters work?
+
+Instead of many domain-specific capabilities, use the atomic capability with a domain parameter:
+
+```yaml
+# Old approach (99 capabilities)
+- capability: detect-anomaly
+  store_as: anomaly_out
+
+# New approach (35 capabilities)
+- capability: detect
+  domain: anomaly
+  store_as: anomaly_out
+```
+
+This keeps the ontology small while preserving expressiveness.
+
+### Is this like the periodic table?
+
+The analogy captures the design philosophy:
+
+| Chemistry | Grounded Agency |
+|-----------|-----------------|
+| ~118 elements | 35 capabilities |
+| Atoms are irreducible | Capabilities are atomic |
+| Molecules are compositions | Workflows are compositions |
+| Element groups (metals, gases) | Capability layers (9 cognitive layers) |
+
+**What the analogy means**: Capabilities are composable primitives. The goal is better workflows (molecules), not more capabilities (atoms).
+
+**What it doesn't mean**: We don't claim physical law derivation or that 35 is fixed forever.
 
 ---
 
@@ -135,17 +215,18 @@ See [CONFORMANCE.md](../spec/CONFORMANCE.md) for details.
 Bindings reference outputs from earlier steps:
 
 ```yaml
-- capability: inspect
-  store_as: inspect_out
+- capability: observe
+  store_as: observe_out
 
-- capability: detect-anomaly
+- capability: detect
+  domain: anomaly
   input_bindings:
-    context: ${inspect_out.findings}  # References inspect's output
+    context: ${observe_out.observation}  # References observe's output
 ```
 
 Typed bindings add explicit type annotations:
 ```yaml
-observations: ${integrate_out.unified_model.observations: array<object>}
+observations: ${integrate_out.merged.observations: array<object>}
 ```
 
 ### What are gates?
@@ -154,7 +235,7 @@ Gates are conditional checks that can halt or redirect execution:
 
 ```yaml
 gates:
-  - when: ${checkpoint_out.created} == false
+  - when: ${checkpoint_out.checkpoint_id} == null
     action: stop
     message: "No checkpoint created. Do not mutate."
 ```
@@ -166,7 +247,7 @@ gates:
 3. Verify the outcome
 4. If verification fails, rollback to the checkpoint
 
-The standard enforces this pattern: `act-plan` requires `checkpoint`.
+The standard enforces this pattern: `mutate` requires `checkpoint`.
 
 ---
 
@@ -179,16 +260,16 @@ Yes. Define a new capability in your ontology extension:
 ```json
 {
   "id": "my-custom-capability",
-  "layer": "MODELING",
+  "layer": "UNDERSTAND",
   "description": "What it does...",
   "input_schema": { ... },
   "output_schema": { ... },
-  "requires": [],
-  "soft_requires": []
+  "risk": "low",
+  "mutation": false
 }
 ```
 
-Then create a corresponding skill in `skills/`.
+Then create a corresponding skill in `skills/my-custom-capability/SKILL.md`.
 
 ### Can I create my own workflows?
 
@@ -199,17 +280,17 @@ my_workflow:
   goal: What this workflow achieves
   risk: medium
   steps:
-    - capability: inspect
+    - capability: observe
       purpose: First step
-      store_as: step1_out
+      store_as: observe_out
     - capability: plan
       purpose: Create a plan
       store_as: plan_out
     - capability: checkpoint
       purpose: Save state
       store_as: checkpoint_out
-    - capability: act-plan
-      purpose: Execute
+    - capability: mutate
+      purpose: Execute changes
       store_as: result
 ```
 

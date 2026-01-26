@@ -97,18 +97,19 @@ A capability MUST define:
 
 ### 4.2 Layers
 
-Capabilities are classified into 8 layers:
+Capabilities are classified into 9 cognitive layers:
 
-| Layer | Purpose | Mutation |
-|-------|---------|----------|
-| **PERCEPTION** | Observe the world | No |
-| **MODELING** | Build understanding and representations | No |
-| **REASONING** | Think, compare, and decide | No |
-| **ACTION** | Cause changes in the world | Yes |
-| **SAFETY** | Protect, verify, and enable recovery | Varies |
-| **META** | Self-reflection and discovery | No |
-| **MEMORY** | Persistence and recall | Varies |
-| **COORDINATION** | Multi-agent and workflow orchestration | Varies |
+| Layer | Purpose | Mutation | Count |
+|-------|---------|----------|-------|
+| **PERCEIVE** | Acquire information from the world | No | 4 |
+| **UNDERSTAND** | Make sense of information | No | 6 |
+| **REASON** | Plan and analyze | No | 4 |
+| **MODEL** | Represent the world | No | 5 |
+| **SYNTHESIZE** | Create content | No | 3 |
+| **EXECUTE** | Change the world | Yes | 3 |
+| **VERIFY** | Ensure correctness | Varies | 5 |
+| **REMEMBER** | Persist state | Varies | 2 |
+| **COORDINATE** | Multi-agent interaction | Varies | 3 |
 
 ### 4.3 Dependency Semantics
 
@@ -121,9 +122,10 @@ The following capabilities have special requirements:
 
 | Capability | Requires | Notes |
 |------------|----------|-------|
-| `act-plan` | `plan`, `checkpoint` | Cannot execute without prior checkpoint |
-| `rollback` | `checkpoint`, `audit` | Must have checkpoint to revert to |
-| `verify` | `model-schema` | Must have invariants to verify against |
+| `mutate` | `checkpoint` | Cannot mutate without prior checkpoint |
+| `send` | `checkpoint` | Cannot send without prior checkpoint |
+| `rollback` | `checkpoint` | Must have checkpoint to revert to |
+| `verify` | `constrain` | Should have constraints to verify against |
 
 ---
 
@@ -181,9 +183,9 @@ ${store_as.field.path: type_annotation}
 
 Examples:
 ```yaml
-${inspect_out.findings}
-${world_state_out.entities: array<object>}
-${integrate_out.unified_model.observations: array<object>}
+${observe_out.observation}
+${state_out.entities: array<object>}
+${integrate_out.merged.observations: array<object>}
 ```
 
 ### 5.4 Typed Binding Rules

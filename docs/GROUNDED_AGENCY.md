@@ -12,7 +12,7 @@ January 2026
 
 As large language models transition from conversational assistants to autonomous agents capable of real-world actions, the gap between what AI can do (capability taxonomies) and how AI operates reliably (operational primitives) becomes critical. We present **Grounded Agency**, a comprehensive framework that bridges academic capability taxonomies with production-grade agent infrastructure through three core contributions:
 
-1. A **capability ontology** of 99 atomic primitives organized across 8 functional layers with formal input/output schemas and 60 dependency edges
+1. A **capability ontology** of 35 atomic primitives organized across 9 cognitive layers with formal input/output schemas and typed contracts
 2. A **world state schema** supporting real and digital system modeling with first-class uncertainty (epistemic, aleatoric, mixed), evidence anchors, and reversible state transitions
 3. A **trust-aware conflict resolution** model with source authority weights, temporal decay, and Bayesian identity resolution
 
@@ -42,7 +42,7 @@ Academic capability taxonomies, such as the DIS '23 AI Capabilities framework [4
 
 We present **Grounded Agency**, a capability ontology and workflow framework that bridges this gap. Our contributions are:
 
-1. **Capability Ontology** (§3): 99 atomic capabilities organized into 8 layers (Perception, Modeling, Reasoning, Action, Safety, Meta, Memory, Coordination) with formal input/output schemas, mutation flags, and 60 dependency edges.
+1. **Capability Ontology** (§3): 35 atomic capabilities organized into 9 cognitive layers (Perceive, Understand, Reason, Model, Synthesize, Execute, Verify, Remember, Coordinate) with formal input/output schemas, mutation flags, and safety constraints.
 
 2. **World State Schema** (§4): A canonical representation for modeling real and digital systems with entities, relationships, state variables, observations, and transition rules. Every element carries provenance records, evidence anchors, and typed uncertainty (epistemic, aleatoric, or mixed).
 
@@ -101,27 +101,29 @@ Process-level safety research examines tool use risks [26], sandboxing [27], and
 
 ## 3. Capability Ontology
 
-The capability ontology defines **99 atomic capabilities** that agents can invoke, organized into 8 functional layers with explicit dependencies and contracts.
+The capability ontology defines **35 atomic capabilities** that agents can invoke, organized into 9 cognitive layers with explicit contracts and safety constraints.
 
 ### 3.1 Layer Taxonomy
 
 Organizing capabilities into layers serves two purposes: it clarifies the ontology's structure for human readers, and it enables the validator to enforce ordering constraints (e.g., Perception before Modeling). We assign capabilities to layers based on their primary function:
 
-- **Perception** (4 capabilities): Interface with external data sources. Examples: `retrieve`, `inspect`, `search`, `receive`.
+- **Perceive** (4 capabilities): Acquire information from the world. Examples: `retrieve`, `search`, `observe`, `receive`.
 
-- **Modeling** (45 capabilities): Construct and maintain world representations. Examples: `world-state`, `state-transition`, `causal-model`, `identity-resolution`, `grounding`.
+- **Understand** (6 capabilities): Make sense of information. Examples: `detect`, `classify`, `measure`, `predict`, `compare`, `discover`.
 
-- **Reasoning** (20 capabilities): Analyze, plan, and decide. Examples: `plan`, `prioritize`, `compare`, `critique`, `decompose`.
+- **Reason** (4 capabilities): Plan and analyze. Examples: `plan`, `decompose`, `critique`, `explain`.
 
-- **Action** (12 capabilities): Execute changes in the world. Examples: `act-plan`, `transform`, `send`, `constrain`.
+- **Model** (5 capabilities): Represent the world. Examples: `state`, `transition`, `attribute`, `ground`, `simulate`.
 
-- **Safety** (7 capabilities): Ensure correctness and enable recovery. Examples: `verify`, `audit`, `checkpoint`, `rollback`, `mitigate`, `improve`, `constrain`.
+- **Synthesize** (3 capabilities): Create content. Examples: `generate`, `transform`, `integrate`.
 
-- **Meta** (6 capabilities): Discover and compose other capabilities. Examples: `discover-entity`, `discover-pattern`, `invoke-workflow`.
+- **Execute** (3 capabilities): Change the world. Examples: `execute`, `mutate`, `send`.
 
-- **Memory** (2 capabilities): Persistent state across invocations. Examples: `persist`, `recall`.
+- **Verify** (5 capabilities): Ensure correctness and enable recovery. Examples: `verify`, `checkpoint`, `rollback`, `constrain`, `audit`.
 
-- **Coordination** (3 capabilities): Multi-agent interaction. Examples: `delegate`, `synchronize`, `negotiate`.
+- **Remember** (2 capabilities): Persist state. Examples: `persist`, `recall`.
+
+- **Coordinate** (3 capabilities): Multi-agent interaction. Examples: `delegate`, `synchronize`, `invoke`.
 
 ### 3.2 Capability Schema
 
@@ -159,7 +161,7 @@ soft_requires: [search]
 
 Key design decisions:
 
-1. **100% Schema Coverage**: All 99 capabilities have both `input_schema` and `output_schema`, enabling static type checking.
+1. **100% Schema Coverage**: All 35 capabilities have both `input_schema` and `output_schema`, enabling static type checking.
 
 2. **Evidence by Default**: Every output schema requires `evidence_anchors` and `confidence`.
 
@@ -184,6 +186,58 @@ The ontology defines **60 dependency edges** between capabilities:
 - **documented_by** (1 edge): Specification linkage.
 
 This graph enables the validator to check that workflows satisfy all hard prerequisites before a capability is invoked.
+
+### 3.4 Derivation Methodology
+
+The 35 capabilities were derived from first-principles analysis of cognitive architectures (BDI, ReAct, SOAR) and refined through atomicity testing.
+
+#### 3.4.1 Foundation: DIS '23 Framework
+
+We began with the DIS '23 AI Capabilities framework [4], which identified 8 core verbs for AI systems:
+
+| Verb | Definition | Layer Mapping |
+|------|------------|---------------|
+| Detect | Find occurrences of patterns | MODELING |
+| Identify | Classify and label | MODELING |
+| Estimate | Quantify uncertain values | MODELING |
+| Forecast | Predict future states | MODELING |
+| Compare | Evaluate alternatives | REASONING |
+| Discover | Find unknown patterns | META |
+| Generate | Produce new content | ACTION |
+| Act | Execute changes | ACTION |
+
+#### 3.4.2 Systematic Extension
+
+Each DIS '23 verb was expanded along three axes:
+
+1. **Domain specialization**: `detect` → `detect-entity`, `detect-anomaly`, `detect-drift`, etc.
+2. **Operational requirements**: Added `world-state`, `checkpoint`, `rollback`, etc.
+3. **Evidence grounding**: Added `provenance`, `grounding`, `verify`, `audit`
+
+#### 3.4.3 Atomicity Criteria
+
+A capability is included only if it:
+- Cannot be decomposed into simpler capabilities
+- Has a single, clear purpose
+- Has a well-defined I/O contract
+- Is domain-general (not tool-specific or framework-specific)
+
+#### 3.4.4 The Number 35
+
+The derivation process yielded 35 atomic capabilities across 9 cognitive layers:
+- 4 Perceive (information acquisition)
+- 6 Understand (sense-making)
+- 4 Reason (planning and analysis)
+- 5 Model (world representation)
+- 3 Synthesize (content creation)
+- 3 Execute (world changes)
+- 5 Verify (correctness assurance)
+- 2 Remember (persistence)
+- 3 Coordinate (multi-agent)
+
+The key insight is **domain parameterization**: instead of 99 domain-specific capabilities (detect-anomaly, detect-entity, etc.), we use 35 atomic verbs with domain parameters (detect with domain: anomaly). This preserves expressiveness while maintaining a minimal ontology.
+
+For full derivation details, see [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
 
 ---
 
