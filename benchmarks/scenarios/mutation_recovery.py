@@ -16,7 +16,9 @@ Metrics:
 - Recovery time: How quickly state is restored
 """
 
+import atexit
 import hashlib
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -60,6 +62,9 @@ class MutationRecoveryScenario(BenchmarkScenario):
 
         # Create temporary directory for test files
         self.temp_dir = Path(tempfile.mkdtemp(prefix="ga_benchmark_"))
+
+        # Register cleanup with atexit for reliable resource management
+        atexit.register(self._cleanup)
 
         self.log(f"Original file: {self.file_lines} lines")
         self.log(f"Original hash: {self.original_hash[:16]}...")
@@ -232,9 +237,7 @@ class MutationRecoveryScenario(BenchmarkScenario):
 
         return comparison
 
-    def __del__(self):
-        """Cleanup temporary files."""
+    def _cleanup(self) -> None:
+        """Cleanup temporary files. Registered with atexit for reliability."""
         if self.temp_dir and self.temp_dir.exists():
-            import shutil
-
             shutil.rmtree(self.temp_dir, ignore_errors=True)

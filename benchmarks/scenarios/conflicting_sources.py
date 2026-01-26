@@ -18,23 +18,41 @@ Metrics:
 
 import math
 import random
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from .base import BenchmarkScenario
 
 
-# Default trust weights from authority_trust_model.yaml
-TRUST_WEIGHTS = {
-    "hardware_sensor": 0.95,
-    "system_of_record": 0.92,
-    "primary_api": 0.88,
-    "observability_pipeline": 0.80,
-    "derived_inference": 0.65,
-    "human_note": 0.55,
-}
+def _load_trust_model() -> tuple[dict[str, float], int]:
+    """Load trust weights and decay settings from authority_trust_model.yaml."""
+    schema_path = Path(__file__).parent.parent.parent / "schemas" / "authority_trust_model.yaml"
 
-# Trust decay half-life in hours
-TRUST_HALF_LIFE_HOURS = 14 * 24  # 14 days in hours
+    if schema_path.exists():
+        with open(schema_path) as f:
+            model = yaml.safe_load(f)
+        weights = model.get("source_ranking", {}).get("weights", {})
+        # Parse half_life from ISO 8601 duration (P14D = 14 days)
+        half_life_str = model.get("decay_model", {}).get("half_life", "P14D")
+        days = int(half_life_str.replace("P", "").replace("D", ""))
+        half_life_hours = days * 24
+        return weights, half_life_hours
+
+    # Fallback defaults if file not found
+    return {
+        "hardware_sensor": 0.95,
+        "system_of_record": 0.92,
+        "primary_api": 0.88,
+        "observability_pipeline": 0.80,
+        "derived_inference": 0.65,
+        "human_note": 0.55,
+    }, 14 * 24
+
+
+# Load trust weights from canonical source
+TRUST_WEIGHTS, TRUST_HALF_LIFE_HOURS = _load_trust_model()
 
 
 def recency_weight(hours_ago: float, half_life: float = TRUST_HALF_LIFE_HOURS) -> float:
