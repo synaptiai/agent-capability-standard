@@ -140,7 +140,7 @@ input → constrain(schema) → process → verify(output) → transform(target_
 
 ### Category 3: Coordination/Execution Failures
 
-**Prevalence**: ~20% of issues | **Severity**: High
+**Prevalence**: ~22% of issues | **Severity**: High
 
 Coordination failures occur when multiple agents or async operations fail to properly synchronize, leading to race conditions, deadlocks, or lost results.
 
@@ -325,7 +325,7 @@ sources → compare(criteria) → integrate(with conflict_resolution) → verify
 |----------|-----------|------------------------|----------------|
 | State Management | 35% | checkpoint, rollback, state, persist | **YES** |
 | Workflow/Type | 25% | verify, constrain, transform | **YES** |
-| Coordination | 20% | synchronize, delegate, execute | **YES** |
+| Coordination | 22% | synchronize, delegate, execute | **YES** |
 | Data/Grounding | 10% | ground, verify, detect | **YES** |
 | Explainability | 5% | explain, audit | **YES** |
 | Trust/Conflict | 5% | integrate, compare, ground | **YES** |
