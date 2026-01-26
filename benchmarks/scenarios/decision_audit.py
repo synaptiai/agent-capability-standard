@@ -57,7 +57,7 @@ class DecisionAuditScenario(BenchmarkScenario):
                     values[c] * weights[c] for c in criteria
                 )
 
-            winner = max(scores, key=scores.get)
+            winner = max(scores, key=lambda x: scores[x])
 
             # Record actual reasoning
             reasoning = {

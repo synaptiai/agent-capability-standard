@@ -50,6 +50,7 @@ class MutationRecoveryScenario(BenchmarkScenario):
         self.original_content: str = ""
         self.original_hash: str = ""
         self.temp_dir: Path | None = None
+        self._cleanup_registered: bool = False
 
     def setup(self) -> None:
         """Create test file with known content."""
@@ -63,8 +64,10 @@ class MutationRecoveryScenario(BenchmarkScenario):
         # Create temporary directory for test files
         self.temp_dir = Path(tempfile.mkdtemp(prefix="ga_benchmark_"))
 
-        # Register cleanup with atexit for reliable resource management
-        atexit.register(self._cleanup)
+        # Register cleanup with atexit for reliable resource management (only once)
+        if not self._cleanup_registered:
+            atexit.register(self._cleanup)
+            self._cleanup_registered = True
 
         self.log(f"Original file: {self.file_lines} lines")
         self.log(f"Original hash: {self.original_hash[:16]}...")
@@ -114,7 +117,7 @@ class MutationRecoveryScenario(BenchmarkScenario):
 
                     lines_written = i + 1
 
-        except Exception as e:
+        except Exception:
             failed = True
 
         elapsed_ms = (time.time() - start_time) * 1000
@@ -153,6 +156,7 @@ class MutationRecoveryScenario(BenchmarkScenario):
         Mutation failure leaves file in corrupted state
         with no automatic recovery.
         """
+        assert self.temp_dir is not None, "setup() must be called before run_baseline()"
         file_path = self.temp_dir / "baseline_file.txt"
 
         result = self._simulate_mutation_with_failure(file_path, checkpoint_content=None)
@@ -181,6 +185,7 @@ class MutationRecoveryScenario(BenchmarkScenario):
         Creates recovery point, attempts mutation, and
         rolls back on failure.
         """
+        assert self.temp_dir is not None, "setup() must be called before run_ga()"
         file_path = self.temp_dir / "ga_file.txt"
 
         # Create checkpoint (GA approach)

@@ -343,7 +343,6 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
         """
         results = []
         errors_detected = 0
-        design_time_detections = 0
 
         for workflow in self.test_workflows:
             result = self._simulate_runtime_execution(workflow)
@@ -367,7 +366,7 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
         detection_rate = errors_detected / len(error_workflows) if error_workflows else 1.0
 
         self.log(f"Baseline detection rate: {detection_rate:.0%}")
-        self.log(f"Baseline design-time detections: 0%")
+        self.log("Baseline design-time detections: 0%")
 
         return {
             "detection_rate": detection_rate,

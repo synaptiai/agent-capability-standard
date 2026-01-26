@@ -10,14 +10,11 @@ Tests that:
 import sys
 from pathlib import Path
 
-import pytest
-
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from benchmarks.scenarios import (
     SCENARIOS,
-    BenchmarkScenario,
     CapabilityGapScenario,
     ConflictingSourcesScenario,
     DecisionAuditScenario,
@@ -255,6 +252,7 @@ class TestBenchmarkResult:
         assert result.ga_metrics["accuracy"] == 0.9
         assert result.improvement["accuracy_improvement"] == 0.4
         assert result.execution_time_ms == 100.0
+        assert result.metadata is not None
         assert result.metadata["seed"] == 42
 
 
@@ -280,6 +278,7 @@ class TestFullBenchmarkRun:
         # Should still have valid metrics
         assert 0 <= result.baseline_metrics["accuracy"] <= 1
         assert 0 <= result.ga_metrics["accuracy"] <= 1
+        assert result.metadata is not None
         assert result.metadata["iterations"] == 3
 
 
@@ -308,3 +307,224 @@ class TestEdgeCases:
         # Should not crash and should have valid rates
         assert 0 <= baseline["faithfulness"] <= 1
         assert ga["faithfulness"] == 1.0
+
+
+class TestAverageMetrics:
+    """Tests for the _average_metrics helper in base class."""
+
+    def test_average_numeric_values(self):
+        """Should average numeric values across runs."""
+        scenario = ConflictingSourcesScenario(seed=42, num_cases=10)
+        results = [
+            {"accuracy": 0.5, "count": 10},
+            {"accuracy": 0.6, "count": 10},
+            {"accuracy": 0.7, "count": 10},
+        ]
+        averaged = scenario._average_metrics(results)
+
+        assert averaged["accuracy"] == 0.6  # (0.5 + 0.6 + 0.7) / 3
+        assert averaged["count"] == 10
+
+    def test_non_numeric_takes_last_value(self):
+        """Non-numeric values should take the last value."""
+        scenario = ConflictingSourcesScenario(seed=42, num_cases=10)
+        results = [
+            {"status": "running", "count": 1},
+            {"status": "done", "count": 2},
+        ]
+        averaged = scenario._average_metrics(results)
+
+        assert averaged["status"] == "done"
+        assert averaged["count"] == 1.5
+
+    def test_empty_results_returns_empty_dict(self):
+        """Empty results list should return empty dict."""
+        scenario = ConflictingSourcesScenario(seed=42, num_cases=10)
+        averaged = scenario._average_metrics([])
+
+        assert averaged == {}
+
+
+class TestCompareMethod:
+    """Tests for the compare() method of each scenario."""
+
+    def test_conflicting_sources_compare(self):
+        """ConflictingSourcesScenario.compare should calculate improvement."""
+        scenario = ConflictingSourcesScenario(seed=42, num_cases=50)
+        scenario.setup()
+
+        baseline = scenario.run_baseline()
+        ga = scenario.run_ga()
+        comparison = scenario.compare(baseline, ga)
+
+        assert "accuracy_improvement_absolute" in comparison
+        assert "accuracy_improvement_percent" in comparison
+        assert "evidence_completeness" in comparison
+        assert comparison["accuracy_improvement_absolute"] > 0
+
+    def test_mutation_recovery_compare(self):
+        """MutationRecoveryScenario.compare should calculate improvements."""
+        scenario = MutationRecoveryScenario(seed=42)
+        scenario.setup()
+
+        baseline = scenario.run_baseline()
+        ga = scenario.run_ga()
+        comparison = scenario.compare(baseline, ga)
+
+        assert "recovery_rate_improvement" in comparison
+        assert "data_integrity_improvement" in comparison
+        assert "lines_saved" in comparison
+        assert comparison["recovery_rate_improvement"] == 1.0
+
+    def test_decision_audit_compare(self):
+        """DecisionAuditScenario.compare should calculate improvements."""
+        scenario = DecisionAuditScenario(seed=42, num_decisions=20)
+        scenario.setup()
+
+        baseline = scenario.run_baseline()
+        ga = scenario.run_ga()
+        comparison = scenario.compare(baseline, ga)
+
+        assert "faithfulness_improvement" in comparison
+        assert "evidence_coverage_improvement" in comparison
+        assert "confabulation_reduction" in comparison
+
+    def test_workflow_type_error_compare(self):
+        """WorkflowTypeErrorScenario.compare should calculate improvements."""
+        scenario = WorkflowTypeErrorScenario(seed=42)
+        scenario.setup()
+
+        baseline = scenario.run_baseline()
+        ga = scenario.run_ga()
+        comparison = scenario.compare(baseline, ga)
+
+        assert "design_time_detection_improvement" in comparison
+        assert "runtime_errors_prevented" in comparison
+        assert "suggestion_accuracy" in comparison
+
+    def test_capability_gap_compare(self):
+        """CapabilityGapScenario.compare should calculate improvements."""
+        scenario = CapabilityGapScenario(seed=42)
+        scenario.setup()
+
+        baseline = scenario.run_baseline()
+        ga = scenario.run_ga()
+        comparison = scenario.compare(baseline, ga)
+
+        assert "detection_improvement" in comparison
+        assert "compute_savings" in comparison
+        assert "identification_accuracy" in comparison
+
+
+class TestVerboseMode:
+    """Tests for verbose output mode."""
+
+    def test_verbose_does_not_crash(self):
+        """Running with verbose=True should not crash."""
+        scenario = ConflictingSourcesScenario(seed=42, num_cases=5, verbose=True)
+        result = scenario.run(iterations=1)
+
+        assert isinstance(result, BenchmarkResult)
+
+    def test_log_only_outputs_when_verbose(self, capsys):
+        """log() should only output when verbose=True."""
+        scenario_quiet = ConflictingSourcesScenario(seed=42, num_cases=5, verbose=False)
+        scenario_quiet.log("test message")
+        captured = capsys.readouterr()
+        assert "test message" not in captured.out
+
+        scenario_verbose = ConflictingSourcesScenario(seed=42, num_cases=5, verbose=True)
+        scenario_verbose.log("test message")
+        captured = capsys.readouterr()
+        assert "test message" in captured.out
+
+
+class TestMutationRecoveryCleanup:
+    """Tests for temp file cleanup in MutationRecoveryScenario."""
+
+    def test_temp_dir_created_on_setup(self):
+        """Temp directory should be created during setup."""
+        scenario = MutationRecoveryScenario(seed=42)
+        assert scenario.temp_dir is None
+
+        scenario.setup()
+        assert scenario.temp_dir is not None
+        assert scenario.temp_dir.exists()
+
+    def test_cleanup_removes_temp_dir(self):
+        """_cleanup should remove temp directory."""
+        scenario = MutationRecoveryScenario(seed=42)
+        scenario.setup()
+        temp_dir = scenario.temp_dir
+        assert temp_dir is not None
+
+        scenario._cleanup()
+        assert not temp_dir.exists()
+
+    def test_cleanup_handles_already_deleted(self):
+        """_cleanup should handle already deleted temp dir gracefully."""
+        scenario = MutationRecoveryScenario(seed=42)
+        scenario.setup()
+        temp_dir = scenario.temp_dir
+        assert temp_dir is not None
+
+        # Manually delete
+        import shutil
+        shutil.rmtree(temp_dir)
+
+        # Should not raise
+        scenario._cleanup()
+
+
+class TestBenchmarkResultDefaults:
+    """Tests for BenchmarkResult dataclass defaults."""
+
+    def test_metadata_defaults_to_none(self):
+        """metadata should default to None if not provided."""
+        result = BenchmarkResult(
+            scenario_name="test",
+            baseline_metrics={},
+            ga_metrics={},
+            improvement={},
+            execution_time_ms=0.0,
+        )
+        assert result.metadata is None
+
+    def test_all_fields_populated(self):
+        """All fields should be accessible when populated."""
+        result = BenchmarkResult(
+            scenario_name="test",
+            baseline_metrics={"a": 1},
+            ga_metrics={"b": 2},
+            improvement={"c": 3.0},
+            execution_time_ms=42.0,
+            metadata={"key": "value"},
+        )
+        assert result.scenario_name == "test"
+        assert result.baseline_metrics == {"a": 1}
+        assert result.ga_metrics == {"b": 2}
+        assert result.improvement == {"c": 3.0}
+        assert result.execution_time_ms == 42.0
+        assert result.metadata == {"key": "value"}
+
+
+class TestSetupRequired:
+    """Tests verifying setup() must be called before run methods."""
+
+    def test_mutation_recovery_requires_setup_for_baseline(self):
+        """run_baseline should fail if setup() not called."""
+        scenario = MutationRecoveryScenario(seed=42)
+        try:
+            scenario.run_baseline()
+            assert False, "Should have raised AssertionError"
+        except AssertionError as e:
+            assert "setup() must be called" in str(e)
+
+    def test_mutation_recovery_requires_setup_for_ga(self):
+        """run_ga should fail if setup() not called."""
+        scenario = MutationRecoveryScenario(seed=42)
+        try:
+            scenario.run_ga()
+            assert False, "Should have raised AssertionError"
+        except AssertionError as e:
+            assert "setup() must be called" in str(e)

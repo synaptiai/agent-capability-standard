@@ -289,7 +289,7 @@ class CapabilityGapScenario(BenchmarkScenario):
 
         self.log(f"Baseline gap detection rate: {detection_rate:.0%}")
         self.log(f"Baseline compute wasted: {total_compute_wasted}")
-        self.log(f"Baseline design-time detections: 0%")
+        self.log("Baseline design-time detections: 0%")
 
         return {
             "detection_rate": detection_rate,
