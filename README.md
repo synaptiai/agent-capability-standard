@@ -296,6 +296,48 @@ agent-capability-standard/
 └── templates/               # Skill templates
 ```
 
+## Claude Agent SDK Integration
+
+The Grounded Agency capability standard integrates with the Claude Agent SDK to provide safety-first agent execution:
+
+```python
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+# Create adapter with strict checkpoint enforcement
+adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=True))
+
+# Create checkpoint before mutations
+adapter.create_checkpoint(scope=["src/*.py"], reason="Before refactoring")
+
+# Wrap SDK options with safety layer
+options = adapter.wrap_options(
+    ClaudeAgentOptions(allowed_tools=["Read", "Write", "Edit", "Bash"])
+)
+
+# Use SDK as normal - safety is enforced automatically
+async with ClaudeSDKClient(options) as client:
+    await client.query("Refactor the authentication module")
+```
+
+**Features:**
+- **Permission callbacks** that block mutations without checkpoints
+- **Evidence anchors** that track provenance for grounded decisions
+- **Skill tracking** that updates checkpoint state when `checkpoint` skill is invoked
+- **Audit trails** for compliance and debugging
+
+See [docs/integrations/claude_agent_sdk.md](docs/integrations/claude_agent_sdk.md) for the full integration guide.
+
+**Install the Python package:**
+
+```bash
+pip install grounded-agency
+# Or with SDK support:
+pip install grounded-agency[sdk]
+```
+
+---
+
 ## Installation
 
 ### Claude Code Plugin
