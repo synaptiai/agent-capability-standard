@@ -132,6 +132,49 @@ python -c "import json; json.load(open('schemas/capability_ontology.json'))"
 - Add workflow to `schemas/workflow_catalog.yaml`
 - Update workflow count in `skills/README.md`
 
+## Claude Agent SDK Integration
+
+The `grounded_agency/` Python package provides SDK integration:
+
+### Install
+```bash
+pip install -e ".[sdk]"  # From repo root
+```
+
+### Run SDK integration tests
+```bash
+pytest tests/test_sdk_integration.py -v
+```
+
+### Run examples
+```bash
+python examples/grounded_agent_demo.py
+python examples/checkpoint_enforcement_demo.py
+python examples/capability_skills_demo.py
+```
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| `GroundedAgentAdapter` | Main entry point - wraps SDK options with safety layer |
+| `CapabilityRegistry` | Loads and queries `capability_ontology.json` |
+| `ToolCapabilityMapper` | Maps SDK tools to capability metadata |
+| `CheckpointTracker` | Manages checkpoint lifecycle for mutation safety |
+| `EvidenceStore` | Collects evidence anchors from tool executions |
+
+### Example Usage
+
+```python
+from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=True))
+adapter.create_checkpoint(["*.py"], "Before changes")
+options = adapter.wrap_options(base_options)
+```
+
+See [docs/integrations/claude_agent_sdk.md](docs/integrations/claude_agent_sdk.md) for full documentation.
+
 ## Safety Model
 
 High-risk capabilities (`mutate`, `send`) have:
