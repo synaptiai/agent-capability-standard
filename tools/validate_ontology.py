@@ -2,13 +2,14 @@
 """Ontology graph validator: detects orphan capabilities and validates edge semantics.
 
 Usage:
-    python tools/validate_ontology.py [--verbose]
+    python tools/validate_ontology.py [--verbose] [--check-duplicates]
 
 This script validates the capability ontology by:
 1. Detecting orphan capabilities (no incoming or outgoing edges)
 2. Validating symmetric edge types have bidirectional edges
 3. Detecting cycles in hard dependency edges (requires, precedes)
 4. Validating all edge references point to valid capabilities
+5. Optionally checking for multiple edge types between capability pairs
 """
 
 import json
@@ -91,6 +92,20 @@ def validate_symmetric_edges(edges: list[dict], symmetric_types: list[str]) -> l
     return warnings
 
 
+def check_duplicate_edges(edges: list[dict]) -> list[str]:
+    """Warn about multiple edges between the same capability pair."""
+    warnings = []
+    edge_pairs = defaultdict(list)
+    for edge in edges:
+        key = (edge["from"], edge["to"])
+        edge_pairs[key].append(edge["type"])
+
+    for (from_cap, to_cap), types in sorted(edge_pairs.items()):
+        if len(types) > 1:
+            warnings.append(f"Multiple edge types {from_cap} -> {to_cap}: {types}")
+    return warnings
+
+
 def detect_cycles(edges: list[dict], cycle_types: list[str]) -> list[list[str]]:
     """Detect cycles in edges of specified types using DFS."""
     cycles = []
@@ -138,6 +153,11 @@ def main():
     parser = argparse.ArgumentParser(description="Validate capability ontology graph")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed output")
     parser.add_argument(
+        "--check-duplicates",
+        action="store_true",
+        help="Warn about multiple edge types between the same capability pair"
+    )
+    parser.add_argument(
         "--ontology",
         default="schemas/capability_ontology.json",
         help="Path to ontology file"
@@ -184,6 +204,11 @@ def main():
     cycles = detect_cycles(edges, cycle_types)
     for cycle in cycles:
         errors.append(f"Cycle detected in {cycle_types} edges: {' -> '.join(cycle)}")
+
+    # 5. Check for duplicate edges (optional)
+    if args.check_duplicates:
+        dup_warnings = check_duplicate_edges(edges)
+        warnings.extend(dup_warnings)
 
     # Report results
     if args.verbose:
