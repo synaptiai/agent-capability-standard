@@ -29,7 +29,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES_DIR = ROOT / "schemas" / "profiles"
-SCHEMA_FILE = PROFILES_DIR / "profile_schema.yaml"
 
 
 # -------------------- Schema Constants --------------------
