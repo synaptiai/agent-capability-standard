@@ -98,6 +98,12 @@ Relationships between capabilities (in `capability_ontology.json`):
 - `requires`: Hard dependency (must be satisfied)
 - `soft_requires`: Recommended but not mandatory
 - `enables`: Unlocks other capabilities
+- `precedes`: Temporal ordering (must complete before target)
+- `conflicts_with`: Mutual exclusivity (cannot coexist in workflow)
+- `alternative_to`: Substitutable capabilities
+- `specializes`: Parent-child inheritance
+
+See [spec/EDGE_TYPES.md](spec/EDGE_TYPES.md) for full edge type documentation.
 
 ## Creating New Capabilities
 

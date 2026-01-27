@@ -171,21 +171,23 @@ Key design decisions:
 
 ### 3.3 Dependency Graph
 
-The ontology defines **60 dependency edges** between capabilities:
+The ontology defines **54 dependency edges** across **7 edge types**:
 
-- **requires** (44 edges): Hard prerequisite. The dependent capability cannot execute unless the required capability has produced output.
+- **enables** (20 edges): The source capability produces outputs that make the target more effective.
 
-- **enables** (11 edges): The source capability produces outputs that make the target more effective.
+- **precedes** (12 edges): Temporal ordering; the source must complete before the target begins.
 
-- **governed_by** (2 edges): Policy or constraint relationship.
+- **soft_requires** (7 edges): Preferred but not mandatory prerequisite.
 
-- **verifies** (1 edge): The source validates outputs of the target.
+- **specializes** (6 edges): Inheritance; the source is a more specific variant of the target.
 
-- **soft_requires** (1 edge): Preferred but not mandatory.
+- **requires** (4 edges): Hard prerequisite. The dependent capability cannot execute unless the required capability has produced output.
 
-- **documented_by** (1 edge): Specification linkage.
+- **alternative_to** (3 edges): Substitutability; capabilities can replace each other.
 
-This graph enables the validator to check that workflows satisfy all hard prerequisites before a capability is invoked.
+- **conflicts_with** (2 edges): Mutual exclusivity; both cannot coexist in the same workflow.
+
+This graph enables the validator to check that workflows satisfy all hard prerequisites, respect temporal ordering, and avoid conflicting capability combinations. See [spec/EDGE_TYPES.md](../spec/EDGE_TYPES.md) for full edge type documentation.
 
 ### 3.4 Derivation Methodology
 
@@ -562,9 +564,9 @@ We evaluate Grounded Agency on three dimensions: coverage, validation effectiven
 
 | Component | Count | Notes |
 |-----------|-------|-------|
-| Capabilities | 99 | 100% schema coverage |
-| Layers | 8 | Perception to Coordination |
-| Dependency edges | 60 | 44 requires, 11 enables |
+| Capabilities | 36 | 100% schema coverage |
+| Layers | 9 | Perceive to Coordinate |
+| Dependency edges | 54 | 7 edge types (see spec/EDGE_TYPES.md) |
 | Entity classes | 18 | 10 digital, 8 real-world |
 | Entity subtypes | 57 | Extensible taxonomy |
 | Core relations | 13 | depends_on, owns, causes... |
