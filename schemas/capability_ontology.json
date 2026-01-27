@@ -1055,6 +1055,45 @@
       }
     }
   ],
+  "edge_types": {
+    "requires": {
+      "description": "Hard dependency: the 'from' capability MUST be satisfied before 'to' can execute",
+      "semantics": "Validator MUST reject workflows that violate this ordering",
+      "transitive": false
+    },
+    "soft_requires": {
+      "description": "Soft dependency: the 'from' capability SHOULD be satisfied when available",
+      "semantics": "Validator SHOULD warn if not satisfied, but workflow is still valid",
+      "transitive": false
+    },
+    "enables": {
+      "description": "The 'from' capability unlocks or makes possible the 'to' capability",
+      "semantics": "Represents capability flow and composition patterns",
+      "transitive": false
+    },
+    "precedes": {
+      "description": "Temporal ordering: 'from' must complete before 'to' begins in any workflow",
+      "semantics": "Enforces execution order even when no data dependency exists",
+      "transitive": true
+    },
+    "conflicts_with": {
+      "description": "Mutual exclusivity: 'from' and 'to' cannot both execute in the same workflow",
+      "semantics": "Validator MUST reject workflows containing both capabilities",
+      "transitive": false,
+      "symmetric": true
+    },
+    "alternative_to": {
+      "description": "Substitutability: 'from' can replace 'to' with compatible semantics",
+      "semantics": "Used for capability selection when multiple options exist",
+      "transitive": false,
+      "symmetric": true
+    },
+    "specializes": {
+      "description": "Inheritance: 'from' is a more specific variant of 'to'",
+      "semantics": "The specialized capability inherits contracts from the general capability",
+      "transitive": true
+    }
+  },
   "edges": [
     {"from": "retrieve", "to": "detect", "type": "enables"},
     {"from": "search", "to": "detect", "type": "enables"},
@@ -1086,6 +1125,33 @@
     {"from": "mutate", "to": "persist", "type": "soft_requires"},
     {"from": "predict", "to": "ground", "type": "soft_requires"},
     {"from": "critique", "to": "inquire", "type": "enables"},
-    {"from": "inquire", "to": "receive", "type": "soft_requires"}
+    {"from": "inquire", "to": "receive", "type": "soft_requires"},
+
+    {"from": "checkpoint", "to": "mutate", "type": "precedes", "rationale": "State must be saved before any mutation"},
+    {"from": "checkpoint", "to": "send", "type": "precedes", "rationale": "State must be saved before external communication"},
+    {"from": "plan", "to": "execute", "type": "precedes", "rationale": "Planning must complete before execution"},
+    {"from": "plan", "to": "mutate", "type": "precedes", "rationale": "Planning must complete before state mutation"},
+    {"from": "observe", "to": "detect", "type": "precedes", "rationale": "Observation must precede pattern detection"},
+    {"from": "detect", "to": "classify", "type": "precedes", "rationale": "Detection must precede classification"},
+    {"from": "retrieve", "to": "transform", "type": "precedes", "rationale": "Data must be retrieved before transformation"},
+    {"from": "search", "to": "compare", "type": "precedes", "rationale": "Search results needed before comparison"},
+    {"from": "state", "to": "simulate", "type": "precedes", "rationale": "Current state needed before simulation"},
+    {"from": "verify", "to": "audit", "type": "precedes", "rationale": "Verification results must be audited"},
+    {"from": "mutate", "to": "verify", "type": "precedes", "rationale": "Mutation must complete before verification"},
+    {"from": "execute", "to": "verify", "type": "precedes", "rationale": "Execution must complete before verification"},
+
+    {"from": "rollback", "to": "persist", "type": "conflicts_with", "rationale": "Cannot persist while rolling back state"},
+    {"from": "mutate", "to": "rollback", "type": "conflicts_with", "rationale": "Cannot mutate during rollback operation"},
+
+    {"from": "search", "to": "retrieve", "type": "alternative_to", "rationale": "Both acquire data, search by criteria vs retrieve by reference"},
+    {"from": "measure", "to": "predict", "type": "alternative_to", "rationale": "Both quantify, measure current vs predict future"},
+    {"from": "persist", "to": "checkpoint", "type": "alternative_to", "rationale": "Both store state, checkpoint for recovery vs persist for durability"},
+
+    {"from": "detect", "to": "observe", "type": "specializes", "rationale": "Detection is specialized observation for patterns"},
+    {"from": "classify", "to": "detect", "type": "specializes", "rationale": "Classification is specialized detection with categories"},
+    {"from": "predict", "to": "measure", "type": "specializes", "rationale": "Prediction is specialized measurement over time"},
+    {"from": "critique", "to": "verify", "type": "specializes", "rationale": "Critique is specialized verification for quality"},
+    {"from": "rollback", "to": "mutate", "type": "specializes", "rationale": "Rollback is specialized mutation to previous state"},
+    {"from": "delegate", "to": "invoke", "type": "specializes", "rationale": "Delegation is specialized invocation to agents"}
   ]
 }
