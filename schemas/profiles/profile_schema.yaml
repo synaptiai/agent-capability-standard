@@ -1,0 +1,101 @@
+# Domain Profile Schema
+# Defines configuration for domain-specific trust weights, risk thresholds,
+# checkpoint policies, and evidence requirements.
+
+profile_schema:
+  type: object
+  required:
+    - domain
+    - version
+    - trust_weights
+    - risk_thresholds
+    - checkpoint_policy
+    - evidence_policy
+  properties:
+    domain:
+      type: string
+      description: Domain identifier (kebab-case)
+    version:
+      type: string
+      pattern: "^\\d+\\.\\d+\\.\\d+$"
+      description: Semantic version of this profile
+    description:
+      type: string
+      description: Human-readable domain description
+    trust_weights:
+      type: object
+      description: |
+        Source-specific trust weights (0.0 to 1.0).
+        Higher values indicate more trusted sources.
+        These weights affect how evidence is evaluated and conflicts resolved.
+      additionalProperties:
+        type: number
+        minimum: 0.0
+        maximum: 1.0
+    risk_thresholds:
+      type: object
+      description: Risk tolerance levels for automated actions
+      properties:
+        auto_approve:
+          type: string
+          enum: [none, low, medium, high]
+          description: Maximum risk level that can be auto-approved
+        require_review:
+          type: string
+          enum: [low, medium, high]
+          description: Minimum risk level requiring human review
+        require_human:
+          type: string
+          enum: [low, medium, high, critical]
+          description: Minimum risk level requiring human execution
+        block_autonomous:
+          type: array
+          items:
+            type: string
+          description: Capability IDs that must never run autonomously
+    checkpoint_policy:
+      type: object
+      description: When to create checkpoints
+      additionalProperties:
+        type: string
+        enum: [always, high_risk, medium_risk, never]
+    evidence_policy:
+      type: object
+      description: Evidence requirements for claims
+      properties:
+        required_anchor_types:
+          type: array
+          items:
+            type: string
+          description: Types of evidence anchors expected in this domain
+        minimum_confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Minimum confidence threshold for actions
+        require_grounding:
+          type: array
+          items:
+            type: string
+          description: Capabilities that require explicit grounding
+    domain_sources:
+      type: array
+      description: Expected data sources for this domain
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          type:
+            type: string
+            enum: [api, sensor, database, human, document, system_log]
+          default_trust:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+    workflows:
+      type: array
+      description: Recommended workflows for this domain
+      items:
+        type: string
+        description: Workflow ID from workflow_catalog.yaml

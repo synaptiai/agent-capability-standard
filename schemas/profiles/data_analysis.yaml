@@ -1,0 +1,87 @@
+# Data Analysis Domain Profile
+# Calibrated for data pipelines, analytics, ML model monitoring, and reporting.
+
+domain: data-analysis
+version: "1.0.0"
+description: |
+  Profile for data science and analytics environments.
+  Emphasizes data quality, reproducibility, statistical rigor,
+  and model governance.
+
+trust_weights:
+  # Primary data sources
+  data_warehouse: 0.92    # Curated enterprise data
+  data_lake: 0.85         # Raw data storage
+  production_db: 0.90     # Production databases
+  certified_dataset: 0.95 # Certified/validated datasets
+
+  # Processing systems
+  etl_pipeline: 0.88      # ETL/ELT pipeline outputs
+  feature_store: 0.90     # Feature engineering store
+  model_registry: 0.88    # ML model registry
+
+  # Validation sources
+  data_catalog: 0.85      # Metadata catalog
+  schema_registry: 0.92   # Schema definitions
+  data_quality_system: 0.90 # DQ monitoring
+
+  # Human sources
+  data_steward: 0.85      # Data governance team
+  analyst_annotation: 0.78 # Analyst notes
+  domain_expert: 0.82     # Subject matter expert input
+
+  # External sources
+  public_dataset: 0.65    # Public data sources
+  api_feed: 0.70          # External API data
+  web_scrape: 0.55        # Web scraped data
+
+risk_thresholds:
+  auto_approve: low       # Low-risk analysis auto-approved
+  require_review: medium  # Medium requires data team review
+  require_human: high     # High-risk requires approval
+  block_autonomous:
+    - mutate              # Never modify production data autonomously
+    - send                # Never publish results without review
+
+checkpoint_policy:
+  before_data_mutation: always      # Always checkpoint before writes
+  before_model_deployment: always   # Always checkpoint model changes
+  before_report_publish: always     # Always checkpoint before publishing
+  before_pipeline_change: high_risk # Checkpoint pipeline modifications
+  during_batch_job: medium_risk     # Checkpoint long-running jobs
+
+evidence_policy:
+  required_anchor_types:
+    - data_lineage
+    - statistical_summary
+    - query_hash
+    - timestamp
+  minimum_confidence: 0.80  # High confidence for data decisions
+  require_grounding:
+    - detect                # Anomaly detection needs evidence
+    - predict               # Predictions must cite model + data
+    - measure               # Measurements need methodology
+    - compare               # Comparisons need criteria transparency
+
+domain_sources:
+  - name: Data Warehouse
+    type: database
+    default_trust: 0.92
+  - name: Data Lake
+    type: database
+    default_trust: 0.85
+  - name: ML Pipeline
+    type: api
+    default_trust: 0.88
+  - name: Analyst Input
+    type: human
+    default_trust: 0.78
+  - name: External APIs
+    type: api
+    default_trust: 0.70
+
+workflows:
+  - data_pipeline_validation
+  - anomaly_investigation
+  - report_generation
+  - model_monitoring

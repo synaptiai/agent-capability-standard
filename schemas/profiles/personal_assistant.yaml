@@ -1,0 +1,80 @@
+# Personal Assistant Domain Profile
+# Calibrated for task management, scheduling, communication, and information research.
+
+domain: personal-assistant
+version: "1.0.0"
+description: |
+  Profile for personal productivity assistants.
+  Emphasizes user preference learning, communication safety,
+  and balanced autonomy with user oversight.
+
+trust_weights:
+  # User sources (highest trust)
+  user_explicit: 0.98     # Direct user instruction
+  user_preference: 0.92   # Learned user preferences
+  user_calendar: 0.95     # User's own calendar data
+
+  # System sources
+  email_system: 0.88      # Email metadata (not content trust)
+  calendar_api: 0.90      # Calendar service data
+  task_system: 0.88       # Task management system
+  contact_database: 0.85  # Contact information
+
+  # External sources
+  web_search: 0.60        # Internet search results
+  news_feed: 0.55         # News aggregation
+  public_api: 0.70        # Public APIs (weather, maps, etc.)
+  third_party_app: 0.65   # Third-party integrations
+
+  # Inferred sources
+  pattern_inference: 0.72 # Inferred from user patterns
+  context_inference: 0.68 # Inferred from context
+
+risk_thresholds:
+  auto_approve: low       # Low-risk can be auto-approved
+  require_review: medium  # Medium requires user confirmation
+  require_human: high     # High-risk requires explicit user action
+  block_autonomous:
+    - send                # Never send communications autonomously
+    - mutate              # Never modify external systems autonomously
+
+checkpoint_policy:
+  before_send_message: always     # Always checkpoint before sending
+  before_schedule_change: always  # Always checkpoint calendar changes
+  before_delegation: always       # Always checkpoint before delegating
+  before_purchase: always         # Always checkpoint financial actions
+  before_data_share: always       # Always checkpoint sharing user data
+
+evidence_policy:
+  required_anchor_types:
+    - user_instruction
+    - system_data
+    - timestamp
+  minimum_confidence: 0.75  # Moderate confidence for personal tasks
+  require_grounding:
+    - send                  # Communications need clear user intent
+    - delegate              # Delegations need explicit approval
+    - predict               # Predictions about user intent
+
+domain_sources:
+  - name: User Voice/Text
+    type: human
+    default_trust: 0.98
+  - name: Calendar Service
+    type: api
+    default_trust: 0.90
+  - name: Email Service
+    type: api
+    default_trust: 0.88
+  - name: Web Search
+    type: api
+    default_trust: 0.60
+  - name: Task Manager
+    type: database
+    default_trust: 0.88
+
+workflows:
+  - schedule_management
+  - information_research
+  - task_delegation
+  - communication_drafting

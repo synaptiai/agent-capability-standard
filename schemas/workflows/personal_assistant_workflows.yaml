@@ -1,0 +1,614 @@
+# Personal Assistant Domain Workflows
+# Composed from 36 atomic capabilities
+# Profile: schemas/profiles/personal_assistant.yaml
+
+schedule_management:
+  goal: Analyze scheduling requests, resolve conflicts, and propose calendar changes.
+  risk: low
+  domain: personal-assistant
+  profile: schemas/profiles/personal_assistant.yaml
+  description: |
+    Schedule management workflow for personal assistants. Analyzes user requests,
+    checks for conflicts, suggests optimal times, and prepares calendar updates.
+    All calendar changes require user confirmation.
+  success:
+    - User request interpreted correctly
+    - Conflicts identified and resolved
+    - Optimal time slots proposed
+    - Calendar update prepared for approval
+  steps:
+    - capability: retrieve
+      purpose: Get user's current calendar for the relevant time range.
+      risk: low
+      mutation: false
+      store_as: calendar_out
+      input_bindings:
+        target: user_calendar
+        format: calendar_events
+        range: ${request.date_range}
+
+    - capability: critique
+      purpose: Analyze request for ambiguity or missing information.
+      risk: low
+      mutation: false
+      store_as: request_analysis_out
+      input_bindings:
+        target: ${request.content}
+        criteria:
+          - time_specificity
+          - duration_clarity
+          - participant_identification
+          - location_requirements
+
+    - capability: inquire
+      purpose: Generate clarifying questions if request is ambiguous.
+      risk: low
+      mutation: false
+      store_as: clarification_out
+      input_bindings:
+        ambiguous_input: ${request.content}
+        context: ${calendar_out.data}
+        max_questions: 2
+      gates:
+        - when: ${request_analysis_out.confidence} > 0.85
+          action: skip
+          message: Request is clear, no clarification needed.
+
+    - capability: detect
+      purpose: Identify scheduling conflicts in proposed time.
+      domain: conflict
+      risk: low
+      mutation: false
+      store_as: conflicts_out
+      input_bindings:
+        data: ${calendar_out.data}
+        pattern: time_overlap
+        threshold: 0  # Any overlap is a conflict
+
+    - capability: search
+      purpose: Find available time slots that match request.
+      risk: low
+      mutation: false
+      store_as: available_slots_out
+      input_bindings:
+        query:
+          duration: ${request.duration}
+          preferences: ${user_preferences.scheduling}
+          constraints: ${request.constraints}
+        scope: ${calendar_out.data}
+
+    - capability: compare
+      purpose: Rank available slots by user preference alignment.
+      domain: scheduling_preference
+      risk: low
+      mutation: false
+      store_as: ranked_slots_out
+      input_bindings:
+        options: ${available_slots_out.results}
+        criteria:
+          - time_of_day_preference
+          - buffer_time
+          - travel_time
+          - focus_time_protection
+        weights: ${user_preferences.weights}
+      gates:
+        - when: ${conflicts_out.detected} == true && ${available_slots_out.total_count} == 0
+          action: stop
+          message: No available slots found. User must manually resolve.
+
+    - capability: plan
+      purpose: Create calendar modification plan.
+      risk: low
+      mutation: false
+      store_as: calendar_plan_out
+      input_bindings:
+        goal: schedule_event
+        constraints:
+          preferred_slot: ${ranked_slots_out.recommendation}
+          conflicts_to_resolve: ${conflicts_out.matches}
+          user_preferences: ${user_preferences}
+
+    - capability: generate
+      purpose: Create calendar event draft for user approval.
+      domain: calendar_event
+      risk: low
+      mutation: false
+      store_as: event_draft_out
+      input_bindings:
+        specification:
+          type: calendar_event
+          title: ${request.title}
+          time: ${calendar_plan_out.steps[0].time}
+          duration: ${request.duration}
+          participants: ${request.participants}
+          location: ${request.location}
+
+    - capability: explain
+      purpose: Summarize scheduling decision for user.
+      risk: low
+      mutation: false
+      store_as: explanation_out
+      input_bindings:
+        conclusion: ${event_draft_out}
+        audience: user
+        depth: brief
+
+    - capability: audit
+      purpose: Record scheduling interaction.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: scheduling_request
+          original_request: ${request.content}
+          conflicts_found: ${conflicts_out.detected}
+          proposed_time: ${event_draft_out.content.time}
+
+  inputs:
+    request:
+      type: object
+      required: true
+      properties:
+        content: {type: string}
+        date_range: {type: object}
+        duration: {type: string}
+        title: {type: string}
+        participants: {type: array}
+        location: {type: string}
+        constraints: {type: object}
+    user_preferences:
+      type: object
+      description: User's scheduling preferences
+    profile:
+      type: object
+      ref: schemas/profiles/personal_assistant.yaml
+
+information_research:
+  goal: Research a topic and synthesize findings into an actionable summary.
+  risk: low
+  domain: personal-assistant
+  profile: schemas/profiles/personal_assistant.yaml
+  description: |
+    Information research workflow for answering user questions.
+    Searches multiple sources, evaluates credibility, and produces
+    a grounded summary with citations.
+  success:
+    - Multiple sources consulted
+    - Information quality assessed
+    - Coherent summary produced
+    - All claims grounded with citations
+  steps:
+    - capability: decompose
+      purpose: Break research question into searchable sub-questions.
+      risk: low
+      mutation: false
+      store_as: decomposed_out
+      input_bindings:
+        problem: ${query}
+        max_depth: 2
+        strategy: faceted_decomposition
+
+    - capability: search
+      purpose: Search web for relevant information.
+      risk: low
+      mutation: false
+      store_as: web_search_out
+      input_bindings:
+        query: ${decomposed_out.subproblems}
+        scope: web
+        limit: 10
+
+    - capability: search
+      purpose: Search user's documents for relevant context.
+      risk: low
+      mutation: false
+      store_as: local_search_out
+      input_bindings:
+        query: ${decomposed_out.subproblems}
+        scope: user_documents
+        limit: 5
+
+    - capability: retrieve
+      purpose: Fetch full content from top search results.
+      risk: low
+      mutation: false
+      store_as: content_out
+      input_bindings:
+        target: ${web_search_out.results[0:5]}
+        format: text_content
+
+    - capability: classify
+      purpose: Assess source credibility and relevance.
+      risk: low
+      mutation: false
+      store_as: source_quality_out
+      input_bindings:
+        item: ${content_out.data}
+        taxonomy: [authoritative, reliable, questionable, unreliable]
+        multi_label: false
+
+    - capability: detect
+      purpose: Identify key facts and claims in content.
+      domain: fact
+      risk: low
+      mutation: false
+      store_as: facts_out
+      input_bindings:
+        data: ${content_out.data}
+        pattern: factual_claim
+
+    - capability: compare
+      purpose: Cross-reference facts across sources.
+      domain: fact_consistency
+      risk: low
+      mutation: false
+      store_as: cross_ref_out
+      input_bindings:
+        options: ${facts_out.matches}
+        criteria:
+          - source_agreement
+          - recency
+          - specificity
+
+    - capability: integrate
+      purpose: Merge verified facts into coherent knowledge.
+      risk: low
+      mutation: false
+      store_as: integrated_knowledge_out
+      input_bindings:
+        sources: ${cross_ref_out.ranking}
+        strategy: weighted_merge
+        conflict_resolution: prefer_high_confidence
+
+    - capability: ground
+      purpose: Anchor all claims to source citations.
+      risk: low
+      mutation: false
+      store_as: grounded_out
+      input_bindings:
+        claim: ${integrated_knowledge_out.merged}
+        sources: ${content_out.data}
+        required_strength: moderate
+
+    - capability: generate
+      purpose: Synthesize research into user-friendly summary.
+      domain: summary
+      risk: low
+      mutation: false
+      store_as: summary_out
+      input_bindings:
+        specification:
+          type: research_summary
+          question: ${query}
+          findings: ${grounded_out}
+          format: ${output_format}
+        constraints:
+          max_length: ${max_length}
+          include_citations: true
+
+    - capability: audit
+      purpose: Record research session.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: information_research
+          query: ${query}
+          sources_consulted: ${web_search_out.total_count}
+          facts_extracted: ${facts_out.matches}
+
+  inputs:
+    query:
+      type: string
+      required: true
+      description: The research question
+    output_format:
+      type: string
+      default: narrative
+      enum: [narrative, bullet_points, table]
+    max_length:
+      type: integer
+      default: 500
+    profile:
+      type: object
+      ref: schemas/profiles/personal_assistant.yaml
+
+task_delegation:
+  goal: Decompose a complex task and delegate subtasks to appropriate services or people.
+  risk: medium
+  domain: personal-assistant
+  profile: schemas/profiles/personal_assistant.yaml
+  description: |
+    Task delegation workflow that breaks down user requests,
+    identifies appropriate executors (services or people),
+    and coordinates the delegation. All delegations require user approval.
+  success:
+    - Task decomposed into actionable subtasks
+    - Appropriate executors identified
+    - Delegation requests prepared for approval
+    - Progress tracking established
+  steps:
+    - capability: decompose
+      purpose: Break complex task into subtasks.
+      risk: low
+      mutation: false
+      store_as: subtasks_out
+      input_bindings:
+        problem: ${task.description}
+        max_depth: 2
+        strategy: action_decomposition
+
+    - capability: classify
+      purpose: Classify each subtask by required executor type.
+      risk: low
+      mutation: false
+      store_as: task_classification_out
+      input_bindings:
+        item: ${subtasks_out.subproblems}
+        taxonomy: [automated_service, human_assistant, user_action, ai_agent]
+        multi_label: false
+
+    - capability: search
+      purpose: Find available services or contacts for delegation.
+      risk: low
+      mutation: false
+      store_as: executor_search_out
+      input_bindings:
+        query: ${task_classification_out}
+        scope: [available_services, contacts, integrations]
+
+    - capability: compare
+      purpose: Rank potential executors by suitability.
+      domain: executor_selection
+      risk: low
+      mutation: false
+      store_as: executor_ranking_out
+      input_bindings:
+        options: ${executor_search_out.results}
+        criteria:
+          - capability_match
+          - availability
+          - past_performance
+          - cost
+
+    - capability: plan
+      purpose: Create delegation plan with dependencies.
+      risk: low
+      mutation: false
+      store_as: delegation_plan_out
+      input_bindings:
+        goal: complete_task
+        constraints:
+          deadline: ${task.deadline}
+          budget: ${task.budget}
+          dependencies: ${subtasks_out.dependencies}
+
+    - capability: generate
+      purpose: Create delegation request messages.
+      domain: delegation_request
+      risk: low
+      mutation: false
+      store_as: delegation_requests_out
+      input_bindings:
+        specification:
+          type: delegation_request
+          subtasks: ${delegation_plan_out.steps}
+          executors: ${executor_ranking_out.recommendation}
+          context: ${task.context}
+
+    - capability: checkpoint
+      purpose: Checkpoint before any delegation actions.
+      risk: low
+      mutation: true
+      store_as: checkpoint_out
+      input_bindings:
+        scope: delegation
+        label: "DEL-${task.id}-${timestamp}"
+
+    - capability: explain
+      purpose: Summarize delegation plan for user approval.
+      risk: low
+      mutation: false
+      store_as: explanation_out
+      input_bindings:
+        conclusion: ${delegation_plan_out}
+        audience: user
+        depth: detailed
+
+    - capability: audit
+      purpose: Record delegation planning session.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: delegation_planning
+          task_id: ${task.id}
+          subtasks_created: ${subtasks_out.subproblems}
+          delegations_proposed: ${delegation_requests_out.content}
+          checkpoint_id: ${checkpoint_out.checkpoint_id}
+
+  inputs:
+    task:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+        description: {type: string}
+        deadline: {type: string}
+        budget: {type: object}
+        context: {type: object}
+    profile:
+      type: object
+      ref: schemas/profiles/personal_assistant.yaml
+
+communication_drafting:
+  goal: Draft communications (email, message) based on user intent and context.
+  risk: medium
+  domain: personal-assistant
+  profile: schemas/profiles/personal_assistant.yaml
+  description: |
+    Communication drafting workflow that understands user intent,
+    retrieves relevant context, and generates appropriate messages.
+    All communications require user approval before sending.
+  success:
+    - User intent clearly understood
+    - Relevant context incorporated
+    - Appropriate tone and format applied
+    - Draft ready for user review
+  steps:
+    - capability: critique
+      purpose: Analyze user request for communication intent.
+      risk: low
+      mutation: false
+      store_as: intent_analysis_out
+      input_bindings:
+        target: ${request}
+        criteria:
+          - communication_goal
+          - recipient_relationship
+          - urgency_level
+          - formality_required
+
+    - capability: inquire
+      purpose: Clarify ambiguous aspects of the request.
+      risk: low
+      mutation: false
+      store_as: clarification_out
+      input_bindings:
+        ambiguous_input: ${request}
+        context: ${conversation_history}
+        max_questions: 2
+      gates:
+        - when: ${intent_analysis_out.confidence} > 0.85
+          action: skip
+          message: Intent is clear.
+
+    - capability: search
+      purpose: Find relevant prior communications with recipient.
+      risk: low
+      mutation: false
+      store_as: history_search_out
+      input_bindings:
+        query: ${recipient}
+        scope: communication_history
+        limit: 10
+
+    - capability: retrieve
+      purpose: Get recipient's contact information and preferences.
+      risk: low
+      mutation: false
+      store_as: recipient_info_out
+      input_bindings:
+        target: ${recipient}
+        format: contact_profile
+
+    - capability: recall
+      purpose: Retrieve user's communication style preferences.
+      risk: low
+      mutation: false
+      store_as: style_prefs_out
+      input_bindings:
+        key: communication_preferences
+        default: ${default_style}
+
+    - capability: generate
+      purpose: Draft the communication.
+      domain: communication
+      risk: low
+      mutation: false
+      store_as: draft_out
+      input_bindings:
+        specification:
+          type: ${communication_type}
+          recipient: ${recipient_info_out.data}
+          intent: ${intent_analysis_out}
+          tone: ${style_prefs_out.data.tone}
+          context: ${history_search_out.results}
+          key_points: ${request.key_points}
+        constraints:
+          max_length: ${max_length}
+          format: ${format}
+
+    - capability: critique
+      purpose: Review draft for tone, clarity, and completeness.
+      risk: low
+      mutation: false
+      store_as: draft_review_out
+      input_bindings:
+        target: ${draft_out.content}
+        criteria:
+          - tone_appropriateness
+          - clarity
+          - completeness
+          - grammar_spelling
+
+    - capability: transform
+      purpose: Apply corrections based on review if needed.
+      risk: low
+      mutation: false
+      store_as: revised_draft_out
+      input_bindings:
+        input: ${draft_out.content}
+        source_format: draft
+        target_format: polished
+        options:
+          corrections: ${draft_review_out.suggestions}
+      gates:
+        - when: ${draft_review_out.issues} == []
+          action: skip
+          message: Draft needs no revision.
+
+    - capability: checkpoint
+      purpose: Checkpoint before presenting draft.
+      risk: low
+      mutation: true
+      store_as: checkpoint_out
+      input_bindings:
+        scope: communication_draft
+        label: "COMM-${communication_type}-${timestamp}"
+
+    - capability: audit
+      purpose: Record communication drafting session.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: communication_draft
+          recipient: ${recipient}
+          communication_type: ${communication_type}
+          intent: ${intent_analysis_out}
+          checkpoint_id: ${checkpoint_out.checkpoint_id}
+
+  inputs:
+    request:
+      type: string
+      required: true
+      description: User's communication request
+    recipient:
+      type: string
+      required: true
+    communication_type:
+      type: string
+      enum: [email, slack_message, text, formal_letter]
+      default: email
+    conversation_history:
+      type: array
+      description: Recent conversation context
+    max_length:
+      type: integer
+      default: 300
+    format:
+      type: string
+      default: professional
+    default_style:
+      type: object
+      default:
+        tone: professional
+        formality: medium
+    profile:
+      type: object
+      ref: schemas/profiles/personal_assistant.yaml

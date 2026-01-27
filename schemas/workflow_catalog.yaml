@@ -1,6 +1,14 @@
 # Workflow Catalog (36-capability model)
 # Maps to capability_ontology.json
 #
+# Domain-specific workflows are in separate files:
+#   - schemas/workflows/manufacturing_workflows.yaml
+#   - schemas/workflows/personal_assistant_workflows.yaml
+#   - schemas/workflows/data_analysis_workflows.yaml
+#   - schemas/workflows/healthcare_workflows.yaml
+#
+# See docs/domains/ for domain documentation and customization guides.
+#
 # Capability Mapping (old → new):
 #   inspect → observe
 #   map-relationships → attribute

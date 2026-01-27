@@ -1,0 +1,83 @@
+# Manufacturing Domain Profile
+# Calibrated for industrial automation, production monitoring, and quality control.
+
+domain: manufacturing
+version: "1.0.0"
+description: |
+  Profile for manufacturing and industrial automation environments.
+  Emphasizes safety-critical operations, sensor data reliability,
+  and regulatory compliance (ISO, OSHA, FDA where applicable).
+
+trust_weights:
+  # Hardware sources (highest trust)
+  plc_system: 0.95        # Programmable Logic Controllers
+  scada_system: 0.93      # Supervisory Control and Data Acquisition
+  hardware_sensor: 0.92   # Direct sensor readings
+  mes_api: 0.90           # Manufacturing Execution System
+
+  # Enterprise sources
+  erp_system: 0.85        # Enterprise Resource Planning
+  quality_system: 0.88    # Quality Management System (QMS)
+  maintenance_system: 0.85 # CMMS data
+
+  # Human sources
+  operator_note: 0.75     # Production operator observations
+  engineer_assessment: 0.82 # Engineering evaluations
+  inspector_report: 0.88  # Quality inspector reports
+
+  # External sources
+  supplier_data: 0.70     # Supplier-provided specifications
+  vendor_manual: 0.80     # Equipment documentation
+  regulatory_standard: 0.95 # ISO/OSHA/FDA standards
+
+risk_thresholds:
+  auto_approve: low       # Only low-risk actions auto-approved
+  require_review: medium  # Medium+ requires human review
+  require_human: high     # High-risk requires human execution
+  block_autonomous:
+    - mutate              # Never autonomous state changes
+    - send                # Never autonomous external communications
+
+checkpoint_policy:
+  before_actuator_command: always   # Always checkpoint before machine control
+  before_process_change: always     # Always checkpoint before production changes
+  before_quality_decision: always   # Always checkpoint before accept/reject
+  before_maintenance_action: always # Always checkpoint before maintenance
+  before_parameter_update: high_risk # Checkpoint if parameter change is high-risk
+  during_batch_processing: medium_risk # Checkpoint at batch milestones
+
+evidence_policy:
+  required_anchor_types:
+    - sensor_reading
+    - system_log
+    - operator_confirmation
+    - timestamp
+  minimum_confidence: 0.85  # High confidence required for manufacturing
+  require_grounding:
+    - predict               # Predictions must be grounded
+    - detect                # Detections must have evidence
+    - classify              # Classifications need justification
+    - plan                  # Plans require traceable reasoning
+
+domain_sources:
+  - name: PLC/SCADA
+    type: sensor
+    default_trust: 0.94
+  - name: Quality System
+    type: database
+    default_trust: 0.88
+  - name: MES
+    type: api
+    default_trust: 0.90
+  - name: Operator Input
+    type: human
+    default_trust: 0.75
+  - name: Equipment Logs
+    type: system_log
+    default_trust: 0.90
+
+workflows:
+  - production_line_monitoring
+  - quality_control_loop
+  - predictive_maintenance
+  - supply_chain_sync

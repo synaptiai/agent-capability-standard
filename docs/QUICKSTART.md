@@ -187,10 +187,93 @@ Key observations:
 - **I/O schemas**: Typed contracts for inputs and outputs
 - **Evidence anchors**: Required in output for grounded agency
 
+## Step 6: Choose Your Domain (2 min)
+
+The framework includes domain-specific templates to accelerate adoption. Choose the domain closest to your use case:
+
+### Manufacturing
+For production monitoring, quality control, predictive maintenance, and supply chain.
+
+```bash
+# View the manufacturing profile
+cat schemas/profiles/manufacturing.yaml
+
+# Explore manufacturing workflows
+cat schemas/workflows/manufacturing_workflows.yaml
+```
+
+**Key characteristics:**
+- High trust for sensors (0.92-0.95)
+- Checkpoints before all actuator commands
+- Human required for all mutations
+
+**Documentation:** [docs/domains/manufacturing/](domains/manufacturing/README.md)
+
+### Personal Assistant
+For scheduling, research, task delegation, and communication drafting.
+
+```bash
+cat schemas/profiles/personal_assistant.yaml
+cat schemas/workflows/personal_assistant_workflows.yaml
+```
+
+**Key characteristics:**
+- Highest trust for user input (0.98)
+- Never auto-send communications
+- Learned preferences inform but don't override
+
+**Documentation:** [docs/domains/personal-assistant/](domains/personal-assistant/README.md)
+
+### Data Analysis
+For pipeline validation, anomaly investigation, reporting, and ML monitoring.
+
+```bash
+cat schemas/profiles/data_analysis.yaml
+cat schemas/workflows/data_analysis_workflows.yaml
+```
+
+**Key characteristics:**
+- High trust for certified data (0.95)
+- Required data lineage grounding
+- Statistical uncertainty in measurements
+
+**Documentation:** [docs/domains/data-analysis/](domains/data-analysis/README.md)
+
+### Healthcare (Clinical Decision Support)
+For patient monitoring, alert triage, care plan review, and handoffs.
+
+```bash
+cat schemas/profiles/healthcare.yaml
+cat schemas/workflows/healthcare_workflows.yaml
+```
+
+**Key characteristics:**
+- NO autonomous clinical actions
+- 7-year audit retention
+- All outputs include clinical disclaimers
+
+**Documentation:** [docs/domains/healthcare/](domains/healthcare/README.md)
+
+### Domain Selection Guide
+
+| If you're building... | Start with... |
+|-----------------------|---------------|
+| Factory automation agents | Manufacturing |
+| Personal productivity tools | Personal Assistant |
+| Data pipelines/ML systems | Data Analysis |
+| Clinical decision support | Healthcare |
+| Something else | Pick the closest, then customize |
+
+Each domain provides:
+- **Profile** — Pre-calibrated trust weights, risk thresholds, checkpoint policies
+- **Workflows** — Ready-to-use workflow patterns
+- **Documentation** — Customization and integration guidance
+
 ## What's Next?
 
 | Goal | Document |
 |------|----------|
+| Explore domain templates | [docs/domains/](domains/README.md) |
 | Build your own workflow | [TUTORIAL.md](TUTORIAL.md) |
 | Understand key terms | [GLOSSARY.md](GLOSSARY.md) |
 | Read the full spec | [STANDARD-v1.0.0.md](../spec/STANDARD-v1.0.0.md) |

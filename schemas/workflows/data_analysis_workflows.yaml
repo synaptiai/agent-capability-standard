@@ -1,0 +1,716 @@
+# Data Analysis Domain Workflows
+# Composed from 36 atomic capabilities
+# Profile: schemas/profiles/data_analysis.yaml
+
+data_pipeline_validation:
+  goal: Validate data pipeline outputs for quality, schema compliance, and statistical consistency.
+  risk: low
+  domain: data-analysis
+  profile: schemas/profiles/data_analysis.yaml
+  description: |
+    Data quality validation workflow for ETL/ELT pipeline outputs.
+    Checks schema conformance, statistical properties, and data lineage.
+    Produces validation report with pass/fail verdict.
+  success:
+    - Schema validation completed
+    - Statistical checks passed
+    - Data lineage verified
+    - Validation report generated
+  steps:
+    - capability: retrieve
+      purpose: Get pipeline output data for validation.
+      risk: low
+      mutation: false
+      store_as: pipeline_output_out
+      input_bindings:
+        target: ${pipeline.output_location}
+        format: ${pipeline.output_format}
+
+    - capability: retrieve
+      purpose: Get expected schema definition.
+      risk: low
+      mutation: false
+      store_as: schema_out
+      input_bindings:
+        target: ${pipeline.schema_registry}/${pipeline.schema_id}
+        format: json_schema
+
+    - capability: constrain
+      purpose: Validate data against schema constraints.
+      risk: low
+      mutation: false
+      store_as: schema_validation_out
+      input_bindings:
+        target: ${pipeline_output_out.data}
+        constraints:
+          - ${schema_out.data}
+        action_on_violation: log
+
+    - capability: measure
+      purpose: Calculate statistical summary of the data.
+      domain: statistics
+      risk: low
+      mutation: false
+      store_as: stats_out
+      input_bindings:
+        target: ${pipeline_output_out.data}
+        metric: descriptive_statistics
+        unit: per_column
+
+    - capability: retrieve
+      purpose: Get historical statistics for comparison.
+      risk: low
+      mutation: false
+      store_as: historical_stats_out
+      input_bindings:
+        target: ${pipeline.stats_baseline}
+        format: statistics_summary
+
+    - capability: compare
+      purpose: Compare current stats against historical baseline.
+      domain: statistical_drift
+      risk: low
+      mutation: false
+      store_as: drift_comparison_out
+      input_bindings:
+        options:
+          - ${stats_out}
+          - ${historical_stats_out.data}
+        criteria:
+          - mean_drift
+          - variance_change
+          - null_rate_change
+          - distribution_shift
+
+    - capability: detect
+      purpose: Detect anomalies in statistical properties.
+      domain: anomaly
+      risk: low
+      mutation: false
+      store_as: anomaly_out
+      input_bindings:
+        data: ${drift_comparison_out}
+        pattern: statistical_anomaly
+        threshold: ${pipeline.anomaly_threshold}
+
+    - capability: verify
+      purpose: Run data quality checks.
+      risk: low
+      mutation: false
+      store_as: dq_checks_out
+      input_bindings:
+        target: ${pipeline_output_out.data}
+        conditions:
+          - no_null_primary_keys
+          - referential_integrity
+          - value_ranges
+          - uniqueness_constraints
+
+    - capability: ground
+      purpose: Verify data lineage is complete.
+      risk: low
+      mutation: false
+      store_as: lineage_verification_out
+      input_bindings:
+        claim: data_has_complete_lineage
+        sources:
+          - ${pipeline.lineage_metadata}
+        required_strength: strong
+
+    - capability: classify
+      purpose: Classify overall validation result.
+      risk: low
+      mutation: false
+      store_as: validation_result_out
+      input_bindings:
+        item:
+          schema: ${schema_validation_out.compliant}
+          statistics: ${anomaly_out.detected}
+          quality: ${dq_checks_out.passed}
+          lineage: ${lineage_verification_out.grounded}
+        taxonomy: [pass, pass_with_warnings, fail]
+
+    - capability: generate
+      purpose: Create validation report.
+      domain: report
+      risk: low
+      mutation: false
+      store_as: report_out
+      input_bindings:
+        specification:
+          type: data_validation_report
+          pipeline_id: ${pipeline.id}
+          run_id: ${pipeline.run_id}
+          result: ${validation_result_out.labels[0]}
+          schema_issues: ${schema_validation_out.violations}
+          statistical_anomalies: ${anomaly_out.matches}
+          dq_failures: ${dq_checks_out.violations}
+
+    - capability: audit
+      purpose: Record validation execution.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: pipeline_validation
+          pipeline_id: ${pipeline.id}
+          run_id: ${pipeline.run_id}
+          result: ${validation_result_out.labels[0]}
+          timestamp: ${pipeline_output_out.timestamp}
+
+  inputs:
+    pipeline:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+        run_id: {type: string}
+        output_location: {type: string}
+        output_format: {type: string}
+        schema_registry: {type: string}
+        schema_id: {type: string}
+        stats_baseline: {type: string}
+        anomaly_threshold: {type: number, default: 2.5}
+        lineage_metadata: {type: object}
+    profile:
+      type: object
+      ref: schemas/profiles/data_analysis.yaml
+
+anomaly_investigation:
+  goal: Investigate detected anomalies to identify root cause and impact.
+  risk: low
+  domain: data-analysis
+  profile: schemas/profiles/data_analysis.yaml
+  description: |
+    Anomaly investigation workflow that drills down into detected
+    anomalies, identifies contributing factors, and produces
+    actionable insights for resolution.
+  success:
+    - Anomaly scope defined
+    - Contributing factors identified
+    - Root cause hypothesis generated
+    - Impact assessment completed
+  steps:
+    - capability: retrieve
+      purpose: Get detailed data around the anomaly.
+      risk: low
+      mutation: false
+      store_as: anomaly_data_out
+      input_bindings:
+        target: ${anomaly.data_source}
+        format: detailed_records
+        filter: ${anomaly.filter_criteria}
+
+    - capability: observe
+      purpose: Examine the anomalous data points in context.
+      risk: low
+      mutation: false
+      store_as: observation_out
+      input_bindings:
+        target: ${anomaly_data_out.data}
+        aspects: [distribution, temporal_pattern, correlations]
+
+    - capability: discover
+      purpose: Find patterns in the anomalous data.
+      risk: low
+      mutation: false
+      store_as: pattern_discovery_out
+      input_bindings:
+        data: ${anomaly_data_out.data}
+        constraints:
+          focus: ${anomaly.type}
+        method: unsupervised_clustering
+
+    - capability: attribute
+      purpose: Identify likely causes of the anomaly.
+      domain: causation
+      risk: low
+      mutation: false
+      store_as: attribution_out
+      input_bindings:
+        effect: ${anomaly}
+        candidates:
+          - data_source_change
+          - upstream_pipeline_issue
+          - schema_drift
+          - real_world_change
+          - measurement_error
+        context: ${observation_out.observation}
+
+    - capability: search
+      purpose: Search for related events or changes.
+      risk: low
+      mutation: false
+      store_as: related_events_out
+      input_bindings:
+        query:
+          time_range: ${anomaly.detection_time}
+          systems: ${anomaly.affected_systems}
+        scope: change_logs_and_incidents
+
+    - capability: compare
+      purpose: Compare anomalous period to normal baseline.
+      domain: period_comparison
+      risk: low
+      mutation: false
+      store_as: period_comparison_out
+      input_bindings:
+        options:
+          - ${anomaly_data_out.data}
+          - ${baseline_data}
+        criteria:
+          - value_distribution
+          - null_patterns
+          - record_counts
+          - key_metrics
+
+    - capability: measure
+      purpose: Quantify the impact of the anomaly.
+      domain: impact
+      risk: low
+      mutation: false
+      store_as: impact_out
+      input_bindings:
+        target: ${anomaly}
+        metric: business_impact
+        unit: ${impact_unit}
+
+    - capability: simulate
+      purpose: Project impact if anomaly continues unaddressed.
+      risk: low
+      mutation: false
+      store_as: projection_out
+      input_bindings:
+        scenario:
+          type: anomaly_continuation
+          anomaly: ${anomaly}
+          duration: ${projection_horizon}
+        initial_state: ${observation_out.observation}
+        steps: 10
+
+    - capability: plan
+      purpose: Generate remediation recommendations.
+      risk: low
+      mutation: false
+      store_as: remediation_plan_out
+      input_bindings:
+        goal: resolve_anomaly
+        constraints:
+          likely_cause: ${attribution_out.causes[0]}
+          available_actions: ${available_remediation_actions}
+
+    - capability: explain
+      purpose: Create investigation summary.
+      risk: low
+      mutation: false
+      store_as: summary_out
+      input_bindings:
+        conclusion:
+          anomaly: ${anomaly}
+          likely_cause: ${attribution_out.causes[0]}
+          impact: ${impact_out.value}
+          recommendation: ${remediation_plan_out.steps[0]}
+        audience: data_team
+        depth: detailed
+
+    - capability: audit
+      purpose: Record investigation.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: anomaly_investigation
+          anomaly_id: ${anomaly.id}
+          likely_cause: ${attribution_out.causes[0]}
+          impact_assessment: ${impact_out.value}
+          recommendations: ${remediation_plan_out.steps}
+
+  inputs:
+    anomaly:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+        type: {type: string}
+        data_source: {type: string}
+        filter_criteria: {type: object}
+        detection_time: {type: string}
+        affected_systems: {type: array}
+    baseline_data:
+      type: object
+      description: Normal baseline data for comparison
+    impact_unit:
+      type: string
+      default: revenue_impact
+    projection_horizon:
+      type: string
+      default: 7d
+    available_remediation_actions:
+      type: array
+    profile:
+      type: object
+      ref: schemas/profiles/data_analysis.yaml
+
+report_generation:
+  goal: Generate data-driven reports with visualizations and insights.
+  risk: low
+  domain: data-analysis
+  profile: schemas/profiles/data_analysis.yaml
+  description: |
+    Report generation workflow that queries data, computes metrics,
+    generates insights, and produces formatted reports.
+  success:
+    - Data retrieved and validated
+    - Metrics computed with confidence
+    - Insights generated and grounded
+    - Report formatted for audience
+  steps:
+    - capability: retrieve
+      purpose: Get report template and specifications.
+      risk: low
+      mutation: false
+      store_as: template_out
+      input_bindings:
+        target: ${report.template_id}
+        format: report_template
+
+    - capability: search
+      purpose: Query data sources for report metrics.
+      risk: low
+      mutation: false
+      store_as: data_query_out
+      input_bindings:
+        query: ${template_out.data.queries}
+        scope: ${report.data_sources}
+        limit: ${report.row_limit}
+
+    - capability: measure
+      purpose: Compute key metrics from retrieved data.
+      domain: kpi
+      risk: low
+      mutation: false
+      store_as: metrics_out
+      input_bindings:
+        target: ${data_query_out.results}
+        metric: ${template_out.data.metrics}
+
+    - capability: compare
+      purpose: Compare current metrics to benchmarks.
+      domain: benchmark
+      risk: low
+      mutation: false
+      store_as: benchmark_comparison_out
+      input_bindings:
+        options:
+          - ${metrics_out}
+          - ${report.benchmarks}
+        criteria:
+          - vs_target
+          - vs_previous_period
+          - vs_industry
+
+    - capability: detect
+      purpose: Identify notable trends and outliers.
+      domain: trend
+      risk: low
+      mutation: false
+      store_as: trends_out
+      input_bindings:
+        data: ${metrics_out}
+        pattern: significant_change
+        threshold: ${report.significance_threshold}
+
+    - capability: attribute
+      purpose: Identify factors driving key metric changes.
+      domain: driver
+      risk: low
+      mutation: false
+      store_as: drivers_out
+      input_bindings:
+        effect: ${trends_out.matches}
+        candidates: ${report.potential_drivers}
+        context: ${data_query_out.results}
+
+    - capability: predict
+      purpose: Forecast metrics for next period.
+      domain: metric_forecast
+      risk: low
+      mutation: false
+      store_as: forecast_out
+      input_bindings:
+        target: ${template_out.data.forecast_metrics}
+        horizon: ${report.forecast_horizon}
+        conditions: ${metrics_out}
+
+    - capability: ground
+      purpose: Anchor all insights to data evidence.
+      risk: low
+      mutation: false
+      store_as: grounded_insights_out
+      input_bindings:
+        claim:
+          trends: ${trends_out}
+          drivers: ${drivers_out}
+          forecast: ${forecast_out}
+        sources:
+          - ${data_query_out}
+          - ${metrics_out}
+        required_strength: moderate
+
+    - capability: generate
+      purpose: Create report content and visualizations.
+      domain: report
+      risk: low
+      mutation: false
+      store_as: report_content_out
+      input_bindings:
+        specification:
+          type: analytics_report
+          template: ${template_out.data}
+          metrics: ${metrics_out}
+          comparisons: ${benchmark_comparison_out}
+          insights: ${grounded_insights_out}
+          forecast: ${forecast_out}
+        format: ${report.output_format}
+
+    - capability: transform
+      purpose: Format report for target audience.
+      risk: low
+      mutation: false
+      store_as: formatted_report_out
+      input_bindings:
+        input: ${report_content_out.content}
+        source_format: raw_report
+        target_format: ${report.output_format}
+        options:
+          audience: ${report.audience}
+          branding: ${report.branding}
+
+    - capability: audit
+      purpose: Record report generation.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: report_generation
+          report_id: ${report.id}
+          template_id: ${report.template_id}
+          data_sources: ${report.data_sources}
+          generation_time: ${timestamp}
+
+  inputs:
+    report:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+        template_id: {type: string}
+        data_sources: {type: array}
+        row_limit: {type: integer, default: 100000}
+        benchmarks: {type: object}
+        significance_threshold: {type: number, default: 0.05}
+        potential_drivers: {type: array}
+        forecast_horizon: {type: string, default: "30d"}
+        output_format: {type: string, default: "pdf"}
+        audience: {type: string}
+        branding: {type: object}
+    profile:
+      type: object
+      ref: schemas/profiles/data_analysis.yaml
+
+model_monitoring:
+  goal: Monitor ML model performance and detect drift requiring intervention.
+  risk: medium
+  domain: data-analysis
+  profile: schemas/profiles/data_analysis.yaml
+  description: |
+    ML model monitoring workflow that tracks prediction performance,
+    detects data and concept drift, and triggers retraining alerts.
+  success:
+    - Model performance metrics computed
+    - Data drift detected or ruled out
+    - Concept drift assessed
+    - Intervention recommendations generated
+  steps:
+    - capability: receive
+      purpose: Ingest recent model predictions and actuals.
+      risk: low
+      mutation: false
+      store_as: predictions_out
+      input_bindings:
+        channel: model_predictions
+        filter:
+          model_id: ${model.id}
+          window: ${monitoring_window}
+
+    - capability: retrieve
+      purpose: Get model baseline performance metrics.
+      risk: low
+      mutation: false
+      store_as: baseline_out
+      input_bindings:
+        target: ${model.baseline_metrics}
+        format: model_performance
+
+    - capability: measure
+      purpose: Calculate current model performance metrics.
+      domain: model_performance
+      risk: low
+      mutation: false
+      store_as: current_performance_out
+      input_bindings:
+        target: ${predictions_out.data}
+        metric: ${model.performance_metrics}
+
+    - capability: compare
+      purpose: Compare current performance to baseline.
+      domain: performance_degradation
+      risk: low
+      mutation: false
+      store_as: performance_comparison_out
+      input_bindings:
+        options:
+          - ${current_performance_out}
+          - ${baseline_out.data}
+        criteria:
+          - accuracy_change
+          - precision_change
+          - recall_change
+          - f1_change
+
+    - capability: retrieve
+      purpose: Get input feature distributions from training.
+      risk: low
+      mutation: false
+      store_as: training_distributions_out
+      input_bindings:
+        target: ${model.training_stats}
+        format: feature_distributions
+
+    - capability: observe
+      purpose: Observe current input feature distributions.
+      risk: low
+      mutation: false
+      store_as: current_distributions_out
+      input_bindings:
+        target: ${predictions_out.data.features}
+        aspects: [distribution, statistics]
+
+    - capability: detect
+      purpose: Detect data drift in input features.
+      domain: data_drift
+      risk: low
+      mutation: false
+      store_as: data_drift_out
+      input_bindings:
+        data:
+          current: ${current_distributions_out.observation}
+          baseline: ${training_distributions_out.data}
+        pattern: distribution_shift
+        threshold: ${model.drift_threshold}
+
+    - capability: detect
+      purpose: Detect concept drift (prediction vs actual relationship change).
+      domain: concept_drift
+      risk: low
+      mutation: false
+      store_as: concept_drift_out
+      input_bindings:
+        data: ${performance_comparison_out}
+        pattern: concept_shift
+        threshold: ${model.concept_drift_threshold}
+
+    - capability: attribute
+      purpose: Identify features most contributing to drift.
+      domain: drift_attribution
+      risk: low
+      mutation: false
+      store_as: drift_attribution_out
+      input_bindings:
+        effect: ${data_drift_out.matches}
+        candidates: ${model.features}
+        context: ${current_distributions_out.observation}
+      gates:
+        - when: ${data_drift_out.detected} == false
+          action: skip
+          message: No data drift detected.
+
+    - capability: predict
+      purpose: Forecast future performance if no action taken.
+      domain: performance_trajectory
+      risk: low
+      mutation: false
+      store_as: performance_forecast_out
+      input_bindings:
+        target: model_performance
+        horizon: ${forecast_horizon}
+        conditions:
+          drift: ${data_drift_out}
+          current_performance: ${current_performance_out}
+
+    - capability: plan
+      purpose: Recommend intervention actions.
+      risk: low
+      mutation: false
+      store_as: intervention_plan_out
+      input_bindings:
+        goal: maintain_model_performance
+        constraints:
+          data_drift: ${data_drift_out.detected}
+          concept_drift: ${concept_drift_out.detected}
+          performance_degradation: ${performance_comparison_out}
+          available_actions: [retrain, recalibrate, feature_update, rollback]
+
+    - capability: generate
+      purpose: Create monitoring report.
+      domain: monitoring_report
+      risk: low
+      mutation: false
+      store_as: report_out
+      input_bindings:
+        specification:
+          type: model_monitoring_report
+          model_id: ${model.id}
+          performance: ${current_performance_out}
+          data_drift: ${data_drift_out}
+          concept_drift: ${concept_drift_out}
+          recommendations: ${intervention_plan_out.steps}
+
+    - capability: audit
+      purpose: Record monitoring cycle.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: model_monitoring
+          model_id: ${model.id}
+          performance_status: ${performance_comparison_out}
+          data_drift_detected: ${data_drift_out.detected}
+          concept_drift_detected: ${concept_drift_out.detected}
+          intervention_recommended: ${intervention_plan_out.steps[0]}
+
+  inputs:
+    model:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+        baseline_metrics: {type: string}
+        performance_metrics: {type: array}
+        training_stats: {type: string}
+        features: {type: array}
+        drift_threshold: {type: number, default: 0.1}
+        concept_drift_threshold: {type: number, default: 0.05}
+    monitoring_window:
+      type: string
+      default: "24h"
+    forecast_horizon:
+      type: string
+      default: "7d"
+    profile:
+      type: object
+      ref: schemas/profiles/data_analysis.yaml

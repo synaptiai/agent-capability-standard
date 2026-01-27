@@ -1,0 +1,723 @@
+# Healthcare Domain Workflows
+# Composed from 36 atomic capabilities
+# Profile: schemas/profiles/healthcare.yaml
+#
+# IMPORTANT: These workflows are for CLINICAL DECISION SUPPORT only.
+# All clinical decisions must be made by licensed healthcare professionals.
+# No autonomous clinical actions are permitted.
+
+patient_monitoring:
+  goal: Continuously monitor patient vital signs and generate clinician alerts.
+  risk: low
+  domain: healthcare
+  profile: schemas/profiles/healthcare.yaml
+  description: |
+    Patient monitoring workflow for clinical decision support.
+    Observes vital signs, detects concerning trends, and generates
+    alerts for clinician review. All clinical decisions remain with
+    licensed healthcare professionals.
+
+    NOTE: This is an ADVISORY system. No autonomous clinical actions.
+  success:
+    - Vital signs collected and validated
+    - Trends analyzed against patient baseline
+    - Concerning patterns flagged for clinician
+    - Alert generated with clinical context
+  steps:
+    - capability: receive
+      purpose: Ingest vital sign data from bedside monitors.
+      risk: low
+      mutation: false
+      store_as: vitals_out
+      input_bindings:
+        channel: patient_monitors
+        filter:
+          patient_id: ${patient.id}
+          signals: [heart_rate, blood_pressure, spo2, respiratory_rate, temperature]
+
+    - capability: retrieve
+      purpose: Get patient's baseline and clinical context.
+      risk: low
+      mutation: false
+      store_as: patient_context_out
+      input_bindings:
+        target: ${patient.id}
+        format: clinical_summary
+
+    - capability: transform
+      purpose: Normalize vital signs to standard units.
+      risk: low
+      mutation: false
+      store_as: normalized_vitals_out
+      input_bindings:
+        source: ${vitals_out.data}
+        target_schema: hl7_vital_signs
+
+    - capability: state
+      purpose: Build current patient physiological state.
+      risk: low
+      mutation: false
+      store_as: patient_state_out
+      input_bindings:
+        scope: patient_physiology
+        observations: ${normalized_vitals_out.output}
+
+    - capability: compare
+      purpose: Compare current vitals to patient baseline.
+      domain: vital_sign_deviation
+      risk: low
+      mutation: false
+      store_as: baseline_comparison_out
+      input_bindings:
+        options:
+          - ${patient_state_out.state}
+          - ${patient_context_out.data.baseline_vitals}
+        criteria:
+          - deviation_from_baseline
+          - rate_of_change
+          - clinical_significance
+
+    - capability: detect
+      purpose: Detect clinically significant patterns.
+      domain: clinical_pattern
+      risk: low
+      mutation: false
+      store_as: pattern_detection_out
+      input_bindings:
+        data: ${patient_state_out.state}
+        pattern: ${clinical_patterns}  # e.g., early warning scores
+        threshold: ${alert_threshold}
+
+    - capability: predict
+      purpose: Forecast vital sign trajectory (for clinician context).
+      domain: vital_trajectory
+      risk: low
+      mutation: false
+      store_as: trajectory_out
+      input_bindings:
+        target: vital_signs
+        horizon: 4h
+        conditions: ${patient_state_out.state}
+
+    - capability: classify
+      purpose: Classify alert severity level.
+      risk: low
+      mutation: false
+      store_as: severity_out
+      input_bindings:
+        item:
+          patterns: ${pattern_detection_out.matches}
+          trajectory: ${trajectory_out.prediction}
+        taxonomy: [routine, elevated, urgent, critical]
+      gates:
+        - when: ${pattern_detection_out.detected} == false
+          action: stop
+          message: Vitals within expected parameters.
+
+    - capability: ground
+      purpose: Anchor alert to clinical evidence.
+      risk: low
+      mutation: false
+      store_as: grounded_alert_out
+      input_bindings:
+        claim: ${severity_out.labels[0]}
+        sources:
+          - ${vitals_out}
+          - ${patient_context_out}
+          - ${pattern_detection_out}
+        required_strength: strong
+
+    - capability: generate
+      purpose: Create clinician alert with full context.
+      domain: clinical_alert
+      risk: low
+      mutation: false
+      store_as: alert_out
+      input_bindings:
+        specification:
+          type: clinical_alert
+          patient_id: ${patient.id}
+          severity: ${severity_out.labels[0]}
+          current_vitals: ${patient_state_out.state}
+          baseline_deviation: ${baseline_comparison_out}
+          detected_patterns: ${pattern_detection_out.matches}
+          trajectory: ${trajectory_out.prediction}
+          evidence: ${grounded_alert_out.evidence}
+          recommended_review_focus: ${pattern_detection_out.matches[0]}
+        constraints:
+          include_disclaimer: true
+          disclaimer: "For clinical decision support only. All decisions must be made by licensed clinicians."
+
+    - capability: checkpoint
+      purpose: Checkpoint before alert delivery.
+      risk: low
+      mutation: true
+      store_as: checkpoint_out
+      input_bindings:
+        scope: clinical_alert
+        label: "ALERT-${patient.id}-${timestamp}"
+
+    - capability: audit
+      purpose: Record monitoring cycle with full clinical audit trail.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: patient_monitoring_cycle
+          patient_id: ${patient.id}
+          vitals_captured: ${vitals_out.data}
+          patterns_detected: ${pattern_detection_out.detected}
+          alert_generated: ${alert_out.content}
+          severity: ${severity_out.labels[0]}
+          checkpoint_id: ${checkpoint_out.checkpoint_id}
+        retention: 2555d  # 7 years for medical records
+
+  inputs:
+    patient:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+    clinical_patterns:
+      type: array
+      description: Clinical patterns to detect (e.g., Early Warning Score)
+      default: [mews, news2, sepsis_screen]
+    alert_threshold:
+      type: number
+      default: 3
+    profile:
+      type: object
+      ref: schemas/profiles/healthcare.yaml
+
+clinical_alert_triage:
+  goal: Triage incoming clinical alerts and route to appropriate care team.
+  risk: low
+  domain: healthcare
+  profile: schemas/profiles/healthcare.yaml
+  description: |
+    Alert triage workflow for clinical decision support.
+    Analyzes alert context, assesses urgency, and prepares
+    routing recommendations. All routing decisions are advisory.
+
+    NOTE: This is an ADVISORY system. Final triage decisions
+    are made by clinical staff.
+  success:
+    - Alert context fully gathered
+    - Urgency assessed with clinical evidence
+    - Routing recommendation prepared
+    - Care team notification drafted
+  steps:
+    - capability: retrieve
+      purpose: Get full alert details and patient context.
+      risk: low
+      mutation: false
+      store_as: alert_context_out
+      input_bindings:
+        target: ${alert.id}
+        format: full_alert
+
+    - capability: retrieve
+      purpose: Get patient's current care plan and team.
+      risk: low
+      mutation: false
+      store_as: care_plan_out
+      input_bindings:
+        target: ${alert.patient_id}
+        format: care_plan
+
+    - capability: search
+      purpose: Find similar historical alerts for this patient.
+      risk: low
+      mutation: false
+      store_as: alert_history_out
+      input_bindings:
+        query:
+          patient_id: ${alert.patient_id}
+          alert_type: ${alert.type}
+        scope: clinical_alerts
+        limit: 10
+
+    - capability: compare
+      purpose: Compare to similar historical alerts.
+      domain: alert_similarity
+      risk: low
+      mutation: false
+      store_as: historical_comparison_out
+      input_bindings:
+        options:
+          - ${alert_context_out.data}
+          - ${alert_history_out.results}
+        criteria:
+          - severity_vs_history
+          - response_patterns
+          - escalation_history
+
+    - capability: classify
+      purpose: Classify alert acuity level.
+      risk: low
+      mutation: false
+      store_as: acuity_out
+      input_bindings:
+        item: ${alert_context_out.data}
+        taxonomy: [immediate, emergent, urgent, less_urgent, non_urgent]
+
+    - capability: detect
+      purpose: Detect alert fatigue risk indicators.
+      domain: alert_fatigue
+      risk: low
+      mutation: false
+      store_as: fatigue_risk_out
+      input_bindings:
+        data:
+          alert: ${alert_context_out.data}
+          history: ${alert_history_out.results}
+        pattern: alert_fatigue_indicators
+
+    - capability: compare
+      purpose: Rank potential responders by appropriateness.
+      domain: responder_selection
+      risk: low
+      mutation: false
+      store_as: responder_ranking_out
+      input_bindings:
+        options: ${care_plan_out.data.care_team}
+        criteria:
+          - role_match
+          - current_availability
+          - patient_familiarity
+          - workload
+
+    - capability: plan
+      purpose: Recommend routing and response approach.
+      risk: low
+      mutation: false
+      store_as: routing_plan_out
+      input_bindings:
+        goal: appropriate_alert_response
+        constraints:
+          acuity: ${acuity_out.labels[0]}
+          fatigue_risk: ${fatigue_risk_out.detected}
+          available_responders: ${responder_ranking_out.ranking}
+
+    - capability: generate
+      purpose: Create routing recommendation and notification draft.
+      domain: clinical_notification
+      risk: low
+      mutation: false
+      store_as: notification_out
+      input_bindings:
+        specification:
+          type: alert_routing_recommendation
+          alert: ${alert_context_out.data}
+          recommended_responder: ${responder_ranking_out.recommendation}
+          acuity: ${acuity_out.labels[0]}
+          routing_rationale: ${routing_plan_out}
+        constraints:
+          include_disclaimer: true
+
+    - capability: checkpoint
+      purpose: Checkpoint triage decision.
+      risk: low
+      mutation: true
+      store_as: checkpoint_out
+      input_bindings:
+        scope: alert_triage
+        label: "TRIAGE-${alert.id}-${timestamp}"
+
+    - capability: audit
+      purpose: Record triage decision with full trail.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: alert_triage
+          alert_id: ${alert.id}
+          patient_id: ${alert.patient_id}
+          acuity_classification: ${acuity_out.labels[0]}
+          recommended_responder: ${responder_ranking_out.recommendation}
+          routing_plan: ${routing_plan_out.steps}
+          checkpoint_id: ${checkpoint_out.checkpoint_id}
+        retention: 2555d
+
+  inputs:
+    alert:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+        patient_id: {type: string}
+        type: {type: string}
+    profile:
+      type: object
+      ref: schemas/profiles/healthcare.yaml
+
+care_plan_review:
+  goal: Review and synthesize patient care plan with recent clinical data.
+  risk: low
+  domain: healthcare
+  profile: schemas/profiles/healthcare.yaml
+  description: |
+    Care plan review workflow for clinical decision support.
+    Synthesizes current patient data, identifies potential issues,
+    and prepares summary for clinician review.
+
+    NOTE: All care plan decisions are made by licensed clinicians.
+  success:
+    - Patient data synthesized from multiple sources
+    - Potential issues identified
+    - Care plan alignment assessed
+    - Summary prepared for clinician review
+  steps:
+    - capability: retrieve
+      purpose: Get current care plan.
+      risk: low
+      mutation: false
+      store_as: care_plan_out
+      input_bindings:
+        target: ${patient.id}
+        format: care_plan
+
+    - capability: search
+      purpose: Gather recent clinical notes.
+      risk: low
+      mutation: false
+      store_as: notes_out
+      input_bindings:
+        query:
+          patient_id: ${patient.id}
+          date_range: ${review_window}
+        scope: clinical_notes
+        limit: 50
+
+    - capability: retrieve
+      purpose: Get recent lab results.
+      risk: low
+      mutation: false
+      store_as: labs_out
+      input_bindings:
+        target: ${patient.id}
+        format: lab_results
+        range: ${review_window}
+
+    - capability: retrieve
+      purpose: Get current medications.
+      risk: low
+      mutation: false
+      store_as: medications_out
+      input_bindings:
+        target: ${patient.id}
+        format: medication_list
+
+    - capability: integrate
+      purpose: Merge clinical data into unified patient view.
+      risk: low
+      mutation: false
+      store_as: integrated_view_out
+      input_bindings:
+        sources:
+          - ${care_plan_out.data}
+          - ${notes_out.results}
+          - ${labs_out.data}
+          - ${medications_out.data}
+        strategy: temporal_merge
+        conflict_resolution: prefer_recent
+
+    - capability: detect
+      purpose: Detect potential drug interactions.
+      domain: drug_interaction
+      risk: low
+      mutation: false
+      store_as: interactions_out
+      input_bindings:
+        data: ${medications_out.data}
+        pattern: interaction_risk
+
+    - capability: compare
+      purpose: Compare lab trends to care plan targets.
+      domain: care_plan_alignment
+      risk: low
+      mutation: false
+      store_as: alignment_out
+      input_bindings:
+        options:
+          - ${labs_out.data}
+          - ${care_plan_out.data.targets}
+        criteria:
+          - target_achievement
+          - trend_direction
+          - rate_of_change
+
+    - capability: detect
+      purpose: Identify care gaps or overdue items.
+      domain: care_gap
+      risk: low
+      mutation: false
+      store_as: care_gaps_out
+      input_bindings:
+        data: ${care_plan_out.data}
+        pattern: overdue_or_missing
+        threshold: ${gap_threshold_days}
+
+    - capability: critique
+      purpose: Assess care plan for potential improvements.
+      risk: low
+      mutation: false
+      store_as: plan_critique_out
+      input_bindings:
+        target: ${care_plan_out.data}
+        criteria:
+          - guideline_alignment
+          - completeness
+          - patient_specific_factors
+        context: ${integrated_view_out.merged}
+
+    - capability: ground
+      purpose: Anchor findings to clinical evidence.
+      risk: low
+      mutation: false
+      store_as: grounded_findings_out
+      input_bindings:
+        claim:
+          interactions: ${interactions_out}
+          alignment: ${alignment_out}
+          gaps: ${care_gaps_out}
+          critique: ${plan_critique_out}
+        sources:
+          - ${labs_out}
+          - ${medications_out}
+          - ${notes_out}
+        required_strength: strong
+
+    - capability: explain
+      purpose: Generate care plan review summary for clinician.
+      risk: low
+      mutation: false
+      store_as: summary_out
+      input_bindings:
+        conclusion: ${grounded_findings_out}
+        audience: attending_physician
+        depth: comprehensive
+        constraints:
+          include_disclaimer: true
+          highlight_actionable: true
+
+    - capability: audit
+      purpose: Record care plan review.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: care_plan_review
+          patient_id: ${patient.id}
+          findings_summary: ${summary_out.explanation}
+          interactions_detected: ${interactions_out.detected}
+          care_gaps_found: ${care_gaps_out.detected}
+        retention: 2555d
+
+  inputs:
+    patient:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+    review_window:
+      type: string
+      default: "7d"
+    gap_threshold_days:
+      type: integer
+      default: 3
+    profile:
+      type: object
+      ref: schemas/profiles/healthcare.yaml
+
+handoff_preparation:
+  goal: Prepare comprehensive patient handoff documentation for care transitions.
+  risk: low
+  domain: healthcare
+  profile: schemas/profiles/healthcare.yaml
+  description: |
+    Handoff preparation workflow for care transitions.
+    Synthesizes patient information, identifies critical items,
+    and prepares structured handoff documentation.
+
+    NOTE: Final handoff communication is between clinical staff.
+  success:
+    - Patient status summarized comprehensively
+    - Critical items highlighted
+    - Pending tasks identified
+    - Structured handoff document prepared
+  steps:
+    - capability: retrieve
+      purpose: Get patient demographic and admission info.
+      risk: low
+      mutation: false
+      store_as: patient_info_out
+      input_bindings:
+        target: ${patient.id}
+        format: patient_demographics
+
+    - capability: retrieve
+      purpose: Get current care plan and active problems.
+      risk: low
+      mutation: false
+      store_as: care_plan_out
+      input_bindings:
+        target: ${patient.id}
+        format: care_plan_summary
+
+    - capability: search
+      purpose: Gather clinical notes from current shift.
+      risk: low
+      mutation: false
+      store_as: shift_notes_out
+      input_bindings:
+        query:
+          patient_id: ${patient.id}
+          date_range: ${shift_window}
+        scope: clinical_notes
+
+    - capability: retrieve
+      purpose: Get current vital signs and trends.
+      risk: low
+      mutation: false
+      store_as: vitals_out
+      input_bindings:
+        target: ${patient.id}
+        format: vital_signs_summary
+        range: ${shift_window}
+
+    - capability: retrieve
+      purpose: Get pending orders and tasks.
+      risk: low
+      mutation: false
+      store_as: pending_tasks_out
+      input_bindings:
+        target: ${patient.id}
+        format: pending_orders
+
+    - capability: search
+      purpose: Find any recent alerts or events.
+      risk: low
+      mutation: false
+      store_as: events_out
+      input_bindings:
+        query:
+          patient_id: ${patient.id}
+          date_range: ${shift_window}
+        scope: clinical_events_and_alerts
+
+    - capability: integrate
+      purpose: Merge all patient data for handoff.
+      risk: low
+      mutation: false
+      store_as: integrated_handoff_out
+      input_bindings:
+        sources:
+          - ${patient_info_out.data}
+          - ${care_plan_out.data}
+          - ${shift_notes_out.results}
+          - ${vitals_out.data}
+          - ${pending_tasks_out.data}
+          - ${events_out.results}
+        strategy: structured_merge
+        conflict_resolution: prefer_recent
+
+    - capability: classify
+      purpose: Classify patient acuity for handoff.
+      risk: low
+      mutation: false
+      store_as: acuity_out
+      input_bindings:
+        item: ${integrated_handoff_out.merged}
+        taxonomy: [stable, guarded, critical]
+
+    - capability: detect
+      purpose: Identify critical items requiring emphasis.
+      domain: critical_item
+      risk: low
+      mutation: false
+      store_as: critical_items_out
+      input_bindings:
+        data: ${integrated_handoff_out.merged}
+        pattern: critical_for_handoff
+
+    - capability: compare
+      purpose: Rank pending tasks by urgency.
+      domain: task_urgency
+      risk: low
+      mutation: false
+      store_as: task_priority_out
+      input_bindings:
+        options: ${pending_tasks_out.data}
+        criteria:
+          - time_sensitivity
+          - clinical_importance
+          - dependency
+
+    - capability: generate
+      purpose: Create structured handoff document (SBAR format).
+      domain: handoff_document
+      risk: low
+      mutation: false
+      store_as: handoff_doc_out
+      input_bindings:
+        specification:
+          type: sbar_handoff
+          patient: ${patient_info_out.data}
+          situation: ${acuity_out.labels[0]}
+          background: ${care_plan_out.data}
+          assessment:
+            vitals: ${vitals_out.data}
+            events: ${events_out.results}
+            notes: ${shift_notes_out.results}
+          recommendation:
+            critical_items: ${critical_items_out.matches}
+            pending_tasks: ${task_priority_out.ranking}
+        format: sbar
+
+    - capability: checkpoint
+      purpose: Checkpoint handoff preparation.
+      risk: low
+      mutation: true
+      store_as: checkpoint_out
+      input_bindings:
+        scope: handoff_preparation
+        label: "HANDOFF-${patient.id}-${timestamp}"
+
+    - capability: audit
+      purpose: Record handoff preparation.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: handoff_preparation
+          patient_id: ${patient.id}
+          acuity: ${acuity_out.labels[0]}
+          critical_items_count: ${critical_items_out.matches.length}
+          pending_tasks_count: ${pending_tasks_out.data.length}
+          handoff_from: ${shift_info.outgoing_provider}
+          handoff_to: ${shift_info.incoming_provider}
+          checkpoint_id: ${checkpoint_out.checkpoint_id}
+        retention: 2555d
+
+  inputs:
+    patient:
+      type: object
+      required: true
+      properties:
+        id: {type: string}
+    shift_window:
+      type: string
+      default: "12h"
+    shift_info:
+      type: object
+      properties:
+        outgoing_provider: {type: string}
+        incoming_provider: {type: string}
+    profile:
+      type: object
+      ref: schemas/profiles/healthcare.yaml
