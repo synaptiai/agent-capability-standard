@@ -248,8 +248,8 @@ Keep 3.
 | EXECUTE | 3 | execute, mutate, send |
 | VERIFY | 5 | verify, checkpoint, rollback, constrain, audit |
 | REMEMBER | 2 | persist, recall |
-| COORDINATE | 3 | delegate, synchronize, invoke |
-| **TOTAL** | **35** | |
+| COORDINATE | 4 | delegate, synchronize, invoke, inquire |
+| **TOTAL** | **36** | |
 
 ### 2.2 Changes from Previous 36
 
@@ -392,12 +392,13 @@ REMEMBER (2)
 ├── persist      # Store durably
 └── recall       # Retrieve stored
 
-COORDINATE (3)
+COORDINATE (4)
 ├── delegate     # Assign task to another agent
 ├── synchronize  # Achieve state agreement
-└── invoke       # Execute workflow
+├── invoke       # Execute workflow
+└── inquire      # Request information from another agent
 
-TOTAL: 35 CAPABILITIES
+TOTAL: 36 CAPABILITIES
 ```
 
 ### 4.2 Layer Names
@@ -477,9 +478,9 @@ TOTAL: 35 CAPABILITIES
 
 ## 7. Conclusion
 
-### The Reassessed 35 Capabilities
+### The Reassessed 36 Capabilities
 
-This first-principles reassessment confirms **35 capabilities** with:
+This first-principles reassessment confirms **36 capabilities** with:
 
 1. **Simpler names**: `state` not `world-state`, `observe` not `inspect`
 2. **Clearer semantics**: `attribute` for cause-effect, `mutate` for state changes

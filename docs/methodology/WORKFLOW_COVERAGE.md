@@ -22,7 +22,7 @@ This document tracks which capabilities are exercised by reference workflows, id
 | Reference Workflows | 5 |
 | Total Workflow Steps | 51 |
 
-**Note**: The 35-capability model consolidates domain-specific variants into parameterized atomic capabilities (e.g., `detect` with `domain: anomaly` instead of `detect-anomaly`).
+**Note**: The 36-capability model consolidates domain-specific variants into parameterized atomic capabilities (e.g., `detect` with `domain: anomaly` instead of `detect-anomaly`).
 
 ---
 
@@ -147,8 +147,8 @@ This document tracks which capabilities are exercised by reference workflows, id
 | EXECUTE | 3 | 2 | 67% |
 | VERIFY | 5 | 5 | 100% |
 | REMEMBER | 2 | 0 | 0% |
-| COORDINATE | 3 | 1 | 33% |
-| **TOTAL** | **35** | **29** | **83%** |
+| COORDINATE | 4 | 1 | 25% |
+| **TOTAL** | **36** | **29** | **81%** |
 
 ---
 
@@ -177,7 +177,7 @@ This document tracks which capabilities are exercised by reference workflows, id
 
 | Layer | Coverage | Capabilities Needed | Suggested Workflows |
 |-------|----------|---------------------|---------------------|
-| COORDINATE | 33% | delegate, synchronize | Multi-agent collaboration, Parallel processing |
+| COORDINATE | 25% | delegate, synchronize, inquire | Multi-agent collaboration, Parallel processing |
 
 ### Medium Priority (50-80% coverage)
 
@@ -211,19 +211,19 @@ Implementing these 2 workflows would achieve **100% coverage** (35/35).
 | Layers with 0% coverage | 2 | 1 |
 | Layers with 100% coverage | 1 | 6 |
 
-The 35-capability model achieves **higher coverage with fewer primitives** because domain parameterization eliminates redundant variants.
+The 36-capability model achieves **higher coverage with fewer primitives** because domain parameterization eliminates redundant variants.
 
 ---
 
 ## 8. Conclusion
 
-Current coverage is **29/35 (83%)**. This indicates:
+Current coverage is **29/36 (81%)**. This indicates:
 
 1. **Strong foundation**: 6 of 9 layers have 100% coverage
-2. **Focused gaps**: Only 6 capabilities remain unused
+2. **Focused gaps**: Only 7 capabilities remain unused
 3. **Clear path to 100%**: Two targeted workflows can close the gap
 
-The [Extension Governance](EXTENSION_GOVERNANCE.md) process includes usage requirements, which ensures any proposed capability #36 must demonstrate coverage gaps that existing capabilities cannot address.
+The [Extension Governance](EXTENSION_GOVERNANCE.md) process includes usage requirements, which ensures any proposed new capability must demonstrate coverage gaps that existing capabilities cannot address.
 
 ---
 
@@ -232,4 +232,4 @@ The [Extension Governance](EXTENSION_GOVERNANCE.md) process includes usage requi
 - [GitHub Issue #12: Domain-specific workflow templates](https://github.com/synaptiai/agent-capability-standard/issues/12)
 - [EXTENSION_GOVERNANCE.md](EXTENSION_GOVERNANCE.md) — Capability tier definitions
 - `schemas/workflow_catalog.yaml` — Reference workflow definitions
-- `schemas/capability_ontology.json` — 35-capability ontology
+- `schemas/capability_ontology.json` — 36-capability ontology

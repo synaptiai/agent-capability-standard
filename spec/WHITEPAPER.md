@@ -172,7 +172,7 @@ We organize capabilities into 9 cognitive layers:
 | EXECUTE | Change the world | Yes | 3 |
 | VERIFY | Ensure correctness | Varies | 5 |
 | REMEMBER | Persist state | Varies | 2 |
-| COORDINATE | Multi-agent | Varies | 3 |
+| COORDINATE | Multi-agent | Varies | 4 |
 
 This organization provides several benefits:
 - **Risk assessment**: ACTION layer capabilities are inherently higher risk
@@ -639,17 +639,18 @@ Production agents require architecture, not vibes. This standard provides that a
 
 ## Appendix A: Capability Count by Layer
 
-| Layer | Count | Examples |
-|-------|-------|----------|
-| PERCEPTION | 4 | inspect, search, retrieve, receive |
-| MODELING | 45 | detect-*, identify-*, estimate-*, world-state |
-| REASONING | 20 | compare-*, plan, decide, critique |
-| ACTION | 12 | act-plan, generate-*, transform, send |
-| SAFETY | 7 | verify, checkpoint, rollback, audit, constrain, mitigate, improve |
-| META | 6 | discover-*, prioritize |
-| MEMORY | 2 | persist, recall |
-| COORDINATION | 3 | delegate, synchronize, invoke-workflow |
-| **Total** | **99** | |
+| Layer | Count | Capabilities |
+|-------|-------|--------------|
+| PERCEIVE | 4 | retrieve, search, observe, receive |
+| UNDERSTAND | 6 | detect, classify, measure, predict, compare, discover |
+| REASON | 4 | plan, decompose, critique, explain |
+| MODEL | 5 | state, transition, attribute, ground, simulate |
+| SYNTHESIZE | 3 | generate, transform, integrate |
+| EXECUTE | 3 | execute, mutate, send |
+| VERIFY | 5 | verify, checkpoint, rollback, constrain, audit |
+| REMEMBER | 2 | persist, recall |
+| COORDINATE | 4 | delegate, synchronize, invoke, inquire |
+| **Total** | **36** | |
 
 ## Appendix B: Workflow Catalog
 

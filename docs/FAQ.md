@@ -361,7 +361,7 @@ Trust scores combine:
 - **Recency**: Time decay with configurable half-life
 - **Field-specific authority**: Sources may be authoritative for specific fields
 
-See `schemas/trust_policy.yaml` for configuration.
+See `schemas/authority_trust_model.yaml` for configuration.
 
 ---
 

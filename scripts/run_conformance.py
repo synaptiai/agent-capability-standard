@@ -7,7 +7,9 @@ The validator expects fixed paths relative to the project root,
 so we temporarily swap `schemas/workflow_catalog.yaml` with fixture content.
 """
 
-import json, subprocess, sys
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,8 +29,8 @@ def run_fixture(name: str, path: Path) -> dict:
     finally:
         CAT.write_text(backup, encoding="utf-8")
 
-def main():
-    results=[]
+def main() -> None:
+    results = []
     failed=0
     for name, meta in EXPECT.items():
         path = FIX / f"{name}.workflow_catalog.yaml"

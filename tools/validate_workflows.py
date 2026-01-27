@@ -35,10 +35,16 @@ Usage:
 """
 
 from __future__ import annotations
-import json, sys, re, argparse, difflib
+
+import argparse
+import difflib
+import json
+import re
+import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
 import yaml
-from typing import Any, Dict, Optional, Tuple, List
 
 ROOT = Path(__file__).resolve().parents[1]
 ONTO = ROOT / "schemas" / "capability_ontology.json"
@@ -52,91 +58,101 @@ REF_RE = re.compile(r"\$\{([^}]+)\}")
 # -------------------- Helpers: type grammar --------------------
 
 def split_top_level(s: str, sep: str) -> List[str]:
-    out=[]; depth=0; cur=[]
+    out: List[str] = []
+    depth = 0
+    cur: List[str] = []
     for ch in s:
-        if ch=='<': depth += 1
-        elif ch=='>': depth -= 1
-        if ch==sep and depth==0:
-            out.append(''.join(cur).strip()); cur=[]
+        if ch == '<':
+            depth += 1
+        elif ch == '>':
+            depth -= 1
+        if ch == sep and depth == 0:
+            out.append(''.join(cur).strip())
+            cur = []
         else:
             cur.append(ch)
-    if cur: out.append(''.join(cur).strip())
+    if cur:
+        out.append(''.join(cur).strip())
     return out
 
 def parse_type(t: str) -> Dict[str, Any]:
-    t=(t or '').strip()
+    t = (t or '').strip()
     if not t:
-        return {'kind':'unknown'}
+        return {'kind': 'unknown'}
     if t.startswith('nullable<') and t.endswith('>'):
-        return {'kind':'nullable','of': parse_type(t[len('nullable<'):-1])}
+        return {'kind': 'nullable', 'of': parse_type(t[len('nullable<'):-1])}
     if t.startswith('array<') and t.endswith('>'):
-        return {'kind':'array','items': parse_type(t[len('array<'):-1])}
+        return {'kind': 'array', 'items': parse_type(t[len('array<'):-1])}
     if t.startswith('map<') and t.endswith('>'):
-        inner=t[len('map<'):-1]
-        parts=split_top_level(inner, ',')
-        if len(parts)==2:
-            return {'kind':'map','key': parse_type(parts[0]), 'value': parse_type(parts[1])}
-        return {'kind':'map','key':{'kind':'unknown'},'value':{'kind':'unknown'}}
-    if t in {'string','number','boolean','object'}:
-        return {'kind':t}
-    return {'kind':'unknown','raw':t}
+        inner = t[len('map<'):-1]
+        parts = split_top_level(inner, ',')
+        if len(parts) == 2:
+            return {'kind': 'map', 'key': parse_type(parts[0]), 'value': parse_type(parts[1])}
+        return {'kind': 'map', 'key': {'kind': 'unknown'}, 'value': {'kind': 'unknown'}}
+    if t in {'string', 'number', 'boolean', 'object'}:
+        return {'kind': t}
+    return {'kind': 'unknown', 'raw': t}
 
 def type_to_str(t: Dict[str, Any]) -> str:
-    k=t.get('kind','unknown')
-    if k=='array': return f"array<{type_to_str(t.get('items',{}))}>"
-    if k=='nullable': return f"nullable<{type_to_str(t.get('of',{}))}>"
-    if k=='map': return f"map<{type_to_str(t.get('key',{}))},{type_to_str(t.get('value',{}))}>"
-    if k=='union':
-        opts=','.join(type_to_str(x) for x in t.get('options',[]))
+    k = t.get('kind', 'unknown')
+    if k == 'array':
+        return f"array<{type_to_str(t.get('items', {}))}>"
+    if k == 'nullable':
+        return f"nullable<{type_to_str(t.get('of', {}))}>"
+    if k == 'map':
+        return f"map<{type_to_str(t.get('key', {}))},{type_to_str(t.get('value', {}))}>"
+    if k == 'union':
+        opts = ','.join(type_to_str(x) for x in t.get('options', []))
         return f"union<{opts}>"
     return k
 
 def schema_type(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
     """Return (type_ast, ambiguous)."""
     if not isinstance(schema, dict):
-        return ({'kind':'unknown'}, True)
-    for comb in ('oneOf','anyOf','allOf'):
+        return ({'kind': 'unknown'}, True)
+    for comb in ('oneOf', 'anyOf', 'allOf'):
         if comb in schema:
-            opts=[]
-            for o in schema.get(comb,[]) or []:
-                ot,_amb = schema_type(o)
+            opts = []
+            for o in schema.get(comb, []) or []:
+                ot, _ = schema_type(o)
                 opts.append(ot)
-            return ({'kind':'union','options':opts,'via':comb}, True)
-    t=schema.get('type')
+            return ({'kind': 'union', 'options': opts, 'via': comb}, True)
+    t = schema.get('type')
     if isinstance(t, list):
-        non_null=[x for x in t if x!='null']
-        if len(non_null)==1 and 'null' in t:
-            return ({'kind':'nullable','of':{'kind':non_null[0]}}, False)
-        return ({'kind':'union','options':[{'kind':x} for x in non_null]}, True)
-    if t=='array':
-        it, amb = schema_type(schema.get('items',{}) or {})
-        return ({'kind':'array','items':it}, amb or (it.get('kind')=='unknown'))
-    if t in {'string','number','boolean','object'}:
-        return ({'kind':t}, False)
+        non_null = [x for x in t if x != 'null']
+        if len(non_null) == 1 and 'null' in t:
+            return ({'kind': 'nullable', 'of': {'kind': non_null[0]}}, False)
+        return ({'kind': 'union', 'options': [{'kind': x} for x in non_null]}, True)
+    if t == 'array':
+        it, amb = schema_type(schema.get('items', {}) or {})
+        return ({'kind': 'array', 'items': it}, amb or (it.get('kind') == 'unknown'))
+    if t in {'string', 'number', 'boolean', 'object'}:
+        return ({'kind': t}, False)
     if 'properties' in schema and isinstance(schema.get('properties'), dict):
-        return ({'kind':'object'}, False)
+        return ({'kind': 'object'}, False)
     if 'additionalProperties' in schema and isinstance(schema['additionalProperties'], dict):
         vt, amb = schema_type(schema['additionalProperties'])
-        return ({'kind':'map','key':{'kind':'string'},'value':vt}, amb or (vt.get('kind')=='unknown'))
-    return ({'kind':'unknown'}, True)
+        return ({'kind': 'map', 'key': {'kind': 'string'}, 'value': vt}, amb or (vt.get('kind') == 'unknown'))
+    return ({'kind': 'unknown'}, True)
+
 
 def is_type_compatible(expected: Dict[str, Any], actual: Dict[str, Any]) -> bool:
     ek, ak = expected.get('kind'), actual.get('kind')
-    if ek=='unknown' or ak=='unknown':
+    if ek == 'unknown' or ak == 'unknown':
         return True
-    if ek=='union':
-        return any(is_type_compatible(opt, actual) for opt in expected.get('options',[]))
-    if ak=='union':
-        return any(is_type_compatible(expected, opt) for opt in actual.get('options',[]))
-    if ek=='nullable':
-        return is_type_compatible(expected['of'], actual) or ak=='nullable'
-    if ak=='nullable':
+    if ek == 'union':
+        return any(is_type_compatible(opt, actual) for opt in expected.get('options', []))
+    if ak == 'union':
+        return any(is_type_compatible(expected, opt) for opt in actual.get('options', []))
+    if ek == 'nullable':
+        return is_type_compatible(expected['of'], actual) or ak == 'nullable'
+    if ak == 'nullable':
         return is_type_compatible(expected, actual['of'])
-    if ek!=ak:
+    if ek != ak:
         return False
-    if ek=='array':
+    if ek == 'array':
         return is_type_compatible(expected['items'], actual['items'])
-    if ek=='map':
+    if ek == 'map':
         return is_type_compatible(expected['key'], actual['key']) and is_type_compatible(expected['value'], actual['value'])
     return True
 
@@ -145,9 +161,9 @@ def is_type_compatible(expected: Dict[str, Any], actual: Dict[str, Any]) -> bool
 def load_schema_file(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
-    if path.suffix.lower() in {'.yaml','.yml'}:
+    if path.suffix.lower() in {'.yaml', '.yml'}:
         return yaml.safe_load(path.read_text(encoding='utf-8')) or {}
-    if path.suffix.lower()=='.json':
+    if path.suffix.lower() == '.json':
         return json.loads(path.read_text(encoding='utf-8'))
     return {}
 
@@ -473,7 +489,7 @@ def apply_patch_suggestions_to_yaml(workflows: Dict[str, Any], suggestions: List
 
     return yaml.safe_dump(wf_copy, sort_keys=False, allow_unicode=True)
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--emit-patch", action="store_true", help="Write a unified diff patch for suggested transform insertions.")
     args = ap.parse_args()

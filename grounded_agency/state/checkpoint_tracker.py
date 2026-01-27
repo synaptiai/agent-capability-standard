@@ -85,8 +85,8 @@ class CheckpointTracker:
         tracker.consume_checkpoint()
     """
 
-    DEFAULT_EXPIRY_MINUTES = 30
-    DEFAULT_MAX_HISTORY = 100
+    DEFAULT_EXPIRY_MINUTES: int = 30
+    DEFAULT_MAX_HISTORY: int = 100
 
     def __init__(
         self,

@@ -8,6 +8,7 @@ Enables querying capabilities, edges, and layers at runtime.
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,9 @@ class CapabilityRegistry:
         self._ontology: dict[str, Any] | None = None
         self._nodes_by_id: dict[str, CapabilityNode] | None = None
         self._edges: list[CapabilityEdge] | None = None
+        # Edge indexes for O(1) lookups
+        self._outgoing_edges: dict[str, list[CapabilityEdge]] | None = None
+        self._incoming_edges: dict[str, list[CapabilityEdge]] | None = None
 
     def _ensure_loaded(self) -> None:
         """Ensure ontology is loaded. Call before accessing data."""
@@ -129,15 +133,19 @@ class CapabilityRegistry:
             node = CapabilityNode.from_dict(node_data)
             self._nodes_by_id[node.id] = node
 
-        # Parse edges
-        self._edges = [
-            CapabilityEdge(
-                from_cap=edge["from"],
-                to_cap=edge["to"],
-                edge_type=edge["type"],
+        # Parse edges and build indexes for O(1) lookups
+        self._edges = []
+        self._outgoing_edges = defaultdict(list)
+        self._incoming_edges = defaultdict(list)
+        for edge_data in ontology.get("edges", []):
+            edge = CapabilityEdge(
+                from_cap=edge_data["from"],
+                to_cap=edge_data["to"],
+                edge_type=edge_data["type"],
             )
-            for edge in ontology.get("edges", [])
-        ]
+            self._edges.append(edge)
+            self._outgoing_edges[edge.from_cap].append(edge)
+            self._incoming_edges[edge.to_cap].append(edge)
 
     def get_capability(self, cap_id: str) -> CapabilityNode | None:
         """
@@ -161,19 +169,26 @@ class CapabilityRegistry:
         Returns:
             List of edges where cap_id is source or target
         """
-        return [
-            edge
-            for edge in self._loaded_edges
-            if edge.from_cap == cap_id or edge.to_cap == cap_id
+        self._ensure_loaded()
+        assert self._outgoing_edges is not None
+        assert self._incoming_edges is not None
+        # Combine outgoing and incoming (may have duplicates if self-referential)
+        return list(self._outgoing_edges.get(cap_id, [])) + [
+            e for e in self._incoming_edges.get(cap_id, [])
+            if e.from_cap != cap_id  # Avoid duplicates from self-edges
         ]
 
     def get_outgoing_edges(self, cap_id: str) -> list[CapabilityEdge]:
         """Get edges originating from a capability."""
-        return [edge for edge in self._loaded_edges if edge.from_cap == cap_id]
+        self._ensure_loaded()
+        assert self._outgoing_edges is not None
+        return list(self._outgoing_edges.get(cap_id, []))
 
     def get_incoming_edges(self, cap_id: str) -> list[CapabilityEdge]:
         """Get edges pointing to a capability."""
-        return [edge for edge in self._loaded_edges if edge.to_cap == cap_id]
+        self._ensure_loaded()
+        assert self._incoming_edges is not None
+        return list(self._incoming_edges.get(cap_id, []))
 
     def get_required_capabilities(self, cap_id: str) -> list[str]:
         """

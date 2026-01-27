@@ -149,7 +149,7 @@ def detect_cycles(edges: list[dict], cycle_types: list[str]) -> list[list[str]]:
     return cycles
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Validate capability ontology graph")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed output")
     parser.add_argument(

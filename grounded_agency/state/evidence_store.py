@@ -8,12 +8,16 @@ Evidence anchors form the provenance chain for grounded decisions.
 from __future__ import annotations
 
 import json
+import logging
 import re
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import islice
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Metadata validation constants
 _MAX_METADATA_SIZE_BYTES = 1024  # 1KB max per anchor
@@ -79,8 +83,9 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
                 # Remove the key with largest value
                 largest_key = max(sanitized.keys(), key=lambda k: len(str(sanitized[k])))
                 sanitized[largest_key] = "[truncated]"
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as e:
         # If serialization fails, return minimal safe metadata
+        logger.debug("Metadata serialization failed: %s", e)
         return {"_error": "metadata_serialization_failed"}
 
     return sanitized
@@ -257,7 +262,7 @@ class EvidenceStore:
         read_evidence = store.get_for_capability("retrieve")
     """
 
-    DEFAULT_MAX_ANCHORS = 10000
+    DEFAULT_MAX_ANCHORS: int = 10000
 
     def __init__(self, max_anchors: int | None = None) -> None:
         """
@@ -268,7 +273,8 @@ class EvidenceStore:
                         When exceeded, oldest anchors are evicted (FIFO).
         """
         self._max_anchors = max_anchors if max_anchors is not None else self.DEFAULT_MAX_ANCHORS
-        self._anchors: list[EvidenceAnchor] = []
+        # Use deque for O(1) append and popleft operations
+        self._anchors: deque[EvidenceAnchor] = deque(maxlen=self._max_anchors)
         self._by_kind: dict[str, list[EvidenceAnchor]] = defaultdict(list)
         self._by_capability: dict[str, list[EvidenceAnchor]] = defaultdict(list)
 
@@ -281,14 +287,16 @@ class EvidenceStore:
         Add an evidence anchor to the store.
 
         If max_anchors is exceeded, the oldest anchor is evicted (FIFO).
+        Uses deque with maxlen for O(1) eviction.
 
         Args:
             anchor: The evidence anchor to add
             capability_id: Optional capability ID to associate with
         """
-        # Evict oldest if at capacity
+        # Check if we need to evict (deque handles the main list automatically,
+        # but we need to clean up indexes)
         if len(self._anchors) >= self._max_anchors:
-            self._evict_oldest()
+            self._evict_oldest_from_indexes()
 
         self._anchors.append(anchor)
         self._by_kind[anchor.kind].append(anchor)
@@ -296,12 +304,13 @@ class EvidenceStore:
         if capability_id:
             self._by_capability[capability_id].append(anchor)
 
-    def _evict_oldest(self) -> None:
-        """Evict the oldest anchor from all indexes."""
+    def _evict_oldest_from_indexes(self) -> None:
+        """Remove the oldest anchor from secondary indexes before deque evicts it."""
         if not self._anchors:
             return
 
-        oldest = self._anchors.pop(0)
+        # Get the oldest anchor (will be evicted by deque on next append)
+        oldest = self._anchors[0]
 
         # Remove from kind index
         kind_list = self._by_kind.get(oldest.kind, [])
@@ -324,7 +333,9 @@ class EvidenceStore:
         Returns:
             List of evidence reference strings
         """
-        return [anchor.ref for anchor in self._anchors[-n:]]
+        # Get last n items from deque (deque doesn't support slicing)
+        start_idx = max(0, len(self._anchors) - n)
+        return [anchor.ref for anchor in islice(self._anchors, start_idx, None)]
 
     def get_recent_anchors(self, n: int = 10) -> list[EvidenceAnchor]:
         """
@@ -336,7 +347,9 @@ class EvidenceStore:
         Returns:
             List of EvidenceAnchor objects
         """
-        return list(self._anchors[-n:])
+        # Get last n items from deque (deque doesn't support slicing)
+        start_idx = max(0, len(self._anchors) - n)
+        return list(islice(self._anchors, start_idx, None))
 
     def get_by_kind(self, kind: str) -> list[EvidenceAnchor]:
         """

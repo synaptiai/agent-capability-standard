@@ -61,7 +61,7 @@ _SHELL_INJECTION_PATTERNS = re.compile(
     re.VERBOSE
 )
 
-_READ_ONLY_COMMANDS = {
+_READ_ONLY_COMMANDS: frozenset[str] = frozenset({
     "ls", "cat", "head", "tail", "less", "more", "file", "stat", "du", "df",
     "pwd", "whoami", "hostname", "uname", "date", "cal", "env", "printenv",
     "echo", "printf", "which", "whereis", "locate", "find", "grep", "awk",
@@ -70,7 +70,7 @@ _READ_ONLY_COMMANDS = {
     "npm list", "npm view", "pip list", "pip show",
     "docker ps", "docker images", "docker logs",
     "kubectl get", "kubectl describe", "kubectl logs",
-}
+})
 
 
 @dataclass(slots=True)

@@ -281,9 +281,9 @@ agent-capability-standard/
 │   ├── checkpoint/SKILL.md
 │   ├── persist/SKILL.md     # REMEMBER layer
 │   ├── delegate/SKILL.md    # COORDINATE layer
-│   └── ...                  # (35 total skills)
+│   └── ...                  # (36 total skills)
 ├── schemas/                 # Ontology + workflow + world state schemas
-│   ├── capability_ontology.json     # 35-capability ontology
+│   ├── capability_ontology.json     # 36-capability ontology
 │   ├── workflow_catalog.yaml
 │   ├── world_state_schema.yaml
 │   └── transforms/          # Type coercion mappings

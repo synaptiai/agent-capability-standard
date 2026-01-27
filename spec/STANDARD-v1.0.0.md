@@ -109,7 +109,7 @@ Capabilities are classified into 9 cognitive layers:
 | **EXECUTE** | Change the world | Yes | 3 |
 | **VERIFY** | Ensure correctness | Varies | 5 |
 | **REMEMBER** | Persist state | Varies | 2 |
-| **COORDINATE** | Multi-agent interaction | Varies | 3 |
+| **COORDINATE** | Multi-agent interaction | Varies | 4 |
 
 ### 4.3 Edge Types and Dependency Semantics
 
@@ -272,7 +272,7 @@ failure_modes:
 | `world_state_schema.yaml` | World state structure |
 | `event_schema.yaml` | Event and observation structure |
 | `entity_taxonomy.yaml` | Entity type hierarchy |
-| `trust_policy.yaml` | Trust scoring configuration |
+| `authority_trust_model.yaml` | Trust scoring configuration |
 | `identity_policy.yaml` | Identity resolution rules |
 
 ### 6.2 Observation Requirements
