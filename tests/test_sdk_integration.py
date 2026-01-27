@@ -12,24 +12,22 @@ Tests the grounded_agency package components:
 
 from __future__ import annotations
 
-import pytest
+import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from pathlib import Path
 
-import sys
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from grounded_agency import (
+    CapabilityRegistry,
+    CheckpointTracker,
+    EvidenceAnchor,
+    EvidenceStore,
     GroundedAgentAdapter,
     GroundedAgentConfig,
-    CapabilityRegistry,
     ToolCapabilityMapper,
-    ToolMapping,
-    CheckpointTracker,
-    Checkpoint,
-    EvidenceStore,
-    EvidenceAnchor,
 )
 
 
@@ -169,56 +167,76 @@ class TestCapabilityRegistry:
     def test_get_preceding_capabilities(self, registry: CapabilityRegistry):
         """Test getting capabilities that must temporally precede."""
         preceding = registry.get_preceding_capabilities("mutate")
-        assert "checkpoint" in preceding  # checkpoint must precede mutate
-        assert "plan" in preceding  # plan must precede mutate
+        assert "checkpoint" in preceding
+        assert "plan" in preceding
 
-    def test_get_preceding_capabilities_empty(self, registry: CapabilityRegistry):
-        """Test that capabilities with no precedes return empty list."""
+    def test_get_preceding_capabilities_no_predecessors(self, registry: CapabilityRegistry):
+        """Test capability with no incoming precedes edges returns empty list."""
         preceding = registry.get_preceding_capabilities("observe")
-        # observe has no incoming precedes edges
-        assert isinstance(preceding, list)
+        assert preceding == []
 
     def test_get_conflicting_capabilities(self, registry: CapabilityRegistry):
         """Test getting mutually exclusive capabilities."""
         conflicts = registry.get_conflicting_capabilities("rollback")
-        assert "persist" in conflicts  # rollback conflicts_with persist
-        assert "mutate" in conflicts  # mutate conflicts_with rollback
+        assert "persist" in conflicts
+        assert "mutate" in conflicts
 
     def test_get_conflicting_capabilities_symmetric(self, registry: CapabilityRegistry):
-        """Test that conflicts_with is symmetric."""
-        # If rollback conflicts with persist, persist should conflict with rollback
+        """Test that conflicts_with is symmetric (A conflicts B implies B conflicts A)."""
         rollback_conflicts = registry.get_conflicting_capabilities("rollback")
         persist_conflicts = registry.get_conflicting_capabilities("persist")
         assert "persist" in rollback_conflicts
         assert "rollback" in persist_conflicts
 
+    def test_get_conflicting_capabilities_no_conflicts(self, registry: CapabilityRegistry):
+        """Test capability with no conflicts returns empty list."""
+        conflicts = registry.get_conflicting_capabilities("observe")
+        assert conflicts == []
+
     def test_get_alternatives(self, registry: CapabilityRegistry):
         """Test getting substitutable capabilities."""
         alternatives = registry.get_alternatives("search")
-        assert "retrieve" in alternatives  # search alternative_to retrieve
+        assert "retrieve" in alternatives
 
     def test_get_alternatives_symmetric(self, registry: CapabilityRegistry):
-        """Test that alternative_to is symmetric."""
+        """Test that alternative_to is symmetric (A alt B implies B alt A)."""
         search_alts = registry.get_alternatives("search")
         retrieve_alts = registry.get_alternatives("retrieve")
         assert "retrieve" in search_alts
         assert "search" in retrieve_alts
 
+    def test_get_alternatives_no_alternatives(self, registry: CapabilityRegistry):
+        """Test capability with no alternatives returns empty list."""
+        alternatives = registry.get_alternatives("observe")
+        assert alternatives == []
+
     def test_get_specialized_by(self, registry: CapabilityRegistry):
         """Test getting capabilities that specialize this one."""
         specialized = registry.get_specialized_by("detect")
-        assert "classify" in specialized  # classify specializes detect
+        assert "classify" in specialized
+
+    def test_get_specialized_by_no_specializations(self, registry: CapabilityRegistry):
+        """Test capability with no specializations returns empty list."""
+        specialized = registry.get_specialized_by("classify")
+        assert specialized == []
 
     def test_get_generalizes_to(self, registry: CapabilityRegistry):
-        """Test getting the parent capability."""
+        """Test getting the parent capability in specialization hierarchy."""
         parent = registry.get_generalizes_to("classify")
-        assert parent == "detect"  # classify specializes detect
+        assert parent == "detect"
 
-    def test_get_generalizes_to_none(self, registry: CapabilityRegistry):
-        """Test that top-level capabilities return None."""
+    def test_get_generalizes_to_top_level(self, registry: CapabilityRegistry):
+        """Test top-level capability (no parent) returns None."""
         parent = registry.get_generalizes_to("observe")
-        # observe doesn't specialize anything
         assert parent is None
+
+    def test_edge_methods_nonexistent_capability(self, registry: CapabilityRegistry):
+        """Test all edge methods return empty/None for nonexistent capability."""
+        assert registry.get_preceding_capabilities("nonexistent") == []
+        assert registry.get_conflicting_capabilities("nonexistent") == []
+        assert registry.get_alternatives("nonexistent") == []
+        assert registry.get_specialized_by("nonexistent") == []
+        assert registry.get_generalizes_to("nonexistent") is None
 
 
 # =============================================================================

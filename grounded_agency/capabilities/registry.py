@@ -205,6 +205,14 @@ class CapabilityRegistry:
         incoming = self.get_incoming_edges(cap_id)
         return [edge.from_cap for edge in incoming if edge.edge_type == "precedes"]
 
+    def _get_symmetric_edge_targets(self, cap_id: str, edge_type: str) -> list[str]:
+        """Get targets of symmetric edges (works regardless of edge direction)."""
+        return [
+            edge.to_cap if edge.from_cap == cap_id else edge.from_cap
+            for edge in self.get_edges(cap_id)
+            if edge.edge_type == edge_type
+        ]
+
     def get_conflicting_capabilities(self, cap_id: str) -> list[str]:
         """
         Get capabilities that conflict with cap_id.
@@ -217,14 +225,7 @@ class CapabilityRegistry:
         Returns:
             List of capability IDs that conflict with cap_id
         """
-        edges = self.get_edges(cap_id)
-        conflicts = []
-        for edge in edges:
-            if edge.edge_type == "conflicts_with":
-                # conflicts_with is symmetric
-                other = edge.to_cap if edge.from_cap == cap_id else edge.from_cap
-                conflicts.append(other)
-        return conflicts
+        return self._get_symmetric_edge_targets(cap_id, "conflicts_with")
 
     def get_alternatives(self, cap_id: str) -> list[str]:
         """
@@ -238,14 +239,7 @@ class CapabilityRegistry:
         Returns:
             List of capability IDs that can substitute for cap_id
         """
-        edges = self.get_edges(cap_id)
-        alternatives = []
-        for edge in edges:
-            if edge.edge_type == "alternative_to":
-                # alternative_to is symmetric
-                other = edge.to_cap if edge.from_cap == cap_id else edge.from_cap
-                alternatives.append(other)
-        return alternatives
+        return self._get_symmetric_edge_targets(cap_id, "alternative_to")
 
     def get_specialized_by(self, cap_id: str) -> list[str]:
         """
