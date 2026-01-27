@@ -1,0 +1,103 @@
+# Healthcare Domain Profile
+# Calibrated for clinical decision support, patient monitoring, and care coordination.
+# NOTE: This profile is for CLINICAL DECISION SUPPORT only, not autonomous medical decisions.
+
+domain: healthcare
+version: "1.0.0"
+description: |
+  Profile for healthcare and clinical support environments.
+  Emphasizes patient safety, regulatory compliance (HIPAA, FDA, HL7),
+  and human-in-the-loop for all clinical decisions.
+
+  IMPORTANT: This profile is designed for CLINICAL DECISION SUPPORT.
+  All clinical decisions must be made by licensed healthcare professionals.
+
+trust_weights:
+  # Clinical systems (high trust, verified sources)
+  ehr_system: 0.94        # Electronic Health Record
+  lab_system: 0.95        # Laboratory Information System
+  pharmacy_system: 0.93   # Pharmacy management
+  imaging_pacs: 0.94      # Radiology/imaging systems
+
+  # Medical devices
+  bedside_monitor: 0.92   # Patient monitors
+  infusion_pump: 0.90     # Smart infusion devices
+  diagnostic_device: 0.88 # Diagnostic equipment
+
+  # Clinical sources
+  physician_order: 0.96   # Physician orders
+  nurse_assessment: 0.90  # Nursing assessments
+  pharmacist_review: 0.92 # Pharmacist verification
+  specialist_consult: 0.94 # Specialist consultations
+
+  # Reference sources
+  clinical_guideline: 0.92 # Published clinical guidelines
+  drug_database: 0.95     # Drug interaction databases
+  icd_codes: 0.98         # Standard coding systems
+  evidence_library: 0.88  # Medical literature
+
+  # Patient sources
+  patient_reported: 0.75  # Patient self-reports
+  caregiver_input: 0.72   # Family/caregiver information
+
+risk_thresholds:
+  auto_approve: none      # NO autonomous clinical actions
+  require_review: low     # All actions require clinical review
+  require_human: low      # Almost everything needs human decision
+  block_autonomous:
+    - mutate              # Never modify clinical records autonomously
+    - send                # Never send clinical communications autonomously
+    - execute             # Never execute clinical orders autonomously
+    - delegate            # Never delegate clinical tasks autonomously
+
+checkpoint_policy:
+  before_any_recommendation: always   # Always checkpoint suggestions
+  before_alert_generation: always     # Always checkpoint alerts
+  before_documentation: always        # Always checkpoint doc changes
+  before_order_suggestion: always     # Always checkpoint order suggestions
+  before_handoff: always              # Always checkpoint care transitions
+
+evidence_policy:
+  required_anchor_types:
+    - clinical_data_point
+    - guideline_reference
+    - audit_trail
+    - clinician_verification
+    - timestamp
+  minimum_confidence: 0.90  # Very high confidence for healthcare
+  require_grounding:
+    - detect                # All detections need clinical evidence
+    - predict               # All predictions need evidence base
+    - classify              # Classifications need clear criteria
+    - plan                  # Care plans need guideline anchors
+    - compare               # Treatment comparisons need citations
+
+domain_sources:
+  - name: EHR System
+    type: database
+    default_trust: 0.94
+  - name: Laboratory System
+    type: api
+    default_trust: 0.95
+  - name: Clinical Guidelines
+    type: document
+    default_trust: 0.92
+  - name: Clinician Input
+    type: human
+    default_trust: 0.94
+  - name: Patient Monitors
+    type: sensor
+    default_trust: 0.92
+
+workflows:
+  - patient_monitoring
+  - clinical_alert_triage
+  - care_plan_review
+  - handoff_preparation
+
+# Regulatory compliance markers
+compliance:
+  hipaa: required
+  fda_clinical_decision_support: advisory_only
+  hl7_fhir: recommended
+  audit_retention_days: 2555  # 7 years for medical records

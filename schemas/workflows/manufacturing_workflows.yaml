@@ -1,0 +1,579 @@
+# Manufacturing Domain Workflows
+# Composed from 36 atomic capabilities
+# Profile: schemas/profiles/manufacturing.yaml
+
+production_line_monitoring:
+  goal: Continuously monitor production line health and detect anomalies requiring intervention.
+  risk: low
+  domain: manufacturing
+  profile: schemas/profiles/manufacturing.yaml
+  description: |
+    Real-time monitoring workflow for production lines. Observes sensor data,
+    detects anomalies, assesses impact, and generates alerts with recommendations.
+    All interventions require human approval per manufacturing profile.
+  success:
+    - Production metrics collected and validated
+    - Anomalies detected with confidence scores
+    - Alerts generated with actionable recommendations
+    - Audit trail maintained
+  steps:
+    - capability: receive
+      purpose: Ingest real-time sensor data from PLC/SCADA systems.
+      risk: low
+      mutation: false
+      store_as: sensor_data_out
+      input_bindings:
+        channel: plc_scada
+        filter:
+          type: [temperature, pressure, vibration, flow_rate, cycle_time]
+      failure_modes:
+        - condition: No sensor data received
+          action: request_more_context
+          recovery: Check sensor connectivity and data source configuration.
+
+    - capability: transform
+      purpose: Normalize sensor readings to standard units and schema.
+      risk: low
+      mutation: false
+      store_as: normalized_data_out
+      input_bindings:
+        source: ${sensor_data_out.data}
+        target_schema: canonical_sensor_reading
+
+    - capability: state
+      purpose: Build current production line state representation.
+      risk: low
+      mutation: false
+      store_as: line_state_out
+      input_bindings:
+        scope: production_line
+        observations: ${normalized_data_out.output}
+
+    - capability: detect
+      purpose: Identify anomalies in sensor patterns.
+      domain: anomaly
+      risk: low
+      mutation: false
+      store_as: anomaly_out
+      input_bindings:
+        data: ${line_state_out.state}
+        pattern: statistical_deviation
+        threshold: 2.5  # Standard deviations
+
+    - capability: measure
+      purpose: Quantify severity and impact of detected anomalies.
+      domain: risk
+      risk: low
+      mutation: false
+      store_as: risk_assessment_out
+      input_bindings:
+        target: ${anomaly_out.matches}
+        metric: operational_risk
+      gates:
+        - when: ${anomaly_out.detected} == false
+          action: stop
+          message: No anomalies detected, production nominal.
+
+    - capability: predict
+      purpose: Forecast progression if anomaly is not addressed.
+      domain: risk
+      risk: low
+      mutation: false
+      store_as: forecast_out
+      input_bindings:
+        target: ${anomaly_out.matches}
+        horizon: 4h
+        conditions: ${line_state_out.state}
+
+    - capability: plan
+      purpose: Generate recommended intervention actions.
+      risk: low
+      mutation: false
+      store_as: intervention_plan_out
+      input_bindings:
+        goal: resolve_anomaly
+        constraints:
+          max_downtime: 30m
+          safety_requirements: ${profile.checkpoint_policy}
+
+    - capability: generate
+      purpose: Create alert notification with full context.
+      domain: alert
+      risk: low
+      mutation: false
+      store_as: alert_out
+      input_bindings:
+        specification:
+          type: production_alert
+          severity: ${risk_assessment_out.value}
+          anomaly: ${anomaly_out.matches}
+          forecast: ${forecast_out.prediction}
+          recommendations: ${intervention_plan_out.steps}
+
+    - capability: audit
+      purpose: Record monitoring cycle and any alerts generated.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: production_monitoring_cycle
+          timestamp: ${line_state_out.timestamp}
+          anomalies_detected: ${anomaly_out.detected}
+          alert_generated: ${alert_out.content}
+
+  inputs:
+    profile:
+      type: object
+      ref: schemas/profiles/manufacturing.yaml
+
+quality_control_loop:
+  goal: Execute quality inspection, make accept/reject recommendations, and track quality metrics.
+  risk: medium
+  domain: manufacturing
+  profile: schemas/profiles/manufacturing.yaml
+  description: |
+    Quality control workflow for production batches. Inspects samples,
+    compares against specifications, recommends disposition, and
+    maintains quality records. Final accept/reject requires human approval.
+  success:
+    - Sample inspected against specifications
+    - Accept/reject recommendation generated with evidence
+    - Quality metrics updated
+    - Audit trail with full lineage
+  steps:
+    - capability: retrieve
+      purpose: Get quality specifications for the product being inspected.
+      risk: low
+      mutation: false
+      store_as: spec_out
+      input_bindings:
+        target: ${batch.product_id}
+        format: quality_specification
+
+    - capability: observe
+      purpose: Collect inspection measurements from quality system.
+      risk: low
+      mutation: false
+      store_as: inspection_out
+      input_bindings:
+        target: ${batch.sample_id}
+        aspects: [dimensions, weight, visual, functional]
+
+    - capability: measure
+      purpose: Quantify each quality attribute with uncertainty.
+      domain: quality
+      risk: low
+      mutation: false
+      store_as: measurements_out
+      input_bindings:
+        target: ${inspection_out.observation}
+        metric: specification_compliance
+
+    - capability: compare
+      purpose: Compare measurements against specification limits.
+      domain: specification
+      risk: low
+      mutation: false
+      store_as: comparison_out
+      input_bindings:
+        options:
+          - ${measurements_out}
+          - ${spec_out.data}
+        criteria:
+          - within_tolerance
+          - cpk_index
+          - defect_classification
+
+    - capability: classify
+      purpose: Classify the batch disposition recommendation.
+      risk: low
+      mutation: false
+      store_as: disposition_out
+      input_bindings:
+        item: ${comparison_out}
+        taxonomy: [accept, reject, rework, hold_for_review]
+
+    - capability: ground
+      purpose: Anchor disposition recommendation to evidence.
+      risk: low
+      mutation: false
+      store_as: grounded_disposition_out
+      input_bindings:
+        claim: ${disposition_out.labels[0]}
+        sources:
+          - ${measurements_out}
+          - ${spec_out}
+          - ${comparison_out}
+        required_strength: strong
+
+    - capability: explain
+      purpose: Generate human-readable quality report.
+      risk: low
+      mutation: false
+      store_as: report_out
+      input_bindings:
+        conclusion: ${grounded_disposition_out}
+        audience: quality_engineer
+        depth: detailed
+
+    - capability: checkpoint
+      purpose: Create checkpoint before any disposition action.
+      risk: low
+      mutation: true
+      store_as: checkpoint_out
+      input_bindings:
+        scope: quality_decision
+        label: "QC-${batch.batch_id}-${timestamp}"
+
+    - capability: audit
+      purpose: Record complete quality inspection with lineage.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: quality_inspection
+          batch_id: ${batch.batch_id}
+          measurements: ${measurements_out}
+          disposition: ${disposition_out}
+          evidence: ${grounded_disposition_out.evidence}
+          checkpoint_id: ${checkpoint_out.checkpoint_id}
+
+  inputs:
+    batch:
+      type: object
+      required: true
+      properties:
+        batch_id: {type: string}
+        product_id: {type: string}
+        sample_id: {type: string}
+    profile:
+      type: object
+      ref: schemas/profiles/manufacturing.yaml
+
+predictive_maintenance:
+  goal: Predict equipment failures before they occur and recommend maintenance actions.
+  risk: medium
+  domain: manufacturing
+  profile: schemas/profiles/manufacturing.yaml
+  description: |
+    Predictive maintenance workflow that analyzes equipment health data,
+    predicts failure probability, and recommends maintenance scheduling.
+    Maintenance execution requires human approval.
+  success:
+    - Equipment health assessed with confidence
+    - Failure predictions generated with probability
+    - Maintenance recommendations prioritized
+    - Work order suggestions ready for approval
+  steps:
+    - capability: retrieve
+      purpose: Get equipment configuration and maintenance history.
+      risk: low
+      mutation: false
+      store_as: equipment_history_out
+      input_bindings:
+        target: ${equipment.asset_id}
+        format: maintenance_record
+
+    - capability: receive
+      purpose: Ingest recent sensor telemetry for equipment.
+      risk: low
+      mutation: false
+      store_as: telemetry_out
+      input_bindings:
+        channel: equipment_sensors
+        filter:
+          asset_id: ${equipment.asset_id}
+          window: 7d
+
+    - capability: detect
+      purpose: Detect degradation patterns in telemetry.
+      domain: degradation
+      risk: low
+      mutation: false
+      store_as: degradation_out
+      input_bindings:
+        data: ${telemetry_out.data}
+        pattern: trend_deterioration
+        threshold: baseline_deviation
+
+    - capability: attribute
+      purpose: Identify likely causes of degradation.
+      domain: causation
+      risk: low
+      mutation: false
+      store_as: root_cause_out
+      input_bindings:
+        effect: ${degradation_out.matches}
+        candidates:
+          - wear
+          - contamination
+          - misalignment
+          - overload
+        context: ${equipment_history_out.data}
+
+    - capability: predict
+      purpose: Forecast time to failure and probability.
+      domain: failure
+      risk: low
+      mutation: false
+      store_as: failure_forecast_out
+      input_bindings:
+        target: equipment_failure
+        horizon: 30d
+        conditions:
+          degradation: ${degradation_out}
+          history: ${equipment_history_out}
+
+    - capability: measure
+      purpose: Quantify business impact of predicted failure.
+      domain: impact
+      risk: low
+      mutation: false
+      store_as: impact_out
+      input_bindings:
+        target: ${failure_forecast_out}
+        metric: production_loss_cost
+
+    - capability: compare
+      purpose: Compare maintenance strategies by cost-benefit.
+      domain: maintenance_strategy
+      risk: low
+      mutation: false
+      store_as: strategy_comparison_out
+      input_bindings:
+        options:
+          - immediate_replacement
+          - scheduled_maintenance
+          - condition_based_monitoring
+          - run_to_failure
+        criteria:
+          - total_cost
+          - downtime_impact
+          - safety_risk
+          - probability_of_success
+        weights:
+          safety_risk: 0.4
+          total_cost: 0.3
+          downtime_impact: 0.2
+          probability_of_success: 0.1
+
+    - capability: plan
+      purpose: Generate maintenance work order recommendation.
+      risk: low
+      mutation: false
+      store_as: maintenance_plan_out
+      input_bindings:
+        goal: prevent_equipment_failure
+        constraints:
+          strategy: ${strategy_comparison_out.recommendation}
+          available_parts: ${equipment_history_out.data.spare_parts}
+          crew_availability: check_cmms
+
+    - capability: generate
+      purpose: Create work order draft for approval.
+      domain: work_order
+      risk: low
+      mutation: false
+      store_as: work_order_out
+      input_bindings:
+        specification:
+          type: maintenance_work_order
+          asset: ${equipment.asset_id}
+          prediction: ${failure_forecast_out}
+          strategy: ${strategy_comparison_out.recommendation}
+          plan: ${maintenance_plan_out.steps}
+          priority: ${impact_out.value}
+
+    - capability: audit
+      purpose: Record predictive maintenance analysis.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: predictive_maintenance_analysis
+          asset_id: ${equipment.asset_id}
+          degradation_detected: ${degradation_out.detected}
+          failure_probability: ${failure_forecast_out.probability}
+          recommended_action: ${strategy_comparison_out.recommendation}
+
+  inputs:
+    equipment:
+      type: object
+      required: true
+      properties:
+        asset_id: {type: string}
+        equipment_type: {type: string}
+    profile:
+      type: object
+      ref: schemas/profiles/manufacturing.yaml
+
+supply_chain_sync:
+  goal: Synchronize inventory state with suppliers and trigger replenishment when needed.
+  risk: medium
+  domain: manufacturing
+  profile: schemas/profiles/manufacturing.yaml
+  description: |
+    Supply chain synchronization workflow that monitors inventory levels,
+    detects reorder points, and prepares purchase recommendations.
+    All purchase orders require human approval.
+  success:
+    - Inventory state synchronized across systems
+    - Reorder points detected with lead time analysis
+    - Purchase recommendations generated
+    - Supplier communication prepared for approval
+  steps:
+    - capability: search
+      purpose: Query current inventory levels across warehouses.
+      risk: low
+      mutation: false
+      store_as: inventory_search_out
+      input_bindings:
+        query: inventory_levels
+        scope: all_warehouses
+        limit: 1000
+
+    - capability: retrieve
+      purpose: Get material specifications and reorder parameters.
+      risk: low
+      mutation: false
+      store_as: material_params_out
+      input_bindings:
+        target: material_master
+        format: reorder_parameters
+
+    - capability: integrate
+      purpose: Merge inventory data from multiple sources.
+      risk: low
+      mutation: false
+      store_as: integrated_inventory_out
+      input_bindings:
+        sources:
+          - ${inventory_search_out.results}
+          - ${erp_inventory}
+          - ${wms_inventory}
+        strategy: sum_by_location
+        conflict_resolution: prefer_recent
+
+    - capability: state
+      purpose: Build current inventory state model.
+      risk: low
+      mutation: false
+      store_as: inventory_state_out
+      input_bindings:
+        scope: supply_chain
+        observations: ${integrated_inventory_out.merged}
+
+    - capability: compare
+      purpose: Compare current levels against reorder points.
+      domain: inventory_threshold
+      risk: low
+      mutation: false
+      store_as: threshold_comparison_out
+      input_bindings:
+        options:
+          - ${inventory_state_out.state}
+          - ${material_params_out.data}
+        criteria:
+          - below_reorder_point
+          - below_safety_stock
+          - days_of_supply
+
+    - capability: detect
+      purpose: Identify materials requiring replenishment.
+      domain: reorder
+      risk: low
+      mutation: false
+      store_as: reorder_needed_out
+      input_bindings:
+        data: ${threshold_comparison_out}
+        pattern: below_threshold
+        threshold: reorder_point
+
+    - capability: predict
+      purpose: Forecast demand for reorder quantity calculation.
+      domain: demand
+      risk: low
+      mutation: false
+      store_as: demand_forecast_out
+      input_bindings:
+        target: material_demand
+        horizon: ${lead_time_days}d
+        conditions: ${production_schedule}
+      gates:
+        - when: ${reorder_needed_out.detected} == false
+          action: stop
+          message: All inventory levels adequate, no reorders needed.
+
+    - capability: plan
+      purpose: Calculate optimal order quantities.
+      risk: low
+      mutation: false
+      store_as: order_plan_out
+      input_bindings:
+        goal: replenish_inventory
+        constraints:
+          demand: ${demand_forecast_out.prediction}
+          lead_time: ${material_params_out.data.lead_time}
+          economic_order_qty: ${material_params_out.data.eoq}
+          supplier_minimums: ${supplier_constraints}
+
+    - capability: generate
+      purpose: Create purchase order recommendations.
+      domain: purchase_order
+      risk: low
+      mutation: false
+      store_as: po_draft_out
+      input_bindings:
+        specification:
+          type: purchase_order_draft
+          materials: ${reorder_needed_out.matches}
+          quantities: ${order_plan_out.steps}
+          suppliers: ${preferred_suppliers}
+
+    - capability: checkpoint
+      purpose: Checkpoint before any supplier communication.
+      risk: low
+      mutation: true
+      store_as: checkpoint_out
+      input_bindings:
+        scope: supply_chain_action
+        label: "SCM-${timestamp}"
+
+    - capability: audit
+      purpose: Record supply chain synchronization cycle.
+      risk: low
+      mutation: true
+      store_as: audit_out
+      input_bindings:
+        event:
+          type: supply_chain_sync
+          materials_checked: ${inventory_search_out.total_count}
+          reorders_identified: ${reorder_needed_out.matches}
+          po_drafts_created: ${po_draft_out.content}
+          checkpoint_id: ${checkpoint_out.checkpoint_id}
+
+  inputs:
+    erp_inventory:
+      type: object
+      description: ERP system inventory data
+    wms_inventory:
+      type: object
+      description: Warehouse management system data
+    production_schedule:
+      type: object
+      description: Upcoming production schedule
+    preferred_suppliers:
+      type: array
+      description: Preferred supplier list
+    supplier_constraints:
+      type: object
+      description: Supplier minimum order constraints
+    lead_time_days:
+      type: integer
+      default: 14
+    profile:
+      type: object
+      ref: schemas/profiles/manufacturing.yaml
