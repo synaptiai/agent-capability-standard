@@ -35,7 +35,7 @@ async def main():
         GroundedAgentConfig(
             strict_mode=True,
             ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.json"
+                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
             ),
         )
     )

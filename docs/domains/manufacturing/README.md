@@ -211,4 +211,4 @@ retrieve:
 
 - [Profile Schema](../../../schemas/profiles/profile_schema.yaml)
 - [Manufacturing Workflows](../../../schemas/workflows/manufacturing_workflows.yaml)
-- [Capability Ontology](../../../schemas/capability_ontology.json)
+- [Capability Ontology](../../../schemas/capability_ontology.yaml)

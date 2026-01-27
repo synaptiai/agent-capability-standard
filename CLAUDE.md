@@ -46,7 +46,7 @@ Every agent action must be:
 
 | File | Purpose |
 |------|---------|
-| `schemas/capability_ontology.json` | Master ontology defining all 36 capabilities with I/O contracts, risk levels, and edges |
+| `schemas/capability_ontology.yaml` | Master ontology defining all 36 capabilities with I/O contracts, risk levels, and edges |
 | `schemas/workflow_catalog.yaml` | Reference workflows that compose capabilities |
 | `schemas/profiles/*.yaml` | Domain-specific profiles (trust weights, risk thresholds, checkpoint/evidence policies) |
 | `schemas/profiles/profile_schema.yaml` | Schema defining structure for domain profiles |
@@ -99,7 +99,7 @@ The plugin enforces safety through Claude Code hooks:
 
 ### Ontology Edge Types
 
-Relationships between capabilities (in `capability_ontology.json`):
+Relationships between capabilities (in `capability_ontology.yaml`):
 - `requires`: Hard dependency (must be satisfied)
 - `soft_requires`: Recommended but not mandatory
 - `enables`: Unlocks other capabilities
@@ -115,7 +115,7 @@ See [spec/EDGE_TYPES.md](spec/EDGE_TYPES.md) for full edge type documentation.
 When adding a new atomic capability, you MUST complete ALL of these steps:
 
 ### 1. Update the Ontology
-- Add capability node to `schemas/capability_ontology.json` with full input/output schemas
+- Add capability node to `schemas/capability_ontology.yaml` with full input/output schemas
 - Add edges connecting to related capabilities (`requires`, `soft_requires`, `enables`)
 - Update the layer's `capabilities` array in the `layers` section
 - Update the `meta.description` count (e.g., "36 atomic capabilities" → "37 atomic capabilities")
@@ -144,7 +144,7 @@ Search and update capability counts in these files:
 ```bash
 python tools/validate_workflows.py
 python tools/validate_profiles.py
-python -c "import json; json.load(open('schemas/capability_ontology.json'))"
+python -c "import yaml; yaml.safe_load(open('schemas/capability_ontology.yaml'))"
 ```
 
 ### 5. Update Workflow Catalog (if adding workflow patterns)
@@ -177,7 +177,7 @@ python examples/capability_skills_demo.py
 | Component | Purpose |
 |-----------|---------|
 | `GroundedAgentAdapter` | Main entry point - wraps SDK options with safety layer |
-| `CapabilityRegistry` | Loads and queries `capability_ontology.json` |
+| `CapabilityRegistry` | Loads and queries `capability_ontology.yaml` |
 | `ToolCapabilityMapper` | Maps SDK tools to capability metadata |
 | `CheckpointTracker` | Manages checkpoint lifecycle for mutation safety |
 | `EvidenceStore` | Collects evidence anchors from tool executions |

@@ -1,5 +1,5 @@
 # Workflow Catalog (36-capability model)
-# Maps to capability_ontology.json
+# Maps to capability_ontology.yaml
 #
 # Domain-specific workflows are in separate files:
 #   - schemas/workflows/manufacturing_workflows.yaml

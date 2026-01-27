@@ -234,4 +234,4 @@ When presenting drafts:
 
 - [Profile Schema](../../../schemas/profiles/profile_schema.yaml)
 - [Personal Assistant Workflows](../../../schemas/workflows/personal_assistant_workflows.yaml)
-- [Capability Ontology](../../../schemas/capability_ontology.json)
+- [Capability Ontology](../../../schemas/capability_ontology.yaml)

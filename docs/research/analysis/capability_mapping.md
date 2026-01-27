@@ -343,5 +343,5 @@ Most failures require **capability composition** rather than single capabilities
 ## References
 
 - [Main Failure Taxonomy](../failure_taxonomy.md)
-- [Capability Ontology](../../../schemas/capability_ontology.json)
+- [Capability Ontology](../../../schemas/capability_ontology.yaml)
 - [Raw Issue Data](../raw_data/)

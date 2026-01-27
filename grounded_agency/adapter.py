@@ -49,7 +49,7 @@ def _find_ontology_path() -> str:
         from importlib.resources import as_file, files
 
         package_path = files("grounded_agency").joinpath(
-            "../schemas/capability_ontology.json"
+            "../schemas/capability_ontology.yaml"
         )
         # Check if it exists
         with as_file(package_path) as path:
@@ -61,15 +61,15 @@ def _find_ontology_path() -> str:
     # Fallback: look relative to this file
     module_dir = Path(__file__).parent
     for relative in [
-        "../schemas/capability_ontology.json",  # Development layout
-        "schemas/capability_ontology.json",  # Alternative layout
+        "../schemas/capability_ontology.yaml",  # Development layout
+        "schemas/capability_ontology.yaml",  # Alternative layout
     ]:
         candidate = module_dir / relative
         if candidate.exists():
             return str(candidate.resolve())
 
     # Final fallback: assume cwd-relative (original behavior)
-    return "schemas/capability_ontology.json"
+    return "schemas/capability_ontology.yaml"
 
 
 # Cache the resolved path
@@ -90,7 +90,7 @@ class GroundedAgentConfig:
     Configuration for the Grounded Agent Adapter.
 
     Attributes:
-        ontology_path: Path to capability_ontology.json (auto-detected if not specified)
+        ontology_path: Path to capability_ontology.yaml (auto-detected if not specified)
         strict_mode: If True, block mutations without checkpoint.
                     If False, log warning but allow.
         audit_log_path: Path for audit log file

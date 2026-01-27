@@ -120,7 +120,7 @@ The maintainers decide:
 ### Step 5: Implementation
 
 If accepted:
-1. Add to `schemas/capability_ontology.json`
+1. Add to `schemas/capability_ontology.yaml`
 2. Create skill in `skills/<layer>/<name>/SKILL.md`
 3. Update documentation
 4. Add to reference workflow(s)

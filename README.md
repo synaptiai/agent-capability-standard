@@ -205,7 +205,7 @@ Production-ready workflow compositions with gates, recovery loops, and typed bin
 
 ### Canonical Schemas
 
-- **Capability Ontology** — 36 atomic capabilities with I/O contracts ([ontology](schemas/capability_ontology.json))
+- **Capability Ontology** — 36 atomic capabilities with I/O contracts ([ontology](schemas/capability_ontology.yaml))
 - **Workflow DSL** — Typed bindings, gates, recovery loops
 - **World State** — Observations with provenance and uncertainty
 - **Trust Model** — Authority ranking with time decay
@@ -283,7 +283,7 @@ agent-capability-standard/
 │   ├── delegate/SKILL.md    # COORDINATE layer
 │   └── ...                  # (36 total skills)
 ├── schemas/                 # Ontology + workflow + world state schemas
-│   ├── capability_ontology.json     # 36-capability ontology
+│   ├── capability_ontology.yaml     # 36-capability ontology
 │   ├── workflow_catalog.yaml
 │   ├── world_state_schema.yaml
 │   └── transforms/          # Type coercion mappings

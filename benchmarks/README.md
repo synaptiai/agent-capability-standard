@@ -379,7 +379,7 @@ class NewScenario(BenchmarkScenario):
 ## Related Documentation
 
 - [Failure Taxonomy](../docs/research/failure_taxonomy.md) - Informs scenario selection
-- [Capability Ontology](../schemas/capability_ontology.json) - Defines GA primitives
+- [Capability Ontology](../schemas/capability_ontology.yaml) - Defines GA primitives
 - [Trust Model](../schemas/authority_trust_model.yaml) - Conflict resolution weights
 - [Workflow DSL](../docs/WORKFLOW_PATTERNS.md) - Composition patterns
 

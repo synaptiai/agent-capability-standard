@@ -248,4 +248,4 @@ ground:
 
 - [Profile Schema](../../../schemas/profiles/profile_schema.yaml)
 - [Data Analysis Workflows](../../../schemas/workflows/data_analysis_workflows.yaml)
-- [Capability Ontology](../../../schemas/capability_ontology.json)
+- [Capability Ontology](../../../schemas/capability_ontology.yaml)

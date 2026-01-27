@@ -207,6 +207,6 @@ Include at least one complete example with:
 - [ ] Procedure has 4-6 capability-specific steps
 - [ ] Output contract has complete YAML schema
 - [ ] At least 1 example with complete input/output
-- [ ] Safety constraints match capability_ontology.json
+- [ ] Safety constraints match capability_ontology.yaml
 - [ ] Composition patterns reference valid capability IDs
 - [ ] Skill is under 500 lines

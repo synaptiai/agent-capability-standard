@@ -575,7 +575,7 @@ COORDINATE (4): delegate, synchronize, invoke, **inquire**  ← NEW
 ## 8. Implementation Checklist
 
 - [x] Research document complete (`docs/research/replanning_capabilities.md`)
-- [x] Add `inquire` to `schemas/capability_ontology.json`
+- [x] Add `inquire` to `schemas/capability_ontology.yaml`
 - [x] Add edges: `critique → inquire`, `inquire ~> receive`
 - [x] Document `monitor-and-replan` workflow in `schemas/workflow_catalog.yaml`
 - [x] Document `clarify-intent` workflow in `schemas/workflow_catalog.yaml`

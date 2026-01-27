@@ -12,7 +12,7 @@ from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 adapter = GroundedAgentAdapter(
     GroundedAgentConfig(
         strict_mode=True,           # Block mutations without checkpoint
-        ontology_path="schemas/capability_ontology.json",
+        ontology_path="schemas/capability_ontology.yaml",
     )
 )
 
@@ -202,7 +202,7 @@ mutation:config.yaml           # State mutation
 @dataclass
 class GroundedAgentConfig:
     # Path to capability ontology
-    ontology_path: str = "schemas/capability_ontology.json"
+    ontology_path: str = "schemas/capability_ontology.yaml"
 
     # If True, block mutations without checkpoint
     # If False, log warning but allow

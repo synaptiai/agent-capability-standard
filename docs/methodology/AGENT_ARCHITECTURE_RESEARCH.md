@@ -4,7 +4,7 @@
 **Last Updated**: 2026-01-26
 **Purpose**: Evaluate alternative foundations for agent capability ontology
 
-> **⚠️ Historical Document**: This document captures research that informed the final 35-capability model. The capability counts and proposals here reflect exploration of alternatives. For the authoritative ontology, see [`schemas/capability_ontology.json`](../../schemas/capability_ontology.json) and [`FIRST_PRINCIPLES_REASSESSMENT.md`](FIRST_PRINCIPLES_REASSESSMENT.md).
+> **⚠️ Historical Document**: This document captures research that informed the final 35-capability model. The capability counts and proposals here reflect exploration of alternatives. For the authoritative ontology, see [`schemas/capability_ontology.yaml`](../../schemas/capability_ontology.yaml) and [`FIRST_PRINCIPLES_REASSESSMENT.md`](FIRST_PRINCIPLES_REASSESSMENT.md).
 
 ---
 

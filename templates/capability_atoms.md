@@ -8,7 +8,7 @@ You can treat each capability as an "atomic unit" and compose them into higher-l
 
 ## Reference List (99 Capabilities)
 
-> **Source of truth**: `schemas/capability_ontology.json`
+> **Source of truth**: `schemas/capability_ontology.yaml`
 
 ### PERCEPTION (4)
 
@@ -186,5 +186,5 @@ Multi-agent and workflow coordination capabilities.
 To get the latest capability list programmatically:
 
 ```bash
-cat schemas/capability_ontology.json | jq -r '.nodes[] | "\(.layer): \(.id)"' | sort
+cat schemas/capability_ontology.yaml | jq -r '.nodes[] | "\(.layer): \(.id)"' | sort
 ```

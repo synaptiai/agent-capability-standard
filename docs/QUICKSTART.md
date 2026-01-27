@@ -148,7 +148,7 @@ Key observations:
 
 ## Step 5: Explore the Capability Ontology (2 min)
 
-Open `schemas/capability_ontology.json` and find the `mutate` capability:
+Open `schemas/capability_ontology.yaml` and find the `mutate` capability:
 
 ```json
 {
@@ -299,7 +299,7 @@ python tools/validate_workflows.py
 ### Validator reports errors
 
 Read the error message carefully. Common issues:
-- Unknown capability: Check spelling against `schemas/capability_ontology.json`
+- Unknown capability: Check spelling against `schemas/capability_ontology.yaml`
 - Missing prerequisite: Add the required step before the one that needs it
 - Invalid binding: Ensure the referenced `store_as` exists in a prior step
 

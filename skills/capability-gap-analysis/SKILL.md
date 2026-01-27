@@ -21,7 +21,7 @@ Run the composed workflow **gap-analysis-workflow** using atomic capability skil
 - Audit trail of analysis process
 
 **Compatible schemas:**
-- `docs/schemas/capability_ontology.json`
+- `docs/schemas/capability_ontology.yaml`
 - `docs/schemas/workflow_catalog.yaml`
 
 ## Inputs
@@ -144,7 +144,7 @@ constraints:
   priority_criteria:
     - "security_impact"
     - "automation_potential"
-reference_ontology: "schemas/capability_ontology.json"
+reference_ontology: "schemas/capability_ontology.yaml"
 ```
 
 **Output:**
@@ -160,7 +160,7 @@ current_state:
     - "safety"
     - "action"
   evidence_anchors:
-    - "file:schemas/capability_ontology.json"
+    - "file:schemas/capability_ontology.yaml"
     - "file:skills/critique/SKILL.md"
 gaps_identified:
   total: 8
@@ -193,7 +193,7 @@ gaps_identified:
       - "evaluate-test-coverage"
       - "apply-suggested-fix"
   evidence_anchors:
-    - "file:schemas/capability_ontology.json:nodes"
+    - "file:schemas/capability_ontology.yaml:nodes"
     - "tool:compare-plans:coverage_analysis"
 relationships:
   existing_dependencies:
@@ -217,7 +217,7 @@ relationships:
     - "tool:map-relationships:dependency_graph"
     - "tool:discover-relationship:implicit_links"
 comparison:
-  reference_ontology: "schemas/capability_ontology.json"
+  reference_ontology: "schemas/capability_ontology.yaml"
   alignment_score: 0.72
   divergences:
     - "Missing specialized detection capabilities for code patterns"
@@ -262,7 +262,7 @@ audit:
     - "file:.claude/audit/gap_20240115_120000_codereview.log"
 confidence: 0.85
 evidence_anchors:
-  - "file:schemas/capability_ontology.json"
+  - "file:schemas/capability_ontology.yaml"
   - "tool:map-relationships:dependency_graph"
   - "tool:compare-plans:ontology_diff"
   - "tool:prioritize:impact_matrix"
@@ -318,4 +318,4 @@ assumptions:
 
 **Workflow references:**
 - See `workflow_catalog.yaml#gap-analysis-workflow` for step definitions
-- See `capability_ontology.json` for reference structure
+- See `capability_ontology.yaml` for reference structure

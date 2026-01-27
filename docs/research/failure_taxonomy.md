@@ -425,7 +425,7 @@ constrain(operation, limits=[tokens, calls, memory]) →
 
 ## References
 
-- [Grounded Agency Capability Ontology](../../schemas/capability_ontology.json)
+- [Grounded Agency Capability Ontology](../../schemas/capability_ontology.yaml)
 - [First Principles Reassessment](../methodology/FIRST_PRINCIPLES_REASSESSMENT.md)
 - [Raw Issue Data](./raw_data/)
 - [Detailed Capability Mapping](./analysis/capability_mapping.md)

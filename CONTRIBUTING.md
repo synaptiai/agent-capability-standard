@@ -41,7 +41,7 @@ This project follows a formal RFC process for changes. See [`spec/GOVERNANCE.md`
 
 New skills must:
 - Follow the template in `templates/SKILL_TEMPLATE_ENHANCED.md`
-- Include valid capability references from `schemas/capability_ontology.json`
+- Include valid capability references from `schemas/capability_ontology.yaml`
 - Define clear input/output contracts
 - Include workflow references where applicable
 

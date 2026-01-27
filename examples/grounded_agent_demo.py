@@ -38,7 +38,7 @@ async def demo_checkpoint_enforcement():
         GroundedAgentConfig(
             strict_mode=True,
             ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.json"
+                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
             ),
         )
     )
@@ -79,7 +79,7 @@ async def demo_safe_mutation():
         GroundedAgentConfig(
             strict_mode=True,
             ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.json"
+                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
             ),
         )
     )
@@ -115,7 +115,7 @@ async def demo_evidence_collection():
     adapter = GroundedAgentAdapter(
         GroundedAgentConfig(
             ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.json"
+                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
             ),
         )
     )
@@ -175,7 +175,7 @@ async def demo_tool_mapping():
     adapter = GroundedAgentAdapter(
         GroundedAgentConfig(
             ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.json"
+                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
             ),
         )
     )
@@ -220,7 +220,7 @@ async def demo_with_sdk():
             GroundedAgentConfig(
                 strict_mode=True,
                 ontology_path=str(
-                    Path(__file__).parent.parent / "schemas/capability_ontology.json"
+                    Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
                 ),
             )
         )
@@ -264,7 +264,7 @@ async def demo_with_sdk():
         adapter = GroundedAgentAdapter(
             GroundedAgentConfig(
                 ontology_path=str(
-                    Path(__file__).parent.parent / "schemas/capability_ontology.json"
+                    Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
                 ),
             )
         )

@@ -136,6 +136,6 @@ This proves the atomic capability set is complete — different domains compose 
 
 ## Related Documentation
 
-- [Capability Ontology](../../schemas/capability_ontology.json) — The 36 atomic capabilities
+- [Capability Ontology](../../schemas/capability_ontology.yaml) — The 36 atomic capabilities
 - [Workflow Catalog](../../schemas/workflow_catalog.yaml) — Core workflow patterns
 - [Getting Started](../QUICKSTART.md) — Quick start guide

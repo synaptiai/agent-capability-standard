@@ -12,17 +12,18 @@ This script validates the capability ontology by:
 5. Optionally checking for multiple edge types between capability pairs
 """
 
-import json
 import argparse
 from pathlib import Path
 from collections import defaultdict
 from typing import Any
 
+import yaml
+
 
 def load_ontology(path: Path) -> dict[str, Any]:
-    """Load the capability ontology from JSON."""
-    with open(path) as f:
-        return json.load(f)
+    """Load the capability ontology from YAML."""
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
 def get_all_capability_ids(ontology: dict) -> set[str]:
@@ -159,7 +160,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--ontology",
-        default="schemas/capability_ontology.json",
+        default="schemas/capability_ontology.yaml",
         help="Path to ontology file"
     )
     args = parser.parse_args()

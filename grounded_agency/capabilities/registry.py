@@ -1,17 +1,18 @@
 """
 Capability Ontology Registry
 
-Loads and provides typed access to the capability ontology JSON schema.
+Loads and provides typed access to the capability ontology YAML schema.
 Enables querying capabilities, edges, and layers at runtime.
 """
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 
 @dataclass(slots=True)
@@ -30,7 +31,7 @@ class CapabilityNode:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CapabilityNode:
-        """Create CapabilityNode from ontology JSON node."""
+        """Create CapabilityNode from ontology YAML node."""
         return cls(
             id=data["id"],
             layer=data["layer"],
@@ -57,14 +58,14 @@ class CapabilityRegistry:
     """
     Registry for the Grounded Agency capability ontology.
 
-    Loads capability_ontology.json and provides methods to query:
+    Loads capability_ontology.yaml and provides methods to query:
     - Individual capabilities by ID
     - Edges (relationships) between capabilities
     - Capabilities by layer
     - High-risk capabilities requiring checkpoints
 
     Example:
-        registry = CapabilityRegistry("schemas/capability_ontology.json")
+        registry = CapabilityRegistry("schemas/capability_ontology.yaml")
         mutate = registry.get_capability("mutate")
         assert mutate.requires_checkpoint is True
     """
@@ -74,7 +75,7 @@ class CapabilityRegistry:
         Initialize the registry.
 
         Args:
-            ontology_path: Path to capability_ontology.json
+            ontology_path: Path to capability_ontology.yaml
         """
         self._ontology_path = Path(ontology_path)
         self._ontology: dict[str, Any] | None = None
@@ -116,14 +117,14 @@ class CapabilityRegistry:
         return self._loaded_ontology
 
     def _load_ontology(self) -> None:
-        """Load the ontology JSON from disk."""
+        """Load the ontology YAML from disk."""
         if not self._ontology_path.exists():
             raise FileNotFoundError(
                 f"Capability ontology not found: {self._ontology_path}"
             )
 
         with open(self._ontology_path, encoding="utf-8") as f:
-            ontology: dict[str, Any] = json.load(f)
+            ontology: dict[str, Any] = yaml.safe_load(f)
 
         self._ontology = ontology
 

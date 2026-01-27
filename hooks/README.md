@@ -77,4 +77,4 @@ These hooks implement runtime enforcement of SAFETY layer requirements:
 | `requires_checkpoint: true` | `pretooluse_require_checkpoint.sh` blocks without checkpoint |
 | `audit` capability | `posttooluse_log_tool.sh` records tool usage |
 
-See `schemas/capability_ontology.json` for full capability definitions.
+See `schemas/capability_ontology.yaml` for full capability definitions.

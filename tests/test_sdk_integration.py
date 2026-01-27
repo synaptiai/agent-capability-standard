@@ -35,7 +35,7 @@ from grounded_agency import (
 @pytest.fixture
 def ontology_path() -> str:
     """Path to the capability ontology."""
-    return str(Path(__file__).parent.parent / "schemas/capability_ontology.json")
+    return str(Path(__file__).parent.parent / "schemas/capability_ontology.yaml")
 
 
 @pytest.fixture

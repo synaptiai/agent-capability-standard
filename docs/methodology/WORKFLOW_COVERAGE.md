@@ -232,4 +232,4 @@ The [Extension Governance](EXTENSION_GOVERNANCE.md) process includes usage requi
 - [GitHub Issue #12: Domain-specific workflow templates](https://github.com/synaptiai/agent-capability-standard/issues/12)
 - [EXTENSION_GOVERNANCE.md](EXTENSION_GOVERNANCE.md) — Capability tier definitions
 - `schemas/workflow_catalog.yaml` — Reference workflow definitions
-- `schemas/capability_ontology.json` — 36-capability ontology
+- `schemas/capability_ontology.yaml` — 36-capability ontology

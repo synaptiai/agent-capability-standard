@@ -203,4 +203,4 @@ Skills can be invoked via:
 2. Direct SKILL.md reading and execution
 3. Workflow composition via `invoke`
 
-See `schemas/capability_ontology.json` for the authoritative ontology definition.
+See `schemas/capability_ontology.yaml` for the authoritative ontology definition.

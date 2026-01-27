@@ -47,7 +47,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-ONTO = ROOT / "schemas" / "capability_ontology.json"
+ONTO = ROOT / "schemas" / "capability_ontology.yaml"
 WF   = ROOT / "schemas" / "workflow_catalog.yaml"
 COERCE_REG = ROOT / "schemas" / "transforms" / "transform_coercion_registry.yaml"
 SUGGESTIONS_JSON = ROOT / "tools" / "validator_suggestions.json"
@@ -494,7 +494,7 @@ def main() -> None:
     ap.add_argument("--emit-patch", action="store_true", help="Write a unified diff patch for suggested transform insertions.")
     args = ap.parse_args()
 
-    onto = json.loads(ONTO.read_text(encoding='utf-8'))
+    onto = yaml.safe_load(ONTO.read_text(encoding='utf-8'))
     workflows = yaml.safe_load(WF.read_text(encoding='utf-8')) or {}
     nodes = {n['id']: n for n in onto['nodes']}
 

@@ -280,5 +280,5 @@ Recommended data formats:
 
 - [Profile Schema](../../../schemas/profiles/profile_schema.yaml)
 - [Healthcare Workflows](../../../schemas/workflows/healthcare_workflows.yaml)
-- [Capability Ontology](../../../schemas/capability_ontology.json)
+- [Capability Ontology](../../../schemas/capability_ontology.yaml)
 - [FDA Clinical Decision Support Guidance](https://www.fda.gov/medical-devices/software-medical-device-samd/clinical-decision-support-software)

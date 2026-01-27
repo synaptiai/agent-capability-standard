@@ -644,6 +644,6 @@ All patterns compose from the **36 atomic capabilities**. New patterns can be cr
 
 ## References
 
-- [capability_ontology.json](../schemas/capability_ontology.json) — The 36 atomic capabilities
+- [capability_ontology.yaml](../schemas/capability_ontology.yaml) — The 36 atomic capabilities
 - [FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md) — Derivation methodology
 - [Claude Skills Overview](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
