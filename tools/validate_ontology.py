@@ -13,8 +13,8 @@ This script validates the capability ontology by:
 """
 
 import argparse
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import yaml
