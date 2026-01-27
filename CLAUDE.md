@@ -14,6 +14,11 @@ python tools/validate_workflows.py
 python tools/validate_profiles.py
 ```
 
+### Validate ontology graph (orphans, cycles, symmetry)
+```bash
+python tools/validate_ontology.py
+```
+
 ### Run conformance tests
 ```bash
 python scripts/run_conformance.py
