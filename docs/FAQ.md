@@ -49,6 +49,31 @@ Start where the pain is worst, then expand as you see value.
 
 ---
 
+## Why weren't PERCEIVE/REMEMBER/COORDINATE layers expanded?
+
+Issues #3, #4, and #5 proposed additional capabilities for these layers. After first-principles evaluation, all were rejected because they failed the criteria in `docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md`:
+
+**Proposals that are workflow patterns:**
+- `listen` = loop of `receive`
+- `coordinate` = `decompose` + `delegate` + `synchronize` + `integrate`
+- `compress` = `recall` + `integrate` + `transform` + `persist`
+
+**Proposals that are parameter variations:**
+- `sample` = `search` with `limit`
+- `scan` = `search` with exhaustive query
+- `broadcast` = `send` with multiple destinations
+
+**Proposals covered by existing capabilities:**
+- `observe` already exists
+- `negotiate` covered by `synchronize`
+- `handoff` covered by `delegate` with context
+- `forget` covered by `persist(ttl: 0)` or `mutate(delete)`
+- `index` and `associate` covered by MODEL layer capabilities
+
+The 36-capability model represents genuinely **irreducible cognitive operations**. Workflow patterns belong in `schemas/workflow_catalog.yaml`, not as atomic capabilities.
+
+---
+
 ## General
 
 ### What is the Agent Capability Standard?
