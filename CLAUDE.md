@@ -9,6 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python tools/validate_workflows.py
 ```
 
+### Validate domain profiles against schema
+```bash
+python tools/validate_profiles.py
+```
+
 ### Run conformance tests
 ```bash
 python scripts/run_conformance.py
@@ -38,6 +43,8 @@ Every agent action must be:
 |------|---------|
 | `schemas/capability_ontology.json` | Master ontology defining all 36 capabilities with I/O contracts, risk levels, and edges |
 | `schemas/workflow_catalog.yaml` | Reference workflows that compose capabilities |
+| `schemas/profiles/*.yaml` | Domain-specific profiles (trust weights, risk thresholds, checkpoint/evidence policies) |
+| `schemas/profiles/profile_schema.yaml` | Schema defining structure for domain profiles |
 | `skills/<name>/SKILL.md` | Individual skill implementations (flat structure, no nesting) |
 | `hooks/hooks.json` | Claude Code hooks for safety enforcement |
 | `templates/SKILL_TEMPLATE_ENHANCED.md` | Template for creating new skills |
@@ -125,6 +132,7 @@ Search and update capability counts in these files:
 ### 4. Validate
 ```bash
 python tools/validate_workflows.py
+python tools/validate_profiles.py
 python -c "import json; json.load(open('schemas/capability_ontology.json'))"
 ```
 
