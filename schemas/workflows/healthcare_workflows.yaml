@@ -146,7 +146,7 @@ patient_monitoring:
           recommended_review_focus: ${pattern_detection_out.matches[0]}
         constraints:
           include_disclaimer: true
-          disclaimer: "For clinical decision support only. All decisions must be made by licensed clinicians."
+          disclaimer: "For clinical decision support only. All decisions must be made by licensed healthcare professionals."
 
     - capability: checkpoint
       purpose: Checkpoint before alert delivery.
@@ -363,7 +363,7 @@ care_plan_review:
     Synthesizes current patient data, identifies potential issues,
     and prepares summary for clinician review.
 
-    NOTE: All care plan decisions are made by licensed clinicians.
+    NOTE: All care plan decisions are made by licensed healthcare professionals.
   success:
     - Patient data synthesized from multiple sources
     - Potential issues identified
