@@ -162,6 +162,64 @@ class TestCapabilityRegistry:
         """Test capability count."""
         assert registry.capability_count == 36  # 36 atomic capabilities
 
+    # -------------------------------------------------------------------------
+    # Edge Type Methods Tests
+    # -------------------------------------------------------------------------
+
+    def test_get_preceding_capabilities(self, registry: CapabilityRegistry):
+        """Test getting capabilities that must temporally precede."""
+        preceding = registry.get_preceding_capabilities("mutate")
+        assert "checkpoint" in preceding  # checkpoint must precede mutate
+        assert "plan" in preceding  # plan must precede mutate
+
+    def test_get_preceding_capabilities_empty(self, registry: CapabilityRegistry):
+        """Test that capabilities with no precedes return empty list."""
+        preceding = registry.get_preceding_capabilities("observe")
+        # observe has no incoming precedes edges
+        assert isinstance(preceding, list)
+
+    def test_get_conflicting_capabilities(self, registry: CapabilityRegistry):
+        """Test getting mutually exclusive capabilities."""
+        conflicts = registry.get_conflicting_capabilities("rollback")
+        assert "persist" in conflicts  # rollback conflicts_with persist
+        assert "mutate" in conflicts  # mutate conflicts_with rollback
+
+    def test_get_conflicting_capabilities_symmetric(self, registry: CapabilityRegistry):
+        """Test that conflicts_with is symmetric."""
+        # If rollback conflicts with persist, persist should conflict with rollback
+        rollback_conflicts = registry.get_conflicting_capabilities("rollback")
+        persist_conflicts = registry.get_conflicting_capabilities("persist")
+        assert "persist" in rollback_conflicts
+        assert "rollback" in persist_conflicts
+
+    def test_get_alternatives(self, registry: CapabilityRegistry):
+        """Test getting substitutable capabilities."""
+        alternatives = registry.get_alternatives("search")
+        assert "retrieve" in alternatives  # search alternative_to retrieve
+
+    def test_get_alternatives_symmetric(self, registry: CapabilityRegistry):
+        """Test that alternative_to is symmetric."""
+        search_alts = registry.get_alternatives("search")
+        retrieve_alts = registry.get_alternatives("retrieve")
+        assert "retrieve" in search_alts
+        assert "search" in retrieve_alts
+
+    def test_get_specialized_by(self, registry: CapabilityRegistry):
+        """Test getting capabilities that specialize this one."""
+        specialized = registry.get_specialized_by("detect")
+        assert "classify" in specialized  # classify specializes detect
+
+    def test_get_generalizes_to(self, registry: CapabilityRegistry):
+        """Test getting the parent capability."""
+        parent = registry.get_generalizes_to("classify")
+        assert parent == "detect"  # classify specializes detect
+
+    def test_get_generalizes_to_none(self, registry: CapabilityRegistry):
+        """Test that top-level capabilities return None."""
+        parent = registry.get_generalizes_to("observe")
+        # observe doesn't specialize anything
+        assert parent is None
+
 
 # =============================================================================
 # ToolCapabilityMapper Tests
