@@ -49,7 +49,7 @@ class CapabilityEdge:
 
     from_cap: str
     to_cap: str
-    edge_type: str  # "requires", "soft_requires", "enables"
+    edge_type: str  # See spec/EDGE_TYPES.md for all 7 edge types
 
 
 class CapabilityRegistry:
@@ -189,6 +189,90 @@ class CapabilityRegistry:
         """
         incoming = self.get_incoming_edges(cap_id)
         return [edge.from_cap for edge in incoming if edge.edge_type == "requires"]
+
+    def get_preceding_capabilities(self, cap_id: str) -> list[str]:
+        """
+        Get capabilities that must temporally precede cap_id.
+
+        Returns capabilities connected via 'precedes' edges.
+
+        Args:
+            cap_id: Capability identifier
+
+        Returns:
+            List of capability IDs that must complete before cap_id
+        """
+        incoming = self.get_incoming_edges(cap_id)
+        return [edge.from_cap for edge in incoming if edge.edge_type == "precedes"]
+
+    def _get_symmetric_edge_targets(self, cap_id: str, edge_type: str) -> list[str]:
+        """Get targets of symmetric edges (works regardless of edge direction)."""
+        return [
+            edge.to_cap if edge.from_cap == cap_id else edge.from_cap
+            for edge in self.get_edges(cap_id)
+            if edge.edge_type == edge_type
+        ]
+
+    def get_conflicting_capabilities(self, cap_id: str) -> list[str]:
+        """
+        Get capabilities that conflict with cap_id.
+
+        Returns capabilities that cannot coexist in the same workflow.
+
+        Args:
+            cap_id: Capability identifier
+
+        Returns:
+            List of capability IDs that conflict with cap_id
+        """
+        return self._get_symmetric_edge_targets(cap_id, "conflicts_with")
+
+    def get_alternatives(self, cap_id: str) -> list[str]:
+        """
+        Get capabilities that can substitute for cap_id.
+
+        Returns capabilities connected via 'alternative_to' edges.
+
+        Args:
+            cap_id: Capability identifier
+
+        Returns:
+            List of capability IDs that can substitute for cap_id
+        """
+        return self._get_symmetric_edge_targets(cap_id, "alternative_to")
+
+    def get_specialized_by(self, cap_id: str) -> list[str]:
+        """
+        Get capabilities that specialize cap_id.
+
+        Returns more specific variants of this capability.
+
+        Args:
+            cap_id: Capability identifier
+
+        Returns:
+            List of capability IDs that specialize cap_id
+        """
+        incoming = self.get_incoming_edges(cap_id)
+        return [edge.from_cap for edge in incoming if edge.edge_type == "specializes"]
+
+    def get_generalizes_to(self, cap_id: str) -> str | None:
+        """
+        Get the capability that cap_id specializes.
+
+        Returns the more general capability, if any.
+
+        Args:
+            cap_id: Capability identifier
+
+        Returns:
+            Capability ID that cap_id specializes, or None
+        """
+        outgoing = self.get_outgoing_edges(cap_id)
+        for edge in outgoing:
+            if edge.edge_type == "specializes":
+                return edge.to_cap
+        return None
 
     def get_layer(self, layer_name: str) -> dict[str, Any]:
         """

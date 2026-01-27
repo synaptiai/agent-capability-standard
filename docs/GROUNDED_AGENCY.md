@@ -132,7 +132,7 @@ Each capability node specifies:
 ```yaml
 id: verify
 type: DIS.Level4Verb
-layer: SAFETY
+layer: VERIFY
 risk: medium
 mutation: false
 requires_checkpoint: false
@@ -171,21 +171,23 @@ Key design decisions:
 
 ### 3.3 Dependency Graph
 
-The ontology defines **60 dependency edges** between capabilities:
+The ontology defines **54 dependency edges** across **7 edge types**:
 
-- **requires** (44 edges): Hard prerequisite. The dependent capability cannot execute unless the required capability has produced output.
+- **enables** (20 edges): The source capability produces outputs that make the target more effective.
 
-- **enables** (11 edges): The source capability produces outputs that make the target more effective.
+- **precedes** (12 edges): Temporal ordering; the source must complete before the target begins.
 
-- **governed_by** (2 edges): Policy or constraint relationship.
+- **soft_requires** (7 edges): Preferred but not mandatory prerequisite.
 
-- **verifies** (1 edge): The source validates outputs of the target.
+- **specializes** (6 edges): Inheritance; the source is a more specific variant of the target.
 
-- **soft_requires** (1 edge): Preferred but not mandatory.
+- **requires** (4 edges): Hard prerequisite. The dependent capability cannot execute unless the required capability has produced output.
 
-- **documented_by** (1 edge): Specification linkage.
+- **alternative_to** (3 edges): Substitutability; capabilities can replace each other.
 
-This graph enables the validator to check that workflows satisfy all hard prerequisites before a capability is invoked.
+- **conflicts_with** (2 edges): Mutual exclusivity; both cannot coexist in the same workflow.
+
+This graph enables the validator to check that workflows satisfy all hard prerequisites, respect temporal ordering, and avoid conflicting capability combinations. See [spec/EDGE_TYPES.md](../spec/EDGE_TYPES.md) for full edge type documentation.
 
 ### 3.4 Derivation Methodology
 
@@ -195,16 +197,18 @@ The 36 capabilities were derived from first-principles analysis of cognitive arc
 
 We began with the DIS '23 AI Capabilities framework [4], which identified 8 core verbs for AI systems:
 
-| Verb | Definition | Layer Mapping |
+| Verb | Definition | DIS '23 Layer |
 |------|------------|---------------|
-| Detect | Find occurrences of patterns | MODELING |
-| Identify | Classify and label | MODELING |
-| Estimate | Quantify uncertain values | MODELING |
-| Forecast | Predict future states | MODELING |
-| Compare | Evaluate alternatives | REASONING |
-| Discover | Find unknown patterns | META |
-| Generate | Produce new content | ACTION |
-| Act | Execute changes | ACTION |
+| Detect | Find occurrences of patterns | Modeling |
+| Identify | Classify and label | Modeling |
+| Estimate | Quantify uncertain values | Modeling |
+| Forecast | Predict future states | Modeling |
+| Compare | Evaluate alternatives | Reasoning |
+| Discover | Find unknown patterns | Meta |
+| Generate | Produce new content | Action |
+| Act | Execute changes | Action |
+
+*Note: These are the original DIS '23 layer names. Our ontology uses a refined 9-layer architecture (see Section 3.1).*
 
 #### 3.4.2 Systematic Extension
 
@@ -562,9 +566,9 @@ We evaluate Grounded Agency on three dimensions: coverage, validation effectiven
 
 | Component | Count | Notes |
 |-----------|-------|-------|
-| Capabilities | 99 | 100% schema coverage |
-| Layers | 8 | Perception to Coordination |
-| Dependency edges | 60 | 44 requires, 11 enables |
+| Capabilities | 36 | 100% schema coverage |
+| Layers | 9 | Perceive to Coordinate |
+| Dependency edges | 54 | 7 edge types (see spec/EDGE_TYPES.md) |
 | Entity classes | 18 | 10 digital, 8 real-world |
 | Entity subtypes | 57 | Extensible taxonomy |
 | Core relations | 13 | depends_on, owns, causes... |
@@ -706,7 +710,7 @@ The framework assumes a trusted implementation environment and focuses on preven
 
 Our framework makes three design bets. First, that **grounding every claim in evidence** prevents the hallucination and confabulation that undermine agent reliability. Second, that **typing uncertainty** (epistemic vs. aleatoric) enables agents to reason appropriately about knowledge gaps versus inherent randomness. Third, that **mandating reversibility** for mutations transforms agent errors from catastrophic events into recoverable incidents.
 
-The 99-capability ontology with 60 dependency edges provides the compositional vocabulary. The world state schema with provenance records and typed uncertainty provides the representational foundation. The trust model with temporal decay and field-specific authority provides the conflict resolution mechanism. The design-time validator with type inference and coercion suggestions catches errors before they reach production.
+The 36-capability ontology with 54 dependency edges provides the compositional vocabulary. The world state schema with provenance records and typed uncertainty provides the representational foundation. The trust model with temporal decay and field-specific authority provides the conflict resolution mechanism. The design-time validator with type inference and coercion suggestions catches errors before they reach production.
 
 The framework enforces three invariants we believe are essential for trustworthy agentic AI: **grounding** (every claim has evidence), **uncertainty** (confidence is typed and explicit), and **reversibility** (every mutation can be undone). These are not conventions to be followed but structural properties enforced by the ontology's dependency edges and the validator's type system.
 
@@ -800,14 +804,17 @@ We release the complete framework as open source to establish a foundation for a
 
 | Layer | Count | Key Capabilities |
 |-------|-------|-----------------|
-| MODELING | 45 | world-state, state-transition, causal-model, identity-resolution, grounding, simulation |
-| REASONING | 20 | plan, schedule, prioritize, compare, critique, decompose, infer |
-| ACTION | 12 | act-plan, transform, send, constrain, mitigate |
-| SAFETY | 7 | verify, audit, checkpoint, rollback, mitigate, improve, constrain |
-| META | 6 | discover-entity, discover-pattern, invoke-workflow |
-| PERCEPTION | 4 | retrieve, inspect, search, receive |
-| COORDINATION | 3 | delegate, synchronize, negotiate |
-| MEMORY | 2 | persist, recall |
+| PERCEIVE | 4 | retrieve, search, observe, receive |
+| UNDERSTAND | 6 | detect, classify, measure, predict, compare, discover |
+| REASON | 4 | plan, decompose, critique, explain |
+| MODEL | 5 | state, transition, attribute, ground, simulate |
+| SYNTHESIZE | 3 | generate, transform, integrate |
+| EXECUTE | 3 | execute, mutate, send |
+| VERIFY | 5 | verify, checkpoint, rollback, constrain, audit |
+| REMEMBER | 2 | persist, recall |
+| COORDINATE | 4 | delegate, synchronize, invoke, inquire |
+
+**Total: 36 capabilities across 9 cognitive layers**
 
 ---
 

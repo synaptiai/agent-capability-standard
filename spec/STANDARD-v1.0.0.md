@@ -111,10 +111,28 @@ Capabilities are classified into 9 cognitive layers:
 | **REMEMBER** | Persist state | Varies | 2 |
 | **COORDINATE** | Multi-agent interaction | Varies | 3 |
 
-### 4.3 Dependency Semantics
+### 4.3 Edge Types and Dependency Semantics
 
+The ontology supports 7 edge types for expressing relationships between capabilities:
+
+| Edge Type | Enforcement | Description |
+|-----------|-------------|-------------|
+| `requires` | MUST | Hard prerequisite that must be satisfied |
+| `soft_requires` | SHOULD | Recommended prerequisite when available |
+| `enables` | Informational | Capability flow and composition pattern |
+| `precedes` | MUST | Temporal ordering constraint |
+| `conflicts_with` | MUST | Mutual exclusivity (symmetric) |
+| `alternative_to` | Informational | Substitutable capabilities (symmetric) |
+| `specializes` | Informational | Parent-child inheritance |
+
+**Enforcement semantics:**
 - `requires`: MUST be satisfied earlier in workflow execution order. Validator MUST reject workflows that violate this.
 - `soft_requires`: SHOULD be satisfied when available. Validator SHOULD warn if not satisfied.
+- `precedes`: MUST complete before the target capability begins. Validator MUST reject workflows that violate temporal ordering.
+- `conflicts_with`: Both capabilities MUST NOT appear in the same workflow. Validator MUST reject workflows containing both.
+- `enables`, `alternative_to`, `specializes`: Informational only, used for workflow design and capability selection.
+
+See [EDGE_TYPES.md](EDGE_TYPES.md) for full edge type documentation.
 
 ### 4.4 Safety-Critical Capabilities
 
