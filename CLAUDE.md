@@ -32,7 +32,7 @@ pip install pyyaml
 
 ## Architecture
 
-This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with **36 atomic capabilities** across **9 cognitive layers**, plus 11 composed workflow patterns.
+This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with **36 atomic capabilities** across **9 cognitive layers**, plus 12 composed workflow patterns.
 
 ### Core Philosophy: Grounded Agency
 

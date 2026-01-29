@@ -1,6 +1,6 @@
 # Agent Capability Skills
 
-This directory contains **36 atomic capabilities** organized according to the capability ontology's **9 cognitive layers**, plus 11 composed workflow skills.
+This directory contains **36 atomic capabilities** organized according to the capability ontology's **9 cognitive layers**, plus 12 composed workflow skills.
 
 ## Skill Layers
 
@@ -15,9 +15,9 @@ This directory contains **36 atomic capabilities** organized according to the ca
 | VERIFY | 5 | Ensure correctness |
 | REMEMBER | 2 | Persist state |
 | COORDINATE | 4 | Multi-agent and user interaction |
-| Workflows | 11 | Composed multi-step skills |
+| Workflows | 12 | Composed multi-step skills |
 
-**Total: 36 atomic capabilities + 11 composed workflows = 47 skills**
+**Total: 36 atomic capabilities + 12 composed workflows = 48 skills**
 
 ## The 36 Atomic Capabilities
 
@@ -111,7 +111,7 @@ Multi-agent and user interaction.
 | `invoke` | Execute a composed workflow |
 | `inquire` | Request clarification when input is ambiguous |
 
-## Composed Workflows (11)
+## Composed Workflows (12)
 
 | Workflow | Description |
 |----------|-------------|
@@ -125,6 +125,7 @@ Multi-agent and user interaction.
 | `security-assessment` | Identify and assess security vulnerabilities (OASF Cat. 8) |
 | `multi-agent-orchestration` | Coordinate multiple agents on complex tasks (OASF Cat. 10) |
 | `data-quality-pipeline` | Clean and validate data quality (OASF Cat. 9) |
+| `world-model-build` | Build a structured world model with dynamics and uncertainty |
 | `model-deployment` | Safely deploy ML models to production (OASF Cat. 12) |
 
 ## Domain Parameterization

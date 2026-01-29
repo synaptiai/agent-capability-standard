@@ -1169,7 +1169,9 @@ rag_pipeline:
       max: 2
       backoff: exponential
     store_as: retrieve_out
-    input_bindings: {}
+    input_bindings:
+      query: "$.input.query"
+      references: "${search_out.results: array<object>}"
     failure_modes:
     - condition: Document retrieval fails
       action: request_more_context
@@ -1197,7 +1199,9 @@ rag_pipeline:
     timeout: null
     retry: null
     store_as: ground_out
-    input_bindings: {}
+    input_bindings:
+      claims: "${detect_out.matches: array<object>}"
+      sources: "${search_out.results: array<object>}"
     failure_modes: []
   - capability: generate
     purpose: Produce response synthesized from grounded evidence.
@@ -1256,7 +1260,9 @@ rag_pipeline:
 
 security_assessment:
   goal: Identify and assess security vulnerabilities with risk scoring and mitigation recommendations.
-  risk: medium
+  # Risk: low — all steps are read-only analysis (search, detect, measure,
+  # attribute, critique, generate, audit); no mutations or external tool invocations.
+  risk: low
   description: |
     Security assessment workflow inspired by OASF Category 8 (Security & Privacy).
     Scans for known vulnerability patterns, detects potential security issues,
