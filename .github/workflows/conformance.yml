@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -16,6 +18,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyyaml
+      - name: Validate PVC reports
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            # On push, event.before is all-zeros for new branches.
+            # Fall back to merge-base against default branch.
+            BASE="${{ github.event.before }}"
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ] || [ -z "$BASE" ]; then
+              BASE=$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)
+            fi
+          fi
+          python skills/perspective-validation/scripts/validate_pvc.py --diff-base "$BASE"
       - name: Run conformance suite
         run: |
           python scripts/run_conformance.py

@@ -1,0 +1,42 @@
+# Perspective Validation Checklist (PVC) report
+# See: skills/perspective-validation/CHECKLIST.md
+# priority: P0 (urgent) | P1 (important) | P2 (nice-to-have)
+
+target: "<path or description>"
+context:
+  domain: general
+  deployment: local-dev
+  risk_tier: low
+stakeholders:
+  - operator/on-call
+  - end user
+  - security
+  - compliance/legal
+  - product/engineering owners
+assumptions:
+  - "<assumption>"
+evidence:
+  - "file:<path>#L<line>"
+scorecard:
+  HF-101: N/A
+  HF-102: N/A
+  HF-103: N/A
+  ORG-201: N/A
+  GOV-202: N/A
+  ECON-301: N/A
+  ECON-302: N/A
+  SEC-401: N/A
+  SEC-402: N/A
+  CTRL-501: N/A
+  ASSUR-601: N/A
+  ASSUR-602: N/A
+  DG-701: N/A
+  ETH-801: N/A
+  ECO-901: N/A
+actions:
+  - id: "DOC-001"
+    priority: P1
+    fix: "<what to add/change>"
+    artifact: doc
+    owner: "<role/team>"
+

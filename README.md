@@ -237,6 +237,7 @@ Hooks implementing SAFETY layer capabilities:
 | [GLOSSARY.md](docs/GLOSSARY.md) | Key terms and definitions |
 | [FAQ.md](docs/FAQ.md) | Common questions |
 | [MODALITY_HANDLING.md](docs/guides/MODALITY_HANDLING.md) | Working with vision, audio, and multimodal domains |
+| [PERSPECTIVE_VALIDATION_CHECKLIST.md](skills/perspective-validation/CHECKLIST.md) | Socio-technical and governance review checklist (PVC) |
 
 ### For Implementers
 

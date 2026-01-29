@@ -1,0 +1,49 @@
+target: "Operationalize PVC in repo (reports + template + validator + CI + skill)"
+context:
+  domain: general
+  deployment: internal
+  risk_tier: medium
+stakeholders:
+  - operator/on-call
+  - end user
+  - security
+  - compliance/legal
+  - product/engineering owners
+assumptions:
+  - "PVC reports are a review artifact, not a normative spec requirement."
+  - "This report evaluates operationalization plumbing, not end-to-end incident response for a specific workflow."
+evidence:
+  - "file:skills/perspective-validation/CHECKLIST.md#L1"
+  - "file:docs/reviews/pvc/README.md#L1"
+  - "file:skills/perspective-validation/pvc_report_template.yaml#L1"
+  - "file:skills/perspective-validation/scripts/validate_pvc.py#L1"
+  - "file:.github/workflows/conformance.yml#L1"
+  - "file:skills/perspective-validation/SKILL.md#L1"
+scorecard:
+  HF-101: PARTIAL
+  HF-102: N/A
+  HF-103: N/A
+  ORG-201: PARTIAL
+  GOV-202: PARTIAL
+  ECON-301: N/A
+  ECON-302: N/A
+  SEC-401: PARTIAL
+  SEC-402: N/A
+  CTRL-501: N/A
+  ASSUR-601: PARTIAL
+  ASSUR-602: N/A
+  DG-701: PARTIAL
+  ETH-801: N/A
+  ECO-901: PASS
+actions:
+  - id: "GOV-001"
+    priority: P1
+    fix: "Add explicit policy ownership and change-control guidance for trust/identity/constraint policies (owners, review, rollback)."
+    artifact: doc
+    owner: "maintainers"
+  - id: "SEC-001"
+    priority: P2
+    fix: "Add a minimal redaction/minimization guideline for evidence anchors and audit logs (examples + do/don't)."
+    artifact: doc
+    owner: "maintainers"
+
