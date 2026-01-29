@@ -150,6 +150,84 @@ classify:
         value: 0.91
 ```
 
+## Available Workflows
+
+> **Note:** These workflows are proposed and pending inclusion in the workflow catalog. See the [workflow catalog](../../../schemas/workflow_catalog.yaml) for currently available patterns.
+
+### 1. Image Captioning Pipeline
+
+**Goal:** Generate natural language captions for images with cross-modal evidence grounding.
+
+**Capabilities used:**
+- `retrieve` -- Load image and captioning model configuration
+- `observe` -- Inspect image features and content
+- `detect` -- Detect objects and scene elements
+- `classify` -- Classify scene type and attributes
+- `transform` -- Convert visual features to text caption
+- `ground` -- Anchor caption to source image regions
+- `verify` -- Validate caption accuracy against image content
+- `checkpoint` -- Checkpoint before final output
+- `audit` -- Record captioning decision and provenance
+
+**Trigger:** Image submission
+
+**Output:** Caption with alignment score, confidence, and modality provenance
+
+### 2. Visual Question Answering
+
+**Goal:** Answer natural language questions about images with grounded evidence.
+
+**Capabilities used:**
+- `retrieve` -- Load image and question context
+- `observe` -- Inspect relevant image regions
+- `detect` -- Detect entities referenced in the question
+- `classify` -- Classify answer from visual evidence
+- `ground` -- Anchor answer to specific image regions and question
+- `explain` -- Generate answer explanation with cross-modal evidence
+- `verify` -- Validate answer against visual evidence
+- `audit` -- Record QA decision and provenance
+
+**Trigger:** Question-image pair submission
+
+**Output:** Answer with cross-modal evidence anchors and confidence
+
+### 3. Text-to-Image Generation
+
+**Goal:** Generate images from text prompts with review and provenance tracking.
+
+**Capabilities used:**
+- `retrieve` -- Load generation constraints and style guides
+- `observe` -- Analyze text prompt for intent and constraints
+- `generate` -- Create image from text prompt
+- `detect` -- Detect alignment between prompt and generated image
+- `verify` -- Validate generated image against prompt requirements
+- `ground` -- Anchor generated image to source prompt
+- `checkpoint` -- Checkpoint before release
+- `explain` -- Document generation provenance
+- `audit` -- Record generation and review decision
+
+**Trigger:** Text-to-image generation request
+
+**Output:** Generated image with prompt alignment score and provenance trail
+
+### 4. Cross-modal Search
+
+**Goal:** Search across modalities to find content matching a query in any modality.
+
+**Capabilities used:**
+- `retrieve` -- Load query (text, image, or audio)
+- `transform` -- Convert query to cross-modal embedding
+- `search` -- Search across modality indices
+- `compare` -- Rank results by cross-modal similarity
+- `detect` -- Detect alignment quality of top results
+- `ground` -- Anchor results to source query and modality evidence
+- `explain` -- Generate search result summary with cross-modal context
+- `audit` -- Record search session and results
+
+**Trigger:** Cross-modal search request
+
+**Output:** Ranked results across modalities with alignment scores
+
 ## Evidence Grounding for Multi-modal
 
 Cross-modal evidence anchors must include:

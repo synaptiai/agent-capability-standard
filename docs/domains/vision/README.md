@@ -34,6 +34,8 @@ Vision environments trust calibrated capture systems over processed or synthetic
 | Augmented Image | 0.70 | Augmented/transformed training data |
 | Model Prediction | 0.65 | Predictions from other ML models |
 | Synthetic Image | 0.60 | AI-generated or synthetic imagery |
+| Ground Truth Label | 0.95 | Verified ground truth annotations |
+| Expert Annotation | 0.90 | Domain expert visual annotations |
 
 ### Risk Thresholds
 
@@ -131,6 +133,82 @@ transform:
       - type: pixel_evidence
         operations_applied: ["denoise", "normalize", "resize"]
 ```
+
+## Available Workflows
+
+> **Note:** These workflows are proposed and pending inclusion in the workflow catalog. See the [workflow catalog](../../../schemas/workflow_catalog.yaml) for currently available patterns.
+
+### 1. Image Classification Pipeline
+
+**Goal:** Classify images into predefined categories with evidence grounding.
+
+**Capabilities used:**
+- `retrieve` -- Load image and reference taxonomy
+- `observe` -- Inspect image features
+- `detect` -- Detect objects and regions of interest
+- `classify` -- Assign category labels with confidence
+- `ground` -- Anchor classification to visual evidence
+- `explain` -- Generate classification report
+- `checkpoint` -- Checkpoint before final output
+- `audit` -- Record classification decision
+
+**Trigger:** Image submission or batch schedule
+
+**Output:** Classification label with confidence and visual evidence anchors
+
+### 2. Object Detection Pipeline
+
+**Goal:** Detect and localize objects within images with bounding box evidence.
+
+**Capabilities used:**
+- `retrieve` -- Load image and detection model
+- `detect` -- Detect objects with bounding boxes
+- `classify` -- Classify each detected object
+- `measure` -- Quantify detection confidence
+- `ground` -- Anchor detections to image regions
+- `verify` -- Validate detections against thresholds
+- `explain` -- Generate detection report
+- `audit` -- Record detection results
+
+**Trigger:** Image or video frame submission
+
+**Output:** Detected objects with bounding boxes, labels, and confidence scores
+
+### 3. Visual Quality Inspection
+
+**Goal:** Inspect visual inputs for defects or quality deviations.
+
+**Capabilities used:**
+- `retrieve` -- Load reference specifications
+- `observe` -- Capture inspection image
+- `detect` -- Identify visual defects
+- `compare` -- Compare against quality standards
+- `classify` -- Recommend disposition (pass/fail/review)
+- `ground` -- Anchor findings to image regions
+- `checkpoint` -- Checkpoint before disposition
+- `explain` -- Generate inspection report
+- `audit` -- Record inspection cycle
+
+**Trigger:** Batch completion or continuous inspection
+
+**Output:** Disposition recommendation with defect evidence
+
+### 4. Image Generation Review
+
+**Goal:** Generate images from prompts with human review checkpoints.
+
+**Capabilities used:**
+- `retrieve` -- Load generation constraints and style guides
+- `generate` -- Create image from prompt
+- `verify` -- Check generated image against constraints
+- `ground` -- Anchor generated image to source prompt
+- `checkpoint` -- Checkpoint before release
+- `explain` -- Document generation provenance
+- `audit` -- Record generation and review decision
+
+**Trigger:** Generation request
+
+**Output:** Generated image with provenance trail and review status
 
 ## Evidence Grounding for Vision
 

@@ -34,6 +34,8 @@ Audio environments trust calibrated and professional sources over processed or s
 | Crowd Annotation | 0.70 | Crowdsourced audio labels |
 | Model Prediction | 0.62 | Other audio model predictions |
 | Synthesized Audio | 0.55 | AI-generated or TTS audio |
+| Ground Truth Transcript | 0.95 | Verified human transcripts |
+| Expert Annotation | 0.90 | Linguist/domain expert annotations |
 
 ### Risk Thresholds
 
@@ -136,6 +138,83 @@ generate:
       - type: modality_hash
         value: "sha256:..."
 ```
+
+## Available Workflows
+
+> **Note:** These workflows are proposed and pending inclusion in the workflow catalog. See the [workflow catalog](../../../schemas/workflow_catalog.yaml) for currently available patterns.
+
+### 1. Speech Recognition Pipeline
+
+**Goal:** Transcribe audio to text with temporal evidence grounding.
+
+**Capabilities used:**
+- `retrieve` -- Load audio and language model configuration
+- `observe` -- Assess audio signal quality
+- `transform` -- Convert audio to text transcription
+- `detect` -- Detect speaker changes and non-speech events
+- `measure` -- Quantify transcription confidence and signal quality
+- `ground` -- Anchor transcript segments to audio time ranges
+- `verify` -- Validate transcription against quality thresholds
+- `checkpoint` -- Checkpoint before final output
+- `audit` -- Record transcription decision
+
+**Trigger:** Audio submission or stream start
+
+**Output:** Timestamped transcript with confidence scores and signal quality metrics
+
+### 2. Audio Classification Pipeline
+
+**Goal:** Classify audio segments into predefined categories (speech, music, noise, events).
+
+**Capabilities used:**
+- `retrieve` -- Load audio and classification taxonomy
+- `observe` -- Inspect audio signal characteristics
+- `detect` -- Detect sound events and segment boundaries
+- `classify` -- Assign category labels with confidence
+- `ground` -- Anchor classifications to time segments
+- `explain` -- Generate classification report
+- `audit` -- Record classification results
+
+**Trigger:** Audio submission or continuous monitoring
+
+**Output:** Classification labels with time segments and confidence scores
+
+### 3. Speaker Verification
+
+**Goal:** Verify speaker identity with privacy-aware checkpoints.
+
+**Capabilities used:**
+- `retrieve` -- Load reference voiceprints
+- `observe` -- Capture audio features
+- `detect` -- Detect speech segments
+- `compare` -- Compare against reference voiceprints
+- `classify` -- Determine speaker identity match
+- `ground` -- Anchor verification to acoustic evidence
+- `checkpoint` -- Checkpoint before identity disclosure
+- `verify` -- Validate confidence against threshold
+- `audit` -- Record verification decision
+
+**Trigger:** Authentication request
+
+**Output:** Verification result with confidence and privacy audit trail
+
+### 4. Audio Quality Assessment
+
+**Goal:** Assess audio quality and recommend processing actions.
+
+**Capabilities used:**
+- `retrieve` -- Load quality standards and reference signals
+- `observe` -- Capture audio signal properties
+- `measure` -- Quantify signal-to-noise ratio and quality metrics
+- `detect` -- Identify noise, clipping, and artifacts
+- `compare` -- Compare against quality thresholds
+- `classify` -- Recommend quality disposition
+- `explain` -- Generate quality assessment report
+- `audit` -- Record assessment results
+
+**Trigger:** Audio ingestion or quality check request
+
+**Output:** Quality assessment with metrics and processing recommendations
 
 ## Evidence Grounding for Audio
 
