@@ -35,6 +35,8 @@ Concrete examples:
 | `generate-image` | `generate` with `domain: image` |
 | `transcribe-speech` | `transform` with `source_format: audio.speech`, `target_format: text.transcript` |
 
+**A note on the `domain` parameter:** The `domain` parameter used throughout this guide is a workflow-level annotation convention. It is not a formal property defined in the capability ontology schema -- rather, it serves as a hint to implementations about which modality-specific processing pipeline to invoke. Workflow authors use `domain` to specialize generic capabilities (e.g., `detect` with `domain: visual` vs `domain: audio`) without requiring separate ontology entries per modality.
+
 ### 1.2 Benefits
 
 1. **Ontology stability.** Adding support for a new modality (e.g., 3D point clouds, haptic data) requires zero changes to the capability ontology. The existing 36 capabilities already cover it.
@@ -443,7 +445,7 @@ confidence: 0.89
     query:
       text: "solar panel installation on residential rooftop"
       visual_reference: ${reference_image_out.data}
-    scope: "asset_library"
+    collection: "asset_library"
     limit: 20
 ```
 
@@ -587,9 +589,9 @@ The Open Agentic Schema Framework (OASF) by Cisco/Outshift organizes AI agent sk
 
 | OASF Category | ID | OASF Approach | Grounded Agency Approach |
 |---|---|---|---|
-| **Computer Vision** | 2 | Dedicated skill category with subcategories for object detection, image segmentation, image classification, OCR, etc. | `detect(domain: image.*)`, `classify(domain: image.*)`, `measure(domain: image.*)`, `generate(domain: image)`, `transform(source_format: image.*, ...)` |
-| **Audio** | 3 | Dedicated skill category with subcategories for audio classification, speech recognition, text-to-speech, etc. | `detect(domain: audio.*)`, `classify(domain: audio.*)`, `generate(domain: audio)`, `transform(source_format: audio.*, ...)` |
-| **Multi-modal** | 7 | Dedicated skill category for cross-modality tasks like image-to-text, text-to-image, visual question answering | `transform(source_format: <modality_A>, target_format: <modality_B>)`, `detect(domain: multimodal.*)`, `search(scope: multimodal)` |
+| **Computer Vision** | 2 | Dedicated skill category with subcategories for object detection, image segmentation, image classification, OCR, etc. | `detect(domain: image.*)`, `classify(domain: image.*)`, `measure(domain: image.*)`, `predict(domain: image.*)`, `generate(domain: image)`, `transform(source_format: image.*, ...)` |
+| **Audio** | 3 | Dedicated skill category with subcategories for audio classification, speech recognition, text-to-speech, etc. | `detect(domain: audio.*)`, `classify(domain: audio.*)`, `measure(domain: audio.*)`, `predict(domain: audio.*)`, `generate(domain: audio)`, `transform(source_format: audio.*, ...)` |
+| **Multi-modal** | 7 | Dedicated skill category for cross-modality tasks like image-to-text, text-to-image, visual question answering | `detect(domain: multimodal.*)`, `classify(domain: multimodal.*)`, `measure(domain: multimodal.*)`, `predict(domain: multimodal.*)`, `transform(source_format: <modality_A>, target_format: <modality_B>)`, `search(scope: multimodal)` |
 
 ### 5.2 OASF Skill Equivalences
 
