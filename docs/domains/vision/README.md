@@ -10,7 +10,7 @@ The vision domain profile is calibrated for environments where:
 - **Source quality varies widely** -- Calibrated cameras vs. generated imagery have very different trust levels
 - **Generation requires oversight** -- AI-generated images need checkpoint-before-create policies
 
-This profile maps to [OASF Category 2 (Computer Vision)](https://schema.oasf.outshift.com/skill_categories), covering image segmentation, object detection, image generation, and visual transformations.
+This profile maps to [OASF Category 2 (Computer Vision)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering image segmentation, object detection, image generation, and visual transformations.
 
 ## Domain Profile
 
@@ -36,6 +36,8 @@ Vision environments trust calibrated capture systems over processed or synthetic
 | Synthetic Image | 0.60 | AI-generated or synthetic imagery |
 | Ground Truth Label | 0.95 | Verified ground truth annotations |
 | Expert Annotation | 0.90 | Domain expert visual annotations |
+
+*Sorted by source category; see profile YAML for exact grouping.*
 
 ### Risk Thresholds
 

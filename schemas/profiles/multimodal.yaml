@@ -69,6 +69,7 @@ evidence_policy:
     - detect                   # Cross-modal detections must reference all modalities
     - classify                 # Classifications must cite features from relevant modalities
     - predict                  # Predictions must reference multi-modal evidence
+    - plan                     # Multi-modal pipeline plans require traceable reasoning
     - generate                 # Generated content must cite source modality inputs
     - transform                # Transformations must document modality mapping
 
@@ -88,7 +89,7 @@ domain_sources:
   - name: Reference Corpus
     type: document
     default_trust: 0.88
-  - name: Pipeline Execution Log
+  - name: Processing Pipeline Log
     type: system_log
     default_trust: 0.90
 

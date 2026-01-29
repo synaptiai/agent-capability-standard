@@ -18,9 +18,9 @@ Domain templates provide ready-to-use starting points for specific industry vert
 | [Personal Assistant](./personal-assistant/README.md) | [personal_assistant.yaml](../../schemas/profiles/personal_assistant.yaml) | 4 workflows | User-centric, communication-safe, preference-learning |
 | [Data Analysis](./data-analysis/README.md) | [data_analysis.yaml](../../schemas/profiles/data_analysis.yaml) | 4 workflows | Quality-focused, reproducible, statistical rigor |
 | [Healthcare](./healthcare/README.md) | [healthcare.yaml](../../schemas/profiles/healthcare.yaml) | 4 workflows | Advisory-only, patient-safety, regulated |
-| [Vision](./vision/README.md) | [vision.yaml](../../schemas/profiles/vision.yaml) | 4 workflows | Visual evidence, spatial grounding, image generation oversight |
-| [Audio](./audio/README.md) | [audio.yaml](../../schemas/profiles/audio.yaml) | 4 workflows | Temporal evidence, signal quality, speaker privacy |
-| [Multi-modal](./multimodal/README.md) | [multimodal.yaml](../../schemas/profiles/multimodal.yaml) | 4 workflows | Cross-modal consistency, alignment verification, modality trust hierarchy |
+| [Vision](./vision/README.md) | [vision.yaml](../../schemas/profiles/vision.yaml) | 4 workflows | Visual-evidence-primary, spatially-grounded, generation-gated |
+| [Audio](./audio/README.md) | [audio.yaml](../../schemas/profiles/audio.yaml) | 4 workflows | Temporal-evidence-primary, signal-quality-aware, speaker-privacy-gated |
+| [Multi-modal](./multimodal/README.md) | [multimodal.yaml](../../schemas/profiles/multimodal.yaml) | 4 workflows | Cross-modal-consistent, alignment-verified, modality-trust-ranked |
 
 ## Choosing a Domain
 

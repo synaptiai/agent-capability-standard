@@ -59,7 +59,7 @@ evidence_policy:
     - time_segment             # Temporal segment (start/end timestamps)
     - confidence_score         # Model confidence for detections
     - signal_quality           # SNR or quality metric for source audio
-  minimum_confidence: 0.78     # Moderate confidence for audio tasks
+  minimum_confidence: 0.80     # Moderate confidence for audio tasks
   require_grounding:
     - detect                   # Sound event detections must reference time segments
     - classify                 # Audio classifications must cite acoustic features

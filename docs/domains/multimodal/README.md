@@ -10,7 +10,7 @@ The multi-modal domain profile is calibrated for environments where:
 - **Generation trust varies by modality** -- Generated video is less trusted than generated text
 - **Transformation pipelines span modalities** -- Image-to-text, text-to-image, speech-to-text
 
-This profile maps to [OASF Category 7 (Multi-modal)](https://schema.oasf.outshift.com/skill_categories), covering image-to-text, text-to-video, speech recognition, visual question answering, and cross-modal transformations.
+This profile maps to [OASF Category 7 (Multi-modal)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering image-to-text, text-to-video, speech recognition, visual question answering, and cross-modal transformations.
 
 ## Domain Profile
 
@@ -36,6 +36,8 @@ Multi-modal environments trust aligned and verified sources over generated cross
 | Generated Image | 0.60 | AI-generated images |
 | Generated Audio | 0.58 | AI-synthesized audio |
 | Generated Video | 0.55 | AI-generated video (lowest confidence) |
+
+*Sorted by source category; see profile YAML for exact grouping.*
 
 ### Risk Thresholds
 

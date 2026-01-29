@@ -10,7 +10,7 @@ The audio domain profile is calibrated for environments where:
 - **Speaker privacy matters** -- Speaker identification requires strict checkpoint policies
 - **Synthesis requires oversight** -- AI-generated audio needs review before distribution
 
-This profile maps to [OASF Category 3 (Audio)](https://schema.oasf.outshift.com/skill_categories), covering audio classification, speech recognition, speaker identification, and audio synthesis.
+This profile maps to [OASF Category 3 (Audio)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering audio classification, speech recognition, speaker identification, and audio synthesis.
 
 ## Domain Profile
 
@@ -36,6 +36,8 @@ Audio environments trust calibrated and professional sources over processed or s
 | Synthesized Audio | 0.55 | AI-generated or TTS audio |
 | Ground Truth Transcript | 0.95 | Verified human transcripts |
 | Expert Annotation | 0.90 | Linguist/domain expert annotations |
+
+*Sorted by source category; see profile YAML for exact grouping.*
 
 ### Risk Thresholds
 
