@@ -1126,6 +1126,13 @@ digital_twin_bootstrap:
 # OASF-inspired workflow patterns (Issue #23)
 # These patterns are derived from OASF skill categories mapped to our
 # 36-capability model. See docs/research/analysis/OASF_comparison.md Section 5.
+#
+# NOTE: Workflow steps may override the ontology-defined risk level for a
+# capability when the workflow context changes the risk profile. For example,
+# `execute` is risk: medium in the ontology, but risk: high in model_deployment
+# because executing deployment scripts in production is inherently riskier.
+# Similarly, `checkpoint` is risk: low in the ontology but risk: medium in
+# workflows where the checkpoint operation itself involves significant I/O.
 
 rag_pipeline:
   goal: Retrieve relevant information and generate a grounded, evidence-cited response.
@@ -1231,6 +1238,9 @@ rag_pipeline:
       conclusion: "${generate_out.content: object}"
     failure_modes: []
   - capability: audit
+    # NOTE: audit has mutation: true in the ontology (writes audit log),
+    # but workflows mark it mutation: false because the mutation is
+    # append-only and non-destructive — it cannot corrupt existing data.
     purpose: Record retrieval provenance and generation lineage.
     risk: low
     mutation: false
