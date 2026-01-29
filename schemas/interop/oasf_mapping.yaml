@@ -26,6 +26,7 @@ categories:
   "1":
     name: Natural Language Processing
     description: Text comprehension and generation abilities
+    # Category 1 intentionally omits capabilities — use subcategories for specific mappings
     subcategories:
 
       "101":
@@ -659,7 +660,7 @@ reverse_mapping:
   search:       ["103", "6"]
   observe:      ["1102", "1105"]
   receive:      []
-  detect:       ["101", "111", "201", "203", "207", "301", "303", "801", "804", "1104"]
+  detect:       ["101", "111", "201", "203", "207", "303", "801", "804", "1104"]
   classify:     ["101", "109", "202", "301", "303", "108"]
   measure:      ["205", "501", "802", "803", "904", "1103", "1105", "1304"]
   predict:      ["4", "1501", "1503"]

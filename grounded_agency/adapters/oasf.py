@@ -10,8 +10,8 @@ Usage:
 
     adapter = OASFAdapter("schemas/interop/oasf_mapping.yaml")
     result = adapter.translate("109")  # Text Classification -> classify
-    print(result.capabilities)  # ["classify"]
-    print(result.domain_hint)   # "text"
+    print(result.mapping.capabilities)  # ("classify",)
+    print(result.mapping.domain_hint)   # "text"
 
 OASF Reference: https://schema.oasf.outshift.com
 """
@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -47,8 +47,8 @@ class OASFMapping:
 
     skill_code: str
     skill_name: str
-    capabilities: list[str]
-    mapping_type: str  # direct, domain, composition, workflow
+    capabilities: tuple[str, ...]
+    mapping_type: Literal["direct", "domain", "composition", "workflow"]
     domain_hint: str | None = None
     workflow: str | None = None
     notes: str | None = None
@@ -135,7 +135,7 @@ class OASFAdapter:
         self._index[str(code)] = OASFMapping(
             skill_code=str(code),
             skill_name=data.get("name", f"OASF-{code}"),
-            capabilities=data.get("capabilities", []),
+            capabilities=tuple(data.get("capabilities", [])),
             mapping_type=data.get("mapping_type", "composition"),
             domain_hint=data.get("domain_hint"),
             workflow=data.get("workflow"),
@@ -181,6 +181,8 @@ class OASFAdapter:
                     requires_checkpoint = True
                 if self._RISK_ORDER.get(node.risk, 0) > self._RISK_ORDER.get(max_risk, 0):
                     max_risk = node.risk
+            else:
+                logger.warning("Capability '%s' not found in registry", cap_id)
 
         logger.debug(
             "Translated OASF %s (%s) -> %s [risk=%s, checkpoint=%s]",
@@ -229,9 +231,29 @@ class OASFAdapter:
         assert self._index is not None
         return list(self._index.values())
 
+    def _compute_reverse_mapping(self) -> dict[str, list[str]]:
+        """
+        Compute the reverse mapping programmatically from the forward mapping.
+
+        Iterates over all indexed entries and inverts the mapping so that each
+        capability ID maps to the list of OASF skill codes that reference it.
+
+        Returns:
+            Dict mapping capability IDs to lists of OASF skill codes
+        """
+        assert self._index is not None
+        reverse: dict[str, list[str]] = {}
+        for code, mapping in self._index.items():
+            for cap_id in mapping.capabilities:
+                reverse.setdefault(cap_id, []).append(code)
+        return reverse
+
     def reverse_lookup(self, capability_id: str) -> list[str]:
         """
         Find all OASF skill codes that map to a Grounded Agency capability.
+
+        Uses the bundled reverse_mapping from the YAML file if available,
+        otherwise computes it programmatically from the forward mapping.
 
         Args:
             capability_id: Grounded Agency capability ID (e.g., "detect")
@@ -241,9 +263,16 @@ class OASFAdapter:
         """
         self._ensure_loaded()
         assert self._raw is not None
-        reverse: dict[str, list[str]] = self._raw.get("reverse_mapping", {})
-        result: list[str] = reverse.get(capability_id, [])
-        return result
+        assert self._index is not None
+
+        # Try bundled reverse mapping first
+        bundled_reverse: dict[str, list[str]] = self._raw.get("reverse_mapping", {})
+        if capability_id in bundled_reverse:
+            return bundled_reverse[capability_id]
+
+        # Fall back to programmatic computation
+        computed = self._compute_reverse_mapping()
+        return computed.get(capability_id, [])
 
     @property
     def oasf_version(self) -> str:

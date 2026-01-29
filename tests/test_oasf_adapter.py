@@ -102,6 +102,11 @@ class TestSafetyMetadata:
         # checkpoint and rollback are in the capabilities list
         assert "checkpoint" in result.mapping.capabilities
 
+    def test_checkpoint_required_for_mutation_capabilities(self, adapter: OASFAdapter) -> None:
+        # OASF code "1204" (Model Versioning) maps to mutate, which requires checkpoint
+        result = adapter.translate("1204")
+        assert result.requires_checkpoint is True
+
     def test_low_risk_for_classify(self, adapter: OASFAdapter) -> None:
         result = adapter.translate("109")  # Text Classification
         assert result.max_risk == "low"
