@@ -35,6 +35,8 @@ Concrete examples:
 | `generate-image` | `generate` with `domain: image` |
 | `transcribe-speech` | `transform` with `source_format: audio.speech`, `target_format: text.transcript` |
 
+Note that `transform` uses its native `source_format`/`target_format` input parameters rather than the `domain` annotation convention, since the modality is inherent to the transformation definition itself.
+
 **A note on the `domain` parameter:** The `domain` parameter used throughout this guide is a workflow-level annotation convention. It is not a formal property defined in the capability ontology schema -- rather, it serves as a hint to implementations about which modality-specific processing pipeline to invoke. Workflow authors use `domain` to specialize generic capabilities (e.g., `detect` with `domain: visual` vs `domain: audio`) without requiring separate ontology entries per modality.
 
 **Cross-reference:** Domain profiles (e.g., `schemas/profiles/vision.yaml`) use profile-level domain names (e.g., `domain: vision`) that differ from the capability-level domain parameters used in this guide (e.g., `domain: image.object`). Profile domain names identify the agent specialization; capability domain parameters specify the processing pipeline.
@@ -49,7 +51,20 @@ Concrete examples:
 
 4. **Reduced cognitive load.** Developers learn 36 capabilities once, then apply them to any modality. There is no need to discover and memorize separate APIs for each modality.
 
-### 1.3 When Modality Matters
+### 1.3 Handling Unsupported Modalities
+
+When a workflow specifies a `domain` parameter for a modality that the target implementation does not support, the implementation should return a clear error indicating the unsupported domain value. For example:
+
+```yaml
+error:
+  code: unsupported_domain
+  domain: "haptic.pressure"
+  message: "No processing pipeline available for domain 'haptic.pressure'"
+```
+
+This allows workflow authors to detect modality gaps at design time rather than encountering silent failures at runtime.
+
+### 1.4 When Modality Matters
 
 Domain parameters do not erase modality -- they parameterize it. The modality affects:
 
@@ -478,7 +493,7 @@ confidence: 0.89
   store_as: narration_out
   input_bindings:
     specification: ${caption_out.output}
-    format: "audio.wav"
+    format: "wav"
     constraints:
       voice: "neutral"
       speed: 1.0
@@ -534,6 +549,9 @@ evidence_anchor:
         - url
         - tool_output
         - sensor_reading
+        # The `file`, `url`, `tool_output`, and `sensor_reading` kinds are generic
+        # evidence anchors not specific to any modality. They are included for
+        # completeness alongside the modality-specific kinds defined in Section 4.1.
     excerpt:
       type: string
       description: Human-readable description of what the evidence shows
@@ -599,7 +617,7 @@ The Open Agentic Schema Framework (OASF) by Cisco/Outshift organizes AI agent sk
 |---|---|---|---|
 | **Computer Vision** | 2 | Dedicated skill category with subcategories for object detection, image segmentation, image classification, OCR, etc. | `detect(domain: image.*)`, `classify(domain: image.*)`, `measure(domain: image.*)`, `predict(domain: image.*)`, `generate(domain: image)`, `transform(source_format: image.*, ...)` |
 | **Audio** | 3 | Dedicated skill category with subcategories for audio classification, speech recognition, text-to-speech, etc. | `detect(domain: audio.*)`, `classify(domain: audio.*)`, `measure(domain: audio.*)`, `predict(domain: audio.*)`, `generate(domain: audio)`, `transform(source_format: audio.*, ...)` |
-| **Multi-modal** | 7 | Dedicated skill category for cross-modality tasks like image-to-text, text-to-image, visual question answering | `detect(domain: multimodal.*)`, `classify(domain: multimodal.*)`, `measure(domain: multimodal.*)`, `predict(domain: multimodal.*)`, `transform(source_format: <modality_A>, target_format: <modality_B>)`, `search(scope: multimodal)` |
+| **Multi-modal** | 7 | Dedicated skill category for cross-modality tasks like image-to-text, text-to-image, visual question answering | `detect(domain: multimodal.*)`, `classify(domain: multimodal.*)`, `measure(domain: multimodal.*)`, `predict(domain: multimodal.*)`, `generate(domain: multimodal.*)`, `transform(source_format: <modality_A>, target_format: <modality_B>)`, `search(scope: multimodal)` |
 
 ### 5.2 OASF Skill Equivalences
 
@@ -634,7 +652,7 @@ These workflow patterns will be formally defined in the workflow catalog. See th
 ### 5.4 Reference
 
 For more information on OASF:
-- OASF Skill Categories: [https://schema.oasf.outshift.com/skill_categories](https://schema.oasf.outshift.com/skill_categories)
+- OASF Skill Categories: [https://schema.oasf.outshift.com/skill_categories](https://schema.oasf.outshift.com/skill_categories) (as of OASF v0.8.0, January 2026)
 - Full comparison: [docs/research/analysis/OASF_comparison.md](../research/analysis/OASF_comparison.md)
 
 ---
@@ -749,7 +767,7 @@ content_moderation:
 
     # 8. Make final moderation decision
     - capability: classify
-      domain: moderation.decision
+      domain: moderation.decision  # domain here specializes the task, not the modality
       purpose: Produce final moderation verdict from integrated signals.
       store_as: verdict_out
       input_bindings:
