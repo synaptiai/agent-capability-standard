@@ -40,7 +40,7 @@ This design creates three classes of risk:
 
 The fundamental insight motivating this proposal is that agent safety cannot be achieved through optional skills. Safety must be woven into the execution fabric itself. Consider an analogy: a programming language does not make memory safety "a library you can import." Languages like Rust encode memory safety into the type system. Similarly, agent frameworks should encode safety into their capability contracts.
 
-The Grounded Agency Capability Ontology demonstrates this approach. Every one of its 36 atomic capabilities includes `evidence_anchors` and `confidence` in its output schema. High-risk capabilities structurally require checkpoints before execution. Constraint checking precedes any mutation. These are not conventions to be followed by diligent implementers -- they are contracts enforced by the schema itself.
+The Grounded Agency Capability Ontology demonstrates this approach. Most of its 36 atomic capabilities include `evidence_anchors` and `confidence` in their output schemas. Capabilities in the EXECUTE, VERIFY, REMEMBER, and COORDINATE layers omit the `confidence` field since confidence scoring is not applicable to action and mutation capabilities -- these capabilities either succeed or fail, and their outputs are verified through other means (e.g., the `verify` capability). High-risk capabilities structurally require checkpoints before execution. Constraint checking precedes any mutation. These are not conventions to be followed by diligent implementers -- they are contracts enforced by the schema itself.
 
 ### 2.3 Real-World Failure Modes
 
@@ -248,6 +248,8 @@ skill:
         minimum: 0
         maximum: 1
 ```
+
+> **Note:** Elevating `timestamp` from optional to required is an intentional OASF strengthening -- audit trails require temporal ordering to be meaningful.
 
 #### Integration with Existing Skills
 
@@ -524,6 +526,8 @@ skill:
         minimum: 0
         maximum: 1
 ```
+
+> **Note:** The schema refinements for `constrain` are intentional -- OASF safety extensions deliberately strengthen constraint enforcement beyond the base ontology's minimal contract.
 
 #### Example: Constrained Data Export
 
