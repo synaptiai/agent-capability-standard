@@ -14,7 +14,7 @@ Example:
 
 ## How to write a report
 
-1. Start from `templates/pvc_report_template.yaml`
+1. Start from `skills/perspective-validation/pvc_report_template.yaml`
 2. Fill scores (PASS / PARTIAL / FAIL / N/A) with evidence references
 3. Add remediation actions for any FAIL/PARTIAL
 
@@ -23,7 +23,7 @@ Example:
 Run:
 
 ```bash
-python tools/validate_pvc.py
+python skills/perspective-validation/scripts/validate_pvc.py
 ```
 
 CI will require:

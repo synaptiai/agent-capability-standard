@@ -10,8 +10,8 @@ This validator checks:
 5) Optional CI rule: if "critical paths" change, a PVC report must change too
 
 Usage:
-  python tools/validate_pvc.py
-  python tools/validate_pvc.py --diff-base <git-sha>
+  python skills/perspective-validation/scripts/validate_pvc.py
+  python skills/perspective-validation/scripts/validate_pvc.py --diff-base <git-sha>
 """
 
 from __future__ import annotations
@@ -26,7 +26,17 @@ from typing import Any
 import yaml
 
 
-ROOT = Path(__file__).resolve().parents[1]
+def _find_root() -> Path:
+    """Walk up from script location to find the repo root."""
+    p = Path(__file__).resolve().parent
+    for _ in range(10):
+        if (p / "schemas").is_dir():
+            return p
+        p = p.parent
+    raise RuntimeError("Cannot find repository root")
+
+
+ROOT = _find_root()
 PVC_DIR = ROOT / "docs" / "reviews" / "pvc"
 
 ALLOWED_STATUSES = {"PASS", "PARTIAL", "FAIL", "N/A"}
@@ -60,7 +70,7 @@ CRITICAL_PREFIXES = (
     "spec/",
 )
 CRITICAL_EXACT_EXEMPTIONS = {
-    "tools/validate_pvc.py",
+    "skills/perspective-validation/scripts/validate_pvc.py",
 }
 
 

@@ -30,7 +30,7 @@ jobs:
               BASE=$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)
             fi
           fi
-          python tools/validate_pvc.py --diff-base "$BASE"
+          python skills/perspective-validation/scripts/validate_pvc.py --diff-base "$BASE"
       - name: Run conformance suite
         run: |
           python scripts/run_conformance.py

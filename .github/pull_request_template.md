@@ -11,7 +11,7 @@
 
 - [ ] `python scripts/run_conformance.py`
 - [ ] `python tools/validate_workflows.py` (if workflows changed)
-- [ ] `python tools/validate_pvc.py`
+- [ ] `python skills/perspective-validation/scripts/validate_pvc.py`
 
 ## Notes / Risks
 

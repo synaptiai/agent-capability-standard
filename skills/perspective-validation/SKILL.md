@@ -14,13 +14,13 @@ agent: general-purpose
 Produce a **PVC report** (Perspective Validation Checklist) that scores the target against key non-type failure modes (human factors, governance, economics, adversarial security, loop stability, data governance, and legitimacy) with concrete evidence references and remediation actions.
 
 **Success criteria:**
-- A valid PVC report is written to `docs/reviews/pvc/` and passes `python tools/validate_pvc.py`
+- A valid PVC report is written to `docs/reviews/pvc/` and passes `python skills/perspective-validation/scripts/validate_pvc.py`
 - Each non-N/A score is justified with at least one evidence reference
 - Any FAIL/PARTIAL includes a concrete remediation action (P0/P1/P2)
 
 **References:**
-- `docs/guides/PERSPECTIVE_VALIDATION_CHECKLIST.md`
-- `templates/pvc_report_template.yaml`
+- `CHECKLIST.md`
+- `pvc_report_template.yaml`
 
 ## Inputs
 
@@ -48,9 +48,9 @@ Produce a **PVC report** (Perspective Validation Checklist) that scores the targ
 
 4) **Write the report**: Create a new file in `docs/reviews/pvc/` named:
    - `YYYY-MM-DD_<short-slug>.pvc.yaml`
-   - Start from `templates/pvc_report_template.yaml`, then fill it in completely
+   - Start from `pvc_report_template.yaml`, then fill it in completely
 
-5) **Validate**: Run `python tools/validate_pvc.py`
+5) **Validate**: Run `python skills/perspective-validation/scripts/validate_pvc.py`
    - If it fails, fix the report until it passes
 
 6) **Summarize actions**: Provide the top remediation actions (P0 first), with crisp “what to change” and “where it lives” guidance

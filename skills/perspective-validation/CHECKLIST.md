@@ -1,6 +1,6 @@
 # Perspective Validation Checklist (PVC)
 
-**Canonical location:** `docs/guides/PERSPECTIVE_VALIDATION_CHECKLIST.md`
+**Canonical location:** `skills/perspective-validation/CHECKLIST.md`
 
 This checklist complements **type/contract validation** with **socio-technical, security, governance, and operational validation**.
 
