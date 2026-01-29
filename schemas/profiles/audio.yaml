@@ -2,6 +2,10 @@
 # Calibrated for audio processing, speech analysis, and acoustic AI applications.
 # Maps to OASF Category 3 (Audio): audio classification, speech recognition,
 # speaker identification, sound event detection, and audio synthesis.
+#
+# NOTE: The profile domain name 'audio' matches the capability domain parameter
+# convention (e.g., domain: audio.speech, domain: audio.event).
+# See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
 
 domain: audio
 version: "1.0.0"
@@ -61,6 +65,7 @@ evidence_policy:
     - classify                 # Audio classifications must cite acoustic features
     - predict                  # Audio predictions must reference temporal patterns
     - generate                 # Generated audio must cite source/prompt
+    - transform                # Audio transformations must document signal processing steps
 
 domain_sources:
   - name: Audio Capture System
@@ -82,6 +87,8 @@ domain_sources:
     type: system_log
     default_trust: 0.90
 
+# Workflows below are proposed — pending inclusion in the workflow catalog.
+# See docs/domains/audio/README.md for workflow descriptions.
 workflows:
   - speech_recognition_pipeline
   - audio_classification_pipeline

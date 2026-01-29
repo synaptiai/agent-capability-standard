@@ -2,6 +2,10 @@
 # Calibrated for computer vision, image analysis, and visual AI applications.
 # Maps to OASF Category 2 (Computer Vision): image segmentation, object detection,
 # image generation, depth estimation, and visual transformations.
+#
+# NOTE: The profile domain name 'vision' refers to the agent specialization.
+# Capability domain parameters use 'image.*' (e.g., domain: image.object).
+# See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
 
 domain: vision
 version: "1.0.0"
@@ -60,6 +64,7 @@ evidence_policy:
     - classify                 # Classifications must cite visual features
     - predict                  # Visual predictions must reference patterns
     - generate                 # Generated images must cite source/prompt
+    - transform                # Image transformations must document processing pipeline
 
 domain_sources:
   - name: Calibrated Camera System
@@ -81,6 +86,8 @@ domain_sources:
     type: system_log
     default_trust: 0.92
 
+# Workflows below are proposed — pending inclusion in the workflow catalog.
+# See docs/domains/vision/README.md for workflow descriptions.
 workflows:
   - image_classification_pipeline
   - object_detection_pipeline

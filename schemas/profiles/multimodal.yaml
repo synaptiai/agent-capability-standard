@@ -2,6 +2,11 @@
 # Calibrated for cross-modality AI applications combining text, image, audio, and video.
 # Maps to OASF Category 7 (Multi-modal): image-to-text, text-to-video,
 # speech recognition, visual question answering, and cross-modal transformations.
+#
+# NOTE: The profile domain name 'multimodal' matches the cross-modal agent
+# specialization. Capability domain parameters use modality-specific prefixes
+# (e.g., domain: image.object, domain: audio.speech).
+# See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
 
 domain: multimodal
 version: "1.0.0"
@@ -41,7 +46,9 @@ risk_thresholds:
   block_autonomous:
     - mutate                  # Never autonomously modify source content
     - send                    # Never autonomously distribute generated content
-    - generate                # Never autonomously generate without review
+    # NOTE: generate is intentionally NOT blocked here. Per the ontology,
+    # generate is low-risk and the checkpoint_policy.before_content_generation: always
+    # already gates generation safely. Blocking it would contradict the ontology risk model.
 
 checkpoint_policy:
   before_modality_conversion: always     # Always checkpoint before converting between modalities
@@ -85,6 +92,8 @@ domain_sources:
     type: system_log
     default_trust: 0.90
 
+# Workflows below are proposed — pending inclusion in the workflow catalog.
+# See docs/domains/multimodal/README.md for workflow descriptions.
 workflows:
   - image_captioning_pipeline
   - visual_question_answering
