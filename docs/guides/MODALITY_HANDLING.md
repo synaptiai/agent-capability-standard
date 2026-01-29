@@ -37,6 +37,8 @@ Concrete examples:
 
 **A note on the `domain` parameter:** The `domain` parameter used throughout this guide is a workflow-level annotation convention. It is not a formal property defined in the capability ontology schema -- rather, it serves as a hint to implementations about which modality-specific processing pipeline to invoke. Workflow authors use `domain` to specialize generic capabilities (e.g., `detect` with `domain: visual` vs `domain: audio`) without requiring separate ontology entries per modality.
 
+**Cross-reference:** Domain profiles (e.g., `schemas/profiles/vision.yaml`) use profile-level domain names (e.g., `domain: vision`) that differ from the capability-level domain parameters used in this guide (e.g., `domain: image.object`). Profile domain names identify the agent specialization; capability domain parameters specify the processing pipeline.
+
 ### 1.2 Benefits
 
 1. **Ontology stability.** Adding support for a new modality (e.g., 3D point clouds, haptic data) requires zero changes to the capability ontology. The existing 36 capabilities already cover it.
@@ -71,6 +73,8 @@ The following matrix shows how key capabilities operate across modalities. Each 
 | **measure** | `domain: text.readability`, `domain: text.similarity`, `domain: text.length` -- Quantify readability score, semantic similarity, or document length | `domain: image.resolution`, `domain: image.quality`, `domain: image.similarity` -- Measure resolution, perceptual quality (SSIM, LPIPS), or visual similarity | `domain: audio.loudness`, `domain: audio.snr`, `domain: audio.duration` -- Measure loudness (LUFS), signal-to-noise ratio, or segment duration | `domain: video.fps`, `domain: video.bitrate`, `domain: video.stability` -- Measure frame rate, encoding bitrate, or camera stability | `domain: multimodal.coherence` -- Measure cross-modal coherence (e.g., audio-visual sync score) |
 | **predict** | `domain: text.completion`, `domain: text.next_event` -- Predict likely text continuation or next event in a log stream | `domain: image.depth`, `domain: image.segmentation_mask` -- Predict depth maps or segmentation masks from images | `domain: audio.next_segment`, `domain: audio.speaker_turn` -- Predict upcoming audio content or next speaker turn | `domain: video.trajectory`, `domain: video.next_frame` -- Predict object trajectories or synthesize next frames | `domain: multimodal.outcome` -- Predict outcomes using combined text, image, and audio signals |
 
+The remaining UNDERSTAND capabilities (`compare` and `discover`) are typically modality-agnostic and are not shown in this matrix. They operate on abstract data comparisons and pattern discovery regardless of the input modality.
+
 ### 2.2 SYNTHESIZE Layer Capabilities
 
 | Capability | Text | Image | Audio | Video | Multi-Modal |
@@ -78,12 +82,16 @@ The following matrix shows how key capabilities operate across modalities. Each 
 | **generate** | `domain: text`, `format: markdown` or `format: code` -- Generate prose, documentation, or source code | `domain: image`, `format: png` or `format: svg` -- Generate images from text prompts or specifications | `domain: audio`, `format: wav` or `format: mp3` -- Generate speech, music, or sound effects | `domain: video`, `format: mp4` -- Generate video clips from descriptions or scripts | `domain: multimodal`, `format: presentation` -- Generate presentations combining text, images, and audio |
 | **transform** | `source_format: text.markdown`, `target_format: text.html` -- Convert between text formats, summarize, or translate | `source_format: image.png`, `target_format: image.svg` -- Convert image formats, resize, apply style transfer | `source_format: audio.speech`, `target_format: text.transcript` (transcription) or `source_format: text`, `target_format: audio.speech` (TTS) | `source_format: video.mp4`, `target_format: video.gif` -- Convert formats, extract frames, change resolution | `source_format: text`, `target_format: image` (text-to-image) or `source_format: image`, `target_format: text` (captioning) |
 
+The `integrate` capability merges outputs from multiple sources regardless of modality. See Appendix B, Step 7 for a multi-modal integration example.
+
 ### 2.3 PERCEIVE Layer Capabilities
 
 | Capability | Text | Image | Audio | Video | Multi-Modal |
 |---|---|---|---|---|---|
 | **retrieve** | `format: text` -- Fetch documents, articles, or code by URI or path | `format: image` -- Fetch images by URI, asset ID, or path | `format: audio` -- Fetch audio files by URI, track ID, or path | `format: video` -- Fetch video files by URI, stream ID, or path | `format: mixed` -- Fetch resources containing multiple modalities |
 | **search** | `scope: text` -- Search text corpora, databases, or code repositories | `scope: image` -- Search image databases by visual similarity or tags | `scope: audio` -- Search audio libraries by content, metadata, or fingerprint | `scope: video` -- Search video archives by content, transcript, or visual features | `scope: multimodal` -- Search across modalities using cross-modal embeddings |
+
+The `observe` and `receive` capabilities accept any data type and do not use modality-specific format or scope parameters. They are modality-agnostic by design.
 
 ### 2.4 Summary Count
 
@@ -613,6 +621,8 @@ Selected OASF skills and their Grounded Agency equivalents:
 | Visual QA | Multi-modal [7] | Workflow: `detect(domain: image.*) -> ground -> generate(domain: text)` |
 | Image-to-3D | Multi-modal [7] | Workflow: `detect(domain: image.*) -> transform -> generate(domain: 3d)` |
 
+These workflow patterns will be formally defined in the workflow catalog. See the catalog for currently available patterns.
+
 ### 5.3 Key Differences
 
 1. **Taxonomy vs. parameterization.** OASF lists modality skills as separate entries in a flat catalog. Grounded Agency parameterizes the same atomic capabilities, reducing the number of concepts to learn while maintaining the same expressiveness.
@@ -643,6 +653,8 @@ Examples:
 - `audio.speech` -- speech detection in audio
 - `video.action` -- action recognition in video
 - `multimodal.alignment` -- cross-modal alignment checking
+- `3d.mesh` -- 3D mesh operations
+- `3d.point_cloud` -- 3D point cloud operations
 
 When no specialization is needed, the modality alone suffices:
 - `image` -- general image domain (e.g., for `generate`)
@@ -754,6 +766,8 @@ content_moderation:
         depth: "detailed"
 
     # 10. Audit the decision
+    # Note: audit writes to the audit log (mutation: true in ontology) but does
+    # not require a checkpoint — the mutation is append-only and non-destructive.
     - capability: audit
       purpose: Record the moderation decision with full evidence trail.
       store_as: audit_out
