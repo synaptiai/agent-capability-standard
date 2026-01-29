@@ -115,17 +115,17 @@ Multi-agent and user interaction.
 
 | Workflow | Description |
 |----------|-------------|
-| `debug-workflow` | Systematic code debugging workflow |
+| `debug-code-change` | Systematic code debugging workflow |
 | `capability-gap-analysis` | Assess missing capabilities in a project |
 | `digital-twin-bootstrap` | Initialize a digital twin from scratch |
 | `digital-twin-sync-loop` | Synchronize digital twin state with reality |
 | `monitor-and-replan` | Detect world changes and trigger replanning |
 | `clarify-intent` | Resolve ambiguous user requests |
+| `world-model-build` | Build a structured world model with dynamics and uncertainty |
 | `rag-pipeline` | Retrieve information and generate grounded response (OASF Cat. 6) |
 | `security-assessment` | Identify and assess security vulnerabilities (OASF Cat. 8) |
 | `multi-agent-orchestration` | Coordinate multiple agents on complex tasks (OASF Cat. 10) |
 | `data-quality-pipeline` | Clean and validate data quality (OASF Cat. 9) |
-| `world-model-build` | Build a structured world model with dynamics and uncertainty |
 | `model-deployment` | Safely deploy ML models to production (OASF Cat. 12) |
 
 ## Domain Parameterization

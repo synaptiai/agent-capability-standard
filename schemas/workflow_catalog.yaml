@@ -1170,7 +1170,7 @@ rag_pipeline:
       backoff: exponential
     store_as: retrieve_out
     input_bindings:
-      query: "$.input.query"
+      target: ${user_query}
       references: "${search_out.results: array<object>}"
     failure_modes:
     - condition: Document retrieval fails
@@ -1200,7 +1200,7 @@ rag_pipeline:
     retry: null
     store_as: ground_out
     input_bindings:
-      claims: "${detect_out.matches: array<object>}"
+      claim: ${user_query}
       sources: "${search_out.results: array<object>}"
     failure_modes: []
   - capability: generate
@@ -1488,6 +1488,11 @@ multi_agent_orchestration:
       max: 2
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      target: "${delegate_out: object}"
+      conditions:
+      - subtask_completion
+      - result_validity
     failure_modes:
     - condition: Subtask result fails validation
       action: request_more_context
@@ -1676,6 +1681,20 @@ data_quality_pipeline:
         transformations: "${transform_out.output: object}"
         verification: ${verify_out.passed}
     failure_modes: []
+  - capability: rollback
+    purpose: If verification fails, revert data to pre-cleaning checkpoint.
+    risk: medium
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    gates:
+    - when: ${verify_out.passed} == true
+      action: skip
+      message: Cleaned data passed verification. No rollback needed.
+    failure_modes: []
   risk_propagation:
     strategy: max_step_risk
     computed_risk: medium
@@ -1813,7 +1832,7 @@ model_deployment:
       metric: performance
     gates:
     - when: ${verify_deploy_out.passed} == false
-      action: rollback
+      action: skip
       message: Deployment verification failed. Skipping performance check.
     failure_modes: []
   - capability: audit
