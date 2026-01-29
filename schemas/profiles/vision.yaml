@@ -1,0 +1,88 @@
+# Vision Domain Profile
+# Calibrated for computer vision, image analysis, and visual AI applications.
+# Maps to OASF Category 2 (Computer Vision): image segmentation, object detection,
+# image generation, depth estimation, and visual transformations.
+
+domain: vision
+version: "1.0.0"
+description: |
+  Profile for computer vision and image processing environments.
+  Emphasizes visual evidence grounding, spatial reasoning accuracy,
+  and appropriate confidence thresholds for visual classification tasks.
+
+trust_weights:
+  # Calibrated sensor/camera sources (highest trust)
+  calibrated_camera: 0.95     # Fixed, calibrated industrial/scientific cameras
+  stereo_camera: 0.93         # Stereo vision systems with depth
+  lidar_scan: 0.94            # LiDAR point clouds (high geometric accuracy)
+
+  # Standard capture sources
+  digital_camera: 0.88        # Standard digital photography
+  smartphone_camera: 0.82     # Mobile device cameras
+  screen_capture: 0.90        # Screenshots and screen recordings
+  satellite_imagery: 0.92     # Satellite/aerial imagery (verified provider)
+
+  # Processed/derived sources
+  annotated_image: 0.85       # Human-annotated image data
+  synthetic_image: 0.60       # AI-generated or synthetic imagery
+  augmented_image: 0.70       # Augmented/transformed training data
+
+  # Reference sources
+  ground_truth_label: 0.95    # Verified ground truth annotations
+  expert_annotation: 0.90     # Domain expert visual annotations
+  crowd_annotation: 0.72      # Crowdsourced annotations
+  model_prediction: 0.65      # Predictions from other ML models
+
+risk_thresholds:
+  auto_approve: low           # Only low-risk visual analysis auto-approved
+  require_review: medium      # Medium+ requires human review
+  require_human: high         # High-risk visual decisions require human
+  block_autonomous:
+    - mutate                  # Never autonomously modify source imagery
+    - send                    # Never autonomously distribute visual content
+
+checkpoint_policy:
+  before_image_modification: always      # Always checkpoint before modifying images
+  before_classification_output: always   # Always checkpoint before final classification
+  before_generation: always              # Always checkpoint before generating images
+  before_batch_processing: high_risk     # Checkpoint before large batch operations
+  during_pipeline_stages: medium_risk    # Checkpoint at pipeline stage boundaries
+
+evidence_policy:
+  required_anchor_types:
+    - image_reference          # Source image URI or hash
+    - bounding_box             # Spatial region coordinates
+    - confidence_score         # Model confidence for detections
+    - pixel_evidence           # Pixel-level evidence (segmentation masks)
+  minimum_confidence: 0.80     # Moderate-high confidence for visual tasks
+  require_grounding:
+    - detect                   # Object detections must reference image regions
+    - classify                 # Classifications must cite visual features
+    - predict                  # Visual predictions must reference patterns
+    - generate                 # Generated images must cite source/prompt
+
+domain_sources:
+  - name: Calibrated Camera System
+    type: sensor
+    default_trust: 0.94
+  - name: Image Database
+    type: database
+    default_trust: 0.90
+  - name: Vision API
+    type: api
+    default_trust: 0.85
+  - name: Expert Annotator
+    type: human
+    default_trust: 0.90
+  - name: Reference Dataset
+    type: document
+    default_trust: 0.88
+  - name: Processing Pipeline Log
+    type: system_log
+    default_trust: 0.92
+
+workflows:
+  - image_classification_pipeline
+  - object_detection_pipeline
+  - visual_quality_inspection
+  - image_generation_review

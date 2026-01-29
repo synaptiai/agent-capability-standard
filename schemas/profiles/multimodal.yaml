@@ -1,0 +1,92 @@
+# Multi-modal Domain Profile
+# Calibrated for cross-modality AI applications combining text, image, audio, and video.
+# Maps to OASF Category 7 (Multi-modal): image-to-text, text-to-video,
+# speech recognition, visual question answering, and cross-modal transformations.
+
+domain: multimodal
+version: "1.0.0"
+description: |
+  Profile for multi-modal AI environments that combine text, image, audio,
+  and video modalities. Emphasizes cross-modal evidence consistency,
+  modality alignment verification, and appropriate confidence thresholds
+  for transformations between modalities.
+
+trust_weights:
+  # Aligned multi-modal sources (highest trust)
+  aligned_dataset: 0.93        # Pre-aligned multi-modal datasets (e.g., image-caption pairs)
+  synchronized_capture: 0.92   # Simultaneously captured multi-modal data
+
+  # Single-modality inputs
+  text_input: 0.90             # Verified text content
+  image_input: 0.88            # Verified image content
+  audio_input: 0.85            # Verified audio content
+  video_input: 0.87            # Verified video content
+
+  # Generated/transformed outputs
+  generated_text: 0.72         # AI-generated text from other modalities
+  generated_image: 0.60        # AI-generated images from text/other
+  generated_audio: 0.58        # AI-synthesized audio
+  generated_video: 0.55        # AI-generated video (lowest confidence)
+  cross_modal_embedding: 0.75  # Shared embedding space representations
+
+  # Reference sources
+  human_alignment_label: 0.92  # Human-verified cross-modal alignment
+  expert_assessment: 0.90      # Domain expert cross-modal evaluation
+  model_prediction: 0.65       # Cross-modal model predictions
+
+risk_thresholds:
+  auto_approve: low           # Only low-risk analyses auto-approved
+  require_review: medium      # Medium+ requires human review
+  require_human: high         # High-risk cross-modal decisions require human
+  block_autonomous:
+    - mutate                  # Never autonomously modify source content
+    - send                    # Never autonomously distribute generated content
+    - generate                # Never autonomously generate without review
+
+checkpoint_policy:
+  before_modality_conversion: always     # Always checkpoint before converting between modalities
+  before_content_generation: always      # Always checkpoint before generating content
+  before_alignment_decision: always      # Always checkpoint before cross-modal alignment
+  before_batch_transformation: high_risk # Checkpoint before large batch conversions
+  during_pipeline_stages: medium_risk    # Checkpoint at pipeline stage boundaries
+
+evidence_policy:
+  required_anchor_types:
+    - source_modality          # Identification of input modality and reference
+    - target_modality          # Identification of output modality
+    - alignment_score          # Cross-modal alignment/similarity metric
+    - confidence_score         # Model confidence for the transformation
+    - modality_hash            # Content hash for each modality artifact
+  minimum_confidence: 0.75     # Moderate confidence for cross-modal tasks
+  require_grounding:
+    - detect                   # Cross-modal detections must reference all modalities
+    - classify                 # Classifications must cite features from relevant modalities
+    - predict                  # Predictions must reference multi-modal evidence
+    - generate                 # Generated content must cite source modality inputs
+    - transform                # Transformations must document modality mapping
+
+domain_sources:
+  - name: Multi-modal Dataset
+    type: database
+    default_trust: 0.92
+  - name: Vision-Language API
+    type: api
+    default_trust: 0.82
+  - name: Audio-Visual Capture
+    type: sensor
+    default_trust: 0.90
+  - name: Human Evaluator
+    type: human
+    default_trust: 0.90
+  - name: Reference Corpus
+    type: document
+    default_trust: 0.88
+  - name: Pipeline Execution Log
+    type: system_log
+    default_trust: 0.90
+
+workflows:
+  - image_captioning_pipeline
+  - visual_question_answering
+  - text_to_image_generation
+  - cross_modal_search
