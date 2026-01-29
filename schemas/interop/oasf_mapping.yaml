@@ -14,6 +14,7 @@
 
 meta:
   version: "1.0.0"
+  date: "2026-01-29"
   description: "Bidirectional mapping between OASF skill categories and Grounded Agency capabilities"
   oasf_version: "0.8.0"
   grounded_agency_version: "2.0.0"
@@ -197,6 +198,7 @@ categories:
         capabilities: [detect, transform, generate]
         mapping_type: composition
         domain_hint: image.3d
+        notes: "Composition required: detect features, transform to 3D space, generate mesh"
 
   # ---------------------------------------------------------------------------
   # Category 3: Audio
@@ -242,6 +244,7 @@ categories:
   # Category 4: Tabular / Text
   # ---------------------------------------------------------------------------
 
+  # Category 4 has no subcategories in OASF v0.8.0
   "4":
     name: Tabular / Text
     description: Tabular data classification and regression tasks
@@ -372,6 +375,7 @@ categories:
         capabilities: [detect]
         mapping_type: domain
         domain_hint: security.threat
+        notes: "Maps detect + search for vulnerability scanning"
 
       "802":
         name: Vulnerability Analysis
@@ -410,6 +414,7 @@ categories:
         capabilities: [detect, transform]
         mapping_type: composition
         domain_hint: data.cleaning
+        notes: "Full pipeline: observe raw data, transform to target format, verify output"
 
       "902":
         name: Schema Inference
@@ -452,6 +457,7 @@ categories:
         name: Task Decomposition
         capabilities: [decompose]
         mapping_type: direct
+        notes: "Maps decompose + plan for breaking complex tasks into subtasks"
 
       "1002":
         name: Role Assignment
@@ -531,6 +537,7 @@ categories:
         name: Infrastructure Provisioning
         capabilities: [plan, constrain, checkpoint, execute, verify]
         mapping_type: composition
+        notes: "Full deployment pipeline with checkpoint safety and rollback capability"
 
       "1202":
         name: Deployment Orchestration
@@ -654,12 +661,12 @@ categories:
 # Reverse Mapping: Grounded Agency → OASF
 # ---------------------------------------------------------------------------
 # Capabilities with NO OASF equivalent:
-#   attribute   — Causal reasoning (no OASF equivalent)
-#   integrate   — Data merging (no OASF equivalent)
-#   recall      — Stored data retrieval (no OASF equivalent)
-#   receive     — Pushed data/event acceptance (no OASF equivalent)
-#   send        — External data transmission (no OASF equivalent)
-#   transition  — Dynamics modeling (no OASF equivalent)
+#   attribute   — Causal reasoning: OASF has no dedicated causal attribution skill
+#   integrate   — Data merging: implicit in OASF pipelines, not a standalone skill
+#   recall      — Stored data retrieval: internal agent memory, not an OASF task category
+#   receive     — Pushed data/event acceptance: OASF is task-oriented, not event-driven
+#   send        — External data transmission: OASF treats output as implicit, not a distinct skill
+#   transition  — Dynamics modeling: no OASF category covers state machine transitions
 #
 # Capabilities with partial OASF mappings:
 #   checkpoint  — State preservation (partial: 12, 1201, 1202, 1204)
