@@ -35,6 +35,13 @@ This project follows a formal RFC process for changes. See [`spec/GOVERNANCE.md`
    ```bash
    python tools/validate_workflows.py
    ```
+5. (When changing core artifacts) Add/update a PVC report:
+   - Reports live in `docs/reviews/pvc/`
+   - Start from `templates/pvc_report_template.yaml`
+   - Validate with:
+     ```bash
+     python tools/validate_pvc.py
+     ```
 5. Submit a pull request
 
 ### Adding Skills
@@ -50,6 +57,16 @@ New skills must:
 - YAML files: 2-space indentation
 - Markdown files: CommonMark compatible
 - Shell scripts: `shellcheck` compliant
+
+## Perspective Validation Checklist (PVC)
+
+When a change touches critical paths (`schemas/`, `hooks/`, `skills/`, `grounded_agency/`, `tools/`, `spec/`), include a **PVC report**:
+
+- Guide: `docs/guides/PERSPECTIVE_VALIDATION_CHECKLIST.md`
+- Reports: `docs/reviews/pvc/`
+- Template: `templates/pvc_report_template.yaml`
+
+CI enforces that a PVC report is updated for critical-path changes and that all PVC reports are structurally valid.
 
 ## License
 
