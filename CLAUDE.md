@@ -54,6 +54,9 @@ Every agent action must be:
 | `hooks/hooks.json` | Claude Code hooks for safety enforcement |
 | `templates/SKILL_TEMPLATE_ENHANCED.md` | Template for creating new skills |
 | `_archive/` | Archived files from v1 (99-capability model) |
+| `schemas/interop/oasf_mapping.yaml` | OASF skill-code-to-capability mapping |
+| `docs/guides/MODALITY_HANDLING.md` | Modality handling guide (vision, audio, multimodal) |
+| `docs/proposals/OASF_SAFETY_EXTENSIONS.md` | OASF safety extension proposal |
 
 ### Layer Architecture
 

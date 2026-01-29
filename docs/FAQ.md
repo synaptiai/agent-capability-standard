@@ -128,7 +128,7 @@ For the full derivation, see [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md]
 
 The original 99-capability model included many domain-specific variants. Through first-principles analysis, we discovered these could be unified:
 
-| Old Model (99) | New Model (35) | Pattern |
+| Old Model (99) | New Model (36) | Pattern |
 |----------------|----------------|---------|
 | detect-anomaly, detect-entity, detect-person | detect (domain: anomaly/entity/person) | Domain parameterization |
 | estimate-risk, estimate-impact | measure (metric: risk/impact) | Metric parameterization |
@@ -136,9 +136,9 @@ The original 99-capability model included many domain-specific variants. Through
 
 The archived 99-capability model is in `_archive/skills/` for reference.
 
-### Is 35 the final number?
+### Is 36 the final number?
 
-The ontology is **stable but extensible**. A 36th capability may be added if:
+The ontology is **stable but extensible**. A 37th capability may be added if:
 - It cannot be expressed as a composition of existing capabilities
 - It passes atomicity tests (irreducible, single purpose, typed contract)
 - It's used in at least one reference workflow

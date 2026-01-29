@@ -191,17 +191,24 @@ Capabilities compose into reusable workflow patterns:
 
 See [WORKFLOW_PATTERNS.md](docs/WORKFLOW_PATTERNS.md) for the complete pattern catalog.
 
-### 5 Reference Workflows
+### 12 Composed Workflows
 
 Production-ready workflow compositions with gates, recovery loops, and typed bindings:
 
 | Workflow | Goal | Risk |
 |----------|------|------|
-| `debug_code_change` | Safely diagnose and fix bugs | High |
+| `monitor_and_replan` | Detect world changes and trigger replanning | Medium |
+| `clarify_intent` | Resolve ambiguous user requests | Low |
+| `debug_code_change` | Safely diagnose and fix bugs | Medium |
 | `world_model_build` | Construct grounded world model | Low |
-| `capability_gap_analysis` | Identify missing capabilities | Medium |
+| `capability_gap_analysis` | Identify missing capabilities | Low |
 | `digital_twin_sync_loop` | Synchronize digital twin state | High |
 | `digital_twin_bootstrap` | Initialize and run first sync | High |
+| `rag_pipeline` | Retrieve and generate grounded response | Low |
+| `security_assessment` | Assess vulnerabilities with risk scoring | Low |
+| `multi_agent_orchestration` | Coordinate agents for complex tasks | Medium |
+| `data_quality_pipeline` | Detect, classify, and clean data quality issues | Medium |
+| `model_deployment` | Safely deploy ML model to production | High |
 
 ### Canonical Schemas
 
@@ -229,6 +236,7 @@ Hooks implementing SAFETY layer capabilities:
 | [TUTORIAL.md](docs/TUTORIAL.md) | Build your first workflow (30 min) |
 | [GLOSSARY.md](docs/GLOSSARY.md) | Key terms and definitions |
 | [FAQ.md](docs/FAQ.md) | Common questions |
+| [MODALITY_HANDLING.md](docs/guides/MODALITY_HANDLING.md) | Working with vision, audio, and multimodal domains |
 
 ### For Implementers
 
@@ -255,6 +263,7 @@ Hooks implementing SAFETY layer capabilities:
 | [SKILLS_ALIGNMENT_EVALUATION.md](docs/methodology/SKILLS_ALIGNMENT_EVALUATION.md) | Validation against Claude Skills |
 | [WORKFLOW_PATTERNS.md](docs/WORKFLOW_PATTERNS.md) | Reusable composition patterns |
 | [EXTENSION_GOVERNANCE.md](docs/methodology/EXTENSION_GOVERNANCE.md) | When to add new capabilities |
+| [OASF_SAFETY_EXTENSIONS.md](docs/proposals/OASF_SAFETY_EXTENSIONS.md) | OASF safety property integration proposal |
 
 ### Background
 
@@ -286,12 +295,16 @@ agent-capability-standard/
 │   ├── capability_ontology.yaml     # 36-capability ontology
 │   ├── workflow_catalog.yaml
 │   ├── world_state_schema.yaml
+│   ├── interop/                       # Framework interoperability mappings
+│   │   └── oasf_mapping.yaml          # OASF skill code mapping
 │   └── transforms/          # Type coercion mappings
 ├── hooks/                   # Safety hooks (checkpoint, audit)
 ├── tools/                   # Validator CLI
 ├── tests/                   # Conformance fixtures
 ├── spec/                    # Standard documentation
 ├── docs/                    # User documentation + methodology
+│   ├── guides/                        # User guides
+│   └── proposals/                     # Extension proposals
 ├── examples/                # Usage examples
 └── templates/               # Skill templates
 ```

@@ -412,3 +412,11 @@ class EvidenceStore:
     def get_for_capability(self, capability_id: str) -> list[EvidenceAnchor]: ...
     def get_mutations(self) -> list[EvidenceAnchor]: ...
 ```
+
+## OASF Interoperability
+
+The `grounded_agency.adapters.oasf` module provides bidirectional mapping between
+OASF skill codes and Grounded Agency capabilities. See
+[schemas/interop/oasf_mapping.yaml](../../schemas/interop/oasf_mapping.yaml) for the
+mapping data and the [OASF comparison doc](../comparisons/OASF_COMPARISON.md) for
+design rationale.

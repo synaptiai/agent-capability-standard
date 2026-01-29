@@ -22,7 +22,7 @@ The 36 atomic capabilities are **primitives**. Real agent behaviors emerge by **
 └─────────────────────────────────────────────────┘
                     ↓ compose from
 ┌─────────────────────────────────────────────────┐
-│  ATOMIC CAPABILITIES (35 primitives)            │
+│  ATOMIC CAPABILITIES (36 primitives)            │
 │  detect, classify, plan, verify, execute...     │
 └─────────────────────────────────────────────────┘
 ```
