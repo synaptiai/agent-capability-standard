@@ -1122,3 +1122,752 @@ digital_twin_bootstrap:
     world_state_out:
       type: object
       ref: schemas/world_state_schema.yaml#/world_state
+
+# OASF-inspired workflow patterns (Issue #23)
+# These patterns are derived from OASF skill categories mapped to our
+# 36-capability model. See docs/research/analysis/OASF_comparison.md Section 5.
+
+rag_pipeline:
+  goal: Retrieve relevant information and generate a grounded, evidence-cited response.
+  risk: low
+  description: |
+    Retrieval-Augmented Generation pipeline inspired by OASF Category 6 (RAG).
+    Searches for relevant documents, extracts pertinent passages, anchors the
+    response to retrieved evidence, generates a response, and cites sources.
+    This pattern ensures generated content is grounded in retrieved facts rather
+    than relying solely on parametric knowledge.
+  success:
+  - Relevant documents found and retrieved
+  - Response grounded in retrieved evidence
+  - Sources cited with provenance
+  steps:
+  - capability: search
+    purpose: Find relevant documents matching the query.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry:
+      max: 2
+      backoff: exponential
+    store_as: search_out
+    input_bindings:
+      query: ${user_query}
+    failure_modes:
+    - condition: No relevant documents found
+      action: request_more_context
+      recovery: Broaden search terms or ask user for additional context.
+  - capability: retrieve
+    purpose: Fetch full content of relevant documents.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry:
+      max: 2
+      backoff: exponential
+    store_as: retrieve_out
+    input_bindings: {}
+    failure_modes:
+    - condition: Document retrieval fails
+      action: request_more_context
+      recovery: Try alternative sources or report partial results.
+  - capability: detect
+    purpose: Extract relevant passages from retrieved documents.
+    domain: relevance
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: detect_out
+    input_bindings:
+      data: "${retrieve_out.data: object}"
+      pattern: ${user_query}
+    failure_modes: []
+  - capability: ground
+    purpose: Anchor response to retrieved evidence with provenance.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: ground_out
+    input_bindings: {}
+    failure_modes: []
+  - capability: generate
+    purpose: Produce response synthesized from grounded evidence.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: generate_out
+    input_bindings:
+      specification: "${ground_out.evidence: array<object>}"
+    failure_modes:
+    - condition: Insufficient evidence for coherent response
+      action: stop
+      recovery: Report that available evidence is insufficient and cite what was found.
+  - capability: explain
+    purpose: Cite sources and provide reasoning chain for the response.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: explain_out
+    input_bindings:
+      conclusion: "${generate_out.content: object}"
+    failure_modes: []
+  - capability: audit
+    purpose: Record retrieval provenance and generation lineage.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    input_bindings:
+      event:
+        type: rag_pipeline
+        query: ${user_query}
+        grounded: ${ground_out.grounded}
+        response: "${generate_out.content: object}"
+    failure_modes: []
+  risk_propagation:
+    strategy: max_step_risk
+    computed_risk: low
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output is stored under store_as and may be referenced by later steps.
+  inputs:
+    user_query:
+      type: string
+      required: true
+      description: The user query to answer using retrieved information
+
+security_assessment:
+  goal: Identify and assess security vulnerabilities with risk scoring and mitigation recommendations.
+  risk: medium
+  description: |
+    Security assessment workflow inspired by OASF Category 8 (Security & Privacy).
+    Scans for known vulnerability patterns, detects potential security issues,
+    assesses severity, identifies root causes, evaluates mitigation options,
+    generates a security report, and records assessment findings for audit.
+  success:
+  - Vulnerability scan completed
+  - Severity assessed with risk scores
+  - Root causes identified
+  - Mitigation recommendations produced
+  - Assessment findings recorded
+  steps:
+  - capability: search
+    purpose: Scan for known vulnerability patterns and CVEs.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry:
+      max: 2
+      backoff: exponential
+    store_as: search_out
+    input_bindings:
+      query: ${assessment_target}
+    failure_modes:
+    - condition: Unable to access vulnerability databases
+      action: request_more_context
+      recovery: Fall back to pattern-based detection without CVE lookup.
+  - capability: detect
+    purpose: Find potential security issues in the target.
+    domain: vulnerability
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: detect_out
+    input_bindings:
+      data: "${search_out.results: array<object>}"
+      pattern: vulnerability
+    failure_modes:
+    - condition: No vulnerabilities detected
+      action: stop
+      recovery: Report clean assessment with confidence level.
+  - capability: measure
+    purpose: Assess severity and risk level of detected vulnerabilities.
+    domain: severity
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: measure_out
+    input_bindings:
+      target: "${detect_out.matches: array<object>}"
+      metric: severity
+    failure_modes: []
+  - capability: attribute
+    purpose: Identify root causes and attack vectors for vulnerabilities.
+    domain: causation
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: attribute_out
+    input_bindings:
+      effect: "${detect_out.matches: array<object>}"
+      context: "${search_out: object}"
+    failure_modes: []
+  - capability: critique
+    purpose: Evaluate mitigation options and their trade-offs.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: critique_out
+    input_bindings:
+      target: "${attribute_out.causes: array<object>}"
+      criteria:
+      - mitigation_effectiveness
+      - implementation_cost
+      - operational_impact
+    failure_modes: []
+  - capability: generate
+    purpose: Produce comprehensive security assessment report.
+    domain: report
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: generate_out
+    input_bindings:
+      specification: "${critique_out.suggestions: array<object>}"
+    failure_modes: []
+  - capability: audit
+    purpose: Record assessment findings and recommendations for compliance.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    input_bindings:
+      event:
+        type: security_assessment
+        target: ${assessment_target}
+        severity: ${measure_out.value}
+        report: "${generate_out.content: object}"
+    failure_modes: []
+  risk_propagation:
+    strategy: max_step_risk
+    computed_risk: low
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output is stored under store_as and may be referenced by later steps.
+  inputs:
+    assessment_target:
+      type: object
+      required: true
+      description: The system, codebase, or artifact to assess for security vulnerabilities
+      properties:
+        target_type:
+          type: string
+        scope:
+          type: string
+        constraints:
+          type: object
+
+multi_agent_orchestration:
+  goal: Coordinate multiple agents to execute a complex task through decomposition, delegation, and result integration.
+  risk: medium
+  description: |
+    Multi-agent orchestration workflow inspired by OASF Category 10 (Agent Orchestration).
+    Decomposes a complex task into subtasks, creates an execution plan with
+    dependencies, delegates subtasks to appropriate agents, coordinates shared
+    state, validates results, merges outputs, and records orchestration decisions.
+  success:
+  - Task decomposed into manageable subtasks
+  - Subtasks delegated to appropriate agents
+  - Shared state coordinated across agents
+  - Results validated and integrated
+  - Orchestration decisions audited
+  steps:
+  - capability: decompose
+    purpose: Break complex task into independent subtasks.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: decompose_out
+    input_bindings:
+      problem: ${task.goal}
+    failure_modes:
+    - condition: Task cannot be meaningfully decomposed
+      action: stop
+      recovery: Execute task as a single unit without delegation.
+  - capability: plan
+    purpose: Create execution plan with subtask dependencies and ordering.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: plan_out
+    input_bindings:
+      goal: ${task.goal}
+      constraints: "${decompose_out.structure: object}"
+    failure_modes: []
+  - capability: delegate
+    purpose: Assign subtasks to appropriate agents based on capabilities.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: true
+    timeout: null
+    retry: null
+    store_as: delegate_out
+    input_bindings:
+      task: "${plan_out.dependencies: object}"
+    failure_modes:
+    - condition: No suitable agent available for subtask
+      action: request_more_context
+      recovery: Queue subtask or request manual agent assignment.
+  - capability: synchronize
+    purpose: Coordinate shared state across delegated agents.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry:
+      max: 3
+      backoff: exponential
+    store_as: synchronize_out
+    input_bindings:
+      agents: "${task.agent_pool: array<string>}"
+      state: "${delegate_out: object}"
+    failure_modes:
+    - condition: State synchronization timeout
+      action: pause_and_checkpoint
+      recovery: Checkpoint current state and retry synchronization.
+  - capability: verify
+    purpose: Validate subtask results meet acceptance criteria.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry:
+      max: 2
+      backoff: exponential
+    store_as: verify_out
+    failure_modes:
+    - condition: Subtask result fails validation
+      action: request_more_context
+      recovery: Return subtask to assigned agent with failure details.
+  - capability: integrate
+    purpose: Merge results from multiple agents into unified output.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: integrate_out
+    input_bindings:
+      sources:
+      - "${delegate_out: object}"
+      - "${synchronize_out.agreed_state: object}"
+      strategy: merge_by_subtask
+    failure_modes:
+    - condition: Conflicting results from agents
+      action: request_more_context
+      recovery: Escalate conflicts for manual resolution.
+  - capability: audit
+    purpose: Record orchestration decisions, delegations, and results.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    input_bindings:
+      event:
+        type: multi_agent_orchestration
+        task: ${task.goal}
+        plan: "${plan_out.steps: array<object>}"
+        delegation: ${delegate_out.accepted}
+        results: "${integrate_out.merged: object}"
+    failure_modes: []
+  risk_propagation:
+    strategy: max_step_risk
+    computed_risk: medium
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output is stored under store_as and may be referenced by later steps.
+  inputs:
+    task:
+      type: object
+      required: true
+      description: The complex task to orchestrate across multiple agents
+      properties:
+        goal:
+          type: string
+        subtask_hints:
+          type: array
+        agent_pool:
+          type: array
+
+data_quality_pipeline:
+  goal: Examine, detect, classify, measure, clean, verify, and audit data quality issues.
+  risk: medium
+  description: |
+    Data quality pipeline inspired by OASF Category 9 (Data Engineering).
+    Examines raw data, detects quality problems, classifies issue types,
+    computes quality metrics, applies cleaning transformations, verifies
+    cleaned data against quality thresholds, and records all transformations
+    applied for reproducibility.
+  success:
+  - Raw data examined for quality issues
+  - Issues detected and classified
+  - Quality metrics computed
+  - Cleaning transformations applied
+  - Cleaned data verified against thresholds
+  - All transformations recorded for audit
+  steps:
+  - capability: observe
+    purpose: Examine raw data structure, schema, and sample values.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    input_bindings:
+      target: ${raw_data.format}
+    failure_modes:
+    - condition: Unable to read or parse data
+      action: stop
+      recovery: Report format incompatibility and request data in supported format.
+  - capability: detect
+    purpose: Find quality problems such as nulls, outliers, duplicates, and format issues.
+    domain: data_issue
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: detect_out
+    input_bindings:
+      data: "${observe_out.observation: object}"
+      pattern: data_quality_issue
+    failure_modes: []
+  - capability: classify
+    purpose: Categorize detected issues by type and severity.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: classify_out
+    input_bindings:
+      item: "${detect_out.matches: array<object>}"
+    failure_modes: []
+  - capability: measure
+    purpose: Compute quality metrics (completeness, consistency, accuracy, timeliness).
+    domain: quality
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: measure_out
+    input_bindings:
+      target: "${detect_out.matches: array<object>}"
+      metric: quality
+    failure_modes: []
+  - capability: checkpoint
+    purpose: Save data state before applying cleaning transformations.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: checkpoint_out
+    failure_modes: []
+  - capability: transform
+    purpose: Apply cleaning operations to fix detected quality issues.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: transform_out
+    input_bindings:
+      input: "${classify_out.labels: array<object>}"
+      target_format: cleaned
+    failure_modes:
+    - condition: Transformation produces unexpected results
+      action: pause_and_checkpoint
+      recovery: Review transformation rules and retry with adjusted parameters.
+  - capability: verify
+    purpose: Validate cleaned data meets quality thresholds.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry:
+      max: 2
+      backoff: exponential
+    store_as: verify_out
+    failure_modes:
+    - condition: Cleaned data fails quality threshold
+      action: rollback
+      recovery: Rollback to checkpoint, adjust cleaning rules, and retry.
+  - capability: audit
+    purpose: Record all transformations applied and quality metrics before/after.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    input_bindings:
+      event:
+        type: data_quality_pipeline
+        detected: ${detect_out.detected}
+        quality_score: ${measure_out.value}
+        transformations: "${transform_out.output: object}"
+        verification: ${verify_out.passed}
+    failure_modes: []
+  risk_propagation:
+    strategy: max_step_risk
+    computed_risk: medium
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output is stored under store_as and may be referenced by later steps.
+  inputs:
+    raw_data:
+      type: object
+      required: true
+      description: The raw data to be quality-checked and cleaned
+      properties:
+        format:
+          type: string
+        schema:
+          type: object
+        quality_thresholds:
+          type: object
+
+model_deployment:
+  goal: Safely deploy an ML model to production with validation, policy checks, and rollback capability.
+  risk: high
+  description: |
+    Model deployment workflow inspired by OASF Category 12 (DevOps/MLOps).
+    Validates model artifacts, checks deployment policies, creates a rollback
+    checkpoint, executes deployment scripts, verifies deployment success,
+    measures model performance post-deployment, and records the deployment
+    event. Includes automatic rollback on verification failure.
+  success:
+  - Model artifacts validated
+  - Deployment policies satisfied
+  - Rollback checkpoint created
+  - Deployment executed successfully
+  - Post-deployment verification passed
+  - Performance metrics within thresholds
+  - Deployment event recorded
+  steps:
+  - capability: verify
+    purpose: Validate model artifacts (weights, config, schema compatibility).
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry: null
+    store_as: verify_artifacts_out
+    input_bindings:
+      target: ${model_package}
+      conditions:
+      - artifact_integrity
+      - schema_compatibility
+      - version_consistency
+    failure_modes:
+    - condition: Model artifacts invalid or corrupted
+      action: stop
+      recovery: Report validation failures and request corrected artifacts.
+  - capability: constrain
+    purpose: Check deployment policies (approval gates, resource limits, compliance).
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: constrain_out
+    input_bindings:
+      target: ${deployment_config}
+      constraints:
+      - deployment_policy
+      - resource_limits
+      - compliance_requirements
+    failure_modes:
+    - condition: Policy violation detected
+      action: stop
+      recovery: Report policy violations and required remediation steps.
+  - capability: checkpoint
+    purpose: Save rollback point before deployment begins.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: checkpoint_out
+    failure_modes: []
+  - capability: execute
+    purpose: Run deployment scripts to push model to production.
+    risk: high
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: true
+    timeout: 5m
+    retry: null
+    store_as: execute_out
+    input_bindings:
+      code: ${deployment_config.deploy_command}
+    gates:
+    - when: ${constrain_out.compliant} == false
+      action: stop
+      message: Deployment blocked by policy violation.
+    - when: ${checkpoint_out.checkpoint_id} == null
+      action: stop
+      message: No checkpoint created. Do not deploy.
+    failure_modes:
+    - condition: Deployment script fails
+      action: rollback
+      recovery: Rollback to checkpoint and report deployment failure.
+  - capability: verify
+    purpose: Validate deployment success (health checks, endpoint availability).
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry:
+      max: 3
+      backoff: exponential
+    store_as: verify_deploy_out
+    failure_modes:
+    - condition: Deployment health check fails
+      action: rollback
+      recovery: Rollback to checkpoint and investigate deployment issues.
+  - capability: measure
+    purpose: Check model performance metrics post-deployment.
+    domain: performance
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: measure_out
+    input_bindings:
+      target: "${verify_deploy_out.results: array<object>}"
+      metric: performance
+    gates:
+    - when: ${verify_deploy_out.passed} == false
+      action: rollback
+      message: Deployment verification failed. Skipping performance check.
+    failure_modes: []
+  - capability: audit
+    purpose: Record deployment event with full provenance.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    input_bindings:
+      event:
+        type: model_deployment
+        model: ${model_package.model_id}
+        version: ${model_package.version}
+        deployment_result: "${execute_out.result: object}"
+        verification: ${verify_deploy_out.passed}
+        performance: ${measure_out.value}
+    failure_modes: []
+  - capability: rollback
+    purpose: If verification fails, revert deployment to checkpoint.
+    risk: medium
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    gates:
+    - when: ${verify_deploy_out.passed} == true
+      action: skip
+      message: Deployment verified successfully. No rollback needed.
+    failure_modes: []
+  risk_propagation:
+    strategy: max_step_risk
+    computed_risk: high
+  data_flow:
+    pattern: step_outputs_are_addressable
+    rule: Each step output is stored under store_as and may be referenced by later steps.
+  inputs:
+    model_package:
+      type: object
+      required: true
+      description: The ML model package to deploy
+      properties:
+        model_id:
+          type: string
+        version:
+          type: string
+        artifacts:
+          type: object
+    deployment_config:
+      type: object
+      required: true
+      description: Deployment configuration including target environment and policies
+      properties:
+        environment:
+          type: string
+        deploy_command:
+          type: string
+        policies:
+          type: object
