@@ -354,7 +354,7 @@ pip install grounded-agency[sdk]
 ## Installation
 
 ### Claude Code Plugin
-
+Add the [Synapti marketplace](https://github.com/synaptiai/synapti-marketplace) to your Claude Code setup.
 ```bash
 # Add the Synapti marketplace (one-time)
 claude plugin marketplace add synaptiai/synapti-marketplace
