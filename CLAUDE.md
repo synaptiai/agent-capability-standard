@@ -14,6 +14,11 @@ python tools/validate_workflows.py
 python tools/validate_profiles.py
 ```
 
+### Validate skill file references (no phantom paths)
+```bash
+python tools/validate_skill_refs.py
+```
+
 ### Validate ontology graph (orphans, cycles, symmetry)
 ```bash
 python tools/validate_ontology.py
