@@ -1,6 +1,6 @@
 # PVC Review Reports
 
-This folder stores **Perspective Validation Checklist (PVC)** reports used for socio-technical and governance review of changes to core artifacts (e.g., `schemas/`, `skills/`, `hooks/`, `grounded_agency/`, `tools/`).
+This folder stores **Perspective Validation Checklist (PVC)** reports used for socio-technical and governance review of changes to core artifacts (e.g., `schemas/`, `skills/`, `hooks/`, `grounded_agency/`, `tools/`, `spec/`).
 
 ## Naming
 

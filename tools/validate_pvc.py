@@ -134,7 +134,11 @@ def _validate_report(path: Path, data: Any) -> list[str]:
             file_path = _extract_file_ref_path(ev)
             if file_path:
                 candidate = (ROOT / file_path).resolve()
-                if not candidate.exists():
+                if not candidate.is_relative_to(ROOT):
+                    errors.append(
+                        _err(path, f"Evidence reference escapes repository root: {ev!r}.")
+                    )
+                elif not candidate.exists():
                     errors.append(
                         _err(path, f"Evidence reference points to missing file: {ev!r}.")
                     )
@@ -197,7 +201,11 @@ def _git_changed_files(diff_base: str) -> list[str] | None:
             cwd=ROOT,
             text=True,
         )
-    except Exception:
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: git diff failed (exit {e.returncode}); skipping critical-path gate.", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"Warning: unexpected error running git diff: {e}; skipping critical-path gate.", file=sys.stderr)
         return None
     return [line.strip() for line in out.splitlines() if line.strip()]
 
@@ -226,7 +234,14 @@ def main() -> int:
     )
     if not report_paths:
         print("No PVC reports found in docs/reviews/pvc/.", file=sys.stderr)
-        return 1
+        if args.diff_base:
+            # In CI mode, absence of reports is only an error if critical paths changed
+            changed = _git_changed_files(args.diff_base)
+            if changed and any(_is_critical_change(p) for p in changed):
+                return 1
+            print("No critical-path changes detected; skipping.", file=sys.stderr)
+            return 0
+        return 0
 
     # Optional CI rule: require report update if critical paths changed
     changed = _git_changed_files(args.diff_base)

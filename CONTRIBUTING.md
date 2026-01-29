@@ -42,7 +42,7 @@ This project follows a formal RFC process for changes. See [`spec/GOVERNANCE.md`
      ```bash
      python tools/validate_pvc.py
      ```
-5. Submit a pull request
+6. Submit a pull request
 
 ### Adding Skills
 

@@ -23,7 +23,12 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
           else
+            # On push, event.before is all-zeros for new branches.
+            # Fall back to merge-base against default branch.
             BASE="${{ github.event.before }}"
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ] || [ -z "$BASE" ]; then
+              BASE=$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)
+            fi
           fi
           python tools/validate_pvc.py --diff-base "$BASE"
       - name: Run conformance suite
