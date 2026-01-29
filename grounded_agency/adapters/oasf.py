@@ -54,7 +54,7 @@ class OASFMapping:
     notes: str | None = None
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class OASFSkillResult:
     """Result of translating an OASF skill invocation."""
 
@@ -230,7 +230,12 @@ class OASFAdapter:
         ]
 
     def list_all_mappings(self) -> list[OASFMapping]:
-        """List all mappings (categories and subcategories)."""
+        """List all mappings (categories and subcategories).
+
+        Returns mappings in YAML source order (categories first, then
+        subcategories within each category). Order is deterministic on
+        Python 3.7+.
+        """
         self._ensure_loaded()
         assert self._index is not None
         return list(self._index.values())

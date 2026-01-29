@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -83,6 +85,12 @@ class TestOASFTranslation:
         assert "detect" in result.mapping.capabilities
         assert result.mapping.domain_hint == "security.threat"
 
+    def test_translate_category_without_capabilities(self, adapter: OASFAdapter) -> None:
+        """Category '1' (NLP) has no direct capabilities at parent level."""
+        result = adapter.translate("1")
+        assert result.mapping.capabilities == ()
+        assert result.capability_nodes == []
+
     def test_unknown_skill_raises(self, adapter: OASFAdapter) -> None:
         with pytest.raises(UnknownSkillError):
             adapter.translate("99999")
@@ -115,6 +123,14 @@ class TestSafetyMetadata:
         result = adapter.translate("109")
         assert len(result.capability_nodes) > 0
         assert result.capability_nodes[0].id == "classify"
+
+    def test_warning_logged_for_missing_capability(self, adapter: OASFAdapter, caplog: pytest.LogCaptureFixture) -> None:
+        """A warning is logged when a mapped capability is not found in the registry."""
+        with patch.object(adapter._registry, "get_capability", return_value=None):
+            with caplog.at_level(logging.WARNING, logger="grounded_agency.adapters.oasf"):
+                result = adapter.translate("109")  # classify -> patched to None
+        assert "not found in registry" in caplog.text
+        assert result.capability_nodes == []
 
 
 class TestReverseLookup:
