@@ -40,7 +40,7 @@ This design creates three classes of risk:
 
 The fundamental insight motivating this proposal is that agent safety cannot be achieved through optional skills. Safety must be woven into the execution fabric itself. Consider an analogy: a programming language does not make memory safety "a library you can import." Languages like Rust encode memory safety into the type system. Similarly, agent frameworks should encode safety into their capability contracts.
 
-The Grounded Agency Capability Ontology demonstrates this approach. Most of its 36 atomic capabilities include `evidence_anchors` and `confidence` in their output schemas. Capabilities in the EXECUTE, VERIFY, REMEMBER, and COORDINATE layers omit the `confidence` field since confidence scoring is not applicable to action and mutation capabilities -- these capabilities either succeed or fail, and their outputs are verified through other means (e.g., the `verify` capability). High-risk capabilities structurally require checkpoints before execution. Constraint checking precedes any mutation. These are not conventions to be followed by diligent implementers -- they are contracts enforced by the schema itself.
+The Grounded Agency Capability Ontology demonstrates this approach. Most of its 36 atomic capabilities include `evidence_anchors` and `confidence` in their output schemas. Most capabilities in the EXECUTE layer (all 3), REMEMBER layer (both), and most of the VERIFY layer (4 of 5) and COORDINATE layer (3 of 4) omit the `confidence` field. The `verify` and `inquire` capabilities are exceptions within their respective layers because they produce assessments where confidence is meaningful. Additionally, `receive` in the PERCEIVE layer also omits confidence, as received events are factual data rather than assessments. (While the ontology's `meta.principles` state "every capability returns evidence anchors and confidence," the actual schemas omit `confidence` from 13 of 36 capabilities, primarily in action-oriented layers where binary success/failure is more appropriate than probabilistic confidence.) High-risk capabilities structurally require checkpoints before execution. Constraint checking precedes any mutation. These are not conventions to be followed by diligent implementers -- they are contracts enforced by the schema itself.
 
 ### 2.3 Real-World Failure Modes
 
@@ -218,6 +218,10 @@ skill:
           Time-to-live for this checkpoint. After expiry, the
           checkpoint may be garbage collected. Format: ISO 8601
           duration (e.g., PT1H for 1 hour).
+        # TTL Semantics:
+        # - Rollback against an expired checkpoint MUST return an error including the expiry timestamp
+        # - Default TTL when unspecified is implementation-defined but MUST be documented
+        # - A rollback in progress MUST NOT be interrupted by TTL expiry
   output:
     type: object
     required:
@@ -250,6 +254,13 @@ skill:
 ```
 
 > **Note:** Elevating `timestamp` from optional to required is an intentional OASF strengthening -- audit trails require temporal ordering to be meaningful.
+
+> **Note:** The OASF checkpoint schema includes `confidence` to indicate the completeness of the captured state snapshot, even though the source ontology omits confidence from action-oriented capabilities. This is an intentional OASF strengthening.
+
+**TTL Semantics:**
+- Rollback against an expired checkpoint MUST return an error including the expiry timestamp
+- Default TTL when unspecified is implementation-defined but MUST be documented
+- A rollback in progress MUST NOT be interrupted by TTL expiry
 
 #### Integration with Existing Skills
 
@@ -355,6 +366,8 @@ skill:
         maximum: 1
 ```
 
+> **Note:** The OASF rollback schema includes `confidence` to indicate the completeness of the restoration, even though the source ontology omits confidence from action-oriented capabilities. This is an intentional OASF strengthening.
+
 #### Checkpoint-Rollback Interaction Pattern
 
 The checkpoint and rollback skills form a paired safety mechanism:
@@ -399,6 +412,14 @@ steps:
           event: "Schema migration completed successfully"
 ```
 
+#### Error Handling
+
+If a rollback operation fails:
+1. The system MUST log the failure state including the checkpoint ID and partial restoration status
+2. Retry is permitted up to a maximum of 2 attempts with exponential backoff
+3. If all retries fail, the system MUST alert a human operator with the checkpoint ID and failure details
+4. A failed rollback MUST NOT trigger another checkpoint (to avoid infinite loops)
+
 ---
 
 ### 3.4 Pre-execution Constraints
@@ -410,6 +431,14 @@ OASF has governance and compliance skills (Category 13), but these are invoked a
 #### Proposed Solution
 
 Introduce a `constrain` skill that checks a set of policy conditions before allowing a subsequent operation to proceed. If any constraint is violated, the operation is blocked and the violation is recorded.
+
+#### Schema Divergences from Base Ontology
+
+| Field | Ontology `constrain` | OASF `constrain` | Rationale |
+|-------|---------------------|-------------------|-----------|
+| `target` | `type: any` | Split into `target_skill` (string) + `target_input` (object) | OASF is skill-aware; constraint evaluation requires knowing which skill is targeted |
+| `constraints` | `type: array` (flat) | Nested with `id`, `condition`, `action_on_violation`, `severity` | Structured constraints enable machine evaluation and graduated responses |
+| `action_on_violation` | Top-level input field | Per-constraint field | Different constraints may require different violation responses |
 
 #### Schema Definition
 
@@ -566,6 +595,8 @@ steps:
       destination: "eu-west-1"
 ```
 
+> **Note:** The expression syntax used in `condition` fields (variable interpolation `${}`, comparison operators, method calls like `.startsWith()`, `.includes()`, logical operators `AND`/`OR`) is intentionally left implementation-defined. Conforming implementations SHOULD use an established expression language such as [Google CEL](https://github.com/google/cel-spec), [JSONPath](https://datatracker.ietf.org/doc/rfc9535/), or [Rego](https://www.openpolicyagent.org/docs/latest/policy-language/). The examples in this proposal use a pseudocode syntax for readability.
+
 ---
 
 ## 4. Implementation Guidance
@@ -661,6 +692,8 @@ category:
 ```
 
 Evidence anchoring is not a separate skill but a schema extension that applies to all existing skills.
+
+**Versioning:** Category 16 skills follow OASF's existing semantic versioning scheme. The category should be stabilized and reviewed before OASF reaches 1.0. Breaking changes to safety primitives require a major version increment at the category level.
 
 ### 4.5 Backward Compatibility
 
