@@ -1,0 +1,729 @@
+# OASF-to-Grounded-Agency Capability Mapping
+# Machine-readable translation between the Open Agentic Schema Framework (OASF)
+# and the Grounded Agency Capability Ontology.
+#
+# OASF Reference: https://schema.oasf.outshift.com
+# OASF Version:   0.8.0
+# Grounded Agency: 36 atomic capabilities across 9 cognitive layers
+#
+# Mapping types:
+#   direct      — 1:1 capability correspondence
+#   domain      — Same capability with domain parameter specialization
+#   composition — Multiple capabilities required
+#   workflow    — Maps to a composed workflow pattern
+
+meta:
+  version: "1.0.0"
+  date: "2026-01-29"
+  description: "Bidirectional mapping between OASF skill categories and Grounded Agency capabilities"
+  oasf_version: "0.8.0"
+  grounded_agency_version: "2.0.0"
+  generated_from: "docs/research/analysis/OASF_comparison.md"
+
+# ---------------------------------------------------------------------------
+# Category 1: Natural Language Processing
+# ---------------------------------------------------------------------------
+
+categories:
+  "1":
+    name: Natural Language Processing
+    description: Text comprehension and generation abilities
+    capabilities: [classify, constrain, decompose, detect, explain, generate, ground, plan, retrieve, search, state, transform]
+    mapping_type: composition
+    domain_hint: text
+    subcategories:
+
+      "101":
+        name: Natural Language Understanding
+        capabilities: [detect, classify]
+        mapping_type: composition
+        domain_hint: text
+        notes: >
+          Contextual comprehension maps to detect (pattern recognition)
+          combined with classify (semantic categorization).
+
+      "102":
+        name: Natural Language Generation
+        capabilities: [generate]
+        mapping_type: direct
+        domain_hint: text
+        notes: >
+          Text completion, summarization, paraphrasing, and dialogue
+          generation all use the generate capability with text domain.
+
+      "103":
+        name: Information Retrieval and Synthesis
+        capabilities: [search, retrieve, ground]
+        mapping_type: composition
+        # Workflow from PR #31 (OASF workflow patterns)
+        workflow: rag_pipeline
+        domain_hint: text
+        notes: >
+          Information retrieval maps to search + retrieve. Synthesis
+          requires grounding to evidence. Full pipeline available as
+          rag_pipeline workflow.
+
+      "104":
+        name: Creative Content Generation
+        capabilities: [generate]
+        mapping_type: domain
+        domain_hint: creative
+        notes: >
+          Storytelling, poetry, and creative writing use generate with
+          creative domain parameters for style and format.
+
+      "105":
+        name: Language Translation
+        capabilities: [transform]
+        mapping_type: domain
+        domain_hint: language
+        notes: >
+          Translation is a transformation between language domains.
+          Source and target language specified via domain parameters.
+
+      "106":
+        name: Personalisation and Adaptation
+        capabilities: [state, transform]
+        mapping_type: composition
+        domain_hint: user
+        notes: >
+          Personalization requires maintaining user state model via
+          state capability, then applying transform to adapt content.
+
+      "107":
+        name: Analytical and Logical Reasoning
+        capabilities: [decompose, plan, explain]
+        mapping_type: composition
+        domain_hint: reasoning
+        notes: >
+          Inference and deduction map to decompose (breaking apart problems),
+          plan (structured reasoning), and explain (justification).
+
+      "108":
+        name: Ethical and Safe Interaction
+        capabilities: [constrain, classify]
+        mapping_type: composition
+        domain_hint: safety
+        notes: >
+          Bias mitigation and content moderation use constrain for
+          policy enforcement and classify for content categorization.
+
+      "109":
+        name: Text Classification
+        capabilities: [classify]
+        mapping_type: direct
+        domain_hint: text
+        notes: >
+          Topic labeling, sentiment analysis, and NLI all use classify
+          with appropriate domain parameters (topic, sentiment, entailment).
+
+      "110":
+        name: Module Extraction
+        capabilities: [detect, transform]
+        mapping_type: composition
+        domain_hint: text.feature
+        notes: >
+          Textual feature extraction uses detect (identify features)
+          and transform (convert to representations).
+
+      "111":
+        name: Token Classification
+        capabilities: [detect]
+        mapping_type: domain
+        domain_hint: token
+        notes: >
+          NER, POS tagging, and similar token-level tasks use detect
+          with token-level domain parameters.
+
+  # ---------------------------------------------------------------------------
+  # Category 2: Images / Computer Vision
+  # ---------------------------------------------------------------------------
+
+  "2":
+    name: Images / Computer Vision
+    description: Visual processing and analysis capabilities
+    capabilities: [classify, detect, generate, measure, transform]
+    mapping_type: composition
+    domain_hint: image
+    notes: >
+      All vision capabilities map to the same atomic capabilities used
+      for text, parameterized with image domain. See vision domain profile
+      at schemas/profiles/vision.yaml (Profile from PR #28, modality domain profiles).
+    subcategories:
+
+      "201":
+        name: Image Segmentation
+        capabilities: [detect]
+        mapping_type: domain
+        domain_hint: image.segmentation
+
+      "202":
+        name: Image Classification
+        capabilities: [classify]
+        mapping_type: domain
+        domain_hint: image.scene
+
+      "203":
+        name: Object Detection
+        capabilities: [detect]
+        mapping_type: domain
+        domain_hint: image.object
+
+      "204":
+        name: Image Generation
+        capabilities: [generate]
+        mapping_type: domain
+        domain_hint: image
+
+      "205":
+        name: Depth Estimation
+        capabilities: [measure]
+        mapping_type: domain
+        domain_hint: image.depth
+
+      "206":
+        name: Image-to-Image Transformation
+        capabilities: [transform]
+        mapping_type: domain
+        domain_hint: image
+
+      "207":
+        name: Keypoint Detection
+        capabilities: [detect]
+        mapping_type: domain
+        domain_hint: image.keypoint
+
+      "208":
+        name: Image-to-3D
+        capabilities: [detect, transform, generate]
+        mapping_type: composition
+        domain_hint: image.3d
+        notes: "Composition required: detect features, transform to 3D space, generate mesh"
+
+  # ---------------------------------------------------------------------------
+  # Category 3: Audio
+  # ---------------------------------------------------------------------------
+
+  "3":
+    name: Audio
+    description: Audio classification and transformation abilities
+    capabilities: [detect, classify, generate, transform]
+    mapping_type: composition
+    domain_hint: audio
+    notes: >
+      Audio capabilities map to the same atomic capabilities used for text
+      and vision. See audio domain profile at schemas/profiles/audio.yaml
+      (Profile from PR #28, modality domain profiles).
+    subcategories:
+
+      "301":
+        name: Audio Classification
+        capabilities: [classify]
+        mapping_type: domain
+        domain_hint: audio.event
+
+      "302":
+        name: Speech Recognition
+        capabilities: [detect, transform]
+        mapping_type: composition
+        domain_hint: audio.speech
+
+      "303":
+        name: Speaker Identification
+        capabilities: [detect, classify]
+        mapping_type: composition
+        domain_hint: audio.speaker
+
+      "304":
+        name: Audio Generation / TTS
+        capabilities: [generate]
+        mapping_type: domain
+        domain_hint: audio.speech
+
+  # ---------------------------------------------------------------------------
+  # Category 4: Tabular / Text
+  # ---------------------------------------------------------------------------
+
+  # Category 4 has no subcategories in OASF v0.8.0
+  "4":
+    name: Tabular / Text
+    description: Tabular data classification and regression tasks
+    capabilities: [classify, predict]
+    mapping_type: composition
+    domain_hint: tabular
+    notes: >
+      Tabular classification uses classify; regression tasks use predict
+      with tabular domain parameters.
+
+  # ---------------------------------------------------------------------------
+  # Category 5: Analytical Skills
+  # ---------------------------------------------------------------------------
+
+  "5":
+    name: Analytical Skills
+    description: Mathematical problem-solving, theorem proving, and coding
+    capabilities: [decompose, explain, generate, measure, transform]
+    mapping_type: composition
+    domain_hint: analytical
+    subcategories:
+
+      "501":
+        name: Mathematical Reasoning
+        capabilities: [measure, decompose, explain]
+        mapping_type: composition
+        domain_hint: math
+
+      "502":
+        name: Code Generation
+        capabilities: [generate]
+        mapping_type: domain
+        domain_hint: code
+
+      "503":
+        name: Code Refactoring
+        capabilities: [transform]
+        mapping_type: domain
+        domain_hint: code
+
+      "504":
+        name: Documentation Generation
+        capabilities: [generate]
+        mapping_type: domain
+        domain_hint: code.documentation
+
+  # ---------------------------------------------------------------------------
+  # Category 6: Retrieval Augmented Generation
+  # ---------------------------------------------------------------------------
+
+  "6":
+    name: Retrieval Augmented Generation
+    description: Information retrieval, indexing, search, and document QA
+    capabilities: [search, retrieve, ground, generate]
+    mapping_type: workflow
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: rag_pipeline
+    notes: >
+      RAG is a composed workflow pattern, not an atomic capability. Uses
+      search, retrieve, ground (evidence anchoring), and generate.
+
+  # ---------------------------------------------------------------------------
+  # Category 7: Multi-modal
+  # ---------------------------------------------------------------------------
+
+  "7":
+    name: Multi-modal
+    description: Cross-modal transformations
+    capabilities: [classify, detect, generate, transform]
+    mapping_type: composition
+    domain_hint: multimodal
+    notes: >
+      Cross-modal transformations use transform with source_format and
+      target_format parameters. See multimodal domain profile at
+      schemas/profiles/multimodal.yaml (Profile from PR #28, modality domain profiles).
+    subcategories:
+
+      "701":
+        name: Image-to-Text
+        capabilities: [transform]
+        mapping_type: domain
+        domain_hint: multimodal.image_to_text
+
+      "702":
+        name: Text-to-Image
+        capabilities: [generate]
+        mapping_type: domain
+        domain_hint: multimodal.text_to_image
+
+      "703":
+        name: Text-to-Video
+        capabilities: [generate]
+        mapping_type: domain
+        domain_hint: multimodal.text_to_video
+
+      "704":
+        name: Speech-to-Text
+        capabilities: [transform]
+        mapping_type: domain
+        domain_hint: multimodal.speech_to_text
+
+      "705":
+        name: Visual Question Answering
+        capabilities: [detect, classify, generate]
+        mapping_type: composition
+        domain_hint: multimodal.vqa
+
+  # ---------------------------------------------------------------------------
+  # Category 8: Security & Privacy
+  # ---------------------------------------------------------------------------
+
+  "8":
+    name: Security & Privacy
+    description: Threat detection, vulnerability analysis, privacy assessment
+    capabilities: [detect, measure, constrain]
+    mapping_type: composition
+    domain_hint: security
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: security_assessment
+    notes: >
+      Security assessment is a workflow pattern. Individual skills map to
+      detect (threat/vulnerability), measure (risk scoring), and
+      constrain (policy enforcement).
+    subcategories:
+
+      "801":
+        name: Threat Detection
+        capabilities: [detect]
+        mapping_type: domain
+        domain_hint: security.threat
+        notes: "Maps detect + search for vulnerability scanning"
+
+      "802":
+        name: Vulnerability Analysis
+        capabilities: [detect, measure]
+        mapping_type: composition
+        domain_hint: security.vulnerability
+
+      "803":
+        name: Privacy Risk Assessment
+        capabilities: [measure, constrain]
+        mapping_type: composition
+        domain_hint: security.privacy
+
+      "804":
+        name: Secret Leak Detection
+        capabilities: [detect]
+        mapping_type: domain
+        domain_hint: security.secret
+
+  # ---------------------------------------------------------------------------
+  # Category 9: Data Engineering
+  # ---------------------------------------------------------------------------
+
+  "9":
+    name: Data Engineering
+    description: Data preparation and quality assurance
+    capabilities: [detect, discover, generate, measure, transform, verify]
+    mapping_type: composition
+    domain_hint: data
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: data_quality_pipeline
+    subcategories:
+
+      "901":
+        name: Data Cleaning
+        capabilities: [detect, transform]
+        mapping_type: composition
+        domain_hint: data.cleaning
+        notes: "Full pipeline: observe raw data, transform to target format, verify output"
+
+      "902":
+        name: Schema Inference
+        capabilities: [discover]
+        mapping_type: domain
+        domain_hint: data.schema
+
+      "903":
+        name: Feature Engineering
+        capabilities: [transform, generate]
+        mapping_type: composition
+        domain_hint: data.feature
+
+      "904":
+        name: Data Quality Assessment
+        capabilities: [measure]
+        mapping_type: domain
+        domain_hint: data.quality
+
+      "905":
+        name: Transformation Pipeline
+        capabilities: [transform, verify]
+        mapping_type: composition
+        domain_hint: data.pipeline
+
+  # ---------------------------------------------------------------------------
+  # Category 10: Agent Orchestration
+  # ---------------------------------------------------------------------------
+
+  "10":
+    name: Agent Orchestration
+    description: Multi-agent coordination and task management
+    capabilities: [compare, decompose, delegate, inquire, plan, synchronize]
+    mapping_type: composition
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: multi_agent_orchestration
+    subcategories:
+
+      "1001":
+        name: Task Decomposition
+        capabilities: [decompose]
+        mapping_type: direct
+        notes: "Maps decompose + plan for breaking complex tasks into subtasks"
+
+      "1002":
+        name: Role Assignment
+        capabilities: [delegate]
+        mapping_type: direct
+
+      "1003":
+        name: Multi-agent Planning
+        capabilities: [plan, delegate]
+        mapping_type: composition
+
+      "1004":
+        name: Negotiation / Conflict Resolution
+        capabilities: [inquire, compare, plan, delegate, synchronize]
+        mapping_type: composition
+        notes: >
+          Complex multi-step coordination requiring clarification (inquire),
+          comparison of positions, planning, delegation, and synchronization.
+
+  # ---------------------------------------------------------------------------
+  # Category 11: Evaluation & Monitoring
+  # ---------------------------------------------------------------------------
+
+  "11":
+    name: Evaluation & Monitoring
+    description: Performance assessment and quality evaluation
+    capabilities: [audit, critique, detect, execute, generate, measure, observe, verify]
+    # audit included at category level — covers evaluation audit trails across all subcategories
+    mapping_type: composition
+    subcategories:
+
+      "1101":
+        name: Benchmark Execution
+        capabilities: [execute, verify]
+        mapping_type: composition
+
+      "1102":
+        name: Test Case Generation
+        capabilities: [observe, critique, generate, verify]
+        mapping_type: composition
+
+      "1103":
+        name: Quality Evaluation
+        capabilities: [measure, verify]
+        mapping_type: composition
+        domain_hint: quality
+
+      "1104":
+        name: Anomaly Detection
+        capabilities: [detect]
+        mapping_type: domain
+        domain_hint: anomaly
+
+      "1105":
+        name: Performance Monitoring
+        capabilities: [observe, measure]
+        mapping_type: composition
+
+  # ---------------------------------------------------------------------------
+  # Category 12: DevOps / MLOps
+  # ---------------------------------------------------------------------------
+
+  "12":
+    name: DevOps / MLOps
+    description: Infrastructure and deployment management
+    capabilities: [audit, checkpoint, constrain, detect, execute, generate, measure, mutate, observe, persist, plan, rollback, verify]
+    mapping_type: workflow
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: model_deployment
+    domain_hint: devops
+    notes: >
+      DevOps/MLOps operations are inherently workflow patterns requiring
+      checkpoint-before-execute safety guarantees.
+    subcategories:
+
+      "1201":
+        name: Infrastructure Provisioning
+        capabilities: [plan, constrain, checkpoint, execute, verify]
+        mapping_type: composition
+        notes: "Full deployment pipeline with checkpoint safety and rollback capability"
+
+      "1202":
+        name: Deployment Orchestration
+        capabilities: [checkpoint, execute, verify, rollback]
+        mapping_type: composition
+
+      "1203":
+        name: CI/CD Configuration
+        capabilities: [generate, verify]
+        mapping_type: composition
+        domain_hint: devops.cicd
+
+      "1204":
+        name: Model Versioning
+        capabilities: [checkpoint, mutate, verify, persist, audit]
+        mapping_type: composition
+
+      "1205":
+        name: Monitoring Setup
+        capabilities: [observe, measure, detect]
+        mapping_type: composition
+
+  # ---------------------------------------------------------------------------
+  # Category 13: Governance & Compliance
+  # ---------------------------------------------------------------------------
+
+  "13":
+    name: Governance & Compliance
+    description: Policy and audit functions
+    capabilities: [audit, constrain, explain, measure, verify]
+    mapping_type: composition
+    subcategories:
+
+      "1301":
+        name: Policy Mapping
+        capabilities: [constrain]
+        mapping_type: direct
+
+      "1302":
+        name: Compliance Assessment
+        capabilities: [verify]
+        mapping_type: domain
+        domain_hint: compliance
+
+      "1303":
+        name: Audit Summarization
+        capabilities: [audit, explain]
+        mapping_type: composition
+
+      "1304":
+        name: Risk Classification
+        capabilities: [measure]
+        mapping_type: domain
+        domain_hint: risk
+
+  # ---------------------------------------------------------------------------
+  # Category 14: Tool Interaction
+  # ---------------------------------------------------------------------------
+
+  "14":
+    name: Tool Interaction
+    description: API and workflow integration
+    capabilities: [classify, detect, execute, invoke, plan]
+    mapping_type: composition
+    subcategories:
+
+      "1401":
+        name: API Schema Understanding
+        capabilities: [detect, classify]
+        mapping_type: composition
+        domain_hint: api
+
+      "1402":
+        name: Workflow Automation
+        capabilities: [invoke]
+        mapping_type: direct
+
+      "1403":
+        name: Tool Use Planning
+        capabilities: [plan, invoke]
+        mapping_type: composition
+
+      "1404":
+        name: Script Integration
+        capabilities: [execute]
+        mapping_type: direct
+        domain_hint: code.script
+
+  # ---------------------------------------------------------------------------
+  # Category 15: Advanced Reasoning & Planning
+  # ---------------------------------------------------------------------------
+
+  "15":
+    name: Advanced Reasoning & Planning
+    description: Strategic planning and complex reasoning
+    capabilities: [critique, decompose, discover, explain, observe, plan, predict, simulate, state, verify]
+    mapping_type: composition
+    subcategories:
+
+      "1501":
+        name: Long-horizon Planning
+        capabilities: [state, predict, plan, simulate, critique]
+        mapping_type: composition
+
+      "1502":
+        name: Chain-of-Thought Reasoning
+        capabilities: [decompose, explain, verify]
+        mapping_type: composition
+
+      "1503":
+        name: Hypothesis Generation
+        capabilities: [observe, discover, predict, critique]
+        mapping_type: composition
+
+      "1504":
+        name: Strategic Planning
+        capabilities: [state, predict, plan, simulate, critique]
+        mapping_type: composition
+
+# ---------------------------------------------------------------------------
+# Reverse Mapping: Grounded Agency → OASF
+# ---------------------------------------------------------------------------
+# Capabilities with NO OASF equivalent:
+#   attribute   — Causal reasoning: OASF has no dedicated causal attribution skill
+#   integrate   — Data merging: implicit in OASF pipelines, not a standalone skill
+#   recall      — Stored data retrieval: internal agent memory, not an OASF task category
+#   receive     — Pushed data/event acceptance: OASF is task-oriented, not event-driven
+#   send        — External data transmission: OASF treats output as implicit, not a distinct skill
+#   transition  — Dynamics modeling: no OASF category covers state machine transitions
+#
+# Capabilities with partial OASF mappings:
+#   checkpoint  — State preservation (partial: 12, 1201, 1202, 1204)
+#   simulate    — Counterfactual analysis (partial: 15, 1501, 1504)
+#   inquire     — Structured clarification (partial: 10, 1004)
+#   synchronize — Multi-agent state agreement (partial: 10, 1004)
+#   state       — World state representation (partial: 1, 15, 106, 1501, 1504)
+#   ground      — Evidence anchoring (partial: 1, 6, 103)
+#   rollback    — Recovery mechanism (partial: 12, 1202)
+#
+# These are documented in the OASF Safety Extensions Proposal:
+# Proposal from PR #29 (OASF safety extensions)
+#   docs/proposals/OASF_SAFETY_EXTENSIONS.md
+
+reverse_mapping:
+  # --- PERCEIVE layer ---
+  retrieve:     ["1", "6", "103"]
+  search:       ["1", "6", "103"]
+  observe:      ["11", "12", "15", "1102", "1105", "1205", "1503"]
+  receive:      []
+  # --- UNDERSTAND layer ---
+  detect:       ["1", "2", "3", "7", "8", "9", "11", "12", "14", "101", "110", "111", "201", "203", "207", "208", "302", "303", "705", "801", "802", "804", "901", "1104", "1205", "1401"]
+  classify:     ["1", "2", "3", "4", "7", "14", "101", "108", "109", "202", "301", "303", "705", "1401"]
+  measure:      ["2", "5", "8", "9", "11", "12", "13", "205", "501", "802", "803", "904", "1103", "1105", "1205", "1304"]
+  predict:      ["4", "15", "1501", "1503", "1504"]
+  compare:      ["10", "1004"]
+  discover:     ["9", "15", "902", "1503"]
+  # --- REASON layer ---
+  plan:         ["1", "10", "12", "14", "15", "107", "1003", "1004", "1201", "1403", "1501", "1504"]
+  decompose:    ["1", "5", "10", "15", "107", "501", "1001", "1502"]
+  critique:     ["11", "15", "1102", "1501", "1503", "1504"]
+  explain:      ["1", "5", "13", "15", "107", "501", "1303", "1502"]
+  # --- MODEL layer ---
+  state:        ["1", "15", "106", "1501", "1504"]
+  transition:   []
+  attribute:    []
+  ground:       ["1", "6", "103"]
+  simulate:     ["15", "1501", "1504"]
+  # --- SYNTHESIZE layer ---
+  generate:     ["1", "2", "3", "5", "6", "7", "9", "11", "12", "102", "104", "204", "208", "304", "502", "504", "702", "703", "705", "903", "1102", "1203"]
+  transform:    ["1", "2", "3", "5", "7", "9", "105", "106", "110", "206", "208", "302", "503", "701", "704", "901", "903", "905"]
+  integrate:    []
+  # --- EXECUTE layer ---
+  execute:      ["11", "12", "14", "1101", "1201", "1202", "1404"]
+  mutate:       ["12", "1204"]
+  send:         []
+  # --- VERIFY layer ---
+  verify:       ["9", "11", "12", "13", "15", "905", "1101", "1102", "1103", "1201", "1202", "1203", "1204", "1302", "1502"]
+  checkpoint:   ["12", "1201", "1202", "1204"]
+  rollback:     ["12", "1202"]
+  constrain:    ["1", "8", "12", "13", "108", "803", "1201", "1301"]
+  audit:        ["11", "12", "13", "1204", "1303"]
+  # --- REMEMBER layer ---
+  persist:      ["12", "1204"]
+  recall:       []
+  # --- COORDINATE layer ---
+  delegate:     ["10", "1002", "1003", "1004"]
+  synchronize:  ["10", "1004"]
+  invoke:       ["14", "1402", "1403"]
+  inquire:      ["10", "1004"]
