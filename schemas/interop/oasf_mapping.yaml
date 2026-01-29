@@ -14,6 +14,8 @@
 
 meta:
   version: "1.0.0"
+  date: "2026-01-29"
+  description: "Bidirectional mapping between OASF skill categories and Grounded Agency capabilities"
   oasf_version: "0.8.0"
   grounded_agency_version: "2.0.0"
   generated_from: "docs/research/analysis/OASF_comparison.md"
@@ -26,7 +28,9 @@ categories:
   "1":
     name: Natural Language Processing
     description: Text comprehension and generation abilities
-    # Category 1 intentionally omits capabilities — use subcategories for specific mappings
+    capabilities: [classify, constrain, decompose, detect, explain, generate, ground, plan, retrieve, search, state, transform]
+    mapping_type: composition
+    domain_hint: text
     subcategories:
 
       "101":
@@ -51,6 +55,7 @@ categories:
         name: Information Retrieval and Synthesis
         capabilities: [search, retrieve, ground]
         mapping_type: composition
+        # Workflow from PR #31 (OASF workflow patterns)
         workflow: rag_pipeline
         domain_hint: text
         notes: >
@@ -137,13 +142,13 @@ categories:
   "2":
     name: Images / Computer Vision
     description: Visual processing and analysis capabilities
-    capabilities: [detect, classify, generate, transform]
-    mapping_type: domain
+    capabilities: [classify, detect, generate, measure, transform]
+    mapping_type: composition
     domain_hint: image
     notes: >
       All vision capabilities map to the same atomic capabilities used
       for text, parameterized with image domain. See vision domain profile
-      at schemas/profiles/vision.yaml.
+      at schemas/profiles/vision.yaml (Profile from PR #28, modality domain profiles).
     subcategories:
 
       "201":
@@ -193,6 +198,7 @@ categories:
         capabilities: [detect, transform, generate]
         mapping_type: composition
         domain_hint: image.3d
+        notes: "Composition required: detect features, transform to 3D space, generate mesh"
 
   # ---------------------------------------------------------------------------
   # Category 3: Audio
@@ -202,11 +208,12 @@ categories:
     name: Audio
     description: Audio classification and transformation abilities
     capabilities: [detect, classify, generate, transform]
-    mapping_type: domain
+    mapping_type: composition
     domain_hint: audio
     notes: >
       Audio capabilities map to the same atomic capabilities used for text
-      and vision. See audio domain profile at schemas/profiles/audio.yaml.
+      and vision. See audio domain profile at schemas/profiles/audio.yaml
+      (Profile from PR #28, modality domain profiles).
     subcategories:
 
       "301":
@@ -237,11 +244,12 @@ categories:
   # Category 4: Tabular / Text
   # ---------------------------------------------------------------------------
 
+  # Category 4 has no subcategories in OASF v0.8.0
   "4":
     name: Tabular / Text
     description: Tabular data classification and regression tasks
     capabilities: [classify, predict]
-    mapping_type: domain
+    mapping_type: composition
     domain_hint: tabular
     notes: >
       Tabular classification uses classify; regression tasks use predict
@@ -254,7 +262,7 @@ categories:
   "5":
     name: Analytical Skills
     description: Mathematical problem-solving, theorem proving, and coding
-    capabilities: [measure, generate]
+    capabilities: [decompose, explain, generate, measure, transform]
     mapping_type: composition
     domain_hint: analytical
     subcategories:
@@ -292,6 +300,7 @@ categories:
     description: Information retrieval, indexing, search, and document QA
     capabilities: [search, retrieve, ground, generate]
     mapping_type: workflow
+    # Workflow from PR #31 (OASF workflow patterns)
     workflow: rag_pipeline
     notes: >
       RAG is a composed workflow pattern, not an atomic capability. Uses
@@ -304,13 +313,13 @@ categories:
   "7":
     name: Multi-modal
     description: Cross-modal transformations
-    capabilities: [transform]
-    mapping_type: domain
+    capabilities: [classify, detect, generate, transform]
+    mapping_type: composition
     domain_hint: multimodal
     notes: >
       Cross-modal transformations use transform with source_format and
       target_format parameters. See multimodal domain profile at
-      schemas/profiles/multimodal.yaml.
+      schemas/profiles/multimodal.yaml (Profile from PR #28, modality domain profiles).
     subcategories:
 
       "701":
@@ -353,6 +362,7 @@ categories:
     capabilities: [detect, measure, constrain]
     mapping_type: composition
     domain_hint: security
+    # Workflow from PR #31 (OASF workflow patterns)
     workflow: security_assessment
     notes: >
       Security assessment is a workflow pattern. Individual skills map to
@@ -365,6 +375,7 @@ categories:
         capabilities: [detect]
         mapping_type: domain
         domain_hint: security.threat
+        notes: "Maps detect + search for vulnerability scanning"
 
       "802":
         name: Vulnerability Analysis
@@ -391,9 +402,10 @@ categories:
   "9":
     name: Data Engineering
     description: Data preparation and quality assurance
-    capabilities: [transform, verify, measure]
+    capabilities: [detect, discover, generate, measure, transform, verify]
     mapping_type: composition
     domain_hint: data
+    # Workflow from PR #31 (OASF workflow patterns)
     workflow: data_quality_pipeline
     subcategories:
 
@@ -402,6 +414,7 @@ categories:
         capabilities: [detect, transform]
         mapping_type: composition
         domain_hint: data.cleaning
+        notes: "Full pipeline: observe raw data, transform to target format, verify output"
 
       "902":
         name: Schema Inference
@@ -434,8 +447,9 @@ categories:
   "10":
     name: Agent Orchestration
     description: Multi-agent coordination and task management
-    capabilities: [decompose, delegate, synchronize]
+    capabilities: [compare, decompose, delegate, inquire, plan, synchronize]
     mapping_type: composition
+    # Workflow from PR #31 (OASF workflow patterns)
     workflow: multi_agent_orchestration
     subcategories:
 
@@ -443,6 +457,7 @@ categories:
         name: Task Decomposition
         capabilities: [decompose]
         mapping_type: direct
+        notes: "Maps decompose + plan for breaking complex tasks into subtasks"
 
       "1002":
         name: Role Assignment
@@ -469,7 +484,8 @@ categories:
   "11":
     name: Evaluation & Monitoring
     description: Performance assessment and quality evaluation
-    capabilities: [verify, measure, audit]
+    capabilities: [audit, critique, detect, execute, generate, measure, observe, verify]
+    # audit included at category level — covers evaluation audit trails across all subcategories
     mapping_type: composition
     subcategories:
 
@@ -507,9 +523,11 @@ categories:
   "12":
     name: DevOps / MLOps
     description: Infrastructure and deployment management
-    capabilities: [execute, verify, checkpoint]
+    capabilities: [audit, checkpoint, constrain, detect, execute, generate, measure, mutate, observe, persist, plan, rollback, verify]
     mapping_type: workflow
+    # Workflow from PR #31 (OASF workflow patterns)
     workflow: model_deployment
+    domain_hint: devops
     notes: >
       DevOps/MLOps operations are inherently workflow patterns requiring
       checkpoint-before-execute safety guarantees.
@@ -519,6 +537,7 @@ categories:
         name: Infrastructure Provisioning
         capabilities: [plan, constrain, checkpoint, execute, verify]
         mapping_type: composition
+        notes: "Full deployment pipeline with checkpoint safety and rollback capability"
 
       "1202":
         name: Deployment Orchestration
@@ -548,7 +567,7 @@ categories:
   "13":
     name: Governance & Compliance
     description: Policy and audit functions
-    capabilities: [constrain, audit, verify]
+    capabilities: [audit, constrain, explain, measure, verify]
     mapping_type: composition
     subcategories:
 
@@ -581,7 +600,7 @@ categories:
   "14":
     name: Tool Interaction
     description: API and workflow integration
-    capabilities: [invoke, execute]
+    capabilities: [classify, detect, execute, invoke, plan]
     mapping_type: composition
     subcategories:
 
@@ -614,7 +633,7 @@ categories:
   "15":
     name: Advanced Reasoning & Planning
     description: Strategic planning and complex reasoning
-    capabilities: [plan, decompose, simulate, predict]
+    capabilities: [critique, decompose, discover, explain, observe, plan, predict, simulate, state, verify]
     mapping_type: composition
     subcategories:
 
@@ -642,55 +661,69 @@ categories:
 # Reverse Mapping: Grounded Agency → OASF
 # ---------------------------------------------------------------------------
 # Capabilities with NO OASF equivalent:
-#   attribute   — Causal reasoning (no OASF equivalent)
-#   transition  — Dynamics modeling (no OASF equivalent)
+#   attribute   — Causal reasoning: OASF has no dedicated causal attribution skill
+#   integrate   — Data merging: implicit in OASF pipelines, not a standalone skill
+#   recall      — Stored data retrieval: internal agent memory, not an OASF task category
+#   receive     — Pushed data/event acceptance: OASF is task-oriented, not event-driven
+#   send        — External data transmission: OASF treats output as implicit, not a distinct skill
+#   transition  — Dynamics modeling: no OASF category covers state machine transitions
 #
 # Capabilities with partial OASF mappings:
-#   ground      — Evidence anchoring (partial: 103, 6)
-#   checkpoint  — State preservation (partial: 1201, 1202, 1204)
-#   rollback    — Recovery mechanism (partial: 1202)
-#   simulate    — Counterfactual analysis (partial: 1501, 1504)
-#   inquire     — Structured clarification (partial: 1004)
-#   synchronize — Multi-agent state agreement (partial: 1004)
-#   state       — World state representation (partial: 106, 1501, 1504)
+#   checkpoint  — State preservation (partial: 12, 1201, 1202, 1204)
+#   simulate    — Counterfactual analysis (partial: 15, 1501, 1504)
+#   inquire     — Structured clarification (partial: 10, 1004)
+#   synchronize — Multi-agent state agreement (partial: 10, 1004)
+#   state       — World state representation (partial: 1, 15, 106, 1501, 1504)
+#   ground      — Evidence anchoring (partial: 1, 6, 103)
+#   rollback    — Recovery mechanism (partial: 12, 1202)
 #
 # These are documented in the OASF Safety Extensions Proposal:
+# Proposal from PR #29 (OASF safety extensions)
 #   docs/proposals/OASF_SAFETY_EXTENSIONS.md
 
 reverse_mapping:
-  retrieve:     ["103"]
-  search:       ["103", "6"]
-  observe:      ["1102", "1105"]
+  # --- PERCEIVE layer ---
+  retrieve:     ["1", "6", "103"]
+  search:       ["1", "6", "103"]
+  observe:      ["11", "12", "15", "1102", "1105", "1205", "1503"]
   receive:      []
-  detect:       ["101", "111", "201", "203", "207", "303", "801", "804", "1104"]
-  classify:     ["101", "109", "202", "301", "303", "108"]
-  measure:      ["205", "501", "802", "803", "904", "1103", "1105", "1304"]
-  predict:      ["4", "1501", "1503"]
-  compare:      ["1004"]
-  discover:     ["902"]
-  plan:         ["107", "1003", "1201", "1403", "1501", "1504"]
-  decompose:    ["107", "1001"]
-  critique:     ["1501", "1503"]
-  explain:      ["107", "1303"]
-  state:        ["1501", "1504"]
+  # --- UNDERSTAND layer ---
+  detect:       ["1", "2", "3", "7", "8", "9", "11", "12", "14", "101", "110", "111", "201", "203", "207", "208", "302", "303", "705", "801", "802", "804", "901", "1104", "1205", "1401"]
+  classify:     ["1", "2", "3", "4", "7", "14", "101", "108", "109", "202", "301", "303", "705", "1401"]
+  measure:      ["2", "5", "8", "9", "11", "12", "13", "205", "501", "802", "803", "904", "1103", "1105", "1205", "1304"]
+  predict:      ["4", "15", "1501", "1503", "1504"]
+  compare:      ["10", "1004"]
+  discover:     ["9", "15", "902", "1503"]
+  # --- REASON layer ---
+  plan:         ["1", "10", "12", "14", "15", "107", "1003", "1004", "1201", "1403", "1501", "1504"]
+  decompose:    ["1", "5", "10", "15", "107", "501", "1001", "1502"]
+  critique:     ["11", "15", "1102", "1501", "1503", "1504"]
+  explain:      ["1", "5", "13", "15", "107", "501", "1303", "1502"]
+  # --- MODEL layer ---
+  state:        ["1", "15", "106", "1501", "1504"]
   transition:   []
   attribute:    []
-  ground:       ["103", "6"]
-  simulate:     ["1501", "1504"]
-  generate:     ["102", "104", "204", "304", "502", "504", "702", "703", "1102", "1203"]
-  transform:    ["105", "110", "206", "302", "503", "701", "704", "901", "903", "905"]
+  ground:       ["1", "6", "103"]
+  simulate:     ["15", "1501", "1504"]
+  # --- SYNTHESIZE layer ---
+  generate:     ["1", "2", "3", "5", "6", "7", "9", "11", "12", "102", "104", "204", "208", "304", "502", "504", "702", "703", "705", "903", "1102", "1203"]
+  transform:    ["1", "2", "3", "5", "7", "9", "105", "106", "110", "206", "208", "302", "503", "701", "704", "901", "903", "905"]
   integrate:    []
-  execute:      ["1101", "1201", "1202", "1404"]
-  mutate:       ["1204"]
+  # --- EXECUTE layer ---
+  execute:      ["11", "12", "14", "1101", "1201", "1202", "1404"]
+  mutate:       ["12", "1204"]
   send:         []
-  verify:       ["1101", "1103", "1202", "1302", "905"]
-  checkpoint:   ["1201", "1202", "1204"]
-  rollback:     ["1202"]
-  constrain:    ["108", "803", "1201", "1301"]
-  audit:        ["1204", "1303"]
-  persist:      ["1204"]
+  # --- VERIFY layer ---
+  verify:       ["9", "11", "12", "13", "15", "905", "1101", "1102", "1103", "1201", "1202", "1203", "1204", "1302", "1502"]
+  checkpoint:   ["12", "1201", "1202", "1204"]
+  rollback:     ["12", "1202"]
+  constrain:    ["1", "8", "12", "13", "108", "803", "1201", "1301"]
+  audit:        ["11", "12", "13", "1204", "1303"]
+  # --- REMEMBER layer ---
+  persist:      ["12", "1204"]
   recall:       []
-  delegate:     ["1002", "1003", "1004"]
-  synchronize:  ["1004"]
-  invoke:       ["1402", "1403"]
-  inquire:      ["1004"]
+  # --- COORDINATE layer ---
+  delegate:     ["10", "1002", "1003", "1004"]
+  synchronize:  ["10", "1004"]
+  invoke:       ["14", "1402", "1403"]
+  inquire:      ["10", "1004"]

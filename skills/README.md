@@ -1,6 +1,6 @@
 # Agent Capability Skills
 
-This directory contains **36 atomic capabilities** organized according to the capability ontology's **9 cognitive layers**, plus 4 composed workflow skills.
+This directory contains **36 atomic capabilities** organized according to the capability ontology's **9 cognitive layers**, plus 12 composed workflow skills.
 
 ## Skill Layers
 
@@ -15,9 +15,9 @@ This directory contains **36 atomic capabilities** organized according to the ca
 | VERIFY | 5 | Ensure correctness |
 | REMEMBER | 2 | Persist state |
 | COORDINATE | 4 | Multi-agent and user interaction |
-| Workflows | 6 | Composed multi-step skills |
+| Workflows | 12 | Composed multi-step skills |
 
-**Total: 36 atomic capabilities + 6 composed workflows = 42 skills**
+**Total: 36 atomic capabilities + 12 composed workflows = 48 skills**
 
 ## The 36 Atomic Capabilities
 
@@ -111,16 +111,22 @@ Multi-agent and user interaction.
 | `invoke` | Execute a composed workflow |
 | `inquire` | Request clarification when input is ambiguous |
 
-## Composed Workflows (6)
+## Composed Workflows (12)
 
 | Workflow | Description |
 |----------|-------------|
-| `debug-workflow` | Systematic code debugging workflow |
+| `debug-code-change` | Systematic code debugging workflow |
 | `capability-gap-analysis` | Assess missing capabilities in a project |
 | `digital-twin-bootstrap` | Initialize a digital twin from scratch |
 | `digital-twin-sync-loop` | Synchronize digital twin state with reality |
 | `monitor-and-replan` | Detect world changes and trigger replanning |
 | `clarify-intent` | Resolve ambiguous user requests |
+| `world-model-build` | Build a structured world model with dynamics and uncertainty |
+| `rag-pipeline` | Retrieve information and generate grounded response (OASF Cat. 6) |
+| `security-assessment` | Identify and assess security vulnerabilities (OASF Cat. 8) |
+| `data-quality-pipeline` | Clean and validate data quality (OASF Cat. 9) |
+| `multi-agent-orchestration` | Coordinate multiple agents on complex tasks (OASF Cat. 10) |
+| `model-deployment` | Safely deploy ML models to production (OASF Cat. 12) |
 
 ## Domain Parameterization
 

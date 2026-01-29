@@ -10,8 +10,6 @@ import pytest
 
 from grounded_agency.adapters.oasf import (
     OASFAdapter,
-    OASFMapping,
-    OASFSkillResult,
     UnknownSkillError,
 )
 
@@ -85,11 +83,12 @@ class TestOASFTranslation:
         assert "detect" in result.mapping.capabilities
         assert result.mapping.domain_hint == "security.threat"
 
-    def test_translate_category_without_capabilities(self, adapter: OASFAdapter) -> None:
-        """Category '1' (NLP) has no direct capabilities at parent level."""
+    def test_translate_category_with_aggregate_capabilities(self, adapter: OASFAdapter) -> None:
+        """Category '1' (NLP) aggregates capabilities from subcategories."""
         result = adapter.translate("1")
-        assert result.mapping.capabilities == ()
-        assert result.capability_nodes == []
+        assert len(result.mapping.capabilities) > 0
+        assert "classify" in result.mapping.capabilities
+        assert result.mapping.domain_hint == "text"
 
     def test_unknown_skill_raises(self, adapter: OASFAdapter) -> None:
         with pytest.raises(UnknownSkillError):
