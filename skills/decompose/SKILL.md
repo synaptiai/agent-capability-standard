@@ -20,9 +20,6 @@ Break down a complex goal into smaller, manageable subgoals with clear boundarie
 - Acceptance criteria are testable
 - Decomposition depth is appropriate
 
-**Compatible schemas:**
-- `docs/schemas/decomposition_schema.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

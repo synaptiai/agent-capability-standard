@@ -46,10 +46,6 @@ Execute **audit** to create a structured record of actions taken, tools invoked,
 - Changes documented with before/after state
 - Provenance chain for all outputs
 
-**Compatible schemas:**
-- `docs/schemas/audit_record.yaml`
-- `docs/schemas/change_log.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

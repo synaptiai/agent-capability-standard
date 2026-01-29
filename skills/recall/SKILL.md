@@ -19,10 +19,6 @@ Execute **recall** to retrieve relevant prior decisions, rationale, and patterns
 - Consistency with past reasoning is maintained
 - Retrieved information is grounded with timestamps and context
 
-**Compatible schemas:**
-- `docs/schemas/memory_schema.yaml`
-- `CLAUDE.md` (project memory)
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

@@ -21,8 +21,7 @@ Run the composed workflow **debug-workflow** using atomic capability skills to s
 - Rollback pathway documented and verified
 
 **Compatible schemas:**
-- `docs/schemas/workflow_catalog.yaml`
-- `docs/schemas/audit_log.yaml`
+- `schemas/workflow_catalog.yaml`
 
 ## Inputs
 

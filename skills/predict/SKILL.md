@@ -20,9 +20,6 @@ Forecast future states or outcomes for a target based on current state, historic
 - Alternative outcomes considered
 - Assumptions explicitly stated
 
-**Compatible schemas:**
-- `docs/schemas/prediction_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

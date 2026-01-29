@@ -58,10 +58,6 @@ Execute **checkpoint** to create a restorable state marker before any mutating o
 - Restore command is documented and tested
 - Expiry policy set if applicable
 
-**Compatible schemas:**
-- `docs/schemas/checkpoint.yaml`
-- `docs/schemas/state_snapshot.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

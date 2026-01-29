@@ -49,9 +49,6 @@ Transform data from one format or schema to another while tracking what informat
 - Loss/distortion explicitly documented
 - Evidence anchors trace source to output
 
-**Compatible schemas:**
-- `docs/schemas/transform_schema.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

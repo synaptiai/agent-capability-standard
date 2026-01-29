@@ -20,9 +20,6 @@ Define the rules governing how a system's state changes over time. This capabili
 - Triggers identified with evidence
 - State machine is deterministic (or non-determinism noted)
 
-**Compatible schemas:**
-- `schemas/transition_schema.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

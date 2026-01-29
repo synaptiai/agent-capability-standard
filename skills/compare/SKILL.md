@@ -19,9 +19,6 @@ Systematically evaluate multiple alternatives against defined criteria to produc
 - Clear recommendation with rationale
 - Tradeoffs explicitly documented
 
-**Compatible schemas:**
-- `docs/schemas/comparison_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

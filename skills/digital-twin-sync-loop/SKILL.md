@@ -26,9 +26,9 @@ This workflow is designed to **model both real and digital systems** using the c
 - Rollback available if verification fails
 
 **Compatible schemas:**
-- `docs/schemas/world_state_schema.yaml`
-- `docs/schemas/event_schema.yaml`
-- `docs/schemas/workflow_catalog.yaml`
+- `schemas/world_state_schema.yaml`
+- `schemas/event_schema.yaml`
+- `schemas/workflow_catalog.yaml`
 
 ## Inputs
 

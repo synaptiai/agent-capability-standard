@@ -20,9 +20,6 @@ Generate a clear, structured explanation of a topic, decision, or concept tailor
 - Evidence supports key claims
 - No unnecessary jargon or fluff
 
-**Compatible schemas:**
-- `docs/schemas/explanation_schema.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

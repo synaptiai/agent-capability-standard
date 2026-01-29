@@ -20,9 +20,6 @@ Verify that claims are supported by evidence from reliable sources. This is the 
 - Grounding strength assessed (strong, moderate, weak, ungrounded)
 - Evidence gaps explicitly documented
 
-**Compatible schemas:**
-- `schemas/grounding_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

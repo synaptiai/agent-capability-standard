@@ -28,9 +28,8 @@ A world model captures:
 - Simulation capability established
 
 **Compatible schemas:**
-- `docs/schemas/world_state_schema.yaml`
-- `docs/schemas/event_schema.yaml`
-- `docs/schemas/causal_model_schema.yaml`
+- `schemas/world_state_schema.yaml`
+- `schemas/event_schema.yaml`
 
 ## Inputs
 

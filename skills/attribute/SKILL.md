@@ -20,9 +20,6 @@ Establish causal relationships between observed effects and potential causes. Th
 - Causal mechanism explained
 - Alternative causes considered and ruled out
 
-**Compatible schemas:**
-- `schemas/causal_model_schema.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

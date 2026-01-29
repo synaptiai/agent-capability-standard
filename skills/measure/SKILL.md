@@ -20,9 +20,6 @@ Quantify a specific metric for a target, providing a numerical value with explic
 - Measurement method documented
 - Units clearly specified
 
-**Compatible schemas:**
-- `docs/schemas/measurement_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

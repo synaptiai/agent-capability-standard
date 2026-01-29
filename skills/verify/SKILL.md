@@ -28,10 +28,6 @@ Execute **verify** to determine whether an artifact (code, configuration, state,
 - Failures include actionable fix suggestions
 - All assumptions about expected behavior are explicit
 
-**Compatible schemas:**
-- `docs/schemas/verification_result.yaml`
-- `docs/schemas/test_report.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

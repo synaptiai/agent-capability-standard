@@ -20,9 +20,6 @@ Assign one or more labels from a defined taxonomy to items based on their observ
 - Confidence scores reflect classification certainty
 - Ambiguous cases explicitly flagged
 
-**Compatible schemas:**
-- `docs/schemas/classification_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

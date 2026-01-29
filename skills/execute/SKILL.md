@@ -20,9 +20,6 @@ Execute code or commands in a controlled manner, capturing output for verificati
 - Exit code recorded
 - Errors properly surfaced
 
-**Compatible schemas:**
-- `schemas/execution_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

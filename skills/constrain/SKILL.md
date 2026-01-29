@@ -19,10 +19,6 @@ Execute **constrain** to evaluate proposed actions against defined policies, enf
 - Scope reduced to minimum necessary permissions
 - Violation actions documented (block, warn, log)
 
-**Compatible schemas:**
-- `docs/schemas/policy_evaluation.yaml`
-- `docs/schemas/permission_boundary.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

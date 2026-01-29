@@ -19,9 +19,6 @@ Produce a new artifact that satisfies specified constraints and serves a defined
 - Quality signals demonstrate fitness for purpose
 - Safety considerations documented
 
-**Compatible schemas:**
-- `docs/schemas/generation_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

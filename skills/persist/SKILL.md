@@ -66,10 +66,6 @@ Execute **persist** to write stable learnings, decisions, and patterns to durabl
 - Metadata (timestamp, source) is recorded
 - Write is verified successfully
 
-**Compatible schemas:**
-- `docs/schemas/memory_schema.yaml`
-- `CLAUDE.md` format conventions
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

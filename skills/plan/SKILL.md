@@ -22,9 +22,6 @@ Create a structured, executable plan that decomposes a goal into ordered steps w
 - Checkpoints placed before high-risk operations
 - Estimated risk level accurately reflects plan complexity
 
-**Compatible schemas:**
-- `docs/schemas/plan_schema.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

@@ -19,9 +19,6 @@ Scan data sources to determine whether a specified pattern, entity, or condition
 - False positive risk assessment provided
 - Confidence score justified by evidence quality
 
-**Compatible schemas:**
-- `docs/schemas/detection_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

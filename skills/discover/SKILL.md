@@ -19,9 +19,6 @@ Explore data or systems to find patterns, relationships, or anomalies that were 
 - Novelty classified (known, suspected, surprising)
 - Methodology documented for reproducibility
 
-**Compatible schemas:**
-- `docs/schemas/discovery_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

@@ -22,9 +22,6 @@ Make controlled changes to persistent state with safety guarantees. This is the 
 - Change is verifiable
 - Audit trail recorded
 
-**Compatible schemas:**
-- `schemas/mutation_output.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

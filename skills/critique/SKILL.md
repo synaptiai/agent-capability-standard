@@ -20,9 +20,6 @@ Systematically analyze a target (plan, code, design, document) to identify failu
 - Security/exploit risks rated appropriately
 - Each finding has actionable recommendation
 
-**Compatible schemas:**
-- `docs/schemas/critique_schema.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

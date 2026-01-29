@@ -59,10 +59,6 @@ Send a message, event, or payload to an external destination with full policy en
 - Complete audit trail of what was sent
 - Delivery confirmation obtained where possible
 
-**Compatible schemas:**
-- `docs/schemas/message_schema.yaml`
-- `docs/schemas/policy_schema.yaml`
-
 ## Inputs
 
 | Parameter | Required | Type | Description |

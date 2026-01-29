@@ -21,8 +21,7 @@ Execute **receive** to ingest incoming data from external sources and parse it i
 - Malformed or unexpected data is handled gracefully
 
 **Compatible schemas:**
-- `docs/schemas/event_schema.yaml`
-- `docs/schemas/message_format.yaml`
+- `schemas/event_schema.yaml`
 
 ## Inputs
 

@@ -21,8 +21,8 @@ Run the composed workflow **gap-analysis-workflow** using atomic capability skil
 - Audit trail of analysis process
 
 **Compatible schemas:**
-- `docs/schemas/capability_ontology.yaml`
-- `docs/schemas/workflow_catalog.yaml`
+- `schemas/capability_ontology.yaml`
+- `schemas/workflow_catalog.yaml`
 
 ## Inputs
 
