@@ -3,6 +3,7 @@
 **Authors:** Grounded Agency Contributors
 **Date:** 2026-01-29
 **OASF Target Version:** 0.8.x
+**OASF Version Referenced:** 0.8.0 (category numbers and skill IDs are based on this version)
 **Status:** Draft Proposal
 
 ---
@@ -127,6 +128,8 @@ evidence_output:
         A score of 1.0 means fully supported; 0.0 means no
         supporting evidence found.
 ```
+
+The `evidence_output` type above is defined as a reusable OASF schema component (suitable for use as a JSON Schema `$ref` target). The subsequent sections embed these fields directly in each skill's output schema for clarity, but implementations SHOULD reference the shared component to avoid duplication.
 
 #### Example: Enhanced Information Retrieval Skill
 
@@ -265,6 +268,8 @@ skill:
 #### Integration with Existing Skills
 
 The checkpoint skill should be invoked before any skill classified as high-risk. OASF does not currently assign risk levels to skills, so this proposal also recommends adding a `risk` attribute (see Section 4). Example integration:
+
+> **Note:** OASF skill IDs used in examples (e.g., `120301`, `110201`) are illustrative and should be verified against the OASF skill catalog for the target version.
 
 ```yaml
 # Workflow: Safe Infrastructure Deployment
@@ -622,6 +627,8 @@ risk:
             verification after execution
 ```
 
+For context, the Grounded Agency ontology classifies only 2 of its 36 capabilities (`mutate` and `send`) as high-risk. The following category-level defaults are intentionally conservative starting points.
+
 **Suggested risk classifications for existing OASF categories:**
 
 | Category | Default Risk | Rationale |
@@ -899,7 +906,7 @@ Evidence anchors and constraint checking create a natural audit trail. When a re
 3. The `checkpoint` records show what state existed before each change
 4. The `confidence` scores show how certain the agent was at each step
 
-This is directly relevant to emerging AI governance requirements, including the EU AI Act's transparency obligations and the NIST AI Risk Management Framework's traceability recommendations.
+This is directly relevant to emerging AI governance requirements, including the EU AI Act's transparency obligations (Articles 12, 13, and 14) and the NIST AI Risk Management Framework's traceability recommendations (Govern and Measure functions).
 
 ### 6.3 Reduced Risk of Irreversible Failures
 
