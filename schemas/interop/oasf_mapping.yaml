@@ -14,6 +14,7 @@
 
 meta:
   version: "1.0.0"
+  description: "Bidirectional mapping between OASF skill categories and Grounded Agency capabilities"
   oasf_version: "0.8.0"
   grounded_agency_version: "2.0.0"
   generated_from: "docs/research/analysis/OASF_comparison.md"
@@ -53,8 +54,8 @@ categories:
         name: Information Retrieval and Synthesis
         capabilities: [search, retrieve, ground]
         mapping_type: composition
-        # Proposed workflow — depends on PR #31 (OASF workflow patterns)
-        workflow_proposed: rag_pipeline
+        # Workflow from PR #31 (OASF workflow patterns)
+        workflow: rag_pipeline
         domain_hint: text
         notes: >
           Information retrieval maps to search + retrieve. Synthesis
@@ -141,7 +142,7 @@ categories:
     name: Images / Computer Vision
     description: Visual processing and analysis capabilities
     capabilities: [classify, detect, generate, measure, transform]
-    mapping_type: domain
+    mapping_type: composition
     domain_hint: image
     notes: >
       All vision capabilities map to the same atomic capabilities used
@@ -205,7 +206,7 @@ categories:
     name: Audio
     description: Audio classification and transformation abilities
     capabilities: [detect, classify, generate, transform]
-    mapping_type: domain
+    mapping_type: composition
     domain_hint: audio
     notes: >
       Audio capabilities map to the same atomic capabilities used for text
@@ -245,7 +246,7 @@ categories:
     name: Tabular / Text
     description: Tabular data classification and regression tasks
     capabilities: [classify, predict]
-    mapping_type: domain
+    mapping_type: composition
     domain_hint: tabular
     notes: >
       Tabular classification uses classify; regression tasks use predict
@@ -296,8 +297,8 @@ categories:
     description: Information retrieval, indexing, search, and document QA
     capabilities: [search, retrieve, ground, generate]
     mapping_type: workflow
-    # Proposed workflow — depends on PR #31 (OASF workflow patterns)
-    workflow_proposed: rag_pipeline
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: rag_pipeline
     notes: >
       RAG is a composed workflow pattern, not an atomic capability. Uses
       search, retrieve, ground (evidence anchoring), and generate.
@@ -310,7 +311,7 @@ categories:
     name: Multi-modal
     description: Cross-modal transformations
     capabilities: [classify, detect, generate, transform]
-    mapping_type: domain
+    mapping_type: composition
     domain_hint: multimodal
     notes: >
       Cross-modal transformations use transform with source_format and
@@ -358,8 +359,8 @@ categories:
     capabilities: [detect, measure, constrain]
     mapping_type: composition
     domain_hint: security
-    # Proposed workflow — depends on PR #31 (OASF workflow patterns)
-    workflow_proposed: security_assessment
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: security_assessment
     notes: >
       Security assessment is a workflow pattern. Individual skills map to
       detect (threat/vulnerability), measure (risk scoring), and
@@ -400,8 +401,8 @@ categories:
     capabilities: [detect, discover, generate, measure, transform, verify]
     mapping_type: composition
     domain_hint: data
-    # Proposed workflow — depends on PR #31 (OASF workflow patterns)
-    workflow_proposed: data_quality_pipeline
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: data_quality_pipeline
     subcategories:
 
       "901":
@@ -443,8 +444,8 @@ categories:
     description: Multi-agent coordination and task management
     capabilities: [compare, decompose, delegate, inquire, plan, synchronize]
     mapping_type: composition
-    # Proposed workflow — depends on PR #31 (OASF workflow patterns)
-    workflow_proposed: multi_agent_orchestration
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: multi_agent_orchestration
     subcategories:
 
       "1001":
@@ -478,6 +479,7 @@ categories:
     name: Evaluation & Monitoring
     description: Performance assessment and quality evaluation
     capabilities: [audit, critique, detect, execute, generate, measure, observe, verify]
+    # audit included at category level — covers evaluation audit trails across all subcategories
     mapping_type: composition
     subcategories:
 
@@ -517,8 +519,8 @@ categories:
     description: Infrastructure and deployment management
     capabilities: [audit, checkpoint, constrain, detect, execute, generate, measure, mutate, observe, persist, plan, rollback, verify]
     mapping_type: workflow
-    # Proposed workflow — depends on PR #31 (OASF workflow patterns)
-    workflow_proposed: model_deployment
+    # Workflow from PR #31 (OASF workflow patterns)
+    workflow: model_deployment
     domain_hint: devops
     notes: >
       DevOps/MLOps operations are inherently workflow patterns requiring
@@ -652,17 +654,21 @@ categories:
 # Reverse Mapping: Grounded Agency → OASF
 # ---------------------------------------------------------------------------
 # Capabilities with NO OASF equivalent:
-#   ground      — Evidence anchoring (no OASF equivalent)
-#   rollback    — Recovery mechanism (no OASF equivalent)
 #   attribute   — Causal reasoning (no OASF equivalent)
+#   integrate   — Data merging (no OASF equivalent)
+#   recall      — Stored data retrieval (no OASF equivalent)
+#   receive     — Pushed data/event acceptance (no OASF equivalent)
+#   send        — External data transmission (no OASF equivalent)
 #   transition  — Dynamics modeling (no OASF equivalent)
 #
-# Capabilities with partial mappings via related OASF categories:
-#   checkpoint  — State preservation (partial: 1201, 1202, 1204)
-#   simulate    — Counterfactual analysis (partial: 1501, 1504)
-#   inquire     — Structured clarification (partial: 1004)
-#   synchronize — Multi-agent state agreement (partial: 1004)
-#   state       — World state representation (partial: 106, 1501, 1504)
+# Capabilities with partial OASF mappings:
+#   checkpoint  — State preservation (partial: 12, 1201, 1202, 1204)
+#   simulate    — Counterfactual analysis (partial: 15, 1501, 1504)
+#   inquire     — Structured clarification (partial: 10, 1004)
+#   synchronize — Multi-agent state agreement (partial: 10, 1004)
+#   state       — World state representation (partial: 1, 15, 106, 1501, 1504)
+#   ground      — Evidence anchoring (partial: 1, 6, 103)
+#   rollback    — Recovery mechanism (partial: 12, 1202)
 #
 # These are documented in the OASF Safety Extensions Proposal:
 # Proposal from PR #29 (OASF safety extensions)
