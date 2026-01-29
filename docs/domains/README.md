@@ -18,6 +18,9 @@ Domain templates provide ready-to-use starting points for specific industry vert
 | [Personal Assistant](./personal-assistant/README.md) | [personal_assistant.yaml](../../schemas/profiles/personal_assistant.yaml) | 4 workflows | User-centric, communication-safe, preference-learning |
 | [Data Analysis](./data-analysis/README.md) | [data_analysis.yaml](../../schemas/profiles/data_analysis.yaml) | 4 workflows | Quality-focused, reproducible, statistical rigor |
 | [Healthcare](./healthcare/README.md) | [healthcare.yaml](../../schemas/profiles/healthcare.yaml) | 4 workflows | Advisory-only, patient-safety, regulated |
+| [Vision](./vision/README.md) | [vision.yaml](../../schemas/profiles/vision.yaml) | 4 workflows | Visual-evidence-primary, spatially-grounded, generation-gated |
+| [Audio](./audio/README.md) | [audio.yaml](../../schemas/profiles/audio.yaml) | 4 workflows | Temporal-evidence-primary, signal-quality-aware, speaker-privacy-gated |
+| [Multi-modal](./multimodal/README.md) | [multimodal.yaml](../../schemas/profiles/multimodal.yaml) | 4 workflows | Cross-modal-consistent, alignment-verified, modality-trust-ranked |
 
 ## Choosing a Domain
 
@@ -72,6 +75,45 @@ Choose this if you're building clinical decision support for:
 - NO autonomous clinical actions
 - 7-year audit retention
 - All outputs include clinical disclaimers
+
+### Vision
+
+Choose this if you're building agents for:
+- Image classification and object detection
+- Visual quality inspection
+- Image generation with review pipelines
+- Computer vision pipelines
+
+**Key profile settings:**
+- High trust for calibrated cameras (0.93-0.95)
+- Checkpoints before all image modifications and generation
+- Evidence requires image references and bounding boxes
+
+### Audio
+
+Choose this if you're building agents for:
+- Speech recognition and transcription
+- Audio classification and event detection
+- Speaker verification
+- Audio quality assessment
+
+**Key profile settings:**
+- High trust for studio recordings (0.93-0.95)
+- Checkpoints before speaker identification
+- Evidence requires time segments and signal quality metrics
+
+### Multi-modal
+
+Choose this if you're building agents for:
+- Image captioning and visual question answering
+- Text-to-image or text-to-video generation
+- Cross-modal search and retrieval
+- Document understanding (OCR + layout)
+
+**Key profile settings:**
+- Trust decreases with each generation step
+- Checkpoints before all modality conversions
+- Evidence requires source/target modality identification and alignment scores
 
 ## Profile Schema
 

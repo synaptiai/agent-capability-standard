@@ -1,0 +1,96 @@
+# Audio Domain Profile
+# Calibrated for audio processing, speech analysis, and acoustic AI applications.
+# Maps to OASF Category 3 (Audio): audio classification, speech recognition,
+# speaker identification, sound event detection, and audio synthesis.
+#
+# NOTE: The profile domain name 'audio' matches the capability domain parameter
+# convention (e.g., domain: audio.speech, domain: audio.event).
+# See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
+
+domain: audio
+version: "1.0.0"
+description: |
+  Profile for audio processing and acoustic analysis environments.
+  Emphasizes temporal evidence grounding, signal quality assessment,
+  and appropriate confidence thresholds for audio classification and
+  speech recognition tasks.
+
+trust_weights:
+  # Studio/calibrated sources (highest trust)
+  studio_recording: 0.95      # Professional studio recordings
+  calibrated_microphone: 0.93 # Calibrated measurement microphones
+  reference_audio: 0.94       # Verified reference audio samples
+
+  # Standard capture sources
+  digital_recording: 0.88     # Standard digital audio recordings
+  phone_audio: 0.75           # Telephone/VoIP audio (lossy compression)
+  ambient_microphone: 0.78    # Ambient/environmental microphones
+  conference_audio: 0.80      # Meeting/conference recordings
+
+  # Processed/derived sources
+  enhanced_audio: 0.82        # Noise-reduced or enhanced audio
+  synthesized_audio: 0.55     # AI-generated or TTS audio
+  transcription: 0.78         # ASR-generated transcriptions
+
+  # Reference sources
+  ground_truth_transcript: 0.95  # Verified human transcripts
+  expert_annotation: 0.90       # Linguist/domain expert annotations
+  crowd_annotation: 0.70        # Crowdsourced audio labels
+  model_prediction: 0.62        # Predictions from other audio models
+
+risk_thresholds:
+  auto_approve: low           # Only low-risk audio analysis auto-approved
+  require_review: medium      # Medium+ requires human review
+  require_human: high         # High-risk audio decisions require human
+  block_autonomous:
+    - mutate                  # Never autonomously modify source audio
+    - send                    # Never autonomously distribute audio content
+
+checkpoint_policy:
+  before_audio_modification: always     # Always checkpoint before modifying audio
+  before_transcription_output: always   # Always checkpoint before final transcription
+  before_synthesis: always              # Always checkpoint before generating audio
+  before_speaker_identification: always # Always checkpoint before identifying speakers
+  before_batch_processing: high_risk    # Checkpoint before large batch operations
+
+evidence_policy:
+  required_anchor_types:
+    - audio_reference          # Source audio URI or hash
+    - time_segment             # Temporal segment (start/end timestamps)
+    - confidence_score         # Model confidence for detections
+    - signal_quality           # SNR or quality metric for source audio
+  minimum_confidence: 0.80     # Moderate confidence for audio tasks
+  require_grounding:
+    - detect                   # Sound event detections must reference time segments
+    - classify                 # Audio classifications must cite acoustic features
+    - predict                  # Audio predictions must reference temporal patterns
+    - generate                 # Generated audio must cite source/prompt
+    - transform                # Audio transformations must document signal processing steps
+
+domain_sources:
+  - name: Audio Capture System
+    type: sensor
+    default_trust: 0.92
+  - name: Audio Archive
+    type: database
+    default_trust: 0.90
+  - name: Speech API
+    type: api
+    default_trust: 0.82
+  - name: Linguist Annotator
+    type: human
+    default_trust: 0.90
+  - name: Audio Corpus
+    type: document
+    default_trust: 0.88
+  - name: Processing Pipeline Log
+    type: system_log
+    default_trust: 0.90
+
+# Workflows below are proposed — pending inclusion in the workflow catalog.
+# See docs/domains/audio/README.md for workflow descriptions.
+workflows:
+  - speech_recognition_pipeline
+  - audio_classification_pipeline
+  - speaker_verification
+  - audio_quality_assessment
