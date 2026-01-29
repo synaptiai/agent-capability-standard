@@ -641,16 +641,18 @@ categories:
 # ---------------------------------------------------------------------------
 # Reverse Mapping: Grounded Agency → OASF
 # ---------------------------------------------------------------------------
-# Capabilities that have NO OASF equivalent (safety primitives):
-#   ground      — Evidence anchoring (no OASF equivalent)
-#   checkpoint  — State preservation (no OASF equivalent)
-#   rollback    — Recovery mechanism (no OASF equivalent)
+# Capabilities with NO OASF equivalent:
 #   attribute   — Causal reasoning (no OASF equivalent)
-#   simulate    — Counterfactual analysis (no OASF equivalent)
-#   inquire     — Structured clarification (no OASF equivalent)
-#   synchronize — Multi-agent state agreement (no OASF equivalent)
 #   transition  — Dynamics modeling (no OASF equivalent)
-#   state       — World state representation (no OASF equivalent)
+#
+# Capabilities with partial OASF mappings:
+#   ground      — Evidence anchoring (partial: 103, 6)
+#   checkpoint  — State preservation (partial: 1201, 1202, 1204)
+#   rollback    — Recovery mechanism (partial: 1202)
+#   simulate    — Counterfactual analysis (partial: 1501, 1504)
+#   inquire     — Structured clarification (partial: 1004)
+#   synchronize — Multi-agent state agreement (partial: 1004)
+#   state       — World state representation (partial: 106, 1501, 1504)
 #
 # These are documented in the OASF Safety Extensions Proposal:
 #   docs/proposals/OASF_SAFETY_EXTENSIONS.md
@@ -673,7 +675,7 @@ reverse_mapping:
   state:        ["1501", "1504"]
   transition:   []
   attribute:    []
-  ground:       []
+  ground:       ["103", "6"]
   simulate:     ["1501", "1504"]
   generate:     ["102", "104", "204", "304", "502", "504", "702", "703", "1102", "1203"]
   transform:    ["105", "110", "206", "302", "503", "701", "704", "901", "903", "905"]
@@ -683,7 +685,7 @@ reverse_mapping:
   send:         []
   verify:       ["1101", "1103", "1202", "1302", "905"]
   checkpoint:   ["1201", "1202", "1204"]
-  rollback:     []
+  rollback:     ["1202"]
   constrain:    ["108", "803", "1201", "1301"]
   audit:        ["1204", "1303"]
   persist:      ["1204"]

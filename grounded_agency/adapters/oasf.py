@@ -90,6 +90,7 @@ class OASFAdapter:
         self._mapping_path = Path(mapping_path)
         self._raw: dict[str, Any] | None = None
         self._index: dict[str, OASFMapping] | None = None
+        self._computed_reverse: dict[str, list[str]] | None = None
 
         if registry is not None:
             self._registry = registry
@@ -132,10 +133,13 @@ class OASFAdapter:
     def _index_entry(self, code: str, data: dict[str, Any]) -> None:
         """Index a single category or subcategory entry."""
         assert self._index is not None
+        capabilities = data.get("capabilities", [])
+        if not capabilities:
+            logger.warning("OASF code '%s' has no mapped capabilities", code)
         self._index[str(code)] = OASFMapping(
             skill_code=str(code),
             skill_name=data.get("name", f"OASF-{code}"),
-            capabilities=tuple(data.get("capabilities", [])),
+            capabilities=tuple(capabilities),
             mapping_type=data.get("mapping_type", "composition"),
             domain_hint=data.get("domain_hint"),
             workflow=data.get("workflow"),
@@ -238,22 +242,27 @@ class OASFAdapter:
         Iterates over all indexed entries and inverts the mapping so that each
         capability ID maps to the list of OASF skill codes that reference it.
 
+        The result is cached after the first computation.
+
         Returns:
             Dict mapping capability IDs to lists of OASF skill codes
         """
+        if self._computed_reverse is not None:
+            return self._computed_reverse
         assert self._index is not None
         reverse: dict[str, list[str]] = {}
         for code, mapping in self._index.items():
             for cap_id in mapping.capabilities:
                 reverse.setdefault(cap_id, []).append(code)
+        self._computed_reverse = reverse
         return reverse
 
     def reverse_lookup(self, capability_id: str) -> list[str]:
         """
         Find all OASF skill codes that map to a Grounded Agency capability.
 
-        Uses the bundled reverse_mapping from the YAML file if available,
-        otherwise computes it programmatically from the forward mapping.
+        Always uses the computed reverse mapping derived from the forward
+        mapping as the source of truth.
 
         Args:
             capability_id: Grounded Agency capability ID (e.g., "detect")
@@ -262,17 +271,10 @@ class OASFAdapter:
             List of OASF skill codes that include this capability
         """
         self._ensure_loaded()
-        assert self._raw is not None
         assert self._index is not None
 
-        # Try bundled reverse mapping first
-        bundled_reverse: dict[str, list[str]] = self._raw.get("reverse_mapping", {})
-        if capability_id in bundled_reverse:
-            return bundled_reverse[capability_id]
-
-        # Fall back to programmatic computation
         computed = self._compute_reverse_mapping()
-        return computed.get(capability_id, [])
+        return list(computed.get(capability_id, []))
 
     @property
     def oasf_version(self) -> str:

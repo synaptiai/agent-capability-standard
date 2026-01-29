@@ -124,15 +124,28 @@ class TestReverseLookup:
         codes = adapter.reverse_lookup("detect")
         assert len(codes) > 1  # detect maps to many OASF skills
 
-    def test_ground_has_no_oasf_equivalent(self, adapter: OASFAdapter) -> None:
+    def test_ground_has_partial_oasf_mapping(self, adapter: OASFAdapter) -> None:
+        """ground maps partially to OASF codes 103 (Information Retrieval) and 6 (RAG)."""
         codes = adapter.reverse_lookup("ground")
-        assert codes == []  # ground has no OASF equivalent
+        assert "103" in codes
+        assert "6" in codes
 
-    def test_checkpoint_has_no_oasf_equivalent(self, adapter: OASFAdapter) -> None:
+    def test_checkpoint_has_partial_oasf_mapping(self, adapter: OASFAdapter) -> None:
+        """checkpoint maps partially to OASF codes 1201, 1202, 1204."""
         codes = adapter.reverse_lookup("checkpoint")
-        # checkpoint maps to DevOps subcategories
-        # but it may or may not be in the reverse mapping
-        assert isinstance(codes, list)
+        assert len(codes) >= 3
+        assert "1201" in codes
+        assert "1202" in codes
+        assert "1204" in codes
+
+    def test_computed_reverse_mapping_covers_all_forward_entries(self, adapter: OASFAdapter) -> None:
+        """Every capability in the forward mapping should appear in the reverse mapping."""
+        for mapping in adapter.list_all_mappings():
+            for cap in mapping.capabilities:
+                codes = adapter.reverse_lookup(cap)
+                assert mapping.skill_code in codes, (
+                    f"Code {mapping.skill_code} missing from reverse lookup for {cap}"
+                )
 
 
 class TestListOperations:
