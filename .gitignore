@@ -6,6 +6,9 @@
 *.pyc
 __pycache__/
 
+# Build outputs
+build/
+
 # Tool output artifacts
 validator_suggestions.json
 validator_patch.diff
