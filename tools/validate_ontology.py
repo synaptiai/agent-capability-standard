@@ -17,13 +17,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import yaml
+from _yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
 
 def load_ontology(path: Path) -> dict[str, Any]:
     """Load the capability ontology from YAML."""
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return safe_yaml_load(path, max_size=ONTOLOGY_MAX_BYTES)
 
 
 def get_all_capability_ids(ontology: dict) -> set[str]:

@@ -46,6 +46,8 @@ from typing import Any
 
 import yaml
 
+from _yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
+
 ROOT = Path(__file__).resolve().parents[1]
 ONTO = ROOT / "schemas" / "capability_ontology.yaml"
 WF   = ROOT / "schemas" / "workflow_catalog.yaml"
@@ -162,7 +164,7 @@ def load_schema_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     if path.suffix.lower() in {'.yaml', '.yml'}:
-        return yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+        return safe_yaml_load(path) or {}
     if path.suffix.lower() == '.json':
         return json.loads(path.read_text(encoding='utf-8'))
     return {}
@@ -492,10 +494,12 @@ def apply_patch_suggestions_to_yaml(workflows: dict[str, Any], suggestions: list
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--emit-patch", action="store_true", help="Write a unified diff patch for suggested transform insertions.")
+    ap.add_argument("--catalog", default=None, help="Override workflow catalog path.")
     args = ap.parse_args()
 
-    onto = yaml.safe_load(ONTO.read_text(encoding='utf-8'))
-    workflows = yaml.safe_load(WF.read_text(encoding='utf-8')) or {}
+    onto = safe_yaml_load(ONTO, max_size=ONTOLOGY_MAX_BYTES)
+    wf_path = Path(args.catalog) if args.catalog else WF
+    workflows = safe_yaml_load(wf_path) or {}
     nodes = {n['id']: n for n in onto['nodes']}
 
     errors: list[str] = []
