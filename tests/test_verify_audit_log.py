@@ -59,9 +59,7 @@ class TestComputeHmac:
         assert compute_hmac("hello", "key1") != compute_hmac("hello", "key2")
 
     def test_matches_stdlib_hmac(self) -> None:
-        expected = hmac.new(
-            b"mykey", b"mydata", hashlib.sha256
-        ).hexdigest()
+        expected = hmac.new(b"mykey", b"mydata", hashlib.sha256).hexdigest()
         assert compute_hmac("mydata", "mykey") == expected
 
 

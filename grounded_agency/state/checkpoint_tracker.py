@@ -111,7 +111,9 @@ class CheckpointTracker:
                        tracker with the shell PreToolUse hook (SEC-001).
         """
         self._checkpoint_dir = Path(checkpoint_dir)
-        self._max_history = max_history if max_history is not None else self.DEFAULT_MAX_HISTORY
+        self._max_history = (
+            max_history if max_history is not None else self.DEFAULT_MAX_HISTORY
+        )
         self._marker_dir = Path(marker_dir) if marker_dir is not None else None
         self._active_checkpoint: Checkpoint | None = None
         self._checkpoint_history: list[Checkpoint] = []
@@ -186,7 +188,7 @@ class CheckpointTracker:
         # Sort by created_at and keep only the most recent
         self._checkpoint_history.sort(key=lambda c: c.created_at, reverse=True)
         to_prune = len(self._checkpoint_history) - self._max_history
-        self._checkpoint_history = self._checkpoint_history[:self._max_history]
+        self._checkpoint_history = self._checkpoint_history[: self._max_history]
         return to_prune
 
     def _write_marker(self, checkpoint: Checkpoint) -> None:
@@ -201,7 +203,11 @@ class CheckpointTracker:
             marker_path = self._marker_dir / "checkpoint.ok"
             self._marker_dir.mkdir(parents=True, exist_ok=True)
             created_ts = int(checkpoint.created_at.timestamp())
-            expires_ts = int(checkpoint.expires_at.timestamp()) if checkpoint.expires_at else created_ts + self.DEFAULT_EXPIRY_MINUTES * 60
+            expires_ts = (
+                int(checkpoint.expires_at.timestamp())
+                if checkpoint.expires_at
+                else created_ts + self.DEFAULT_EXPIRY_MINUTES * 60
+            )
             marker_data = {
                 "checkpoint_id": checkpoint.id,
                 "created_at": created_ts,
@@ -325,7 +331,8 @@ class CheckpointTracker:
         original_count = len(self._checkpoint_history)
 
         self._checkpoint_history = [
-            c for c in self._checkpoint_history
+            c
+            for c in self._checkpoint_history
             if c.expires_at is None or c.expires_at > now
         ]
 

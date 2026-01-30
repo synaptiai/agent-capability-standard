@@ -23,7 +23,7 @@ _DESTRUCTIVE_PATTERNS = re.compile(
     \bdocker\s+(rm|rmi|prune|push) |                               # Docker mutations
     \bkubectl\s+(delete|apply|patch|edit)                          # k8s mutations
     """,
-    re.VERBOSE | re.IGNORECASE
+    re.VERBOSE | re.IGNORECASE,
 )
 
 _NETWORK_SEND_PATTERNS = re.compile(
@@ -37,7 +37,7 @@ _NETWORK_SEND_PATTERNS = re.compile(
     \btelnet\s |                                                    # telnet
     \bftp\s                                                         # ftp
     """,
-    re.VERBOSE | re.IGNORECASE
+    re.VERBOSE | re.IGNORECASE,
 )
 
 # Patterns that indicate shell injection attempts or obfuscation
@@ -58,19 +58,64 @@ _SHELL_INJECTION_PATTERNS = re.compile(
     \\x[0-9a-fA-F]{2} |                   # Hex escape sequences
     \\u[0-9a-fA-F]{4}                     # Unicode escape sequences
     """,
-    re.VERBOSE
+    re.VERBOSE,
 )
 
-_READ_ONLY_COMMANDS: frozenset[str] = frozenset({
-    "ls", "cat", "head", "tail", "less", "more", "file", "stat", "du", "df",
-    "pwd", "whoami", "hostname", "uname", "date", "cal", "env", "printenv",
-    "echo", "printf", "which", "whereis", "locate", "find", "grep", "awk",
-    "sed", "cut", "sort", "uniq", "wc", "diff", "cmp", "comm", "tr",
-    "git status", "git log", "git show", "git diff", "git branch", "git remote",
-    "npm list", "npm view", "pip list", "pip show",
-    "docker ps", "docker images", "docker logs",
-    "kubectl get", "kubectl describe", "kubectl logs",
-})
+_READ_ONLY_COMMANDS: frozenset[str] = frozenset(
+    {
+        "ls",
+        "cat",
+        "head",
+        "tail",
+        "less",
+        "more",
+        "file",
+        "stat",
+        "du",
+        "df",
+        "pwd",
+        "whoami",
+        "hostname",
+        "uname",
+        "date",
+        "cal",
+        "env",
+        "printenv",
+        "echo",
+        "printf",
+        "which",
+        "whereis",
+        "locate",
+        "find",
+        "grep",
+        "awk",
+        "sed",
+        "cut",
+        "sort",
+        "uniq",
+        "wc",
+        "diff",
+        "cmp",
+        "comm",
+        "tr",
+        "git status",
+        "git log",
+        "git show",
+        "git diff",
+        "git branch",
+        "git remote",
+        "npm list",
+        "npm view",
+        "pip list",
+        "pip show",
+        "docker ps",
+        "docker images",
+        "docker logs",
+        "kubectl get",
+        "kubectl describe",
+        "kubectl logs",
+    }
+)
 
 
 @dataclass(slots=True)

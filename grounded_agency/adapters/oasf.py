@@ -96,7 +96,9 @@ class OASFAdapter:
             self._registry = registry
         else:
             # Default: assume mapping is at schemas/interop/ relative to repo root
-            ontology_path = self._mapping_path.parent.parent / "capability_ontology.yaml"
+            ontology_path = (
+                self._mapping_path.parent.parent / "capability_ontology.yaml"
+            )
             self._registry = CapabilityRegistry(ontology_path)
 
     # ------------------------------------------------------------------
@@ -108,9 +110,7 @@ class OASFAdapter:
             return
 
         if not self._mapping_path.exists():
-            raise FileNotFoundError(
-                f"OASF mapping not found: {self._mapping_path}"
-            )
+            raise FileNotFoundError(f"OASF mapping not found: {self._mapping_path}")
 
         with open(self._mapping_path, encoding="utf-8") as f:
             self._raw = yaml.safe_load(f)
@@ -183,7 +183,9 @@ class OASFAdapter:
                 nodes.append(node)
                 if node.requires_checkpoint:
                     requires_checkpoint = True
-                if self._RISK_ORDER.get(node.risk, 0) > self._RISK_ORDER.get(max_risk, 0):
+                if self._RISK_ORDER.get(node.risk, 0) > self._RISK_ORDER.get(
+                    max_risk, 0
+                ):
                     max_risk = node.risk
             else:
                 logger.warning("Capability '%s' not found in registry", cap_id)

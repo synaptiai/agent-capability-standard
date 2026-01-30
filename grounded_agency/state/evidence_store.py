@@ -36,14 +36,10 @@ def _validate_metadata_depth(value: Any, current_depth: int = 0) -> bool:
         return False
     if isinstance(value, dict):
         return all(
-            _validate_metadata_depth(v, current_depth + 1)
-            for v in value.values()
+            _validate_metadata_depth(v, current_depth + 1) for v in value.values()
         )
     if isinstance(value, list):
-        return all(
-            _validate_metadata_depth(v, current_depth + 1)
-            for v in value
-        )
+        return all(_validate_metadata_depth(v, current_depth + 1) for v in value)
     return True
 
 
@@ -77,11 +73,16 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         serialized = json.dumps(sanitized, default=str)
         if len(serialized.encode("utf-8")) > _MAX_METADATA_SIZE_BYTES:
             # Truncate by removing largest values until under limit
-            while len(json.dumps(sanitized, default=str).encode("utf-8")) > _MAX_METADATA_SIZE_BYTES:
+            while (
+                len(json.dumps(sanitized, default=str).encode("utf-8"))
+                > _MAX_METADATA_SIZE_BYTES
+            ):
                 if not sanitized:
                     break
                 # Remove the key with largest value
-                largest_key = max(sanitized.keys(), key=lambda k: len(str(sanitized[k])))
+                largest_key = max(
+                    sanitized.keys(), key=lambda k: len(str(sanitized[k]))
+                )
                 sanitized[largest_key] = "[truncated]"
     except (TypeError, ValueError) as e:
         # If serialization fails, return minimal safe metadata
@@ -272,7 +273,9 @@ class EvidenceStore:
             max_anchors: Maximum number of anchors to store (default: 10000).
                         When exceeded, oldest anchors are evicted (FIFO).
         """
-        self._max_anchors = max_anchors if max_anchors is not None else self.DEFAULT_MAX_ANCHORS
+        self._max_anchors = (
+            max_anchors if max_anchors is not None else self.DEFAULT_MAX_ANCHORS
+        )
         # Use deque for O(1) append and popleft operations
         self._anchors: deque[EvidenceAnchor] = deque(maxlen=self._max_anchors)
         self._by_kind: dict[str, list[EvidenceAnchor]] = defaultdict(list)
@@ -424,10 +427,7 @@ class EvidenceStore:
         Returns:
             List of matching anchors
         """
-        return [
-            a for a in self._anchors
-            if a.metadata.get(key) == value
-        ]
+        return [a for a in self._anchors if a.metadata.get(key) == value]
 
     def clear(self) -> None:
         """Clear all evidence from the store."""

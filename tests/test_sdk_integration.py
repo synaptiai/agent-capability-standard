@@ -77,6 +77,7 @@ def adapter(ontology_path: str) -> GroundedAgentAdapter:
 @dataclass
 class MockClaudeAgentOptions:
     """Mock ClaudeAgentOptions for testing."""
+
     allowed_tools: list = field(default_factory=list)
     permission_mode: str = "default"
     hooks: dict = field(default_factory=dict)
@@ -88,6 +89,7 @@ class MockClaudeAgentOptions:
 # =============================================================================
 # CapabilityRegistry Tests
 # =============================================================================
+
 
 class TestCapabilityRegistry:
     """Tests for CapabilityRegistry."""
@@ -170,7 +172,9 @@ class TestCapabilityRegistry:
         assert "checkpoint" in preceding
         assert "plan" in preceding
 
-    def test_get_preceding_capabilities_no_predecessors(self, registry: CapabilityRegistry):
+    def test_get_preceding_capabilities_no_predecessors(
+        self, registry: CapabilityRegistry
+    ):
         """Test capability with no incoming precedes edges returns empty list."""
         preceding = registry.get_preceding_capabilities("observe")
         assert preceding == []
@@ -188,7 +192,9 @@ class TestCapabilityRegistry:
         assert "persist" in rollback_conflicts
         assert "rollback" in persist_conflicts
 
-    def test_get_conflicting_capabilities_no_conflicts(self, registry: CapabilityRegistry):
+    def test_get_conflicting_capabilities_no_conflicts(
+        self, registry: CapabilityRegistry
+    ):
         """Test capability with no conflicts returns empty list."""
         conflicts = registry.get_conflicting_capabilities("observe")
         assert conflicts == []
@@ -242,6 +248,7 @@ class TestCapabilityRegistry:
 # =============================================================================
 # ToolCapabilityMapper Tests
 # =============================================================================
+
 
 class TestToolCapabilityMapper:
     """Tests for ToolCapabilityMapper."""
@@ -297,7 +304,9 @@ class TestToolCapabilityMapper:
 
     def test_map_bash_curl_post(self, mapper: ToolCapabilityMapper):
         """Test mapping curl POST command."""
-        mapping = mapper.map_tool("Bash", {"command": "curl -X POST https://api.example.com"})
+        mapping = mapper.map_tool(
+            "Bash", {"command": "curl -X POST https://api.example.com"}
+        )
         assert mapping.capability_id == "send"
         assert mapping.risk == "high"
         assert mapping.requires_checkpoint is True
@@ -323,6 +332,7 @@ class TestToolCapabilityMapper:
 # CheckpointTracker Tests
 # =============================================================================
 
+
 class TestCheckpointTracker:
     """Tests for CheckpointTracker."""
 
@@ -335,7 +345,9 @@ class TestCheckpointTracker:
         assert checkpoint_id.startswith("chk_")
         assert checkpoint_tracker.has_valid_checkpoint()
 
-    def test_has_valid_checkpoint_false_initially(self, checkpoint_tracker: CheckpointTracker):
+    def test_has_valid_checkpoint_false_initially(
+        self, checkpoint_tracker: CheckpointTracker
+    ):
         """Test that no checkpoint exists initially."""
         assert checkpoint_tracker.has_valid_checkpoint() is False
 
@@ -392,6 +404,7 @@ class TestCheckpointTracker:
 # EvidenceStore Tests
 # =============================================================================
 
+
 class TestEvidenceStore:
     """Tests for EvidenceStore."""
 
@@ -421,15 +434,9 @@ class TestEvidenceStore:
 
     def test_get_by_kind(self, evidence_store: EvidenceStore):
         """Test getting evidence by kind."""
-        evidence_store.add_anchor(
-            EvidenceAnchor.from_tool_output("Read", "1", {})
-        )
-        evidence_store.add_anchor(
-            EvidenceAnchor.from_file("test.py")
-        )
-        evidence_store.add_anchor(
-            EvidenceAnchor.from_mutation("config.yaml", "write")
-        )
+        evidence_store.add_anchor(EvidenceAnchor.from_tool_output("Read", "1", {}))
+        evidence_store.add_anchor(EvidenceAnchor.from_file("test.py"))
+        evidence_store.add_anchor(EvidenceAnchor.from_mutation("config.yaml", "write"))
 
         tool_outputs = evidence_store.get_by_kind("tool_output")
         assert len(tool_outputs) == 1
@@ -463,6 +470,7 @@ class TestEvidenceStore:
 # =============================================================================
 # GroundedAgentAdapter Tests
 # =============================================================================
+
 
 class TestGroundedAgentAdapter:
     """Tests for GroundedAgentAdapter."""
@@ -570,6 +578,7 @@ class TestGroundedAgentAdapter:
 # Hook Tests
 # =============================================================================
 
+
 class TestHooks:
     """Tests for hook callbacks."""
 
@@ -650,13 +659,12 @@ class TestHooks:
 # Integration Tests
 # =============================================================================
 
+
 class TestIntegration:
     """Integration tests for the full workflow."""
 
     @pytest.mark.asyncio
-    async def test_full_checkpoint_mutation_flow(
-        self, adapter: GroundedAgentAdapter
-    ):
+    async def test_full_checkpoint_mutation_flow(self, adapter: GroundedAgentAdapter):
         """Test complete checkpoint -> mutation -> consume flow."""
         callback = adapter._make_permission_callback()
 

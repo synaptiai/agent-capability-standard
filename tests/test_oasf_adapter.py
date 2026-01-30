@@ -83,7 +83,9 @@ class TestOASFTranslation:
         assert "detect" in result.mapping.capabilities
         assert result.mapping.domain_hint == "security.threat"
 
-    def test_translate_category_with_aggregate_capabilities(self, adapter: OASFAdapter) -> None:
+    def test_translate_category_with_aggregate_capabilities(
+        self, adapter: OASFAdapter
+    ) -> None:
         """Category '1' (NLP) aggregates capabilities from subcategories."""
         result = adapter.translate("1")
         assert len(result.mapping.capabilities) > 0
@@ -109,7 +111,9 @@ class TestSafetyMetadata:
         # checkpoint and rollback are in the capabilities list
         assert "checkpoint" in result.mapping.capabilities
 
-    def test_checkpoint_required_for_mutation_capabilities(self, adapter: OASFAdapter) -> None:
+    def test_checkpoint_required_for_mutation_capabilities(
+        self, adapter: OASFAdapter
+    ) -> None:
         # OASF code "1204" (Model Versioning) maps to mutate, which requires checkpoint
         result = adapter.translate("1204")
         assert result.requires_checkpoint is True
@@ -123,10 +127,14 @@ class TestSafetyMetadata:
         assert len(result.capability_nodes) > 0
         assert result.capability_nodes[0].id == "classify"
 
-    def test_warning_logged_for_missing_capability(self, adapter: OASFAdapter, caplog: pytest.LogCaptureFixture) -> None:
+    def test_warning_logged_for_missing_capability(
+        self, adapter: OASFAdapter, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """A warning is logged when a mapped capability is not found in the registry."""
         with patch.object(adapter._registry, "get_capability", return_value=None):
-            with caplog.at_level(logging.WARNING, logger="grounded_agency.adapters.oasf"):
+            with caplog.at_level(
+                logging.WARNING, logger="grounded_agency.adapters.oasf"
+            ):
                 result = adapter.translate("109")  # classify -> patched to None
         assert "not found in registry" in caplog.text
         assert result.capability_nodes == []
@@ -153,7 +161,9 @@ class TestReverseLookup:
         assert "1202" in codes
         assert "1204" in codes
 
-    def test_computed_reverse_mapping_covers_all_forward_entries(self, adapter: OASFAdapter) -> None:
+    def test_computed_reverse_mapping_covers_all_forward_entries(
+        self, adapter: OASFAdapter
+    ) -> None:
         """Every capability in the forward mapping should appear in the reverse mapping."""
         for mapping in adapter.list_all_mappings():
             for cap in mapping.capabilities:

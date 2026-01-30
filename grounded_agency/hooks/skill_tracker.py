@@ -77,7 +77,11 @@ def create_skill_tracker(checkpoint_tracker: CheckpointTracker) -> HookCallback:
                 # Extract scope from skill input or response
                 scope = tool_input.get("scope")
                 if scope is None:
-                    scope = tool_response.get("scope") if isinstance(tool_response, dict) else None
+                    scope = (
+                        tool_response.get("scope")
+                        if isinstance(tool_response, dict)
+                        else None
+                    )
                 if scope is None:
                     scope = ["*"]  # Default to all files
 
@@ -88,7 +92,11 @@ def create_skill_tracker(checkpoint_tracker: CheckpointTracker) -> HookCallback:
                 # Extract reason
                 reason = tool_input.get("reason")
                 if reason is None:
-                    reason = tool_response.get("reason") if isinstance(tool_response, dict) else None
+                    reason = (
+                        tool_response.get("reason")
+                        if isinstance(tool_response, dict)
+                        else None
+                    )
                 if reason is None:
                     reason = "Checkpoint created via skill invocation"
 
