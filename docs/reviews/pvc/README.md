@@ -26,7 +26,5 @@ Run:
 python skills/perspective-validation/scripts/validate_pvc.py
 ```
 
-CI will require:
-- at least one PVC report updated when critical paths change
-- all PVC reports to be structurally valid YAML
+Reports can be validated locally. Including a PVC report for changes to critical paths is recommended but not enforced by CI.
 

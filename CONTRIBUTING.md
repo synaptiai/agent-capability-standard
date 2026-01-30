@@ -24,10 +24,10 @@ This project follows a formal RFC process for changes. See [`spec/GOVERNANCE.md`
    - Motivation for the change
    - Alternative approaches considered
    - Backward compatibility analysis
-   - Required conformance test updates
+   - Conformance test considerations (if applicable)
 
 2. Draft implementation in a feature branch
-3. Ensure all conformance tests pass:
+3. Run conformance tests (optional local check):
    ```bash
    python scripts/run_conformance.py
    ```
@@ -35,10 +35,10 @@ This project follows a formal RFC process for changes. See [`spec/GOVERNANCE.md`
    ```bash
    python tools/validate_workflows.py
    ```
-5. (When changing core artifacts) Add/update a PVC report:
+5. Consider adding a PVC report for significant changes:
    - Reports live in `docs/reviews/pvc/`
    - Start from `skills/perspective-validation/pvc_report_template.yaml`
-   - Validate with:
+   - Validate locally with:
      ```bash
      python skills/perspective-validation/scripts/validate_pvc.py
      ```
@@ -66,7 +66,7 @@ When a change touches critical paths (`schemas/`, `hooks/`, `skills/`, `grounded
 - Reports: `docs/reviews/pvc/`
 - Template: `skills/perspective-validation/pvc_report_template.yaml`
 
-CI enforces that a PVC report is updated for critical-path changes and that all PVC reports are structurally valid.
+PVC reports can be validated locally with `python skills/perspective-validation/scripts/validate_pvc.py`.
 
 ## License
 

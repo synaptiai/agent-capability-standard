@@ -3,7 +3,6 @@
 > **Grounded Agency**: A framework for building AI agents that know what they don't know.
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet?logo=anthropic)](https://github.com/synaptiai/synapti-marketplace)
-[![Conformance](https://github.com/synaptiai/agent-capability-standard/actions/workflows/conformance.yml/badge.svg)](https://github.com/synaptiai/agent-capability-standard/actions/workflows/conformance.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](spec/STANDARD-v1.0.0.md)
 

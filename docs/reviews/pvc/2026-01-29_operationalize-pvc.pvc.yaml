@@ -17,7 +17,6 @@ evidence:
   - "file:docs/reviews/pvc/README.md#L1"
   - "file:skills/perspective-validation/pvc_report_template.yaml#L1"
   - "file:skills/perspective-validation/scripts/validate_pvc.py#L1"
-  - "file:.github/workflows/conformance.yml#L1"
   - "file:skills/perspective-validation/SKILL.md#L1"
 scorecard:
   HF-101: PARTIAL

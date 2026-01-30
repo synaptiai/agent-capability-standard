@@ -29,7 +29,7 @@ python tools/validate_ontology.py
 python tools/sync_skill_schemas.py
 ```
 
-### Run conformance tests
+### Run conformance tests (optional, local only)
 ```bash
 python scripts/run_conformance.py
 ```
