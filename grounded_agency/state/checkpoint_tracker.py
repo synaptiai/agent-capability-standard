@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -92,6 +96,7 @@ class CheckpointTracker:
         self,
         checkpoint_dir: str | Path = ".checkpoints",
         max_history: int | None = None,
+        marker_dir: str | Path | None = None,
     ) -> None:
         """
         Initialize the tracker.
@@ -100,9 +105,14 @@ class CheckpointTracker:
             checkpoint_dir: Directory to store checkpoint metadata
             max_history: Maximum checkpoints to keep in history (default: 100).
                         Oldest checkpoints are pruned when limit is exceeded.
+            marker_dir: Directory for the shell hook marker file (.claude/).
+                       If provided, create_checkpoint() writes .claude/checkpoint.ok
+                       and consume_checkpoint() removes it, bridging the Python
+                       tracker with the shell PreToolUse hook (SEC-001).
         """
         self._checkpoint_dir = Path(checkpoint_dir)
         self._max_history = max_history if max_history is not None else self.DEFAULT_MAX_HISTORY
+        self._marker_dir = Path(marker_dir) if marker_dir is not None else None
         self._active_checkpoint: Checkpoint | None = None
         self._checkpoint_history: list[Checkpoint] = []
 
@@ -150,6 +160,7 @@ class CheckpointTracker:
             self._prune_history_if_needed()
 
         self._active_checkpoint = checkpoint
+        self._write_marker(checkpoint)
         return checkpoint_id
 
     def _generate_checkpoint_id(self) -> str:
@@ -177,6 +188,38 @@ class CheckpointTracker:
         to_prune = len(self._checkpoint_history) - self._max_history
         self._checkpoint_history = self._checkpoint_history[:self._max_history]
         return to_prune
+
+    def _write_marker(self, checkpoint: Checkpoint) -> None:
+        """Write the shell hook marker file with checkpoint metadata.
+
+        Bridges the Python tracker with the shell PreToolUse hook by
+        writing a JSON marker file that the hook validates for freshness.
+        """
+        if self._marker_dir is None:
+            return
+        try:
+            marker_path = self._marker_dir / "checkpoint.ok"
+            self._marker_dir.mkdir(parents=True, exist_ok=True)
+            created_ts = int(checkpoint.created_at.timestamp())
+            expires_ts = int(checkpoint.expires_at.timestamp()) if checkpoint.expires_at else created_ts + 1800
+            marker_data = {
+                "checkpoint_id": checkpoint.id,
+                "created_at": created_ts,
+                "expires_at": expires_ts,
+            }
+            marker_path.write_text(json.dumps(marker_data), encoding="utf-8")
+        except OSError as e:
+            logger.warning("Failed to write checkpoint marker: %s", e)
+
+    def _remove_marker(self) -> None:
+        """Remove the shell hook marker file when checkpoint is consumed/invalidated."""
+        if self._marker_dir is None:
+            return
+        try:
+            marker_path = self._marker_dir / "checkpoint.ok"
+            marker_path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("Failed to remove checkpoint marker: %s", e)
 
     def has_valid_checkpoint(self) -> bool:
         """Check if there's a valid (unexpired, unconsumed) checkpoint."""
@@ -231,6 +274,7 @@ class CheckpointTracker:
         # Move to history
         self._checkpoint_history.append(self._active_checkpoint)
         self._active_checkpoint = None
+        self._remove_marker()
 
         return checkpoint_id
 
@@ -298,6 +342,7 @@ class CheckpointTracker:
             self._active_checkpoint.consumed = True
             self._checkpoint_history.append(self._active_checkpoint)
             self._active_checkpoint = None
+            self._remove_marker()
 
     @property
     def checkpoint_count(self) -> int:
