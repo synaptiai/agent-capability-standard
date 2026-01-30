@@ -27,16 +27,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ONTOLOGY_PATH = ROOT / "schemas" / "capability_ontology.yaml"
 SKILLS_DIR = ROOT / "skills"
 
-# Transitive dependencies referenced inside bundled workflow_catalog.yaml
+# Transitive dependencies referenced inside bundled workflow_catalog.yaml.
+# Maps repo-root paths → local filenames for both copying and path rewriting.
 WORKFLOW_CATALOG_TRANSITIVE_DEPS = {
-    "schemas/world_state_schema.yaml": "world_state_schema.yaml",
-    "schemas/event_schema.yaml": "event_schema.yaml",
-    "schemas/transforms/transform_mapping_rawlog_to_observation.yaml": "transform_mapping_rawlog_to_observation.yaml",
-}
-
-# Path rewrites for inside the bundled workflow_catalog.yaml
-# Maps repo-root paths to co-located relative filenames
-WORKFLOW_CATALOG_PATH_REWRITES = {
     "schemas/world_state_schema.yaml": "world_state_schema.yaml",
     "schemas/event_schema.yaml": "event_schema.yaml",
     "schemas/transforms/transform_mapping_rawlog_to_observation.yaml": "transform_mapping_rawlog_to_observation.yaml",
@@ -168,7 +161,7 @@ def sync_workflow_catalog_deps(dry_run: bool = False) -> tuple[int, int, list[st
         original = content
 
         # Rewrite structural refs (ref:, mapping_ref:, output_conforms_to:)
-        for old_path, new_path in WORKFLOW_CATALOG_PATH_REWRITES.items():
+        for old_path, new_path in WORKFLOW_CATALOG_TRANSITIVE_DEPS.items():
             content = content.replace(old_path, new_path)
 
         # Rewrite comment-only domain workflow refs
