@@ -19,9 +19,9 @@ Break down a complex goal into smaller, manageable subgoals with clear boundarie
 - Dependencies are explicit
 - Acceptance criteria are testable
 - Decomposition depth is appropriate
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

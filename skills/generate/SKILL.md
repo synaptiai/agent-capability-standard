@@ -18,9 +18,9 @@ Produce a new artifact that satisfies specified constraints and serves a defined
 - Rationale explains design decisions
 - Quality signals demonstrate fitness for purpose
 - Safety considerations documented
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

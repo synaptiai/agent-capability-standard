@@ -25,9 +25,9 @@ Integrate is essential for building comprehensive `world-state` from multiple ob
 
 **Hard dependencies:**
 - Requires `identity-resolution` when sources contain overlapping entities
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

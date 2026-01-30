@@ -19,9 +19,9 @@ Execute code or commands in a controlled manner, capturing output for verificati
 - Output captured completely
 - Exit code recorded
 - Errors properly surfaced
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

@@ -27,9 +27,9 @@ Execute **verify** to determine whether an artifact (code, configuration, state,
 - Every check is grounded to observable output or file content
 - Failures include actionable fix suggestions
 - All assumptions about expected behavior are explicit
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

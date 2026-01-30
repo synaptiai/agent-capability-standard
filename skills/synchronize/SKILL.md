@@ -18,9 +18,9 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
 - Conflicts are detected and resolved according to specified strategy
 - Provenance is preserved for each merged element
 - Output includes lineage trace for every change
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

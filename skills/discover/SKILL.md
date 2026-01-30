@@ -18,9 +18,9 @@ Explore data or systems to find patterns, relationships, or anomalies that were 
 - Significance level assigned to each discovery
 - Novelty classified (known, suspected, surprising)
 - Methodology documented for reproducibility
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

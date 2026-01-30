@@ -19,9 +19,9 @@ Systematically analyze a target (plan, code, design, document) to identify failu
 - Ambiguities flagged with clarification requests
 - Security/exploit risks rated appropriately
 - Each finding has actionable recommendation
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

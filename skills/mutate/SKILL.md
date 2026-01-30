@@ -21,9 +21,9 @@ Make controlled changes to persistent state with safety guarantees. This is the 
 - Previous state captured for rollback
 - Change is verifiable
 - Audit trail recorded
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

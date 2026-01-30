@@ -19,9 +19,9 @@ Generate a clear, structured explanation of a topic, decision, or concept tailor
 - Causal chain shows logical progression
 - Evidence supports key claims
 - No unnecessary jargon or fluff
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

@@ -19,9 +19,9 @@ Assign one or more labels from a defined taxonomy to items based on their observ
 - Label assignment supported by evidence
 - Confidence scores reflect classification certainty
 - Ambiguous cases explicitly flagged
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

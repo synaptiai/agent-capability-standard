@@ -19,9 +19,9 @@ Forecast future states or outcomes for a target based on current state, historic
 - Probability or confidence assigned to prediction
 - Alternative outcomes considered
 - Assumptions explicitly stated
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

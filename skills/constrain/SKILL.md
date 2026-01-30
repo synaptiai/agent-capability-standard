@@ -18,9 +18,9 @@ Execute **constrain** to evaluate proposed actions against defined policies, enf
 - Clear allow/deny decision with rationale
 - Scope reduced to minimum necessary permissions
 - Violation actions documented (block, warn, log)
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

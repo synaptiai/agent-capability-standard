@@ -32,9 +32,9 @@ Execute **search** to find relevant information when you don't know exactly wher
 
 **World Modeling Context:**
 Search feeds into the **State Layer** by discovering entities and observations to include in `world-state`. It supports the **Identity & Continuity Layer** by finding candidate matches for `identity-resolution`.
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

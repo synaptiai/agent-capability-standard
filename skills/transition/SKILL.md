@@ -19,9 +19,9 @@ Define the rules governing how a system's state changes over time. This capabili
 - Preconditions and effects documented
 - Triggers identified with evidence
 - State machine is deterministic (or non-determinism noted)
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

@@ -58,9 +58,9 @@ Send a message, event, or payload to an external destination with full policy en
 - Approval gate passed (explicit user confirmation)
 - Complete audit trail of what was sent
 - Delivery confirmation obtained where possible
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

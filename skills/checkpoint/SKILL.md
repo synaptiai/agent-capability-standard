@@ -57,9 +57,9 @@ Execute **checkpoint** to create a restorable state marker before any mutating o
 - All files/state in scope are captured
 - Restore command is documented and tested
 - Expiry policy set if applicable
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

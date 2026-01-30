@@ -18,9 +18,9 @@ Systematically evaluate multiple alternatives against defined criteria to produc
 - Criteria weighted by importance
 - Clear recommendation with rationale
 - Tradeoffs explicitly documented
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

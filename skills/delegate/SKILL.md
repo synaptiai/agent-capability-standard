@@ -19,9 +19,9 @@ Delegate a complex task to one or more subagents by defining clear contracts, in
 - Interface between tasks is well-defined
 - Merge strategy handles conflicts and failures
 - Dependencies between subtasks are clear
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

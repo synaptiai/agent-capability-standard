@@ -19,9 +19,9 @@ Verify that claims are supported by evidence from reliable sources. This is the 
 - Evidence sources identified and referenced
 - Grounding strength assessed (strong, moderate, weak, ungrounded)
 - Evidence gaps explicitly documented
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

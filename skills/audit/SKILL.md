@@ -45,9 +45,9 @@ Execute **audit** to create a structured record of actions taken, tools invoked,
 - Every action linked to actor, timestamp, and rationale
 - Changes documented with before/after state
 - Provenance chain for all outputs
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

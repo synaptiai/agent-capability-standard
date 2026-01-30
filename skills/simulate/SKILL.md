@@ -19,9 +19,9 @@ Execute mental simulations of scenarios to explore outcomes without making real 
 - Multiple outcomes considered
 - Key decision points identified
 - Assumptions made explicit
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

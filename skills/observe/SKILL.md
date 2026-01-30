@@ -19,9 +19,9 @@ Observe and report the current state of a specified target without modifying it.
 - Relevant aspects of the target documented
 - At least one evidence anchor per observation
 - Uncertainty explicitly noted where state is ambiguous
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

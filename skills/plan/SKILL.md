@@ -21,9 +21,9 @@ Create a structured, executable plan that decomposes a goal into ordered steps w
 - Each mutating step has rollback strategy defined
 - Checkpoints placed before high-risk operations
 - Estimated risk level accurately reflects plan complexity
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

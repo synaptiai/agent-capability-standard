@@ -18,9 +18,9 @@ Scan data sources to determine whether a specified pattern, entity, or condition
 - At least one evidence anchor for positive detections
 - False positive risk assessment provided
 - Confidence score justified by evidence quality
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

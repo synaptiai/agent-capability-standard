@@ -19,9 +19,9 @@ Establish causal relationships between observed effects and potential causes. Th
 - Causal strength estimated for each relationship
 - Causal mechanism explained
 - Alternative causes considered and ruled out
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

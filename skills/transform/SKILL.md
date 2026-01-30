@@ -48,9 +48,9 @@ Transform data from one format or schema to another while tracking what informat
 - Transformation is deterministic and reproducible
 - Loss/distortion explicitly documented
 - Evidence anchors trace source to output
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

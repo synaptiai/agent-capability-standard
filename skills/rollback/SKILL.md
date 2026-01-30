@@ -64,9 +64,9 @@ Execute **rollback** to restore system state to a previously created checkpoint.
 - Post-rollback hash matches checkpoint hash
 - No orphaned artifacts remain from failed mutation
 - Audit trail of what was reverted
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

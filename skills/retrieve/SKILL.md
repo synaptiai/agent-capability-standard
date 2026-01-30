@@ -22,9 +22,9 @@ Execute **retrieve** to fetch specific, known information from specified sources
 
 **World Modeling Context:**
 Retrieve feeds into all world modeling layers by providing grounded observations for `world-state`, timestamps for `temporal-reasoning`, and evidence for `grounding`.
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 

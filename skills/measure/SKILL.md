@@ -19,9 +19,9 @@ Quantify a specific metric for a target, providing a numerical value with explic
 - Uncertainty bounds explicitly stated
 - Measurement method documented
 - Units clearly specified
+
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
-
 
 ## Inputs
 
