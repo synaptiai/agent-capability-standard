@@ -14,8 +14,7 @@ agent: general-purpose
 Synchronize a **digital twin** with real-time signals and keep it **grounded, safe, and auditable**. This workflow maintains alignment between the real world and its digital representation.
 
 This workflow is designed to **model both real and digital systems** using the canonical world-state schema:
-- `world_state_schema.yaml`
-- `world_state_example.yaml`
+- `reference/world_state_schema.yaml`
 
 **Success criteria:**
 - Twin snapshot updated with latest signals
@@ -26,9 +25,9 @@ This workflow is designed to **model both real and digital systems** using the c
 - Rollback available if verification fails
 
 **Compatible schemas:**
-- `schemas/world_state_schema.yaml`
-- `schemas/event_schema.yaml`
-- `schemas/workflow_catalog.yaml`
+- `reference/world_state_schema.yaml`
+- `reference/event_schema.yaml`
+- `reference/workflow_catalog.yaml`
 
 ## Inputs
 
@@ -325,6 +324,6 @@ assumptions:
 - Never delete audit logs before retention period
 
 **Workflow references:**
-- See `workflow_catalog.yaml#digital-twin-sync-loop` for step definitions
-- See `world_state_schema.yaml` for canonical state format
-- See `composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
+- See `reference/workflow_catalog.yaml#digital-twin-sync-loop` for step definitions
+- See `reference/world_state_schema.yaml` for canonical state format
+- See `reference/composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern

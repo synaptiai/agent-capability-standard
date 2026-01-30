@@ -19,6 +19,9 @@ Establish causal relationships between observed effects and potential causes. Th
 - Causal strength estimated for each relationship
 - Causal mechanism explained
 - Alternative causes considered and ruled out
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -254,5 +257,5 @@ assumptions:
 - Avoid attribution without sufficient evidence
 
 **Workflow references:**
-- See `workflow_catalog.yaml#debug_code_change` for attribution in debugging
-- See `workflow_catalog.yaml#world_model_build` for causal modeling
+- See `reference/workflow_catalog.yaml#debug_code_change` for attribution in debugging
+- See `reference/workflow_catalog.yaml#world_model_build` for causal modeling

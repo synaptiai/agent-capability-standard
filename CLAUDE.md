@@ -24,6 +24,11 @@ python tools/validate_skill_refs.py
 python tools/validate_ontology.py
 ```
 
+### Sync skill-local schemas from ontology
+```bash
+python tools/sync_skill_schemas.py
+```
+
 ### Run conformance tests
 ```bash
 python scripts/run_conformance.py
@@ -158,6 +163,12 @@ python -c "import yaml; yaml.safe_load(open('schemas/capability_ontology.yaml'))
 ### 5. Update Workflow Catalog (if adding workflow patterns)
 - Add workflow to `schemas/workflow_catalog.yaml`
 - Update workflow count in `skills/README.md`
+
+### 6. Generate Local Schema
+```bash
+python tools/sync_skill_schemas.py
+```
+This generates `skills/<name>/schemas/output_schema.yaml` from the ontology.
 
 ## Claude Agent SDK Integration
 

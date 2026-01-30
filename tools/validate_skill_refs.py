@@ -2,17 +2,17 @@
 """Skill reference validator: checks that file paths in SKILL.md files resolve to existing files.
 
 Scans all SKILL.md files under skills/ for structured file path references
-in dependency sections (Compatible schemas, References) and verifies they
-exist in the repository. This prevents phantom references — paths to files
+in dependency sections and verifies they exist either at the repo root or
+within the skill directory. This prevents phantom references — paths to files
 that were never created or have since been removed.
 
 Validates:
 1) Paths in "Compatible schemas" sections
 2) Paths in "References" sections
 3) Paths in "Bundled Scripts" / "Located at" sections
+4) Paths in "Workflow references" sections (expected to be skill-local)
 
 Allows:
-- Cross-references in Workflow/Composition sections (shorthand pointers)
 - Example/documentation paths in procedure text and code blocks
 - URLs (http://, https://)
 
@@ -43,6 +43,7 @@ STRICT_SECTIONS = {
     "Compatible schemas:",
     "References:",
     "Located at:",
+    "Workflow references:",
 }
 
 CODE_FENCE = "```"

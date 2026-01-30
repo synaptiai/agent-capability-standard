@@ -18,6 +18,9 @@ Execute **constrain** to evaluate proposed actions against defined policies, enf
 - Clear allow/deny decision with rationale
 - Scope reduced to minimum necessary permissions
 - Violation actions documented (block, warn, log)
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -302,6 +305,6 @@ Apply the following verification patterns:
 - Never evaluate constrain after mutation has begun
 
 **Workflow references:**
-- See `composition_patterns.md#digital-twin-sync-loop` for constrain-before-act
-- See `composition_patterns.md#risk-assessment` for constrain placement
-- See `verification_patterns.md#safety-boundary` for boundary checks
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for constrain-before-act
+- See `reference/composition_patterns.md#risk-assessment` for constrain placement
+- See `reference/verification_patterns.md#safety-boundary` for boundary checks

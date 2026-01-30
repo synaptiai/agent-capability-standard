@@ -18,6 +18,9 @@ Systematically evaluate multiple alternatives against defined criteria to produc
 - Criteria weighted by importance
 - Clear recommendation with rationale
 - Tradeoffs explicitly documented
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -379,5 +382,5 @@ assumptions:
 - Do not use compare for simple existence checking (use `detect`)
 
 **Workflow references:**
-- See `composition_patterns.md#capability-gap-analysis` for compare-plans usage
-- See `composition_patterns.md#observe-model-act` for comparison in decision loops
+- See `reference/composition_patterns.md#capability-gap-analysis` for compare-plans usage
+- See `reference/composition_patterns.md#observe-model-act` for comparison in decision loops

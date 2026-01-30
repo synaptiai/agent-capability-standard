@@ -19,6 +19,9 @@ Verify that claims are supported by evidence from reliable sources. This is the 
 - Evidence sources identified and referenced
 - Grounding strength assessed (strong, moderate, weak, ungrounded)
 - Evidence gaps explicitly documented
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -271,5 +274,5 @@ assumptions:
 - Avoid accepting claims without evidence in planning
 
 **Workflow references:**
-- See `workflow_catalog.yaml#world_model_build` for grounding in world models
+- See `reference/workflow_catalog.yaml#world_model_build` for grounding in world models
 - Core principle of Grounded Agency - all skills should ground claims

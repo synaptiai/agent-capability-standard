@@ -25,6 +25,9 @@ Integrate is essential for building comprehensive `world-state` from multiple ob
 
 **Hard dependencies:**
 - Requires `identity-resolution` when sources contain overlapping entities
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -405,5 +408,5 @@ evidence_anchors:
 - Avoid ignoring conflicts - always resolve or flag
 
 **Workflow references:**
-- See `composition_patterns.md#world-model-build` for integration in model construction
-- See `composition_patterns.md#digital-twin-sync-loop` for ongoing integration
+- See `reference/composition_patterns.md#world-model-build` for integration in model construction
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for ongoing integration

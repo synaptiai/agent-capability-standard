@@ -65,6 +65,9 @@ Execute **persist** to write stable learnings, decisions, and patterns to durabl
 - New content follows established structure/format
 - Metadata (timestamp, source) is recorded
 - Write is verified successfully
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 

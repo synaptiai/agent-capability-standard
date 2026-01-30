@@ -18,6 +18,9 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
 - Conflicts are detected and resolved according to specified strategy
 - Provenance is preserved for each merged element
 - Output includes lineage trace for every change
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -268,5 +271,5 @@ assumptions:
 - Avoid synchronizing security-sensitive data without human review
 
 **Workflow references:**
-- See `composition_patterns.md#digital-twin-sync-loop` for twin state synchronization
-- See `composition_patterns.md#enrichment-pipeline` for parallel data gathering
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for twin state synchronization
+- See `reference/composition_patterns.md#enrichment-pipeline` for parallel data gathering

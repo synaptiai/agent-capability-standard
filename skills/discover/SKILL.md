@@ -18,6 +18,9 @@ Explore data or systems to find patterns, relationships, or anomalies that were 
 - Significance level assigned to each discovery
 - Novelty classified (known, suspected, surprising)
 - Methodology documented for reproducibility
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -248,5 +251,5 @@ assumptions:
 - Do not use discover when you already know what to find
 
 **Workflow references:**
-- See `composition_patterns.md#capability-gap-analysis` for discover-relationship usage
-- See `composition_patterns.md#world-model-build` for discovery in modeling
+- See `reference/composition_patterns.md#capability-gap-analysis` for discover-relationship usage
+- See `reference/composition_patterns.md#world-model-build` for discovery in modeling

@@ -58,6 +58,9 @@ Send a message, event, or payload to an external destination with full policy en
 - Approval gate passed (explicit user confirmation)
 - Complete audit trail of what was sent
 - Delivery confirmation obtained where possible
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -323,5 +326,5 @@ The approval must be captured with a token that is referenced in this operation.
 - NEVER retry failed sends indefinitely (resource exhaustion)
 
 **Workflow references:**
-- See `composition_patterns.md#anti-patterns` for send safety rules
-- See `composition_patterns.md#digital-twin-sync-loop` for send in sync context
+- See `reference/composition_patterns.md#anti-patterns` for send safety rules
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for send in sync context

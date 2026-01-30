@@ -21,7 +21,8 @@ Create a structured representation of the current state of a domain, system, or 
 - Evidence anchors for all state assertions
 
 **Compatible schemas:**
-- `schemas/world_state_schema.yaml`
+- `schemas/output_schema.yaml`
+- `reference/world_state_schema.yaml`
 
 ## Inputs
 
@@ -267,5 +268,5 @@ assumptions:
 - Avoid state for single-value measurement (use `measure`)
 
 **Workflow references:**
-- See `workflow_catalog.yaml#world_model_build` for state in world modeling
-- See `workflow_catalog.yaml#digital_twin_sync_loop` for state in digital twins
+- See `reference/workflow_catalog.yaml#world_model_build` for state in world modeling
+- See `reference/workflow_catalog.yaml#digital_twin_sync_loop` for state in digital twins

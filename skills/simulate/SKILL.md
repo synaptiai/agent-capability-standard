@@ -19,6 +19,9 @@ Execute mental simulations of scenarios to explore outcomes without making real 
 - Multiple outcomes considered
 - Key decision points identified
 - Assumptions made explicit
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -327,4 +330,4 @@ evidence_anchors:
 - Avoid simulating without state/transition models
 
 **Workflow references:**
-- See `workflow_catalog.yaml#world_model_build` for simulation in modeling
+- See `reference/workflow_catalog.yaml#world_model_build` for simulation in modeling

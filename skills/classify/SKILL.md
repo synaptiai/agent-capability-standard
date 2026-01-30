@@ -19,6 +19,9 @@ Assign one or more labels from a defined taxonomy to items based on their observ
 - Label assignment supported by evidence
 - Confidence scores reflect classification certainty
 - Ambiguous cases explicitly flagged
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -197,4 +200,4 @@ assumptions:
 - Avoid classify when precise measurement needed (use `measure`)
 
 **Workflow references:**
-- See `workflow_catalog.yaml#capability_gap_analysis` for classification usage
+- See `reference/workflow_catalog.yaml#capability_gap_analysis` for classification usage

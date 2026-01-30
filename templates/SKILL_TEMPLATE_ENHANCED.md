@@ -25,7 +25,7 @@ agent: <explore|general-purpose>
 - <Specific measurable outcome 2>
 
 **Compatible schemas:** (if applicable)
-- `docs/schemas/<relevant_schema>.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 

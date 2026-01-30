@@ -19,6 +19,9 @@ Define the rules governing how a system's state changes over time. This capabili
 - Preconditions and effects documented
 - Triggers identified with evidence
 - State machine is deterministic (or non-determinism noted)
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -285,5 +288,5 @@ assumptions:
 - Avoid modeling transitions without state model first
 
 **Workflow references:**
-- See `workflow_catalog.yaml#world_model_build` for transitions in world modeling
-- See `workflow_catalog.yaml#digital_twin_sync_loop` for transition application
+- See `reference/workflow_catalog.yaml#world_model_build` for transitions in world modeling
+- See `reference/workflow_catalog.yaml#digital_twin_sync_loop` for transition application

@@ -19,6 +19,9 @@ Systematically analyze a target (plan, code, design, document) to identify failu
 - Ambiguities flagged with clarification requests
 - Security/exploit risks rated appropriately
 - Each finding has actionable recommendation
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -352,5 +355,5 @@ assumptions:
 - Avoid superficial critique of security-sensitive targets
 
 **Workflow references:**
-- See `composition_patterns.md#debug-code-change` for critique in debugging
-- See `composition_patterns.md#capability-gap-analysis` for planning context
+- See `reference/composition_patterns.md#debug-code-change` for critique in debugging
+- See `reference/composition_patterns.md#capability-gap-analysis` for planning context

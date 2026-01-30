@@ -28,8 +28,8 @@ A world model captures:
 - Simulation capability established
 
 **Compatible schemas:**
-- `schemas/world_state_schema.yaml`
-- `schemas/event_schema.yaml`
+- `reference/world_state_schema.yaml`
+- `reference/event_schema.yaml`
 
 ## Inputs
 
@@ -339,6 +339,5 @@ assumptions:
 - Never deploy model without simulation validation
 
 **Workflow references:**
-- See `workflow_catalog.yaml#world-model-workflow` for step definitions
-- See `world_state_schema.yaml` for canonical state format
-- See `causal_model_schema.yaml` for dynamics representation
+- See `reference/workflow_catalog.yaml#world-model-workflow` for step definitions
+- See `reference/world_state_schema.yaml` for canonical state format

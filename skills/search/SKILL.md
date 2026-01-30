@@ -32,6 +32,9 @@ Execute **search** to find relevant information when you don't know exactly wher
 
 **World Modeling Context:**
 Search feeds into the **State Layer** by discovering entities and observations to include in `world-state`. It supports the **Identity & Continuity Layer** by finding candidate matches for `identity-resolution`.
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -336,5 +339,5 @@ next_searches:
 - Never search without considering coverage limitations
 
 **Workflow references:**
-- See `composition_patterns.md#world-model-build` for search in model construction
-- See `composition_patterns.md#debug-code-change` for search during debugging
+- See `reference/composition_patterns.md#world-model-build` for search in model construction
+- See `reference/composition_patterns.md#debug-code-change` for search during debugging

@@ -27,6 +27,9 @@ Execute **verify** to determine whether an artifact (code, configuration, state,
 - Every check is grounded to observable output or file content
 - Failures include actionable fix suggestions
 - All assumptions about expected behavior are explicit
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -272,5 +275,5 @@ Located at: `scripts/verify-state.sh`
 - Never ignore FAIL verdicts and proceed with mutations
 
 **Workflow references:**
-- See `composition_patterns.md#debug-code-change` for CAVR pattern
-- See `composition_patterns.md#digital-twin-sync-loop` for verify-after-act usage
+- See `reference/composition_patterns.md#debug-code-change` for CAVR pattern
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for verify-after-act usage

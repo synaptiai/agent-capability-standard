@@ -18,6 +18,9 @@ Execute **recall** to retrieve relevant prior decisions, rationale, and patterns
 - Prior decisions and their rationale are surfaced
 - Consistency with past reasoning is maintained
 - Retrieved information is grounded with timestamps and context
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 

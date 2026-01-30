@@ -21,7 +21,8 @@ Execute **receive** to ingest incoming data from external sources and parse it i
 - Malformed or unexpected data is handled gracefully
 
 **Compatible schemas:**
-- `schemas/event_schema.yaml`
+- `schemas/output_schema.yaml`
+- `reference/event_schema.yaml`
 
 ## Inputs
 
@@ -352,5 +353,5 @@ assumptions:
 - Avoid processing unbounded streams without size limits
 
 **Workflow references:**
-- See `composition_patterns.md#digital-twin-sync-loop` for receive as entry point
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for receive as entry point
 - First step in most data ingestion pipelines

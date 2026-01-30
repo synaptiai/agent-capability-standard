@@ -19,6 +19,9 @@ Observe and report the current state of a specified target without modifying it.
 - Relevant aspects of the target documented
 - At least one evidence anchor per observation
 - Uncertainty explicitly noted where state is ambiguous
+**Compatible schemas:**
+- `schemas/output_schema.yaml`
+
 
 ## Inputs
 
@@ -198,5 +201,5 @@ next_actions:
 - Avoid observe for pattern matching (use `detect`)
 
 **Workflow references:**
-- See `workflow_catalog.yaml#debug_code_change` for observation in debugging
-- See `workflow_catalog.yaml#world_model_build` for observation in modeling
+- See `reference/workflow_catalog.yaml#debug_code_change` for observation in debugging
+- See `reference/workflow_catalog.yaml#world_model_build` for observation in modeling
