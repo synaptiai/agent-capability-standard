@@ -201,7 +201,7 @@ class CheckpointTracker:
             marker_path = self._marker_dir / "checkpoint.ok"
             self._marker_dir.mkdir(parents=True, exist_ok=True)
             created_ts = int(checkpoint.created_at.timestamp())
-            expires_ts = int(checkpoint.expires_at.timestamp()) if checkpoint.expires_at else created_ts + 1800
+            expires_ts = int(checkpoint.expires_at.timestamp()) if checkpoint.expires_at else created_ts + self.DEFAULT_EXPIRY_MINUTES * 60
             marker_data = {
                 "checkpoint_id": checkpoint.id,
                 "created_at": created_ts,
@@ -333,6 +333,7 @@ class CheckpointTracker:
         if self._active_checkpoint and not self._active_checkpoint.is_valid():
             self._checkpoint_history.append(self._active_checkpoint)
             self._active_checkpoint = None
+            self._remove_marker()
 
         return original_count - len(self._checkpoint_history)
 

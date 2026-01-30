@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Append a skill usage line to .claude/audit.log with HMAC integrity chain.
 #
-# Each log entry is a JSON object containing:
+# Each log entry is a single-line JSON object containing:
 #   - ts: ISO 8601 timestamp
 #   - skill: skill name
 #   - args: skill arguments (if any)
@@ -12,6 +12,9 @@
 # any entry invalidates all subsequent HMACs.
 #
 # SEC-005: Audit log integrity via HMAC chaining.
+# NOTE: The default HMAC key (derived from hostname) provides integrity
+# against accidental corruption only. For adversarial tamper resistance,
+# set AUDIT_HMAC_KEY to a proper secret.
 
 # Read JSON from stdin (Claude Code hooks receive data via stdin)
 input=$(cat)
@@ -46,8 +49,7 @@ log_file="$log_dir/audit.log"
 # Build log entry with timestamp
 ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-# HMAC key: use AUDIT_HMAC_KEY env var, or derive from a stable machine secret
-# In production, this should be set to a proper secret via environment config.
+# HMAC key: use AUDIT_HMAC_KEY env var, or derive from hostname.
 hmac_key="${AUDIT_HMAC_KEY:-grounded-agency-audit-$(hostname -s 2>/dev/null || echo 'default')}"
 
 # Get previous entry's HMAC for chaining (empty string for first entry)
@@ -59,29 +61,36 @@ if [ -f "$log_file" ] && [ -s "$log_file" ]; then
   fi
 fi
 
-# Build the entry content (everything except the hmac field itself)
-entry_content=$(jq -n \
+# Build compact single-line JSON for entry content (matches Python verifier format).
+# Using jq -c produces {"ts":"...","skill":"...","args":"...","prev_hmac":"..."} which
+# matches json.dumps(d, separators=(",", ":")) in the Python verifier.
+entry_content=$(jq -c -n \
   --arg ts "$ts" \
   --arg skill "$skill" \
   --arg args "$args" \
   --arg prev_hmac "$prev_hmac" \
   '{ts: $ts, skill: $skill, args: $args, prev_hmac: $prev_hmac}' 2>/dev/null)
 
-# Compute HMAC over entry content
+# Guard: if jq failed, skip logging rather than corrupt the chain
+if [ -z "$entry_content" ]; then
+  exit 0
+fi
+
+# Compute HMAC over entry content. Requires openssl (available on Linux + macOS).
 if command -v openssl &> /dev/null; then
   entry_hmac=$(printf '%s' "$entry_content" | openssl dgst -sha256 -hmac "$hmac_key" -hex 2>/dev/null | awk '{print $NF}')
-elif command -v shasum &> /dev/null; then
-  # Fallback: use shasum with key prepended (not true HMAC but provides basic integrity)
-  entry_hmac=$(printf '%s%s' "$hmac_key" "$entry_content" | shasum -a 256 2>/dev/null | awk '{print $1}')
 else
-  # Last resort: no HMAC available, use a hash of content only
   entry_hmac="no-hmac-available"
 fi
 
-# Build final entry with HMAC
-final_entry=$(echo "$entry_content" | jq --arg hmac "$entry_hmac" '. + {hmac: $hmac}' 2>/dev/null)
+# Build final compact JSON entry with HMAC
+final_entry=$(echo "$entry_content" | jq -c --arg hmac "$entry_hmac" '. + {hmac: $hmac}' 2>/dev/null)
 
-# Append to log (atomic-ish: single echo to avoid partial writes)
+# Guard: don't append empty/broken entries
+if [ -z "$final_entry" ]; then
+  exit 0
+fi
+
 echo "$final_entry" >> "$log_file"
 
 exit 0

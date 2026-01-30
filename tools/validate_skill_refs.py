@@ -28,7 +28,6 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = ROOT / "skills"
@@ -54,7 +53,7 @@ def find_skill_files() -> list[Path]:
     return sorted(SKILLS_DIR.glob("*/SKILL.md"))
 
 
-def parse_sections(lines: list[str]) -> list[Tuple[str, int, int]]:
+def parse_sections(lines: list[str]) -> list[tuple[str, int, int]]:
     """Identify strict validation sections and their line ranges.
 
     Returns list of (section_name, start_line, end_line) tuples.
@@ -175,7 +174,7 @@ def main() -> None:
         print(f"WARNING: No SKILL.md files found in {SKILLS_DIR}")
         sys.exit(0)
 
-    errors: List[str] = []
+    errors: list[str] = []
     validated_count = 0
 
     for skill_path in skill_files:

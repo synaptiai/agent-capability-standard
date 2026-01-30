@@ -96,7 +96,8 @@ select = [
     "UP",  # pyupgrade
 ]
 ignore = [
-    "E501",  # line too long (handled by formatter)
+    "E501",   # line too long (handled by formatter)
+    "UP038",  # isinstance(x, (A, B)) — unsafe to auto-convert for bool subclass
 ]
 
 [tool.ruff.lint.isort]

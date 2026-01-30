@@ -58,16 +58,24 @@ fi
 
 # Check if jq is available for JSON parsing
 if command -v jq &> /dev/null; then
+  checkpoint_id=$(echo "$content" | jq -r '.checkpoint_id // empty' 2>/dev/null)
   expires_at=$(echo "$content" | jq -r '.expires_at // empty' 2>/dev/null)
-  if [ -z "$expires_at" ]; then
-    echo "Blocked: checkpoint marker missing expiry. Create a new checkpoint."
+  if [ -z "$checkpoint_id" ] || [ -z "$expires_at" ]; then
+    echo "Blocked: checkpoint marker missing required fields. Create a new checkpoint."
+    rm -f "$marker"
+    exit 1
+  fi
+
+  # Validate expires_at is numeric
+  if ! [[ "$expires_at" =~ ^[0-9]+$ ]]; then
+    echo "Blocked: checkpoint marker has invalid expiry. Create a new checkpoint."
     rm -f "$marker"
     exit 1
   fi
 
   # Compare expiry against current time
   now=$(date +%s)
-  if [ "$now" -gt "$expires_at" ] 2>/dev/null; then
+  if [ "$now" -gt "$expires_at" ]; then
     echo "Blocked: checkpoint has expired. Create a new checkpoint."
     rm -f "$marker"
     exit 1

@@ -64,36 +64,19 @@ def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[st
             f"but expected={expected_prev_hmac!r}"
         )
 
-    # Reconstruct content (same fields as shell hook, same order)
-    content = json.dumps(
-        {
-            "ts": entry["ts"],
-            "skill": entry["skill"],
-            "args": entry["args"],
-            "prev_hmac": entry["prev_hmac"],
-        },
-        separators=(",", ":"),
-        sort_keys=False,
-    )
+    # Reconstruct content in compact format matching jq -c output
+    content_dict = {
+        "ts": entry["ts"],
+        "skill": entry["skill"],
+        "args": entry["args"],
+        "prev_hmac": entry["prev_hmac"],
+    }
+    content = json.dumps(content_dict, separators=(",", ":"), sort_keys=False)
 
     # Verify HMAC
     expected_hmac = compute_hmac(content, hmac_key)
     if entry["hmac"] != expected_hmac:
-        # The shell uses jq which may format JSON differently.
-        # Try with jq-style spacing (compact with spaces after : and ,)
-        content_jq = json.dumps(
-            {
-                "ts": entry["ts"],
-                "skill": entry["skill"],
-                "args": entry["args"],
-                "prev_hmac": entry["prev_hmac"],
-            },
-        )
-        expected_hmac_jq = compute_hmac(content_jq, hmac_key)
-        if entry["hmac"] != expected_hmac_jq:
-            errors.append(
-                f"HMAC mismatch: recorded={entry['hmac']!r}"
-            )
+        errors.append(f"HMAC mismatch: recorded={entry['hmac']!r}")
 
     return errors
 

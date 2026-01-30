@@ -103,3 +103,4 @@ jobs:
         with:
           name: conformance-results
           path: build/conformance_results.json
+          if-no-files-found: warn
