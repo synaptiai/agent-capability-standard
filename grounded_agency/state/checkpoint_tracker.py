@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,6 +46,41 @@ class Checkpoint:
         if self.expires_at and datetime.now(timezone.utc) > self.expires_at:
             return False
         return True
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize checkpoint to a JSON-compatible dict."""
+        return {
+            "id": self.id,
+            "scope": self.scope,
+            "reason": self.reason,
+            "created_at": self.created_at.isoformat(),
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "consumed": self.consumed,
+            "consumed_at": self.consumed_at.isoformat() if self.consumed_at else None,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Checkpoint:
+        """Deserialize checkpoint from a dict."""
+        return cls(
+            id=data["id"],
+            scope=data["scope"],
+            reason=data["reason"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            expires_at=(
+                datetime.fromisoformat(data["expires_at"])
+                if data.get("expires_at")
+                else None
+            ),
+            consumed=data.get("consumed", False),
+            consumed_at=(
+                datetime.fromisoformat(data["consumed_at"])
+                if data.get("consumed_at")
+                else None
+            ),
+            metadata=data.get("metadata", {}),
+        )
 
     def matches_scope(self, target: str) -> bool:
         """Check if target is covered by this checkpoint's scope."""
@@ -117,6 +153,69 @@ class CheckpointTracker:
         self._marker_dir = Path(marker_dir) if marker_dir is not None else None
         self._active_checkpoint: Checkpoint | None = None
         self._checkpoint_history: list[Checkpoint] = []
+        self._load_persisted_state()
+
+    # ------------------------------------------------------------------
+    # Persistence (TD-011)
+    # ------------------------------------------------------------------
+
+    def _state_file_path(self) -> Path:
+        """Path to the persisted tracker state file."""
+        return self._checkpoint_dir / "tracker_state.json"
+
+    def _persist_state(self) -> None:
+        """Atomically write tracker state to disk.
+
+        Uses write-to-tmp + rename for crash safety.
+        """
+        try:
+            self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            state = {
+                "active": (
+                    self._active_checkpoint.to_dict()
+                    if self._active_checkpoint
+                    else None
+                ),
+                "history": [c.to_dict() for c in self._checkpoint_history],
+            }
+            state_path = self._state_file_path()
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._checkpoint_dir), suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(state, f)
+                os.replace(tmp_path, str(state_path))
+            except BaseException:
+                # Clean up temp file on failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        except OSError as e:
+            logger.warning("Failed to persist checkpoint state: %s", e)
+
+    def _load_persisted_state(self) -> None:
+        """Load tracker state from disk if available.
+
+        Handles missing and corrupt files gracefully.
+        """
+        state_path = self._state_file_path()
+        if not state_path.exists():
+            return
+        try:
+            raw = state_path.read_text(encoding="utf-8")
+            state = json.loads(raw)
+            if state.get("active"):
+                self._active_checkpoint = Checkpoint.from_dict(state["active"])
+            for entry in state.get("history", []):
+                self._checkpoint_history.append(Checkpoint.from_dict(entry))
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError, OSError) as e:
+            logger.warning("Failed to load persisted checkpoint state: %s", e)
+            # Start fresh — don't propagate corrupt state
+            self._active_checkpoint = None
+            self._checkpoint_history = []
 
     def create_checkpoint(
         self,
@@ -163,6 +262,7 @@ class CheckpointTracker:
 
         self._active_checkpoint = checkpoint
         self._write_marker(checkpoint)
+        self._persist_state()
         return checkpoint_id
 
     def _generate_checkpoint_id(self) -> str:
@@ -272,15 +372,19 @@ class CheckpointTracker:
         if self._active_checkpoint is None:
             return None
 
-        self._active_checkpoint.consumed = True
-        self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
+        # Capture reference and clear active first to avoid intermediate
+        # invalid state where active still points to consumed checkpoint.
+        consumed = self._active_checkpoint
+        self._active_checkpoint = None
 
-        checkpoint_id = self._active_checkpoint.id
+        consumed.consumed = True
+        consumed.consumed_at = datetime.now(timezone.utc)
+        checkpoint_id = consumed.id
 
         # Move to history
-        self._checkpoint_history.append(self._active_checkpoint)
-        self._active_checkpoint = None
+        self._checkpoint_history.append(consumed)
         self._remove_marker()
+        self._persist_state()
 
         return checkpoint_id
 
@@ -342,7 +446,10 @@ class CheckpointTracker:
             self._active_checkpoint = None
             self._remove_marker()
 
-        return original_count - len(self._checkpoint_history)
+        cleared = original_count - len(self._checkpoint_history)
+        if cleared > 0:
+            self._persist_state()
+        return cleared
 
     def invalidate_all(self) -> None:
         """Invalidate all checkpoints (used for rollback scenarios)."""
@@ -351,6 +458,7 @@ class CheckpointTracker:
             self._checkpoint_history.append(self._active_checkpoint)
             self._active_checkpoint = None
             self._remove_marker()
+            self._persist_state()
 
     @property
     def checkpoint_count(self) -> int:
