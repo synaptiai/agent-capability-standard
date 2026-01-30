@@ -1,29 +1,5 @@
 # Workflow Catalog (36-capability model)
 # Maps to capability_ontology.yaml
-#
-# Capability Mapping (old → new):
-#   inspect → observe
-#   map-relationships → attribute
-#   model-schema → constrain
-#   act-plan → execute
-#   identity-resolution → (composition: detect + classify + integrate)
-#   world-state → state
-#   state-transition → transition
-#   causal-model → attribute
-#   uncertainty-model → measure (with domain: uncertainty)
-#   provenance → audit
-#   grounding → ground
-#   simulation → simulate
-#   summarize → explain
-#   discover-relationship → discover
-#   compare-plans → compare
-#   prioritize → compare (with domain: priority)
-#   generate-plan → generate (with domain: plan)
-#   diff-world-state → compare (with domain: state_diff)
-#   detect-anomaly → detect (with domain: anomaly)
-#   estimate-risk → measure (with domain: risk)
-#   forecast-risk → predict (with domain: risk)
-#   invoke-workflow → invoke
 
 debug_code_change:
   goal: Safely diagnose and fix a bug/regression in a codebase.
