@@ -51,9 +51,9 @@ def mapper() -> ToolCapabilityMapper:
 
 
 @pytest.fixture
-def checkpoint_tracker() -> CheckpointTracker:
-    """Create a fresh CheckpointTracker."""
-    return CheckpointTracker()
+def checkpoint_tracker(tmp_path: Path) -> CheckpointTracker:
+    """Create a fresh CheckpointTracker with isolated directory."""
+    return CheckpointTracker(checkpoint_dir=tmp_path / ".checkpoints")
 
 
 @pytest.fixture
