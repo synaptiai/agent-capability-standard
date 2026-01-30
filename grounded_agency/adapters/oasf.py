@@ -289,7 +289,7 @@ class OASFAdapter:
         self._ensure_loaded()
         assert self._raw is not None
         meta: dict[str, Any] = self._raw.get("meta", {})
-        return meta.get("oasf_version", "unknown")
+        return str(meta.get("oasf_version", "unknown"))
 
     @property
     def mapping_version(self) -> str:
@@ -297,7 +297,7 @@ class OASFAdapter:
         self._ensure_loaded()
         assert self._raw is not None
         meta: dict[str, Any] = self._raw.get("meta", {})
-        return meta.get("version", "unknown")
+        return str(meta.get("version", "unknown"))
 
     @property
     def category_count(self) -> int:

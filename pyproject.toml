@@ -46,6 +46,7 @@ dev = [
     "pytest-asyncio>=0.21",
     "mypy>=1.0",
     "ruff>=0.1.0",
+    "types-PyYAML>=6.0",
 ]
 all = [
     "grounded-agency[sdk,dev]",
@@ -80,6 +81,10 @@ exclude = [
     "^.venv/",
     "^_archive/",
 ]
+
+[[tool.mypy.overrides]]
+module = "claude_agent_sdk.*"
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py310"
