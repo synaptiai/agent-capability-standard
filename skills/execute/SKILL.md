@@ -21,7 +21,7 @@ Execute code or commands in a controlled manner, capturing output for verificati
 - Errors properly surfaced
 
 **Compatible schemas:**
-- `schemas/execution_output.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -253,5 +253,5 @@ evidence_anchors:
 - Never execute untrusted code without sandboxing
 
 **Workflow references:**
-- See `workflow_catalog.yaml#debug_code_change` for execute in testing
-- See `workflow_catalog.yaml#digital_twin_sync_loop` for execute in sync loops
+- See `reference/workflow_catalog.yaml#debug_code_change` for execute in testing
+- See `reference/workflow_catalog.yaml#digital_twin_sync_loop` for execute in sync loops

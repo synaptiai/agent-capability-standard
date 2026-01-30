@@ -66,8 +66,7 @@ Execute **rollback** to restore system state to a previously created checkpoint.
 - Audit trail of what was reverted
 
 **Compatible schemas:**
-- `docs/schemas/rollback_result.yaml`
-- `docs/schemas/checkpoint.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -280,6 +279,6 @@ Apply the following verification patterns:
 - Never delete checkpoint until rollback verification passes
 
 **Workflow references:**
-- See `composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
-- See `composition_patterns.md#rollback-verification` in verification_patterns.md
-- See `composition_patterns.md#debug-code-change` for rollback-then-critique flow
+- See `reference/composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
+- See `reference/composition_patterns.md#rollback-verification` in verification_patterns.md
+- See `reference/composition_patterns.md#debug-code-change` for rollback-then-critique flow

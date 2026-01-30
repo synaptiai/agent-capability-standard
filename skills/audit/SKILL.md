@@ -47,8 +47,7 @@ Execute **audit** to create a structured record of actions taken, tools invoked,
 - Provenance chain for all outputs
 
 **Compatible schemas:**
-- `docs/schemas/audit_record.yaml`
-- `docs/schemas/change_log.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -307,5 +306,5 @@ Apply the following verification patterns:
 - Never omit failed actions from audit trail
 
 **Workflow references:**
-- See `composition_patterns.md#debug-code-change` for audit-after-verify
-- See `composition_patterns.md#digital-twin-sync-loop` for audit in loops
+- See `reference/composition_patterns.md#debug-code-change` for audit-after-verify
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for audit in loops

@@ -60,8 +60,7 @@ Send a message, event, or payload to an external destination with full policy en
 - Delivery confirmation obtained where possible
 
 **Compatible schemas:**
-- `docs/schemas/message_schema.yaml`
-- `docs/schemas/policy_schema.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -327,5 +326,5 @@ The approval must be captured with a token that is referenced in this operation.
 - NEVER retry failed sends indefinitely (resource exhaustion)
 
 **Workflow references:**
-- See `composition_patterns.md#anti-patterns` for send safety rules
-- See `composition_patterns.md#digital-twin-sync-loop` for send in sync context
+- See `reference/composition_patterns.md#anti-patterns` for send safety rules
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for send in sync context

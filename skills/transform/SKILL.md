@@ -50,7 +50,7 @@ Transform data from one format or schema to another while tracking what informat
 - Evidence anchors trace source to output
 
 **Compatible schemas:**
-- `docs/schemas/transform_schema.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -320,5 +320,5 @@ assumptions:
 - Avoid chained transforms without intermediate validation
 
 **Workflow references:**
-- See `composition_patterns.md#digital-twin-sync-loop` for transform in data pipeline
-- See `composition_patterns.md#enrichment-pipeline` for transform context
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for transform in data pipeline
+- See `reference/composition_patterns.md#enrichment-pipeline` for transform context

@@ -20,7 +20,8 @@ Generate targeted clarifying questions when a user request is ambiguous or under
 - Evidence anchors reference the specific ambiguous elements
 
 **Compatible schemas:**
-- `schemas/capability_ontology.yaml#/inquire`
+- `schemas/output_schema.yaml`
+- `reference/capability_ontology.yaml#/inquire`
 
 ## Inputs
 
@@ -217,4 +218,4 @@ assumptions: []
 - Don't use with `mutate` in the same step - inquire is read-only
 
 **Workflow references:**
-- See `workflow_catalog.yaml#clarify_intent` for the complete clarification workflow
+- See `reference/workflow_catalog.yaml#clarify_intent` for the complete clarification workflow

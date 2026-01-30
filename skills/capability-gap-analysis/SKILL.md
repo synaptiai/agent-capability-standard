@@ -21,8 +21,8 @@ Run the composed workflow **gap-analysis-workflow** using atomic capability skil
 - Audit trail of analysis process
 
 **Compatible schemas:**
-- `docs/schemas/capability_ontology.yaml`
-- `docs/schemas/workflow_catalog.yaml`
+- `reference/capability_ontology.yaml`
+- `reference/workflow_catalog.yaml`
 
 ## Inputs
 
@@ -317,5 +317,5 @@ assumptions:
 - Never generate roadmap without dependency analysis
 
 **Workflow references:**
-- See `workflow_catalog.yaml#gap-analysis-workflow` for step definitions
-- See `capability_ontology.yaml` for reference structure
+- See `reference/workflow_catalog.yaml#gap-analysis-workflow` for step definitions
+- See `reference/capability_ontology.yaml` for reference structure

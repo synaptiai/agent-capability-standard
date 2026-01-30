@@ -21,7 +21,7 @@ Forecast future states or outcomes for a target based on current state, historic
 - Assumptions explicitly stated
 
 **Compatible schemas:**
-- `docs/schemas/prediction_output.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -233,4 +233,4 @@ invalidation_conditions:
 - Avoid predict when historical data is insufficient
 
 **Workflow references:**
-- See `workflow_catalog.yaml#digital_twin_sync_loop` for forecasting in digital twins
+- See `reference/workflow_catalog.yaml#digital_twin_sync_loop` for forecasting in digital twins

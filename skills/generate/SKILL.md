@@ -20,7 +20,7 @@ Produce a new artifact that satisfies specified constraints and serves a defined
 - Safety considerations documented
 
 **Compatible schemas:**
-- `docs/schemas/generation_output.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -348,5 +348,5 @@ next_actions:
 - Do not use generate for analysis (use `estimate`, `compare`, etc.)
 
 **Workflow references:**
-- See `composition_patterns.md#capability-gap-analysis` for generate-plan usage
-- See `composition_patterns.md#debug-code-change` for code generation in fixes
+- See `reference/composition_patterns.md#capability-gap-analysis` for generate-plan usage
+- See `reference/composition_patterns.md#debug-code-change` for code generation in fixes

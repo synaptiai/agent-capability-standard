@@ -20,7 +20,7 @@ Explore data or systems to find patterns, relationships, or anomalies that were 
 - Methodology documented for reproducibility
 
 **Compatible schemas:**
-- `docs/schemas/discovery_output.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -251,5 +251,5 @@ assumptions:
 - Do not use discover when you already know what to find
 
 **Workflow references:**
-- See `composition_patterns.md#capability-gap-analysis` for discover-relationship usage
-- See `composition_patterns.md#world-model-build` for discovery in modeling
+- See `reference/composition_patterns.md#capability-gap-analysis` for discover-relationship usage
+- See `reference/composition_patterns.md#world-model-build` for discovery in modeling

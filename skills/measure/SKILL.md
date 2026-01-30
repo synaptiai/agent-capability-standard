@@ -21,7 +21,7 @@ Quantify a specific metric for a target, providing a numerical value with explic
 - Units clearly specified
 
 **Compatible schemas:**
-- `docs/schemas/measurement_output.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -206,4 +206,4 @@ assumptions:
 - Avoid measure for categorical assessment (use `classify`)
 
 **Workflow references:**
-- See `workflow_catalog.yaml#digital_twin_sync_loop` for risk measurement
+- See `reference/workflow_catalog.yaml#digital_twin_sync_loop` for risk measurement

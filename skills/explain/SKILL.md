@@ -21,7 +21,7 @@ Generate a clear, structured explanation of a topic, decision, or concept tailor
 - No unnecessary jargon or fluff
 
 **Compatible schemas:**
-- `docs/schemas/explanation_schema.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 

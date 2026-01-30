@@ -21,7 +21,7 @@ Assign one or more labels from a defined taxonomy to items based on their observ
 - Ambiguous cases explicitly flagged
 
 **Compatible schemas:**
-- `docs/schemas/classification_output.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -200,4 +200,4 @@ assumptions:
 - Avoid classify when precise measurement needed (use `measure`)
 
 **Workflow references:**
-- See `workflow_catalog.yaml#capability_gap_analysis` for classification usage
+- See `reference/workflow_catalog.yaml#capability_gap_analysis` for classification usage

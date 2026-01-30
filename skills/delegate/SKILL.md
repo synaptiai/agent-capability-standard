@@ -21,7 +21,7 @@ Delegate a complex task to one or more subagents by defining clear contracts, in
 - Dependencies between subtasks are clear
 
 **Compatible schemas:**
-- `docs/schemas/delegation_schema.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -382,4 +382,4 @@ assumptions:
 - Avoid circular dependencies between subtasks
 
 **Workflow references:**
-- See `composition_patterns.md#enrichment-pipeline` for parallel delegation
+- See `reference/composition_patterns.md#enrichment-pipeline` for parallel delegation

@@ -21,7 +21,8 @@ Invoke a predefined workflow by name, passing input parameters and receiving agg
 - Execution trace available for debugging
 
 **Compatible schemas:**
-- `schemas/workflow_catalog.yaml`
+- `schemas/output_schema.yaml`
+- `reference/workflow_catalog.yaml`
 
 ## Inputs
 
@@ -315,5 +316,5 @@ evidence_anchors:
 - Do not invoke without understanding workflow effects
 
 **Workflow references:**
-- See `workflow_catalog.yaml#digital_twin_bootstrap` for nested invocation
+- See `reference/workflow_catalog.yaml#digital_twin_bootstrap` for nested invocation
 - This capability is the entry point for all workflow execution

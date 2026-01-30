@@ -21,7 +21,7 @@ Break down a complex goal into smaller, manageable subgoals with clear boundarie
 - Decomposition depth is appropriate
 
 **Compatible schemas:**
-- `docs/schemas/decomposition_schema.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -382,4 +382,4 @@ assumptions:
 - Never skip acceptance criteria
 
 **Workflow references:**
-- See `composition_patterns.md` for plan requiring decompose
+- See `reference/composition_patterns.md` for plan requiring decompose

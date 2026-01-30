@@ -59,8 +59,7 @@ Execute **checkpoint** to create a restorable state marker before any mutating o
 - Expiry policy set if applicable
 
 **Compatible schemas:**
-- `docs/schemas/checkpoint.yaml`
-- `docs/schemas/state_snapshot.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -268,6 +267,6 @@ Apply the following verification patterns:
 - Never delete checkpoint before verify confirms success
 
 **Workflow references:**
-- See `composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
-- See `composition_patterns.md#debug-code-change` for checkpoint placement
-- See `composition_patterns.md#digital-twin-sync-loop` for checkpoint in loops
+- See `reference/composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
+- See `reference/composition_patterns.md#debug-code-change` for checkpoint placement
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for checkpoint in loops

@@ -21,7 +21,7 @@ Establish causal relationships between observed effects and potential causes. Th
 - Alternative causes considered and ruled out
 
 **Compatible schemas:**
-- `schemas/causal_model_schema.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -257,5 +257,5 @@ assumptions:
 - Avoid attribution without sufficient evidence
 
 **Workflow references:**
-- See `workflow_catalog.yaml#debug_code_change` for attribution in debugging
-- See `workflow_catalog.yaml#world_model_build` for causal modeling
+- See `reference/workflow_catalog.yaml#debug_code_change` for attribution in debugging
+- See `reference/workflow_catalog.yaml#world_model_build` for causal modeling

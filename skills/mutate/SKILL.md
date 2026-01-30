@@ -23,7 +23,7 @@ Make controlled changes to persistent state with safety guarantees. This is the 
 - Audit trail recorded
 
 **Compatible schemas:**
-- `schemas/mutation_output.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -252,5 +252,5 @@ error:
 - Avoid mutation in exploratory workflows
 
 **Workflow references:**
-- See `workflow_catalog.yaml#debug_code_change` for mutation in bug fixes
-- See `workflow_catalog.yaml#digital_twin_sync_loop` for mutation in sync loops
+- See `reference/workflow_catalog.yaml#debug_code_change` for mutation in bug fixes
+- See `reference/workflow_catalog.yaml#digital_twin_sync_loop` for mutation in sync loops

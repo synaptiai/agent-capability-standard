@@ -20,7 +20,7 @@ Scan data sources to determine whether a specified pattern, entity, or condition
 - Confidence score justified by evidence quality
 
 **Compatible schemas:**
-- `docs/schemas/detection_output.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -193,5 +193,5 @@ next_actions:
 - Avoid detect for quantitative assessment (use `estimate` instead)
 
 **Workflow references:**
-- See `composition_patterns.md#risk-assessment` for detection in risk workflows
-- See `composition_patterns.md#observe-model-act` for detection in agentic loops
+- See `reference/composition_patterns.md#risk-assessment` for detection in risk workflows
+- See `reference/composition_patterns.md#observe-model-act` for detection in agentic loops

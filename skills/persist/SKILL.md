@@ -67,8 +67,7 @@ Execute **persist** to write stable learnings, decisions, and patterns to durabl
 - Write is verified successfully
 
 **Compatible schemas:**
-- `docs/schemas/memory_schema.yaml`
-- `CLAUDE.md` format conventions
+- `schemas/output_schema.yaml`
 
 ## Inputs
 

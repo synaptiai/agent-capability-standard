@@ -23,7 +23,7 @@ Create a structured, executable plan that decomposes a goal into ordered steps w
 - Estimated risk level accurately reflects plan complexity
 
 **Compatible schemas:**
-- `docs/schemas/plan_schema.yaml`
+- `schemas/output_schema.yaml`
 
 ## Inputs
 
@@ -330,6 +330,6 @@ assumptions:
 - Never execute plans with unresolved ambiguity
 
 **Workflow references:**
-- See `composition_patterns.md#debug-code-change` for bug fix workflow
-- See `composition_patterns.md#capability-gap-analysis` for planning context
-- See `composition_patterns.md#oma-pattern` for Observe-Model-Act flow
+- See `reference/composition_patterns.md#debug-code-change` for bug fix workflow
+- See `reference/composition_patterns.md#capability-gap-analysis` for planning context
+- See `reference/composition_patterns.md#oma-pattern` for Observe-Model-Act flow

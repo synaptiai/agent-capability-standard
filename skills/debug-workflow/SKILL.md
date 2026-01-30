@@ -21,8 +21,7 @@ Run the composed workflow **debug-workflow** using atomic capability skills to s
 - Rollback pathway documented and verified
 
 **Compatible schemas:**
-- `docs/schemas/workflow_catalog.yaml`
-- `docs/schemas/audit_log.yaml`
+- `reference/workflow_catalog.yaml`
 
 ## Inputs
 
@@ -289,5 +288,5 @@ assumptions:
 - Never mark complete without `/verify` confirmation
 
 **Workflow references:**
-- See `workflow_catalog.yaml#debug-workflow` for step definitions
-- See `composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
+- See `reference/workflow_catalog.yaml#debug-workflow` for step definitions
+- See `reference/composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
