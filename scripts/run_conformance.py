@@ -33,7 +33,7 @@ def run_fixture(name: str, path: Path) -> dict:
 
 def main() -> None:
     results = []
-    failed=0
+    failed = 0
     for name, meta in EXPECT.items():
         path = FIX / f"{name}.workflow_catalog.yaml"
         if not path.exists():

@@ -193,7 +193,7 @@ class CheckpointTracker:
                 except OSError:
                     pass
                 raise
-        except OSError as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.warning("Failed to persist checkpoint state: %s", e)
 
     # Maximum size for persisted state file (10 MB — generous for JSON metadata).
@@ -220,7 +220,9 @@ class CheckpointTracker:
             state = json.loads(raw)
             if state.get("active"):
                 self._active_checkpoint = Checkpoint.from_dict(state["active"])
-            for entry in state.get("history", []):
+            # Cap loaded history to _max_history to prevent unbounded growth
+            # from a crafted or accumulated state file.
+            for entry in state.get("history", [])[:self._max_history]:
                 self._checkpoint_history.append(Checkpoint.from_dict(entry))
         except (json.JSONDecodeError, KeyError, ValueError, TypeError, OSError) as e:
             logger.warning("Failed to load persisted checkpoint state: %s", e)
@@ -459,12 +461,13 @@ class CheckpointTracker:
             for c in self._checkpoint_history
             if c.expires_at is None or c.expires_at > now
         ]
-        history_cleared = original_count - len(self._checkpoint_history)
+        # Includes the expired active (appended above) that was then filtered out.
+        total_cleared = original_count - len(self._checkpoint_history)
 
         # Persist whenever state changed (active cleared or history pruned)
-        if active_cleared or history_cleared > 0:
+        if active_cleared or total_cleared > 0:
             self._persist_state()
-        return history_cleared
+        return total_cleared
 
     def invalidate_all(self) -> None:
         """Invalidate all checkpoints (used for rollback scenarios)."""

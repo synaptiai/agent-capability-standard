@@ -3,6 +3,9 @@
 Standalone version that avoids import dependencies on the
 ``grounded_agency`` package.  Mirrors the API of
 ``grounded_agency.utils.safe_yaml`` so call-sites look identical.
+
+IMPORTANT: This file is a mirror of ``grounded_agency/utils/safe_yaml.py``.
+Changes here MUST be applied to the source as well.
 """
 
 from __future__ import annotations
@@ -46,14 +49,17 @@ def safe_yaml_load(
 
     Raises:
         FileNotFoundError: If the file does not exist.
+        ValueError: If the path is a symlink (SEC-006).
         YAMLSizeExceededError: If the file exceeds *max_size*.
         yaml.YAMLError: If the file is not valid YAML.
     """
     path = Path(path)
 
-    if not path.exists():
-        raise FileNotFoundError(f"YAML file not found: {path}")
+    if path.is_symlink():
+        raise ValueError(f"Refusing to follow symlink: {path}")
 
+    # Open first, then fstat() on the fd to avoid TOCTOU between stat() and open().
+    # If the file does not exist, open() raises FileNotFoundError directly.
     with open(path, encoding="utf-8") as f:
         file_size = os.fstat(f.fileno()).st_size
         if file_size > max_size:

@@ -192,6 +192,42 @@ class TestAtomicWrites:
         assert (new_dir / "tracker_state.json").exists()
 
 
+class TestEdgeCases:
+    """Tests for edge-case resilience."""
+
+    def test_oversized_state_file_starts_fresh(self, chk_dir: Path) -> None:
+        """State file exceeding _MAX_STATE_FILE_BYTES is ignored."""
+        state_file = chk_dir / "tracker_state.json"
+        # Write a file larger than 10 MB
+        state_file.write_text("x" * (10 * 1024 * 1024 + 1), encoding="utf-8")
+
+        tracker = CheckpointTracker(checkpoint_dir=chk_dir)
+        assert not tracker.has_valid_checkpoint()
+        assert tracker.checkpoint_count == 0
+
+    def test_persist_failure_does_not_crash(self, tmp_path: Path) -> None:
+        """Tracker operates in-memory when persistence fails (read-only dir)."""
+        import os
+        import platform
+
+        chk_dir = tmp_path / "readonly_dir"
+        chk_dir.mkdir()
+
+        # Create the tracker while the dir is writable
+        tracker = CheckpointTracker(checkpoint_dir=chk_dir)
+
+        if platform.system() != "Windows":
+            # Make directory read-only to force persistence failure
+            os.chmod(chk_dir, 0o555)
+            try:
+                chk_id = tracker.create_checkpoint(scope=["*"], reason="ro test")
+                # Should still work in-memory even though persist failed
+                assert tracker.has_valid_checkpoint()
+                assert tracker.get_active_checkpoint_id() == chk_id
+            finally:
+                os.chmod(chk_dir, 0o755)
+
+
 class TestClearExpiredPersistence:
     """Tests for clear_expired persistence behavior."""
 

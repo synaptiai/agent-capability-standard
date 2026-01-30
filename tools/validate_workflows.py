@@ -499,14 +499,14 @@ def main() -> None:
 
     try:
         onto = safe_yaml_load(ONTO, max_size=ONTOLOGY_MAX_BYTES)
-    except (FileNotFoundError, YAMLSizeExceededError) as e:
+    except (FileNotFoundError, YAMLSizeExceededError, yaml.YAMLError) as e:
         print(f"ERROR: Cannot load ontology: {e}", file=sys.stderr)
         sys.exit(1)
 
     wf_path = Path(args.catalog) if args.catalog else WF
     try:
         workflows = safe_yaml_load(wf_path) or {}
-    except (FileNotFoundError, YAMLSizeExceededError) as e:
+    except (FileNotFoundError, YAMLSizeExceededError, yaml.YAMLError) as e:
         print(f"ERROR: Cannot load workflow catalog: {e}", file=sys.stderr)
         sys.exit(1)
     nodes = {n['id']: n for n in onto['nodes']}
@@ -522,7 +522,7 @@ def main() -> None:
 
     if args.emit_patch and suggestions:
         modified = apply_patch_suggestions_to_yaml(workflows, suggestions)
-        original = WF.read_text(encoding="utf-8")
+        original = wf_path.read_text(encoding="utf-8")
         diff = difflib.unified_diff(
             original.splitlines(keepends=True),
             modified.splitlines(keepends=True),

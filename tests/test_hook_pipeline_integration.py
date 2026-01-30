@@ -78,6 +78,7 @@ def _run_hook(hook_path: Path, payload: str, env: dict[str, str]) -> subprocess.
         capture_output=True,
         text=True,
         env=_minimal_env(env),
+        timeout=10,
     )
 
 
@@ -286,6 +287,7 @@ class TestAuditLogIntegrity:
             capture_output=True,
             text=True,
             env=_minimal_env({"CLAUDE_PROJECT_DIR": str(project_dir)}),
+            timeout=10,
         )
         assert result.returncode == 0
 
@@ -315,6 +317,7 @@ class TestAuditLogIntegrity:
                 capture_output=True,
                 text=True,
                 env=_minimal_env({"CLAUDE_PROJECT_DIR": str(project_dir)}),
+                timeout=10,
             )
 
         log_file = project_dir / ".claude" / "audit.log"
@@ -344,6 +347,7 @@ class TestAuditLogIntegrity:
             capture_output=True,
             text=True,
             env=_minimal_env({"CLAUDE_PROJECT_DIR": str(project_dir)}),
+            timeout=10,
         )
 
         log_file = project_dir / ".claude" / "audit.log"

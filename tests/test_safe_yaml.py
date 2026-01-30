@@ -88,6 +88,24 @@ class TestSafeYamlLoad:
             safe_yaml_load(small_yaml, max_size=1)
 
 
+class TestSymlinkRejection:
+    """Tests for symlink rejection (SEC-006)."""
+
+    def test_rejects_symlink_to_valid_yaml(self, small_yaml: Path, tmp_path: Path) -> None:
+        """Symlinks should be rejected even if the target is a valid YAML file."""
+        link = tmp_path / "link.yaml"
+        link.symlink_to(small_yaml)
+        with pytest.raises(ValueError, match="symlink"):
+            safe_yaml_load(link)
+
+    def test_rejects_symlink_to_nonexistent(self, tmp_path: Path) -> None:
+        """Symlinks to nonexistent targets should be rejected as symlinks, not FileNotFoundError."""
+        link = tmp_path / "dangling.yaml"
+        link.symlink_to(tmp_path / "does_not_exist.yaml")
+        with pytest.raises(ValueError, match="symlink"):
+            safe_yaml_load(link)
+
+
 class TestYAMLSizeExceededError:
     """Tests for the custom exception."""
 
