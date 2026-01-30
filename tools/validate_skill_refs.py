@@ -97,13 +97,17 @@ def parse_sections(lines: list[str]) -> list[Tuple[str, int, int]]:
     return sections
 
 
-def is_in_code_block(lines: list[str], line_idx: int) -> bool:
-    """Check if a line is inside a fenced code block."""
-    fence_count = 0
-    for i in range(line_idx):
-        if lines[i].strip().startswith(CODE_FENCE):
-            fence_count += 1
-    return fence_count % 2 == 1
+def compute_code_block_lines(lines: list[str]) -> set[int]:
+    """Precompute set of line indices that are inside fenced code blocks."""
+    code_lines: set[int] = set()
+    in_block = False
+    for i, line in enumerate(lines):
+        if line.strip().startswith(CODE_FENCE):
+            in_block = not in_block
+            continue
+        if in_block:
+            code_lines.add(i)
+    return code_lines
 
 
 def validate_skill(skill_path: Path, errors: list[str], verbose: bool) -> None:
@@ -113,12 +117,13 @@ def validate_skill(skill_path: Path, errors: list[str], verbose: bool) -> None:
     lines = content.splitlines()
 
     sections = parse_sections(lines)
+    code_block_lines = compute_code_block_lines(lines)
 
     for section_name, start, end in sections:
         for line_idx in range(start, min(end + 1, len(lines))):
             line = lines[line_idx]
 
-            if is_in_code_block(lines, line_idx):
+            if line_idx in code_block_lines:
                 continue
 
             for match in PATH_REF_RE.finditer(line):
