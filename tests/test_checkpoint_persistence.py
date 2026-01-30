@@ -192,6 +192,56 @@ class TestAtomicWrites:
         assert (new_dir / "tracker_state.json").exists()
 
 
+class TestClearExpiredPersistence:
+    """Tests for clear_expired persistence behavior."""
+
+    def test_clear_expired_persists_active_removal(self, chk_dir: Path) -> None:
+        """Expired active checkpoint is cleared from disk after clear_expired()."""
+        from datetime import datetime, timedelta, timezone
+
+        tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
+        # Create checkpoint that is already expired
+        tracker1.create_checkpoint(scope=["*"], reason="will expire", expiry_minutes=0)
+        # Force expiry by setting expires_at to the past
+        assert tracker1._active_checkpoint is not None
+        tracker1._active_checkpoint.expires_at = datetime.now(timezone.utc) - timedelta(
+            seconds=10
+        )
+        tracker1._persist_state()
+
+        # Clear expired
+        tracker1.clear_expired()
+        assert tracker1._active_checkpoint is None
+
+        # Restore from disk — active should be gone
+        tracker2 = CheckpointTracker(checkpoint_dir=chk_dir)
+        assert not tracker2.has_valid_checkpoint()
+        assert tracker2._active_checkpoint is None
+
+    def test_clear_expired_removes_from_history(self, chk_dir: Path) -> None:
+        """Expired history entries are removed from disk after clear_expired()."""
+        from datetime import datetime, timedelta, timezone
+
+        tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
+        # Create and consume a checkpoint (moves to history)
+        tracker1.create_checkpoint(scope=["*"], reason="will expire", expiry_minutes=0)
+        assert tracker1._active_checkpoint is not None
+        tracker1._active_checkpoint.expires_at = datetime.now(timezone.utc) - timedelta(
+            seconds=10
+        )
+        tracker1.consume_checkpoint()
+
+        # History should have 1 expired entry
+        assert len(tracker1._checkpoint_history) == 1
+
+        tracker1.clear_expired()
+        assert len(tracker1._checkpoint_history) == 0
+
+        # Restore — history should be empty on disk too
+        tracker2 = CheckpointTracker(checkpoint_dir=chk_dir)
+        assert tracker2.checkpoint_count == 0
+
+
 class TestInvalidateAllPersistence:
     """Tests for persistence during invalidate_all."""
 

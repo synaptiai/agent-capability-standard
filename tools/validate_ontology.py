@@ -17,7 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from _yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
+from yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
 
 def load_ontology(path: Path) -> dict[str, Any]:

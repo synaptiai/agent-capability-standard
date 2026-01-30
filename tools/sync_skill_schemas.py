@@ -23,7 +23,7 @@ from pathlib import Path
 
 import yaml
 
-from _yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
+from yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]
 ONTOLOGY_PATH = ROOT / "schemas" / "capability_ontology.yaml"

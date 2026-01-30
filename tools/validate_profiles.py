@@ -27,7 +27,7 @@ from typing import Any
 
 import yaml
 
-from _yaml_util import safe_yaml_load
+from yaml_util import YAMLSizeExceededError, safe_yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES_DIR = ROOT / "schemas" / "profiles"
@@ -325,8 +325,8 @@ def main() -> None:
 
         try:
             profile = safe_yaml_load(profile_path) or {}
-        except yaml.YAMLError as e:
-            errors.append(f"[{profile_name}] YAML parse error: {e}")
+        except (yaml.YAMLError, YAMLSizeExceededError) as e:
+            errors.append(f"[{profile_name}] YAML load error: {e}")
             continue
 
         validate_profile(profile, errors, profile_name)

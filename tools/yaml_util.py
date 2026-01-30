@@ -7,6 +7,7 @@ Standalone version that avoids import dependencies on the
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -53,9 +54,8 @@ def safe_yaml_load(
     if not path.exists():
         raise FileNotFoundError(f"YAML file not found: {path}")
 
-    file_size = path.stat().st_size
-    if file_size > max_size:
-        raise YAMLSizeExceededError(path, file_size, max_size)
-
     with open(path, encoding="utf-8") as f:
+        file_size = os.fstat(f.fileno()).st_size
+        if file_size > max_size:
+            raise YAMLSizeExceededError(path, file_size, max_size)
         return yaml.safe_load(f)

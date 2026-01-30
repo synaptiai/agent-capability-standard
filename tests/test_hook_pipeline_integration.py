@@ -57,13 +57,27 @@ def tracker_with_marker(project_dir: Path) -> CheckpointTracker:
     )
 
 
+def _minimal_env(overrides: dict[str, str]) -> dict[str, str]:
+    """Build a minimal, deterministic environment for shell hook tests.
+
+    Only passes PATH, HOME, and SHELL from the host to avoid
+    non-deterministic behaviour from leaked environment variables.
+    """
+    base = {}
+    for key in ("PATH", "HOME", "SHELL", "TMPDIR"):
+        if key in os.environ:
+            base[key] = os.environ[key]
+    base.update(overrides)
+    return base
+
+
 def _run_hook(hook_path: Path, payload: str, env: dict[str, str]) -> subprocess.CompletedProcess:
     """Execute a shell hook script with the given payload and environment."""
     return subprocess.run(
         ["bash", str(hook_path), payload],
         capture_output=True,
         text=True,
-        env={**os.environ, **env},
+        env=_minimal_env(env),
     )
 
 
@@ -271,7 +285,7 @@ class TestAuditLogIntegrity:
             input=payload,
             capture_output=True,
             text=True,
-            env={**os.environ, "CLAUDE_PROJECT_DIR": str(project_dir)},
+            env=_minimal_env({"CLAUDE_PROJECT_DIR": str(project_dir)}),
         )
         assert result.returncode == 0
 
@@ -300,7 +314,7 @@ class TestAuditLogIntegrity:
                 input=payload,
                 capture_output=True,
                 text=True,
-                env={**os.environ, "CLAUDE_PROJECT_DIR": str(project_dir)},
+                env=_minimal_env({"CLAUDE_PROJECT_DIR": str(project_dir)}),
             )
 
         log_file = project_dir / ".claude" / "audit.log"
@@ -329,7 +343,7 @@ class TestAuditLogIntegrity:
             input=payload,
             capture_output=True,
             text=True,
-            env={**os.environ, "CLAUDE_PROJECT_DIR": str(project_dir)},
+            env=_minimal_env({"CLAUDE_PROJECT_DIR": str(project_dir)}),
         )
 
         log_file = project_dir / ".claude" / "audit.log"

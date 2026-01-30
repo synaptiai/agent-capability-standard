@@ -31,13 +31,9 @@ def small_yaml(tmp_path: Path) -> Path:
 def oversized_yaml(tmp_path: Path) -> Path:
     """Create a YAML file that exceeds the default 1 MB limit."""
     p = tmp_path / "oversized.yaml"
-    # Write slightly over 1 MB of valid YAML
-    lines = [f"key_{i}: {'x' * 100}" for i in range(10_000)]
-    content = "\n".join(lines)
-    # Pad to exceed 1 MB
-    while len(content.encode("utf-8")) <= DEFAULT_MAX_BYTES:
-        content += "\nextra: " + "y" * 1000
-    p.write_text(content, encoding="utf-8")
+    # Single write — clearly exceeds 1 MB
+    padding = "x" * DEFAULT_MAX_BYTES
+    p.write_text(f"key: {padding}\n", encoding="utf-8")
     return p
 
 

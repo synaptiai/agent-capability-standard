@@ -108,7 +108,7 @@ class CheckpointTracker:
     4. Checkpoint history for audit trails
 
     Example:
-        tracker = CheckpointTracker()
+        tracker = CheckpointTracker(checkpoint_dir=".checkpoints")
 
         # Before mutation
         checkpoint_id = tracker.create_checkpoint(
@@ -186,8 +186,8 @@ class CheckpointTracker:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(state, f)
                 os.replace(tmp_path, str(state_path))
-            except BaseException:
-                # Clean up temp file on failure
+            except Exception:
+                # Clean up temp file on failure; re-raise original error.
                 try:
                     os.unlink(tmp_path)
                 except OSError:
@@ -195,6 +195,9 @@ class CheckpointTracker:
                 raise
         except OSError as e:
             logger.warning("Failed to persist checkpoint state: %s", e)
+
+    # Maximum size for persisted state file (10 MB — generous for JSON metadata).
+    _MAX_STATE_FILE_BYTES: int = 10 * 1024 * 1024
 
     def _load_persisted_state(self) -> None:
         """Load tracker state from disk if available.
@@ -205,6 +208,14 @@ class CheckpointTracker:
         if not state_path.exists():
             return
         try:
+            file_size = state_path.stat().st_size
+            if file_size > self._MAX_STATE_FILE_BYTES:
+                logger.warning(
+                    "State file too large (%d bytes, limit %d) — starting fresh",
+                    file_size,
+                    self._MAX_STATE_FILE_BYTES,
+                )
+                return
             raw = state_path.read_text(encoding="utf-8")
             state = json.loads(raw)
             if state.get("active"):
@@ -432,29 +443,34 @@ class CheckpointTracker:
             Number of checkpoints cleared
         """
         now = datetime.now(timezone.utc)
-        original_count = len(self._checkpoint_history)
+        active_cleared = False
 
+        # Move expired active checkpoint to history FIRST so it gets
+        # filtered along with all other expired history entries.
+        if self._active_checkpoint and not self._active_checkpoint.is_valid():
+            self._checkpoint_history.append(self._active_checkpoint)
+            self._active_checkpoint = None
+            self._remove_marker()
+            active_cleared = True
+
+        original_count = len(self._checkpoint_history)
         self._checkpoint_history = [
             c
             for c in self._checkpoint_history
             if c.expires_at is None or c.expires_at > now
         ]
+        history_cleared = original_count - len(self._checkpoint_history)
 
-        # Clear active if expired
-        if self._active_checkpoint and not self._active_checkpoint.is_valid():
-            self._checkpoint_history.append(self._active_checkpoint)
-            self._active_checkpoint = None
-            self._remove_marker()
-
-        cleared = original_count - len(self._checkpoint_history)
-        if cleared > 0:
+        # Persist whenever state changed (active cleared or history pruned)
+        if active_cleared or history_cleared > 0:
             self._persist_state()
-        return cleared
+        return history_cleared
 
     def invalidate_all(self) -> None:
         """Invalidate all checkpoints (used for rollback scenarios)."""
         if self._active_checkpoint:
             self._active_checkpoint.consumed = True
+            self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
             self._checkpoint_history.append(self._active_checkpoint)
             self._active_checkpoint = None
             self._remove_marker()

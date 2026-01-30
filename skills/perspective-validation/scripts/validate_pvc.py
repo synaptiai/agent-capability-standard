@@ -23,10 +23,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-_MAX_PVC_YAML_BYTES = 1 * 1024 * 1024  # 1 MB
-
 
 def _find_root() -> Path:
     """Walk up from script location to find the repo root."""
@@ -39,6 +35,9 @@ def _find_root() -> Path:
 
 
 ROOT = _find_root()
+sys.path.insert(0, str(ROOT / "tools"))
+from yaml_util import safe_yaml_load  # noqa: E402
+
 PVC_DIR = ROOT / "docs" / "reviews" / "pvc"
 
 ALLOWED_STATUSES = {"PASS", "PARTIAL", "FAIL", "N/A"}
@@ -201,13 +200,7 @@ def _validate_report(path: Path, data: Any) -> list[str]:
 
 
 def _read_yaml(path: Path) -> Any:
-    file_size = path.stat().st_size
-    if file_size > _MAX_PVC_YAML_BYTES:
-        raise ValueError(
-            f"PVC YAML file exceeds size limit: {path} is {file_size:,} bytes "
-            f"(limit: {_MAX_PVC_YAML_BYTES:,} bytes)"
-        )
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return safe_yaml_load(path)
 
 
 def _git_changed_files(diff_base: str) -> list[str] | None:
