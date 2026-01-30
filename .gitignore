@@ -6,9 +6,13 @@
 *.pyc
 __pycache__/
 
+# Build outputs
+build/
+
 # Tool output artifacts
 validator_suggestions.json
 validator_patch.diff
 conformance_results.json
 .claude/audit.log
+.claude/checkpoint.ok
 .claude/settings.json

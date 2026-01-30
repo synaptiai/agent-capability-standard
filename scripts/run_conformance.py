@@ -49,7 +49,9 @@ def main() -> None:
             print(f"PASS: {name}")
         results.append(res)
 
-    (ROOT / "conformance_results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+    build_dir = ROOT / "build"
+    build_dir.mkdir(exist_ok=True)
+    (build_dir / "conformance_results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
     if failed:
         print(f"\nConformance FAILED ({failed} failures)")
         sys.exit(1)

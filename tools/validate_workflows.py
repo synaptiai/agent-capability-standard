@@ -42,7 +42,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
@@ -57,10 +57,10 @@ REF_RE = re.compile(r"\$\{([^}]+)\}")
 
 # -------------------- Helpers: type grammar --------------------
 
-def split_top_level(s: str, sep: str) -> List[str]:
-    out: List[str] = []
+def split_top_level(s: str, sep: str) -> list[str]:
+    out: list[str] = []
     depth = 0
-    cur: List[str] = []
+    cur: list[str] = []
     for ch in s:
         if ch == '<':
             depth += 1
@@ -75,7 +75,7 @@ def split_top_level(s: str, sep: str) -> List[str]:
         out.append(''.join(cur).strip())
     return out
 
-def parse_type(t: str) -> Dict[str, Any]:
+def parse_type(t: str) -> dict[str, Any]:
     t = (t or '').strip()
     if not t:
         return {'kind': 'unknown'}
@@ -93,7 +93,7 @@ def parse_type(t: str) -> Dict[str, Any]:
         return {'kind': t}
     return {'kind': 'unknown', 'raw': t}
 
-def type_to_str(t: Dict[str, Any]) -> str:
+def type_to_str(t: dict[str, Any]) -> str:
     k = t.get('kind', 'unknown')
     if k == 'array':
         return f"array<{type_to_str(t.get('items', {}))}>"
@@ -106,7 +106,7 @@ def type_to_str(t: Dict[str, Any]) -> str:
         return f"union<{opts}>"
     return k
 
-def schema_type(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+def schema_type(schema: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """Return (type_ast, ambiguous)."""
     if not isinstance(schema, dict):
         return ({'kind': 'unknown'}, True)
@@ -136,7 +136,7 @@ def schema_type(schema: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
     return ({'kind': 'unknown'}, True)
 
 
-def is_type_compatible(expected: Dict[str, Any], actual: Dict[str, Any]) -> bool:
+def is_type_compatible(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
     ek, ak = expected.get('kind'), actual.get('kind')
     if ek == 'unknown' or ak == 'unknown':
         return True
@@ -158,7 +158,7 @@ def is_type_compatible(expected: Dict[str, Any], actual: Dict[str, Any]) -> bool
 
 # -------------------- $ref resolution --------------------
 
-def load_schema_file(path: Path) -> Dict[str, Any]:
+def load_schema_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     if path.suffix.lower() in {'.yaml', '.yml'}:
@@ -167,7 +167,7 @@ def load_schema_file(path: Path) -> Dict[str, Any]:
         return json.loads(path.read_text(encoding='utf-8'))
     return {}
 
-def resolve_json_pointer(doc: Dict[str, Any], pointer: str) -> Any:
+def resolve_json_pointer(doc: dict[str, Any], pointer: str) -> Any:
     if not pointer or pointer == '#':
         return doc
     if pointer.startswith('#'):
@@ -215,7 +215,7 @@ def resolve_schema_node(root: Path, node: Any, depth: int=0) -> Any:
 
 # -------------------- Schema navigation --------------------
 
-def schema_path_exists(schema: Dict[str, Any], path: List[str]) -> bool:
+def schema_path_exists(schema: dict[str, Any], path: list[str]) -> bool:
     cur=schema or {}
     for key in path:
         if cur.get('type')=='array':
@@ -226,7 +226,7 @@ def schema_path_exists(schema: Dict[str, Any], path: List[str]) -> bool:
         cur=props[key] or {}
     return True
 
-def schema_node_at(schema: Dict[str, Any], path: List[str]) -> Dict[str, Any]:
+def schema_node_at(schema: dict[str, Any], path: list[str]) -> dict[str, Any]:
     cur=schema or {}
     for key in path:
         if cur.get('type')=='array':
@@ -236,7 +236,7 @@ def schema_node_at(schema: Dict[str, Any], path: List[str]) -> Dict[str, Any]:
 
 # -------------------- Binding parsing --------------------
 
-def parse_ref_expr(expr: str) -> Tuple[str, List[str], Optional[str]]:
+def parse_ref_expr(expr: str) -> tuple[str, list[str], str | None]:
     expr=(expr or '').strip()
     if ': ' in expr:
         left, typ = expr.split(': ',1)
@@ -249,14 +249,14 @@ def parse_ref_expr(expr: str) -> Tuple[str, List[str], Optional[str]]:
     path=parts[1:] if len(parts)>1 else []
     return store, path, typ
 
-def infer_binding_type(raw: str, schema: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+def infer_binding_type(raw: str, schema: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     store, path, _typ = parse_ref_expr(raw)
     node=schema_node_at(schema, path)
     return schema_type(node)
 
 # -------------------- Coercion registry --------------------
 
-def load_coercions() -> Dict[Tuple[str,str], str]:
+def load_coercions() -> dict[tuple[str,str], str]:
     reg = load_schema_file(COERCE_REG)
     out={}
     for c in reg.get('coercions',[]) or []:
@@ -267,7 +267,7 @@ COERCIONS = load_coercions()
 
 # -------------------- Validation core --------------------
 
-def validate_refs_in_string(s: str, schemas_by_store: Dict[str, Any], external_inputs: Dict[str, Any], errors: List[str], suggestions: List[Dict[str, Any]]):
+def validate_refs_in_string(s: str, schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]]):
     for m in REF_RE.finditer(s or ''):
         raw = m.group(1)
         store, path, typ_anno = parse_ref_expr(raw)
@@ -316,7 +316,7 @@ def validate_refs_in_string(s: str, schemas_by_store: Dict[str, Any], external_i
         else:
             errors.append(f"Unknown reference store '{store}' in ${{{raw}}}")
 
-def scan_refs(val: Any, schemas_by_store: Dict[str, Any], external_inputs: Dict[str, Any], errors: List[str], suggestions: List[Dict[str, Any]]):
+def scan_refs(val: Any, schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]]):
     if isinstance(val, str):
         validate_refs_in_string(val, schemas_by_store, external_inputs, errors, suggestions)
     elif isinstance(val, list):
@@ -326,7 +326,7 @@ def scan_refs(val: Any, schemas_by_store: Dict[str, Any], external_inputs: Dict[
         for x in val.values():
             scan_refs(x, schemas_by_store, external_inputs, errors, suggestions)
 
-def consumer_type_check(step: Dict[str, Any], cap_node: Dict[str, Any], schemas_by_store: Dict[str, Any], external_inputs: Dict[str, Any], errors: List[str], suggestions: List[Dict[str, Any]], workflow_name: str, step_index: int):
+def consumer_type_check(step: dict[str, Any], cap_node: dict[str, Any], schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]], workflow_name: str, step_index: int):
     """Compare binding inferred type vs consumer input_schema expected type."""
     input_schema = cap_node.get('input_schema') or {}
     input_schema = resolve_schema_node(ROOT, input_schema)
@@ -381,7 +381,7 @@ def consumer_type_check(step: Dict[str, Any], cap_node: Dict[str, Any], schemas_
                         "patch": build_transform_patch(workflow_name, step_index, key, raw, mapping, to_t)
                     })
 
-def build_transform_patch(workflow_name: str, step_index: int, input_key: str, raw_ref: str, mapping_ref: Optional[str], to_type: str) -> Dict[str, Any]:
+def build_transform_patch(workflow_name: str, step_index: int, input_key: str, raw_ref: str, mapping_ref: str | None, to_type: str) -> dict[str, Any]:
     """Return a patch plan (not directly applied)"""
     transform_store = f"coerce_{workflow_name}_{step_index}_{input_key}"
     return {
@@ -402,7 +402,7 @@ def build_transform_patch(workflow_name: str, step_index: int, input_key: str, r
         }
     }
 
-def check_workflow(name: str, wf: Dict[str, Any], nodes: Dict[str, Any], errors: List[str], suggestions: List[Dict[str, Any]]):
+def check_workflow(name: str, wf: dict[str, Any], nodes: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]]):
     steps = wf.get('steps',[]) or []
     inputs_decl = wf.get('inputs',{}) or {}
 
@@ -457,7 +457,7 @@ def check_workflow(name: str, wf: Dict[str, Any], nodes: Dict[str, Any], errors:
 
         seen.add(cap)
 
-def apply_patch_suggestions_to_yaml(workflows: Dict[str, Any], suggestions: List[Dict[str, Any]]) -> str:
+def apply_patch_suggestions_to_yaml(workflows: dict[str, Any], suggestions: list[dict[str, Any]]) -> str:
     """Return a modified YAML string applying transform insertion patches (best-effort)."""
     wf_copy = json.loads(json.dumps(workflows))
     # apply only consumer_input_type_mismatch patches
@@ -465,7 +465,7 @@ def apply_patch_suggestions_to_yaml(workflows: Dict[str, Any], suggestions: List
     for s in suggestions:
         if s.get("kind")=="consumer_input_type_mismatch":
             p = s.get("patch")
-            if not p: 
+            if not p:
                 continue
             grouped.setdefault(s["workflow"], []).append(p)
 
@@ -498,8 +498,8 @@ def main() -> None:
     workflows = yaml.safe_load(WF.read_text(encoding='utf-8')) or {}
     nodes = {n['id']: n for n in onto['nodes']}
 
-    errors: List[str] = []
-    suggestions: List[Dict[str, Any]] = []
+    errors: list[str] = []
+    suggestions: list[dict[str, Any]] = []
 
     for name, wf in workflows.items():
         check_workflow(name, wf, nodes, errors, suggestions)

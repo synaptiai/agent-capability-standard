@@ -175,7 +175,8 @@ class CapabilityRegistry:
         assert self._incoming_edges is not None
         # Combine outgoing and incoming (may have duplicates if self-referential)
         return list(self._outgoing_edges.get(cap_id, [])) + [
-            e for e in self._incoming_edges.get(cap_id, [])
+            e
+            for e in self._incoming_edges.get(cap_id, [])
             if e.from_cap != cap_id  # Avoid duplicates from self-edges
         ]
 
@@ -315,23 +316,17 @@ class CapabilityRegistry:
             List of CapabilityNode objects in that layer
         """
         return [
-            node
-            for node in self._loaded_nodes.values()
-            if node.layer == layer_name
+            node for node in self._loaded_nodes.values() if node.layer == layer_name
         ]
 
     def get_high_risk_capabilities(self) -> list[CapabilityNode]:
         """Get all capabilities with risk='high'."""
-        return [
-            node for node in self._loaded_nodes.values() if node.risk == "high"
-        ]
+        return [node for node in self._loaded_nodes.values() if node.risk == "high"]
 
     def get_checkpoint_required_capabilities(self) -> list[CapabilityNode]:
         """Get all capabilities that require a checkpoint before execution."""
         return [
-            node
-            for node in self._loaded_nodes.values()
-            if node.requires_checkpoint
+            node for node in self._loaded_nodes.values() if node.requires_checkpoint
         ]
 
     def all_capabilities(self) -> list[CapabilityNode]:
