@@ -33,9 +33,19 @@ POSTTOOLUSE_HOOK = HOOKS_DIR / "posttooluse_log_tool.sh"
 HAS_BASH = shutil.which("bash") is not None
 HAS_JQ = shutil.which("jq") is not None
 HAS_OPENSSL = shutil.which("openssl") is not None
+HAS_PRETOOLUSE_HOOK = PRETOOLUSE_HOOK.exists()
+HAS_POSTTOOLUSE_HOOK = POSTTOOLUSE_HOOK.exists()
 
 skip_no_bash = pytest.mark.skipif(not HAS_BASH, reason="bash not available")
 skip_no_jq = pytest.mark.skipif(not HAS_JQ, reason="jq not available")
+skip_no_pretooluse = pytest.mark.skipif(
+    not HAS_PRETOOLUSE_HOOK,
+    reason=f"pretooluse hook not found: {PRETOOLUSE_HOOK}",
+)
+skip_no_posttooluse = pytest.mark.skipif(
+    not HAS_POSTTOOLUSE_HOOK,
+    reason=f"posttooluse hook not found: {POSTTOOLUSE_HOOK}",
+)
 
 
 @pytest.fixture
@@ -60,11 +70,12 @@ def tracker_with_marker(project_dir: Path) -> CheckpointTracker:
 def _minimal_env(overrides: dict[str, str]) -> dict[str, str]:
     """Build a minimal, deterministic environment for shell hook tests.
 
-    Only passes PATH, HOME, and SHELL from the host to avoid
-    non-deterministic behaviour from leaked environment variables.
+    Passes PATH, HOME, SHELL, TMPDIR, and locale variables (LANG, LC_ALL)
+    from the host to avoid non-deterministic behaviour from leaked
+    environment variables while preserving locale-dependent shell behaviour.
     """
     base = {}
-    for key in ("PATH", "HOME", "SHELL", "TMPDIR"):
+    for key in ("PATH", "HOME", "SHELL", "TMPDIR", "LANG", "LC_ALL"):
         if key in os.environ:
             base[key] = os.environ[key]
     base.update(overrides)
@@ -91,6 +102,7 @@ class TestCheckpointBridge:
     """Verify that Python tracker creates marker files the shell hook accepts."""
 
     @skip_no_bash
+    @skip_no_pretooluse
     def test_shell_hook_passes_with_valid_marker(
         self, tracker_with_marker: CheckpointTracker, project_dir: Path
     ) -> None:
@@ -108,6 +120,7 @@ class TestCheckpointBridge:
         assert result.returncode == 0, f"Hook should pass: {result.stderr}"
 
     @skip_no_bash
+    @skip_no_pretooluse
     def test_shell_hook_blocks_without_marker(
         self, project_dir: Path
     ) -> None:
@@ -122,6 +135,7 @@ class TestCheckpointBridge:
         assert "checkpoint" in output or "blocked" in output
 
     @skip_no_bash
+    @skip_no_pretooluse
     def test_consume_removes_marker_shell_blocks(
         self, tracker_with_marker: CheckpointTracker, project_dir: Path
     ) -> None:
@@ -142,6 +156,7 @@ class TestCheckpointBridge:
         assert "checkpoint" in output or "blocked" in output
 
     @skip_no_bash
+    @skip_no_pretooluse
     def test_state_file_and_marker_both_written(
         self, tracker_with_marker: CheckpointTracker, project_dir: Path
     ) -> None:
@@ -236,6 +251,7 @@ class TestCrossProcessPersistence:
         assert chk.consumed is True
 
     @skip_no_bash
+    @skip_no_pretooluse
     def test_cross_process_shell_hook_consistency(self, project_dir: Path) -> None:
         """Shell hook agrees with Python state across tracker restarts."""
         chk_dir = project_dir / ".checkpoints"
@@ -279,6 +295,7 @@ class TestAuditLogIntegrity:
 
     @skip_no_bash
     @skip_no_jq
+    @skip_no_posttooluse
     def test_audit_log_entry_written(self, project_dir: Path) -> None:
         """PostToolUse hook writes a JSON entry to audit.log."""
         payload = json.dumps({
@@ -309,6 +326,7 @@ class TestAuditLogIntegrity:
 
     @skip_no_bash
     @skip_no_jq
+    @skip_no_posttooluse
     def test_audit_log_hmac_chain(self, project_dir: Path) -> None:
         """Two consecutive entries form an HMAC chain (prev_hmac links)."""
         for i in range(2):
@@ -339,6 +357,7 @@ class TestAuditLogIntegrity:
 
     @skip_no_bash
     @skip_no_jq
+    @skip_no_posttooluse
     def test_non_skill_invocations_not_logged(self, project_dir: Path) -> None:
         """PostToolUse hook should skip non-Skill tool invocations."""
         payload = json.dumps({
@@ -370,6 +389,7 @@ class TestPermissionEnforcement:
     """Test strict-mode permission enforcement using checkpoints."""
 
     @skip_no_bash
+    @skip_no_pretooluse
     def test_deny_create_allow_consume_deny(
         self, project_dir: Path
     ) -> None:
@@ -405,6 +425,7 @@ class TestPermissionEnforcement:
         assert "checkpoint" in output or "blocked" in output
 
     @skip_no_bash
+    @skip_no_pretooluse
     def test_non_mutation_always_allowed(self, project_dir: Path) -> None:
         """Non-mutation tools should always pass, even without a checkpoint."""
         env = {"CLAUDE_PROJECT_DIR": str(project_dir)}

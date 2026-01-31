@@ -35,9 +35,6 @@ def _find_root() -> Path:
 
 
 ROOT = _find_root()
-sys.path.insert(0, str(ROOT / "tools"))
-from yaml_util import safe_yaml_load  # noqa: E402
-
 PVC_DIR = ROOT / "docs" / "reviews" / "pvc"
 
 ALLOWED_STATUSES = {"PASS", "PARTIAL", "FAIL", "N/A"}
@@ -200,6 +197,10 @@ def _validate_report(path: Path, data: Any) -> list[str]:
 
 
 def _read_yaml(path: Path) -> Any:
+    tools_dir = str(ROOT / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    from yaml_util import safe_yaml_load  # noqa: E402
     return safe_yaml_load(path)
 
 

@@ -475,8 +475,12 @@ class CheckpointTracker:
         """
         Remove expired checkpoints from history.
 
+        If the active checkpoint has expired, it is moved to history and
+        then filtered out along with any other expired history entries.
+        The returned count includes the active checkpoint if it was expired.
+
         Returns:
-            Number of checkpoints cleared
+            Number of expired checkpoints removed (active + history)
         """
         now = datetime.now(timezone.utc)
         active_cleared = False
