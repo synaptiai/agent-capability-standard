@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 from yaml_util import YAMLSizeExceededError, safe_yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]

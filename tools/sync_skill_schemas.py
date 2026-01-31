@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 
 import yaml
-
 from yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]

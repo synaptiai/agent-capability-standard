@@ -46,8 +46,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
-from yaml_util import DEFAULT_MAX_BYTES, ONTOLOGY_MAX_BYTES, YAMLSizeExceededError, safe_yaml_load
+from yaml_util import (
+    DEFAULT_MAX_BYTES,
+    ONTOLOGY_MAX_BYTES,
+    YAMLSizeExceededError,
+    safe_yaml_load,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 ONTO = ROOT / "schemas" / "capability_ontology.yaml"

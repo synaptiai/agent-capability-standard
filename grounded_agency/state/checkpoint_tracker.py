@@ -94,7 +94,7 @@ class Checkpoint:
                 if data.get("consumed_at")
                 else None
             ),
-            metadata=data.get("metadata", {}),
+            metadata=meta,
         )
 
     def matches_scope(self, target: str) -> bool:
@@ -252,8 +252,10 @@ class CheckpointTracker:
                 self._active_checkpoint = Checkpoint.from_dict(state["active"])
             # Cap loaded history to _max_history to prevent unbounded growth
             # from a crafted or accumulated state file.
-            for entry in state.get("history", [])[:self._max_history]:
-                self._checkpoint_history.append(Checkpoint.from_dict(entry))
+            self._checkpoint_history = [
+                Checkpoint.from_dict(entry)
+                for entry in state.get("history", [])[:self._max_history]
+            ]
         except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Failed to load persisted checkpoint state: %s", e)
             # Start fresh — don't propagate corrupt state
@@ -319,20 +321,10 @@ class CheckpointTracker:
         random_suffix = os.urandom(16).hex()
         return f"chk_{timestamp}_{random_suffix}"
 
-    def _prune_history_if_needed(self) -> int:
-        """Prune oldest checkpoints if history exceeds max_history.
-
-        Returns:
-            Number of checkpoints pruned
-        """
-        if len(self._checkpoint_history) <= self._max_history:
-            return 0
-
-        # Sort by created_at and keep only the most recent
-        self._checkpoint_history.sort(key=lambda c: c.created_at, reverse=True)
-        to_prune = len(self._checkpoint_history) - self._max_history
-        self._checkpoint_history = self._checkpoint_history[: self._max_history]
-        return to_prune
+    def _prune_history_if_needed(self) -> None:
+        """Prune oldest checkpoints if history exceeds max_history."""
+        if len(self._checkpoint_history) > self._max_history:
+            self._checkpoint_history = self._checkpoint_history[-self._max_history:]
 
     def _write_marker(self, checkpoint: Checkpoint) -> None:
         """Atomically write the shell hook marker file with checkpoint metadata.
