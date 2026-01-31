@@ -8,10 +8,10 @@ Tracks checkpoint creation, validity, consumption, and expiry.
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import json
 import logging
 import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -46,6 +46,63 @@ class Checkpoint:
             return False
         return True
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize checkpoint to a JSON-compatible dict."""
+        return {
+            "id": self.id,
+            "scope": self.scope,
+            "reason": self.reason,
+            "created_at": self.created_at.isoformat(),
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "consumed": self.consumed,
+            "consumed_at": self.consumed_at.isoformat() if self.consumed_at else None,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Checkpoint:
+        """Deserialize checkpoint from a dict.
+
+        Raises:
+            ValueError: If required fields have wrong types.
+            KeyError: If required fields are missing.
+        """
+        # Validate types to catch crafted/corrupt state files early.
+        if not isinstance(data.get("id"), str):
+            raise ValueError("checkpoint id must be a string")
+        if not isinstance(data.get("scope"), list):
+            raise ValueError("checkpoint scope must be a list")
+        if not all(isinstance(s, str) for s in data["scope"]):
+            raise ValueError("checkpoint scope elements must be strings")
+        if not isinstance(data.get("reason"), str):
+            raise ValueError("checkpoint reason must be a string")
+        if "created_at" not in data:
+            raise ValueError("checkpoint created_at is required")
+        if not isinstance(data.get("consumed", False), bool):
+            raise ValueError("checkpoint consumed must be a boolean")
+        meta = data.get("metadata", {})
+        if not isinstance(meta, dict):
+            raise ValueError("checkpoint metadata must be a dict")
+
+        return cls(
+            id=data["id"],
+            scope=data["scope"],
+            reason=data["reason"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            expires_at=(
+                datetime.fromisoformat(data["expires_at"])
+                if data.get("expires_at")
+                else None
+            ),
+            consumed=data.get("consumed", False),
+            consumed_at=(
+                datetime.fromisoformat(data["consumed_at"])
+                if data.get("consumed_at")
+                else None
+            ),
+            metadata=meta,
+        )
+
     def matches_scope(self, target: str) -> bool:
         """Check if target is covered by this checkpoint's scope."""
         for scope_pattern in self.scope:
@@ -72,7 +129,7 @@ class CheckpointTracker:
     4. Checkpoint history for audit trails
 
     Example:
-        tracker = CheckpointTracker()
+        tracker = CheckpointTracker(checkpoint_dir=".checkpoints")
 
         # Before mutation
         checkpoint_id = tracker.create_checkpoint(
@@ -87,10 +144,21 @@ class CheckpointTracker:
 
         # After successful mutation
         tracker.consume_checkpoint()
+
+    State file format (``checkpoint_dir/tracker_state.json``)::
+
+        {
+            "active": { <Checkpoint dict> } | null,
+            "history": [ { <Checkpoint dict> }, ... ]
+        }
+
+    Each Checkpoint dict contains: id, scope, reason, created_at,
+    expires_at, consumed, consumed_at, metadata.
     """
 
     DEFAULT_EXPIRY_MINUTES: int = 30
     DEFAULT_MAX_HISTORY: int = 100
+    _MAX_STATE_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
     def __init__(
         self,
@@ -117,6 +185,126 @@ class CheckpointTracker:
         self._marker_dir = Path(marker_dir) if marker_dir is not None else None
         self._active_checkpoint: Checkpoint | None = None
         self._checkpoint_history: list[Checkpoint] = []
+        self._load_persisted_state()
+
+    # ------------------------------------------------------------------
+    # Persistence (TD-011)
+    # ------------------------------------------------------------------
+
+    def _state_file_path(self) -> Path:
+        """Path to the persisted tracker state file."""
+        return self._checkpoint_dir / "tracker_state.json"
+
+    def _persist_state(self) -> None:
+        """Atomically write tracker state to disk.
+
+        Uses write-to-tmp + rename for crash safety.
+        """
+        try:
+            self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            state = {
+                "active": (
+                    self._active_checkpoint.to_dict()
+                    if self._active_checkpoint
+                    else None
+                ),
+                # Cap history before serializing to prevent unbounded file growth.
+                "history": [
+                    c.to_dict() for c in self._checkpoint_history[-self._max_history :]
+                ],
+            }
+            state_path = self._state_file_path()
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._checkpoint_dir), suffix=".tmp"
+            )
+            try:
+                try:
+                    f = os.fdopen(fd, "w", encoding="utf-8")
+                except Exception:
+                    os.close(fd)
+                    raise
+                with f:
+                    json.dump(state, f)
+                os.replace(tmp_path, str(state_path))
+            except Exception:
+                # Clean up temp file on failure; re-raise original error.
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        except (OSError, TypeError, ValueError, OverflowError) as e:
+            logger.warning("Failed to persist checkpoint state: %s", e)
+
+    def _load_persisted_state(self) -> None:
+        """Load tracker state from disk if available.
+
+        Uses O_NOFOLLOW + fstat() on the opened fd to avoid TOCTOU between
+        symlink check/existence check and read.  Falls back to is_symlink()
+        on platforms without O_NOFOLLOW.
+        Handles missing and corrupt files gracefully.
+        """
+        state_path = self._state_file_path()
+        o_nofollow = getattr(os, "O_NOFOLLOW", 0)
+        if o_nofollow:
+            try:
+                fd = os.open(str(state_path), os.O_RDONLY | o_nofollow)
+            except FileNotFoundError:
+                return
+            except OSError as e:
+                if e.errno in (40, 62):  # ELOOP — symlink rejected
+                    logger.warning(
+                        "Refusing to follow symlink for state file: %s", state_path
+                    )
+                    return
+                raise
+            try:
+                f = os.fdopen(fd, encoding="utf-8")
+            except Exception:
+                os.close(fd)
+                raise
+        else:
+            if state_path.is_symlink():
+                logger.warning(
+                    "Refusing to follow symlink for state file: %s", state_path
+                )
+                return
+            try:
+                f = open(state_path, encoding="utf-8")
+            except FileNotFoundError:
+                return
+        try:
+            with f:
+                file_size = os.fstat(f.fileno()).st_size
+                if file_size > self._MAX_STATE_FILE_BYTES:
+                    logger.warning(
+                        "State file too large (%d bytes, limit %d) — starting fresh",
+                        file_size,
+                        self._MAX_STATE_FILE_BYTES,
+                    )
+                    return
+                raw = f.read()
+            state = json.loads(raw)
+            if state.get("active"):
+                self._active_checkpoint = Checkpoint.from_dict(state["active"])
+            # Cap loaded history to _max_history to prevent unbounded growth
+            # from a crafted or accumulated state file.
+            self._checkpoint_history = [
+                Checkpoint.from_dict(entry)
+                for entry in state.get("history", [])[: self._max_history]
+            ]
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            ValueError,
+            TypeError,
+            AttributeError,
+            OSError,
+        ) as e:
+            logger.warning("Failed to load persisted checkpoint state: %s", e)
+            # Start fresh — don't propagate corrupt state
+            self._active_checkpoint = None
+            self._checkpoint_history = []
 
     def create_checkpoint(
         self,
@@ -163,39 +351,30 @@ class CheckpointTracker:
 
         self._active_checkpoint = checkpoint
         self._write_marker(checkpoint)
+        self._persist_state()
         return checkpoint_id
 
     def _generate_checkpoint_id(self) -> str:
         """Generate a unique checkpoint ID with 128 bits of entropy.
 
-        Uses 32 hex characters (128 bits) from SHA-256 of 16 random bytes
-        for cryptographic security against ID prediction/collision.
+        Uses 16 cryptographically random bytes (128 bits) encoded as
+        32 hex characters.  ``os.urandom`` is already cryptographically
+        secure, so hashing adds no additional entropy.
         """
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        # Use 16 bytes of randomness → 128 bits of entropy in output
-        random_suffix = hashlib.sha256(os.urandom(16)).hexdigest()[:32]
+        random_suffix = os.urandom(16).hex()
         return f"chk_{timestamp}_{random_suffix}"
 
-    def _prune_history_if_needed(self) -> int:
-        """Prune oldest checkpoints if history exceeds max_history.
-
-        Returns:
-            Number of checkpoints pruned
-        """
-        if len(self._checkpoint_history) <= self._max_history:
-            return 0
-
-        # Sort by created_at and keep only the most recent
-        self._checkpoint_history.sort(key=lambda c: c.created_at, reverse=True)
-        to_prune = len(self._checkpoint_history) - self._max_history
-        self._checkpoint_history = self._checkpoint_history[: self._max_history]
-        return to_prune
+    def _prune_history_if_needed(self) -> None:
+        """Prune oldest checkpoints if history exceeds max_history."""
+        if len(self._checkpoint_history) > self._max_history:
+            self._checkpoint_history = self._checkpoint_history[-self._max_history :]
 
     def _write_marker(self, checkpoint: Checkpoint) -> None:
-        """Write the shell hook marker file with checkpoint metadata.
+        """Atomically write the shell hook marker file with checkpoint metadata.
 
-        Bridges the Python tracker with the shell PreToolUse hook by
-        writing a JSON marker file that the hook validates for freshness.
+        Uses write-to-tmp + rename so the shell PreToolUse hook never reads
+        a partially written marker file.
         """
         if self._marker_dir is None:
             return
@@ -213,7 +392,22 @@ class CheckpointTracker:
                 "created_at": created_ts,
                 "expires_at": expires_ts,
             }
-            marker_path.write_text(json.dumps(marker_data), encoding="utf-8")
+            fd, tmp_path = tempfile.mkstemp(dir=str(self._marker_dir), suffix=".tmp")
+            try:
+                try:
+                    f = os.fdopen(fd, "w", encoding="utf-8")
+                except Exception:
+                    os.close(fd)
+                    raise
+                with f:
+                    json.dump(marker_data, f)
+                os.replace(tmp_path, str(marker_path))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except OSError as e:
             logger.warning("Failed to write checkpoint marker: %s", e)
 
@@ -272,15 +466,19 @@ class CheckpointTracker:
         if self._active_checkpoint is None:
             return None
 
-        self._active_checkpoint.consumed = True
-        self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
+        # Capture reference and clear active first to avoid intermediate
+        # invalid state where active still points to consumed checkpoint.
+        consumed = self._active_checkpoint
+        self._active_checkpoint = None
 
-        checkpoint_id = self._active_checkpoint.id
+        consumed.consumed = True
+        consumed.consumed_at = datetime.now(timezone.utc)
+        checkpoint_id = consumed.id
 
         # Move to history
-        self._checkpoint_history.append(self._active_checkpoint)
-        self._active_checkpoint = None
+        self._checkpoint_history.append(consumed)
         self._remove_marker()
+        self._persist_state()
 
         return checkpoint_id
 
@@ -324,33 +522,53 @@ class CheckpointTracker:
         """
         Remove expired checkpoints from history.
 
+        If the active checkpoint has expired, it is moved to history and
+        then filtered out along with any other expired history entries.
+        The returned count includes the active checkpoint if it was expired.
+
         Returns:
-            Number of checkpoints cleared
+            Number of expired checkpoints removed (active + history)
         """
         now = datetime.now(timezone.utc)
-        original_count = len(self._checkpoint_history)
+        active_cleared = False
 
+        # Move expired active checkpoint to history FIRST so it gets
+        # filtered along with all other expired history entries.
+        # Use explicit expiry check — not is_valid(), which also returns
+        # False for consumed checkpoints (different semantic).
+        if (
+            self._active_checkpoint
+            and self._active_checkpoint.expires_at
+            and now > self._active_checkpoint.expires_at
+        ):
+            self._checkpoint_history.append(self._active_checkpoint)
+            self._active_checkpoint = None
+            self._remove_marker()
+            active_cleared = True
+
+        original_count = len(self._checkpoint_history)
         self._checkpoint_history = [
             c
             for c in self._checkpoint_history
             if c.expires_at is None or c.expires_at > now
         ]
+        # Includes the expired active (appended above) that was then filtered out.
+        total_cleared = original_count - len(self._checkpoint_history)
 
-        # Clear active if expired
-        if self._active_checkpoint and not self._active_checkpoint.is_valid():
-            self._checkpoint_history.append(self._active_checkpoint)
-            self._active_checkpoint = None
-            self._remove_marker()
-
-        return original_count - len(self._checkpoint_history)
+        # Persist whenever state changed (active cleared or history pruned)
+        if active_cleared or total_cleared > 0:
+            self._persist_state()
+        return total_cleared
 
     def invalidate_all(self) -> None:
         """Invalidate all checkpoints (used for rollback scenarios)."""
         if self._active_checkpoint:
             self._active_checkpoint.consumed = True
+            self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
             self._checkpoint_history.append(self._active_checkpoint)
             self._active_checkpoint = None
             self._remove_marker()
+            self._persist_state()
 
     @property
     def checkpoint_count(self) -> int:

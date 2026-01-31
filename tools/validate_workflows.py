@@ -39,12 +39,19 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
+from yaml_util import (
+    DEFAULT_MAX_BYTES,
+    ONTOLOGY_MAX_BYTES,
+    YAMLSizeExceededError,
+    safe_yaml_load,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 ONTO = ROOT / "schemas" / "capability_ontology.yaml"
@@ -162,9 +169,15 @@ def load_schema_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     if path.suffix.lower() in {'.yaml', '.yml'}:
-        return yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+        return safe_yaml_load(path) or {}
     if path.suffix.lower() == '.json':
-        return json.loads(path.read_text(encoding='utf-8'))
+        # Apply same size limit as YAML to prevent memory exhaustion (SEC-003).
+        with open(path, encoding='utf-8') as f:
+            file_size = os.fstat(f.fileno()).st_size
+            if file_size > DEFAULT_MAX_BYTES:
+                print(f"WARNING: JSON schema too large ({file_size:,} bytes): {path}", file=sys.stderr)
+                return {}
+            return json.loads(f.read())
     return {}
 
 def resolve_json_pointer(doc: dict[str, Any], pointer: str) -> Any:
@@ -492,10 +505,21 @@ def apply_patch_suggestions_to_yaml(workflows: dict[str, Any], suggestions: list
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--emit-patch", action="store_true", help="Write a unified diff patch for suggested transform insertions.")
+    ap.add_argument("--catalog", default=None, help="Override workflow catalog path.")
     args = ap.parse_args()
 
-    onto = yaml.safe_load(ONTO.read_text(encoding='utf-8'))
-    workflows = yaml.safe_load(WF.read_text(encoding='utf-8')) or {}
+    try:
+        onto = safe_yaml_load(ONTO, max_size=ONTOLOGY_MAX_BYTES)
+    except (FileNotFoundError, YAMLSizeExceededError, yaml.YAMLError) as e:
+        print(f"ERROR: Cannot load ontology: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    wf_path = Path(args.catalog) if args.catalog else WF
+    try:
+        workflows = safe_yaml_load(wf_path) or {}
+    except (FileNotFoundError, YAMLSizeExceededError, yaml.YAMLError) as e:
+        print(f"ERROR: Cannot load workflow catalog: {e}", file=sys.stderr)
+        sys.exit(1)
     nodes = {n['id']: n for n in onto['nodes']}
 
     errors: list[str] = []
@@ -509,7 +533,7 @@ def main() -> None:
 
     if args.emit_patch and suggestions:
         modified = apply_patch_suggestions_to_yaml(workflows, suggestions)
-        original = WF.read_text(encoding="utf-8")
+        original = wf_path.read_text(encoding="utf-8")
         diff = difflib.unified_diff(
             original.splitlines(keepends=True),
             modified.splitlines(keepends=True),

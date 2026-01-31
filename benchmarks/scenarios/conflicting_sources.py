@@ -21,7 +21,7 @@ import random
 from pathlib import Path
 from typing import Any
 
-import yaml
+from grounded_agency.utils.safe_yaml import safe_yaml_load
 
 from .base import BenchmarkScenario
 
@@ -31,8 +31,7 @@ def _load_trust_model() -> tuple[dict[str, float], int]:
     schema_path = Path(__file__).parent.parent.parent / "schemas" / "authority_trust_model.yaml"
 
     if schema_path.exists():
-        with open(schema_path) as f:
-            model = yaml.safe_load(f)
+        model = safe_yaml_load(schema_path)
         weights = model.get("source_ranking", {}).get("weights", {})
         # Parse half_life from ISO 8601 duration (P14D = 14 days)
         half_life_str = model.get("decay_model", {}).get("half_life", "P14D")

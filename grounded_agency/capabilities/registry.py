@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+from ..utils.safe_yaml import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
 
 @dataclass(slots=True)
@@ -123,8 +123,9 @@ class CapabilityRegistry:
                 f"Capability ontology not found: {self._ontology_path}"
             )
 
-        with open(self._ontology_path, encoding="utf-8") as f:
-            ontology: dict[str, Any] = yaml.safe_load(f)
+        ontology: dict[str, Any] = safe_yaml_load(
+            self._ontology_path, max_size=ONTOLOGY_MAX_BYTES
+        )
 
         self._ontology = ontology
 

@@ -16,7 +16,7 @@ set -euo pipefail
 payload="${1:-}"
 
 # Only check for mutation commands
-if ! echo "$payload" | grep -E -i "(Edit\b|Bash\b|Git\b|rm\b|mv\b|sed\b|perl\b)" >/dev/null 2>&1; then
+if ! echo "$payload" | grep -E -i "(Write\b|Edit\b|Bash\b|Git\b|rm\b|mv\b|sed\b|perl\b)" >/dev/null 2>&1; then
   exit 0
 fi
 

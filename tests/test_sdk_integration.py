@@ -51,9 +51,9 @@ def mapper() -> ToolCapabilityMapper:
 
 
 @pytest.fixture
-def checkpoint_tracker() -> CheckpointTracker:
-    """Create a fresh CheckpointTracker."""
-    return CheckpointTracker()
+def checkpoint_tracker(tmp_path: Path) -> CheckpointTracker:
+    """Create a fresh CheckpointTracker with isolated directory."""
+    return CheckpointTracker(checkpoint_dir=tmp_path / ".checkpoints")
 
 
 @pytest.fixture
@@ -63,12 +63,13 @@ def evidence_store() -> EvidenceStore:
 
 
 @pytest.fixture
-def adapter(ontology_path: str) -> GroundedAgentAdapter:
-    """Create a fresh GroundedAgentAdapter."""
+def adapter(ontology_path: str, tmp_path: Path) -> GroundedAgentAdapter:
+    """Create a fresh GroundedAgentAdapter with isolated checkpoint directory."""
     return GroundedAgentAdapter(
         GroundedAgentConfig(
             ontology_path=ontology_path,
             strict_mode=True,
+            checkpoint_dir=str(tmp_path / ".checkpoints"),
         )
     )
 

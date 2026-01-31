@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Conformance test runner.
 
-Runs the reference validator against each fixture `workflow_catalog.yaml`.
-
-The validator expects fixed paths relative to the project root,
-so we temporarily swap `schemas/workflow_catalog.yaml` with fixture content.
+Runs the reference validator against each fixture ``workflow_catalog.yaml``
+using the ``--catalog`` flag so the production catalog is never modified.
 """
 
 import json
@@ -13,25 +11,30 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CAT  = ROOT / "schemas" / "workflow_catalog.yaml"
 VAL  = ROOT / "tools" / "validate_workflows.py"
 FIX  = ROOT / "tests"
 
 EXPECT = json.loads((FIX / "EXPECTATIONS.json").read_text(encoding="utf-8"))
 
+
 def run_fixture(name: str, path: Path) -> dict:
-    backup = CAT.read_text(encoding="utf-8")
-    try:
-        CAT.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-        proc = subprocess.run([sys.executable, str(VAL), "--emit-patch"], cwd=str(ROOT), capture_output=True, text=True)
-        ok = proc.returncode == 0
-        return {"name": name, "ok": ok, "stdout": proc.stdout, "stderr": proc.stderr}
-    finally:
-        CAT.write_text(backup, encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(VAL), "--catalog", str(path)],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return {
+        "name": name,
+        "ok": proc.returncode == 0,
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+    }
 
 def main() -> None:
     results = []
-    failed=0
+    failed = 0
     for name, meta in EXPECT.items():
         path = FIX / f"{name}.workflow_catalog.yaml"
         if not path.exists():

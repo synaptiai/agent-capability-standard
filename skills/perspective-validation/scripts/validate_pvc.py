@@ -23,8 +23,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 
 def _find_root() -> Path:
     """Walk up from script location to find the repo root."""
@@ -199,7 +197,11 @@ def _validate_report(path: Path, data: Any) -> list[str]:
 
 
 def _read_yaml(path: Path) -> Any:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    tools_dir = str(ROOT / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    from yaml_util import safe_yaml_load  # noqa: E402
+    return safe_yaml_load(path)
 
 
 def _git_changed_files(diff_base: str) -> list[str] | None:

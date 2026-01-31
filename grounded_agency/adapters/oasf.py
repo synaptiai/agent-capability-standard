@@ -23,9 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
-
 from ..capabilities.registry import CapabilityNode, CapabilityRegistry
+from ..utils.safe_yaml import safe_yaml_load
 
 logger = logging.getLogger("grounded_agency.adapters.oasf")
 
@@ -112,8 +111,7 @@ class OASFAdapter:
         if not self._mapping_path.exists():
             raise FileNotFoundError(f"OASF mapping not found: {self._mapping_path}")
 
-        with open(self._mapping_path, encoding="utf-8") as f:
-            self._raw = yaml.safe_load(f)
+        self._raw = safe_yaml_load(self._mapping_path)
 
         self._build_index()
 

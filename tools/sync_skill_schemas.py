@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]
 ONTOLOGY_PATH = ROOT / "schemas" / "capability_ontology.yaml"
@@ -50,8 +51,7 @@ HEADER_TEMPLATE = """\
 
 def load_ontology() -> dict:
     """Load and return the capability ontology."""
-    with open(ONTOLOGY_PATH, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return safe_yaml_load(ONTOLOGY_PATH, max_size=ONTOLOGY_MAX_BYTES)
 
 
 def build_layer_index(ontology: dict) -> dict[str, str]:

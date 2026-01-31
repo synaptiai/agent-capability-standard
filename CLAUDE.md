@@ -24,6 +24,11 @@ python tools/validate_skill_refs.py
 python tools/validate_ontology.py
 ```
 
+### Validate YAML utility sync (safe_yaml.py ↔ yaml_util.py)
+```bash
+python tools/validate_yaml_util_sync.py
+```
+
 ### Sync skill-local schemas from ontology
 ```bash
 python tools/sync_skill_schemas.py
