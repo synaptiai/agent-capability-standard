@@ -301,16 +301,18 @@ class TestHistoryPruningPersistence:
         entries = []
         for i in range(20):
             ts = datetime(2025, 1, 1, 0, i, tzinfo=timezone.utc)
-            entries.append({
-                "id": f"chk_old_{i}",
-                "scope": ["*"],
-                "reason": f"old {i}",
-                "created_at": ts.isoformat(),
-                "expires_at": None,
-                "consumed": True,
-                "consumed_at": ts.isoformat(),
-                "metadata": {},
-            })
+            entries.append(
+                {
+                    "id": f"chk_old_{i}",
+                    "scope": ["*"],
+                    "reason": f"old {i}",
+                    "created_at": ts.isoformat(),
+                    "expires_at": None,
+                    "consumed": True,
+                    "consumed_at": ts.isoformat(),
+                    "metadata": {},
+                }
+            )
 
         chk_dir.mkdir(parents=True, exist_ok=True)
         state_path = chk_dir / "tracker_state.json"
@@ -444,16 +446,20 @@ class TestSymlinkStateFileRejection:
         real_dir.mkdir()
         real_state = real_dir / "tracker_state.json"
         real_state.write_text(
-            json.dumps({
-                "active": {
-                    "id": "chk_symlink",
-                    "scope": ["*"],
-                    "reason": "symlinked",
-                    "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
-                    "metadata": {},
-                },
-                "history": [],
-            }),
+            json.dumps(
+                {
+                    "active": {
+                        "id": "chk_symlink",
+                        "scope": ["*"],
+                        "reason": "symlinked",
+                        "created_at": datetime(
+                            2025, 1, 1, tzinfo=timezone.utc
+                        ).isoformat(),
+                        "metadata": {},
+                    },
+                    "history": [],
+                }
+            ),
             encoding="utf-8",
         )
 

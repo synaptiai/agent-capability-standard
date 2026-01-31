@@ -82,7 +82,9 @@ def _minimal_env(overrides: dict[str, str]) -> dict[str, str]:
     return base
 
 
-def _run_hook(hook_path: Path, payload: str, env: dict[str, str]) -> subprocess.CompletedProcess:
+def _run_hook(
+    hook_path: Path, payload: str, env: dict[str, str]
+) -> subprocess.CompletedProcess:
     """Execute a shell hook script with the given payload and environment."""
     return subprocess.run(
         ["bash", str(hook_path), payload],
@@ -121,9 +123,7 @@ class TestCheckpointBridge:
 
     @skip_no_bash
     @skip_no_pretooluse
-    def test_shell_hook_blocks_without_marker(
-        self, project_dir: Path
-    ) -> None:
+    def test_shell_hook_blocks_without_marker(self, project_dir: Path) -> None:
         """Without marker file, shell hook should block mutation."""
         result = _run_hook(
             PRETOOLUSE_HOOK,
@@ -298,10 +298,12 @@ class TestAuditLogIntegrity:
     @skip_no_posttooluse
     def test_audit_log_entry_written(self, project_dir: Path) -> None:
         """PostToolUse hook writes a JSON entry to audit.log."""
-        payload = json.dumps({
-            "tool_name": "Skill",
-            "tool_input": {"skill": "test-skill", "args": ""},
-        })
+        payload = json.dumps(
+            {
+                "tool_name": "Skill",
+                "tool_input": {"skill": "test-skill", "args": ""},
+            }
+        )
 
         result = subprocess.run(
             ["bash", str(POSTTOOLUSE_HOOK)],
@@ -330,10 +332,12 @@ class TestAuditLogIntegrity:
     def test_audit_log_hmac_chain(self, project_dir: Path) -> None:
         """Two consecutive entries form an HMAC chain (prev_hmac links)."""
         for i in range(2):
-            payload = json.dumps({
-                "tool_name": "Skill",
-                "tool_input": {"skill": f"skill-{i}", "args": ""},
-            })
+            payload = json.dumps(
+                {
+                    "tool_name": "Skill",
+                    "tool_input": {"skill": f"skill-{i}", "args": ""},
+                }
+            )
             subprocess.run(
                 ["bash", str(POSTTOOLUSE_HOOK)],
                 input=payload,
@@ -360,10 +364,12 @@ class TestAuditLogIntegrity:
     @skip_no_posttooluse
     def test_non_skill_invocations_not_logged(self, project_dir: Path) -> None:
         """PostToolUse hook should skip non-Skill tool invocations."""
-        payload = json.dumps({
-            "tool_name": "Read",
-            "tool_input": {"path": "/some/file"},
-        })
+        payload = json.dumps(
+            {
+                "tool_name": "Read",
+                "tool_input": {"path": "/some/file"},
+            }
+        )
 
         subprocess.run(
             ["bash", str(POSTTOOLUSE_HOOK)],
@@ -390,9 +396,7 @@ class TestPermissionEnforcement:
 
     @skip_no_bash
     @skip_no_pretooluse
-    def test_deny_create_allow_consume_deny(
-        self, project_dir: Path
-    ) -> None:
+    def test_deny_create_allow_consume_deny(self, project_dir: Path) -> None:
         """Full cycle: deny → create → allow → consume → deny again."""
         chk_dir = project_dir / ".checkpoints"
         chk_dir.mkdir()

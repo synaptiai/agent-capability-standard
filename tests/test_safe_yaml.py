@@ -91,7 +91,9 @@ class TestSafeYamlLoad:
 class TestSymlinkRejection:
     """Tests for symlink rejection (SEC-006)."""
 
-    def test_rejects_symlink_to_valid_yaml(self, small_yaml: Path, tmp_path: Path) -> None:
+    def test_rejects_symlink_to_valid_yaml(
+        self, small_yaml: Path, tmp_path: Path
+    ) -> None:
         """Symlinks should be rejected even if the target is a valid YAML file."""
         link = tmp_path / "link.yaml"
         link.symlink_to(small_yaml)

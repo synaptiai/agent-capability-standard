@@ -210,8 +210,7 @@ class CheckpointTracker:
                 ),
                 # Cap history before serializing to prevent unbounded file growth.
                 "history": [
-                    c.to_dict()
-                    for c in self._checkpoint_history[-self._max_history:]
+                    c.to_dict() for c in self._checkpoint_history[-self._max_history :]
                 ],
             }
             state_path = self._state_file_path()
@@ -254,7 +253,9 @@ class CheckpointTracker:
                 return
             except OSError as e:
                 if e.errno in (40, 62):  # ELOOP — symlink rejected
-                    logger.warning("Refusing to follow symlink for state file: %s", state_path)
+                    logger.warning(
+                        "Refusing to follow symlink for state file: %s", state_path
+                    )
                     return
                 raise
             try:
@@ -264,7 +265,9 @@ class CheckpointTracker:
                 raise
         else:
             if state_path.is_symlink():
-                logger.warning("Refusing to follow symlink for state file: %s", state_path)
+                logger.warning(
+                    "Refusing to follow symlink for state file: %s", state_path
+                )
                 return
             try:
                 f = open(state_path, encoding="utf-8")
@@ -288,9 +291,16 @@ class CheckpointTracker:
             # from a crafted or accumulated state file.
             self._checkpoint_history = [
                 Checkpoint.from_dict(entry)
-                for entry in state.get("history", [])[:self._max_history]
+                for entry in state.get("history", [])[: self._max_history]
             ]
-        except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, OSError) as e:
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            ValueError,
+            TypeError,
+            AttributeError,
+            OSError,
+        ) as e:
             logger.warning("Failed to load persisted checkpoint state: %s", e)
             # Start fresh — don't propagate corrupt state
             self._active_checkpoint = None
@@ -358,7 +368,7 @@ class CheckpointTracker:
     def _prune_history_if_needed(self) -> None:
         """Prune oldest checkpoints if history exceeds max_history."""
         if len(self._checkpoint_history) > self._max_history:
-            self._checkpoint_history = self._checkpoint_history[-self._max_history:]
+            self._checkpoint_history = self._checkpoint_history[-self._max_history :]
 
     def _write_marker(self, checkpoint: Checkpoint) -> None:
         """Atomically write the shell hook marker file with checkpoint metadata.
@@ -382,9 +392,7 @@ class CheckpointTracker:
                 "created_at": created_ts,
                 "expires_at": expires_ts,
             }
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(self._marker_dir), suffix=".tmp"
-            )
+            fd, tmp_path = tempfile.mkstemp(dir=str(self._marker_dir), suffix=".tmp")
             try:
                 try:
                     f = os.fdopen(fd, "w", encoding="utf-8")
