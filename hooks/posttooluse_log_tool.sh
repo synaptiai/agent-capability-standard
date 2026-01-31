@@ -50,47 +50,69 @@ log_file="$log_dir/audit.log"
 ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 # HMAC key: use AUDIT_HMAC_KEY env var, or derive from hostname.
+# WARNING: The default hostname-derived key provides integrity against
+# accidental corruption ONLY. It is trivially discoverable and does NOT
+# provide adversarial tamper resistance. For production/adversarial
+# environments, set the AUDIT_HMAC_KEY environment variable to a proper
+# cryptographic secret (e.g., 32+ random hex characters).
 hmac_key="${AUDIT_HMAC_KEY:-grounded-agency-audit-$(hostname -s 2>/dev/null || echo 'default')}"
 
-# Get previous entry's HMAC for chaining (empty string for first entry)
-prev_hmac=""
-if [ -f "$log_file" ] && [ -s "$log_file" ]; then
-  last_line=$(tail -1 "$log_file" 2>/dev/null || echo "")
-  if [ -n "$last_line" ]; then
-    prev_hmac=$(echo "$last_line" | jq -r '.hmac // ""' 2>/dev/null || echo "")
+# Serialize read + append via flock to prevent concurrent hook invocations
+# from reading the same prev_hmac and breaking the HMAC chain.
+# Falls back to unserialized write if flock is not available.
+lock_file="${log_file}.lock"
+
+_do_append() {
+  # Get previous entry's HMAC for chaining (empty string for first entry)
+  local prev_hmac=""
+  if [ -f "$log_file" ] && [ -s "$log_file" ]; then
+    local last_line
+    last_line=$(tail -1 "$log_file" 2>/dev/null || echo "")
+    if [ -n "$last_line" ]; then
+      prev_hmac=$(echo "$last_line" | jq -r '.hmac // ""' 2>/dev/null || echo "")
+    fi
   fi
-fi
 
-# Build compact single-line JSON for entry content (matches Python verifier format).
-# Using jq -c produces {"ts":"...","skill":"...","args":"...","prev_hmac":"..."} which
-# matches json.dumps(d, separators=(",", ":")) in the Python verifier.
-entry_content=$(jq -c -n \
-  --arg ts "$ts" \
-  --arg skill "$skill" \
-  --arg args "$args" \
-  --arg prev_hmac "$prev_hmac" \
-  '{ts: $ts, skill: $skill, args: $args, prev_hmac: $prev_hmac}' 2>/dev/null)
+  # Build compact single-line JSON for entry content (matches Python verifier format).
+  # Using jq -c produces {"ts":"...","skill":"...","args":"...","prev_hmac":"..."} which
+  # matches json.dumps(d, separators=(",", ":")) in the Python verifier.
+  local entry_content
+  entry_content=$(jq -c -n \
+    --arg ts "$ts" \
+    --arg skill "$skill" \
+    --arg args "$args" \
+    --arg prev_hmac "$prev_hmac" \
+    '{ts: $ts, skill: $skill, args: $args, prev_hmac: $prev_hmac}' 2>/dev/null)
 
-# Guard: if jq failed, skip logging rather than corrupt the chain
-if [ -z "$entry_content" ]; then
-  exit 0
-fi
+  # Guard: if jq failed, skip logging rather than corrupt the chain
+  if [ -z "$entry_content" ]; then
+    return 0
+  fi
 
-# Compute HMAC over entry content. Requires openssl (available on Linux + macOS).
-if command -v openssl &> /dev/null; then
-  entry_hmac=$(printf '%s' "$entry_content" | openssl dgst -sha256 -hmac "$hmac_key" -hex 2>/dev/null | awk '{print $NF}')
+  # Compute HMAC over entry content. Requires openssl (available on Linux + macOS).
+  local entry_hmac
+  if command -v openssl &> /dev/null; then
+    entry_hmac=$(printf '%s' "$entry_content" | openssl dgst -sha256 -hmac "$hmac_key" -hex 2>/dev/null | awk '{print $NF}')
+  else
+    entry_hmac="no-hmac-available"
+  fi
+
+  # Build final compact JSON entry with HMAC
+  local final_entry
+  final_entry=$(echo "$entry_content" | jq -c --arg hmac "$entry_hmac" '. + {hmac: $hmac}' 2>/dev/null)
+
+  # Guard: don't append empty/broken entries
+  if [ -z "$final_entry" ]; then
+    return 0
+  fi
+
+  echo "$final_entry" >> "$log_file"
+}
+
+if command -v flock &> /dev/null; then
+  (flock -x 200 && _do_append) 200>"$lock_file"
 else
-  entry_hmac="no-hmac-available"
+  _do_append
 fi
-
-# Build final compact JSON entry with HMAC
-final_entry=$(echo "$entry_content" | jq -c --arg hmac "$entry_hmac" '. + {hmac: $hmac}' 2>/dev/null)
-
-# Guard: don't append empty/broken entries
-if [ -z "$final_entry" ]; then
-  exit 0
-fi
-
-echo "$final_entry" >> "$log_file"
 
 exit 0

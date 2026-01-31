@@ -23,6 +23,9 @@ CANONICAL = ROOT / "grounded_agency" / "utils" / "safe_yaml.py"
 MIRROR = ROOT / "tools" / "yaml_util.py"
 
 # Public symbols that must match between the two files.
+# MAINTENANCE: Update this set when adding or removing public symbols from
+# safe_yaml.py.  If a new symbol is added to the canonical file but not here,
+# the sync validator will silently ignore it, allowing drift.
 SYNCED_NAMES = {
     "safe_yaml_load",
     "YAMLSizeExceededError",

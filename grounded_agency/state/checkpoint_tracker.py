@@ -72,8 +72,14 @@ class Checkpoint:
             raise ValueError("checkpoint id must be a string")
         if not isinstance(data.get("scope"), list):
             raise ValueError("checkpoint scope must be a list")
+        if not all(isinstance(s, str) for s in data["scope"]):
+            raise ValueError("checkpoint scope elements must be strings")
         if not isinstance(data.get("reason"), str):
             raise ValueError("checkpoint reason must be a string")
+        if "created_at" not in data:
+            raise ValueError("checkpoint created_at is required")
+        if not isinstance(data.get("consumed", False), bool):
+            raise ValueError("checkpoint consumed must be a boolean")
         meta = data.get("metadata", {})
         if not isinstance(meta, dict):
             raise ValueError("checkpoint metadata must be a dict")
@@ -213,7 +219,12 @@ class CheckpointTracker:
                 dir=str(self._checkpoint_dir), suffix=".tmp"
             )
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                try:
+                    f = os.fdopen(fd, "w", encoding="utf-8")
+                except Exception:
+                    os.close(fd)
+                    raise
+                with f:
                     json.dump(state, f)
                 os.replace(tmp_path, str(state_path))
             except Exception:
@@ -229,15 +240,38 @@ class CheckpointTracker:
     def _load_persisted_state(self) -> None:
         """Load tracker state from disk if available.
 
-        Uses open() + fstat() to avoid TOCTOU between existence check and read.
+        Uses O_NOFOLLOW + fstat() on the opened fd to avoid TOCTOU between
+        symlink check/existence check and read.  Falls back to is_symlink()
+        on platforms without O_NOFOLLOW.
         Handles missing and corrupt files gracefully.
         """
         state_path = self._state_file_path()
-        if state_path.is_symlink():
-            logger.warning("Refusing to follow symlink for state file: %s", state_path)
-            return
+        o_nofollow = getattr(os, "O_NOFOLLOW", 0)
+        if o_nofollow:
+            try:
+                fd = os.open(str(state_path), os.O_RDONLY | o_nofollow)
+            except FileNotFoundError:
+                return
+            except OSError as e:
+                if e.errno in (40, 62):  # ELOOP — symlink rejected
+                    logger.warning("Refusing to follow symlink for state file: %s", state_path)
+                    return
+                raise
+            try:
+                f = os.fdopen(fd, encoding="utf-8")
+            except Exception:
+                os.close(fd)
+                raise
+        else:
+            if state_path.is_symlink():
+                logger.warning("Refusing to follow symlink for state file: %s", state_path)
+                return
+            try:
+                f = open(state_path, encoding="utf-8")
+            except FileNotFoundError:
+                return
         try:
-            with open(state_path, encoding="utf-8") as f:
+            with f:
                 file_size = os.fstat(f.fileno()).st_size
                 if file_size > self._MAX_STATE_FILE_BYTES:
                     logger.warning(
@@ -352,7 +386,12 @@ class CheckpointTracker:
                 dir=str(self._marker_dir), suffix=".tmp"
             )
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                try:
+                    f = os.fdopen(fd, "w", encoding="utf-8")
+                except Exception:
+                    os.close(fd)
+                    raise
+                with f:
                     json.dump(marker_data, f)
                 os.replace(tmp_path, str(marker_path))
             except Exception:

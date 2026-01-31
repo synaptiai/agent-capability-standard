@@ -60,13 +60,36 @@ def safe_yaml_load(
     """
     path = Path(path)
 
-    if path.is_symlink():
-        raise ValueError(f"Refusing to follow symlink: {path}")
-
-    # Open first, then fstat() on the fd to avoid TOCTOU between stat() and open().
-    # If the file does not exist, open() raises FileNotFoundError directly.
-    with open(path, encoding="utf-8") as f:
-        file_size = os.fstat(f.fileno()).st_size
-        if file_size > max_size:
-            raise YAMLSizeExceededError(path, file_size, max_size)
-        return yaml.safe_load(f)
+    # Atomically reject symlinks using O_NOFOLLOW (POSIX) to eliminate the
+    # TOCTOU window between a separate is_symlink() check and open().
+    # Falls back to is_symlink() on platforms without O_NOFOLLOW.
+    o_nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if o_nofollow:
+        try:
+            fd = os.open(str(path), os.O_RDONLY | o_nofollow)
+        except FileNotFoundError:
+            raise
+        except OSError as e:
+            # O_NOFOLLOW causes ELOOP (errno 40/62) on symlinks
+            if e.errno in (40, 62):  # ELOOP on Linux / macOS
+                raise ValueError(f"Refusing to follow symlink: {path}") from e
+            raise
+        try:
+            f = os.fdopen(fd, encoding="utf-8")
+        except Exception:
+            os.close(fd)
+            raise
+        with f:
+            file_size = os.fstat(f.fileno()).st_size
+            if file_size > max_size:
+                raise YAMLSizeExceededError(path, file_size, max_size)
+            return yaml.safe_load(f)
+    else:
+        # Fallback for platforms without O_NOFOLLOW
+        if path.is_symlink():
+            raise ValueError(f"Refusing to follow symlink: {path}")
+        with open(path, encoding="utf-8") as f:
+            file_size = os.fstat(f.fileno()).st_size
+            if file_size > max_size:
+                raise YAMLSizeExceededError(path, file_size, max_size)
+            return yaml.safe_load(f)
