@@ -1,11 +1,14 @@
 """Size-limited YAML loading for tools/ scripts (SEC-003).
 
-Standalone version that avoids import dependencies on the
-``grounded_agency`` package.  Mirrors the API of
-``grounded_agency.utils.safe_yaml`` so call-sites look identical.
+Standalone mirror of ``grounded_agency/utils/safe_yaml.py`` that avoids
+import dependencies on the ``grounded_agency`` package so ``tools/``
+scripts work without installing the package.
 
-IMPORTANT: This file is a mirror of ``grounded_agency/utils/safe_yaml.py``.
-Changes here MUST be applied to the source as well.
+IMPORTANT: The canonical source is ``grounded_agency/utils/safe_yaml.py``.
+Both files MUST expose the same public API (``safe_yaml_load``,
+``YAMLSizeExceededError``, ``DEFAULT_MAX_BYTES``, ``ONTOLOGY_MAX_BYTES``)
+with identical behaviour.  When editing either file, update the other
+to match.
 """
 
 from __future__ import annotations

@@ -3,9 +3,12 @@
 Provides ``safe_yaml_load`` which checks file size before parsing,
 preventing large YAML payloads from consuming unbounded memory.
 
-IMPORTANT: This file is mirrored at ``tools/yaml_util.py`` for scripts
-that cannot import the ``grounded_agency`` package. Changes here MUST
-be applied to the mirror as well.
+IMPORTANT: This file is the canonical source.  A standalone mirror lives
+at ``tools/yaml_util.py`` for scripts that cannot import the
+``grounded_agency`` package.  The two files MUST expose the same public
+API (``safe_yaml_load``, ``YAMLSizeExceededError``, ``DEFAULT_MAX_BYTES``,
+``ONTOLOGY_MAX_BYTES``) with identical behaviour.  When editing either
+file, update the other to match.
 """
 
 from __future__ import annotations

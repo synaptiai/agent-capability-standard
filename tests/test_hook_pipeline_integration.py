@@ -137,6 +137,7 @@ class TestCheckpointBridge:
             {"CLAUDE_PROJECT_DIR": str(project_dir)},
         )
         assert result.returncode != 0, "Hook should block after consume"
+        assert "checkpoint" in result.stdout.lower() or "blocked" in result.stdout.lower()
 
     @skip_no_bash
     def test_state_file_and_marker_both_written(
@@ -261,7 +262,8 @@ class TestCrossProcessPersistence:
             '{"tool_name": "Bash"}',
             {"CLAUDE_PROJECT_DIR": str(project_dir)},
         )
-        assert result.returncode != 0
+        assert result.returncode != 0, "Hook should block after cross-process consume"
+        assert "checkpoint" in result.stdout.lower() or "blocked" in result.stdout.lower()
 
 
 # ------------------------------------------------------------------
@@ -379,6 +381,7 @@ class TestPermissionEnforcement:
         # Step 1: No checkpoint — should be blocked
         result = _run_hook(PRETOOLUSE_HOOK, mutation_payload, env)
         assert result.returncode != 0, "Should block without checkpoint"
+        assert "checkpoint" in result.stdout.lower() or "blocked" in result.stdout.lower()
 
         # Step 2: Create checkpoint
         tracker = CheckpointTracker(checkpoint_dir=chk_dir, marker_dir=marker_dir)
@@ -394,6 +397,7 @@ class TestPermissionEnforcement:
         # Step 5: After consume — should be blocked again
         result = _run_hook(PRETOOLUSE_HOOK, mutation_payload, env)
         assert result.returncode != 0, "Should block after consume"
+        assert "checkpoint" in result.stdout.lower() or "blocked" in result.stdout.lower()
 
     @skip_no_bash
     def test_non_mutation_always_allowed(self, project_dir: Path) -> None:

@@ -8,7 +8,6 @@ Tracks checkpoint creation, validity, consumption, and expiry.
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import json
 import logging
 import os
@@ -202,21 +201,21 @@ class CheckpointTracker:
     def _load_persisted_state(self) -> None:
         """Load tracker state from disk if available.
 
+        Uses open() + fstat() to avoid TOCTOU between existence check and read.
         Handles missing and corrupt files gracefully.
         """
         state_path = self._state_file_path()
-        if not state_path.exists():
-            return
         try:
-            file_size = state_path.stat().st_size
-            if file_size > self._MAX_STATE_FILE_BYTES:
-                logger.warning(
-                    "State file too large (%d bytes, limit %d) — starting fresh",
-                    file_size,
-                    self._MAX_STATE_FILE_BYTES,
-                )
-                return
-            raw = state_path.read_text(encoding="utf-8")
+            with open(state_path, encoding="utf-8") as f:
+                file_size = os.fstat(f.fileno()).st_size
+                if file_size > self._MAX_STATE_FILE_BYTES:
+                    logger.warning(
+                        "State file too large (%d bytes, limit %d) — starting fresh",
+                        file_size,
+                        self._MAX_STATE_FILE_BYTES,
+                    )
+                    return
+                raw = f.read()
             state = json.loads(raw)
             if state.get("active"):
                 self._active_checkpoint = Checkpoint.from_dict(state["active"])
@@ -281,12 +280,12 @@ class CheckpointTracker:
     def _generate_checkpoint_id(self) -> str:
         """Generate a unique checkpoint ID with 128 bits of entropy.
 
-        Uses 32 hex characters (128 bits) from SHA-256 of 16 random bytes
-        for cryptographic security against ID prediction/collision.
+        Uses 16 cryptographically random bytes (128 bits) encoded as
+        32 hex characters.  ``os.urandom`` is already cryptographically
+        secure, so hashing adds no additional entropy.
         """
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        # Use 16 bytes of randomness → 128 bits of entropy in output
-        random_suffix = hashlib.sha256(os.urandom(16)).hexdigest()[:32]
+        random_suffix = os.urandom(16).hex()
         return f"chk_{timestamp}_{random_suffix}"
 
     def _prune_history_if_needed(self) -> int:
@@ -305,10 +304,10 @@ class CheckpointTracker:
         return to_prune
 
     def _write_marker(self, checkpoint: Checkpoint) -> None:
-        """Write the shell hook marker file with checkpoint metadata.
+        """Atomically write the shell hook marker file with checkpoint metadata.
 
-        Bridges the Python tracker with the shell PreToolUse hook by
-        writing a JSON marker file that the hook validates for freshness.
+        Uses write-to-tmp + rename so the shell PreToolUse hook never reads
+        a partially written marker file.
         """
         if self._marker_dir is None:
             return
@@ -326,7 +325,19 @@ class CheckpointTracker:
                 "created_at": created_ts,
                 "expires_at": expires_ts,
             }
-            marker_path.write_text(json.dumps(marker_data), encoding="utf-8")
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._marker_dir), suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(marker_data, f)
+                os.replace(tmp_path, str(marker_path))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except OSError as e:
             logger.warning("Failed to write checkpoint marker: %s", e)
 
