@@ -61,7 +61,23 @@ class Checkpoint:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Checkpoint:
-        """Deserialize checkpoint from a dict."""
+        """Deserialize checkpoint from a dict.
+
+        Raises:
+            ValueError: If required fields have wrong types.
+            KeyError: If required fields are missing.
+        """
+        # Validate types to catch crafted/corrupt state files early.
+        if not isinstance(data.get("id"), str):
+            raise ValueError("checkpoint id must be a string")
+        if not isinstance(data.get("scope"), list):
+            raise ValueError("checkpoint scope must be a list")
+        if not isinstance(data.get("reason"), str):
+            raise ValueError("checkpoint reason must be a string")
+        meta = data.get("metadata", {})
+        if not isinstance(meta, dict):
+            raise ValueError("checkpoint metadata must be a dict")
+
         return cls(
             id=data["id"],
             scope=data["scope"],
@@ -122,10 +138,21 @@ class CheckpointTracker:
 
         # After successful mutation
         tracker.consume_checkpoint()
+
+    State file format (``checkpoint_dir/tracker_state.json``)::
+
+        {
+            "active": { <Checkpoint dict> } | null,
+            "history": [ { <Checkpoint dict> }, ... ]
+        }
+
+    Each Checkpoint dict contains: id, scope, reason, created_at,
+    expires_at, consumed, consumed_at, metadata.
     """
 
     DEFAULT_EXPIRY_MINUTES: int = 30
     DEFAULT_MAX_HISTORY: int = 100
+    _MAX_STATE_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
     def __init__(
         self,
@@ -175,7 +202,11 @@ class CheckpointTracker:
                     if self._active_checkpoint
                     else None
                 ),
-                "history": [c.to_dict() for c in self._checkpoint_history],
+                # Cap history before serializing to prevent unbounded file growth.
+                "history": [
+                    c.to_dict()
+                    for c in self._checkpoint_history[-self._max_history:]
+                ],
             }
             state_path = self._state_file_path()
             fd, tmp_path = tempfile.mkstemp(
@@ -192,11 +223,8 @@ class CheckpointTracker:
                 except OSError:
                     pass
                 raise
-        except (OSError, TypeError, ValueError) as e:
+        except (OSError, TypeError, ValueError, OverflowError) as e:
             logger.warning("Failed to persist checkpoint state: %s", e)
-
-    # Maximum size for persisted state file (10 MB — generous for JSON metadata).
-    _MAX_STATE_FILE_BYTES: int = 10 * 1024 * 1024
 
     def _load_persisted_state(self) -> None:
         """Load tracker state from disk if available.
@@ -205,6 +233,9 @@ class CheckpointTracker:
         Handles missing and corrupt files gracefully.
         """
         state_path = self._state_file_path()
+        if state_path.is_symlink():
+            logger.warning("Refusing to follow symlink for state file: %s", state_path)
+            return
         try:
             with open(state_path, encoding="utf-8") as f:
                 file_size = os.fstat(f.fileno()).st_size
@@ -223,7 +254,7 @@ class CheckpointTracker:
             # from a crafted or accumulated state file.
             for entry in state.get("history", [])[:self._max_history]:
                 self._checkpoint_history.append(Checkpoint.from_dict(entry))
-        except (json.JSONDecodeError, KeyError, ValueError, TypeError, OSError) as e:
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Failed to load persisted checkpoint state: %s", e)
             # Start fresh — don't propagate corrupt state
             self._active_checkpoint = None
@@ -460,7 +491,13 @@ class CheckpointTracker:
 
         # Move expired active checkpoint to history FIRST so it gets
         # filtered along with all other expired history entries.
-        if self._active_checkpoint and not self._active_checkpoint.is_valid():
+        # Use explicit expiry check — not is_valid(), which also returns
+        # False for consumed checkpoints (different semantic).
+        if (
+            self._active_checkpoint
+            and self._active_checkpoint.expires_at
+            and now > self._active_checkpoint.expires_at
+        ):
             self._checkpoint_history.append(self._active_checkpoint)
             self._active_checkpoint = None
             self._remove_marker()

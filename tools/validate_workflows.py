@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -46,7 +47,7 @@ from typing import Any
 
 import yaml
 
-from yaml_util import ONTOLOGY_MAX_BYTES, YAMLSizeExceededError, safe_yaml_load
+from yaml_util import DEFAULT_MAX_BYTES, ONTOLOGY_MAX_BYTES, YAMLSizeExceededError, safe_yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]
 ONTO = ROOT / "schemas" / "capability_ontology.yaml"
@@ -166,7 +167,13 @@ def load_schema_file(path: Path) -> dict[str, Any]:
     if path.suffix.lower() in {'.yaml', '.yml'}:
         return safe_yaml_load(path) or {}
     if path.suffix.lower() == '.json':
-        return json.loads(path.read_text(encoding='utf-8'))
+        # Apply same size limit as YAML to prevent memory exhaustion (SEC-003).
+        with open(path, encoding='utf-8') as f:
+            file_size = os.fstat(f.fileno()).st_size
+            if file_size > DEFAULT_MAX_BYTES:
+                print(f"WARNING: JSON schema too large ({file_size:,} bytes): {path}", file=sys.stderr)
+                return {}
+            return json.loads(f.read())
     return {}
 
 def resolve_json_pointer(doc: dict[str, Any], pointer: str) -> Any:

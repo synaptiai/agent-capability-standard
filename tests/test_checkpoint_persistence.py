@@ -278,6 +278,56 @@ class TestClearExpiredPersistence:
         assert tracker2.checkpoint_count == 0
 
 
+class TestHistoryPruningPersistence:
+    """Tests that history pruning is respected during persistence."""
+
+    def test_history_capped_on_persist(self, chk_dir: Path) -> None:
+        """Creating more checkpoints than max_history caps persisted history."""
+        max_h = 5
+        tracker1 = CheckpointTracker(checkpoint_dir=chk_dir, max_history=max_h)
+
+        # Create max_h + 3 checkpoints (each new one pushes the previous to history)
+        for i in range(max_h + 3):
+            tracker1.create_checkpoint(scope=["*"], reason=f"checkpoint {i}")
+
+        # History should be capped at max_h (active is separate)
+        assert len(tracker1._checkpoint_history) <= max_h
+
+        # Restore from disk — history should still be capped
+        tracker2 = CheckpointTracker(checkpoint_dir=chk_dir, max_history=max_h)
+        assert len(tracker2._checkpoint_history) <= max_h
+        # Active + history should not exceed max_h + 1
+        assert tracker2.checkpoint_count <= max_h + 1
+
+    def test_history_cap_on_load_with_large_state(self, chk_dir: Path) -> None:
+        """Loading a state file with more entries than max_history caps on read."""
+        # Write a state file with 20 history entries manually
+        import json
+        from datetime import datetime, timezone
+
+        entries = []
+        for i in range(20):
+            ts = datetime(2025, 1, 1, 0, i, tzinfo=timezone.utc)
+            entries.append({
+                "id": f"chk_old_{i}",
+                "scope": ["*"],
+                "reason": f"old {i}",
+                "created_at": ts.isoformat(),
+                "expires_at": None,
+                "consumed": True,
+                "consumed_at": ts.isoformat(),
+                "metadata": {},
+            })
+
+        chk_dir.mkdir(parents=True, exist_ok=True)
+        state_path = chk_dir / "tracker_state.json"
+        state_path.write_text(json.dumps({"active": None, "history": entries}))
+
+        # Load with max_history=5 — should cap at 5
+        tracker = CheckpointTracker(checkpoint_dir=chk_dir, max_history=5)
+        assert len(tracker._checkpoint_history) == 5
+
+
 class TestInvalidateAllPersistence:
     """Tests for persistence during invalidate_all."""
 

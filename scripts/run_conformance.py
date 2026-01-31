@@ -23,6 +23,7 @@ def run_fixture(name: str, path: Path) -> dict:
         cwd=str(ROOT),
         capture_output=True,
         text=True,
+        timeout=120,
     )
     return {
         "name": name,
