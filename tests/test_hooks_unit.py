@@ -239,3 +239,101 @@ class TestPostToolUseExitCodes:
         result = run_hook(POSTTOOLUSE_HOOK, payload, log_env)
         assert result.returncode == 0
         assert (tmp_path / ".claude").exists()
+
+
+# ─── Hook Pattern Parity Tests ───
+
+
+# Shell hook regex extracted for testing (must stay in sync with
+# hooks/pretooluse_require_checkpoint.sh line 19).
+_SHELL_HOOK_REGEX = (
+    r"(Write\b|Edit\b|MultiEdit\b|NotebookEdit\b|Bash\b|Git\b|"
+    r"rm\b|mv\b|sed\b|perl\b|curl\b|docker\b|kubectl\b|scp\b|"
+    r"rsync\b|npm\b|pip\b|chmod\b|chown\b|shred\b|unlink\b|ln\b)"
+)
+
+
+def _regex_matches(pattern: str, text: str) -> bool:
+    """Return True if *pattern* matches anywhere in *text* (case-insensitive)."""
+    import re
+
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+class TestHookPatternParity:
+    """Regression tests ensuring shell hook regex covers Python mapper patterns."""
+
+    # Mutation tool names from _TOOL_MAPPINGS in mapper.py that have
+    # mutation=True or requires_checkpoint=True.
+    PYTHON_MUTATION_TOOLS = [
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+    ]
+
+    # Bash sub-commands classified as destructive / network-send in mapper.py
+    # that should be caught by the shell hook regex.
+    BASH_MUTATION_COMMANDS = [
+        "rm",
+        "mv",
+        "sed",
+        "perl",
+        "curl",
+        "docker",
+        "kubectl",
+        "scp",
+        "rsync",
+        "npm",
+        "pip",
+        "chmod",
+        "chown",
+        "shred",
+        "unlink",
+        "ln",
+    ]
+
+    # ── SDK tool-name parity ──
+
+    @pytest.mark.parametrize("tool_name", PYTHON_MUTATION_TOOLS)
+    def test_shell_regex_catches_sdk_mutation_tool(self, tool_name: str) -> None:
+        """Shell hook regex must match every mutation tool from Python mapper."""
+        assert _regex_matches(
+            _SHELL_HOOK_REGEX, tool_name
+        ), f"Shell hook regex does not catch SDK mutation tool '{tool_name}'"
+
+    # ── Bash sub-command parity ──
+
+    @pytest.mark.parametrize("cmd", BASH_MUTATION_COMMANDS)
+    def test_shell_regex_catches_bash_mutation_command(self, cmd: str) -> None:
+        """Shell hook regex must match destructive Bash sub-commands from mapper."""
+        payload = f"Bash {cmd} something"
+        assert _regex_matches(
+            _SHELL_HOOK_REGEX, payload
+        ), f"Shell hook regex does not catch Bash mutation command '{cmd}'"
+
+    # ── Explicit MultiEdit / NotebookEdit tests ──
+
+    def test_multiedit_matched(self) -> None:
+        """MultiEdit must be caught by shell hook regex."""
+        assert _regex_matches(_SHELL_HOOK_REGEX, "MultiEdit files")
+
+    def test_notebookedit_matched(self) -> None:
+        """NotebookEdit must be caught by shell hook regex."""
+        assert _regex_matches(_SHELL_HOOK_REGEX, "NotebookEdit cell 3")
+
+    # ── hooks.json matcher parity ──
+
+    def test_hooks_json_matcher_includes_mutation_tools(self) -> None:
+        """hooks.json PreToolUse matcher must list all SDK mutation tools."""
+        hooks_json_path = ROOT / "hooks" / "hooks.json"
+        hooks_data = json.loads(hooks_json_path.read_text())
+
+        matcher = hooks_data["hooks"]["PreToolUse"][0]["matcher"]
+        matcher_tools = set(matcher.split("|"))
+
+        for tool_name in self.PYTHON_MUTATION_TOOLS:
+            assert tool_name in matcher_tools, (
+                f"hooks.json matcher is missing mutation tool '{tool_name}'; "
+                f"current matcher: {matcher}"
+            )
