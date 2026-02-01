@@ -3,11 +3,16 @@
 
 Runs the reference validator against each fixture ``workflow_catalog.yaml``
 using the ``--catalog`` flag so the production catalog is never modified.
+
+TEST-007: Uses tempfile.TemporaryDirectory for build output isolation
+and signal handlers for cleanup safety.
 """
 
 import json
+import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,34 +37,60 @@ def run_fixture(name: str, path: Path) -> dict:
         "stderr": proc.stderr,
     }
 
-def main() -> None:
-    results = []
-    failed = 0
-    for name, meta in EXPECT.items():
-        path = FIX / f"{name}.workflow_catalog.yaml"
-        if not path.exists():
-            print(f"Missing fixture: {path}")
-            failed += 1
-            continue
-        res = run_fixture(name, path)
-        should_pass = meta.get("should_pass", False)
-        if res["ok"] != should_pass:
-            failed += 1
-            print(f"FAIL: {name} expected should_pass={should_pass} got ok={res['ok']}")
-            print(res["stdout"])
-            print(res["stderr"])
-        else:
-            print(f"PASS: {name}")
-        results.append(res)
 
-    build_dir = ROOT / "build"
-    build_dir.mkdir(exist_ok=True)
-    (build_dir / "conformance_results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+def main() -> None:
+    # TEST-007: Use temporary directory for build output isolation.
+    # This ensures conformance runs don't pollute the working directory
+    # and cleanup happens automatically, even on signal interruption.
+    with tempfile.TemporaryDirectory(prefix="conformance_") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+
+        # Install signal handler for clean shutdown
+        def _signal_handler(signum: int, frame: object) -> None:
+            print(f"\nInterrupted by signal {signum}, cleaning up...")
+            sys.exit(128 + signum)
+
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
+
+        results = []
+        failed = 0
+        for name, meta in EXPECT.items():
+            path = FIX / f"{name}.workflow_catalog.yaml"
+            if not path.exists():
+                print(f"Missing fixture: {path}")
+                failed += 1
+                continue
+            res = run_fixture(name, path)
+            should_pass = meta.get("should_pass", False)
+            if res["ok"] != should_pass:
+                failed += 1
+                print(f"FAIL: {name} expected should_pass={should_pass} got ok={res['ok']}")
+                print(res["stdout"])
+                print(res["stderr"])
+            else:
+                print(f"PASS: {name}")
+            results.append(res)
+
+        # Write results to temp dir first, then copy to build/
+        results_file = tmp_path / "conformance_results.json"
+        results_file.write_text(
+            json.dumps(results, indent=2), encoding="utf-8"
+        )
+
+        # Copy to persistent build dir only on success
+        build_dir = ROOT / "build"
+        build_dir.mkdir(exist_ok=True)
+        (build_dir / "conformance_results.json").write_text(
+            results_file.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+
     if failed:
         print(f"\nConformance FAILED ({failed} failures)")
         sys.exit(1)
     print("\nConformance PASSED")
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()

@@ -273,7 +273,34 @@ def validate_workflows(profile: dict[str, Any], errors: list[str], name: str) ->
             errors.append(f"[{name}] workflows[{i}]: expected string, got {type(item).__name__}")
 
 
-def validate_profile(profile: dict[str, Any], errors: list[str], name: str) -> None:
+def validate_trust_calibration(
+    profile: dict[str, Any], warnings: list[str], name: str
+) -> None:
+    """SEC-009: Check if trust model has been explicitly reviewed."""
+    reviewed = profile.get("trust_model_reviewed")
+    if reviewed is None or reviewed is False:
+        warnings.append(
+            f"[{name}] SEC-009: trust_model_reviewed is {reviewed!r}. "
+            f"Trust weights may not reflect intentional calibration. "
+            f"Set trust_model_reviewed: true after reviewing trust_weights."
+        )
+
+    reviewed_at = profile.get("trust_model_reviewed_at")
+    if reviewed_at is not None:
+        if not isinstance(reviewed_at, str):
+            warnings.append(
+                f"[{name}] trust_model_reviewed_at must be a string (YYYY-MM-DD), "
+                f"got {type(reviewed_at).__name__}"
+            )
+        elif not re.match(r"^\d{4}-\d{2}-\d{2}$", reviewed_at):
+            warnings.append(
+                f"[{name}] trust_model_reviewed_at has invalid format '{reviewed_at}': "
+                f"expected YYYY-MM-DD"
+            )
+
+
+def validate_profile(profile: dict[str, Any], errors: list[str], name: str,
+                     warnings: list[str] | None = None) -> None:
     """Run all validations on a profile."""
     validate_required_fields(profile, errors, name)
     validate_version_format(profile, errors, name)
@@ -283,6 +310,8 @@ def validate_profile(profile: dict[str, Any], errors: list[str], name: str) -> N
     validate_evidence_policy(profile, errors, name)
     validate_domain_sources(profile, errors, name)
     validate_workflows(profile, errors, name)
+    if warnings is not None:
+        validate_trust_calibration(profile, warnings, name)
 
 
 # -------------------- Main --------------------
@@ -314,6 +343,7 @@ def main() -> None:
         sys.exit(0)
 
     errors: list[str] = []
+    warnings: list[str] = []
     validated_count = 0
 
     for profile_path in profile_files:
@@ -328,7 +358,7 @@ def main() -> None:
             errors.append(f"[{profile_name}] YAML load error: {e}")
             continue
 
-        validate_profile(profile, errors, profile_name)
+        validate_profile(profile, errors, profile_name, warnings=warnings)
         validated_count += 1
 
     # Report results
@@ -339,7 +369,13 @@ def main() -> None:
         print(f"\nValidated {validated_count} profiles with {len(errors)} errors")
         sys.exit(1)
 
-    print(f"PROFILE VALIDATION PASS: {validated_count} profiles validated")
+    # SEC-009: Report trust calibration warnings (non-fatal)
+    if warnings:
+        print(f"PROFILE VALIDATION PASS (with {len(warnings)} warnings):")
+        for w in warnings:
+            print(f"  ⚠ {w}")
+    else:
+        print(f"PROFILE VALIDATION PASS: {validated_count} profiles validated")
 
 
 if __name__ == "__main__":

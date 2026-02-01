@@ -16,6 +16,9 @@
 # against accidental corruption only. For adversarial tamper resistance,
 # set AUDIT_HMAC_KEY to a proper secret.
 
+# SEC-006: Consistent path resolution (matches pretooluse_require_checkpoint.sh)
+set -euo pipefail
+
 # Read JSON from stdin (Claude Code hooks receive data via stdin)
 input=$(cat)
 
@@ -25,7 +28,8 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # Extract tool name - skip if not a Skill invocation
-tool_name=$(echo "$input" | jq -r '.tool_name // empty' 2>/dev/null)
+# Guard against invalid JSON input — jq may fail
+tool_name=$(echo "$input" | jq -r '.tool_name // empty' 2>/dev/null || echo "")
 if [[ "$tool_name" != "Skill" ]]; then
   exit 0
 fi
@@ -45,6 +49,12 @@ fi
 mkdir -p "$log_dir"
 
 log_file="$log_dir/audit.log"
+
+# SEC-006: Reject symlinked audit log to prevent log redirection attacks
+if [ -L "$log_file" ]; then
+  echo "WARNING: audit.log is a symlink — refusing to write." >&2
+  exit 0
+fi
 
 # Build log entry with timestamp
 ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"

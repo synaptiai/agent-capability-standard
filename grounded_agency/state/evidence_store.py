@@ -22,11 +22,46 @@ logger = logging.getLogger(__name__)
 # Metadata validation constants
 _MAX_METADATA_SIZE_BYTES = 1024  # 1KB max per anchor
 _MAX_METADATA_DEPTH = 2  # No deeply nested structures
+_MAX_KEY_LENGTH = 64  # SEC-008: Maximum metadata key length
 _VALID_KEY_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+# SEC-008: Explicit denylist for dangerous metadata keys.
+# These keys can cause prototype pollution or class manipulation
+# in downstream JSON consumers (JavaScript, Python pickling, etc.).
+_DENIED_KEYS: frozenset[str] = frozenset(
+    {
+        "__proto__",
+        "constructor",
+        "__class__",
+        "__init__",
+        "__bases__",
+        "__mro__",
+        "__subclasses__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__getattr__",
+        "__setattr__",
+        "__delattr__",
+        "__globals__",
+        "__builtins__",
+        "__import__",
+    }
+)
 
 
 def _validate_metadata_key(key: str) -> bool:
-    """Check if metadata key is safe (alphanumeric + underscore)."""
+    """Check if metadata key is safe.
+
+    SEC-008: Validates against regex pattern, explicit denylist,
+    max length, and rejects keys starting with double underscore.
+    """
+    if len(key) > _MAX_KEY_LENGTH:
+        return False
+    # Reject all dunder keys (broader than explicit denylist)
+    if key.startswith("__"):
+        return False
+    if key in _DENIED_KEYS:
+        return False
     return bool(_VALID_KEY_PATTERN.match(key))
 
 
@@ -92,6 +127,22 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+# Priority levels for evidence retention during eviction (SEC-004).
+# Higher values = more important = evicted last.
+PRIORITY_LOW = 0
+PRIORITY_NORMAL = 1
+PRIORITY_HIGH = 2
+PRIORITY_CRITICAL = 3
+
+# Default priorities by evidence kind
+_KIND_PRIORITY: dict[str, int] = {
+    "tool_output": PRIORITY_NORMAL,
+    "file": PRIORITY_NORMAL,
+    "command": PRIORITY_NORMAL,
+    "mutation": PRIORITY_HIGH,
+}
+
+
 @dataclass(slots=True)
 class EvidenceAnchor:
     """
@@ -106,16 +157,21 @@ class EvidenceAnchor:
         kind: Type of evidence ("tool_output", "file", "command", "mutation")
         timestamp: When the evidence was captured
         metadata: Additional context (tool input, file hash, etc.)
+        priority: Retention priority (SEC-004). Higher = evicted later.
     """
 
     ref: str
     kind: str
     timestamp: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    priority: int = PRIORITY_NORMAL
 
     def __post_init__(self) -> None:
         """Validate and sanitize metadata after initialization."""
         self.metadata = _sanitize_metadata(self.metadata)
+        # SEC-004: Auto-set priority from kind if still at default
+        if self.priority == PRIORITY_NORMAL:
+            self.priority = _KIND_PRIORITY.get(self.kind, PRIORITY_NORMAL)
 
     @classmethod
     def from_tool_output(
@@ -222,7 +278,7 @@ class EvidenceAnchor:
             checkpoint_id: Associated checkpoint ID
 
         Returns:
-            EvidenceAnchor for this mutation
+            EvidenceAnchor for this mutation (priority=HIGH)
         """
         return cls(
             ref=f"mutation:{target}",
@@ -233,7 +289,16 @@ class EvidenceAnchor:
                 "operation": operation,
                 "checkpoint_id": checkpoint_id,
             },
+            priority=PRIORITY_HIGH,
         )
+
+    def mark_critical(self) -> None:
+        """Mark this anchor as critical for forensic retention.
+
+        SEC-004: Critical anchors are evicted last during capacity pressure.
+        Use for evidence that must be preserved for audit/compliance.
+        """
+        self.priority = PRIORITY_CRITICAL
 
     def __str__(self) -> str:
         return self.ref
@@ -246,8 +311,9 @@ class EvidenceStore:
     Collects evidence anchors from tool executions and provides
     methods to query them for provenance and verification.
 
-    Uses FIFO eviction when max_anchors is exceeded to prevent
-    unbounded memory growth.
+    SEC-004: Uses priority-aware eviction when max_anchors is exceeded.
+    Lower-priority anchors are evicted first; within the same priority,
+    oldest anchors are evicted first (FIFO within priority tier).
 
     Example:
         store = EvidenceStore(max_anchors=1000)
@@ -271,12 +337,12 @@ class EvidenceStore:
 
         Args:
             max_anchors: Maximum number of anchors to store (default: 10000).
-                        When exceeded, oldest anchors are evicted (FIFO).
+                        When exceeded, lowest-priority oldest anchors are evicted.
         """
         self._max_anchors = (
             max_anchors if max_anchors is not None else self.DEFAULT_MAX_ANCHORS
         )
-        # Use deque for O(1) append and popleft operations
+        # Use deque for O(1) append; eviction is managed manually for priority
         self._anchors: deque[EvidenceAnchor] = deque(maxlen=self._max_anchors)
         self._by_kind: dict[str, list[EvidenceAnchor]] = defaultdict(list)
         self._by_capability: dict[str, list[EvidenceAnchor]] = defaultdict(list)
@@ -289,17 +355,16 @@ class EvidenceStore:
         """
         Add an evidence anchor to the store.
 
-        If max_anchors is exceeded, the oldest anchor is evicted (FIFO).
-        Uses deque with maxlen for O(1) eviction.
+        SEC-004: If max_anchors is exceeded, evicts the lowest-priority
+        oldest anchor rather than blindly dropping the oldest.
 
         Args:
             anchor: The evidence anchor to add
             capability_id: Optional capability ID to associate with
         """
-        # Check if we need to evict (deque handles the main list automatically,
-        # but we need to clean up indexes)
+        # Check if we need to evict before deque auto-evicts
         if len(self._anchors) >= self._max_anchors:
-            self._evict_oldest_from_indexes()
+            self._evict_lowest_priority()
 
         self._anchors.append(anchor)
         self._by_kind[anchor.kind].append(anchor)
@@ -307,23 +372,51 @@ class EvidenceStore:
         if capability_id:
             self._by_capability[capability_id].append(anchor)
 
-    def _evict_oldest_from_indexes(self) -> None:
-        """Remove the oldest anchor from secondary indexes before deque evicts it."""
+    def _evict_lowest_priority(self) -> None:
+        """SEC-004: Evict the lowest-priority, oldest anchor from the store.
+
+        Scans for the anchor with the lowest priority value. Among anchors
+        with the same lowest priority, evicts the oldest (leftmost in deque).
+        Falls back to FIFO if all anchors have equal priority.
+        """
         if not self._anchors:
             return
 
-        # Get the oldest anchor (will be evicted by deque on next append)
-        oldest = self._anchors[0]
+        # Find anchor with lowest priority (scan from oldest)
+        min_priority = self._anchors[0].priority
+        victim_idx = 0
+        for i, anchor in enumerate(self._anchors):
+            if anchor.priority < min_priority:
+                min_priority = anchor.priority
+                victim_idx = i
+                # Can't do better than PRIORITY_LOW
+                if min_priority == PRIORITY_LOW:
+                    break
 
+        victim = self._anchors[victim_idx]
+
+        # Remove from secondary indexes
+        self._remove_from_indexes(victim)
+
+        # Remove from main deque (convert to list, remove, recreate)
+        # For the common case (victim_idx == 0), deque popleft is O(1)
+        if victim_idx == 0:
+            self._anchors.popleft()
+        else:
+            # O(n) removal — acceptable since eviction is amortized
+            del self._anchors[victim_idx]
+
+    def _remove_from_indexes(self, anchor: EvidenceAnchor) -> None:
+        """Remove an anchor from all secondary indexes."""
         # Remove from kind index
-        kind_list = self._by_kind.get(oldest.kind, [])
-        if oldest in kind_list:
-            kind_list.remove(oldest)
+        kind_list = self._by_kind.get(anchor.kind, [])
+        if anchor in kind_list:
+            kind_list.remove(anchor)
 
         # Remove from capability indexes
         for cap_list in self._by_capability.values():
-            if oldest in cap_list:
-                cap_list.remove(oldest)
+            if anchor in cap_list:
+                cap_list.remove(anchor)
                 break  # Anchor can only be in one capability list
 
     def get_recent(self, n: int = 10) -> list[str]:

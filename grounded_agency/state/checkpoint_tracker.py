@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -183,6 +184,7 @@ class CheckpointTracker:
             max_history if max_history is not None else self.DEFAULT_MAX_HISTORY
         )
         self._marker_dir = Path(marker_dir) if marker_dir is not None else None
+        self._lock = threading.Lock()
         self._active_checkpoint: Checkpoint | None = None
         self._checkpoint_history: list[Checkpoint] = []
         self._load_persisted_state()
@@ -366,9 +368,59 @@ class CheckpointTracker:
         return f"chk_{timestamp}_{random_suffix}"
 
     def _prune_history_if_needed(self) -> None:
-        """Prune oldest checkpoints if history exceeds max_history."""
+        """Prune oldest checkpoints if history exceeds max_history.
+
+        SEC-011: Archives pruned checkpoints to JSONL before deletion
+        to preserve forensic data for audit trails.
+        """
         if len(self._checkpoint_history) > self._max_history:
+            to_prune = self._checkpoint_history[: -self._max_history]
+            self._archive_checkpoints(to_prune)
             self._checkpoint_history = self._checkpoint_history[-self._max_history :]
+
+    def _archive_checkpoints(self, checkpoints: list[Checkpoint]) -> None:
+        """SEC-011: Write pruned checkpoints to archive JSONL file.
+
+        Archives are append-only JSONL files in .checkpoints/archive/.
+        Each line is a JSON-serialized checkpoint dict.
+        """
+        if not checkpoints:
+            return
+        try:
+            archive_dir = self._checkpoint_dir / "archive"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_file = archive_dir / "pruned_checkpoints.jsonl"
+            with open(archive_file, "a", encoding="utf-8") as f:
+                for cp in checkpoints:
+                    f.write(json.dumps(cp.to_dict()) + "\n")
+            logger.info(
+                "Archived %d pruned checkpoints to %s",
+                len(checkpoints),
+                archive_file,
+            )
+        except OSError as e:
+            logger.warning("Failed to archive pruned checkpoints: %s", e)
+
+    def get_archived_checkpoints(self) -> list[Checkpoint]:
+        """SEC-011: Retrieve archived (pruned) checkpoints from JSONL.
+
+        Returns:
+            List of archived Checkpoint objects, oldest first.
+        """
+        archive_file = self._checkpoint_dir / "archive" / "pruned_checkpoints.jsonl"
+        if not archive_file.exists():
+            return []
+        try:
+            results = []
+            with open(archive_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        results.append(Checkpoint.from_dict(json.loads(line)))
+            return results
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.warning("Failed to read checkpoint archive: %s", e)
+            return []
 
     def _write_marker(self, checkpoint: Checkpoint) -> None:
         """Atomically write the shell hook marker file with checkpoint metadata.
@@ -427,6 +479,25 @@ class CheckpointTracker:
             return False
         return self._active_checkpoint.is_valid()
 
+    def validate_and_reserve(self) -> tuple[bool, str | None]:
+        """Atomically check and reserve the active checkpoint.
+
+        SEC-007: Prevents TOCTOU race between has_valid_checkpoint() and
+        subsequent use. The lock ensures no other thread can consume or
+        invalidate the checkpoint between the check and the reservation.
+
+        Returns:
+            Tuple of (is_valid, checkpoint_id). If is_valid is True, the
+            checkpoint is guaranteed to remain valid until consume_checkpoint()
+            is called.
+        """
+        with self._lock:
+            if self._active_checkpoint is None:
+                return False, None
+            if not self._active_checkpoint.is_valid():
+                return False, None
+            return True, self._active_checkpoint.id
+
     def has_checkpoint_for_scope(self, target: str) -> bool:
         """
         Check if there's a valid checkpoint covering the target.
@@ -459,28 +530,30 @@ class CheckpointTracker:
 
         Called after a successful mutation to indicate the checkpoint
         has been "used up" and a new one is needed for further mutations.
+        Thread-safe via self._lock (SEC-007).
 
         Returns:
             ID of consumed checkpoint, or None if no active checkpoint
         """
-        if self._active_checkpoint is None:
-            return None
+        with self._lock:
+            if self._active_checkpoint is None:
+                return None
 
-        # Capture reference and clear active first to avoid intermediate
-        # invalid state where active still points to consumed checkpoint.
-        consumed = self._active_checkpoint
-        self._active_checkpoint = None
+            # Capture reference and clear active first to avoid intermediate
+            # invalid state where active still points to consumed checkpoint.
+            consumed = self._active_checkpoint
+            self._active_checkpoint = None
 
-        consumed.consumed = True
-        consumed.consumed_at = datetime.now(timezone.utc)
-        checkpoint_id = consumed.id
+            consumed.consumed = True
+            consumed.consumed_at = datetime.now(timezone.utc)
+            checkpoint_id = consumed.id
 
-        # Move to history
-        self._checkpoint_history.append(consumed)
-        self._remove_marker()
-        self._persist_state()
+            # Move to history
+            self._checkpoint_history.append(consumed)
+            self._remove_marker()
+            self._persist_state()
 
-        return checkpoint_id
+            return checkpoint_id
 
     def get_checkpoint_by_id(self, checkpoint_id: str) -> Checkpoint | None:
         """

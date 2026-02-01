@@ -117,10 +117,20 @@ class CapabilityRegistry:
         return self._loaded_ontology
 
     def _load_ontology(self) -> None:
-        """Load the ontology YAML from disk."""
+        """Load the ontology YAML from disk.
+
+        SEC-012: Rejects symlinks to prevent path substitution attacks.
+        The ontology file must be a regular file, not a symlink.
+        """
         if not self._ontology_path.exists():
             raise FileNotFoundError(
                 f"Capability ontology not found: {self._ontology_path}"
+            )
+
+        # SEC-012: Reject symlinks to prevent ontology substitution
+        if self._ontology_path.is_symlink():
+            raise ValueError(
+                f"SEC-012: Ontology path is a symlink (rejected): {self._ontology_path}"
             )
 
         ontology: dict[str, Any] = safe_yaml_load(
