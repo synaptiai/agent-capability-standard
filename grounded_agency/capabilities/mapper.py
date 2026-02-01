@@ -86,9 +86,10 @@ _ALWAYS_DANGEROUS_PATTERNS = re.compile(
 
 # Compound command operators: &&, ||, ; followed by a command.
 # Used to split compound commands for per-sub-command classification.
-# Known limitation: quoted strings containing && (e.g., echo "a && b")
-# will be split incorrectly. This is fail-safe: the fragment won't
-# match the read-only allowlist and will be classified as high-risk.
+# Known limitation: quoted or escaped compound operators
+# (e.g., echo "a && b", echo 'a || b', heredocs) will cause
+# incorrect splitting. This is fail-safe: unrecognized fragments
+# default to high-risk via the secure default-deny path.
 _COMPOUND_OPERATOR_RE = re.compile(r"\s*(?:&&|\|\||;\s*(?=[a-zA-Z]))\s*")
 
 _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
@@ -370,34 +371,16 @@ class ToolCapabilityMapper:
             parts = _COMPOUND_OPERATOR_RE.split(command)
             parts = [p.strip() for p in parts if p.strip()]
 
-            high_risk_result: ToolMapping | None = None
-            all_low = True
-
             for part in parts:
                 result = self._classify_single_command(part)
-                if result.risk == "high":
-                    high_risk_result = result
-                    break
                 if result.risk != "low":
-                    all_low = False
+                    return result
 
-            if high_risk_result is not None:
-                return high_risk_result
-
-            if all_low:
-                return ToolMapping(
-                    capability_id="observe",
-                    risk="low",
-                    mutation=False,
-                    requires_checkpoint=False,
-                )
-
-            # Mixed risk — use secure default
             return ToolMapping(
-                capability_id="mutate",
-                risk="high",
-                mutation=True,
-                requires_checkpoint=True,
+                capability_id="observe",
+                risk="low",
+                mutation=False,
+                requires_checkpoint=False,
             )
 
         # THIRD: Single command path

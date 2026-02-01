@@ -33,7 +33,7 @@ def validate_registry(errors: list[str], verbose: bool) -> int:
         errors.append(f"Registry file not found: {REGISTRY_PATH}")
         return 0
 
-    data = safe_yaml_load(REGISTRY_PATH)
+    data = safe_yaml_load(REGISTRY_PATH) or {}
     coercions = data.get("coercions", [])
     count = 0
 
@@ -65,7 +65,7 @@ def validate_workflows(errors: list[str], verbose: bool) -> int:
             print(f"  SKIP: Workflow catalog not found: {WORKFLOW_PATH}")
         return 0
 
-    data = safe_yaml_load(WORKFLOW_PATH)
+    data = safe_yaml_load(WORKFLOW_PATH) or {}
     workflows = data.get("workflows", [])
     count = 0
 

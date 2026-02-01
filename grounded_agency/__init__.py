@@ -18,7 +18,12 @@ from __future__ import annotations
 
 import logging
 
-from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookCallback, HookContext
+from ._types import (
+    FallbackPermissionAllow,
+    FallbackPermissionDeny,
+    HookCallback,
+    HookContext,
+)
 from .adapter import GroundedAgentAdapter, GroundedAgentConfig
 from .capabilities.mapper import ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry

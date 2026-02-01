@@ -23,6 +23,9 @@ class HookContext(Protocol):
     conversation state and tool metadata. This Protocol matches
     any object with the expected attributes, or ``None`` when
     the SDK omits context.
+
+    Extend this Protocol as the SDK adds new context fields
+    (e.g., ``conversation_id``, ``session_metadata``).
     """
 
     @property
