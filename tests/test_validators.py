@@ -5,6 +5,7 @@ Tests all 5 validators: ontology, workflows, profiles, skill refs, yaml sync.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -58,7 +59,7 @@ class TestValidateWorkflows:
 
     def test_catalog_flag_accepts_fixture(self) -> None:
         """--catalog flag should accept alternative catalog files."""
-        fixture = ROOT / "tests" / "pass_reference.workflow_catalog.yaml"
+        fixture = ROOT / "tests" / "fixtures" / "pass_reference.workflow_catalog.yaml"
         if not fixture.exists():
             pytest.skip("Pass reference fixture not found")
         result = run_validator("validate_workflows.py", ["--catalog", str(fixture)])
@@ -66,7 +67,7 @@ class TestValidateWorkflows:
 
     def test_catalog_flag_catches_bad_fixture(self) -> None:
         """--catalog flag should catch bad fixtures."""
-        fixture = ROOT / "tests" / "fail_unknown_capability.workflow_catalog.yaml"
+        fixture = ROOT / "tests" / "fixtures" / "fail_unknown_capability.workflow_catalog.yaml"
         if not fixture.exists():
             pytest.skip("Fail fixture not found")
         result = run_validator("validate_workflows.py", ["--catalog", str(fixture)])
@@ -143,3 +144,87 @@ class TestConformanceRunner:
         )
         assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
         assert "PASSED" in result.stdout
+
+
+# ─── JSON Schema Validation ───
+
+
+class TestJsonSchemaValidation:
+    """Tests for JSON Schema validation of YAML files (Issue #71)."""
+
+    @pytest.fixture
+    def ontology_schema(self) -> dict:
+        schema_path = ROOT / "schemas" / "capability_ontology.schema.json"
+        return json.loads(schema_path.read_text(encoding="utf-8"))
+
+    @pytest.fixture
+    def workflow_schema(self) -> dict:
+        schema_path = ROOT / "schemas" / "workflow_catalog.schema.json"
+        return json.loads(schema_path.read_text(encoding="utf-8"))
+
+    def test_ontology_schema_is_valid_json(self) -> None:
+        """Schema file itself should be valid JSON."""
+        path = ROOT / "schemas" / "capability_ontology.schema.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert "$schema" in data
+
+    def test_workflow_schema_is_valid_json(self) -> None:
+        """Schema file itself should be valid JSON."""
+        path = ROOT / "schemas" / "workflow_catalog.schema.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert "$schema" in data
+
+    def test_ontology_validates_against_schema(self, ontology_schema) -> None:
+        """Production ontology should validate against its JSON Schema."""
+        import jsonschema
+        import yaml
+
+        ontology = yaml.safe_load(
+            (ROOT / "schemas" / "capability_ontology.yaml").read_text()
+        )
+        jsonschema.validate(ontology, ontology_schema)
+
+    def test_workflow_validates_against_schema(self, workflow_schema) -> None:
+        """Production workflow catalog should validate against its JSON Schema."""
+        import jsonschema
+        import yaml
+
+        workflows = yaml.safe_load(
+            (ROOT / "schemas" / "workflow_catalog.yaml").read_text()
+        )
+        jsonschema.validate(workflows, workflow_schema)
+
+    def test_ontology_schema_rejects_bad_risk(self, ontology_schema) -> None:
+        """Schema should reject invalid risk values."""
+        import jsonschema
+
+        bad = {
+            "meta": {"name": "test", "version": "1.0", "description": "test"},
+            "layers": {},
+            "nodes": [
+                {
+                    "id": "test",
+                    "layer": "PERCEIVE",
+                    "description": "test",
+                    "risk": "extreme",
+                }
+            ],
+            "edges": [],
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, ontology_schema)
+
+    def test_ontology_schema_rejects_bad_layer(self, ontology_schema) -> None:
+        """Schema should reject invalid layer values."""
+        import jsonschema
+
+        bad = {
+            "meta": {"name": "test", "version": "1.0", "description": "test"},
+            "layers": {},
+            "nodes": [
+                {"id": "test", "layer": "INVALID", "description": "test"}
+            ],
+            "edges": [],
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, ontology_schema)
