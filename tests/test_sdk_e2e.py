@@ -20,7 +20,7 @@ from grounded_agency import (
 
 # Check if claude_agent_sdk is available
 try:
-    from claude_agent_sdk import PermissionResultAllow
+    import claude_agent_sdk  # noqa: F401
 
     SDK_AVAILABLE = True
 except ImportError:
@@ -28,13 +28,13 @@ except ImportError:
 
 
 def _is_allowed(result: Any) -> bool:
-    """Check if permission result indicates allowed, handling both SDK and dict types."""
+    """Check if permission result indicates allowed, handling SDK, fallback, and dict types."""
     if isinstance(result, dict):
         return result.get("allowed", False) is True
-    # SDK types
-    if SDK_AVAILABLE:
-        return isinstance(result, PermissionResultAllow)
-    return False
+    # SDK types use behavior='allow', fallback types use allowed=True
+    if getattr(result, "behavior", None) == "allow":
+        return True
+    return getattr(result, "allowed", False) is True
 
 
 def _get_message(result: Any) -> str:
