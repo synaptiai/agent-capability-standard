@@ -82,6 +82,34 @@ class TestVerifyOntologyIntegrity:
         assert verify_ontology_integrity(str(dest), None) is False
 
 
+class TestConstantTimeComparison:
+    """Tests that hash comparison uses constant-time hmac.compare_digest."""
+
+    def test_uses_constant_time_comparison(
+        self, ontology_path: str, ontology_hash: str
+    ) -> None:
+        """verify_ontology_integrity must use hmac.compare_digest (P1-3).
+
+        We patch hmac.compare_digest to confirm it is called during
+        hash comparison, ensuring timing-safe comparison is in use.
+        """
+        import unittest.mock
+
+        with unittest.mock.patch("grounded_agency.adapter.hmac") as mock_hmac:
+            mock_hmac.compare_digest.return_value = True
+            result = verify_ontology_integrity(ontology_path, ontology_hash)
+            assert result is True
+            mock_hmac.compare_digest.assert_called_once_with(
+                ontology_hash, ontology_hash
+            )
+
+    def test_constant_time_rejects_bad_hash(
+        self, ontology_path: str, ontology_hash: str
+    ) -> None:
+        """Mismatched hash must be rejected via constant-time comparison."""
+        assert verify_ontology_integrity(ontology_path, "bad_hash_value") is False
+
+
 class TestFindOntologyPath:
     """Tests for _find_ontology_path function."""
 

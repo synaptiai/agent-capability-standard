@@ -202,6 +202,49 @@ class TestPriorityEviction:
                 assert a in store._anchors, f"Stale {a.ref} in _by_capability[{cap}]"
 
 
+# ─── P1-2: Stale index prevention after capacity overflow ───
+
+
+class TestNoStaleIndexes:
+    """Verify that overflowing capacity doesn't leave stale secondary indexes."""
+
+    def test_no_stale_indexes_after_capacity_overflow(self) -> None:
+        """Adding N items beyond max_anchors must not leave stale index entries.
+
+        Without the maxlen removal fix, deque auto-eviction bypasses
+        _remove_from_indexes, leaving ghost references in _by_kind.
+        """
+        cap = 50
+        store = EvidenceStore(max_anchors=cap)
+
+        # Overflow by 2x capacity
+        for i in range(cap * 2):
+            kind = "mutation" if i % 5 == 0 else "tool_output"
+            anchor = EvidenceAnchor(
+                ref=f"ref:{i}",
+                kind=kind,
+                timestamp=f"t{i}",
+                priority=PRIORITY_HIGH if kind == "mutation" else PRIORITY_NORMAL,
+            )
+            store.add_anchor(anchor, capability_id="retrieve" if i % 3 == 0 else None)
+
+        assert len(store) == cap
+
+        # Every anchor in _by_kind must still exist in _anchors
+        for kind, anchors in store._by_kind.items():
+            for a in anchors:
+                assert a in store._anchors, (
+                    f"Stale anchor {a.ref} in _by_kind[{kind}]"
+                )
+
+        # Every anchor in _by_capability must still exist in _anchors
+        for cap_id, anchors in store._by_capability.items():
+            for a in anchors:
+                assert a in store._anchors, (
+                    f"Stale anchor {a.ref} in _by_capability[{cap_id}]"
+                )
+
+
 # ─── TEST-003: Performance benchmarks ───
 
 

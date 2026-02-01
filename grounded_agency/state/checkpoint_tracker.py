@@ -346,14 +346,15 @@ class CheckpointTracker:
             metadata=metadata or {},
         )
 
-        # Move previous active checkpoint to history
-        if self._active_checkpoint:
-            self._checkpoint_history.append(self._active_checkpoint)
-            self._prune_history_if_needed()
+        with self._lock:
+            # Move previous active checkpoint to history
+            if self._active_checkpoint:
+                self._checkpoint_history.append(self._active_checkpoint)
+                self._prune_history_if_needed()
 
-        self._active_checkpoint = checkpoint
-        self._write_marker(checkpoint)
-        self._persist_state()
+            self._active_checkpoint = checkpoint
+            self._write_marker(checkpoint)
+            self._persist_state()
         return checkpoint_id
 
     def _generate_checkpoint_id(self) -> str:
@@ -475,9 +476,10 @@ class CheckpointTracker:
 
     def has_valid_checkpoint(self) -> bool:
         """Check if there's a valid (unexpired, unconsumed) checkpoint."""
-        if self._active_checkpoint is None:
-            return False
-        return self._active_checkpoint.is_valid()
+        with self._lock:
+            if self._active_checkpoint is None:
+                return False
+            return self._active_checkpoint.is_valid()
 
     def validate_and_reserve(self) -> tuple[bool, str | None]:
         """Atomically check and reserve the active checkpoint.
@@ -515,9 +517,10 @@ class CheckpointTracker:
 
     def get_active_checkpoint(self) -> Checkpoint | None:
         """Get the currently active checkpoint, if any."""
-        if self._active_checkpoint and self._active_checkpoint.is_valid():
-            return self._active_checkpoint
-        return None
+        with self._lock:
+            if self._active_checkpoint and self._active_checkpoint.is_valid():
+                return self._active_checkpoint
+            return None
 
     def get_active_checkpoint_id(self) -> str | None:
         """Get the ID of the active checkpoint, or None."""
@@ -602,36 +605,37 @@ class CheckpointTracker:
         Returns:
             Number of expired checkpoints removed (active + history)
         """
-        now = datetime.now(timezone.utc)
-        active_cleared = False
+        with self._lock:
+            now = datetime.now(timezone.utc)
+            active_cleared = False
 
-        # Move expired active checkpoint to history FIRST so it gets
-        # filtered along with all other expired history entries.
-        # Use explicit expiry check — not is_valid(), which also returns
-        # False for consumed checkpoints (different semantic).
-        if (
-            self._active_checkpoint
-            and self._active_checkpoint.expires_at
-            and now > self._active_checkpoint.expires_at
-        ):
-            self._checkpoint_history.append(self._active_checkpoint)
-            self._active_checkpoint = None
-            self._remove_marker()
-            active_cleared = True
+            # Move expired active checkpoint to history FIRST so it gets
+            # filtered along with all other expired history entries.
+            # Use explicit expiry check — not is_valid(), which also returns
+            # False for consumed checkpoints (different semantic).
+            if (
+                self._active_checkpoint
+                and self._active_checkpoint.expires_at
+                and now > self._active_checkpoint.expires_at
+            ):
+                self._checkpoint_history.append(self._active_checkpoint)
+                self._active_checkpoint = None
+                self._remove_marker()
+                active_cleared = True
 
-        original_count = len(self._checkpoint_history)
-        self._checkpoint_history = [
-            c
-            for c in self._checkpoint_history
-            if c.expires_at is None or c.expires_at > now
-        ]
-        # Includes the expired active (appended above) that was then filtered out.
-        total_cleared = original_count - len(self._checkpoint_history)
+            original_count = len(self._checkpoint_history)
+            self._checkpoint_history = [
+                c
+                for c in self._checkpoint_history
+                if c.expires_at is None or c.expires_at > now
+            ]
+            # Includes the expired active (appended above) that was then filtered out.
+            total_cleared = original_count - len(self._checkpoint_history)
 
-        # Persist whenever state changed (active cleared or history pruned)
-        if active_cleared or total_cleared > 0:
-            self._persist_state()
-        return total_cleared
+            # Persist whenever state changed (active cleared or history pruned)
+            if active_cleared or total_cleared > 0:
+                self._persist_state()
+            return total_cleared
 
     def invalidate_all(self) -> None:
         """Invalidate all checkpoints (used for rollback scenarios)."""

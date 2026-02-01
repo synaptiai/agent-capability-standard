@@ -107,6 +107,50 @@ class TestThreadSafety:
         non_none = [cid for cid in consumed_ids if cid is not None]
         assert len(non_none) == 1
 
+    def test_concurrent_create_and_consume(self, tracker: CheckpointTracker) -> None:
+        """Concurrent create + consume must not corrupt internal state.
+
+        Uses a barrier to maximize the chance of true concurrency
+        between the create and consume operations.
+        """
+        barrier = threading.Barrier(2)
+        errors: list[str] = []
+        created_ids: list[str] = []
+        consumed_ids: list[str | None] = []
+
+        def create_worker() -> None:
+            try:
+                barrier.wait()
+                cid = tracker.create_checkpoint(scope=["*"], reason="concurrent")
+                created_ids.append(cid)
+            except Exception as e:
+                errors.append(str(e))
+
+        def consume_worker() -> None:
+            try:
+                barrier.wait()
+                consumed_ids.append(tracker.consume_checkpoint())
+            except Exception as e:
+                errors.append(str(e))
+
+        # Seed a checkpoint so consume has something to work with
+        tracker.create_checkpoint(scope=["*"], reason="seed")
+
+        threads = [
+            threading.Thread(target=create_worker),
+            threading.Thread(target=consume_worker),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"Unexpected errors: {errors}"
+        # Internal state must be consistent: history entries are all valid Checkpoint objects
+        for cp in tracker._checkpoint_history:
+            assert cp.id is not None
+            assert isinstance(cp.scope, list)
+
     def test_rapid_create_consume_cycles(self, tracker: CheckpointTracker) -> None:
         """Rapid create/consume cycles shouldn't corrupt state."""
         errors: list[str] = []
@@ -128,3 +172,7 @@ class TestThreadSafety:
         assert len(errors) == 0
         # State should be consistent — no active checkpoint after all consumes
         # (unless a create happened after the last consume, which is fine)
+        # History entries must all be valid Checkpoint objects
+        for cp in tracker._checkpoint_history:
+            assert cp.id is not None
+            assert isinstance(cp.scope, list)

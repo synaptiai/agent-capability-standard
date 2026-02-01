@@ -21,6 +21,7 @@ Example:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -116,7 +117,7 @@ def verify_ontology_integrity(
         # No hash to verify against — pass by default
         return True
 
-    if actual_hash != expected_hash:
+    if not hmac.compare_digest(actual_hash, expected_hash):
         logger.error(
             "SEC-012: Ontology integrity check FAILED. Expected %s, got %s for %s",
             expected_hash,

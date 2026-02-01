@@ -342,8 +342,10 @@ class EvidenceStore:
         self._max_anchors = (
             max_anchors if max_anchors is not None else self.DEFAULT_MAX_ANCHORS
         )
-        # Use deque for O(1) append; eviction is managed manually for priority
-        self._anchors: deque[EvidenceAnchor] = deque(maxlen=self._max_anchors)
+        # Use deque for O(1) append; eviction is managed manually for priority.
+        # No maxlen — manual eviction in add_anchor() enforces capacity while
+        # keeping secondary indexes consistent.
+        self._anchors: deque[EvidenceAnchor] = deque()
         self._by_kind: dict[str, list[EvidenceAnchor]] = defaultdict(list)
         self._by_capability: dict[str, list[EvidenceAnchor]] = defaultdict(list)
 
