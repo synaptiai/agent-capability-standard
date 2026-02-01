@@ -11,16 +11,16 @@ registry:
 coercions:
 - from: string
   to: number
-  mapping_ref: docs/schemas/transform_mapping_coerce_string_to_number.yaml
+  mapping_ref: schemas/transforms/transform_mapping_coerce_string_to_number.yaml
 - from: number
   to: string
-  mapping_ref: docs/schemas/transform_mapping_coerce_number_to_string.yaml
+  mapping_ref: schemas/transforms/transform_mapping_coerce_number_to_string.yaml
 - from: object
   to: string
-  mapping_ref: docs/schemas/transform_mapping_stringify_object.yaml
+  mapping_ref: schemas/transforms/transform_mapping_stringify_object.yaml
 - from: array<object>
   to: array<string>
-  mapping_ref: docs/schemas/transform_mapping_project_array_object_to_array_string.yaml
+  mapping_ref: schemas/transforms/transform_mapping_project_array_object_to_array_string.yaml
 - from: array<any>
   to: array<object>
-  mapping_ref: docs/schemas/transform_mapping_wrap_any_to_object.yaml
+  mapping_ref: schemas/transforms/transform_mapping_wrap_any_to_object.yaml

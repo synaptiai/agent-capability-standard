@@ -29,6 +29,11 @@ python tools/validate_ontology.py
 python tools/validate_yaml_util_sync.py
 ```
 
+### Validate transform mapping_ref paths (no broken refs)
+```bash
+python tools/validate_transform_refs.py
+```
+
 ### Sync skill-local schemas from ontology
 ```bash
 python tools/sync_skill_schemas.py
