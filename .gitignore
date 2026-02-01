@@ -16,3 +16,5 @@ conformance_results.json
 .claude/audit.log
 .claude/checkpoint.ok
 .claude/settings.json
+.checkpoints/*
+.hypothesis/*
