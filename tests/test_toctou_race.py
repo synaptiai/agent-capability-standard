@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +17,7 @@ from grounded_agency.state.checkpoint_tracker import CheckpointTracker
 
 
 @pytest.fixture
-def tracker(tmp_path: object) -> CheckpointTracker:
+def tracker(tmp_path: Path) -> CheckpointTracker:
     """Create a fresh CheckpointTracker for testing."""
     return CheckpointTracker(checkpoint_dir=str(tmp_path))
 
