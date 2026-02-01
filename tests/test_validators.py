@@ -154,6 +154,26 @@ class TestConformanceRunner:
         assert "PASSED" in result.stdout
 
 
+# ─── Transform Refs Validator ───
+
+
+class TestValidateTransformRefs:
+    """Tests for tools/validate_transform_refs.py."""
+
+    def test_passes_with_valid_refs(self) -> None:
+        result = run_validator("validate_transform_refs.py")
+        assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
+
+    def test_verbose_flag_works(self) -> None:
+        result = run_validator("validate_transform_refs.py", ["--verbose"])
+        assert result.returncode == 0
+        assert "OK" in result.stdout
+
+    def test_output_contains_pass(self) -> None:
+        result = run_validator("validate_transform_refs.py")
+        assert "PASS" in result.stdout
+
+
 # ─── JSON Schema Validation ───
 
 

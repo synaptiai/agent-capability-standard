@@ -14,7 +14,7 @@ from ..capabilities.mapper import ToolCapabilityMapper
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
 
 if TYPE_CHECKING:
-    from .. import HookCallback
+    from .._types import HookCallback, HookContext
 
 logger = logging.getLogger("grounded_agency.hooks.evidence_collector")
 
@@ -52,7 +52,7 @@ def create_evidence_collector(
     async def collect_evidence(
         input_data: dict[str, Any],
         tool_use_id: str | None,
-        context: Any,
+        context: HookContext | None,
     ) -> dict[str, Any]:
         """
         PostToolUse hook that captures evidence from tool execution.

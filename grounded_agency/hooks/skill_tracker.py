@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from ..state.checkpoint_tracker import CheckpointTracker
 
 if TYPE_CHECKING:
-    from .. import HookCallback
+    from .._types import HookCallback, HookContext
 
 logger = logging.getLogger("grounded_agency.hooks.skill_tracker")
 
@@ -47,7 +47,7 @@ def create_skill_tracker(checkpoint_tracker: CheckpointTracker) -> HookCallback:
     async def track_skill(
         input_data: dict[str, Any],
         tool_use_id: str | None,
-        context: Any,
+        context: HookContext | None,
     ) -> dict[str, Any]:
         """
         PostToolUse hook to track checkpoint skill invocations.
