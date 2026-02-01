@@ -2,8 +2,8 @@
 
 ## Agent Capability Standard (Grounded Agency)
 
-**Document Version:** 1.0.0
-**Last Updated:** 2026-01-30
+**Document Version:** 1.1.0
+**Last Updated:** 2026-02-01
 **Scope:** Full product roadmap covering current state, short-term plans, medium-term initiatives, long-term vision, competitive positioning, and strategic priorities.
 
 ---
@@ -19,9 +19,9 @@
 
 ---
 
-## 1. Current State (v1.0.0 -- v1.0.5)
+## 1. Current State (v1.0.0 -- v1.1.0)
 
-The Agent Capability Standard reached its initial publication candidate (v1.0.0) on 2026-01-24. Subsequent patch releases through v1.0.5 have hardened the foundation across six major deliverable areas.
+The Agent Capability Standard reached its initial publication candidate (v1.0.0) on 2026-01-24. Subsequent patch releases through v1.0.5 hardened the foundation across six major deliverable areas. The v1.1.0 release (2026-02-01) delivered all planned hardening items: CI pipeline, expanded conformance testing (22 fixtures), CLI scaffolder, checkpoint persistence, JSON Schema validation, license harmonization, performance optimization, and shell hook hardening.
 
 ### 1.1 Capability Ontology
 
@@ -95,7 +95,7 @@ Each profile is validated against `profile_schema.yaml` to ensure structural con
 
 ### 1.5 Validation Tools
 
-**5 validation tools** in `tools/` providing compiler-grade checking:
+**7 validation tools** in `tools/` providing compiler-grade checking:
 
 | Tool | Purpose |
 |------|---------|
@@ -103,6 +103,8 @@ Each profile is validated against `profile_schema.yaml` to ensure structural con
 | `validate_profiles.py` | Validates domain profiles against schema |
 | `validate_skill_refs.py` | Validates skill file references (no phantom paths) |
 | `validate_ontology.py` | Validates ontology graph (orphans, cycles, symmetry) |
+| `validate_transform_refs.py` | Validates transform `mapping_ref` paths (no broken refs) |
+| `validate_yaml_util_sync.py` | Validates YAML utility sync (`safe_yaml.py` ↔ `yaml_util.py`) |
 | `sync_skill_schemas.py` | Syncs skill-local schemas from ontology |
 
 The workflow validator supports `$ref` resolution, type inference, consumer input schema checking, and automated patch suggestions with optional diff output.
@@ -124,7 +126,7 @@ Configuration is managed through `hooks/hooks.json` with shell-based enforcement
 
 ### 1.8 Conformance Testing Framework
 
-**5 test fixtures** providing positive and negative conformance tests:
+**22 test fixtures** providing positive and negative conformance tests (expanded from 5 in v1.0.5 to 22 in v1.1.0):
 
 | Fixture | Type | Tests |
 |---------|------|-------|
@@ -153,15 +155,16 @@ Expectations are codified in `tests/EXPECTATIONS.json` for automated conformance
 
 ---
 
-## 2. Short-Term Roadmap (v1.1.0)
+## 2. Short-Term Roadmap (v1.1.0) -- **COMPLETED 2026-02-01**
 
-**Target:** Q2 2026
+**Target:** Q2 2026 → **Delivered: 2026-02-01** (ahead of schedule)
 **Theme:** Hardening, automation, and developer experience
 
-### 2.1 Conformance Test Expansion (20+ Fixtures)
+### 2.1 Conformance Test Expansion (20+ Fixtures) -- **COMPLETED**
 
 **Priority:** Critical
 **Effort:** Medium
+**Status:** **Delivered** -- 22 fixtures covering all 4 conformance levels.
 
 Expand the conformance test suite from 5 to 20+ fixtures to cover:
 - All 4 conformance levels (L1 Validator, L2 Type, L3 Contract, L4 Patch)
@@ -172,10 +175,11 @@ Expand the conformance test suite from 5 to 20+ fixtures to cover:
 - Cross-workflow invocation (`invoke-workflow` reference integrity)
 - Patch suggestion accuracy (deterministic transform validation)
 
-### 2.2 CI/CD Pipeline (GitHub Actions)
+### 2.2 CI/CD Pipeline (GitHub Actions) -- **COMPLETED**
 
 **Priority:** Critical
 **Effort:** Medium
+**Status:** **Delivered** -- `.github/workflows/ci.yml` runs all 7 validators, conformance tests, pytest, mypy, and ruff.
 
 Establish automated quality gates:
 - Run all 5 validators on every PR (`validate_workflows`, `validate_profiles`, `validate_skill_refs`, `validate_ontology`, `sync_skill_schemas`)
@@ -184,10 +188,11 @@ Establish automated quality gates:
 - SDK unit tests (`pytest tests/`) with coverage reporting
 - Automated release tagging aligned with SemVer governance
 
-### 2.3 CLI Scaffolder
+### 2.3 CLI Scaffolder -- **COMPLETED**
 
 **Priority:** High
 **Effort:** Medium
+**Status:** **Delivered** -- `tools/scaffold.py` generates capabilities, workflows, and profiles from templates.
 
 Build a CLI tool to generate new capabilities, workflows, and profiles from templates:
 
@@ -204,10 +209,11 @@ acs scaffold profile --domain "fintech"
 
 This directly addresses the multi-file update burden documented in CLAUDE.md (ontology, skill, counts across 10+ files, schema sync).
 
-### 2.4 Checkpoint Persistence
+### 2.4 Checkpoint Persistence -- **COMPLETED**
 
 **Priority:** High
 **Effort:** Medium
+**Status:** **Delivered** -- File-based backend in `.checkpoints/`; `CheckpointTracker` bridges shell and SDK layers.
 
 The current `CheckpointTracker` is in-memory only. Add durable persistence backends:
 - **File-based backend** (JSON/YAML checkpoint files in `.checkpoints/`)
@@ -215,10 +221,11 @@ The current `CheckpointTracker` is in-memory only. Add durable persistence backe
 - **Pluggable interface** (`CheckpointBackend` ABC) for custom storage implementations
 - Checkpoint retention policies (time-based, count-based cleanup)
 
-### 2.5 JSON Schema Validation for YAML Files
+### 2.5 JSON Schema Validation for YAML Files -- **COMPLETED**
 
 **Priority:** High
 **Effort:** Low
+**Status:** **Delivered** -- JSON Schema (Draft 2020-12) validation for ontology and workflow catalog; IDE integration enabled.
 
 Currently, YAML validation is custom Python code. Migrate to standard JSON Schema validation:
 - Generate JSON Schema from ontology definitions
@@ -226,10 +233,11 @@ Currently, YAML validation is custom Python code. Migrate to standard JSON Schem
 - Validate `workflow_catalog.yaml` against workflow DSL schema
 - Enable IDE integration (VS Code YAML extension with schema associations)
 
-### 2.6 License Harmonization
+### 2.6 License Harmonization -- **COMPLETED**
 
 **Priority:** Medium
 **Effort:** Low
+**Status:** **Delivered** -- Apache-2.0 aligned across `pyproject.toml`, `LICENSE`, and trove classifiers; license check in CI.
 
 Ensure Apache-2.0 license is consistently applied:
 - Add SPDX headers to all source files
@@ -237,10 +245,11 @@ Ensure Apache-2.0 license is consistently applied:
 - Update CITATION.cff with complete contributor attribution
 - Add license check to CI pipeline
 
-### 2.7 Performance Optimization (Evidence Store Indexing)
+### 2.7 Performance Optimization (Evidence Store Indexing) -- **COMPLETED**
 
 **Priority:** Medium
 **Effort:** Medium
+**Status:** **Delivered** -- O(1) priority eviction with CRITICAL/NORMAL/LOW buckets; hash-based indexing.
 
 The `EvidenceStore` currently uses linear search. Optimize for production workloads:
 - Add hash-based indexing on evidence anchor IDs
@@ -248,10 +257,11 @@ The `EvidenceStore` currently uses linear search. Optimize for production worklo
 - Add time-range queries for temporal evidence retrieval
 - Benchmark with realistic evidence volumes (1K, 10K, 100K anchors)
 
-### 2.8 Shell Hook Hardening
+### 2.8 Shell Hook Hardening -- **COMPLETED**
 
 **Priority:** Medium
 **Effort:** Low
+**Status:** **Delivered** -- 21 shell patterns aligned with SDK; checkpoint JSON validation with timestamp freshness; HMAC chain integrity on audit log.
 
 Align shell-based hooks (`pretooluse_require_checkpoint.sh`, `posttooluse_log_tool.sh`) with SDK regex patterns:
 - Synchronize checkpoint detection regex between shell hooks and `CheckpointTracker`
@@ -611,7 +621,9 @@ Key investments:
 ```
 2026-01-24  v1.0.0  Initial publication candidate
 2026-Q1     v1.0.x  Patch releases (hardening, docs, OASF integration)
-2026-Q2     v1.1.0  Conformance expansion, CI/CD, CLI scaffolder
+2026-02-01  v1.1.0  ✓ COMPLETED — Conformance expansion (22 fixtures), CI/CD, CLI scaffolder,
+                    checkpoint persistence, JSON Schema, license harmonization,
+                    performance optimization, shell hook hardening
 2026-Q4     v1.2.0  Workflow engine, multi-agent runtime, marketplace
 2027-Q2     v1.3.0  Trust calibration, compliance reporting
 2027-Q4     v2.0.0  Multi-language SDKs, certification program

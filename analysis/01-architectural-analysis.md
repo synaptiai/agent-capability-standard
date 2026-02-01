@@ -1,9 +1,10 @@
 # Architectural Analysis
 
 **Project**: Agent Capability Standard (Grounded Agency)
-**Version**: Plugin v1.0.5 / SDK v0.1.0
+**Version**: Plugin v1.1.0 / SDK v0.1.0
 **Repository**: `synaptiai/agent-capability-standard`
 **Generated**: 2026-01-30
+**Last Updated**: 2026-02-01
 
 ---
 
@@ -131,8 +132,8 @@ options = adapter.wrap_options(base_options)  # Injects hooks, permissions, sett
 
 | Hook | Trigger | Script | Purpose |
 |------|---------|--------|---------|
-| PreToolUse | Write\|Edit | `pretooluse_require_checkpoint.sh` | Blocks mutations without `.claude/checkpoint.ok` marker |
-| PostToolUse | Skill | `posttooluse_log_tool.sh` | Appends timestamped entry to `.claude/audit.log` |
+| PreToolUse | Write\|Edit | `pretooluse_require_checkpoint.sh` | Blocks mutations without valid `.claude/checkpoint.ok` (JSON with timestamp freshness, symlink rejection); 21 detection patterns |
+| PostToolUse | Skill | `posttooluse_log_tool.sh` | Appends HMAC-signed entry to `.claude/audit.log` with `flock` serialization |
 
 **Python Layer** (`grounded_agency/hooks/`):
 
@@ -186,7 +187,7 @@ Followed by markdown sections: Intent, Success Criteria, Input Contract, Procedu
 
 ### 2.5 Validation Subsystem
 
-**Purpose**: Five Python validators for design-time checking of schemas, workflows, profiles, skills, and ontology graph.
+**Purpose**: Seven Python validators for design-time checking of schemas, workflows, profiles, skills, ontology graph, transform refs, and YAML utility sync.
 
 | Tool | LOC | Stages | What It Validates |
 |------|-----|--------|-------------------|
@@ -194,6 +195,8 @@ Followed by markdown sections: Intent, Success Criteria, Input Contract, Procedu
 | `validate_ontology.py` | ~300 | 5 | Orphan nodes, symmetric edges, cycles, valid refs, duplicate edges |
 | `validate_profiles.py` | ~400 | 5 | Required fields, trust weight ranges, enum values, semver format, source types |
 | `validate_skill_refs.py` | ~250 | 4 | Path existence for schemas, references, locations, workflow refs |
+| `validate_transform_refs.py` | ~200 | 3 | Transform `mapping_ref` paths, registry consistency, no broken refs |
+| `validate_yaml_util_sync.py` | ~150 | 2 | YAML utility sync between `safe_yaml.py` and `yaml_util.py` |
 | `sync_skill_schemas.py` | ~300 | 3 | Extracts output schemas from ontology, bundles transitive deps, syncs to skills |
 
 **Type System** (in `validate_workflows.py`):
@@ -204,9 +207,9 @@ Followed by markdown sections: Intent, Success Criteria, Input Contract, Procedu
 - Patch generation: Emits `tools/validator_patch.diff` for auto-fixable issues
 
 **Conformance Testing** (`scripts/run_conformance.py`):
-- 5 fixture files: 1 passing, 4 failing (ambiguous types, bad bindings, contract mismatch, unknown capability)
-- Temporarily swaps workflow catalog for fixture, runs validator, checks expectations
-- Results output to `conformance_results.json`
+- 22 fixture files covering all 4 conformance levels (L1–L4)
+- Uses temp directory copy (no longer swaps production file)
+- Results output to `.conformance/conformance_results.json`
 
 ---
 
@@ -311,18 +314,22 @@ The core safety pattern for mutations:
 
 ```
 Layer 1: Shell Hooks (Claude Code CLI)
-  └─ pretooluse_require_checkpoint.sh
-     └─ Checks .claude/checkpoint.ok file exists
-     └─ Blocks Write|Edit without marker
+  └─ pretooluse_require_checkpoint.sh (21 patterns)
+     └─ Validates .claude/checkpoint.ok JSON (timestamp freshness, symlink rejection)
+     └─ Blocks Write|Edit without valid marker
+     └─ Uses CLAUDE_PROJECT_DIR for absolute path resolution
 
 Layer 2: Python SDK (Permission Callback)
   └─ adapter._make_permission_callback()
      └─ Maps tool → capability via ToolCapabilityMapper
      └─ Checks requires_checkpoint flag
-     └─ Queries CheckpointTracker.has_valid_checkpoint()
+     └─ Atomic validate_and_reserve() with thread lock
+     └─ CheckpointTracker manages .claude/checkpoint.ok lifecycle (synchronized)
      └─ strict_mode=True → PermissionResultDeny
      └─ strict_mode=False → Warning + Allow
 ```
+
+**Dual-Layer Synchronization**: `CheckpointTracker.create_checkpoint()` writes `.claude/checkpoint.ok` with checkpoint ID and expiry timestamp; `consume_checkpoint()` removes it. This bridges the shell and SDK layers.
 
 ### 4.4 Evidence Grounding
 
@@ -610,8 +617,9 @@ Claude Code Plugin
 | Entity classes | 24 (11 digital + 13 physical) |
 | Trust source ranks | 6 |
 | Transform coercions | 7 |
-| Conformance fixtures | 5 |
-| Plugin version | 1.0.5 |
+| Conformance fixtures | 22 |
+| CI pipeline | `.github/workflows/ci.yml` |
+| Plugin version | 1.1.0 |
 | SDK version | 0.1.0 |
 | Python requirement | >=3.10 |
 

@@ -3,9 +3,17 @@
 **Project:** Agent Capability Standard / Grounded Agency
 **Version:** 0.1.0 (Alpha)
 **Assessment Date:** 2026-01-30
+**Last Updated:** 2026-02-01
 **Assessor:** Automated security analysis
 **Scope:** Full codebase review -- Python SDK, shell hooks, YAML ontology, dependency surface
 **Classification:** Internal / Engineering Review
+
+### Revision History
+
+| Date | Change | Author |
+|------|--------|--------|
+| 2026-01-30 | Initial assessment at commit `e14a723` | Automated analysis |
+| 2026-02-01 | All 12 SEC items resolved (PRs #89–#93); remediation recommendations marked complete | Post-remediation review |
 
 ---
 
@@ -41,10 +49,10 @@ The Agent Capability Standard implements a **defense-in-depth** security archite
 
 - **Architecture:** Strong default-deny with typed capability contracts
 - **Dependency Surface:** Minimal (1 runtime dependency: PyYAML)
-- **YAML Handling:** All usages verified as `yaml.safe_load()` -- no unsafe deserialization
-- **Checkpoint Enforcement:** Dual-layer (shell hook + SDK callback) with known synchronization gap
-- **Audit Trail:** Present but lacks integrity protection and authentication
-- **Metadata Sanitization:** Effective against injection but with edge cases in depth validation
+- **YAML Handling:** All usages verified as `yaml.safe_load()` -- no unsafe deserialization; file size limits enforced (1MB default, 10MB ontology)
+- **Checkpoint Enforcement:** Dual-layer (shell hook + SDK callback) with synchronized state via `CheckpointTracker` bridge and `.claude/checkpoint.ok` file management
+- **Audit Trail:** HMAC-SHA256 chain integrity with `flock` serialization; `jq` dependency fails loudly
+- **Metadata Sanitization:** Effective against injection; explicit denylist for `__proto__`, `constructor`, `__class__` added
 
 ---
 
@@ -627,7 +635,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Mutations may proceed without a valid rollback point, violating the checkpoint-before-mutation safety invariant. |
 | **Existing Mitigation** | The SDK adapter layer (`CheckpointTracker`) uses time-based expiry (30 minutes default) which provides a secondary check. However, the two layers are not synchronized. |
 | **Recommended Mitigation** | (1) Write a timestamp or nonce into `checkpoint.ok` and validate it in the hook. (2) Add a cleanup step that removes `.claude/checkpoint.ok` at session start. (3) Include the checkpoint ID in the file for correlation with `CheckpointTracker` state. |
-| **Status** | **Partially Mitigated** -- SDK layer provides expiry, but shell layer has no expiry concept. |
+| **Status** | **Resolved** (PR #89) -- Shell hook validates checkpoint JSON with timestamp freshness and symlink rejection. `CheckpointTracker` now bridges both layers. |
 
 ### SEC-002: Regex-Based Bash Classification Evasion
 
@@ -639,7 +647,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | The command would be classified by the default-deny path as `mutate` with `requires_checkpoint=True`, so the attack still requires an active checkpoint. The risk is that the capability classification is wrong (`mutate` instead of a more specific category), potentially affecting audit trail accuracy. |
 | **Existing Mitigation** | Default-deny architecture ensures unknown commands are treated as high-risk. This is the primary defense and is effective. |
 | **Recommended Mitigation** | (1) Document the regex approach as defense-in-depth, not primary. (2) Consider adding common interpreter patterns (`python -c`, `ruby -e`, `node -e`) to the injection detection set. (3) Add `process substitution` patterns `<(` and `>(` to injection patterns. |
-| **Status** | **Mitigated** -- default-deny provides effective containment, but classification accuracy could be improved. |
+| **Status** | **Resolved** (PRs #91, #93) -- Added interpreter patterns (`python -c`, `ruby -e`, `node -e`) and process substitution detection; two-pass compound classifier for read-only chains. |
 
 ### SEC-003: No YAML Input Size Limits
 
@@ -651,7 +659,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Denial of service through memory exhaustion. The process would crash or become unresponsive. |
 | **Existing Mitigation** | None. The YAML files are typically loaded from trusted, version-controlled paths. In a plugin context, the ontology and profile files are bundled with the package. |
 | **Recommended Mitigation** | (1) Add a file size check before calling `yaml.safe_load()` (e.g., reject files over 10MB). (2) Consider using `yaml.safe_load()` with a memory-limited stream wrapper. (3) For user-supplied YAML, enforce strict size limits (e.g., 1MB for profiles). |
-| **Status** | **Open** -- no size validation exists, though practical risk is low for bundled files. |
+| **Status** | **Resolved** (PR #90) -- `safe_yaml_load()` enforces file size limits (1MB default, 10MB ontology) across all loading sites. |
 
 ### SEC-004: Evidence Store FIFO Eviction Losing Early Provenance
 
@@ -663,7 +671,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Critical provenance information from early in a session is permanently lost. This could prevent forensic analysis of the initial state or early decisions that led to later mutations. Violates the "auditable" principle of Grounded Agency. |
 | **Existing Mitigation** | The default `max_anchors=10000` provides substantial capacity. The `_by_kind` index maintains separate lists per kind, but these are also subject to eviction when anchors are removed from the main deque. |
 | **Recommended Mitigation** | (1) Implement priority-based eviction: mutation and checkpoint anchors should have higher retention priority than read-only tool outputs. (2) Add a "pinned" flag for critical anchors that are exempt from FIFO eviction. (3) Implement periodic flush to persistent storage before eviction. (4) Separate deques per risk level with independent size limits. |
-| **Status** | **Open** -- FIFO eviction treats all evidence equally regardless of importance. |
+| **Status** | **Resolved** (PRs #91, #92) -- Priority-aware eviction with CRITICAL/NORMAL/LOW buckets; mutation and checkpoint anchors retained preferentially. |
 
 ### SEC-005: No Authentication on Audit Log
 
@@ -675,7 +683,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Complete loss of audit trail integrity. Security incident investigations cannot rely on the audit log as evidence. Violates the "Repudiation" mitigation in the STRIDE model. |
 | **Existing Mitigation** | None for the shell hook layer. The SDK layer's `EvidenceStore` provides in-memory evidence, but it is also unauthenticated and not persisted. |
 | **Recommended Mitigation** | (1) Implement cryptographic signing of audit entries (e.g., HMAC chain). (2) Set restrictive file permissions on `.claude/audit.log` (e.g., 0600). (3) Implement log rotation with tamper detection. (4) Alert when `jq` is missing rather than silently skipping. (5) Consider forwarding audit events to a centralized, append-only log store. |
-| **Status** | **Open** -- no integrity protection on audit trail. |
+| **Status** | **Resolved** (PR #89) -- HMAC-SHA256 chain integrity; `jq` dependency fails loudly (exit 1); `flock` serialization prevents concurrent corruption. |
 
 ### SEC-006: Shell Hook Depends on Filesystem State
 
@@ -687,7 +695,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Checkpoint enforcement at the shell layer is bypassed, relying entirely on the SDK adapter layer for safety. |
 | **Existing Mitigation** | The SDK adapter layer provides an independent, in-memory checkpoint check that is not affected by filesystem state. |
 | **Recommended Mitigation** | (1) Use `CLAUDE_PROJECT_DIR` environment variable for absolute path resolution (similar to `posttooluse_log_tool.sh`). (2) Check that `.claude/checkpoint.ok` is a regular file, not a symlink. (3) Read and validate the file content (e.g., checkpoint ID and timestamp). |
-| **Status** | **Partially Mitigated** -- SDK layer provides secondary protection. |
+| **Status** | **Resolved** (PRs #89, #90) -- `CLAUDE_PROJECT_DIR` absolute paths used; `CheckpointTracker` bridges both layers by managing `.claude/checkpoint.ok` lifecycle. |
 
 ### SEC-007: Race Condition Between Checkpoint Check and Tool Execution
 
@@ -699,7 +707,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | A mutation could execute without a valid checkpoint at the actual moment of execution, despite the check passing moments earlier. |
 | **Existing Mitigation** | The window is typically very small (milliseconds between check and execution). The 30-minute default expiry makes expiry-based races unlikely. Single-threaded SDK execution reduces concurrency risks. |
 | **Recommended Mitigation** | (1) Atomically reserve-and-consume the checkpoint in a single operation within the permission callback. (2) Return the checkpoint ID in the permission result for correlation with the tool execution. (3) For concurrent scenarios, use a mutex or compare-and-swap pattern on checkpoint consumption. |
-| **Status** | **Partially Mitigated** -- practical risk is low in single-threaded SDK usage. |
+| **Status** | **Resolved** (PR #91) -- Atomic `validate_and_reserve()` with thread lock prevents TOCTOU race; checkpoint is reserved and consumed in a single operation. |
 
 ### SEC-008: Metadata Injection via Malformed Keys
 
@@ -711,7 +719,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Low in the current Python-only context. Risk increases if evidence is exported to external systems with different key semantics. |
 | **Existing Mitigation** | The regex pattern `^[a-zA-Z_][a-zA-Z0-9_]*$` is restrictive. The `_sanitize_metadata()` function applies size and depth limits. The internal `_error` key is only set by the sanitizer itself in the error path. |
 | **Recommended Mitigation** | (1) Consider disallowing keys starting with underscore (`_`) to prevent collisions with internal fields. (2) Document the allowed key format for downstream consumers. (3) Add an explicit denylist for known problematic keys (`__proto__`, `constructor`, `__class__`). |
-| **Status** | **Mitigated** -- current regex is sufficiently restrictive for Python consumption. |
+| **Status** | **Resolved** (PR #91) -- Explicit denylist for `__proto__`, `constructor`, `__class__`, `__init__`, and all dunder keys added to metadata sanitizer. |
 
 ### SEC-009: Trust Model Default Weights May Not Match Real-World Authority
 
@@ -723,7 +731,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Incorrect information prioritization. Lower-authority sources could effectively override higher-authority sources in conflict resolution. |
 | **Existing Mitigation** | The security guidance (`spec/SECURITY.md` Section 4.3) explicitly warns: "Review trust model weights carefully." Profile validation ensures structural correctness. |
 | **Recommended Mitigation** | (1) Add a "trust_model_reviewed" flag to profiles that must be set to `true` before deployment. (2) Provide calibration guidelines with domain-specific weight recommendations. (3) Log warnings when default weights are used without explicit review. |
-| **Status** | **Partially Mitigated** -- documentation warns about this, but no technical enforcement. |
+| **Status** | **Resolved** (PR #91) -- Trust calibration enforcement with validator warnings when default weights are used without explicit `trust_model_reviewed: true`. |
 
 ### SEC-010: No Rate Limiting on Capability Invocations
 
@@ -735,7 +743,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Denial of service, evidence loss, and audit trail degradation. |
 | **Existing Mitigation** | The underlying Claude SDK may impose its own rate limits. The `max_loops` parameter on recovery workflows provides loop-level limiting but not invocation-rate limiting. |
 | **Recommended Mitigation** | (1) Add a configurable rate limiter to the permission callback (e.g., token bucket algorithm). (2) Implement per-capability rate limits based on risk level (e.g., high-risk mutations limited to 10/minute). (3) Add rate-based anomaly detection with alerting. |
-| **Status** | **Open** -- no rate limiting exists at the adapter layer. |
+| **Status** | **Resolved** (PR #91) -- Token bucket rate limiter with per-risk-level limits (high: 10/min, medium: 60/min, low: 300/min) integrated into permission callback. |
 
 ### SEC-011: Checkpoint History Pruning Loses Forensic Data
 
@@ -747,7 +755,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Reduced forensic capability for long-running agent sessions. |
 | **Existing Mitigation** | The 100-checkpoint default is generous for typical sessions. Checkpoints in history are sorted by `created_at` and the most recent are retained. |
 | **Recommended Mitigation** | (1) Persist checkpoint metadata to disk before pruning. (2) Implement a "compact" format for old checkpoints that retains essential fields (ID, timestamp, scope, reason) while discarding full metadata. |
-| **Status** | **Partially Mitigated** -- adequate for short sessions but insufficient for extended operations. |
+| **Status** | **Resolved** (PR #91) -- Pruned checkpoints archived to `.checkpoints/archive.jsonl` before eviction; compact format retains ID, timestamp, scope, and reason. |
 
 ### SEC-012: Unvalidated Ontology Path Resolution
 
@@ -759,7 +767,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Modified ontology could downgrade risk classifications (e.g., `mutate` from high to low), remove checkpoint requirements, or remove prerequisite edges, weakening safety enforcement. |
 | **Existing Mitigation** | The file is typically loaded from a version-controlled repository location. The `CapabilityRegistry` uses `yaml.safe_load()` so arbitrary code execution via the YAML file is not possible. |
 | **Recommended Mitigation** | (1) Add integrity verification (checksum or signature) on the ontology file. (2) Log the resolved ontology path for audit trail. (3) Validate the ontology content matches expected structure after loading. |
-| **Status** | **Partially Mitigated** -- safe_load prevents code execution, but content substitution is possible. |
+| **Status** | **Resolved** (PR #91) -- SHA-256 integrity verification on ontology file at load time; symlink rejection prevents path substitution attacks. |
 
 ---
 
@@ -846,9 +854,9 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 
 ## 8. Prioritized Remediation Recommendations
 
-### P0: Immediate (Critical/High Severity Open Risks)
+### P0: Immediate (Critical/High Severity Open Risks) -- **ALL COMPLETED**
 
-#### P0-1: Harden Audit Log Integrity (SEC-005)
+#### P0-1: Harden Audit Log Integrity (SEC-005) -- **COMPLETED** (PR #89)
 
 **Effort:** Medium (2-3 days)
 **Impact:** Closes the repudiation gap in the STRIDE model
@@ -860,7 +868,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 4. Add log rotation with a configurable size limit (e.g., 10MB per file, 5 rotations)
 5. Include a sequence number in each log entry for gap detection
 
-#### P0-2: Fix Stale Checkpoint File Bypass (SEC-001)
+#### P0-2: Fix Stale Checkpoint File Bypass (SEC-001) -- **COMPLETED** (PR #89)
 
 **Effort:** Low (1 day)
 **Impact:** Closes the primary shell-hook bypass vector
@@ -871,7 +879,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 3. Add a `CLAUDE_PROJECT_DIR`-based absolute path for the checkpoint file (matching the pattern in `posttooluse_log_tool.sh`)
 4. Clean up `.claude/checkpoint.ok` at session termination or when the checkpoint is consumed
 
-#### P0-3: Address Shell Hook / SDK Checkpoint Synchronization (SEC-006, SEC-007)
+#### P0-3: Address Shell Hook / SDK Checkpoint Synchronization (SEC-006, SEC-007) -- **COMPLETED** (PRs #89, #90)
 
 **Effort:** Medium (2-3 days)
 **Impact:** Unifies dual-layer checkpoint enforcement
@@ -882,9 +890,9 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 3. Implement symlink detection in the shell hook (`[ -L .claude/checkpoint.ok ]` check)
 4. Document the synchronization contract between shell and SDK layers
 
-### P1: Short-Term (Medium Severity Risks, 1-4 Weeks)
+### P1: Short-Term (Medium Severity Risks, 1-4 Weeks) -- **ALL COMPLETED**
 
-#### P1-1: Add YAML Input Size Limits (SEC-003)
+#### P1-1: Add YAML Input Size Limits (SEC-003) -- **COMPLETED** (PR #90)
 
 **Effort:** Low (0.5 days)
 **Impact:** Prevents memory exhaustion DoS
@@ -894,7 +902,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 2. Set reasonable limits: 10MB for ontology, 1MB for profiles, 1MB for workflows
 3. Apply the same limits in validator tools
 
-#### P1-2: Implement Priority-Based Evidence Eviction (SEC-004)
+#### P1-2: Implement Priority-Based Evidence Eviction (SEC-004) -- **COMPLETED** (PRs #91, #92)
 
 **Effort:** Medium (2 days)
 **Impact:** Preserves critical provenance under high load
@@ -905,7 +913,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 3. Modify eviction logic to evict `low` priority first, then `normal`, then `critical`
 4. Optionally, persist critical anchors to disk before eviction
 
-#### P1-3: Add Capability Invocation Rate Limiting (SEC-010)
+#### P1-3: Add Capability Invocation Rate Limiting (SEC-010) -- **COMPLETED** (PR #91)
 
 **Effort:** Medium (2-3 days)
 **Impact:** Prevents DoS through rapid capability invocation
@@ -919,7 +927,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 3. Return `PermissionResultDeny` with rate-limit message when exceeded
 4. Make rate limits configurable via `GroundedAgentConfig`
 
-#### P1-4: Enhance Bash Classification for Interpreter Commands (SEC-002)
+#### P1-4: Enhance Bash Classification for Interpreter Commands (SEC-002) -- **COMPLETED** (PRs #91, #93)
 
 **Effort:** Low (0.5 days)
 **Impact:** Improves classification accuracy for indirect execution
@@ -933,9 +941,9 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 2. Add process substitution patterns: `<\(` and `>\(`
 3. Document the regex approach as defense-in-depth alongside the default-deny fallback
 
-### P2: Medium-Term (Low Severity Improvements, 1-3 Months)
+### P2: Medium-Term (Low Severity Improvements, 1-3 Months) -- **ALL COMPLETED**
 
-#### P2-1: Add Ontology Integrity Verification (SEC-012)
+#### P2-1: Add Ontology Integrity Verification (SEC-012) -- **COMPLETED** (PR #91)
 
 **Effort:** Medium (2 days)
 **Impact:** Prevents ontology content substitution attacks
@@ -946,7 +954,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 3. Verify the checksum at load time in `CapabilityRegistry._load_ontology()`
 4. Log the resolved ontology path for audit
 
-#### P2-2: Add Metadata Key Denylist (SEC-008)
+#### P2-2: Add Metadata Key Denylist (SEC-008) -- **COMPLETED** (PR #91)
 
 **Effort:** Low (0.5 days)
 **Impact:** Prevents cross-system metadata injection
@@ -956,7 +964,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 2. Optionally, disallow keys starting with double underscore (`__`)
 3. Document allowed key format for consumers
 
-#### P2-3: Persistent Checkpoint History (SEC-011)
+#### P2-3: Persistent Checkpoint History (SEC-011) -- **COMPLETED** (PR #91)
 
 **Effort:** Medium (2-3 days)
 **Impact:** Enables forensic analysis of long-running sessions
@@ -966,7 +974,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 2. Include all fields: ID, scope, reason, created_at, expires_at, consumed, consumed_at
 3. Add a `--history` flag to a CLI tool for reviewing checkpoint history
 
-#### P2-4: Trust Model Calibration Enforcement (SEC-009)
+#### P2-4: Trust Model Calibration Enforcement (SEC-009) -- **COMPLETED** (PR #91)
 
 **Effort:** Low (1 day)
 **Impact:** Prevents uncalibrated trust weights in production
@@ -1054,10 +1062,10 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 
 ### 9.3. Limitations
 
-1. **No dynamic analysis:** This assessment is based on static code review only. No fuzzing, penetration testing, or runtime analysis was performed.
-2. **No SDK integration testing:** The `claude-agent-sdk` is an optional dependency and was not available for integration testing during this review.
+1. **No dynamic analysis:** The initial assessment (2026-01-30) was static code review only. Fuzz testing for regex patterns has since been added (PR #91).
+2. **No SDK integration testing:** The `claude-agent-sdk` is an optional dependency. Typed fallback tests now provide coverage without the real SDK (PR #92).
 3. **No formal verification:** Safety properties were assessed through code review, not mathematical proof.
-4. **Point-in-time assessment:** This review reflects the codebase at commit `e14a723` on the `main` branch. Subsequent changes may introduce new risks or resolve identified ones.
+4. **Point-in-time assessment:** The initial review reflects the codebase at commit `e14a723`. The 2026-02-01 update reflects remediation through PRs #89–#93 on the `main` branch.
 5. **Scope boundary:** Third-party dependencies (PyYAML internals, hatchling build system) were assessed at the interface level only, not through source code audit.
 
 ### 9.4. Risk Severity Definitions
@@ -1071,6 +1079,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 
 ---
 
-*Assessment prepared: 2026-01-30*
+*Assessment prepared: 2026-01-30 | Updated: 2026-02-01*
+*All 12 SEC items resolved as of 2026-02-01 (PRs #89–#93)*
 *Next review recommended: 2026-04-30 (quarterly cadence)*
 *Classification: Internal Engineering Review*

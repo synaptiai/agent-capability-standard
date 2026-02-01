@@ -1,9 +1,9 @@
 # Executive Summary
 
 **Project:** Agent Capability Standard (Grounded Agency)
-**Version:** Plugin v1.0.5 / SDK v0.1.0
+**Version:** Plugin v1.1.0 / SDK v0.1.0
 **Repository:** `synaptiai/agent-capability-standard`
-**Date:** 2026-01-30
+**Date:** 2026-01-30 (Updated: 2026-02-01)
 **Document:** 13 of 13 -- Analysis & Due Diligence Package
 
 ---
@@ -203,7 +203,7 @@ The core ontology, schemas, workflows, and domain profiles are released under Ap
 
 ### 4.2 Python SDK (Current)
 
-The `grounded-agency` Python package (PyPI) provides Claude Agent SDK integration. Currently open source (license harmonization with Apache-2.0 is a tracked debt item -- see TD-008 in the Technical Debt Register).
+The `grounded-agency` Python package (PyPI) provides Claude Agent SDK integration. Open source under Apache-2.0 (license harmonization completed -- TD-008 resolved).
 
 **Modules:** `GroundedAgentAdapter`, `CapabilityRegistry`, `ToolCapabilityMapper`, `CheckpointTracker`, `EvidenceStore`, `OASFAdapter`, plus hook callbacks.
 
@@ -268,19 +268,20 @@ A marketplace for community and commercial contributions:
 
 | Metric | Value |
 |--------|-------|
-| Validation tools | 5 |
-| Conformance test fixtures | 5 |
+| Validation tools | 7 |
+| Conformance test fixtures | 22 |
 | YAML schema files | 28 |
 | Skill implementations | 41 |
 | Transform mappings | 7 |
 | Conformance levels | 4 (L1--L4) |
+| CI pipeline | `.github/workflows/ci.yml` (Python 3.10–3.12 matrix) |
 
 ### 5.4 Quality Metrics
 
 | Metric | Value |
 |--------|-------|
-| Security risks identified | 0 critical, 3 high, 8 medium, 5 low (16 total) |
-| Technical debt items | 2 critical, 3 high, 5 medium, 4 low (14 total) |
+| Security risks identified | 16 total — **all 12 resolved** (PRs #89–#93); 4 P3 long-term items tracked |
+| Technical debt items | 14 identified — **12 resolved**, 2 remaining (TD-006 workflow engine, TD-010 OASF gaps) |
 | YAML safe_load violations | 0 |
 | Unsafe deserialization | None detected |
 | Default-deny coverage | Full (unknown operations -> high risk) |
@@ -335,7 +336,7 @@ The architecture supports extension along multiple dimensions without breaking e
 |-----------|----------|
 | **Completeness** | 36 capabilities covering 9 cognitive layers -- derived from first principles, validated against OASF (15 categories) |
 | **Safety** | Dual-layer enforcement, fail-closed default, 3 risk levels, checkpoint/evidence/rollback pattern |
-| **Quality** | 5 validation tools, 5 conformance fixtures, 28 YAML schemas, 14 identified debt items with remediation plans |
+| **Quality** | 7 validation tools, 22 conformance fixtures, 28 YAML schemas, CI pipeline, 12/14 debt items resolved, all 12 security items resolved |
 | **Scale** | 2,568+ LOC SDK, 1,912-line ontology, 1,909-line workflow catalog, 41 skill implementations |
 | **Standards** | Formal standard (RFC 2119), whitepaper, governance model, security policy |
 | **Ecosystem** | PyPI package, Claude Code plugin, Synapti marketplace, GitHub repository |
@@ -343,5 +344,5 @@ The architecture supports extension along multiple dimensions without breaking e
 ---
 
 *Document 13 of 13 -- Agent Capability Standard Analysis & Due Diligence Package*
-*Generated: 2026-01-30 | Tool: Claude Code (Opus 4.5)*
+*Generated: 2026-01-30 | Updated: 2026-02-01 | Tool: Claude Code (Opus 4.5)*
 *Repository: synaptiai/agent-capability-standard*

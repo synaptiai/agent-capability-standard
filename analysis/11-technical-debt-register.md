@@ -3,7 +3,15 @@
 **Project:** Agent Capability Standard (Grounded Agency)
 **Version:** 2.0.0 (36-capability model)
 **Date:** 2026-01-30
+**Last Updated:** 2026-02-01
 **Maintainer:** Grounded Agency Team
+
+### Revision History
+
+| Date | Change | Author |
+|------|--------|--------|
+| 2026-01-30 | Initial register with 14 debt items | Automated analysis |
+| 2026-02-01 | 12 of 14 items closed (PRs #89–#93); TD-006 and TD-010 remain open | Post-remediation review |
 
 ---
 
@@ -56,6 +64,8 @@ Additionally, the conformance runner uses a destructive file-swap approach: it o
 
 **Effort:** Medium (3-5 days)
 
+**Status:** **Closed** (PRs #91, #92) -- Conformance fixtures expanded to 22; runner refactored to use temp directory; legacy comments removed.
+
 ---
 
 ### TD-002: Shell Hook Simplistic Pattern Matching
@@ -95,6 +105,8 @@ This approach has several weaknesses compared to the Python SDK's regex-based cl
 
 **Effort:** Medium (3-5 days)
 
+**Status:** **Closed** (PRs #91, #93) -- Shell hook expanded to 21 patterns; two-pass compound classifier added; interpreter pattern detection included.
+
 ---
 
 ### TD-003: No Integration Tests for Hook Pipeline
@@ -129,6 +141,8 @@ There are no integration tests that verify:
 3. Add a test helper that simulates the Claude Code hook invocation flow end-to-end.
 
 **Effort:** Large (1-2 weeks)
+
+**Status:** **Closed** (PR #92) -- Integration test suite added; dual-layer scenarios covered; hook pipeline tests included.
 
 ---
 
@@ -169,6 +183,8 @@ The `list.remove()` call is O(n) because it scans the list to find the element, 
 3. For the capability index, store a reverse mapping from anchor ref to capability ID to avoid scanning all capability lists.
 
 **Effort:** Small (1-2 days)
+
+**Status:** **Closed** (PR #91) -- O(1) priority eviction with CRITICAL/NORMAL/LOW buckets replaces linear scan.
 
 ---
 
@@ -219,6 +235,8 @@ The `adapter.py` module similarly uses `Any` extensively for SDK option types (l
 
 **Effort:** Small (1-2 days)
 
+**Status:** **Closed** (PR #93) -- Protocol types added via `TYPE_CHECKING` guard; typed fallback for SDK types; `mypy --strict` passes.
+
 ---
 
 ### TD-006: No Workflow Execution Engine (Declarative Only)
@@ -253,6 +271,8 @@ The workflows currently serve as reference composition patterns -- they document
 4. Integrate with `CheckpointTracker` for automatic checkpoint creation before high-risk workflow steps.
 
 **Effort:** XL (2+ weeks)
+
+**Status:** **Open** -- Workflow execution engine remains a strategic investment for v1.2.0+.
 
 ---
 
@@ -290,6 +310,8 @@ These transforms are referenced by workflow steps in `schemas/workflow_catalog.y
 
 **Effort:** Small (1-2 days)
 
+**Status:** **Closed** (PR #93) -- `validate_transform_refs.py` added; all transform `mapping_ref` paths validated.
+
 ---
 
 ### TD-008: License Mismatch Between pyproject.toml and Repository
@@ -326,6 +348,8 @@ The Python package metadata (which is published to PyPI and consumed by package 
 3. Add a license consistency check to CI (see TD-009).
 
 **Effort:** Small (1-2 days)
+
+**Status:** **Closed** (PR #92) -- License harmonized to Apache-2.0; `pyproject.toml` updated; license check in CI.
 
 ---
 
@@ -371,6 +395,8 @@ None of these are automated. Contributors must remember to run them manually bef
 4. Consider adding a CODEOWNERS file for review automation.
 
 **Effort:** Medium (3-5 days)
+
+**Status:** **Closed** (PR #92) -- `.github/workflows/ci.yml` created; runs all 7 validators, conformance tests, pytest, mypy, ruff; branch protection configured.
 
 ---
 
@@ -418,6 +444,8 @@ Additionally, several OASF-to-GA mappings use `composition` mapping type, meanin
 
 **Effort:** Large (1-2 weeks)
 
+**Status:** **Open** -- OASF mapping gaps depend on external standard evolution; adapter patterns documented.
+
 ---
 
 ### TD-011: Checkpoint Persistence (In-Memory Only)
@@ -460,6 +488,8 @@ This means:
 
 **Effort:** Medium (3-5 days)
 
+**Status:** **Closed** (PR #92) -- File-based persistence backend implemented; `CheckpointTracker` manages `.claude/checkpoint.ok` lifecycle; bridges shell and SDK layers.
+
 ---
 
 ### TD-012: No YAML Schema Validation (No JSON Schema)
@@ -493,6 +523,8 @@ Validation is currently performed by bespoke Python scripts (`tools/validate_wor
 4. Consider publishing schemas to JSON Schema Store for community IDE support.
 
 **Effort:** Large (1-2 weeks)
+
+**Status:** **Closed** (PR #92) -- JSON Schema (Draft 2020-12) validation added for ontology and workflow catalog; IDE integration enabled.
 
 ---
 
@@ -536,6 +568,8 @@ The comment on line 52 acknowledges this: `# AND chaining (could be benign, but 
 
 **Effort:** Medium (3-5 days)
 
+**Status:** **Closed** (PR #93) -- Two-pass compound classifier handles read-only chains correctly; `ls && pwd` classified as low-risk.
+
 ---
 
 ### TD-014: Conformance Runner Writes Results to Repository Root
@@ -568,41 +602,45 @@ This file is not in `.gitignore`, meaning it could be accidentally committed. It
 
 **Effort:** Small (1-2 days)
 
+**Status:** **Closed** (PR #92) -- Results written to `.conformance/` directory; `conformance_results.json` added to `.gitignore`.
+
 ---
 
 ## 3. Severity Distribution
 
-### Summary Table
+### Summary Table (Original Assessment)
 
-| Severity | Count | Percentage | Items |
-|----------|-------|------------|-------|
-| Critical | 2 | 14.3% | TD-008, TD-009 |
-| High | 3 | 21.4% | TD-002, TD-003, TD-011 |
-| Medium | 5 | 35.7% | TD-001, TD-004, TD-005, TD-010, TD-012 |
-| Low | 4 | 28.6% | TD-006, TD-007, TD-013, TD-014 |
-| **Total** | **14** | **100%** | |
+| Severity | Original | Closed | Remaining Open | Open Items |
+|----------|----------|--------|---------------|------------|
+| Critical | 2 | 2 | 0 | -- |
+| High | 3 | 3 | 0 | -- |
+| Medium | 5 | 4 | 1 | TD-010 |
+| Low | 4 | 3 | 1 | TD-006 |
+| **Total** | **14** | **12** | **2** | |
 
-### Distribution Chart
+**Debt reduction: 85.7% (12/14 items closed)**
+
+### Distribution Chart (Remaining)
 
 ```
-Critical  [##-----------]  2 items   (14.3%)
-High      [###----------]  3 items   (21.4%)
-Medium    [#####--------]  5 items   (35.7%)
-Low       [####---------]  4 items   (28.6%)
+Critical  [-------------]  0 items   (0%)
+High      [-------------]  0 items   (0%)
+Medium    [#------------]  1 item    (50%)   TD-010 (OASF gaps)
+Low       [#------------]  1 item    (50%)   TD-006 (workflow engine)
           +-+-+-+-+-+-+-+
           0 1 2 3 4 5 6
 ```
 
-### By Category
+### By Category (Updated)
 
-| Category | Count | Items |
-|----------|-------|-------|
-| Architecture | 3 | TD-006, TD-010, TD-011 |
-| Code Quality | 3 | TD-004, TD-005, TD-013 |
-| Testing | 3 | TD-001, TD-003, TD-014 |
-| Infrastructure | 3 | TD-007, TD-008, TD-009 |
-| Security | 1 | TD-002 |
-| Documentation | 1 | TD-012 |
+| Category | Original | Closed | Remaining | Open Items |
+|----------|----------|--------|-----------|------------|
+| Architecture | 3 | 1 | 2 | TD-006, TD-010 |
+| Code Quality | 3 | 3 | 0 | -- |
+| Testing | 3 | 3 | 0 | -- |
+| Infrastructure | 3 | 3 | 0 | -- |
+| Security | 1 | 1 | 0 | -- |
+| Documentation | 1 | 1 | 0 | -- |
 
 ---
 
@@ -610,32 +648,32 @@ Low       [####---------]  4 items   (28.6%)
 
 ### Individual Effort Summary
 
-| ID | Title | Effort | Est. Days |
-|----|-------|--------|-----------|
-| TD-001 | Legacy Conformance Fixtures | Medium | 3-5 |
-| TD-002 | Shell Hook Pattern Matching | Medium | 3-5 |
-| TD-003 | Hook Pipeline Integration Tests | Large | 5-10 |
-| TD-004 | Evidence Store O(n) Eviction | Small | 1-2 |
-| TD-005 | Missing Type Annotations | Small | 1-2 |
-| TD-006 | No Workflow Execution Engine | XL | 10+ |
-| TD-007 | Transform Path References | Small | 1-2 |
-| TD-008 | License Mismatch | Small | 1-2 |
-| TD-009 | No CI Pipeline | Medium | 3-5 |
-| TD-010 | OASF Mapping Completeness | Large | 5-10 |
-| TD-011 | Checkpoint Persistence | Medium | 3-5 |
-| TD-012 | No YAML Schema Validation | Large | 5-10 |
-| TD-013 | Bash Classifier False Positives | Medium | 3-5 |
-| TD-014 | Conformance Results Placement | Small | 1-2 |
+| ID | Title | Effort | Est. Days | Status |
+|----|-------|--------|-----------|--------|
+| TD-001 | Legacy Conformance Fixtures | Medium | 3-5 | **Closed** |
+| TD-002 | Shell Hook Pattern Matching | Medium | 3-5 | **Closed** |
+| TD-003 | Hook Pipeline Integration Tests | Large | 5-10 | **Closed** |
+| TD-004 | Evidence Store O(n) Eviction | Small | 1-2 | **Closed** |
+| TD-005 | Missing Type Annotations | Small | 1-2 | **Closed** |
+| TD-006 | No Workflow Execution Engine | XL | 10+ | Open |
+| TD-007 | Transform Path References | Small | 1-2 | **Closed** |
+| TD-008 | License Mismatch | Small | 1-2 | **Closed** |
+| TD-009 | No CI Pipeline | Medium | 3-5 | **Closed** |
+| TD-010 | OASF Mapping Completeness | Large | 5-10 | Open |
+| TD-011 | Checkpoint Persistence | Medium | 3-5 | **Closed** |
+| TD-012 | No YAML Schema Validation | Large | 5-10 | **Closed** |
+| TD-013 | Bash Classifier False Positives | Medium | 3-5 | **Closed** |
+| TD-014 | Conformance Results Placement | Small | 1-2 | **Closed** |
 
 ### Aggregate by Effort Category
 
-| Effort Level | Count | Total Est. Days | Items |
-|--------------|-------|-----------------|-------|
-| Small (1-2 days) | 4 | 4-8 days | TD-004, TD-005, TD-007, TD-008, TD-014 |
-| Medium (3-5 days) | 5 | 15-25 days | TD-001, TD-002, TD-009, TD-011, TD-013 |
-| Large (1-2 weeks) | 3 | 15-30 days | TD-003, TD-010, TD-012 |
-| XL (2+ weeks) | 1 | 10+ days | TD-006 |
-| **Total** | **14** | **~44-73 engineer-days** | |
+| Effort Level | Original | Closed | Remaining | Est. Days Remaining |
+|--------------|----------|--------|-----------|---------------------|
+| Small (1-2 days) | 5 | 5 | 0 | 0 |
+| Medium (3-5 days) | 5 | 5 | 0 | 0 |
+| Large (1-2 weeks) | 3 | 2 | 1 (TD-010) | 5-10 |
+| XL (2+ weeks) | 1 | 0 | 1 (TD-006) | 10+ |
+| **Total** | **14** | **12** | **2** | **~15-20 days** |
 
 ---
 
@@ -643,7 +681,7 @@ Low       [####---------]  4 items   (28.6%)
 
 Items are grouped into sprints based on severity, dependency relationships, and strategic importance.
 
-### Sprint 1 (P0): Foundation -- Legal & Automation
+### Sprint 1 (P0): Foundation -- Legal & Automation -- **COMPLETED**
 
 **Goal:** Eliminate legal risk and establish automated quality gates.
 **Timeline:** Week 1-2
@@ -656,14 +694,14 @@ Items are grouped into sprints based on severity, dependency relationships, and 
 | TD-014 | Conformance Results Placement | Small | **Quick win.** Fix during CI setup since conformance tests will be integrated into the pipeline. |
 
 **Acceptance Criteria:**
-- [ ] `pyproject.toml` license field matches `LICENSE` file.
-- [ ] `.github/workflows/ci.yml` exists and runs all validation scripts.
-- [ ] Branch protection rules require CI passage.
-- [ ] `conformance_results.json` is either written to `build/` or added to `.gitignore`.
+- [x] `pyproject.toml` license field matches `LICENSE` file.
+- [x] `.github/workflows/ci.yml` exists and runs all validation scripts.
+- [x] Branch protection rules require CI passage.
+- [x] `conformance_results.json` is either written to `build/` or added to `.gitignore`.
 
 ---
 
-### Sprint 2 (P1): Safety -- Integration Tests & Checkpoint Durability
+### Sprint 2 (P1): Safety -- Integration Tests & Checkpoint Durability -- **COMPLETED**
 
 **Goal:** Close safety model gaps and ensure mutation enforcement is tested and durable.
 **Timeline:** Week 3-5
@@ -676,15 +714,15 @@ Items are grouped into sprints based on severity, dependency relationships, and 
 | TD-001 | Legacy Conformance Fixtures | Medium | **Dependency.** Integration tests (TD-003) need clean test fixtures. Modernize fixtures first. |
 
 **Acceptance Criteria:**
-- [ ] Integration test suite under `tests/integration/` covers all dual-layer scenarios.
-- [ ] `CheckpointTracker` persists state to filesystem.
-- [ ] Shell hook and Python `CheckpointTracker` share checkpoint state via filesystem.
-- [ ] All test fixtures reference only 36-capability model names.
-- [ ] Conformance runner uses temp directory, not file-swap.
+- [x] Integration test suite under `tests/integration/` covers all dual-layer scenarios.
+- [x] `CheckpointTracker` persists state to filesystem.
+- [x] Shell hook and Python `CheckpointTracker` share checkpoint state via filesystem.
+- [x] All test fixtures reference only 36-capability model names.
+- [x] Conformance runner uses temp directory, not file-swap.
 
 ---
 
-### Sprint 3 (P2): Quality -- Type Safety, Performance, Hook Hardening
+### Sprint 3 (P2): Quality -- Type Safety, Performance, Hook Hardening -- **COMPLETED**
 
 **Goal:** Improve code quality, developer experience, and close shell hook security gap.
 **Timeline:** Week 6-8
@@ -698,19 +736,19 @@ Items are grouped into sprints based on severity, dependency relationships, and 
 | TD-013 | Bash Classifier False Positives | Medium | **Usability.** Reduces checkpoint fatigue from benign compound commands. |
 
 **Acceptance Criteria:**
-- [ ] `mypy --strict` passes on `grounded_agency/` package.
-- [ ] Evidence store secondary indexes use O(1) eviction.
-- [ ] Shell hook covers all patterns from Python `_DESTRUCTIVE_PATTERNS` and `_NETWORK_SEND_PATTERNS`.
-- [ ] Compound read-only commands (`ls && pwd`) are classified as low-risk.
-- [ ] Benchmark: 10,000 anchor insert/evict cycle completes in under 100ms.
+- [x] `mypy --strict` passes on `grounded_agency/` package.
+- [x] Evidence store secondary indexes use O(1) eviction.
+- [x] Shell hook covers all patterns from Python `_DESTRUCTIVE_PATTERNS` and `_NETWORK_SEND_PATTERNS`.
+- [x] Compound read-only commands (`ls && pwd`) are classified as low-risk.
+- [x] Benchmark: 10,000 anchor insert/evict cycle completes in under 100ms.
 
 ---
 
-### Sprint 4 (P3): Strategic -- Interop, Schemas & Workflow Engine
+### Sprint 4 (P3): Strategic -- Interop, Schemas & Workflow Engine -- **PARTIALLY COMPLETE**
 
 **Goal:** Address long-term architectural debt and standards interoperability.
 **Timeline:** Week 9-14 (or ongoing backlog)
-**Total Effort:** 20-30+ days
+**Total Effort:** 20-30+ days (15-20 days remaining)
 
 | ID | Title | Effort | Rationale |
 |----|-------|--------|-----------|
@@ -720,10 +758,10 @@ Items are grouped into sprints based on severity, dependency relationships, and 
 | TD-007 | Transform Path References | Small | **Maintenance.** Low urgency but easy to address alongside schema work. |
 
 **Acceptance Criteria:**
-- [ ] Workflow engine MVP: validation mode traces agent actions against workflow definitions.
-- [ ] OASF compatibility adapter wraps unmapped GA capabilities.
-- [ ] JSON Schema published for `capability_ontology.yaml` and `workflow_catalog.yaml`.
-- [ ] Transform references validated by existing or new validation tool.
+- [ ] Workflow engine MVP: validation mode traces agent actions against workflow definitions. **(TD-006 -- Open)**
+- [ ] OASF compatibility adapter wraps unmapped GA capabilities. **(TD-010 -- Open)**
+- [x] JSON Schema published for `capability_ontology.yaml` and `workflow_catalog.yaml`. **(TD-012 -- Closed)**
+- [x] Transform references validated by existing or new validation tool. **(TD-007 -- Closed)**
 
 ---
 
@@ -750,12 +788,12 @@ Following the industry-standard technical debt management guideline, we recommen
 
 #### Projected Timeline (20% allocation, 1 engineer)
 
-| Sprint | Weeks | Items | Cumulative Debt Reduced |
-|--------|-------|-------|-------------------------|
-| Sprint 1 (P0) | 1-2 | TD-008, TD-009, TD-014 | 21% (3/14 items) |
-| Sprint 2 (P1) | 3-5 | TD-003, TD-011, TD-001 | 43% (6/14 items) |
-| Sprint 3 (P2) | 6-8 | TD-005, TD-004, TD-002, TD-013 | 71% (10/14 items) |
-| Sprint 4 (P3) | 9-14 | TD-006, TD-010, TD-012, TD-007 | 100% (14/14 items) |
+| Sprint | Weeks | Items | Status | Cumulative Debt Reduced |
+|--------|-------|-------|--------|-------------------------|
+| Sprint 1 (P0) | 1-2 | TD-008, TD-009, TD-014 | **Completed** | 21% (3/14 items) |
+| Sprint 2 (P1) | 3-5 | TD-003, TD-011, TD-001 | **Completed** | 43% (6/14 items) |
+| Sprint 3 (P2) | 6-8 | TD-005, TD-004, TD-002, TD-013 | **Completed** | 71% (10/14 items) |
+| Sprint 4 (P3) | 9-14 | TD-006, TD-010, TD-012, TD-007 | **Partial** (2/4) | 85.7% (12/14 items) |
 
 #### Tracking & Governance
 
@@ -767,3 +805,5 @@ Following the industry-standard technical debt management guideline, we recommen
 ---
 
 *This register should be reviewed and updated at the start of each sprint. Items may be added, re-prioritized, or closed as the codebase evolves.*
+
+*Last updated: 2026-02-01 | 85.7% debt reduction achieved (12/14 items closed)*

@@ -6,8 +6,8 @@
 |-----------------|--------------------------------------------|
 | Document        | `analysis/08-testing-guide.md`             |
 | Project         | Agent Capability Standard                  |
-| Version         | 0.1.0                                      |
-| Last Updated    | 2026-01-30                                 |
+| Version         | 0.2.0                                      |
+| Last Updated    | 2026-02-01                                 |
 | Status          | Active                                     |
 
 ---
@@ -632,78 +632,62 @@ SCENARIOS = {
 | Component              | Test Count | Coverage Level |
 |------------------------|------------|----------------|
 | CapabilityRegistry     | 16         | High           |
-| ToolCapabilityMapper   | 12         | High           |
-| CheckpointTracker      | 7          | High           |
-| EvidenceStore          | 5          | Medium-High    |
-| GroundedAgentAdapter   | 7          | High           |
-| Hook callbacks         | 3          | Medium         |
-| Integration workflows  | 4          | Medium         |
+| ToolCapabilityMapper   | 12+        | High           |
+| CheckpointTracker      | 7+         | High           |
+| EvidenceStore          | 5+         | High           |
+| GroundedAgentAdapter   | 7+         | High           |
+| Hook callbacks         | 3+         | Medium-High    |
+| Hook pipeline (integration) | 5+    | Medium-High    |
+| Shell hook scripts     | 8+         | Medium-High    |
+| Integration workflows  | 4+         | Medium         |
 | OASF Adapter           | 25         | High           |
 | Benchmark scenarios    | 30+        | High           |
-| Conformance fixtures   | 5          | Medium         |
+| Conformance fixtures   | 22         | High           |
+| Regex fuzz testing     | 10+        | Medium         |
+| Validator tools        | 7+         | Medium         |
 
-### 7.2 Coverage Gaps
+### 7.2 Coverage Gaps (Updated 2026-02-01)
 
-The following areas have been identified as lacking test coverage:
+The following areas were identified as lacking test coverage in the initial assessment. Most have been addressed:
 
-#### No integration tests for hook pipeline
+#### ~~No integration tests for hook pipeline~~ — **RESOLVED** (PR #92)
 
-The shell-based hooks defined in `hooks/` are not tested:
-- `hooks/pretooluse_require_checkpoint.sh` -- Pre-mutation checkpoint enforcement
-- `hooks/posttooluse_log_tool.sh` -- Audit logging after tool use
-- `hooks/hooks.json` -- Hook configuration binding
+Integration tests now cover the dual-layer hook pipeline including pre-tool-use checkpoint enforcement and post-tool-use evidence collection. Tests validate that shell hooks and Python SDK hooks operate correctly when composed together.
 
-These hooks are executed by the Claude Code runtime and would require integration testing with the actual CLI to validate.
+#### ~~No tests for shell hook scripts~~ — **RESOLVED** (PR #91)
 
-#### No tests for shell hook scripts
-
-The `.sh` hook scripts use `jq` for JSON parsing and shell logic for enforcement. There are no tests that verify:
-- Correct `jq` query extraction from tool input
-- Checkpoint marker detection in file content
-- Audit log file writing and format
+Shell hook scripts now have unit tests covering:
+- `jq` query extraction from tool input payloads
+- Checkpoint marker JSON validation with timestamp freshness
+- Audit log HMAC chain integrity verification
 - Exit code behavior (0 = allow, 1 = block)
 
-#### No performance or load tests for EvidenceStore at scale
+#### ~~No performance or load tests for EvidenceStore at scale~~ — **RESOLVED** (PR #91)
 
-The `EvidenceStore` tests use small datasets (1-5 anchors). There are no tests for:
-- FIFO eviction behavior when the store reaches its maximum capacity
-- Query performance with thousands of evidence anchors
-- Memory usage patterns under sustained evidence collection
-- Concurrent access patterns (if applicable)
+Evidence store performance tests added covering:
+- Priority-aware eviction with CRITICAL/NORMAL/LOW buckets at capacity
+- O(1) eviction performance with 10,000+ anchors
+- Benchmark: insert/evict cycle at scale
 
-#### No tests for validator tools
+#### ~~No tests for validator tools~~ — **RESOLVED** (PR #92)
 
-The Python validator scripts in `tools/` are tested indirectly through conformance tests (which invoke `validate_workflows.py` via subprocess), but there are no direct unit tests for:
-- `tools/validate_workflows.py` -- The workflow validator's internal functions
-- `tools/validate_profiles.py` -- Domain profile validation
-- `tools/validate_skill_refs.py` -- Skill file reference validation
-- `tools/validate_ontology.py` -- Ontology graph validation (orphans, cycles, symmetry)
-- `tools/sync_skill_schemas.py` -- Schema synchronization logic
+Validator tools are now tested both directly and via the expanded conformance suite (22 fixtures). The 7 validators all run in CI.
 
-#### No fuzz testing for regex patterns
+#### ~~No fuzz testing for regex patterns~~ — **RESOLVED** (PR #91)
 
-The `ToolCapabilityMapper` uses regex pattern matching to classify Bash commands as read-only, destructive, or network operations. There is no fuzz testing to verify:
-- Edge cases in command detection (`rm` inside a string vs. as a command)
-- Aliased or obfuscated destructive commands
-- Complex piped commands with mixed read/write intent
-- Unicode or special character handling
+Fuzz testing added for the `ToolCapabilityMapper` regex patterns covering:
+- Edge cases in command detection
+- Interpreter patterns (`python -c`, `ruby -e`, `node -e`)
+- Process substitution patterns
+- Compound command classification
 
-#### No end-to-end tests with actual Claude Agent SDK
+#### No end-to-end tests with actual Claude Agent SDK — **PARTIALLY RESOLVED** (PR #92)
 
-All adapter tests use `MockClaudeAgentOptions`. There are no tests that:
-- Import from the real `claude-agent-sdk` package
-- Verify actual SDK compatibility
-- Test the full `can_use_tool` callback signature with real SDK types
-- Validate hook registration with the actual SDK hook system
+The adapter tests now include typed fallback tests that exercise the SDK integration path without the real SDK installed. Protocol types via `TYPE_CHECKING` ensure interface compatibility. Full end-to-end tests with the real SDK remain aspirational, as the SDK is an optional dependency.
 
-This is partially by design -- the SDK is an optional dependency (`pip install -e ".[sdk]"`), so tests must work without it.
+#### ~~No test isolation for conformance runner~~ — **RESOLVED** (PR #92)
 
-#### No test isolation for conformance runner
-
-The conformance runner (`scripts/run_conformance.py`) swaps the production `schemas/workflow_catalog.yaml` during execution. If the process is interrupted, the production file could be left in a corrupted state. There are no tests for:
-- Interrupted execution recovery
-- Concurrent conformance test runs
-- File permission errors during swap
+The conformance runner has been refactored to use a temporary directory copy of the catalog rather than overwriting the production file in-place. Signal handlers and `atexit` callbacks guarantee file restoration.
 
 ---
 
@@ -860,11 +844,11 @@ python tools/validate_ontology.py
 
 ---
 
-## 9. Continuous Integration Considerations
+## 9. Continuous Integration
 
-### 9.1 Recommended CI Steps
+### 9.1 Current CI Pipeline (`.github/workflows/ci.yml`)
 
-A CI pipeline for this project should execute the following stages in order:
+The CI pipeline executes the following stages on every PR and push to `main`:
 
 ```
 Stage 1: Lint + Type Check
@@ -885,6 +869,8 @@ Stage 5: Schema Validation
   - python tools/validate_profiles.py
   - python tools/validate_skill_refs.py
   - python tools/validate_ontology.py
+  - python tools/validate_transform_refs.py
+  - python tools/validate_yaml_util_sync.py
 ```
 
 ### 9.2 Environment Matrix
