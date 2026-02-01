@@ -84,11 +84,11 @@ class TestFullPipeline:
 
         # Step 5: Verify audit log
         audit_log = marker_dir / "audit.log"
-        if audit_log.exists():
-            entries = audit_log.read_text().strip().split("\n")
-            assert len(entries) >= 1
-            entry = json.loads(entries[-1])
-            assert entry["skill"] == "checkpoint"
+        assert audit_log.exists(), "PostToolUse hook should have created audit.log"
+        entries = audit_log.read_text().strip().split("\n")
+        assert len(entries) >= 1
+        entry = json.loads(entries[-1])
+        assert entry["skill"] == "checkpoint"
 
     def test_no_checkpoint_blocks_mutation(self, tmp_path: Path) -> None:
         """Without checkpoint, PreToolUse should block mutations."""

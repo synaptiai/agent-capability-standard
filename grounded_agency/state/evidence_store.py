@@ -315,9 +315,6 @@ class EvidenceStore:
     Lower-priority anchors are evicted first; within the same priority,
     oldest anchors are evicted first (FIFO within priority tier).
 
-    Issue #63: Internal data structures use O(1) eviction via priority
-    buckets and seq_id-keyed dict indexes instead of O(n) list scans.
-
     Example:
         store = EvidenceStore(max_anchors=1000)
 
@@ -566,6 +563,7 @@ class EvidenceStore:
     def clear(self) -> None:
         """Clear all evidence from the store."""
         self._anchors.clear()
+        self._seq_counter = 0
         self._anchor_to_seq.clear()
         self._seq_to_anchor.clear()
         self._priority_buckets.clear()

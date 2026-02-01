@@ -67,7 +67,7 @@ def run_hook(
 class TestPreToolUseExitCodes:
     """Test each exit code path in pretooluse_require_checkpoint.sh."""
 
-    def test_exit_0_for_non_mutation(self, tmp_path: Path) -> None:
+    def test_exit_0_for_non_mutation(self) -> None:
         """Non-mutation commands should pass (exit 0)."""
         result = run_hook(PRETOOLUSE_HOOK, "Read some file")
         assert result.returncode == 0
@@ -181,9 +181,9 @@ class TestPostToolUseExitCodes:
         assert result.returncode == 0
 
         log_file = tmp_path / ".claude" / "audit.log"
-        if log_file.exists():
-            content = log_file.read_text()
-            assert "checkpoint" in content
+        assert log_file.exists(), "PostToolUse hook should have created audit.log"
+        content = log_file.read_text()
+        assert "checkpoint" in content
 
     def test_special_characters_in_args(
         self, log_env: dict[str, str], tmp_path: Path
@@ -336,3 +336,16 @@ class TestHookPatternParity:
                 f"hooks.json matcher is missing mutation tool '{tool_name}'; "
                 f"current matcher: {matcher}"
             )
+
+    def test_hooks_json_matcher_includes_bash(self) -> None:
+        """hooks.json PreToolUse matcher must include Bash for sub-command gating."""
+        hooks_json_path = ROOT / "hooks" / "hooks.json"
+        hooks_data = json.loads(hooks_json_path.read_text())
+
+        matcher = hooks_data["hooks"]["PreToolUse"][0]["matcher"]
+        matcher_tools = set(matcher.split("|"))
+
+        assert "Bash" in matcher_tools, (
+            f"hooks.json matcher must include 'Bash' to gate destructive sub-commands; "
+            f"current matcher: {matcher}"
+        )

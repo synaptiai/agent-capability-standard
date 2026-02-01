@@ -6,17 +6,21 @@ tests secondary index consistency after eviction.
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
 
 from grounded_agency.state.evidence_store import (
+    _MAX_METADATA_SIZE_BYTES,
     PRIORITY_CRITICAL,
     PRIORITY_HIGH,
     PRIORITY_LOW,
     PRIORITY_NORMAL,
     EvidenceAnchor,
     EvidenceStore,
+    _sanitize_metadata,
+    _validate_metadata_depth,
     _validate_metadata_key,
 )
 
@@ -81,6 +85,175 @@ class TestMetadataKeyDenylist:
         assert "another_safe" in anchor.metadata
         assert "__proto__" not in anchor.metadata
         assert "__class__" not in anchor.metadata
+
+
+# ─── SEC-008: Metadata sanitization tests ───
+
+
+class TestMetadataSanitization:
+    """Tests for _validate_metadata_depth and _sanitize_metadata (SEC-008)."""
+
+    # ── Depth validation ──
+
+    def test_flat_dict_passes(self) -> None:
+        assert _validate_metadata_depth({"a": 1, "b": "x"}) is True
+
+    def test_nested_within_limit(self) -> None:
+        value = {"level1": {"level2": "ok"}}
+        assert _validate_metadata_depth(value) is True
+
+    def test_nested_exceeds_limit(self) -> None:
+        value: dict = {"l1": {"l2": {"l3": "too deep"}}}
+        assert _validate_metadata_depth(value) is False
+
+    def test_list_nesting_within_limit(self) -> None:
+        value = {"items": [1, 2, 3]}
+        assert _validate_metadata_depth(value) is True
+
+    def test_list_nesting_exceeds_limit(self) -> None:
+        value = {"items": [{"nested": {"deep": True}}]}
+        assert _validate_metadata_depth(value) is False
+
+    def test_scalar_always_passes(self) -> None:
+        assert _validate_metadata_depth("hello") is True
+        assert _validate_metadata_depth(42) is True
+        assert _validate_metadata_depth(None) is True
+
+    def test_empty_dict_passes(self) -> None:
+        assert _validate_metadata_depth({}) is True
+
+    # ── Sanitization ──
+
+    def test_empty_metadata_returns_empty(self) -> None:
+        assert _sanitize_metadata({}) == {}
+
+    def test_strips_invalid_keys(self) -> None:
+        result = _sanitize_metadata({
+            "valid": "ok",
+            "__proto__": "evil",
+            "123invalid": "bad",
+        })
+        assert "valid" in result
+        assert "__proto__" not in result
+        assert "123invalid" not in result
+
+    def test_flattens_too_deep_values(self) -> None:
+        """Values exceeding max depth should be string-flattened."""
+        deep = {"l1": {"l2": {"l3": "deep"}}}
+        result = _sanitize_metadata({"nested": deep})
+        # Should be flattened to a truncated string
+        assert isinstance(result["nested"], str)
+
+    def test_truncates_oversized_metadata(self) -> None:
+        """Metadata exceeding _MAX_METADATA_SIZE_BYTES should be truncated."""
+        big = {"key": "x" * (_MAX_METADATA_SIZE_BYTES + 500)}
+        result = _sanitize_metadata(big)
+        serialized = len(json.dumps(result).encode("utf-8"))
+        # Margin accounts for JSON overhead from "[truncated]" replacement value
+        truncated_overhead = len(json.dumps({"key": "[truncated]"}).encode("utf-8"))
+        assert serialized <= _MAX_METADATA_SIZE_BYTES + truncated_overhead
+
+    def test_circular_reference_flattened(self) -> None:
+        """Circular-reference metadata should be depth-flattened, not crash."""
+        circular: dict = {"key": "value"}
+        circular["self_ref"] = circular  # type: ignore[assignment]
+        result = _sanitize_metadata(circular)
+        assert isinstance(result, dict)
+        # Circular ref exceeds max depth → flattened to str
+        assert isinstance(result.get("self_ref"), str)
+
+    def test_preserves_safe_metadata(self) -> None:
+        """Normal metadata should pass through unchanged."""
+        meta = {"tool_name": "Read", "path": "/tmp/file.py", "count": 42}
+        result = _sanitize_metadata(meta)
+        assert result == meta
+
+
+# ─── EvidenceStore API tests ───
+
+
+class TestEvidenceStoreAPI:
+    """Tests for clear(), to_list(), and search_by_metadata()."""
+
+    def test_clear_empties_store(self) -> None:
+        """clear() should remove all anchors and reset seq counter."""
+        store = EvidenceStore(max_anchors=100)
+        for i in range(10):
+            store.add_anchor(
+                EvidenceAnchor.from_tool_output("Read", f"id_{i}", {"path": f"/tmp/{i}"})
+            )
+        assert len(store) == 10
+
+        store.clear()
+
+        assert len(store) == 0
+        assert store._seq_counter == 0
+        assert len(store._anchor_to_seq) == 0
+        assert len(store._seq_to_anchor) == 0
+        assert len(store._priority_buckets) == 0
+        assert len(store._seq_to_priority) == 0
+        assert len(store._by_kind) == 0
+        assert len(store._by_capability) == 0
+
+    def test_clear_then_add_works(self) -> None:
+        """Store should accept new anchors after clear()."""
+        store = EvidenceStore(max_anchors=100)
+        store.add_anchor(
+            EvidenceAnchor.from_tool_output("Read", "id_0", {"path": "/tmp/0"})
+        )
+        store.clear()
+        store.add_anchor(
+            EvidenceAnchor.from_tool_output("Write", "id_1", {"path": "/tmp/1"})
+        )
+        assert len(store) == 1
+        assert store.get_recent(1) == ["tool:Write:id_1"]
+
+    def test_to_list_returns_dicts(self) -> None:
+        """to_list() should return a list of dicts with expected keys."""
+        store = EvidenceStore(max_anchors=100)
+        store.add_anchor(
+            EvidenceAnchor.from_tool_output("Read", "id_0", {"path": "/tmp/0"})
+        )
+        store.add_anchor(
+            EvidenceAnchor.from_mutation("file.py", "write", "chk_1")
+        )
+
+        result = store.to_list()
+        assert len(result) == 2
+        for entry in result:
+            assert isinstance(entry, dict)
+            assert "ref" in entry
+            assert "kind" in entry
+            assert "timestamp" in entry
+            assert "metadata" in entry
+
+    def test_to_list_empty_store(self) -> None:
+        """to_list() on empty store should return empty list."""
+        store = EvidenceStore(max_anchors=100)
+        assert store.to_list() == []
+
+    def test_search_by_metadata_finds_match(self) -> None:
+        """search_by_metadata() should find anchors with matching key-value."""
+        store = EvidenceStore(max_anchors=100)
+        store.add_anchor(
+            EvidenceAnchor.from_tool_output("Read", "id_0", {"path": "/tmp/0"})
+        )
+        store.add_anchor(
+            EvidenceAnchor.from_tool_output("Write", "id_1", {"path": "/tmp/1"})
+        )
+
+        results = store.search_by_metadata("tool_name", "Read")
+        assert len(results) == 1
+        assert results[0].ref == "tool:Read:id_0"
+
+    def test_search_by_metadata_no_match(self) -> None:
+        """search_by_metadata() should return empty list when no match."""
+        store = EvidenceStore(max_anchors=100)
+        store.add_anchor(
+            EvidenceAnchor.from_tool_output("Read", "id_0", {"path": "/tmp/0"})
+        )
+        results = store.search_by_metadata("tool_name", "NonExistent")
+        assert results == []
 
 
 # ─── SEC-004: Priority eviction tests ───
@@ -359,8 +532,8 @@ class TestPerformance:
         assert len(results) == 5000
         assert elapsed < 1.0, f"search_by_ref_prefix took {elapsed:.2f}s"
 
-    def test_10k_insert_evict_under_100ms(self) -> None:
-        """Benchmark: 10K insert+evict cycle under 100ms with O(1) eviction."""
+    def test_10k_insert_evict_under_1s(self) -> None:
+        """Benchmark: 10K insert+evict cycle under 1s with O(1) eviction."""
         store = EvidenceStore(max_anchors=5000)
 
         # Fill to capacity
@@ -381,3 +554,54 @@ class TestPerformance:
 
         assert len(store) == 5000
         assert elapsed < 1.0, f"10K insert+evict took {elapsed:.3f}s, expected < 1.0s"
+
+
+# ─── Eviction edge cases ───
+
+
+class TestEvictionEdgeCases:
+    """Edge cases for priority eviction."""
+
+    def test_eviction_at_minimum_capacity(self) -> None:
+        """Store with max_anchors=1 should evict on every insert after first."""
+        store = EvidenceStore(max_anchors=1)
+
+        store.add_anchor(
+            EvidenceAnchor(ref="first:1", kind="tool_output", timestamp="t1")
+        )
+        assert len(store) == 1
+
+        store.add_anchor(
+            EvidenceAnchor(ref="second:1", kind="tool_output", timestamp="t2")
+        )
+        assert len(store) == 1
+        assert store.get_recent(1) == ["second:1"]
+
+    def test_eviction_when_all_critical(self) -> None:
+        """When all anchors are CRITICAL, eviction falls through to oldest CRITICAL."""
+        store = EvidenceStore(max_anchors=3)
+
+        for i in range(3):
+            store.add_anchor(
+                EvidenceAnchor(
+                    ref=f"crit:{i}",
+                    kind="mutation",
+                    timestamp=f"t{i}",
+                    priority=PRIORITY_CRITICAL,
+                )
+            )
+
+        # Adding a 4th forces eviction of oldest CRITICAL
+        store.add_anchor(
+            EvidenceAnchor(
+                ref="crit:3",
+                kind="mutation",
+                timestamp="t3",
+                priority=PRIORITY_CRITICAL,
+            )
+        )
+
+        assert len(store) == 3
+        refs = [a.ref for a in store]
+        assert "crit:0" not in refs  # Oldest critical evicted
+        assert "crit:3" in refs  # Newest survived
