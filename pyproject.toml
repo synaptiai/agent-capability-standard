@@ -54,6 +54,9 @@ all = [
     "grounded-agency[sdk,dev]",
 ]
 
+[project.scripts]
+acs = "tools.scaffold:main"
+
 [project.urls]
 Homepage = "https://github.com/synaptiai/agent-capability-standard"
 Documentation = "https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/claude_agent_sdk.md"
