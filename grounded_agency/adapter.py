@@ -360,9 +360,12 @@ class GroundedAgentAdapter:
                     logger.info("Mutation %s failed, checkpoint preserved", tool_name)
                     return {}
 
-                # Mutation succeeded - consume checkpoint
-                if tracker.has_valid_checkpoint():
-                    consumed_id = tracker.consume_checkpoint()
+                # Mutation succeeded — consume checkpoint directly.
+                # No has_valid_checkpoint() guard: consume_checkpoint() is
+                # already atomic and returns None if nothing to consume,
+                # avoiding a TOCTOU race between check and consume.
+                consumed_id = tracker.consume_checkpoint()
+                if consumed_id is not None:
                     logger.info(
                         "Checkpoint %s consumed after %s", consumed_id, tool_name
                     )

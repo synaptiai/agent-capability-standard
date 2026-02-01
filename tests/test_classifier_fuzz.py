@@ -148,6 +148,28 @@ class TestInterpreterEvasion:
         # That's the safe behavior — unknown commands are high-risk
 
 
+class TestPythonHelpExclusion:
+    """python3 --help should not be flagged by the interpreter pattern."""
+
+    def test_python_help_not_flagged_as_interpreter(
+        self, mapper: ToolCapabilityMapper
+    ) -> None:
+        """python3 --help is informational and must not match _INTERPRETER_PATTERNS."""
+        result = mapper.map_tool("Bash", {"command": "python3 --help"})
+        # --help is not a script execution; it should fall through to
+        # default-deny (high risk) but NOT match the interpreter pattern
+        # (capability_id would be "execute" if interpreter pattern matched)
+        assert result.capability_id != "execute"
+
+    def test_python2_help_not_flagged(self, mapper: ToolCapabilityMapper) -> None:
+        result = mapper.map_tool("Bash", {"command": "python2 --help"})
+        assert result.capability_id != "execute"
+
+    def test_python_help_not_flagged(self, mapper: ToolCapabilityMapper) -> None:
+        result = mapper.map_tool("Bash", {"command": "python --help"})
+        assert result.capability_id != "execute"
+
+
 class TestProcessSubstitution:
     """SEC-002: Process substitution and here-strings must be detected."""
 

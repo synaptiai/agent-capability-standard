@@ -405,6 +405,10 @@ class CheckpointTracker:
     def get_archived_checkpoints(self) -> list[Checkpoint]:
         """SEC-011: Retrieve archived (pruned) checkpoints from JSONL.
 
+        Per-line error handling: corrupt lines are skipped with a warning
+        rather than aborting the entire archive read. File-level errors
+        (permissions, missing file) are caught at the outer level.
+
         Returns:
             List of archived Checkpoint objects, oldest first.
         """
@@ -412,14 +416,28 @@ class CheckpointTracker:
         if not archive_file.exists():
             return []
         try:
-            results = []
+            # P2-4: Reject oversized archive files before reading
+            if archive_file.stat().st_size > self._MAX_STATE_FILE_BYTES:
+                logger.warning(
+                    "Archive file too large (%d bytes, limit %d) — skipping",
+                    archive_file.stat().st_size,
+                    self._MAX_STATE_FILE_BYTES,
+                )
+                return []
+            results: list[Checkpoint] = []
             with open(archive_file, encoding="utf-8") as f:
-                for line in f:
+                for line_num, line in enumerate(f, 1):
                     line = line.strip()
-                    if line:
+                    if not line:
+                        continue
+                    try:
                         results.append(Checkpoint.from_dict(json.loads(line)))
+                    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                        logger.warning(
+                            "Skipping corrupt archive line %d: %s", line_num, e
+                        )
             return results
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+        except OSError as e:
             logger.warning("Failed to read checkpoint archive: %s", e)
             return []
 

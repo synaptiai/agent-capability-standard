@@ -31,6 +31,35 @@ def default_limiter() -> RateLimiter:
     return RateLimiter()
 
 
+class TestRateLimitConfigValidation:
+    """Tests for RateLimitConfig __post_init__ validation."""
+
+    def test_rejects_zero_high_rpm(self) -> None:
+        with pytest.raises(ValueError, match="high_rpm must be >= 1"):
+            RateLimitConfig(high_rpm=0)
+
+    def test_rejects_negative_medium_rpm(self) -> None:
+        with pytest.raises(ValueError, match="medium_rpm must be >= 1"):
+            RateLimitConfig(medium_rpm=-5)
+
+    def test_rejects_zero_low_rpm(self) -> None:
+        with pytest.raises(ValueError, match="low_rpm must be >= 1"):
+            RateLimitConfig(low_rpm=0)
+
+    def test_rejects_zero_burst_multiplier(self) -> None:
+        with pytest.raises(ValueError, match="burst_multiplier must be > 0"):
+            RateLimitConfig(burst_multiplier=0)
+
+    def test_rejects_negative_burst_multiplier(self) -> None:
+        with pytest.raises(ValueError, match="burst_multiplier must be > 0"):
+            RateLimitConfig(burst_multiplier=-1.0)
+
+    def test_accepts_valid_config(self) -> None:
+        cfg = RateLimitConfig(high_rpm=1, medium_rpm=1, low_rpm=1, burst_multiplier=0.1)
+        assert cfg.high_rpm == 1
+        assert cfg.burst_multiplier == 0.1
+
+
 class TestTokenBucket:
     """Tests for basic token bucket behavior."""
 

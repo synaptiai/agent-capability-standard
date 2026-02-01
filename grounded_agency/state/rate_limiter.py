@@ -44,6 +44,17 @@ class RateLimitConfig:
     low_rpm: int = 120
     burst_multiplier: float = 1.5
 
+    def __post_init__(self) -> None:
+        """Validate configuration invariants."""
+        for attr in ("high_rpm", "medium_rpm", "low_rpm"):
+            val = getattr(self, attr)
+            if val < 1:
+                raise ValueError(f"{attr} must be >= 1, got {val}")
+        if self.burst_multiplier <= 0:
+            raise ValueError(
+                f"burst_multiplier must be > 0, got {self.burst_multiplier}"
+            )
+
 
 class RateLimiter:
     """Token bucket rate limiter with per-risk-level buckets.

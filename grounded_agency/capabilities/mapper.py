@@ -37,7 +37,7 @@ _INTERPRETER_PATTERNS = re.compile(
     \bphp\s+(-r|--run)\s |                      # PHP eval
     \blua\s+(-e)\s |                            # Lua eval
     \bawk\s+.*\bsystem\s*\( |                   # awk system() calls
-    \bpython[23]?\s+(?!-[Vh])(?!--version)\S    # Python script execution (not --version)
+    \bpython[23]?\s+(?!-[Vh])(?!--version)(?!--help)\S    # Python script execution (not --version/--help)
     """,
     re.VERBOSE | re.IGNORECASE,
 )
