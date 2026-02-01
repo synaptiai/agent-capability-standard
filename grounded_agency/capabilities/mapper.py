@@ -66,16 +66,13 @@ _NETWORK_SEND_PATTERNS = re.compile(
     re.VERBOSE | re.IGNORECASE,
 )
 
-# Patterns that indicate shell injection attempts or obfuscation
-# These should always be treated as high-risk
-_SHELL_INJECTION_PATTERNS = re.compile(
+# Patterns that are ALWAYS dangerous regardless of context.
+# These bypass compound-command analysis and are always high-risk.
+_ALWAYS_DANGEROUS_PATTERNS = re.compile(
     r"""
     \$\( |                                # Command substitution $(...)
     ` |                                   # Backtick command substitution
     \$\{ |                                # Variable expansion ${...}
-    ;\s*[a-zA-Z] |                         # Command chaining with semicolon
-    \|\| |                                # OR chaining
-    && |                                  # AND chaining (could be benign, but risky)
     \beval\s |                            # eval command
     \bexec\s |                            # exec command
     \bsource\s |                          # source command
@@ -86,6 +83,13 @@ _SHELL_INJECTION_PATTERNS = re.compile(
     """,
     re.VERBOSE,
 )
+
+# Compound command operators: &&, ||, ; followed by a command.
+# Used to split compound commands for per-sub-command classification.
+# Known limitation: quoted strings containing && (e.g., echo "a && b")
+# will be split incorrectly. This is fail-safe: the fragment won't
+# match the read-only allowlist and will be classified as high-risk.
+_COMPOUND_OPERATOR_RE = re.compile(r"\s*(?:&&|\|\||;\s*(?=[a-zA-Z]))\s*")
 
 _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
@@ -323,6 +327,12 @@ class ToolCapabilityMapper:
         """
         Classify a Bash command based on its content.
 
+        Uses a two-pass approach for compound commands (&&, ||, ;):
+        1. Always-dangerous patterns are checked first (instant high-risk).
+        2. If compound operators are present, split and classify each
+           sub-command independently. Result is the max risk across all.
+        3. Single commands go through the standard check sequence.
+
         Security principle: Fail-safe defaults. Unknown commands are treated
         as high-risk until explicitly allowlisted as read-only.
 
@@ -343,9 +353,10 @@ class ToolCapabilityMapper:
                 requires_checkpoint=True,
             )
 
-        # FIRST: Check for shell injection/obfuscation patterns
-        # These bypass all other checks and are always high-risk
-        if _SHELL_INJECTION_PATTERNS.search(command):
+        # FIRST: Check for always-dangerous patterns (command substitution,
+        # backticks, variable expansion, eval, exec, source, etc.)
+        # These bypass all other checks and are always high-risk.
+        if _ALWAYS_DANGEROUS_PATTERNS.search(command):
             return ToolMapping(
                 capability_id="mutate",
                 risk="high",
@@ -353,6 +364,58 @@ class ToolCapabilityMapper:
                 requires_checkpoint=True,
             )
 
+        # SECOND: Check for compound operators (&&, ||, ;cmd)
+        # If present, split and classify each sub-command individually.
+        if _COMPOUND_OPERATOR_RE.search(command):
+            parts = _COMPOUND_OPERATOR_RE.split(command)
+            parts = [p.strip() for p in parts if p.strip()]
+
+            high_risk_result: ToolMapping | None = None
+            all_low = True
+
+            for part in parts:
+                result = self._classify_single_command(part)
+                if result.risk == "high":
+                    high_risk_result = result
+                    break
+                if result.risk != "low":
+                    all_low = False
+
+            if high_risk_result is not None:
+                return high_risk_result
+
+            if all_low:
+                return ToolMapping(
+                    capability_id="observe",
+                    risk="low",
+                    mutation=False,
+                    requires_checkpoint=False,
+                )
+
+            # Mixed risk — use secure default
+            return ToolMapping(
+                capability_id="mutate",
+                risk="high",
+                mutation=True,
+                requires_checkpoint=True,
+            )
+
+        # THIRD: Single command path
+        return self._classify_single_command(command)
+
+    def _classify_single_command(self, command: str) -> ToolMapping:
+        """
+        Classify a single (non-compound) Bash command.
+
+        Checks in order: interpreter → process substitution → network →
+        destructive → read-only allowlist → secure default-deny.
+
+        Args:
+            command: A single shell command (no compound operators)
+
+        Returns:
+            ToolMapping based on command analysis
+        """
         # SEC-002: Check for interpreter invocations (python -c, node -e, etc.)
         if _INTERPRETER_PATTERNS.search(command):
             return ToolMapping(
