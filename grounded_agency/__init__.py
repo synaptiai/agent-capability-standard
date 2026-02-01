@@ -25,6 +25,7 @@ from .capabilities.mapper import ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
+from .state.rate_limiter import RateLimitConfig, RateLimiter
 
 # Configure package-level logger
 logger = logging.getLogger("grounded_agency")
@@ -51,6 +52,8 @@ __all__ = [
     "Checkpoint",
     "EvidenceStore",
     "EvidenceAnchor",
+    "RateLimiter",
+    "RateLimitConfig",
     # Types
     "HookCallback",
     # Logging

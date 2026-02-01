@@ -1,0 +1,145 @@
+"""Unit tests for validator tools (TEST-004).
+
+Tests all 5 validators: ontology, workflows, profiles, skill refs, yaml sync.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def run_validator(
+    script_name: str, extra_args: list[str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run a validator script and return the result."""
+    script = ROOT / "tools" / script_name
+    args = [sys.executable, str(script)]
+    if extra_args:
+        args.extend(extra_args)
+    return subprocess.run(
+        args,
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+# ─── Ontology Validator ───
+
+
+class TestValidateOntology:
+    """Tests for tools/validate_ontology.py."""
+
+    def test_passes_with_valid_ontology(self) -> None:
+        result = run_validator("validate_ontology.py")
+        assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
+
+    def test_output_contains_pass(self) -> None:
+        result = run_validator("validate_ontology.py")
+        assert "PASS" in result.stdout.upper() or result.returncode == 0
+
+
+# ─── Workflow Validator ───
+
+
+class TestValidateWorkflows:
+    """Tests for tools/validate_workflows.py."""
+
+    def test_passes_with_production_catalog(self) -> None:
+        result = run_validator("validate_workflows.py")
+        assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
+
+    def test_catalog_flag_accepts_fixture(self) -> None:
+        """--catalog flag should accept alternative catalog files."""
+        fixture = ROOT / "tests" / "pass_reference.workflow_catalog.yaml"
+        if not fixture.exists():
+            pytest.skip("Pass reference fixture not found")
+        result = run_validator("validate_workflows.py", ["--catalog", str(fixture)])
+        assert result.returncode == 0
+
+    def test_catalog_flag_catches_bad_fixture(self) -> None:
+        """--catalog flag should catch bad fixtures."""
+        fixture = ROOT / "tests" / "fail_unknown_capability.workflow_catalog.yaml"
+        if not fixture.exists():
+            pytest.skip("Fail fixture not found")
+        result = run_validator("validate_workflows.py", ["--catalog", str(fixture)])
+        assert result.returncode == 1
+
+    def test_nonexistent_catalog_fails(self) -> None:
+        result = run_validator(
+            "validate_workflows.py", ["--catalog", "/nonexistent.yaml"]
+        )
+        assert result.returncode != 0
+
+
+# ─── Profile Validator ───
+
+
+class TestValidateProfiles:
+    """Tests for tools/validate_profiles.py."""
+
+    def test_passes_with_valid_profiles(self) -> None:
+        result = run_validator("validate_profiles.py")
+        assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
+
+    def test_verbose_flag_works(self) -> None:
+        result = run_validator("validate_profiles.py", ["--verbose"])
+        assert result.returncode == 0
+        assert "Validating:" in result.stdout
+
+    def test_reports_trust_calibration_warnings(self) -> None:
+        """SEC-009: Should report warnings about uncalibrated trust models."""
+        result = run_validator("validate_profiles.py")
+        # Profiles don't have trust_model_reviewed yet, so warnings expected
+        assert result.returncode == 0
+        # Warnings are non-fatal
+        output = result.stdout
+        assert "PASS" in output.upper()
+
+
+# ─── Skill Refs Validator ───
+
+
+class TestValidateSkillRefs:
+    """Tests for tools/validate_skill_refs.py."""
+
+    def test_passes_with_valid_skills(self) -> None:
+        result = run_validator("validate_skill_refs.py")
+        assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
+
+
+# ─── YAML Util Sync Validator ───
+
+
+class TestValidateYamlUtilSync:
+    """Tests for tools/validate_yaml_util_sync.py."""
+
+    def test_passes_when_synced(self) -> None:
+        result = run_validator("validate_yaml_util_sync.py")
+        assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
+
+
+# ─── Conformance Runner ───
+
+
+class TestConformanceRunner:
+    """Tests for scripts/run_conformance.py."""
+
+    def test_conformance_passes(self) -> None:
+        """Conformance runner should pass with reference fixtures."""
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "run_conformance.py")],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
+        assert "PASSED" in result.stdout

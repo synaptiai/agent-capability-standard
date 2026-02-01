@@ -47,6 +47,7 @@ dev = [
     "mypy>=1.0",
     "ruff>=0.1.0",
     "types-PyYAML>=6.0",
+    "hypothesis>=6.0",
 ]
 all = [
     "grounded-agency[sdk,dev]",

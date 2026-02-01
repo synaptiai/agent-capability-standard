@@ -26,6 +26,32 @@ _DESTRUCTIVE_PATTERNS = re.compile(
     re.VERBOSE | re.IGNORECASE,
 )
 
+# SEC-002: Interpreter invocation patterns that can execute arbitrary code.
+# These bypass other checks because the outer command looks benign.
+_INTERPRETER_PATTERNS = re.compile(
+    r"""
+    \bpython[23]?\s+(-c|--command)\s |          # Python one-liners
+    \bruby\s+(-e|--eval)\s |                    # Ruby eval
+    \bnode\s+(-e|--eval)\s |                    # Node.js eval
+    \bperl\s+(-e|-E|--eval)\s |                 # Perl eval
+    \bphp\s+(-r|--run)\s |                      # PHP eval
+    \blua\s+(-e)\s |                            # Lua eval
+    \bawk\s+.*\bsystem\s*\( |                   # awk system() calls
+    \bpython[23]?\s+(?!-[Vh])(?!--version)(?!--help)\S    # Python script execution (not --version/--help)
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# SEC-002: Process substitution and here-strings
+_PROCESS_SUBSTITUTION_PATTERNS = re.compile(
+    r"""
+    <\( |               # Process substitution <(...)
+    >\( |               # Process substitution >(...)
+    <<<                 # Here-string
+    """,
+    re.VERBOSE,
+)
+
 _NETWORK_SEND_PATTERNS = re.compile(
     r"""
     \bcurl\s+.*(-X\s*(POST|PUT|PATCH|DELETE)|--data|--form|-d\s) |  # curl with data
@@ -320,6 +346,24 @@ class ToolCapabilityMapper:
         # FIRST: Check for shell injection/obfuscation patterns
         # These bypass all other checks and are always high-risk
         if _SHELL_INJECTION_PATTERNS.search(command):
+            return ToolMapping(
+                capability_id="mutate",
+                risk="high",
+                mutation=True,
+                requires_checkpoint=True,
+            )
+
+        # SEC-002: Check for interpreter invocations (python -c, node -e, etc.)
+        if _INTERPRETER_PATTERNS.search(command):
+            return ToolMapping(
+                capability_id="execute",
+                risk="high",
+                mutation=True,
+                requires_checkpoint=True,
+            )
+
+        # SEC-002: Check for process substitution and here-strings
+        if _PROCESS_SUBSTITUTION_PATTERNS.search(command):
             return ToolMapping(
                 capability_id="mutate",
                 risk="high",

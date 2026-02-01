@@ -436,6 +436,68 @@ class TestFromDictValidation:
             Checkpoint.from_dict(data)
 
 
+class TestArchiveErrorHandling:
+    """Tests for per-line error handling in get_archived_checkpoints."""
+
+    def test_corrupt_line_skipped(self, chk_dir: Path) -> None:
+        """A single corrupt JSONL line should not abort the entire archive read."""
+        archive_dir = chk_dir / "archive"
+        archive_dir.mkdir(parents=True)
+        archive_file = archive_dir / "pruned_checkpoints.jsonl"
+
+        good_entry = json.dumps(
+            {
+                "id": "chk_good",
+                "scope": ["*"],
+                "reason": "good",
+                "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
+                "metadata": {},
+            }
+        )
+        archive_file.write_text(
+            f"{good_entry}\n{{bad json\n{good_entry}\n",
+            encoding="utf-8",
+        )
+
+        tracker = CheckpointTracker(checkpoint_dir=chk_dir)
+        results = tracker.get_archived_checkpoints()
+        # Both good lines should be parsed; the corrupt line is skipped
+        assert len(results) == 2
+        assert all(r.id == "chk_good" for r in results)
+
+    def test_all_corrupt_lines_returns_empty(self, chk_dir: Path) -> None:
+        """If every line is corrupt, return empty list (no crash)."""
+        archive_dir = chk_dir / "archive"
+        archive_dir.mkdir(parents=True)
+        archive_file = archive_dir / "pruned_checkpoints.jsonl"
+        archive_file.write_text("not json\nalso not json\n", encoding="utf-8")
+
+        tracker = CheckpointTracker(checkpoint_dir=chk_dir)
+        assert tracker.get_archived_checkpoints() == []
+
+    def test_oversized_archive_file_skipped(self, chk_dir: Path) -> None:
+        """Archive files exceeding _MAX_STATE_FILE_BYTES are skipped entirely."""
+        archive_dir = chk_dir / "archive"
+        archive_dir.mkdir(parents=True)
+        archive_file = archive_dir / "pruned_checkpoints.jsonl"
+
+        tracker = CheckpointTracker(checkpoint_dir=chk_dir)
+        # Write a file larger than _MAX_STATE_FILE_BYTES (10 MB)
+        archive_file.write_text(
+            "x" * (tracker._MAX_STATE_FILE_BYTES + 1), encoding="utf-8"
+        )
+        assert tracker.get_archived_checkpoints() == []
+
+    def test_empty_archive_returns_empty(self, chk_dir: Path) -> None:
+        """Empty archive file returns empty list."""
+        archive_dir = chk_dir / "archive"
+        archive_dir.mkdir(parents=True)
+        (archive_dir / "pruned_checkpoints.jsonl").write_text("", encoding="utf-8")
+
+        tracker = CheckpointTracker(checkpoint_dir=chk_dir)
+        assert tracker.get_archived_checkpoints() == []
+
+
 class TestSymlinkStateFileRejection:
     """Tests that _load_persisted_state rejects symlinked state files."""
 

@@ -93,6 +93,16 @@ profile_schema:
             type: number
             minimum: 0.0
             maximum: 1.0
+    trust_model_reviewed:
+      type: boolean
+      description: |
+        SEC-009: Whether the trust model has been explicitly reviewed and calibrated.
+        When false or absent, the validator emits a warning that trust weights
+        may not reflect intentional calibration decisions.
+    trust_model_reviewed_at:
+      type: string
+      pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+      description: Date when trust model was last reviewed (YYYY-MM-DD format)
     workflows:
       type: array
       description: Recommended workflows for this domain

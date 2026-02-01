@@ -7,15 +7,20 @@ Tracks checkpoint creation, validity, consumption, and expiry.
 
 from __future__ import annotations
 
+import errno as _errno_mod
 import fnmatch
 import json
 import logging
 import os
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+# Platform-portable ELOOP errno values (Linux=40, macOS/BSD=62).
+_ELOOP_ERRNOS: set[int] = {getattr(_errno_mod, "ELOOP", 40), 62}
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +188,7 @@ class CheckpointTracker:
             max_history if max_history is not None else self.DEFAULT_MAX_HISTORY
         )
         self._marker_dir = Path(marker_dir) if marker_dir is not None else None
+        self._lock = threading.Lock()
         self._active_checkpoint: Checkpoint | None = None
         self._checkpoint_history: list[Checkpoint] = []
         self._load_persisted_state()
@@ -252,7 +258,7 @@ class CheckpointTracker:
             except FileNotFoundError:
                 return
             except OSError as e:
-                if e.errno in (40, 62):  # ELOOP — symlink rejected
+                if e.errno in _ELOOP_ERRNOS:  # ELOOP — symlink rejected
                     logger.warning(
                         "Refusing to follow symlink for state file: %s", state_path
                     )
@@ -344,14 +350,15 @@ class CheckpointTracker:
             metadata=metadata or {},
         )
 
-        # Move previous active checkpoint to history
-        if self._active_checkpoint:
-            self._checkpoint_history.append(self._active_checkpoint)
-            self._prune_history_if_needed()
+        with self._lock:
+            # Move previous active checkpoint to history
+            if self._active_checkpoint:
+                self._checkpoint_history.append(self._active_checkpoint)
+                self._prune_history_if_needed()
 
-        self._active_checkpoint = checkpoint
-        self._write_marker(checkpoint)
-        self._persist_state()
+            self._active_checkpoint = checkpoint
+            self._write_marker(checkpoint)
+            self._persist_state()
         return checkpoint_id
 
     def _generate_checkpoint_id(self) -> str:
@@ -366,9 +373,77 @@ class CheckpointTracker:
         return f"chk_{timestamp}_{random_suffix}"
 
     def _prune_history_if_needed(self) -> None:
-        """Prune oldest checkpoints if history exceeds max_history."""
+        """Prune oldest checkpoints if history exceeds max_history.
+
+        SEC-011: Archives pruned checkpoints to JSONL before deletion
+        to preserve forensic data for audit trails.
+        """
         if len(self._checkpoint_history) > self._max_history:
+            to_prune = self._checkpoint_history[: -self._max_history]
+            self._archive_checkpoints(to_prune)
             self._checkpoint_history = self._checkpoint_history[-self._max_history :]
+
+    def _archive_checkpoints(self, checkpoints: list[Checkpoint]) -> None:
+        """SEC-011: Write pruned checkpoints to archive JSONL file.
+
+        Archives are append-only JSONL files in .checkpoints/archive/.
+        Each line is a JSON-serialized checkpoint dict.
+        """
+        if not checkpoints:
+            return
+        try:
+            archive_dir = self._checkpoint_dir / "archive"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_file = archive_dir / "pruned_checkpoints.jsonl"
+            with open(archive_file, "a", encoding="utf-8") as f:
+                for cp in checkpoints:
+                    f.write(json.dumps(cp.to_dict()) + "\n")
+            logger.info(
+                "Archived %d pruned checkpoints to %s",
+                len(checkpoints),
+                archive_file,
+            )
+        except OSError as e:
+            logger.warning("Failed to archive pruned checkpoints: %s", e)
+
+    def get_archived_checkpoints(self) -> list[Checkpoint]:
+        """SEC-011: Retrieve archived (pruned) checkpoints from JSONL.
+
+        Per-line error handling: corrupt lines are skipped with a warning
+        rather than aborting the entire archive read. File-level errors
+        (permissions, missing file) are caught at the outer level.
+
+        Returns:
+            List of archived Checkpoint objects, oldest first.
+        """
+        archive_file = self._checkpoint_dir / "archive" / "pruned_checkpoints.jsonl"
+        if not archive_file.exists():
+            return []
+        try:
+            # P2-4: Reject oversized archive files before reading
+            if archive_file.stat().st_size > self._MAX_STATE_FILE_BYTES:
+                logger.warning(
+                    "Archive file too large (%d bytes, limit %d) — skipping",
+                    archive_file.stat().st_size,
+                    self._MAX_STATE_FILE_BYTES,
+                )
+                return []
+            results: list[Checkpoint] = []
+            with open(archive_file, encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        results.append(Checkpoint.from_dict(json.loads(line)))
+                    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                        logger.warning(
+                            "Skipping corrupt archive line %d: %s", line_num, e
+                        )
+            return results
+        except OSError as e:
+            logger.warning("Failed to read checkpoint archive: %s", e)
+            return []
 
     def _write_marker(self, checkpoint: Checkpoint) -> None:
         """Atomically write the shell hook marker file with checkpoint metadata.
@@ -423,9 +498,29 @@ class CheckpointTracker:
 
     def has_valid_checkpoint(self) -> bool:
         """Check if there's a valid (unexpired, unconsumed) checkpoint."""
-        if self._active_checkpoint is None:
-            return False
-        return self._active_checkpoint.is_valid()
+        with self._lock:
+            if self._active_checkpoint is None:
+                return False
+            return self._active_checkpoint.is_valid()
+
+    def validate_and_reserve(self) -> tuple[bool, str | None]:
+        """Atomically check and reserve the active checkpoint.
+
+        SEC-007: Prevents TOCTOU race between has_valid_checkpoint() and
+        subsequent use. The lock ensures no other thread can consume or
+        invalidate the checkpoint between the check and the reservation.
+
+        Returns:
+            Tuple of (is_valid, checkpoint_id). If is_valid is True, the
+            checkpoint is guaranteed to remain valid until consume_checkpoint()
+            is called.
+        """
+        with self._lock:
+            if self._active_checkpoint is None:
+                return False, None
+            if not self._active_checkpoint.is_valid():
+                return False, None
+            return True, self._active_checkpoint.id
 
     def has_checkpoint_for_scope(self, target: str) -> bool:
         """
@@ -437,16 +532,19 @@ class CheckpointTracker:
         Returns:
             True if a valid checkpoint covers this target
         """
-        if not self.has_valid_checkpoint():
-            return False
-        assert self._active_checkpoint is not None  # Guaranteed by has_valid_checkpoint
-        return self._active_checkpoint.matches_scope(target)
+        with self._lock:
+            if self._active_checkpoint is None:
+                return False
+            if not self._active_checkpoint.is_valid():
+                return False
+            return self._active_checkpoint.matches_scope(target)
 
     def get_active_checkpoint(self) -> Checkpoint | None:
         """Get the currently active checkpoint, if any."""
-        if self._active_checkpoint and self._active_checkpoint.is_valid():
-            return self._active_checkpoint
-        return None
+        with self._lock:
+            if self._active_checkpoint and self._active_checkpoint.is_valid():
+                return self._active_checkpoint
+            return None
 
     def get_active_checkpoint_id(self) -> str | None:
         """Get the ID of the active checkpoint, or None."""
@@ -459,28 +557,30 @@ class CheckpointTracker:
 
         Called after a successful mutation to indicate the checkpoint
         has been "used up" and a new one is needed for further mutations.
+        Thread-safe via self._lock (SEC-007).
 
         Returns:
             ID of consumed checkpoint, or None if no active checkpoint
         """
-        if self._active_checkpoint is None:
-            return None
+        with self._lock:
+            if self._active_checkpoint is None:
+                return None
 
-        # Capture reference and clear active first to avoid intermediate
-        # invalid state where active still points to consumed checkpoint.
-        consumed = self._active_checkpoint
-        self._active_checkpoint = None
+            # Capture reference and clear active first to avoid intermediate
+            # invalid state where active still points to consumed checkpoint.
+            consumed = self._active_checkpoint
+            self._active_checkpoint = None
 
-        consumed.consumed = True
-        consumed.consumed_at = datetime.now(timezone.utc)
-        checkpoint_id = consumed.id
+            consumed.consumed = True
+            consumed.consumed_at = datetime.now(timezone.utc)
+            checkpoint_id = consumed.id
 
-        # Move to history
-        self._checkpoint_history.append(consumed)
-        self._remove_marker()
-        self._persist_state()
+            # Move to history
+            self._checkpoint_history.append(consumed)
+            self._remove_marker()
+            self._persist_state()
 
-        return checkpoint_id
+            return checkpoint_id
 
     def get_checkpoint_by_id(self, checkpoint_id: str) -> Checkpoint | None:
         """
@@ -494,14 +594,15 @@ class CheckpointTracker:
         Returns:
             Checkpoint or None if not found
         """
-        if self._active_checkpoint and self._active_checkpoint.id == checkpoint_id:
-            return self._active_checkpoint
+        with self._lock:
+            if self._active_checkpoint and self._active_checkpoint.id == checkpoint_id:
+                return self._active_checkpoint
 
-        for checkpoint in self._checkpoint_history:
-            if checkpoint.id == checkpoint_id:
-                return checkpoint
+            for checkpoint in self._checkpoint_history:
+                if checkpoint.id == checkpoint_id:
+                    return checkpoint
 
-        return None
+            return None
 
     def get_history(self, limit: int = 10) -> list[Checkpoint]:
         """
@@ -513,10 +614,11 @@ class CheckpointTracker:
         Returns:
             List of checkpoints, most recent first
         """
-        history = list(self._checkpoint_history)
-        if self._active_checkpoint:
-            history.append(self._active_checkpoint)
-        return sorted(history, key=lambda c: c.created_at, reverse=True)[:limit]
+        with self._lock:
+            history = list(self._checkpoint_history)
+            if self._active_checkpoint:
+                history.append(self._active_checkpoint)
+            return sorted(history, key=lambda c: c.created_at, reverse=True)[:limit]
 
     def clear_expired(self) -> int:
         """
@@ -529,51 +631,54 @@ class CheckpointTracker:
         Returns:
             Number of expired checkpoints removed (active + history)
         """
-        now = datetime.now(timezone.utc)
-        active_cleared = False
+        with self._lock:
+            now = datetime.now(timezone.utc)
+            active_cleared = False
 
-        # Move expired active checkpoint to history FIRST so it gets
-        # filtered along with all other expired history entries.
-        # Use explicit expiry check — not is_valid(), which also returns
-        # False for consumed checkpoints (different semantic).
-        if (
-            self._active_checkpoint
-            and self._active_checkpoint.expires_at
-            and now > self._active_checkpoint.expires_at
-        ):
-            self._checkpoint_history.append(self._active_checkpoint)
-            self._active_checkpoint = None
-            self._remove_marker()
-            active_cleared = True
+            # Move expired active checkpoint to history FIRST so it gets
+            # filtered along with all other expired history entries.
+            # Use explicit expiry check — not is_valid(), which also returns
+            # False for consumed checkpoints (different semantic).
+            if (
+                self._active_checkpoint
+                and self._active_checkpoint.expires_at
+                and now > self._active_checkpoint.expires_at
+            ):
+                self._checkpoint_history.append(self._active_checkpoint)
+                self._active_checkpoint = None
+                self._remove_marker()
+                active_cleared = True
 
-        original_count = len(self._checkpoint_history)
-        self._checkpoint_history = [
-            c
-            for c in self._checkpoint_history
-            if c.expires_at is None or c.expires_at > now
-        ]
-        # Includes the expired active (appended above) that was then filtered out.
-        total_cleared = original_count - len(self._checkpoint_history)
+            original_count = len(self._checkpoint_history)
+            self._checkpoint_history = [
+                c
+                for c in self._checkpoint_history
+                if c.expires_at is None or c.expires_at > now
+            ]
+            # Includes the expired active (appended above) that was then filtered out.
+            total_cleared = original_count - len(self._checkpoint_history)
 
-        # Persist whenever state changed (active cleared or history pruned)
-        if active_cleared or total_cleared > 0:
-            self._persist_state()
-        return total_cleared
+            # Persist whenever state changed (active cleared or history pruned)
+            if active_cleared or total_cleared > 0:
+                self._persist_state()
+            return total_cleared
 
     def invalidate_all(self) -> None:
         """Invalidate all checkpoints (used for rollback scenarios)."""
-        if self._active_checkpoint:
-            self._active_checkpoint.consumed = True
-            self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
-            self._checkpoint_history.append(self._active_checkpoint)
-            self._active_checkpoint = None
-            self._remove_marker()
-            self._persist_state()
+        with self._lock:
+            if self._active_checkpoint:
+                self._active_checkpoint.consumed = True
+                self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
+                self._checkpoint_history.append(self._active_checkpoint)
+                self._active_checkpoint = None
+                self._remove_marker()
+                self._persist_state()
 
     @property
     def checkpoint_count(self) -> int:
         """Get total number of checkpoints (active + history)."""
-        count = len(self._checkpoint_history)
-        if self._active_checkpoint:
-            count += 1
-        return count
+        with self._lock:
+            count = len(self._checkpoint_history)
+            if self._active_checkpoint:
+                count += 1
+            return count

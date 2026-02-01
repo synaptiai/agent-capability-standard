@@ -20,6 +20,8 @@ Example:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -31,6 +33,7 @@ from .hooks.evidence_collector import create_evidence_collector
 from .hooks.skill_tracker import create_skill_tracker
 from .state.checkpoint_tracker import CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
+from .state.rate_limiter import RateLimitConfig, RateLimiter
 
 logger = logging.getLogger("grounded_agency.adapter")
 
@@ -38,6 +41,9 @@ logger = logging.getLogger("grounded_agency.adapter")
 def _find_ontology_path() -> str:
     """
     Find the capability ontology path.
+
+    SEC-012: Resolves to an absolute, real path (no symlinks) to prevent
+    path substitution attacks.
 
     Priority:
     1. Package-relative path (for installed package)
@@ -54,22 +60,75 @@ def _find_ontology_path() -> str:
         # Check if it exists
         with as_file(package_path) as path:
             if path.exists():
-                return str(path)
-    except (ImportError, FileNotFoundError, TypeError):
+                resolved = path.resolve(strict=True)
+                return str(resolved)
+    except (ImportError, FileNotFoundError, TypeError, OSError):
         pass
 
     # Fallback: look relative to this file
-    module_dir = Path(__file__).parent
+    module_dir = Path(__file__).resolve().parent
     for relative in [
         "../schemas/capability_ontology.yaml",  # Development layout
         "schemas/capability_ontology.yaml",  # Alternative layout
     ]:
-        candidate = module_dir / relative
+        candidate = (module_dir / relative).resolve()
         if candidate.exists():
-            return str(candidate.resolve())
+            return str(candidate)
 
     # Final fallback: assume cwd-relative (original behavior)
-    return "schemas/capability_ontology.yaml"
+    return str(Path("schemas/capability_ontology.yaml").resolve())
+
+
+def verify_ontology_integrity(
+    ontology_path: str,
+    expected_hash: str | None = None,
+) -> bool:
+    """Verify ontology file integrity via SHA-256 checksum.
+
+    SEC-012: Detects content substitution attacks on the ontology file.
+
+    Args:
+        ontology_path: Path to the ontology YAML file.
+        expected_hash: Expected SHA-256 hex digest. If None, checks for a
+                      .sha256 sidecar file next to the ontology.
+
+    Returns:
+        True if integrity check passes or no expected hash is available.
+        False if hash mismatch detected.
+    """
+    path = Path(ontology_path)
+    if not path.exists():
+        return False
+
+    # Compute actual hash
+    sha = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha.update(chunk)
+    actual_hash = sha.hexdigest()
+
+    # Look for expected hash
+    if expected_hash is None:
+        sidecar = path.with_suffix(".yaml.sha256")
+        if sidecar.exists():
+            parts = sidecar.read_text(encoding="utf-8").strip().split()
+            if parts:
+                expected_hash = parts[0]
+
+    if expected_hash is None:
+        # No hash to verify against — pass by default
+        return True
+
+    if not hmac.compare_digest(actual_hash, expected_hash):
+        logger.error(
+            "SEC-012: Ontology integrity check FAILED. Expected %s, got %s for %s",
+            expected_hash,
+            actual_hash,
+            ontology_path,
+        )
+        return False
+
+    return True
 
 
 # Cache the resolved path
@@ -96,6 +155,9 @@ class GroundedAgentConfig:
         audit_log_path: Path for audit log file
         checkpoint_dir: Directory for checkpoint storage
         expiry_minutes: Default checkpoint expiry in minutes
+        rate_limit: Per-risk-level rate limit configuration (SEC-010).
+        ontology_hash: Expected SHA-256 hash for ontology integrity check (SEC-012).
+                      If None, checks for a .sha256 sidecar file.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -103,6 +165,8 @@ class GroundedAgentConfig:
     audit_log_path: str = ".claude/audit.log"
     checkpoint_dir: str = ".checkpoints"
     expiry_minutes: int = 30
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+    ontology_hash: str | None = None
 
 
 @dataclass
@@ -143,13 +207,23 @@ class GroundedAgentAdapter:
     mapper: ToolCapabilityMapper = field(init=False)
     checkpoint_tracker: CheckpointTracker = field(init=False)
     evidence_store: EvidenceStore = field(init=False)
+    rate_limiter: RateLimiter = field(init=False)
 
     def __post_init__(self) -> None:
         """Initialize components after dataclass creation."""
+        # SEC-012: Verify ontology integrity before loading
+        if not verify_ontology_integrity(
+            self.config.ontology_path, self.config.ontology_hash
+        ):
+            raise ValueError(
+                f"SEC-012: Ontology integrity check failed for "
+                f"{self.config.ontology_path}. File may have been tampered with."
+            )
         self.registry = CapabilityRegistry(self.config.ontology_path)
         self.mapper = ToolCapabilityMapper(self.registry.ontology)
         self.checkpoint_tracker = CheckpointTracker(self.config.checkpoint_dir)
         self.evidence_store = EvidenceStore()
+        self.rate_limiter = RateLimiter(self.config.rate_limit)
 
     def wrap_options(self, base: Any) -> Any:
         """
@@ -288,9 +362,12 @@ class GroundedAgentAdapter:
                     logger.info("Mutation %s failed, checkpoint preserved", tool_name)
                     return {}
 
-                # Mutation succeeded - consume checkpoint
-                if tracker.has_valid_checkpoint():
-                    consumed_id = tracker.consume_checkpoint()
+                # Mutation succeeded — consume checkpoint directly.
+                # No has_valid_checkpoint() guard: consume_checkpoint() is
+                # already atomic and returns None if nothing to consume,
+                # avoiding a TOCTOU race between check and consume.
+                consumed_id = tracker.consume_checkpoint()
+                if consumed_id is not None:
                     logger.info(
                         "Checkpoint %s consumed after %s", consumed_id, tool_name
                     )
@@ -305,10 +382,11 @@ class GroundedAgentAdapter:
 
     def _make_permission_callback(self) -> Any:
         """
-        Create permission callback that enforces checkpoint requirements.
+        Create permission callback that enforces checkpoint requirements
+        and rate limits.
 
         This is the core safety mechanism - mutations are blocked
-        unless a valid checkpoint exists.
+        unless a valid checkpoint exists and rate limits are not exceeded.
 
         Returns:
             Async permission callback function
@@ -317,6 +395,7 @@ class GroundedAgentAdapter:
         tracker = self.checkpoint_tracker
         mapper = self.mapper
         strict = self.config.strict_mode
+        limiter = self.rate_limiter
 
         # Try to import SDK permission types
         try:
@@ -332,7 +411,7 @@ class GroundedAgentAdapter:
             context: Any,
         ) -> Any:
             """
-            Permission callback for checkpoint enforcement.
+            Permission callback for checkpoint enforcement and rate limiting.
 
             Args:
                 tool_name: Name of tool being invoked
@@ -346,9 +425,22 @@ class GroundedAgentAdapter:
                 # Map tool to capability
                 mapping = mapper.map_tool(tool_name, input_data)
 
+                # SEC-010: Rate limit check
+                if not limiter.allow(mapping.risk):
+                    message = (
+                        f"Rate limited: {mapping.risk}-risk capability "
+                        f"'{mapping.capability_id}' via {tool_name}. "
+                        f"Too many invocations — please wait."
+                    )
+                    if has_sdk_types:
+                        return PermissionResultDeny(message=message)
+                    return {"allowed": False, "message": message}
+
                 # Check if checkpoint required
                 if mapping.requires_checkpoint:
-                    if not tracker.has_valid_checkpoint():
+                    # SEC-007: Use atomic validate_and_reserve to prevent TOCTOU
+                    is_valid, checkpoint_id = tracker.validate_and_reserve()
+                    if not is_valid:
                         message = (
                             f"Capability '{mapping.capability_id}' requires checkpoint. "
                             f"Create checkpoint before using {tool_name}. "
@@ -367,7 +459,6 @@ class GroundedAgentAdapter:
 
                     else:
                         # Log checkpoint usage
-                        checkpoint_id = tracker.get_active_checkpoint_id()
                         logger.info(
                             "%s allowed with checkpoint %s", tool_name, checkpoint_id
                         )
