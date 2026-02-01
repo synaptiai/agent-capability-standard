@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/schemas/capability_ontology.schema.json",
+  "title": "Grounded Agency Capability Ontology Schema",
+  "description": "JSON Schema for capability_ontology.yaml — defines 36 atomic capabilities across 9 cognitive layers with typed I/O contracts, risk levels, and relationship edges.",
+  "type": "object",
+  "required": ["meta", "layers", "nodes", "edges"],
+  "additionalProperties": true,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["name", "version", "description"],
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable name of the ontology."
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version of the ontology."
+        },
+        "generated_at": {
+          "type": "string",
+          "description": "ISO-8601 timestamp of generation."
+        },
+        "description": {
+          "type": "string",
+          "description": "Short description of the ontology."
+        },
+        "principles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Guiding principles of the ontology."
+        },
+        "derivation": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "method": {
+              "type": "string",
+              "description": "Derivation methodology."
+            },
+            "sources": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Source references for the derivation."
+            },
+            "documentation": {
+              "type": "string",
+              "description": "Path to detailed derivation documentation."
+            }
+          }
+        }
+      }
+    },
+    "layers": {
+      "type": "object",
+      "description": "Cognitive layers that organize capabilities.",
+      "additionalProperties": {
+        "$ref": "#/$defs/layer"
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Atomic capability nodes.",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edge_types": {
+      "type": "object",
+      "description": "Definitions of relationship types between capabilities.",
+      "additionalProperties": {
+        "$ref": "#/$defs/edge_type_definition"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "description": "Directed relationships between capability nodes.",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    }
+  },
+  "$defs": {
+    "layer": {
+      "type": "object",
+      "required": ["description", "cognitive_mapping", "capabilities"],
+      "additionalProperties": true,
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this cognitive layer."
+        },
+        "cognitive_mapping": {
+          "type": "string",
+          "description": "Maps this layer to a cognitive architecture concept."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of capability IDs in this layer."
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "layer", "description"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this capability."
+        },
+        "layer": {
+          "type": "string",
+          "enum": [
+            "PERCEIVE",
+            "UNDERSTAND",
+            "REASON",
+            "MODEL",
+            "SYNTHESIZE",
+            "EXECUTE",
+            "VERIFY",
+            "REMEMBER",
+            "COORDINATE"
+          ],
+          "description": "Cognitive layer this capability belongs to."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this capability does."
+        },
+        "risk": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "Inherent risk level of this capability."
+        },
+        "mutation": {
+          "type": "boolean",
+          "description": "Whether this capability modifies persistent state."
+        },
+        "requires_checkpoint": {
+          "type": "boolean",
+          "description": "Whether a checkpoint is required before invoking this capability."
+        },
+        "requires_approval": {
+          "type": "boolean",
+          "description": "Whether human approval is needed before invoking this capability."
+        },
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "JSON-Schema-like description of the capability's input contract."
+        },
+        "output_schema": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "JSON-Schema-like description of the capability's output contract."
+        },
+        "requires": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Hard dependencies — capability IDs that must be satisfied first."
+        },
+        "soft_requires": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Soft dependencies — recommended but not mandatory."
+        }
+      }
+    },
+    "edge_type_definition": {
+      "type": "object",
+      "required": ["description", "semantics"],
+      "additionalProperties": true,
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this edge type."
+        },
+        "semantics": {
+          "type": "string",
+          "description": "Formal semantics and enforcement rules."
+        },
+        "transitive": {
+          "type": "boolean",
+          "description": "Whether this edge type is transitive."
+        },
+        "symmetric": {
+          "type": "boolean",
+          "description": "Whether this edge type is symmetric."
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to", "type"],
+      "additionalProperties": true,
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "Source capability ID."
+        },
+        "to": {
+          "type": "string",
+          "description": "Target capability ID."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "requires",
+            "soft_requires",
+            "enables",
+            "precedes",
+            "conflicts_with",
+            "alternative_to",
+            "specializes"
+          ],
+          "description": "The relationship type."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Human-readable rationale for this edge."
+        }
+      }
+    }
+  }
+}

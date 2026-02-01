@@ -1,0 +1,292 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/schemas/workflow_catalog.schema.json",
+  "title": "Grounded Agency Workflow Catalog Schema",
+  "description": "JSON Schema for workflow_catalog.yaml — defines composed workflow patterns that orchestrate atomic capabilities from the ontology.",
+  "type": "object",
+  "additionalProperties": {
+    "$ref": "#/$defs/workflow"
+  },
+  "$defs": {
+    "workflow": {
+      "type": "object",
+      "required": ["goal", "risk", "steps", "success"],
+      "additionalProperties": true,
+      "properties": {
+        "goal": {
+          "type": "string",
+          "description": "The objective this workflow achieves."
+        },
+        "risk": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "Overall risk level of the workflow."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of the workflow pattern."
+        },
+        "success": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Success criteria for the workflow."
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          },
+          "description": "Ordered list of capability steps."
+        },
+        "risk_propagation": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "strategy": {
+              "type": "string",
+              "description": "How risk propagates across steps."
+            },
+            "computed_risk": {
+              "type": "string",
+              "enum": ["low", "medium", "high"],
+              "description": "The computed overall risk from propagation."
+            }
+          }
+        },
+        "data_flow": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Data flow pattern between steps."
+            },
+            "rule": {
+              "type": "string",
+              "description": "Rule governing data flow."
+            }
+          }
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/workflow_input"
+          },
+          "description": "Workflow-level input declarations."
+        },
+        "workflow_extensions": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "supports_input_bindings": {
+              "type": "boolean"
+            },
+            "supports_conditions": {
+              "type": "boolean"
+            },
+            "supports_parallel_groups": {
+              "type": "boolean"
+            },
+            "supports_recovery_loops": {
+              "type": "boolean"
+            },
+            "supports_gates": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "workflow_input": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Data type of this input."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether this input is required."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description."
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Sub-properties of this input."
+        },
+        "ref": {
+          "type": "string",
+          "description": "Reference to an external schema."
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "capability",
+        "purpose",
+        "risk",
+        "mutation",
+        "requires_checkpoint",
+        "requires_approval",
+        "store_as",
+        "failure_modes"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "capability": {
+          "type": "string",
+          "description": "The atomic capability to invoke."
+        },
+        "purpose": {
+          "type": "string",
+          "description": "Why this step exists in the workflow."
+        },
+        "risk": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "Risk level of this step (may override ontology)."
+        },
+        "mutation": {
+          "type": "boolean",
+          "description": "Whether this step modifies persistent state."
+        },
+        "requires_checkpoint": {
+          "type": "boolean",
+          "description": "Whether a checkpoint is required before this step."
+        },
+        "requires_approval": {
+          "type": "boolean",
+          "description": "Whether human approval is needed."
+        },
+        "timeout": {
+          "type": ["string", "null"],
+          "description": "Execution timeout (e.g. '5m') or null for no timeout."
+        },
+        "retry": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "max": {
+                  "type": "integer",
+                  "description": "Maximum retry attempts."
+                },
+                "backoff": {
+                  "type": "string",
+                  "description": "Backoff strategy (e.g. 'exponential')."
+                }
+              }
+            }
+          ],
+          "description": "Retry policy or null for no retry."
+        },
+        "store_as": {
+          "type": "string",
+          "description": "Key under which this step's output is stored."
+        },
+        "failure_modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/failure_mode"
+          },
+          "description": "Known failure modes and their recovery strategies."
+        },
+        "input_bindings": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Bindings that wire previous step outputs into this step's inputs."
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/gate"
+          },
+          "description": "Conditional gates that may skip or stop the step."
+        },
+        "parallel_group": {
+          "type": "string",
+          "description": "Group ID for parallel execution."
+        },
+        "join": {
+          "type": "string",
+          "description": "Join strategy for parallel groups (e.g. 'all_complete')."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Domain specialization for this capability invocation."
+        },
+        "condition": {
+          "type": "string",
+          "description": "Expression that must be true for this step to execute."
+        },
+        "skip_if_false": {
+          "type": "boolean",
+          "description": "Whether to skip this step if its condition evaluates to false."
+        },
+        "workflow_id": {
+          "type": "string",
+          "description": "For invoke steps, the ID of the sub-workflow to execute."
+        },
+        "mapping_ref": {
+          "type": "string",
+          "description": "Reference to a transformation mapping file."
+        },
+        "output_conforms_to": {
+          "type": "string",
+          "description": "Schema reference that the step output must conform to."
+        }
+      }
+    },
+    "failure_mode": {
+      "type": "object",
+      "required": ["condition", "action", "recovery"],
+      "additionalProperties": true,
+      "properties": {
+        "condition": {
+          "type": "string",
+          "description": "Condition that triggers this failure mode."
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to take when the condition is met."
+        },
+        "recovery": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "additionalProperties": true
+            }
+          ],
+          "description": "Recovery strategy — a human-readable string or a structured object (e.g. goto_step with context injection)."
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": ["when", "action", "message"],
+      "additionalProperties": true,
+      "properties": {
+        "when": {
+          "type": "string",
+          "description": "Expression that triggers this gate."
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to take (e.g. 'stop', 'skip', 'rollback')."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable message explaining the gate action."
+        }
+      }
+    }
+  }
+}

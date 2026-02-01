@@ -1,0 +1,18 @@
+missing_store:
+  goal: Workflow referencing non-existent store.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    input_bindings:
+      data: ${nonexistent_store}
+    failure_modes: []
+  success:
+  - Should fail

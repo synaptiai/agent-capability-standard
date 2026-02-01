@@ -1,0 +1,50 @@
+domain_params:
+  goal: Workflow with domain-parameterized capabilities.
+  risk: low
+  steps:
+  - capability: detect
+    purpose: Detect anomalies.
+    domain: anomaly
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: detect_anomaly_out
+    failure_modes: []
+  - capability: measure
+    purpose: Measure risk.
+    domain: risk
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: measure_risk_out
+    failure_modes: []
+  - capability: predict
+    purpose: Predict risk trajectory.
+    domain: risk
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: predict_risk_out
+    failure_modes: []
+  - capability: compare
+    purpose: Compare state differences.
+    domain: state_diff
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: compare_out
+    failure_modes: []
+  success:
+  - Domain-parameterized capabilities validated

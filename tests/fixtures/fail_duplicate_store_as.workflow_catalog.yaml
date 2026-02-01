@@ -1,0 +1,26 @@
+dupe_store:
+  goal: Workflow with duplicate store_as names.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: First observation.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: same_name
+    failure_modes: []
+  - capability: search
+    purpose: Search for things.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: same_name
+    failure_modes: []
+  success:
+  - Steps completed

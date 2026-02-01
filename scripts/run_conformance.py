@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VAL = ROOT / "tools" / "validate_workflows.py"
-FIX = ROOT / "tests"
+FIX = ROOT / "tests" / "fixtures"
 
 EXPECT = json.loads((FIX / "EXPECTATIONS.json").read_text(encoding="utf-8"))
 

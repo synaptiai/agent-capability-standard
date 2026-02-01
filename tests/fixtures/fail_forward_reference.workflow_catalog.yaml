@@ -1,0 +1,28 @@
+forward_ref:
+  goal: Workflow with forward reference that doesnt exist yet.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Uses output from a later step.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    input_bindings:
+      data: ${future_out}
+    failure_modes: []
+  - capability: search
+    purpose: Produces future_out.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: future_out
+    failure_modes: []
+  success:
+  - Should fail

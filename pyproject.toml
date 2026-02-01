@@ -48,10 +48,14 @@ dev = [
     "ruff>=0.1.0",
     "types-PyYAML>=6.0",
     "hypothesis>=6.0",
+    "jsonschema>=4.0",
 ]
 all = [
     "grounded-agency[sdk,dev]",
 ]
+
+[project.scripts]
+acs = "tools.scaffold:main"
 
 [project.urls]
 Homepage = "https://github.com/synaptiai/agent-capability-standard"

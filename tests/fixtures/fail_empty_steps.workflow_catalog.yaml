@@ -1,0 +1,6 @@
+empty_steps:
+  goal: Workflow with no steps.
+  risk: low
+  steps: []
+  success:
+  - Nothing

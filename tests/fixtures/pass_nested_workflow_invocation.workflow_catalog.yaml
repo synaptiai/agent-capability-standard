@@ -1,0 +1,34 @@
+inner_workflow:
+  goal: An inner workflow for nesting test.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    failure_modes: []
+  success:
+  - Inner complete
+
+outer_workflow:
+  goal: Outer workflow that invokes inner.
+  risk: medium
+  steps:
+  - capability: invoke
+    purpose: Invoke inner workflow.
+    workflow_id: inner_workflow
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: invoke_out
+    failure_modes: []
+  success:
+  - Nested invocation completed

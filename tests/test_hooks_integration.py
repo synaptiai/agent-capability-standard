@@ -84,11 +84,11 @@ class TestFullPipeline:
 
         # Step 5: Verify audit log
         audit_log = marker_dir / "audit.log"
-        if audit_log.exists():
-            entries = audit_log.read_text().strip().split("\n")
-            assert len(entries) >= 1
-            entry = json.loads(entries[-1])
-            assert entry["skill"] == "checkpoint"
+        assert audit_log.exists(), "PostToolUse hook should have created audit.log"
+        entries = audit_log.read_text().strip().split("\n")
+        assert len(entries) >= 1
+        entry = json.loads(entries[-1])
+        assert entry["skill"] == "checkpoint"
 
     def test_no_checkpoint_blocks_mutation(self, tmp_path: Path) -> None:
         """Without checkpoint, PreToolUse should block mutations."""
@@ -140,6 +140,20 @@ class TestHookMatcherRouting:
     def test_pretooluse_catches_bash(self, tmp_path: Path) -> None:
         result = run_pretooluse("Bash rm -rf /tmp/test", str(tmp_path))
         assert result.returncode == 1
+
+    def test_pretooluse_catches_multiedit(self, tmp_path: Path) -> None:
+        """MultiEdit should trigger checkpoint check and be blocked without marker."""
+        result = run_pretooluse("MultiEdit files in project", str(tmp_path))
+        assert result.returncode == 1, (
+            "MultiEdit should be caught as a mutation and blocked without checkpoint"
+        )
+
+    def test_pretooluse_catches_notebookedit(self, tmp_path: Path) -> None:
+        """NotebookEdit should trigger checkpoint check and be blocked without marker."""
+        result = run_pretooluse("NotebookEdit cell 5", str(tmp_path))
+        assert result.returncode == 1, (
+            "NotebookEdit should be caught as a mutation and blocked without checkpoint"
+        )
 
     def test_posttooluse_ignores_non_skill(self, tmp_path: Path) -> None:
         """PostToolUse should only log Skill invocations."""

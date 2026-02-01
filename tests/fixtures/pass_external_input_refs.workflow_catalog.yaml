@@ -1,0 +1,26 @@
+external_refs:
+  goal: Workflow referencing external inputs.
+  risk: low
+  inputs:
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+        constraints:
+          type: object
+  steps:
+  - capability: observe
+    purpose: Observe with external input.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    input_bindings:
+      scope: ${user_input.domain}
+    failure_modes: []
+  success:
+  - External ref resolved

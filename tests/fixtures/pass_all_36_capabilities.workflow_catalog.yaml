@@ -1,0 +1,373 @@
+all_caps_part1:
+  goal: Exercise PERCEIVE and UNDERSTAND layer capabilities.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Retrieve data.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: retrieve_out
+    failure_modes: []
+  - capability: search
+    purpose: Search for patterns.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: search_out
+    failure_modes: []
+  - capability: observe
+    purpose: Observe state.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    failure_modes: []
+  - capability: receive
+    purpose: Receive messages.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: receive_out
+    failure_modes: []
+  - capability: detect
+    purpose: Detect entities.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: detect_out
+    failure_modes: []
+  - capability: classify
+    purpose: Classify findings.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: classify_out
+    failure_modes: []
+  - capability: measure
+    purpose: Measure metrics.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: measure_out
+    failure_modes: []
+  - capability: predict
+    purpose: Predict outcomes.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: predict_out
+    failure_modes: []
+  - capability: compare
+    purpose: Compare options.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: compare_out
+    failure_modes: []
+  - capability: discover
+    purpose: Discover relationships.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: discover_out
+    failure_modes: []
+  - capability: plan
+    purpose: Plan actions.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: plan_out
+    failure_modes: []
+  - capability: decompose
+    purpose: Decompose problem.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: decompose_out
+    failure_modes: []
+  - capability: critique
+    purpose: Critique plan.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: critique_out
+    failure_modes: []
+  - capability: explain
+    purpose: Explain reasoning.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: explain_out
+    failure_modes: []
+  - capability: state
+    purpose: Model state.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: state_out
+    failure_modes: []
+  - capability: transition
+    purpose: Define transitions.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: transition_out
+    failure_modes: []
+  - capability: attribute
+    purpose: Attribute causes.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: attribute_out
+    failure_modes: []
+  - capability: ground
+    purpose: Ground in evidence.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: ground_out
+    failure_modes: []
+  - capability: simulate
+    purpose: Run simulation.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: simulate_out
+    failure_modes: []
+  - capability: generate
+    purpose: Generate content.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: generate_out
+    failure_modes: []
+  - capability: transform
+    purpose: Transform data.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: transform_out
+    failure_modes: []
+  - capability: integrate
+    purpose: Integrate data.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: integrate_out
+    failure_modes: []
+  success:
+  - All PERCEIVE+UNDERSTAND+REASON+MODEL+SYNTHESIZE capabilities exercised
+
+all_caps_part2:
+  goal: Exercise EXECUTE, VERIFY, REMEMBER, COORDINATE layer capabilities.
+  risk: high
+  steps:
+  - capability: checkpoint
+    purpose: Create checkpoint.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: checkpoint_out
+    failure_modes: []
+  - capability: execute
+    purpose: Execute command.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: execute_out
+    failure_modes: []
+  - capability: mutate
+    purpose: Mutate state.
+    risk: high
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: mutate_out
+    failure_modes: []
+  - capability: send
+    purpose: Send message.
+    risk: high
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: send_out
+    failure_modes: []
+  - capability: verify
+    purpose: Verify result.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: verify_out
+    failure_modes: []
+  - capability: rollback
+    purpose: Rollback changes.
+    risk: medium
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    failure_modes: []
+  - capability: constrain
+    purpose: Apply constraints.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: constrain_out
+    failure_modes: []
+  - capability: audit
+    purpose: Audit trail.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    failure_modes: []
+  - capability: persist
+    purpose: Persist state.
+    risk: low
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: persist_out
+    failure_modes: []
+  - capability: recall
+    purpose: Recall state.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: recall_out
+    failure_modes: []
+  - capability: delegate
+    purpose: Delegate task.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: delegate_out
+    failure_modes: []
+  - capability: synchronize
+    purpose: Synchronize agents.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: synchronize_out
+    failure_modes: []
+  - capability: invoke
+    purpose: Invoke sub-workflow.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: invoke_out
+    failure_modes: []
+  - capability: inquire
+    purpose: Ask user question.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: inquire_out
+    failure_modes: []
+  success:
+  - All EXECUTE+VERIFY+REMEMBER+COORDINATE capabilities exercised

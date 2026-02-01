@@ -1,0 +1,115 @@
+{
+  "pass_reference": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural"
+  },
+  "pass_minimal_single_step": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural"
+  },
+  "pass_all_36_capabilities": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural"
+  },
+  "pass_chained_bindings": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "bindings"
+  },
+  "pass_external_input_refs": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "bindings"
+  },
+  "pass_typed_annotations": {
+    "should_pass": true,
+    "level": "L3",
+    "category": "types"
+  },
+  "pass_parallel_groups": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced"
+  },
+  "pass_gate_conditionals": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced"
+  },
+  "pass_recovery_loops": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced"
+  },
+  "pass_domain_parameterized": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural"
+  },
+  "pass_nested_workflow_invocation": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced"
+  },
+  "fail_unknown_capability": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "structural"
+  },
+  "fail_empty_steps": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "note": "Empty steps is structurally valid"
+  },
+  "fail_duplicate_store_as": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "note": "Validator does not check for duplicate store_as"
+  },
+  "fail_bad_binding_path": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "bindings"
+  },
+  "fail_forward_reference": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "bindings"
+  },
+  "fail_missing_store_ref": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "bindings"
+  },
+  "fail_ambiguous_untyped": {
+    "should_pass": false,
+    "level": "L3",
+    "category": "types"
+  },
+  "fail_consumer_contract_mismatch": {
+    "should_pass": false,
+    "should_emit_suggestions": true,
+    "level": "L3",
+    "category": "types"
+  },
+  "pass_checkpoint_before_mutate": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced"
+  },
+  "fail_unknown_single_cap": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "structural"
+  },
+  "pass_multi_workflow": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural"
+  }
+}

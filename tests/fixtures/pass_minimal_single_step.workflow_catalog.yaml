@@ -1,0 +1,16 @@
+minimal_workflow:
+  goal: Minimal single-step workflow for structural validation.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe something.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    failure_modes: []
+  success:
+  - Observation completed

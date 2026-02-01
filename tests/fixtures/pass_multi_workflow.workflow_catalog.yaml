@@ -1,0 +1,80 @@
+workflow_a:
+  goal: First workflow in multi-workflow file.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe in workflow A.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    failure_modes: []
+  - capability: detect
+    purpose: Detect in workflow A.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: detect_out
+    failure_modes: []
+  success:
+  - Workflow A completed
+
+workflow_b:
+  goal: Second workflow in multi-workflow file.
+  risk: low
+  steps:
+  - capability: search
+    purpose: Search in workflow B.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: search_out
+    failure_modes: []
+  - capability: classify
+    purpose: Classify in workflow B.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: classify_out
+    failure_modes: []
+  success:
+  - Workflow B completed
+
+workflow_c:
+  goal: Third workflow in multi-workflow file.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Retrieve in workflow C.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: retrieve_out
+    failure_modes: []
+  - capability: generate
+    purpose: Generate in workflow C.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: generate_out
+    failure_modes: []
+  success:
+  - Workflow C completed
