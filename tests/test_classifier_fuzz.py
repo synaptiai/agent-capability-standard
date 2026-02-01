@@ -143,9 +143,11 @@ class TestInterpreterEvasion:
         self, mapper: ToolCapabilityMapper, command: str
     ) -> None:
         """Version checks via --version should not be flagged by interpreter pattern."""
-        mapper.map_tool("Bash", {"command": command})
-        # These fall through to the default-deny, which is high-risk
-        # That's the safe behavior — unknown commands are high-risk
+        result = mapper.map_tool("Bash", {"command": command})
+        # These fall through to the default-deny, which is high-risk.
+        # That's the safe behavior — unknown commands are high-risk.
+        assert result.risk == "high"  # default-deny
+        assert result.capability_id != "execute"  # NOT interpreter pattern
 
 
 class TestPythonHelpExclusion:

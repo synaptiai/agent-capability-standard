@@ -13,11 +13,12 @@ import signal
 import subprocess
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VAL  = ROOT / "tools" / "validate_workflows.py"
-FIX  = ROOT / "tests"
+VAL = ROOT / "tools" / "validate_workflows.py"
+FIX = ROOT / "tests"
 
 EXPECT = json.loads((FIX / "EXPECTATIONS.json").read_text(encoding="utf-8"))
 
@@ -46,7 +47,7 @@ def main() -> None:
         tmp_path = Path(tmp_dir)
 
         # Install signal handler for clean shutdown
-        def _signal_handler(signum: int, frame: object) -> None:
+        def _signal_handler(signum: int, frame: types.FrameType | None) -> None:
             print(f"\nInterrupted by signal {signum}, cleaning up...")
             sys.exit(128 + signum)
 
@@ -65,7 +66,9 @@ def main() -> None:
             should_pass = meta.get("should_pass", False)
             if res["ok"] != should_pass:
                 failed += 1
-                print(f"FAIL: {name} expected should_pass={should_pass} got ok={res['ok']}")
+                print(
+                    f"FAIL: {name} expected should_pass={should_pass} got ok={res['ok']}"
+                )
                 print(res["stdout"])
                 print(res["stderr"])
             else:
@@ -74,9 +77,7 @@ def main() -> None:
 
         # Write results to temp dir first, then copy to build/
         results_file = tmp_path / "conformance_results.json"
-        results_file.write_text(
-            json.dumps(results, indent=2), encoding="utf-8"
-        )
+        results_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
         # Copy to persistent build dir only on success
         build_dir = ROOT / "build"

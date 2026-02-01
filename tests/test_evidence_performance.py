@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from grounded_agency.state.evidence_store import (
     PRIORITY_CRITICAL,
     PRIORITY_HIGH,
@@ -24,23 +26,24 @@ from grounded_agency.state.evidence_store import (
 class TestMetadataKeyDenylist:
     """Tests for SEC-008 metadata key validation hardening."""
 
-    def test_rejects_proto(self) -> None:
-        assert _validate_metadata_key("__proto__") is False
-
-    def test_rejects_constructor(self) -> None:
-        assert _validate_metadata_key("constructor") is False
-
-    def test_rejects_class(self) -> None:
-        assert _validate_metadata_key("__class__") is False
-
-    def test_rejects_init(self) -> None:
-        assert _validate_metadata_key("__init__") is False
-
-    def test_rejects_bases(self) -> None:
-        assert _validate_metadata_key("__bases__") is False
-
-    def test_rejects_mro(self) -> None:
-        assert _validate_metadata_key("__mro__") is False
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "__proto__",
+            "constructor",
+            "__class__",
+            "__init__",
+            "__bases__",
+            "__mro__",
+            "__subclasses__",
+            "__reduce__",
+            "__getattr__",
+            "__globals__",
+            "__builtins__",
+        ],
+    )
+    def test_rejects_dangerous_key(self, key: str) -> None:
+        assert _validate_metadata_key(key) is False
 
     def test_rejects_dunder_prefix(self) -> None:
         assert _validate_metadata_key("__anything__") is False
@@ -233,9 +236,7 @@ class TestNoStaleIndexes:
         # Every anchor in _by_kind must still exist in _anchors
         for kind, anchors in store._by_kind.items():
             for a in anchors:
-                assert a in store._anchors, (
-                    f"Stale anchor {a.ref} in _by_kind[{kind}]"
-                )
+                assert a in store._anchors, f"Stale anchor {a.ref} in _by_kind[{kind}]"
 
         # Every anchor in _by_capability must still exist in _anchors
         for cap_id, anchors in store._by_capability.items():

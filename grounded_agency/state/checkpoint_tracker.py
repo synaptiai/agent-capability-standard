@@ -532,10 +532,12 @@ class CheckpointTracker:
         Returns:
             True if a valid checkpoint covers this target
         """
-        if not self.has_valid_checkpoint():
-            return False
-        assert self._active_checkpoint is not None  # Guaranteed by has_valid_checkpoint
-        return self._active_checkpoint.matches_scope(target)
+        with self._lock:
+            if self._active_checkpoint is None:
+                return False
+            if not self._active_checkpoint.is_valid():
+                return False
+            return self._active_checkpoint.matches_scope(target)
 
     def get_active_checkpoint(self) -> Checkpoint | None:
         """Get the currently active checkpoint, if any."""
@@ -592,14 +594,15 @@ class CheckpointTracker:
         Returns:
             Checkpoint or None if not found
         """
-        if self._active_checkpoint and self._active_checkpoint.id == checkpoint_id:
-            return self._active_checkpoint
+        with self._lock:
+            if self._active_checkpoint and self._active_checkpoint.id == checkpoint_id:
+                return self._active_checkpoint
 
-        for checkpoint in self._checkpoint_history:
-            if checkpoint.id == checkpoint_id:
-                return checkpoint
+            for checkpoint in self._checkpoint_history:
+                if checkpoint.id == checkpoint_id:
+                    return checkpoint
 
-        return None
+            return None
 
     def get_history(self, limit: int = 10) -> list[Checkpoint]:
         """
@@ -611,10 +614,11 @@ class CheckpointTracker:
         Returns:
             List of checkpoints, most recent first
         """
-        history = list(self._checkpoint_history)
-        if self._active_checkpoint:
-            history.append(self._active_checkpoint)
-        return sorted(history, key=lambda c: c.created_at, reverse=True)[:limit]
+        with self._lock:
+            history = list(self._checkpoint_history)
+            if self._active_checkpoint:
+                history.append(self._active_checkpoint)
+            return sorted(history, key=lambda c: c.created_at, reverse=True)[:limit]
 
     def clear_expired(self) -> int:
         """
@@ -661,18 +665,20 @@ class CheckpointTracker:
 
     def invalidate_all(self) -> None:
         """Invalidate all checkpoints (used for rollback scenarios)."""
-        if self._active_checkpoint:
-            self._active_checkpoint.consumed = True
-            self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
-            self._checkpoint_history.append(self._active_checkpoint)
-            self._active_checkpoint = None
-            self._remove_marker()
-            self._persist_state()
+        with self._lock:
+            if self._active_checkpoint:
+                self._active_checkpoint.consumed = True
+                self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
+                self._checkpoint_history.append(self._active_checkpoint)
+                self._active_checkpoint = None
+                self._remove_marker()
+                self._persist_state()
 
     @property
     def checkpoint_count(self) -> int:
         """Get total number of checkpoints (active + history)."""
-        count = len(self._checkpoint_history)
-        if self._active_checkpoint:
-            count += 1
-        return count
+        with self._lock:
+            count = len(self._checkpoint_history)
+            if self._active_checkpoint:
+                count += 1
+            return count

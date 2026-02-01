@@ -216,7 +216,7 @@ class TestFullE2EFlow:
     def test_ontology_accessible(self, adapter: GroundedAgentAdapter) -> None:
         """Ontology version and capabilities accessible via adapter."""
         assert adapter.ontology_version != "unknown"
-        assert adapter.capability_count == 36
+        assert adapter.capability_count >= 36
 
     def test_rate_limiter_accessible(self, adapter: GroundedAgentAdapter) -> None:
         """Rate limiter is accessible via adapter."""

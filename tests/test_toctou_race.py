@@ -90,20 +90,30 @@ class TestThreadSafety:
         assert len(results) == 1
         assert len(consumed) == 1
 
-        # Logical consistency: if consume succeeded, validate may or may not
-        # have seen the checkpoint (depending on scheduling). But both
-        # seeing success is contradictory only if consume already consumed it
-        # before validate ran.
-        if consumed[0] is not None and results[0][0] is True:
-            # Both succeeded — this is valid if validate ran before consume
-            pass
-        elif consumed[0] is not None and results[0][0] is False:
+        # Logical consistency: at most one of consume/validate can "win"
+        # the checkpoint exclusively. Both seeing success is valid only if
+        # validate ran before consume (it reserved but didn't consume).
+        consume_ok = consumed[0] is not None
+        validate_ok = results[0][0] is True
+
+        if consume_ok and validate_ok:
+            # Both succeeded — valid only if validate ran before consume
+            assert results[0][1] is not None  # validate returned a checkpoint ID
+        elif consume_ok and not validate_ok:
             # Consume won the race, validate saw no checkpoint — valid
-            pass
-        elif consumed[0] is None and results[0][0] is True:
-            # Validate saw the checkpoint but consume found nothing — impossible
-            # with proper locking unless checkpoint expired between calls
-            pass
+            assert results[0][1] is None
+        elif not consume_ok and validate_ok:
+            # Validate saw the checkpoint but consume found nothing — this
+            # should not happen with proper locking (unless checkpoint expired).
+            # If it does occur, the checkpoint must still exist.
+            assert tracker.has_valid_checkpoint() or not tracker._active_checkpoint
+        else:
+            # Neither succeeded — checkpoint may have expired or was
+            # already consumed; either way state must be consistent
+            assert (
+                tracker._active_checkpoint is None
+                or not tracker._active_checkpoint.is_valid()
+            )
 
     def test_multiple_concurrent_consumes(self, tracker: CheckpointTracker) -> None:
         """Only one concurrent consume should succeed."""
