@@ -195,13 +195,13 @@ class TestPriorityEviction:
         new = EvidenceAnchor(ref="new:1", kind="tool_output", timestamp="t99")
         store.add_anchor(new)
 
-        # Verify index consistency
-        for kind, anchors in store._by_kind.items():
-            for a in anchors:
+        # Verify index consistency (dict-valued indexes after #63)
+        for kind, anchors_dict in store._by_kind.items():
+            for a in anchors_dict.values():
                 assert a in store._anchors, f"Stale {a.ref} in _by_kind[{kind}]"
 
-        for cap, anchors in store._by_capability.items():
-            for a in anchors:
+        for cap, anchors_dict in store._by_capability.items():
+            for a in anchors_dict.values():
                 assert a in store._anchors, f"Stale {a.ref} in _by_capability[{cap}]"
 
 
@@ -233,14 +233,14 @@ class TestNoStaleIndexes:
 
         assert len(store) == cap
 
-        # Every anchor in _by_kind must still exist in _anchors
-        for kind, anchors in store._by_kind.items():
-            for a in anchors:
+        # Every anchor in _by_kind must still exist in _anchors (dict-valued after #63)
+        for kind, anchors_dict in store._by_kind.items():
+            for a in anchors_dict.values():
                 assert a in store._anchors, f"Stale anchor {a.ref} in _by_kind[{kind}]"
 
-        # Every anchor in _by_capability must still exist in _anchors
-        for cap_id, anchors in store._by_capability.items():
-            for a in anchors:
+        # Every anchor in _by_capability must still exist in _anchors (dict-valued after #63)
+        for cap_id, anchors_dict in store._by_capability.items():
+            for a in anchors_dict.values():
                 assert a in store._anchors, (
                     f"Stale anchor {a.ref} in _by_capability[{cap_id}]"
                 )
@@ -265,8 +265,8 @@ class TestPerformance:
         elapsed = time.monotonic() - start
 
         assert len(store) == 10000
-        # Should complete in under 5 seconds on any reasonable hardware
-        assert elapsed < 5.0, f"Adding 10K anchors took {elapsed:.2f}s"
+        # Should complete in under 2 seconds with O(1) eviction (#63)
+        assert elapsed < 2.0, f"Adding 10K anchors took {elapsed:.2f}s"
 
     def test_eviction_at_capacity(self) -> None:
         """Benchmark: adding beyond capacity triggers eviction without crash."""
@@ -289,7 +289,7 @@ class TestPerformance:
         elapsed = time.monotonic() - start
 
         assert len(store) == 1000
-        assert elapsed < 2.0, f"500 evictions took {elapsed:.2f}s"
+        assert elapsed < 0.5, f"500 evictions took {elapsed:.2f}s"
 
     def test_mixed_priority_eviction_at_scale(self) -> None:
         """Priority eviction with mixed priorities at scale."""
@@ -354,3 +354,26 @@ class TestPerformance:
 
         assert len(results) == 5000
         assert elapsed < 1.0, f"search_by_ref_prefix took {elapsed:.2f}s"
+
+    def test_10k_insert_evict_under_100ms(self) -> None:
+        """Benchmark: 10K insert+evict cycle under 100ms with O(1) eviction."""
+        store = EvidenceStore(max_anchors=5000)
+
+        # Fill to capacity
+        for i in range(5000):
+            anchor = EvidenceAnchor.from_tool_output(
+                "Read", f"fill_{i}", {"path": f"/tmp/{i}"}
+            )
+            store.add_anchor(anchor)
+
+        # 10K more inserts (each triggers eviction)
+        start = time.monotonic()
+        for i in range(10000):
+            anchor = EvidenceAnchor.from_tool_output(
+                "Write", f"evict_{i}", {"path": f"/tmp/e_{i}"}
+            )
+            store.add_anchor(anchor)
+        elapsed = time.monotonic() - start
+
+        assert len(store) == 5000
+        assert elapsed < 0.1, f"10K insert+evict took {elapsed:.3f}s, expected < 0.1s"

@@ -315,6 +315,9 @@ class EvidenceStore:
     Lower-priority anchors are evicted first; within the same priority,
     oldest anchors are evicted first (FIFO within priority tier).
 
+    Issue #63: Internal data structures use O(1) eviction via priority
+    buckets and seq_id-keyed dict indexes instead of O(n) list scans.
+
     Example:
         store = EvidenceStore(max_anchors=1000)
 
@@ -342,12 +345,23 @@ class EvidenceStore:
         self._max_anchors = (
             max_anchors if max_anchors is not None else self.DEFAULT_MAX_ANCHORS
         )
-        # Use deque for O(1) append; eviction is managed manually for priority.
-        # No maxlen — manual eviction in add_anchor() enforces capacity while
-        # keeping secondary indexes consistent.
+        # Primary ordered store — deque for O(1) append/popleft
         self._anchors: deque[EvidenceAnchor] = deque()
-        self._by_kind: dict[str, list[EvidenceAnchor]] = defaultdict(list)
-        self._by_capability: dict[str, list[EvidenceAnchor]] = defaultdict(list)
+
+        # Sequence counter for O(1) eviction bookkeeping
+        self._seq_counter: int = 0
+
+        # Bidirectional mappings: anchor identity <-> seq_id
+        self._anchor_to_seq: dict[int, int] = {}  # id(anchor) -> seq_id
+        self._seq_to_anchor: dict[int, EvidenceAnchor] = {}  # seq_id -> anchor
+
+        # Priority buckets: priority level -> deque of seq_ids (insertion order)
+        self._priority_buckets: dict[int, deque[int]] = defaultdict(deque)
+        self._seq_to_priority: dict[int, int] = {}  # seq_id -> priority (reverse)
+
+        # Secondary indexes keyed by seq_id for O(1) removal
+        self._by_kind: dict[str, dict[int, EvidenceAnchor]] = defaultdict(dict)
+        self._by_capability: dict[str, dict[int, EvidenceAnchor]] = defaultdict(dict)
 
     def add_anchor(
         self,
@@ -364,62 +378,87 @@ class EvidenceStore:
             anchor: The evidence anchor to add
             capability_id: Optional capability ID to associate with
         """
-        # Check if we need to evict before deque auto-evicts
+        # Check if we need to evict before adding
         if len(self._anchors) >= self._max_anchors:
             self._evict_lowest_priority()
 
+        # Assign next seq_id
+        seq_id = self._seq_counter
+        self._seq_counter += 1
+
+        # Add to primary store
         self._anchors.append(anchor)
-        self._by_kind[anchor.kind].append(anchor)
+
+        # Bidirectional identity mappings
+        self._anchor_to_seq[id(anchor)] = seq_id
+        self._seq_to_anchor[seq_id] = anchor
+
+        # Priority bucket (insertion-ordered deque per priority level)
+        self._priority_buckets[anchor.priority].append(seq_id)
+        self._seq_to_priority[seq_id] = anchor.priority
+
+        # Secondary indexes (dict-keyed by seq_id for O(1) delete)
+        self._by_kind[anchor.kind][seq_id] = anchor
 
         if capability_id:
-            self._by_capability[capability_id].append(anchor)
+            self._by_capability[capability_id][seq_id] = anchor
 
     def _evict_lowest_priority(self) -> None:
         """SEC-004: Evict the lowest-priority, oldest anchor from the store.
 
-        Scans for the anchor with the lowest priority value. Among anchors
-        with the same lowest priority, evicts the oldest (leftmost in deque).
-        Falls back to FIFO if all anchors have equal priority.
+        O(1) amortized: finds the lowest non-empty priority bucket, pops
+        the leftmost (oldest) seq_id, then removes from all indexes via
+        dict deletes.
         """
         if not self._anchors:
             return
 
-        # Find anchor with lowest priority (scan from oldest)
-        min_priority = self._anchors[0].priority
-        victim_idx = 0
-        for i, anchor in enumerate(self._anchors):
-            if anchor.priority < min_priority:
-                min_priority = anchor.priority
-                victim_idx = i
-                # Can't do better than PRIORITY_LOW
-                if min_priority == PRIORITY_LOW:
-                    break
+        # Find lowest non-empty priority bucket (iterate from LOW upward)
+        victim_seq: int | None = None
+        for priority in (PRIORITY_LOW, PRIORITY_NORMAL, PRIORITY_HIGH, PRIORITY_CRITICAL):
+            bucket = self._priority_buckets.get(priority)
+            if bucket:
+                victim_seq = bucket.popleft()
+                break
 
-        victim = self._anchors[victim_idx]
+        if victim_seq is None:
+            return  # pragma: no cover — defensive
 
-        # Remove from secondary indexes
-        self._remove_from_indexes(victim)
+        victim = self._seq_to_anchor[victim_seq]
 
-        # Remove from main deque (convert to list, remove, recreate)
-        # For the common case (victim_idx == 0), deque popleft is O(1)
-        if victim_idx == 0:
+        # Remove from seq bookkeeping
+        self._remove_from_indexes(victim_seq, victim)
+
+        # Remove from primary deque
+        # Common case: victim is leftmost (oldest in its priority, and that
+        # priority is the lowest), so popleft is O(1).
+        if self._anchors[0] is victim:
             self._anchors.popleft()
         else:
-            # O(n) removal — acceptable since eviction is amortized
-            del self._anchors[victim_idx]
+            # Rare case: victim is not at head (higher-priority items precede it).
+            # Linear scan is unavoidable for deque mid-removal but rare in practice.
+            for i, a in enumerate(self._anchors):
+                if a is victim:
+                    del self._anchors[i]
+                    break
 
-    def _remove_from_indexes(self, anchor: EvidenceAnchor) -> None:
-        """Remove an anchor from all secondary indexes."""
+    def _remove_from_indexes(self, seq_id: int, anchor: EvidenceAnchor) -> None:
+        """Remove an anchor from all secondary indexes by seq_id (O(1) per index)."""
+        # Remove from seq <-> anchor mappings
+        self._anchor_to_seq.pop(id(anchor), None)
+        self._seq_to_anchor.pop(seq_id, None)
+        self._seq_to_priority.pop(seq_id, None)
+
         # Remove from kind index
-        kind_list = self._by_kind.get(anchor.kind, [])
-        if anchor in kind_list:
-            kind_list.remove(anchor)
+        kind_dict = self._by_kind.get(anchor.kind)
+        if kind_dict is not None:
+            kind_dict.pop(seq_id, None)
 
         # Remove from capability indexes
-        for cap_list in self._by_capability.values():
-            if anchor in cap_list:
-                cap_list.remove(anchor)
-                break  # Anchor can only be in one capability list
+        for cap_dict in self._by_capability.values():
+            if seq_id in cap_dict:
+                del cap_dict[seq_id]
+                break  # Anchor can only be in one capability dict
 
     def get_recent(self, n: int = 10) -> list[str]:
         """
@@ -459,7 +498,7 @@ class EvidenceStore:
         Returns:
             List of matching anchors
         """
-        return list(self._by_kind.get(kind, []))
+        return list(self._by_kind.get(kind, {}).values())
 
     def get_for_capability(self, capability_id: str) -> list[EvidenceAnchor]:
         """
@@ -471,7 +510,7 @@ class EvidenceStore:
         Returns:
             List of associated anchors
         """
-        return list(self._by_capability.get(capability_id, []))
+        return list(self._by_capability.get(capability_id, {}).values())
 
     def get_for_capability_output(self, capability_id: str) -> list[str]:
         """
@@ -527,6 +566,10 @@ class EvidenceStore:
     def clear(self) -> None:
         """Clear all evidence from the store."""
         self._anchors.clear()
+        self._anchor_to_seq.clear()
+        self._seq_to_anchor.clear()
+        self._priority_buckets.clear()
+        self._seq_to_priority.clear()
         self._by_kind.clear()
         self._by_capability.clear()
 
