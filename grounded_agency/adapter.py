@@ -27,6 +27,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import ToolCapabilityMapper
 from .capabilities.registry import CapabilityRegistry
 from .hooks.evidence_collector import create_evidence_collector
@@ -335,7 +336,7 @@ class GroundedAgentAdapter:
         async def consume_after_mutation(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: Any,
+            context: HookContext | None,
         ) -> dict[str, Any]:
             """
             PostToolUse hook to consume checkpoint after successful mutation.
@@ -408,7 +409,7 @@ class GroundedAgentAdapter:
         async def check_permission(
             tool_name: str,
             input_data: dict[str, Any],
-            context: Any,
+            context: HookContext | None,
         ) -> Any:
             """
             Permission callback for checkpoint enforcement and rate limiting.
@@ -434,7 +435,7 @@ class GroundedAgentAdapter:
                     )
                     if has_sdk_types:
                         return PermissionResultDeny(message=message)
-                    return {"allowed": False, "message": message}
+                    return FallbackPermissionDeny(message=message)
 
                 # Check if checkpoint required
                 if mapping.requires_checkpoint:
@@ -451,8 +452,7 @@ class GroundedAgentAdapter:
                         if strict:
                             if has_sdk_types:
                                 return PermissionResultDeny(message=message)
-                            # Fallback: return dict
-                            return {"allowed": False, "message": message}
+                            return FallbackPermissionDeny(message=message)
 
                         # Non-strict: warn but allow
                         logger.warning("%s executing without checkpoint", tool_name)
@@ -466,7 +466,7 @@ class GroundedAgentAdapter:
                 # Allow the tool
                 if has_sdk_types:
                     return PermissionResultAllow(updated_input=input_data)
-                return {"allowed": True, "updated_input": input_data}
+                return FallbackPermissionAllow(updated_input=input_data)
 
             except Exception as e:
                 # Fail-closed: deny access on error (secure default)
@@ -475,7 +475,7 @@ class GroundedAgentAdapter:
                 message = f"Permission check failed due to internal error: {e}"
                 if has_sdk_types:
                     return PermissionResultDeny(message=message)
-                return {"allowed": False, "message": message}
+                return FallbackPermissionDeny(message=message)
 
         return check_permission
 
