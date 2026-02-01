@@ -412,7 +412,12 @@ class EvidenceStore:
 
         # Find lowest non-empty priority bucket (iterate from LOW upward)
         victim_seq: int | None = None
-        for priority in (PRIORITY_LOW, PRIORITY_NORMAL, PRIORITY_HIGH, PRIORITY_CRITICAL):
+        for priority in (
+            PRIORITY_LOW,
+            PRIORITY_NORMAL,
+            PRIORITY_HIGH,
+            PRIORITY_CRITICAL,
+        ):
             bucket = self._priority_buckets.get(priority)
             if bucket:
                 victim_seq = bucket.popleft()

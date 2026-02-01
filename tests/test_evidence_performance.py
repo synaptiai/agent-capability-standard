@@ -128,11 +128,13 @@ class TestMetadataSanitization:
         assert _sanitize_metadata({}) == {}
 
     def test_strips_invalid_keys(self) -> None:
-        result = _sanitize_metadata({
-            "valid": "ok",
-            "__proto__": "evil",
-            "123invalid": "bad",
-        })
+        result = _sanitize_metadata(
+            {
+                "valid": "ok",
+                "__proto__": "evil",
+                "123invalid": "bad",
+            }
+        )
         assert "valid" in result
         assert "__proto__" not in result
         assert "123invalid" not in result
@@ -180,7 +182,9 @@ class TestEvidenceStoreAPI:
         store = EvidenceStore(max_anchors=100)
         for i in range(10):
             store.add_anchor(
-                EvidenceAnchor.from_tool_output("Read", f"id_{i}", {"path": f"/tmp/{i}"})
+                EvidenceAnchor.from_tool_output(
+                    "Read", f"id_{i}", {"path": f"/tmp/{i}"}
+                )
             )
         assert len(store) == 10
 
@@ -214,9 +218,7 @@ class TestEvidenceStoreAPI:
         store.add_anchor(
             EvidenceAnchor.from_tool_output("Read", "id_0", {"path": "/tmp/0"})
         )
-        store.add_anchor(
-            EvidenceAnchor.from_mutation("file.py", "write", "chk_1")
-        )
+        store.add_anchor(EvidenceAnchor.from_mutation("file.py", "write", "chk_1"))
 
         result = store.to_list()
         assert len(result) == 2

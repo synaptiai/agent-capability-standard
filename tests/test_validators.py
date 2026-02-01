@@ -67,7 +67,12 @@ class TestValidateWorkflows:
 
     def test_catalog_flag_catches_bad_fixture(self) -> None:
         """--catalog flag should catch bad fixtures."""
-        fixture = ROOT / "tests" / "fixtures" / "fail_unknown_capability.workflow_catalog.yaml"
+        fixture = (
+            ROOT
+            / "tests"
+            / "fixtures"
+            / "fail_unknown_capability.workflow_catalog.yaml"
+        )
         if not fixture.exists():
             pytest.skip("Fail fixture not found")
         result = run_validator("validate_workflows.py", ["--catalog", str(fixture)])
@@ -224,9 +229,7 @@ class TestJsonSchemaValidation:
         bad = {
             "meta": {"name": "test", "version": "1.0", "description": "test"},
             "layers": {},
-            "nodes": [
-                {"id": "test", "layer": "INVALID", "description": "test"}
-            ],
+            "nodes": [{"id": "test", "layer": "INVALID", "description": "test"}],
             "edges": [],
         }
         with pytest.raises(jsonschema.ValidationError):

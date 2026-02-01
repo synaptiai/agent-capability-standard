@@ -29,6 +29,7 @@ SCAFFOLD_PY = TOOLS_DIR / "scaffold.py"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_minimal_ontology(tmp_path: Path) -> Path:
     """Create a minimal ontology file for isolated tests."""
     ontology = {
@@ -38,8 +39,10 @@ def _make_minimal_ontology(tmp_path: Path) -> Path:
             "description": "Test ontology",
         },
         "layers": {
-            layer: {"description": f"{layer} layer", "capabilities":
-                    ["retrieve"] if layer == "PERCEIVE" else []}
+            layer: {
+                "description": f"{layer} layer",
+                "capabilities": ["retrieve"] if layer == "PERCEIVE" else [],
+            }
             for layer in LAYERS
         },
         "nodes": [
@@ -146,6 +149,7 @@ def _run_scaffold(args: list[str]) -> subprocess.CompletedProcess:
 # Monkey-patch helper for unit tests
 # ---------------------------------------------------------------------------
 
+
 def _run_main_isolated(tmp_path: Path, argv: list[str]) -> None:
     """Run scaffold main() with REPO_ROOT patched to tmp_path."""
     import scaffold as scaffold_mod
@@ -161,6 +165,7 @@ def _run_main_isolated(tmp_path: Path, argv: list[str]) -> None:
 # ===========================================================================
 # TestNameValidation
 # ===========================================================================
+
 
 class TestNameValidation:
     """Test name validation for all subcommands."""
@@ -226,15 +231,25 @@ class TestNameValidation:
 # TestCapabilityScaffold
 # ===========================================================================
 
+
 class TestCapabilityScaffold:
     """Test capability scaffolding."""
 
-    def test_dry_run_no_files_written(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_dry_run_no_files_written(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
         """Dry-run should print actions without writing files."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "test-cap", "--layer", "PERCEIVE", "--dry-run",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "test-cap",
+                "--layer",
+                "PERCEIVE",
+                "--dry-run",
+            ],
+        )
         out = capsys.readouterr().out
         assert "DRY-RUN" in out
         assert "test-cap" in out
@@ -244,9 +259,15 @@ class TestCapabilityScaffold:
     def test_create_valid_capability(self, tmp_path: Path) -> None:
         """Creating a valid capability adds to ontology and creates skill."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "test-cap", "--layer", "PERCEIVE",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "test-cap",
+                "--layer",
+                "PERCEIVE",
+            ],
+        )
 
         # Check ontology was updated
         ontology_path = tmp_path / "schemas" / "capability_ontology.yaml"
@@ -276,25 +297,44 @@ class TestCapabilityScaffold:
         """Attempting to create a capability with an existing name should fail."""
         _setup_isolated_repo(tmp_path)
         with pytest.raises(SystemExit) as exc_info:
-            _run_main_isolated(tmp_path, [
-                "capability", "retrieve", "--layer", "PERCEIVE",
-            ])
+            _run_main_isolated(
+                tmp_path,
+                [
+                    "capability",
+                    "retrieve",
+                    "--layer",
+                    "PERCEIVE",
+                ],
+            )
         assert exc_info.value.code == 1
 
     def test_invalid_layer_rejected(self, tmp_path: Path) -> None:
         """An invalid layer name should be rejected by argparse."""
         _setup_isolated_repo(tmp_path)
         with pytest.raises(SystemExit):
-            _run_main_isolated(tmp_path, [
-                "capability", "test-cap", "--layer", "INVALID",
-            ])
+            _run_main_isolated(
+                tmp_path,
+                [
+                    "capability",
+                    "test-cap",
+                    "--layer",
+                    "INVALID",
+                ],
+            )
 
     def test_mutation_flag(self, tmp_path: Path) -> None:
         """--mutation flag should set mutation=true and requires_checkpoint=true."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "mutate-data", "--layer", "EXECUTE", "--mutation",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "mutate-data",
+                "--layer",
+                "EXECUTE",
+                "--mutation",
+            ],
+        )
 
         ontology_path = tmp_path / "schemas" / "capability_ontology.yaml"
         with open(ontology_path, encoding="utf-8") as f:
@@ -307,9 +347,15 @@ class TestCapabilityScaffold:
     def test_skill_directory_created(self, tmp_path: Path) -> None:
         """Skill directory and SKILL.md should exist after creation."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "my-skill", "--layer", "REASON",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "my-skill",
+                "--layer",
+                "REASON",
+            ],
+        )
         skill_dir = tmp_path / "skills" / "my-skill"
         assert skill_dir.is_dir()
         assert (skill_dir / "SKILL.md").is_file()
@@ -317,9 +363,17 @@ class TestCapabilityScaffold:
     def test_ontology_node_added_correctly(self, tmp_path: Path) -> None:
         """The new node should have correct input/output schema."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "analyze-data", "--layer", "UNDERSTAND", "--risk", "medium",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "analyze-data",
+                "--layer",
+                "UNDERSTAND",
+                "--risk",
+                "medium",
+            ],
+        )
 
         ontology_path = tmp_path / "schemas" / "capability_ontology.yaml"
         with open(ontology_path, encoding="utf-8") as f:
@@ -335,9 +389,15 @@ class TestCapabilityScaffold:
     def test_layer_capabilities_updated(self, tmp_path: Path) -> None:
         """The layer's capabilities list should include the new capability."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "plan-step", "--layer", "REASON",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "plan-step",
+                "--layer",
+                "REASON",
+            ],
+        )
 
         ontology_path = tmp_path / "schemas" / "capability_ontology.yaml"
         with open(ontology_path, encoding="utf-8") as f:
@@ -348,27 +408,50 @@ class TestCapabilityScaffold:
     def test_low_risk_uses_explore_agent(self, tmp_path: Path) -> None:
         """Low risk capabilities should use explore agent."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "scan-data", "--layer", "PERCEIVE", "--risk", "low",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "scan-data",
+                "--layer",
+                "PERCEIVE",
+                "--risk",
+                "low",
+            ],
+        )
         skill_content = (tmp_path / "skills" / "scan-data" / "SKILL.md").read_text()
         assert "agent: explore" in skill_content
 
     def test_high_risk_uses_general_purpose_agent(self, tmp_path: Path) -> None:
         """High risk capabilities should use general-purpose agent."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "deploy-code", "--layer", "EXECUTE", "--risk", "high",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "deploy-code",
+                "--layer",
+                "EXECUTE",
+                "--risk",
+                "high",
+            ],
+        )
         skill_content = (tmp_path / "skills" / "deploy-code" / "SKILL.md").read_text()
         assert "agent: general-purpose" in skill_content
 
     def test_mutation_adds_edit_bash_tools(self, tmp_path: Path) -> None:
         """Mutation capabilities should include Edit and Bash in allowed tools."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "capability", "write-file", "--layer", "EXECUTE", "--mutation",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "capability",
+                "write-file",
+                "--layer",
+                "EXECUTE",
+                "--mutation",
+            ],
+        )
         skill_content = (tmp_path / "skills" / "write-file" / "SKILL.md").read_text()
         assert "Edit" in skill_content
         assert "Bash" in skill_content
@@ -378,15 +461,23 @@ class TestCapabilityScaffold:
 # TestWorkflowScaffold
 # ===========================================================================
 
+
 class TestWorkflowScaffold:
     """Test workflow scaffolding."""
 
-    def test_dry_run_no_files_written(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_dry_run_no_files_written(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
         """Dry-run should print actions without modifying the catalog."""
         _setup_isolated_repo(tmp_path)
-        _run_main_isolated(tmp_path, [
-            "workflow", "test-wf", "--dry-run",
-        ])
+        _run_main_isolated(
+            tmp_path,
+            [
+                "workflow",
+                "test-wf",
+                "--dry-run",
+            ],
+        )
         out = capsys.readouterr().out
         assert "DRY-RUN" in out
         assert "test_wf" in out
@@ -456,10 +547,13 @@ class TestWorkflowScaffold:
 # TestProfileScaffold
 # ===========================================================================
 
+
 class TestProfileScaffold:
     """Test profile scaffolding."""
 
-    def test_dry_run_no_files_written(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_dry_run_no_files_written(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
         """Dry-run should print actions without creating the profile file."""
         _setup_isolated_repo(tmp_path)
         _run_main_isolated(tmp_path, ["profile", "test-prof", "--dry-run"])
@@ -504,8 +598,14 @@ class TestProfileScaffold:
             profile = yaml.safe_load(f)
 
         # Required fields from profile_schema.yaml
-        required = ["domain", "version", "trust_weights", "risk_thresholds",
-                     "checkpoint_policy", "evidence_policy"]
+        required = [
+            "domain",
+            "version",
+            "trust_weights",
+            "risk_thresholds",
+            "checkpoint_policy",
+            "evidence_policy",
+        ]
         for field in required:
             assert field in profile, f"Missing required field: {field}"
 
@@ -537,6 +637,7 @@ class TestProfileScaffold:
 # ===========================================================================
 # TestCLIInterface
 # ===========================================================================
+
 
 class TestCLIInterface:
     """Test CLI argument parsing."""
@@ -577,9 +678,15 @@ class TestCLIInterface:
 
     def test_capability_dry_run_flag(self) -> None:
         """capability --dry-run should run without errors."""
-        result = _run_scaffold([
-            "capability", "test-cap", "--layer", "PERCEIVE", "--dry-run",
-        ])
+        result = _run_scaffold(
+            [
+                "capability",
+                "test-cap",
+                "--layer",
+                "PERCEIVE",
+                "--dry-run",
+            ]
+        )
         assert result.returncode == 0
         assert "DRY-RUN" in result.stdout
 
@@ -597,8 +704,14 @@ class TestCLIInterface:
 
     def test_invalid_name_via_cli(self) -> None:
         """Invalid name should produce a non-zero exit code."""
-        result = _run_scaffold([
-            "capability", "INVALID_NAME", "--layer", "PERCEIVE", "--dry-run",
-        ])
+        result = _run_scaffold(
+            [
+                "capability",
+                "INVALID_NAME",
+                "--layer",
+                "PERCEIVE",
+                "--dry-run",
+            ]
+        )
         assert result.returncode == 1
         assert "Error" in result.stderr

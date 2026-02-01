@@ -297,9 +297,9 @@ class TestHookPatternParity:
     @pytest.mark.parametrize("tool_name", PYTHON_MUTATION_TOOLS)
     def test_shell_regex_catches_sdk_mutation_tool(self, tool_name: str) -> None:
         """Shell hook regex must match every mutation tool from Python mapper."""
-        assert _regex_matches(
-            _SHELL_HOOK_REGEX, tool_name
-        ), f"Shell hook regex does not catch SDK mutation tool '{tool_name}'"
+        assert _regex_matches(_SHELL_HOOK_REGEX, tool_name), (
+            f"Shell hook regex does not catch SDK mutation tool '{tool_name}'"
+        )
 
     # ── Bash sub-command parity ──
 
@@ -307,9 +307,9 @@ class TestHookPatternParity:
     def test_shell_regex_catches_bash_mutation_command(self, cmd: str) -> None:
         """Shell hook regex must match destructive Bash sub-commands from mapper."""
         payload = f"Bash {cmd} something"
-        assert _regex_matches(
-            _SHELL_HOOK_REGEX, payload
-        ), f"Shell hook regex does not catch Bash mutation command '{cmd}'"
+        assert _regex_matches(_SHELL_HOOK_REGEX, payload), (
+            f"Shell hook regex does not catch Bash mutation command '{cmd}'"
+        )
 
     # ── Explicit MultiEdit / NotebookEdit tests ──
 
