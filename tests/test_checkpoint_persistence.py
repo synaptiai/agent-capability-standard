@@ -445,13 +445,15 @@ class TestArchiveErrorHandling:
         archive_dir.mkdir(parents=True)
         archive_file = archive_dir / "pruned_checkpoints.jsonl"
 
-        good_entry = json.dumps({
-            "id": "chk_good",
-            "scope": ["*"],
-            "reason": "good",
-            "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
-            "metadata": {},
-        })
+        good_entry = json.dumps(
+            {
+                "id": "chk_good",
+                "scope": ["*"],
+                "reason": "good",
+                "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
+                "metadata": {},
+            }
+        )
         archive_file.write_text(
             f"{good_entry}\n{{bad json\n{good_entry}\n",
             encoding="utf-8",

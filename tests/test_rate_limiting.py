@@ -124,9 +124,7 @@ class TestConcurrentAllow:
         """N threads hitting allow() simultaneously must not exceed bucket capacity."""
         import threading
 
-        limiter = RateLimiter(
-            RateLimitConfig(high_rpm=10, burst_multiplier=1.0)
-        )
+        limiter = RateLimiter(RateLimitConfig(high_rpm=10, burst_multiplier=1.0))
         # Capacity = 10 tokens
 
         results: list[bool] = []

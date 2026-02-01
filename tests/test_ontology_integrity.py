@@ -85,7 +85,9 @@ class TestVerifyOntologyIntegrity:
 class TestEmptySidecarFile:
     """Tests for empty/whitespace-only sidecar .sha256 files."""
 
-    def test_empty_sidecar_file_passes(self, ontology_path: str, tmp_path: Path) -> None:
+    def test_empty_sidecar_file_passes(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
         """Empty sidecar file should not crash, should pass (no hash to verify)."""
         src = Path(ontology_path)
         dest = tmp_path / "capability_ontology.yaml"
