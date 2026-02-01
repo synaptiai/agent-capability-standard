@@ -117,6 +117,74 @@ class TestTokenBucket:
         assert limiter.allow("high") is False
 
 
+class TestConcurrentAllow:
+    """Tests for thread-safety of allow() under concurrency."""
+
+    def test_concurrent_allow_does_not_exceed_capacity(self) -> None:
+        """N threads hitting allow() simultaneously must not exceed bucket capacity."""
+        import threading
+
+        limiter = RateLimiter(
+            RateLimitConfig(high_rpm=10, burst_multiplier=1.0)
+        )
+        # Capacity = 10 tokens
+
+        results: list[bool] = []
+        barrier = threading.Barrier(20)
+
+        def worker() -> None:
+            barrier.wait()
+            results.append(limiter.allow("high"))
+
+        threads = [threading.Thread(target=worker) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        allowed = sum(1 for r in results if r)
+        denied = sum(1 for r in results if not r)
+        # Exactly 10 should be allowed (capacity), 10 denied
+        assert allowed == 10, f"Expected 10 allowed, got {allowed}"
+        assert denied == 10, f"Expected 10 denied, got {denied}"
+
+    def test_concurrent_mixed_risk_levels(self) -> None:
+        """Concurrent calls at different risk levels use independent buckets."""
+        import threading
+
+        limiter = RateLimiter(
+            RateLimitConfig(high_rpm=5, medium_rpm=10, low_rpm=20, burst_multiplier=1.0)
+        )
+        high_results: list[bool] = []
+        medium_results: list[bool] = []
+        barrier = threading.Barrier(20)
+
+        def high_worker() -> None:
+            barrier.wait()
+            high_results.append(limiter.allow("high"))
+
+        def medium_worker() -> None:
+            barrier.wait()
+            medium_results.append(limiter.allow("medium"))
+
+        threads = []
+        for _ in range(10):
+            threads.append(threading.Thread(target=high_worker))
+            threads.append(threading.Thread(target=medium_worker))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        high_allowed = sum(1 for r in high_results if r)
+        medium_allowed = sum(1 for r in medium_results if r)
+
+        # High: 5 capacity, so exactly 5 allowed
+        assert high_allowed == 5, f"High: expected 5, got {high_allowed}"
+        # Medium: 10 capacity, so exactly 10 allowed
+        assert medium_allowed == 10, f"Medium: expected 10, got {medium_allowed}"
+
+
 class TestGetRemaining:
     """Tests for diagnostics."""
 

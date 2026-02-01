@@ -82,6 +82,35 @@ class TestVerifyOntologyIntegrity:
         assert verify_ontology_integrity(str(dest), None) is False
 
 
+class TestEmptySidecarFile:
+    """Tests for empty/whitespace-only sidecar .sha256 files."""
+
+    def test_empty_sidecar_file_passes(self, ontology_path: str, tmp_path: Path) -> None:
+        """Empty sidecar file should not crash, should pass (no hash to verify)."""
+        src = Path(ontology_path)
+        dest = tmp_path / "capability_ontology.yaml"
+        dest.write_bytes(src.read_bytes())
+
+        sidecar = tmp_path / "capability_ontology.yaml.sha256"
+        sidecar.write_text("", encoding="utf-8")
+
+        # No expected hash extracted → passes by default
+        assert verify_ontology_integrity(str(dest), None) is True
+
+    def test_whitespace_only_sidecar_passes(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
+        """Whitespace-only sidecar file should not crash."""
+        src = Path(ontology_path)
+        dest = tmp_path / "capability_ontology.yaml"
+        dest.write_bytes(src.read_bytes())
+
+        sidecar = tmp_path / "capability_ontology.yaml.sha256"
+        sidecar.write_text("   \n  \n", encoding="utf-8")
+
+        assert verify_ontology_integrity(str(dest), None) is True
+
+
 class TestConstantTimeComparison:
     """Tests that hash comparison uses constant-time hmac.compare_digest."""
 

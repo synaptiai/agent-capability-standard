@@ -111,7 +111,9 @@ def verify_ontology_integrity(
     if expected_hash is None:
         sidecar = path.with_suffix(".yaml.sha256")
         if sidecar.exists():
-            expected_hash = sidecar.read_text(encoding="utf-8").strip().split()[0]
+            parts = sidecar.read_text(encoding="utf-8").strip().split()
+            if parts:
+                expected_hash = parts[0]
 
     if expected_hash is None:
         # No hash to verify against — pass by default

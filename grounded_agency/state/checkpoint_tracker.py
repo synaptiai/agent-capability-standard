@@ -7,6 +7,7 @@ Tracks checkpoint creation, validity, consumption, and expiry.
 
 from __future__ import annotations
 
+import errno as _errno_mod
 import fnmatch
 import json
 import logging
@@ -17,6 +18,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+# Platform-portable ELOOP errno values (Linux=40, macOS/BSD=62).
+_ELOOP_ERRNOS: set[int] = {getattr(_errno_mod, "ELOOP", 40), 62}
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +258,7 @@ class CheckpointTracker:
             except FileNotFoundError:
                 return
             except OSError as e:
-                if e.errno in (40, 62):  # ELOOP — symlink rejected
+                if e.errno in _ELOOP_ERRNOS:  # ELOOP — symlink rejected
                     logger.warning(
                         "Refusing to follow symlink for state file: %s", state_path
                     )
