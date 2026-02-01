@@ -1,0 +1,40 @@
+gated:
+  goal: Workflow with gate conditionals.
+  risk: medium
+  steps:
+  - capability: observe
+    purpose: Observe.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    failure_modes: []
+  - capability: checkpoint
+    purpose: Create checkpoint.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: checkpoint_out
+    failure_modes: []
+  - capability: mutate
+    purpose: Mutate with gate.
+    risk: high
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: mutate_out
+    gates:
+    - when: ${checkpoint_out.checkpoint_id} == null
+      action: stop
+      message: No checkpoint.
+    failure_modes: []
+  success:
+  - Gated workflow completed

@@ -1,0 +1,16 @@
+bad_single:
+  goal: Minimal workflow with a single unknown capability.
+  risk: low
+  steps:
+  - capability: teleport
+    purpose: Teleport to another dimension.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: teleport_out
+    failure_modes: []
+  success:
+  - Should fail

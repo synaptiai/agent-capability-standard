@@ -1,0 +1,35 @@
+recovery:
+  goal: Workflow with recovery loop.
+  risk: medium
+  steps:
+  - capability: observe
+    purpose: Observe.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    failure_modes: []
+  - capability: verify
+    purpose: Verify with retry.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry:
+      max: 3
+      backoff: exponential
+    store_as: verify_out
+    failure_modes:
+    - condition: Verdict == FAIL
+      action: rollback
+      recovery:
+        goto_step: observe
+        inject_context:
+          failure_evidence: ${verify_out}
+        max_loops: 3
+  success:
+  - Recovery completed

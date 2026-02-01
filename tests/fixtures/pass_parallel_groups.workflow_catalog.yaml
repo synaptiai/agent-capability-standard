@@ -1,0 +1,40 @@
+parallel:
+  goal: Workflow with parallel execution groups.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe state.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    failure_modes: []
+  - capability: search
+    purpose: Search in parallel.
+    parallel_group: gather
+    join: all_complete
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: search_out
+    failure_modes: []
+  - capability: retrieve
+    purpose: Retrieve in parallel.
+    parallel_group: gather
+    join: all_complete
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: retrieve_out
+    failure_modes: []
+  success:
+  - Parallel group completed

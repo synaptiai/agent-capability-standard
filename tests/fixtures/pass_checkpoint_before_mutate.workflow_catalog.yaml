@@ -1,0 +1,86 @@
+safe_mutation:
+  goal: Workflow demonstrating checkpoint-before-mutate safety pattern.
+  risk: high
+  steps:
+  - capability: observe
+    purpose: Observe current state before mutation.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: observe_out
+    failure_modes: []
+  - capability: plan
+    purpose: Plan the mutation.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: plan_out
+    failure_modes: []
+  - capability: checkpoint
+    purpose: Create checkpoint before mutation.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: checkpoint_out
+    failure_modes: []
+  - capability: mutate
+    purpose: Apply planned mutation safely.
+    risk: high
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: 5m
+    retry: null
+    store_as: mutate_out
+    failure_modes:
+    - condition: Unexpected side effects
+      action: rollback
+      recovery: Rollback to checkpoint.
+  - capability: verify
+    purpose: Verify mutation succeeded.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: 5m
+    retry:
+      max: 3
+      backoff: exponential
+    store_as: verify_out
+    failure_modes:
+    - condition: Verdict == FAIL
+      action: rollback
+      recovery: Rollback to checkpoint and re-plan.
+  - capability: rollback
+    purpose: Rollback if verification fails.
+    risk: medium
+    mutation: true
+    requires_checkpoint: true
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    failure_modes: []
+  - capability: audit
+    purpose: Record mutation audit trail.
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: audit_out
+    failure_modes: []
+  success:
+  - Mutation applied safely with checkpoint
+  - Verification passed
+  - Audit trail produced
