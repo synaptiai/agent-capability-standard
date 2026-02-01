@@ -127,7 +127,6 @@ def scaffold_capability(args: argparse.Namespace) -> None:
             "required": ["result", "evidence_anchors", "confidence"],
             "properties": {
                 "result": {
-                    "type": "any",
                     "description": "Primary output",
                 },
                 "evidence_anchors": {
@@ -270,16 +269,14 @@ def scaffold_workflow(args: argparse.Namespace) -> None:
                 "store_as": "step_1_result",
                 "failure_modes": [
                     {
-                        "type": "retrieval_failure",
+                        "condition": "retrieval_failure",
+                        "action": "retry",
                         "recovery": "retry",
                     },
                 ],
             },
         ],
-        "success": {
-            "condition": "TODO: Define success condition",
-            "evidence": "TODO: Define required evidence",
-        },
+        "success": ["TODO: Define success criterion"],
     }
 
     if dry_run:

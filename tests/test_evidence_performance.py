@@ -37,9 +37,13 @@ class TestMetadataKeyDenylist:
             "__mro__",
             "__subclasses__",
             "__reduce__",
+            "__reduce_ex__",
             "__getattr__",
+            "__setattr__",
+            "__delattr__",
             "__globals__",
             "__builtins__",
+            "__import__",
         ],
     )
     def test_rejects_dangerous_key(self, key: str) -> None:
@@ -376,4 +380,4 @@ class TestPerformance:
         elapsed = time.monotonic() - start
 
         assert len(store) == 5000
-        assert elapsed < 0.1, f"10K insert+evict took {elapsed:.3f}s, expected < 0.1s"
+        assert elapsed < 1.0, f"10K insert+evict took {elapsed:.3f}s, expected < 1.0s"

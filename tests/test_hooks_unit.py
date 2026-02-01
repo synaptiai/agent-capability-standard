@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -255,8 +256,6 @@ _SHELL_HOOK_REGEX = (
 
 def _regex_matches(pattern: str, text: str) -> bool:
     """Return True if *pattern* matches anywhere in *text* (case-insensitive)."""
-    import re
-
     return re.search(pattern, text, re.IGNORECASE) is not None
 
 

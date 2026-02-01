@@ -38,7 +38,8 @@ def _make_minimal_ontology(tmp_path: Path) -> Path:
             "description": "Test ontology",
         },
         "layers": {
-            layer: {"description": f"{layer} layer", "capabilities": []}
+            layer: {"description": f"{layer} layer", "capabilities":
+                    ["retrieve"] if layer == "PERCEIVE" else []}
             for layer in LAYERS
         },
         "nodes": [
@@ -58,11 +59,6 @@ def _make_minimal_ontology(tmp_path: Path) -> Path:
     with open(ontology_path, "w", encoding="utf-8") as f:
         yaml.dump(ontology, f, default_flow_style=False, sort_keys=False)
 
-    # Also seed the PERCEIVE layer with the existing capability
-    ontology["layers"]["PERCEIVE"]["capabilities"] = ["retrieve"]
-    with open(ontology_path, "w", encoding="utf-8") as f:
-        yaml.dump(ontology, f, default_flow_style=False, sort_keys=False)
-
     return ontology_path
 
 
@@ -73,7 +69,7 @@ def _make_minimal_catalog(tmp_path: Path) -> Path:
             "goal": "An existing workflow",
             "risk": "low",
             "steps": [],
-            "success": {"condition": "done", "evidence": "none"},
+            "success": ["done"],
         },
     }
     schemas_dir = tmp_path / "schemas"
@@ -425,7 +421,7 @@ class TestWorkflowScaffold:
         assert exc_info.value.code == 1
 
     def test_workflow_has_success_section(self, tmp_path: Path) -> None:
-        """New workflow should have a success section with condition and evidence."""
+        """New workflow should have a success array of strings."""
         _setup_isolated_repo(tmp_path)
         _run_main_isolated(tmp_path, ["workflow", "check-workflow"])
 
@@ -434,11 +430,12 @@ class TestWorkflowScaffold:
             catalog = yaml.safe_load(f)
 
         wf = catalog["check_workflow"]
-        assert "condition" in wf["success"]
-        assert "evidence" in wf["success"]
+        assert isinstance(wf["success"], list)
+        assert len(wf["success"]) > 0
+        assert all(isinstance(s, str) for s in wf["success"])
 
     def test_workflow_step_has_failure_modes(self, tmp_path: Path) -> None:
-        """Workflow steps should include failure_modes."""
+        """Workflow steps should include failure_modes with schema-compliant fields."""
         _setup_isolated_repo(tmp_path)
         _run_main_isolated(tmp_path, ["workflow", "fail-mode-wf"])
 
@@ -449,6 +446,10 @@ class TestWorkflowScaffold:
         step = catalog["fail_mode_wf"]["steps"][0]
         assert "failure_modes" in step
         assert len(step["failure_modes"]) > 0
+        fm = step["failure_modes"][0]
+        assert "condition" in fm
+        assert "action" in fm
+        assert "recovery" in fm
 
 
 # ===========================================================================
