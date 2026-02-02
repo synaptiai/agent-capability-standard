@@ -16,11 +16,11 @@ This document suite prepares for EU AI Act conformity assessment by mapping the 
 
 | Doc ID | Document | Article | Purpose | Lines |
 |--------|----------|---------|---------|-------|
-| EUAIA-CLS-001 | [Risk Classification](risk_classification.md) | Art. 6 | Maps 7 domain profiles to EU AI Act risk categories | ~250 |
-| EUAIA-PMM-001 | [Post-Market Monitoring](post_market_monitoring.md) | Art. 61 | Data collection, KPIs, escalation, incident reporting | ~300 |
-| EUAIA-NTB-001 | [Notified Body Assessment](notified_body_assessment.md) | Art. 43, 39 | Decision tree for conformity assessment route selection | ~180 |
-| EUAIA-QMS-001 | [Quality Management System](quality_management_system.md) | Art. 17 | Maps Art. 17(a)-(k) to framework implementations | ~350 |
-| EUAIA-TEC-001 | [Annex IV Technical Documentation](annex_iv_technical_documentation.md) | Art. 11 | Covers all 7 Annex IV required elements | ~550 |
+| EUAIA-CLS-001 | [Risk Classification](risk_classification.md) | Art. 6 | Maps 7 domain profiles to EU AI Act risk categories | ~230 |
+| EUAIA-PMM-001 | [Post-Market Monitoring](post_market_monitoring.md) | Art. 61 | Data collection, KPIs, escalation, incident reporting | ~255 |
+| EUAIA-NTB-001 | [Notified Body Assessment](notified_body_assessment.md) | Art. 43, 39 | Decision tree for conformity assessment route selection | ~195 |
+| EUAIA-QMS-001 | [Quality Management System](quality_management_system.md) | Art. 17 | Maps Art. 17(a)-(k) to framework implementations | ~270 |
+| EUAIA-TEC-001 | [Annex IV Technical Documentation](annex_iv_technical_documentation.md) | Art. 11 | Covers all 7 Annex IV required elements | ~455 |
 
 ## Relationship to ISO 42001 Suite
 

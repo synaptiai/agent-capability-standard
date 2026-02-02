@@ -223,7 +223,7 @@ Monitoring Data → KPI Analysis → Threshold Check
 | Incident reports | 10 years (or longer per regulatory requirement) | Art. 62 records | Incident management system |
 | KPI trend data | 10 years | Performance baseline for drift detection | Time-series database |
 
-**Healthcare domain override:** `compliance.audit_retention_days: 2555` (7 years) is the minimum per healthcare profile; the 10-year EU AI Act requirement supersedes this where applicable.
+**Healthcare domain override:** `compliance.audit_retention_days: 2555` (7 years) is the minimum per healthcare profile; the 10-year EU AI Act requirement supersedes this where applicable. **Action required:** Deployers in high-risk contexts should override `audit_retention_days` to at least 3650 (10 years) in their deployed profile configuration to meet Art. 12(3) requirements.
 
 ## 10. Plan Review and Update
 

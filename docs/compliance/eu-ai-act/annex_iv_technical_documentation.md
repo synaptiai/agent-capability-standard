@@ -326,7 +326,7 @@ A comprehensive post-market monitoring plan is defined in **EUAIA-PMM-001**, cov
 | Component | Summary | Reference |
 |-----------|---------|-----------|
 | Data collection plan | Three existing telemetry sources + 8 additional data points | EUAIA-PMM-001 Section 3 |
-| Monitoring cadence | Five-tier schedule (continuous → daily → weekly → monthly → quarterly → annual) | EUAIA-PMM-001 Section 4 |
+| Monitoring cadence | Six-tier schedule (continuous → daily → weekly → monthly → quarterly → annual) plus event-triggered | EUAIA-PMM-001 Section 4 |
 | Key performance indicators | 12 KPIs across safety, performance, and compliance categories | EUAIA-PMM-001 Section 5 |
 | Escalation model | Four levels (Info → Warning → Critical → Incident) with defined response times | EUAIA-PMM-001 Section 6 |
 | Serious incident reporting | Art. 62 procedure with 15-day notification timeline | EUAIA-PMM-001 Section 7 |
