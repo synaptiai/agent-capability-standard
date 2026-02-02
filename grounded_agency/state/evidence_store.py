@@ -610,7 +610,4 @@ class EvidenceStore:
             List of anchor dictionaries
         """
         with self._lock:
-            return [
-                {**a.to_dict(), "metadata": a.metadata}
-                for a in self._anchors
-            ]
+            return [{**a.to_dict(), "metadata": a.metadata} for a in self._anchors]

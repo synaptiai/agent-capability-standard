@@ -561,7 +561,9 @@ class TestDelegationProtocol:
     ) -> None:
         """Default max_delegation_depth is 10; depth=11 raises ValueError."""
         agent_registry.register("worker", {"retrieve"})
-        with pytest.raises(ValueError, match="Delegation depth limit exceeded: 11 > 10"):
+        with pytest.raises(
+            ValueError, match="Delegation depth limit exceeded: 11 > 10"
+        ):
             delegation.delegate(
                 description="Way too deep",
                 required_capabilities={"retrieve"},
@@ -607,9 +609,7 @@ class TestDelegationLifecycle:
         )
         assert result.status == "accepted"
         # First completion should succeed
-        completed = delegation.complete_task(
-            result.task_id, output_data={"done": True}
-        )
+        completed = delegation.complete_task(result.task_id, output_data={"done": True})
         assert completed is not None
         assert completed.status == "completed"
         # Second completion should fail
@@ -848,7 +848,10 @@ class TestCrossAgentEvidenceBridge:
         """trust_decay=0.0 is rejected (must be > 0.0)."""
         with pytest.raises(ValueError, match="trust_decay must be in"):
             CrossAgentEvidenceBridge(
-                agent_registry, evidence_store, audit_log, trust_decay=0.0,
+                agent_registry,
+                evidence_store,
+                audit_log,
+                trust_decay=0.0,
             )
 
     def test_trust_decay_negative_raises(
@@ -860,7 +863,10 @@ class TestCrossAgentEvidenceBridge:
         """trust_decay=-0.5 is rejected (must be > 0.0)."""
         with pytest.raises(ValueError, match="trust_decay must be in"):
             CrossAgentEvidenceBridge(
-                agent_registry, evidence_store, audit_log, trust_decay=-0.5,
+                agent_registry,
+                evidence_store,
+                audit_log,
+                trust_decay=-0.5,
             )
 
     def test_trust_decay_above_one_raises(
@@ -872,7 +878,10 @@ class TestCrossAgentEvidenceBridge:
         """trust_decay=1.5 is rejected (must be <= 1.0)."""
         with pytest.raises(ValueError, match="trust_decay must be in"):
             CrossAgentEvidenceBridge(
-                agent_registry, evidence_store, audit_log, trust_decay=1.5,
+                agent_registry,
+                evidence_store,
+                audit_log,
+                trust_decay=1.5,
             )
 
     def test_trust_decay_valid_succeeds(
@@ -883,7 +892,10 @@ class TestCrossAgentEvidenceBridge:
     ) -> None:
         """trust_decay=0.9 is accepted (within valid range)."""
         bridge = CrossAgentEvidenceBridge(
-            agent_registry, evidence_store, audit_log, trust_decay=0.9,
+            agent_registry,
+            evidence_store,
+            audit_log,
+            trust_decay=0.9,
         )
         assert bridge._trust_decay == 0.9
 
@@ -1251,9 +1263,7 @@ class TestSyncPrimitive:
         # Barrier has been cleaned up; contribute returns False
         assert sync.contribute(barrier.barrier_id, "a1", {"more": "data"}) is False
 
-    def test_resolved_barrier_removed_from_barriers(
-        self, sync: SyncPrimitive
-    ) -> None:
+    def test_resolved_barrier_removed_from_barriers(self, sync: SyncPrimitive) -> None:
         """Resolved barriers are removed from _barriers; get_barrier returns None."""
         barrier = sync.create_barrier(["a1"])
         sync.contribute(barrier.barrier_id, "a1", {"done": True})
@@ -1278,9 +1288,7 @@ class TestSyncPrimitive:
 
         # Barrier should be cleaned up -- not in list_barriers
         assert sync.get_barrier(barrier.barrier_id) is None
-        assert all(
-            b.barrier_id != barrier.barrier_id for b in sync.list_barriers()
-        )
+        assert all(b.barrier_id != barrier.barrier_id for b in sync.list_barriers())
 
 
 # ---------------------------------------------------------------------------

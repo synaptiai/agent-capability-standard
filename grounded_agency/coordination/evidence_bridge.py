@@ -77,9 +77,7 @@ class CrossAgentEvidenceBridge:
         max_shared_per_agent: int = 1000,
     ) -> None:
         if not (0.0 < trust_decay <= 1.0):
-            raise ValueError(
-                f"trust_decay must be in (0.0, 1.0], got {trust_decay}"
-            )
+            raise ValueError(f"trust_decay must be in (0.0, 1.0], got {trust_decay}")
         self._agent_registry = agent_registry
         self._evidence_store = evidence_store
         self._audit_log = audit_log
@@ -90,7 +88,9 @@ class CrossAgentEvidenceBridge:
         self._shared: dict[str, list[SharedEvidence]] = defaultdict(list)
         # Secondary indexes for O(1) lookup by evidence ref
         self._by_ref: dict[str, SharedEvidence] = {}  # first sharing per ref
-        self._lineage: dict[str, list[SharedEvidence]] = defaultdict(list)  # all sharings per ref
+        self._lineage: dict[str, list[SharedEvidence]] = defaultdict(
+            list
+        )  # all sharings per ref
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -127,7 +127,9 @@ class CrossAgentEvidenceBridge:
         if propagated_trust < self._min_trust_floor:
             logger.debug(
                 "Skipping evidence share %s: trust %.3f below floor %.3f",
-                anchor.ref, propagated_trust, self._min_trust_floor,
+                anchor.ref,
+                propagated_trust,
+                self._min_trust_floor,
             )
             return []
 

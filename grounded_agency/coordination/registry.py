@@ -113,9 +113,7 @@ class AgentRegistry:
                 len(self._agents) >= self._max_agents
                 and descriptor.agent_id not in self._agents
             ):
-                raise ValueError(
-                    f"Agent registry is full ({self._max_agents} agents)"
-                )
+                raise ValueError(f"Agent registry is full ({self._max_agents} agents)")
             self._agents[descriptor.agent_id] = descriptor
         logger.debug("Registered agent %s with capabilities %s", agent_id, caps)
         return descriptor

@@ -35,7 +35,9 @@ class BarrierResolvedError(CoordinationError):
 class TaskLifecycleError(CoordinationError):
     """Raised on invalid task state transitions."""
 
-    def __init__(self, task_id: str, current_status: str, attempted_action: str) -> None:
+    def __init__(
+        self, task_id: str, current_status: str, attempted_action: str
+    ) -> None:
         self.task_id = task_id
         self.current_status = current_status
         self.attempted_action = attempted_action
