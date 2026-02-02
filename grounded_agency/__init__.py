@@ -27,6 +27,30 @@ from ._types import (
 from .adapter import GroundedAgentAdapter, GroundedAgentConfig
 from .capabilities.mapper import ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
+from .coordination import (
+    ORCHESTRATOR_AGENT_ID,
+    AgentDescriptor,
+    AgentNotRegisteredError,
+    AgentRegistry,
+    BarrierResolvedError,
+    CapabilityMismatchError,
+    CoordinationAuditLog,
+    CoordinationError,
+    CoordinationEvent,
+    CrossAgentEvidenceBridge,
+    DelegationProtocol,
+    DelegationResult,
+    DelegationTask,
+    OrchestrationConfig,
+    OrchestrationResult,
+    OrchestrationRuntime,
+    SharedEvidence,
+    SyncBarrier,
+    SyncPrimitive,
+    SyncResult,
+    SyncStrategy,
+    TaskLifecycleError,
+)
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
@@ -76,6 +100,30 @@ __all__ = [
     "WorkflowTracer",
     "ConformanceReport",
     "StepTrace",
+    # Coordination
+    "OrchestrationRuntime",
+    "OrchestrationConfig",
+    "OrchestrationResult",
+    "AgentRegistry",
+    "AgentDescriptor",
+    "DelegationProtocol",
+    "DelegationTask",
+    "DelegationResult",
+    "SyncPrimitive",
+    "SyncBarrier",
+    "SyncResult",
+    "CrossAgentEvidenceBridge",
+    "SharedEvidence",
+    "CoordinationAuditLog",
+    "CoordinationEvent",
+    "SyncStrategy",
+    "ORCHESTRATOR_AGENT_ID",
+    # Coordination exceptions
+    "CoordinationError",
+    "AgentNotRegisteredError",
+    "CapabilityMismatchError",
+    "BarrierResolvedError",
+    "TaskLifecycleError",
     # Logging
     "logger",
 ]
