@@ -33,6 +33,11 @@ _BINDING_REF_PATTERN = re.compile(
     r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*?)(?::\s*([a-zA-Z_<>]+(?:\[[a-zA-Z_<>]+\])?))?\}"
 )
 
+# Traversal limits for _extract_binding_refs to prevent CPU amplification
+# via YAML alias bombs (shared references traversed as unique objects).
+_MAX_BINDING_DEPTH: int = 50
+_MAX_BINDING_ELEMENTS: int = 10_000
+
 
 class StepStatus(str, Enum):
     """Status of a workflow step during execution."""
@@ -318,6 +323,24 @@ class WorkflowEngine:
                     f"Step {i} ({step.capability}): "
                     f"capability not found in ontology"
                 )
+                continue
+
+            # Cross-reference safety flags against ontology ground truth.
+            # A workflow step must NOT downgrade safety flags that the
+            # ontology declares — doing so could bypass checkpoint
+            # enforcement or hide mutation risk.
+            if cap.mutation and not step.mutation:
+                errors.append(
+                    f"Step {i} ({step.capability}): "
+                    f"ontology declares mutation=true but step "
+                    f"downgrades to mutation=false"
+                )
+            if cap.requires_checkpoint and not step.requires_checkpoint:
+                errors.append(
+                    f"Step {i} ({step.capability}): "
+                    f"ontology declares requires_checkpoint=true but step "
+                    f"downgrades to requires_checkpoint=false"
+                )
         return errors
 
     def validate_bindings(self, workflow_name: str) -> list[BindingError]:
@@ -422,13 +445,30 @@ class WorkflowEngine:
         self,
         bindings: Any,
         parent_key: str = "",
+        _depth: int = 0,
+        _visited: set[int] | None = None,
     ) -> list[tuple[str, str, str | None]]:
         """
         Extract ${ref} references from binding values.
 
+        Includes depth, cycle, and element-count limits to prevent CPU
+        amplification from YAML alias bombs (shared references that cause
+        exponential traversal).
+
         Returns:
             List of (binding_key, ref_name, declared_type) tuples
+
+        Raises:
+            ValueError: If traversal depth or element count exceeds limits
         """
+        if _depth > _MAX_BINDING_DEPTH:
+            raise ValueError(
+                f"Binding traversal exceeded max depth ({_MAX_BINDING_DEPTH})"
+            )
+
+        if _visited is None:
+            _visited = set()
+
         refs: list[tuple[str, str, str | None]] = []
 
         if isinstance(bindings, str):
@@ -438,14 +478,40 @@ class WorkflowEngine:
                 refs.append((parent_key, ref_name, declared_type))
 
         elif isinstance(bindings, dict):
+            obj_id = id(bindings)
+            if obj_id in _visited:
+                return refs
+            _visited.add(obj_id)
+            if len(_visited) > _MAX_BINDING_ELEMENTS:
+                raise ValueError(
+                    f"Binding traversal exceeded max element count "
+                    f"({_MAX_BINDING_ELEMENTS})"
+                )
             for key, value in bindings.items():
                 full_key = f"{parent_key}.{key}" if parent_key else key
-                refs.extend(self._extract_binding_refs(value, full_key))
+                refs.extend(
+                    self._extract_binding_refs(
+                        value, full_key, _depth + 1, _visited
+                    )
+                )
 
         elif isinstance(bindings, list):
+            obj_id = id(bindings)
+            if obj_id in _visited:
+                return refs
+            _visited.add(obj_id)
+            if len(_visited) > _MAX_BINDING_ELEMENTS:
+                raise ValueError(
+                    f"Binding traversal exceeded max element count "
+                    f"({_MAX_BINDING_ELEMENTS})"
+                )
             for idx, item in enumerate(bindings):
                 full_key = f"{parent_key}[{idx}]"
-                refs.extend(self._extract_binding_refs(item, full_key))
+                refs.extend(
+                    self._extract_binding_refs(
+                        item, full_key, _depth + 1, _visited
+                    )
+                )
 
         return refs
 
@@ -610,7 +676,17 @@ class WorkflowEngine:
         if self._checkpoint_tracker is None:
             return None
 
-        if not (step.mutation or step.requires_checkpoint):
+        # Consult ontology ground truth — a crafted YAML may downgrade
+        # mutation/requires_checkpoint flags to bypass checkpoint creation.
+        # Use logical OR so the ontology's declaration always prevails.
+        needs_checkpoint = step.mutation or step.requires_checkpoint
+        cap = self._registry.get_capability(step.capability)
+        if cap is not None:
+            needs_checkpoint = (
+                needs_checkpoint or cap.mutation or cap.requires_checkpoint
+            )
+
+        if not needs_checkpoint:
             return None
 
         # Check if a valid checkpoint already exists
