@@ -33,17 +33,18 @@ class SharedEvidence:
         anchor: The original evidence anchor.
         source_agent_id: Agent that shared the evidence.
         trust_score: Propagated trust (source trust * decay).
+        original_trust: Trust score from the first time this evidence
+            was shared.  Caps re-sharing to prevent trust inflation.
         shared_at: ISO 8601 UTC timestamp of sharing.
-        accessed_by: Agent IDs that have accessed this evidence.
     """
 
     anchor: EvidenceAnchor
     source_agent_id: str
     trust_score: float
+    original_trust: float = 0.0
     shared_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    accessed_by: list[str] = field(default_factory=list)
 
 
 class CrossAgentEvidenceBridge:
@@ -102,11 +103,21 @@ class CrossAgentEvidenceBridge:
         results: list[SharedEvidence] = []
 
         with self._lock:
+            # Cap trust at the original sharing trust to prevent inflation
+            # when high-trust agents re-share low-trust evidence.
+            prior = self._find_prior_sharing_unlocked(anchor.ref)
+            if prior is not None:
+                propagated_trust = min(propagated_trust, prior.original_trust)
+                original_trust = prior.original_trust
+            else:
+                original_trust = propagated_trust
+
             for target_id in target_agent_ids:
                 se = SharedEvidence(
                     anchor=anchor,
                     source_agent_id=source_agent_id,
                     trust_score=propagated_trust,
+                    original_trust=original_trust,
                     shared_at=shared_at,
                 )
                 self._shared[target_id].append(se)
@@ -134,6 +145,23 @@ class CrossAgentEvidenceBridge:
         return results
 
     # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _find_prior_sharing_unlocked(
+        self, evidence_ref: str,
+    ) -> SharedEvidence | None:
+        """Find the first prior sharing event for this evidence ref.
+
+        Must be called with ``self._lock`` held.
+        """
+        for entries in self._shared.values():
+            for se in entries:
+                if se.anchor.ref == evidence_ref:
+                    return se
+        return None
+
+    # ------------------------------------------------------------------
     # Retrieval
     # ------------------------------------------------------------------
 
@@ -145,19 +173,13 @@ class CrossAgentEvidenceBridge:
         """Get evidence shared *to* a specific agent.
 
         Only returns evidence with ``trust_score >= min_trust``.
-        Records the access in each ``SharedEvidence.accessed_by``.
         """
         with self._lock:
-            items = [
+            return [
                 se
                 for se in self._shared.get(target_agent_id, [])
                 if se.trust_score >= min_trust
             ]
-            # Record access
-            for se in items:
-                if target_agent_id not in se.accessed_by:
-                    se.accessed_by.append(target_agent_id)
-        return items
 
     def get_evidence_lineage(self, evidence_ref: str) -> list[SharedEvidence]:
         """Trace all sharing events for a given evidence ref across agents."""

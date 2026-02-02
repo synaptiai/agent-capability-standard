@@ -7,6 +7,7 @@ state proposals which are merged using a configurable strategy.
 
 from __future__ import annotations
 
+import enum
 import logging
 import os
 import threading
@@ -19,14 +20,21 @@ from .audit import CoordinationAuditLog
 
 logger = logging.getLogger(__name__)
 
-# Supported merge strategies
-STRATEGY_LAST_WRITER_WINS = "last_writer_wins"
-STRATEGY_MERGE_KEYS = "merge_keys"
-STRATEGY_REQUIRE_UNANIMOUS = "require_unanimous"
 
-_VALID_STRATEGIES = frozenset(
-    {STRATEGY_LAST_WRITER_WINS, STRATEGY_MERGE_KEYS, STRATEGY_REQUIRE_UNANIMOUS}
-)
+class SyncStrategy(enum.StrEnum):
+    """Supported merge strategies for barrier resolution."""
+
+    LAST_WRITER_WINS = "last_writer_wins"
+    MERGE_KEYS = "merge_keys"
+    REQUIRE_UNANIMOUS = "require_unanimous"
+
+
+# Backwards-compatible aliases
+STRATEGY_LAST_WRITER_WINS = SyncStrategy.LAST_WRITER_WINS
+STRATEGY_MERGE_KEYS = SyncStrategy.MERGE_KEYS
+STRATEGY_REQUIRE_UNANIMOUS = SyncStrategy.REQUIRE_UNANIMOUS
+
+_VALID_STRATEGIES = frozenset(SyncStrategy)
 
 
 @dataclass(slots=True)
@@ -174,9 +182,10 @@ class SyncPrimitive:
 
             proposals = dict(barrier.proposals)
             participants = tuple(sorted(proposals.keys()))
+            all_participants = frozenset(barrier.participants)
 
         # Check all participants have contributed
-        missing = barrier.participants - set(proposals.keys())
+        missing = all_participants - set(proposals.keys())
         if missing:
             return SyncResult(
                 barrier_id=barrier_id,

@@ -21,6 +21,9 @@ from .registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
 
+# Sentinel agent ID for the orchestration layer itself.
+ORCHESTRATOR_AGENT_ID = "orchestrator"
+
 
 @dataclass(slots=True)
 class DelegationTask:
@@ -152,7 +155,7 @@ class DelegationProtocol:
             },
         )
         self._evidence_store.add_anchor(anchor, capability_id="delegate")
-        result.evidence_anchors.append(anchor)
+        result.evidence_anchors = [anchor]
 
         with self._lock:
             self._tasks[task_id] = task
@@ -161,7 +164,7 @@ class DelegationProtocol:
         # Audit event
         self._audit_log.record(
             event_type="delegation",
-            source_agent_id="orchestrator",
+            source_agent_id=ORCHESTRATOR_AGENT_ID,
             target_agent_ids=[target_agent_id],
             capability_id="delegate",
             details={
@@ -205,11 +208,38 @@ class DelegationProtocol:
                 input_data=dict(input_data) if input_data else {},
                 constraints=dict(constraints) if constraints else {},
             )
+            rejection_reason = "No agent found with required capabilities"
             result = DelegationResult(
                 task_id=task_id,
                 agent_id="",
                 accepted=False,
-                rejection_reason="No agent found with required capabilities",
+                rejection_reason=rejection_reason,
+            )
+            # Evidence and audit for the rejection
+            anchor = EvidenceAnchor(
+                ref=f"delegation:{task_id}",
+                kind="coordination",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                metadata={
+                    "description": description[:100],
+                    "accepted": False,
+                    "rejection_reason": rejection_reason,
+                },
+            )
+            self._evidence_store.add_anchor(anchor, capability_id="delegate")
+            result.evidence_anchors = [anchor]
+            self._audit_log.record(
+                event_type="delegation",
+                source_agent_id=ORCHESTRATOR_AGENT_ID,
+                target_agent_ids=[],
+                capability_id="delegate",
+                details={
+                    "task_id": task_id,
+                    "accepted": False,
+                    "required_capabilities": sorted(caps),
+                    "rejection_reason": rejection_reason,
+                },
+                evidence_refs=[anchor.ref],
             )
             with self._lock:
                 self._tasks[task_id] = task
@@ -237,7 +267,7 @@ class DelegationProtocol:
     ) -> DelegationResult | None:
         """Mark a delegated task as complete with output and evidence.
 
-        Returns the updated result, or None if task_id is unknown.
+        Returns a snapshot of the result, or None if task_id is unknown.
         """
         with self._lock:
             result = self._results.get(task_id)
@@ -245,7 +275,9 @@ class DelegationProtocol:
                 return None
             result.output_data = dict(output_data) if output_data else {}
             if evidence_anchors:
-                result.evidence_anchors.extend(evidence_anchors)
+                result.evidence_anchors = result.evidence_anchors + list(
+                    evidence_anchors
+                )
             # Snapshot under lock for thread-safe audit recording
             agent_id = result.agent_id
             evidence_refs = [a.ref for a in result.evidence_anchors]
@@ -253,7 +285,7 @@ class DelegationProtocol:
         self._audit_log.record(
             event_type="task_complete",
             source_agent_id=agent_id,
-            target_agent_ids=["orchestrator"],
+            target_agent_ids=[ORCHESTRATOR_AGENT_ID],
             capability_id="delegate",
             details={"task_id": task_id},
             evidence_refs=evidence_refs,

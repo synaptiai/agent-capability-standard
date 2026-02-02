@@ -8,9 +8,11 @@ events with full provenance for post-hoc analysis.
 
 from __future__ import annotations
 
+import enum
 import logging
 import os
 import threading
+import types
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -20,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 # Default maximum events retained in memory
 DEFAULT_MAX_EVENTS = 10000
+
+
+class EventType(enum.StrEnum):
+    """Known coordination event types."""
+
+    DELEGATION = "delegation"
+    SYNCHRONIZATION = "synchronization"
+    EVIDENCE_SHARE = "evidence_share"
+    TASK_COMPLETE = "task_complete"
+    ORCHESTRATION_COMPLETE = "orchestration_complete"
+    WORKFLOW_STEP_AUDIT = "workflow_step_audit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +60,9 @@ class CoordinationEvent:
     target_agent_ids: tuple[str, ...]
     capability_id: str
     timestamp: str
-    details: dict[str, Any] = field(default_factory=dict)
+    details: types.MappingProxyType[str, Any] = field(
+        default_factory=lambda: types.MappingProxyType({})
+    )
     evidence_refs: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
@@ -75,6 +90,7 @@ class CoordinationAuditLog:
     def __init__(self, max_events: int = DEFAULT_MAX_EVENTS) -> None:
         self._max_events = max_events
         self._events: deque[CoordinationEvent] = deque(maxlen=max_events)
+        self._total_recorded: int = 0
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -87,7 +103,7 @@ class CoordinationAuditLog:
         source_agent_id: str,
         target_agent_ids: list[str] | tuple[str, ...],
         capability_id: str = "",
-        details: dict[str, Any] | None = None,
+        details: dict[str, Any] | types.MappingProxyType[str, Any] | None = None,
         evidence_refs: list[str] | tuple[str, ...] | None = None,
     ) -> CoordinationEvent:
         """Create and append a new audit event.
@@ -102,11 +118,12 @@ class CoordinationAuditLog:
             target_agent_ids=tuple(target_agent_ids),
             capability_id=capability_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
-            details=dict(details) if details else {},
+            details=types.MappingProxyType(dict(details) if details else {}),
             evidence_refs=tuple(evidence_refs) if evidence_refs else (),
         )
         with self._lock:
             self._events.append(event)
+            self._total_recorded += 1
         logger.debug(
             "Audit: %s from %s -> %s [%s]",
             event_type,
@@ -148,6 +165,18 @@ class CoordinationAuditLog:
                 for e in self._events
                 if e.details.get("task_id") == task_id
             ]
+
+    def get_events_since(self, start_index: int) -> list[CoordinationEvent]:
+        """Return events added at or after *start_index* (0-based).
+
+        The *start_index* is an absolute insertion index (total events
+        ever recorded), so it remains correct even after older events
+        have been evicted from the bounded deque.
+        """
+        with self._lock:
+            evicted = self._total_recorded - len(self._events)
+            offset = max(start_index - evicted, 0)
+            return list(self._events)[offset:]
 
     def to_list(self) -> list[dict[str, Any]]:
         """Serialize all events to a list of dicts."""

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from collections import defaultdict, deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -342,6 +343,7 @@ class EvidenceStore:
         self._max_anchors = (
             max_anchors if max_anchors is not None else self.DEFAULT_MAX_ANCHORS
         )
+        self._lock = threading.Lock()
         # Primary ordered store — deque for O(1) append/popleft
         self._anchors: deque[EvidenceAnchor] = deque()
 
@@ -375,30 +377,31 @@ class EvidenceStore:
             anchor: The evidence anchor to add
             capability_id: Optional capability ID to associate with
         """
-        # Check if we need to evict before adding
-        if len(self._anchors) >= self._max_anchors:
-            self._evict_lowest_priority()
+        with self._lock:
+            # Check if we need to evict before adding
+            if len(self._anchors) >= self._max_anchors:
+                self._evict_lowest_priority()
 
-        # Assign next seq_id
-        seq_id = self._seq_counter
-        self._seq_counter += 1
+            # Assign next seq_id
+            seq_id = self._seq_counter
+            self._seq_counter += 1
 
-        # Add to primary store
-        self._anchors.append(anchor)
+            # Add to primary store
+            self._anchors.append(anchor)
 
-        # Bidirectional identity mappings
-        self._anchor_to_seq[id(anchor)] = seq_id
-        self._seq_to_anchor[seq_id] = anchor
+            # Bidirectional identity mappings
+            self._anchor_to_seq[id(anchor)] = seq_id
+            self._seq_to_anchor[seq_id] = anchor
 
-        # Priority bucket (insertion-ordered deque per priority level)
-        self._priority_buckets[anchor.priority].append(seq_id)
-        self._seq_to_priority[seq_id] = anchor.priority
+            # Priority bucket (insertion-ordered deque per priority level)
+            self._priority_buckets[anchor.priority].append(seq_id)
+            self._seq_to_priority[seq_id] = anchor.priority
 
-        # Secondary indexes (dict-keyed by seq_id for O(1) delete)
-        self._by_kind[anchor.kind][seq_id] = anchor
+            # Secondary indexes (dict-keyed by seq_id for O(1) delete)
+            self._by_kind[anchor.kind][seq_id] = anchor
 
-        if capability_id:
-            self._by_capability[capability_id][seq_id] = anchor
+            if capability_id:
+                self._by_capability[capability_id][seq_id] = anchor
 
     def _evict_lowest_priority(self) -> None:
         """SEC-004: Evict the lowest-priority, oldest anchor from the store.
@@ -472,9 +475,9 @@ class EvidenceStore:
         Returns:
             List of evidence reference strings
         """
-        # Get last n items from deque (deque doesn't support slicing)
-        start_idx = max(0, len(self._anchors) - n)
-        return [anchor.ref for anchor in islice(self._anchors, start_idx, None)]
+        with self._lock:
+            start_idx = max(0, len(self._anchors) - n)
+            return [anchor.ref for anchor in islice(self._anchors, start_idx, None)]
 
     def get_recent_anchors(self, n: int = 10) -> list[EvidenceAnchor]:
         """
@@ -486,9 +489,9 @@ class EvidenceStore:
         Returns:
             List of EvidenceAnchor objects
         """
-        # Get last n items from deque (deque doesn't support slicing)
-        start_idx = max(0, len(self._anchors) - n)
-        return list(islice(self._anchors, start_idx, None))
+        with self._lock:
+            start_idx = max(0, len(self._anchors) - n)
+            return list(islice(self._anchors, start_idx, None))
 
     def get_by_kind(self, kind: str) -> list[EvidenceAnchor]:
         """
@@ -500,7 +503,8 @@ class EvidenceStore:
         Returns:
             List of matching anchors
         """
-        return list(self._by_kind.get(kind, {}).values())
+        with self._lock:
+            return list(self._by_kind.get(kind, {}).values())
 
     def get_for_capability(self, capability_id: str) -> list[EvidenceAnchor]:
         """
@@ -512,7 +516,8 @@ class EvidenceStore:
         Returns:
             List of associated anchors
         """
-        return list(self._by_capability.get(capability_id, {}).values())
+        with self._lock:
+            return list(self._by_capability.get(capability_id, {}).values())
 
     def get_for_capability_output(self, capability_id: str) -> list[str]:
         """
@@ -546,7 +551,8 @@ class EvidenceStore:
         Returns:
             List of matching anchors
         """
-        return [a for a in self._anchors if a.ref.startswith(prefix)]
+        with self._lock:
+            return [a for a in self._anchors if a.ref.startswith(prefix)]
 
     def search_by_metadata(
         self,
@@ -563,24 +569,28 @@ class EvidenceStore:
         Returns:
             List of matching anchors
         """
-        return [a for a in self._anchors if a.metadata.get(key) == value]
+        with self._lock:
+            return [a for a in self._anchors if a.metadata.get(key) == value]
 
     def clear(self) -> None:
         """Clear all evidence from the store."""
-        self._anchors.clear()
-        self._seq_counter = 0
-        self._anchor_to_seq.clear()
-        self._seq_to_anchor.clear()
-        self._priority_buckets.clear()
-        self._seq_to_priority.clear()
-        self._by_kind.clear()
-        self._by_capability.clear()
+        with self._lock:
+            self._anchors.clear()
+            self._seq_counter = 0
+            self._anchor_to_seq.clear()
+            self._seq_to_anchor.clear()
+            self._priority_buckets.clear()
+            self._seq_to_priority.clear()
+            self._by_kind.clear()
+            self._by_capability.clear()
 
     def __len__(self) -> int:
-        return len(self._anchors)
+        with self._lock:
+            return len(self._anchors)
 
     def __iter__(self) -> Iterator[EvidenceAnchor]:
-        return iter(self._anchors)
+        with self._lock:
+            return iter(list(self._anchors))
 
     def to_list(self) -> list[dict[str, Any]]:
         """
@@ -589,12 +599,13 @@ class EvidenceStore:
         Returns:
             List of anchor dictionaries
         """
-        return [
-            {
-                "ref": a.ref,
-                "kind": a.kind,
-                "timestamp": a.timestamp,
-                "metadata": a.metadata,
-            }
-            for a in self._anchors
-        ]
+        with self._lock:
+            return [
+                {
+                    "ref": a.ref,
+                    "kind": a.kind,
+                    "timestamp": a.timestamp,
+                    "metadata": a.metadata,
+                }
+                for a in self._anchors
+            ]

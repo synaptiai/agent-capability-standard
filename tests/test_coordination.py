@@ -8,17 +8,16 @@ Tests cover the 5 acceptance criteria from Issue #76:
 - AC4: Coordination audit trail (TestCoordinationAuditLog)
 - AC3 cont: Barrier synchronization (TestSyncPrimitive)
 - AC5: End-to-end orchestration (TestOrchestrationRuntime)
+- Concurrency: Thread-safety validation (TestConcurrency)
 """
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from grounded_agency import (
     AgentRegistry,
@@ -221,6 +220,14 @@ class TestAgentRegistry:
         with pytest.raises(ValueError, match="trust_score"):
             agent_registry.register("bad", {"retrieve"}, trust_score=-0.1)
 
+    def test_agent_descriptor_is_frozen(
+        self, agent_registry: AgentRegistry,
+    ) -> None:
+        """AgentDescriptor cannot be modified after creation."""
+        desc = agent_registry.register("a1", {"retrieve"}, trust_score=0.5)
+        with pytest.raises(AttributeError):
+            desc.trust_score = 5.0  # type: ignore[misc]
+
 
 # ---------------------------------------------------------------------------
 # AC2: Typed Delegation with Contract Enforcement
@@ -294,13 +301,36 @@ class TestDelegationProtocol:
     ) -> None:
         """Auto-delegation fails when no agent has required capabilities."""
         agent_registry.register("worker", {"retrieve"})
-        # Use a real ontology capability that no agent has
         result = delegation.auto_delegate(
             description="Impossible task",
             required_capabilities={"simulate"},
         )
         assert result.accepted is False
         assert "No agent found" in result.rejection_reason
+
+    def test_auto_delegate_no_candidates_records_audit(
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
+        audit_log: CoordinationAuditLog,
+        evidence_store: EvidenceStore,
+    ) -> None:
+        """Auto-delegation rejection records audit event and evidence."""
+        agent_registry.register("worker", {"retrieve"})
+        result = delegation.auto_delegate(
+            description="Impossible task",
+            required_capabilities={"simulate"},
+        )
+        assert result.accepted is False
+        # Should have evidence even for rejections
+        assert len(result.evidence_anchors) >= 1
+        # Should have an audit event
+        events = audit_log.get_events_by_type("delegation")
+        assert len(events) >= 1
+        rejection_event = [
+            e for e in events if not e.details.get("accepted", True)
+        ]
+        assert len(rejection_event) >= 1
 
     def test_auto_delegate_forwards_input_data(
         self,
@@ -446,9 +476,9 @@ class TestCrossAgentEvidenceBridge:
         assert len(evidence_bridge.get_shared_evidence("target", min_trust=0.2)) == 1
 
     @pytest.mark.parametrize("trust_decay,expected_trust", [
-        (0.0, 0.0),    # all trust destroyed
         (1.0, 0.8),    # trust fully preserved
         (0.5, 0.4),    # half decay
+        (0.1, 0.08),   # near-zero decay
     ])
     def test_trust_decay_boundaries(
         self,
@@ -459,7 +489,7 @@ class TestCrossAgentEvidenceBridge:
         trust_decay: float,
         expected_trust: float,
     ) -> None:
-        """Trust decay boundary values: 0.0, 0.5, and 1.0."""
+        """Trust decay boundary values: 0.1, 0.5, and 1.0."""
         bridge = CrossAgentEvidenceBridge(
             agent_registry, evidence_store, audit_log, trust_decay=trust_decay,
         )
@@ -472,6 +502,38 @@ class TestCrossAgentEvidenceBridge:
             target_agent_ids=["target"],
         )
         assert abs(shared[0].trust_score - expected_trust) < 1e-9
+
+    def test_trust_inflation_prevented(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+        make_anchor: Callable[..., EvidenceAnchor],
+    ) -> None:
+        """Re-sharing evidence cannot inflate trust above original level."""
+        bridge = CrossAgentEvidenceBridge(
+            agent_registry, evidence_store, audit_log, trust_decay=0.9,
+        )
+        agent_registry.register("low-trust", {"retrieve"}, trust_score=0.3)
+        agent_registry.register("high-trust", {"search"}, trust_score=1.0)
+        agent_registry.register("final", {"generate"})
+
+        anchor = make_anchor("test:inflation")
+        # Low-trust agent shares: trust = 0.3 * 0.9 = 0.27
+        bridge.share_evidence(
+            anchor=anchor,
+            source_agent_id="low-trust",
+            target_agent_ids=["high-trust"],
+        )
+
+        # High-trust agent re-shares: would be 1.0 * 0.9 = 0.9 without cap
+        reshared = bridge.share_evidence(
+            anchor=anchor,
+            source_agent_id="high-trust",
+            target_agent_ids=["final"],
+        )
+        # Trust must be capped at exactly 0.27, not inflated to 0.9
+        assert abs(reshared[0].trust_score - 0.27) < 1e-9
 
     def test_broadcast_to_all_agents(
         self,
@@ -522,25 +584,6 @@ class TestCrossAgentEvidenceBridge:
                 anchor=make_anchor("test:orphan"),
                 source_agent_id="ghost",
             )
-
-    def test_access_tracking(
-        self,
-        evidence_bridge: CrossAgentEvidenceBridge,
-        agent_registry: AgentRegistry,
-        make_anchor: Callable[..., EvidenceAnchor],
-    ) -> None:
-        """Accessing shared evidence records the accessor's agent_id."""
-        agent_registry.register("source", {"retrieve"})
-        agent_registry.register("target", {"search"})
-
-        evidence_bridge.share_evidence(
-            anchor=make_anchor("test:access"),
-            source_agent_id="source",
-            target_agent_ids=["target"],
-        )
-        items = evidence_bridge.get_shared_evidence("target")
-        assert len(items) == 1
-        assert "target" in items[0].accessed_by
 
 
 # ---------------------------------------------------------------------------
@@ -619,6 +662,42 @@ class TestCoordinationAuditLog:
         event = audit_log.record("delegation", "a", ["b"])
         with pytest.raises(AttributeError):
             event.event_type = "modified"  # type: ignore[misc]
+
+    def test_event_details_immutability(
+        self, audit_log: CoordinationAuditLog,
+    ) -> None:
+        """CoordinationEvent.details cannot be mutated after creation."""
+        event = audit_log.record(
+            "delegation", "a", ["b"], details={"key": "value"},
+        )
+        with pytest.raises(TypeError):
+            event.details["key"] = "modified"  # type: ignore[index]
+
+    def test_get_events_since(self, audit_log: CoordinationAuditLog) -> None:
+        """get_events_since returns only events after a given index."""
+        for i in range(5):
+            audit_log.record("test", f"agent-{i}", [])
+        events = audit_log.get_events_since(3)
+        assert len(events) == 2
+        assert events[0].source_agent_id == "agent-3"
+
+    def test_get_events_since_with_eviction(self) -> None:
+        """get_events_since returns correct events after deque eviction."""
+        log = CoordinationAuditLog(max_events=5)
+        # Record 10 events (first 5 will be evicted)
+        for i in range(10):
+            log.record(
+                event_type="test",
+                source_agent_id=f"agent-{i}",
+                target_agent_ids=[],
+            )
+        # After 10 records into maxlen=5, events 0-4 are evicted.
+        # Requesting events since index 7 (absolute) should return events 7, 8, 9.
+        events = log.get_events_since(7)
+        assert len(events) == 3
+        assert events[0].source_agent_id == "agent-7"
+        assert events[1].source_agent_id == "agent-8"
+        assert events[2].source_agent_id == "agent-9"
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +831,35 @@ class TestSyncPrimitive:
 
 
 # ---------------------------------------------------------------------------
+# OrchestrationConfig validation
+# ---------------------------------------------------------------------------
+
+class TestOrchestrationConfig:
+    """Validate OrchestrationConfig bounds checking."""
+
+    def test_valid_config(self) -> None:
+        """Default config is valid."""
+        config = OrchestrationConfig()
+        assert config.trust_decay == 0.9
+
+    @pytest.mark.parametrize("trust_decay", [0.0, -0.1, 1.5])
+    def test_invalid_trust_decay(self, trust_decay: float) -> None:
+        """trust_decay must be in (0.0, 1.0]."""
+        with pytest.raises(ValueError, match="trust_decay"):
+            OrchestrationConfig(trust_decay=trust_decay)
+
+    def test_invalid_sync_timeout(self) -> None:
+        """default_sync_timeout must be > 0."""
+        with pytest.raises(ValueError, match="default_sync_timeout"):
+            OrchestrationConfig(default_sync_timeout=0)
+
+    def test_invalid_audit_max_events(self) -> None:
+        """audit_max_events must be > 0."""
+        with pytest.raises(ValueError, match="audit_max_events"):
+            OrchestrationConfig(audit_max_events=0)
+
+
+# ---------------------------------------------------------------------------
 # AC5: End-to-End Orchestration
 # ---------------------------------------------------------------------------
 
@@ -822,6 +930,28 @@ class TestOrchestrationRuntime:
         event_types = {e.event_type for e in result.audit_events}
         assert "delegation" in event_types
         assert "orchestration_complete" in event_types
+
+    def test_orchestrate_audit_events_scoped(
+        self, runtime: OrchestrationRuntime,
+    ) -> None:
+        """Orchestration audit_events only contain events from this run."""
+        runtime.register_agent("worker", {"retrieve"})
+        # First orchestration
+        runtime.orchestrate(task_goal="Run 1")
+        # Second orchestration should NOT include first run's events
+        result2 = runtime.orchestrate(task_goal="Run 2")
+        # All events should be from run 2 (no "Run 1" leakage)
+        assert len(result2.audit_events) >= 1
+        for event in result2.audit_events:
+            if event.details.get("task_goal"):
+                assert event.details["task_goal"] != "Run 1"
+        # Verify run 2 events ARE present
+        run2_goals = [
+            e.details["task_goal"]
+            for e in result2.audit_events
+            if e.details.get("task_goal")
+        ]
+        assert "Run 2" in run2_goals
 
     def test_orchestrate_collects_evidence(
         self, runtime: OrchestrationRuntime,
@@ -964,3 +1094,102 @@ class TestExecuteWorkflowStep:
         result = runtime.execute_workflow_step(step, ctx)
         assert result.status == StepStatus.COMPLETED
         assert result.output == ctx
+
+
+# ---------------------------------------------------------------------------
+# Concurrency tests
+# ---------------------------------------------------------------------------
+
+class TestConcurrency:
+    """Thread-safety validation for shared state operations."""
+
+    def test_concurrent_evidence_store_add(
+        self, evidence_store: EvidenceStore,
+    ) -> None:
+        """Concurrent add_anchor calls do not corrupt the store."""
+        n_threads = 8
+        n_per_thread = 50
+
+        def add_batch(thread_id: int) -> int:
+            for i in range(n_per_thread):
+                anchor = EvidenceAnchor(
+                    ref=f"thread:{thread_id}:item:{i}",
+                    kind="tool_output",
+                    timestamp="2025-01-01T00:00:00+00:00",
+                )
+                evidence_store.add_anchor(anchor)
+            return n_per_thread
+
+        with ThreadPoolExecutor(max_workers=n_threads) as pool:
+            futures = [pool.submit(add_batch, t) for t in range(n_threads)]
+            for f in as_completed(futures):
+                f.result()  # raises if thread hit an exception
+
+        assert len(evidence_store) == n_threads * n_per_thread
+
+    def test_concurrent_audit_log_record(self) -> None:
+        """Concurrent audit log records do not lose events."""
+        log = CoordinationAuditLog(max_events=10000)
+        n_threads = 8
+        n_per_thread = 50
+
+        def record_batch(thread_id: int) -> int:
+            for i in range(n_per_thread):
+                log.record(
+                    event_type="test",
+                    source_agent_id=f"agent-{thread_id}",
+                    target_agent_ids=[f"target-{i}"],
+                )
+            return n_per_thread
+
+        with ThreadPoolExecutor(max_workers=n_threads) as pool:
+            futures = [pool.submit(record_batch, t) for t in range(n_threads)]
+            for f in as_completed(futures):
+                f.result()
+
+        assert len(log) == n_threads * n_per_thread
+
+    def test_concurrent_agent_registration(
+        self, capability_registry: CapabilityRegistry,
+    ) -> None:
+        """Concurrent agent registrations do not corrupt the registry."""
+        registry = AgentRegistry(capability_registry)
+        n_threads = 8
+
+        def register_agent(thread_id: int) -> None:
+            registry.register(
+                agent_id=f"agent-{thread_id}",
+                capabilities={"retrieve"},
+                trust_score=0.5 + thread_id * 0.05,
+            )
+
+        with ThreadPoolExecutor(max_workers=n_threads) as pool:
+            futures = [pool.submit(register_agent, t) for t in range(n_threads)]
+            for f in as_completed(futures):
+                f.result()
+
+        assert registry.agent_count == n_threads
+
+    def test_concurrent_barrier_contributions(
+        self,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+    ) -> None:
+        """Concurrent barrier contributions are all recorded."""
+        sync = SyncPrimitive(evidence_store, audit_log)
+        n_participants = 8
+        participants = [f"agent-{i}" for i in range(n_participants)]
+        barrier = sync.create_barrier(participants)
+
+        def contribute(agent_id: str) -> bool:
+            return sync.contribute(
+                barrier.barrier_id, agent_id, {"from": agent_id},
+            )
+
+        with ThreadPoolExecutor(max_workers=n_participants) as pool:
+            futures = [pool.submit(contribute, p) for p in participants]
+            results = [f.result() for f in as_completed(futures)]
+
+        assert all(results)
+        result = sync.resolve(barrier.barrier_id)
+        assert result.synchronized is True

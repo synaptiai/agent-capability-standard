@@ -27,6 +27,26 @@ from ._types import (
 from .adapter import GroundedAgentAdapter, GroundedAgentConfig
 from .capabilities.mapper import ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
+from .coordination import (
+    ORCHESTRATOR_AGENT_ID,
+    AgentDescriptor,
+    AgentRegistry,
+    CoordinationAuditLog,
+    CoordinationEvent,
+    CrossAgentEvidenceBridge,
+    DelegationProtocol,
+    DelegationResult,
+    DelegationTask,
+    EventType,
+    OrchestrationConfig,
+    OrchestrationResult,
+    OrchestrationRuntime,
+    SharedEvidence,
+    SyncBarrier,
+    SyncPrimitive,
+    SyncResult,
+    SyncStrategy,
+)
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
@@ -39,23 +59,6 @@ from .workflows.engine import (
     WorkflowStepResult,
 )
 from .workflows.tracer import ConformanceReport, StepTrace, WorkflowTracer
-from .coordination import (
-    AgentDescriptor,
-    AgentRegistry,
-    CoordinationAuditLog,
-    CoordinationEvent,
-    CrossAgentEvidenceBridge,
-    DelegationProtocol,
-    DelegationResult,
-    DelegationTask,
-    OrchestrationConfig,
-    OrchestrationResult,
-    OrchestrationRuntime,
-    SharedEvidence,
-    SyncBarrier,
-    SyncPrimitive,
-    SyncResult,
-)
 
 # Configure package-level logger
 logger = logging.getLogger("grounded_agency")
@@ -109,6 +112,9 @@ __all__ = [
     "SharedEvidence",
     "CoordinationAuditLog",
     "CoordinationEvent",
+    "EventType",
+    "SyncStrategy",
+    "ORCHESTRATOR_AGENT_ID",
     # Logging
     "logger",
 ]

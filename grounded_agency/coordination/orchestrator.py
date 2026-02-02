@@ -19,7 +19,7 @@ from ..capabilities.registry import CapabilityRegistry
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
 from ..workflows.engine import WorkflowStep, WorkflowStepResult
 from .audit import CoordinationAuditLog, CoordinationEvent
-from .delegation import DelegationProtocol, DelegationResult
+from .delegation import ORCHESTRATOR_AGENT_ID, DelegationProtocol, DelegationResult
 from .evidence_bridge import CrossAgentEvidenceBridge
 from .registry import AgentRegistry
 from .synchronization import SyncPrimitive, SyncResult
@@ -32,18 +32,30 @@ class OrchestrationConfig:
     """Configuration for the orchestration runtime.
 
     Attributes:
-        trust_decay: Multiplicative factor for trust propagation.
-        default_sync_timeout: Default barrier timeout in seconds.
-        max_delegation_retries: Max retries for failed delegations.
+        trust_decay: Multiplicative factor for trust propagation (0, 1].
+        default_sync_timeout: Default barrier timeout in seconds (> 0).
         sync_strategy: Default merge strategy for synchronization.
-        audit_max_events: Maximum audit events retained in memory.
+        audit_max_events: Maximum audit events retained in memory (> 0).
     """
 
     trust_decay: float = 0.9
     default_sync_timeout: float = 60.0
-    max_delegation_retries: int = 2
     sync_strategy: str = "last_writer_wins"
     audit_max_events: int = 10000
+
+    def __post_init__(self) -> None:
+        if not (0.0 < self.trust_decay <= 1.0):
+            raise ValueError(
+                f"trust_decay must be in (0.0, 1.0], got {self.trust_decay}"
+            )
+        if self.default_sync_timeout <= 0:
+            raise ValueError(
+                f"default_sync_timeout must be > 0, got {self.default_sync_timeout}"
+            )
+        if self.audit_max_events <= 0:
+            raise ValueError(
+                f"audit_max_events must be > 0, got {self.audit_max_events}"
+            )
 
 
 @dataclass(slots=True)
@@ -181,6 +193,7 @@ class OrchestrationRuntime:
         """
         result = OrchestrationResult(success=False, task_goal=task_goal)
         all_evidence: list[EvidenceAnchor] = []
+        audit_start_idx = len(self._audit_log)
 
         # Resolve agent pool
         if agent_pool is None:
@@ -298,7 +311,7 @@ class OrchestrationRuntime:
 
         self._audit_log.record(
             event_type="orchestration_complete",
-            source_agent_id="orchestrator",
+            source_agent_id=ORCHESTRATOR_AGENT_ID,
             target_agent_ids=delegated_agents,
             capability_id="audit",
             details={
@@ -312,7 +325,7 @@ class OrchestrationRuntime:
         result.steps_executed += 1
 
         result.evidence_anchors = all_evidence
-        result.audit_events = self._audit_log.get_events()
+        result.audit_events = self._audit_log.get_events_since(audit_start_idx)
         result.success = verification_passed
 
         logger.info(
@@ -403,7 +416,7 @@ class OrchestrationRuntime:
         if step.capability == "audit":
             self._audit_log.record(
                 event_type="workflow_step_audit",
-                source_agent_id="orchestrator",
+                source_agent_id=ORCHESTRATOR_AGENT_ID,
                 target_agent_ids=[],
                 capability_id="audit",
                 details=ctx,

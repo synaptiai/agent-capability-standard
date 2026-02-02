@@ -20,7 +20,7 @@ from ..capabilities.registry import CapabilityRegistry
 logger = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class AgentDescriptor:
     """Describes a registered agent and its declared capabilities.
 
