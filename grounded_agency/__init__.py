@@ -39,6 +39,23 @@ from .workflows.engine import (
     WorkflowStepResult,
 )
 from .workflows.tracer import ConformanceReport, StepTrace, WorkflowTracer
+from .coordination import (
+    AgentDescriptor,
+    AgentRegistry,
+    CoordinationAuditLog,
+    CoordinationEvent,
+    CrossAgentEvidenceBridge,
+    DelegationProtocol,
+    DelegationResult,
+    DelegationTask,
+    OrchestrationConfig,
+    OrchestrationResult,
+    OrchestrationRuntime,
+    SharedEvidence,
+    SyncBarrier,
+    SyncPrimitive,
+    SyncResult,
+)
 
 # Configure package-level logger
 logger = logging.getLogger("grounded_agency")
@@ -76,6 +93,22 @@ __all__ = [
     "WorkflowTracer",
     "ConformanceReport",
     "StepTrace",
+    # Coordination
+    "OrchestrationRuntime",
+    "OrchestrationConfig",
+    "OrchestrationResult",
+    "AgentRegistry",
+    "AgentDescriptor",
+    "DelegationProtocol",
+    "DelegationTask",
+    "DelegationResult",
+    "SyncPrimitive",
+    "SyncBarrier",
+    "SyncResult",
+    "CrossAgentEvidenceBridge",
+    "SharedEvidence",
+    "CoordinationAuditLog",
+    "CoordinationEvent",
     # Logging
     "logger",
 ]
