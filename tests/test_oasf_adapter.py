@@ -37,7 +37,7 @@ class TestOASFAdapterLoading:
         assert adapter.oasf_version == "0.8.0"
 
     def test_mapping_version(self, adapter: OASFAdapter) -> None:
-        assert adapter.mapping_version == "1.0.0"
+        assert adapter.mapping_version == "1.1.0"
 
     def test_total_mappings_includes_subcategories(self, adapter: OASFAdapter) -> None:
         # 15 categories + subcategories should be > 15
@@ -194,3 +194,142 @@ class TestListOperations:
         mapping = adapter.get_mapping("109")
         assert mapping is not None
         assert mapping.skill_name == "Text Classification"
+
+
+class TestGAExtensions:
+    """Test GA extension codes for unmapped capabilities."""
+
+    @pytest.mark.parametrize(
+        "ga_code, expected_capability",
+        [
+            ("GA-001", "attribute"),
+            ("GA-002", "integrate"),
+            ("GA-003", "recall"),
+            ("GA-004", "receive"),
+            ("GA-005", "send"),
+            ("GA-006", "transition"),
+        ],
+    )
+    def test_each_ga_extension_translates(
+        self, adapter: OASFAdapter, ga_code: str, expected_capability: str
+    ) -> None:
+        """Every GA extension code should translate to its expected capability."""
+        result = adapter.translate(ga_code)
+        assert result.mapping.capabilities == (expected_capability,)
+        assert result.mapping.mapping_type == "ga_extension"
+
+    def test_ga_send_is_high_risk(self, adapter: OASFAdapter) -> None:
+        """GA-005 (send) should be high risk since send requires checkpoint."""
+        result = adapter.translate("GA-005")
+        assert result.max_risk == "high"
+        assert result.requires_checkpoint is True
+
+    def test_list_ga_extensions_count(self, adapter: OASFAdapter) -> None:
+        extensions = adapter.list_ga_extensions()
+        assert len(extensions) == 6
+
+    def test_ga_extension_count_property(self, adapter: OASFAdapter) -> None:
+        assert adapter.ga_extension_count == 6
+
+    def test_ga_codes_excluded_from_list_categories(self, adapter: OASFAdapter) -> None:
+        """GA codes should NOT appear in list_categories() — only OASF categories."""
+        category_codes = {c.skill_code for c in adapter.list_categories()}
+        ga_codes = {ext.skill_code for ext in adapter.list_ga_extensions()}
+        assert category_codes.isdisjoint(ga_codes), (
+            f"GA codes found in categories: {category_codes & ga_codes}"
+        )
+
+    def test_ga_extensions_included_in_list_all_mappings(
+        self, adapter: OASFAdapter
+    ) -> None:
+        """GA extensions should appear in list_all_mappings()."""
+        all_mappings = adapter.list_all_mappings()
+        ga_entries = [m for m in all_mappings if m.mapping_type == "ga_extension"]
+        assert len(ga_entries) == 6
+
+    def test_reverse_lookup_includes_ga_codes(self, adapter: OASFAdapter) -> None:
+        """Reverse lookup for 'attribute' should include GA-001."""
+        codes = adapter.reverse_lookup("attribute")
+        assert "GA-001" in codes
+
+    def test_unknown_ga_code_raises(self, adapter: OASFAdapter) -> None:
+        """An invalid GA-prefixed code should raise UnknownSkillError."""
+        with pytest.raises(UnknownSkillError):
+            adapter.translate("GA-999")
+
+    def test_all_unmapped_have_ga_extension(self, adapter: OASFAdapter) -> None:
+        """Every unmapped capability should have a GA extension entry."""
+        unmapped = adapter.unmapped_capabilities()
+        extensions = adapter.list_ga_extensions()
+        extension_caps = {cap for ext in extensions for cap in ext.capabilities}
+        for cap_id in unmapped:
+            assert cap_id in extension_caps, (
+                f"Unmapped capability '{cap_id}' has no GA extension"
+            )
+
+
+class TestCoverageReport:
+    """Test coverage introspection methods."""
+
+    def test_unmapped_list_matches_expected_set(self, adapter: OASFAdapter) -> None:
+        unmapped = adapter.unmapped_capabilities()
+        assert len(unmapped) == 6
+        expected = {"attribute", "integrate", "recall", "receive", "send", "transition"}
+        assert set(unmapped) == expected
+
+    def test_partial_dict_has_expected_entries(self, adapter: OASFAdapter) -> None:
+        partial = adapter.partial_capabilities()
+        assert len(partial) == 7
+        expected = {
+            "checkpoint",
+            "simulate",
+            "inquire",
+            "synchronize",
+            "state",
+            "ground",
+            "rollback",
+        }
+        assert set(partial.keys()) == expected
+
+    def test_partial_capabilities_have_valid_oasf_codes(
+        self, adapter: OASFAdapter
+    ) -> None:
+        """Each partial capability must reference valid, non-empty OASF codes."""
+        partial = adapter.partial_capabilities()
+        for cap_id, oasf_codes in partial.items():
+            assert len(oasf_codes) > 0, (
+                f"Partial capability '{cap_id}' has empty oasf_codes"
+            )
+            for code in oasf_codes:
+                mapping = adapter.get_mapping(code)
+                assert mapping is not None, (
+                    f"Partial capability '{cap_id}' references unknown OASF code '{code}'"
+                )
+
+    def test_coverage_report_totals(self, adapter: OASFAdapter) -> None:
+        report = adapter.coverage_report()
+        assert report["total_capabilities"] == 36
+        assert report["unmapped_count"] == 6
+        assert report["partial_count"] == 7
+        assert report["fully_mapped"] == 23
+
+    def test_total_capabilities_matches_registry(self, adapter: OASFAdapter) -> None:
+        """The hardcoded total in coverage_report() must match the actual ontology."""
+        report = adapter.coverage_report()
+        actual_count = adapter._registry.capability_count
+        assert report["total_capabilities"] == actual_count, (
+            f"coverage_report() hardcodes {report['total_capabilities']} "
+            f"but ontology has {actual_count} capabilities"
+        )
+
+    def test_coverage_report_includes_ga_extension_count(
+        self, adapter: OASFAdapter
+    ) -> None:
+        report = adapter.coverage_report()
+        assert "ga_extension_count" in report
+        assert report["ga_extension_count"] == 6
+
+    def test_coverage_report_includes_oasf_version(self, adapter: OASFAdapter) -> None:
+        report = adapter.coverage_report()
+        assert report["oasf_version"] == "0.8.0"
+        assert report["mapping_version"] == "1.1.0"

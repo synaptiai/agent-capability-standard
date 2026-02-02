@@ -3,7 +3,7 @@
 **Project:** Agent Capability Standard (Grounded Agency)
 **Version:** 2.0.0 (36-capability model)
 **Date:** 2026-01-30
-**Last Updated:** 2026-02-01
+**Last Updated:** 2026-02-02
 **Maintainer:** Grounded Agency Team
 
 ### Revision History
@@ -12,6 +12,7 @@
 |------|--------|--------|
 | 2026-01-30 | Initial register with 14 debt items | Automated analysis |
 | 2026-02-01 | 12 of 14 items closed (PRs #89–#93); TD-006 and TD-010 remain open | Post-remediation review |
+| 2026-02-02 | TD-010 closed (GA extensions + coverage gaps); 13 of 14 items closed; TD-006 remains open | Issue #69 |
 
 ---
 
@@ -444,7 +445,7 @@ Additionally, several OASF-to-GA mappings use `composition` mapping type, meanin
 
 **Effort:** Large (1-2 weeks)
 
-**Status:** **Open** -- OASF mapping gaps depend on external standard evolution; adapter patterns documented.
+**Status:** **Closed** (Issue #69) -- GA extension mechanism wraps 6 unmapped capabilities with synthetic `GA-` codes; `coverage_gaps` section documents all gaps structurally; 4 new `OASFAdapter` methods for coverage introspection; 11 new tests.
 
 ---
 
@@ -614,19 +615,19 @@ This file is not in `.gitignore`, meaning it could be accidentally committed. It
 |----------|----------|--------|---------------|------------|
 | Critical | 2 | 2 | 0 | -- |
 | High | 3 | 3 | 0 | -- |
-| Medium | 5 | 4 | 1 | TD-010 |
+| Medium | 5 | 5 | 0 | -- |
 | Low | 4 | 3 | 1 | TD-006 |
-| **Total** | **14** | **12** | **2** | |
+| **Total** | **14** | **13** | **1** | |
 
-**Debt reduction: 85.7% (12/14 items closed)**
+**Debt reduction: 92.9% (13/14 items closed)**
 
 ### Distribution Chart (Remaining)
 
 ```
 Critical  [-------------]  0 items   (0%)
 High      [-------------]  0 items   (0%)
-Medium    [#------------]  1 item    (50%)   TD-010 (OASF gaps)
-Low       [#------------]  1 item    (50%)   TD-006 (workflow engine)
+Medium    [-------------]  0 items   (0%)
+Low       [#------------]  1 item    (100%)  TD-006 (workflow engine)
           +-+-+-+-+-+-+-+
           0 1 2 3 4 5 6
 ```
@@ -635,7 +636,7 @@ Low       [#------------]  1 item    (50%)   TD-006 (workflow engine)
 
 | Category | Original | Closed | Remaining | Open Items |
 |----------|----------|--------|-----------|------------|
-| Architecture | 3 | 1 | 2 | TD-006, TD-010 |
+| Architecture | 3 | 2 | 1 | TD-006 |
 | Code Quality | 3 | 3 | 0 | -- |
 | Testing | 3 | 3 | 0 | -- |
 | Infrastructure | 3 | 3 | 0 | -- |
@@ -659,7 +660,7 @@ Low       [#------------]  1 item    (50%)   TD-006 (workflow engine)
 | TD-007 | Transform Path References | Small | 1-2 | **Closed** |
 | TD-008 | License Mismatch | Small | 1-2 | **Closed** |
 | TD-009 | No CI Pipeline | Medium | 3-5 | **Closed** |
-| TD-010 | OASF Mapping Completeness | Large | 5-10 | Open |
+| TD-010 | OASF Mapping Completeness | Large | 5-10 | **Closed** |
 | TD-011 | Checkpoint Persistence | Medium | 3-5 | **Closed** |
 | TD-012 | No YAML Schema Validation | Large | 5-10 | **Closed** |
 | TD-013 | Bash Classifier False Positives | Medium | 3-5 | **Closed** |
@@ -671,9 +672,9 @@ Low       [#------------]  1 item    (50%)   TD-006 (workflow engine)
 |--------------|----------|--------|-----------|---------------------|
 | Small (1-2 days) | 5 | 5 | 0 | 0 |
 | Medium (3-5 days) | 5 | 5 | 0 | 0 |
-| Large (1-2 weeks) | 3 | 2 | 1 (TD-010) | 5-10 |
+| Large (1-2 weeks) | 3 | 3 | 0 | 0 |
 | XL (2+ weeks) | 1 | 0 | 1 (TD-006) | 10+ |
-| **Total** | **14** | **12** | **2** | **~15-20 days** |
+| **Total** | **14** | **13** | **1** | **~10+ days** |
 
 ---
 
@@ -744,11 +745,11 @@ Items are grouped into sprints based on severity, dependency relationships, and 
 
 ---
 
-### Sprint 4 (P3): Strategic -- Interop, Schemas & Workflow Engine -- **PARTIALLY COMPLETE**
+### Sprint 4 (P3): Strategic -- Interop, Schemas & Workflow Engine -- **3 of 4 COMPLETE**
 
 **Goal:** Address long-term architectural debt and standards interoperability.
 **Timeline:** Week 9-14 (or ongoing backlog)
-**Total Effort:** 20-30+ days (15-20 days remaining)
+**Total Effort:** 20-30+ days (10+ days remaining)
 
 | ID | Title | Effort | Rationale |
 |----|-------|--------|-----------|
@@ -759,7 +760,7 @@ Items are grouped into sprints based on severity, dependency relationships, and 
 
 **Acceptance Criteria:**
 - [ ] Workflow engine MVP: validation mode traces agent actions against workflow definitions. **(TD-006 -- Open)**
-- [ ] OASF compatibility adapter wraps unmapped GA capabilities. **(TD-010 -- Open)**
+- [x] OASF compatibility adapter wraps unmapped GA capabilities. **(TD-010 -- Closed)**
 - [x] JSON Schema published for `capability_ontology.yaml` and `workflow_catalog.yaml`. **(TD-012 -- Closed)**
 - [x] Transform references validated by existing or new validation tool. **(TD-007 -- Closed)**
 
@@ -793,7 +794,7 @@ Following the industry-standard technical debt management guideline, we recommen
 | Sprint 1 (P0) | 1-2 | TD-008, TD-009, TD-014 | **Completed** | 21% (3/14 items) |
 | Sprint 2 (P1) | 3-5 | TD-003, TD-011, TD-001 | **Completed** | 43% (6/14 items) |
 | Sprint 3 (P2) | 6-8 | TD-005, TD-004, TD-002, TD-013 | **Completed** | 71% (10/14 items) |
-| Sprint 4 (P3) | 9-14 | TD-006, TD-010, TD-012, TD-007 | **Partial** (2/4) | 85.7% (12/14 items) |
+| Sprint 4 (P3) | 9-14 | TD-006, TD-010, TD-012, TD-007 | **Partial** (3/4) | 92.9% (13/14 items) |
 
 #### Tracking & Governance
 
@@ -806,4 +807,4 @@ Following the industry-standard technical debt management guideline, we recommen
 
 *This register should be reviewed and updated at the start of each sprint. Items may be added, re-prioritized, or closed as the codebase evolves.*
 
-*Last updated: 2026-02-01 | 85.7% debt reduction achieved (12/14 items closed)*
+*Last updated: 2026-02-02 | 92.9% debt reduction achieved (13/14 items closed)*

@@ -47,7 +47,7 @@ class OASFMapping:
     skill_code: str
     skill_name: str
     capabilities: tuple[str, ...]
-    mapping_type: Literal["direct", "domain", "composition", "workflow"]
+    mapping_type: Literal["direct", "domain", "composition", "workflow", "ga_extension"]
     domain_hint: str | None = None
     workflow: str | None = None
     notes: str | None = None
@@ -116,7 +116,7 @@ class OASFAdapter:
         self._build_index()
 
     def _build_index(self) -> None:
-        """Build a flat lookup index from all categories and subcategories."""
+        """Build a flat lookup index from all categories, subcategories, and GA extensions."""
         assert self._raw is not None
         self._index = {}
         categories: dict[str, Any] = self._raw.get("categories", {})
@@ -128,8 +128,12 @@ class OASFAdapter:
             for sub_code, sub_data in cat_data.get("subcategories", {}).items():
                 self._index_entry(str(sub_code), sub_data)
 
+        # Index GA extensions (synthetic codes for unmapped capabilities)
+        for ga_code, ga_data in self._raw.get("ga_extensions", {}).items():
+            self._index_entry(str(ga_code), ga_data)
+
     def _index_entry(self, code: str, data: dict[str, Any]) -> None:
-        """Index a single category or subcategory entry."""
+        """Index a single mapping entry (category, subcategory, or GA extension)."""
         assert self._index is not None
         capabilities = data.get("capabilities", [])
         if not capabilities:
@@ -230,11 +234,11 @@ class OASFAdapter:
         ]
 
     def list_all_mappings(self) -> list[OASFMapping]:
-        """List all mappings (categories and subcategories).
+        """List all mappings (categories, subcategories, and GA extensions).
 
         Returns mappings in YAML source order (categories first, then
-        subcategories within each category). Order is deterministic on
-        Python 3.7+.
+        subcategories within each category, then GA extensions). Order is
+        deterministic on Python 3.7+.
         """
         self._ensure_loaded()
         assert self._index is not None
@@ -306,7 +310,73 @@ class OASFAdapter:
 
     @property
     def total_mapping_count(self) -> int:
-        """Total number of mapped entries (categories + subcategories)."""
+        """Total number of mapped entries (categories + subcategories + GA extensions)."""
         self._ensure_loaded()
         assert self._index is not None
         return len(self._index)
+
+    @property
+    def ga_extension_count(self) -> int:
+        """Number of GA extension entries."""
+        return len(self.list_ga_extensions())
+
+    def list_ga_extensions(self) -> list[OASFMapping]:
+        """List all GA extension mappings (capabilities with no OASF equivalent)."""
+        self._ensure_loaded()
+        assert self._index is not None
+        return [m for m in self._index.values() if m.mapping_type == "ga_extension"]
+
+    def unmapped_capabilities(self) -> list[str]:
+        """Return capability IDs that have no OASF equivalent.
+
+        Reads from the ``coverage_gaps.unmapped`` section of the mapping YAML.
+        """
+        self._ensure_loaded()
+        assert self._raw is not None
+        gaps = self._raw.get("coverage_gaps", {})
+        unmapped = gaps.get("unmapped", {})
+        return [c["id"] for c in (unmapped.get("capabilities") or [])]
+
+    def partial_capabilities(self) -> dict[str, list[str]]:
+        """Return capabilities with incomplete OASF mappings.
+
+        Returns a dict mapping capability ID to the list of OASF codes that
+        partially cover it. Reads from ``coverage_gaps.partial``.
+        """
+        self._ensure_loaded()
+        assert self._raw is not None
+        gaps = self._raw.get("coverage_gaps", {})
+        partial = gaps.get("partial", {})
+        return {
+            c["id"]: c.get("oasf_codes", [])
+            for c in (partial.get("capabilities") or [])
+        }
+
+    def coverage_report(self) -> dict[str, Any]:
+        """Generate a summary coverage report.
+
+        Returns a dict with totals and per-capability status suitable for
+        programmatic consumption or display.
+        """
+        self._ensure_loaded()
+        assert self._raw is not None
+
+        unmapped = self.unmapped_capabilities()
+        partial = self.partial_capabilities()
+
+        # Intentionally hardcoded: forces test failures when ontology grows
+        # without updating coverage_gaps, acting as a change-detection tripwire.
+        total_capabilities = 36
+        fully_mapped = total_capabilities - len(unmapped) - len(partial)
+
+        return {
+            "oasf_version": self.oasf_version,
+            "mapping_version": self.mapping_version,
+            "total_capabilities": total_capabilities,
+            "fully_mapped": fully_mapped,
+            "unmapped_count": len(unmapped),
+            "partial_count": len(partial),
+            "unmapped": unmapped,
+            "partial": partial,
+            "ga_extension_count": self.ga_extension_count,
+        }
