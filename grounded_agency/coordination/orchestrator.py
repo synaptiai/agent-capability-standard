@@ -13,12 +13,12 @@ import logging
 import os
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any
 
 from ..capabilities.registry import CapabilityRegistry
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
 from ..workflows.engine import StepStatus, WorkflowStep, WorkflowStepResult
+from ._evidence_helpers import record_coordination_evidence
 from .audit import CoordinationAuditLog, CoordinationEvent
 from .delegation import ORCHESTRATOR_AGENT_ID, DelegationProtocol, DelegationResult
 from .evidence_bridge import CrossAgentEvidenceBridge
@@ -214,39 +214,21 @@ class OrchestrationRuntime:
     ) -> EvidenceAnchor:
         """Create an evidence anchor and record an audit event.
 
-        Args:
-            ref_prefix: Prefix for the evidence ref (e.g. ``"orchestration"``).
-            ref_id: Unique ID appended to the prefix.
-            event_type: Audit event type string.
-            source_agent_id: Agent that initiated the action.
-            target_agent_ids: Agents affected by the action.
-            capability_id: Ontology capability ID.
-            metadata: Metadata stored on the evidence anchor.
-            audit_details: Details for the audit event.  Defaults to
-                *metadata* when not provided.
-            evidence_refs_override: Override the evidence_refs list on the
-                audit event.  When ``None``, uses ``[anchor.ref]``.
+        Delegates to the shared ``record_coordination_evidence`` helper.
         """
-        anchor = EvidenceAnchor(
-            ref=f"{ref_prefix}:{ref_id}",
-            kind="coordination",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            metadata=metadata,
-        )
-        self._evidence_store.add_anchor(anchor, capability_id=capability_id)
-        self._audit_log.record(
+        return record_coordination_evidence(
+            self._evidence_store,
+            self._audit_log,
+            ref_prefix=ref_prefix,
+            ref_id=ref_id,
             event_type=event_type,
             source_agent_id=source_agent_id,
             target_agent_ids=target_agent_ids,
             capability_id=capability_id,
-            details=audit_details if audit_details is not None else metadata,
-            evidence_refs=(
-                evidence_refs_override
-                if evidence_refs_override is not None
-                else [anchor.ref]
-            ),
+            metadata=metadata,
+            audit_details=audit_details,
+            evidence_refs_override=evidence_refs_override,
         )
-        return anchor
 
     def _order_subtasks_by_dependencies(
         self,

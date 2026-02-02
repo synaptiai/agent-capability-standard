@@ -1213,38 +1213,43 @@ class TestSyncPrimitive:
         assert fetched.barrier_id == barrier.barrier_id
         assert sync.get_barrier("nonexistent") is None
 
-    def test_resolve_already_resolved_raises(self, sync: SyncPrimitive) -> None:
-        """Resolving an already-resolved barrier raises ValueError.
+    def test_resolve_already_resolved_returns_not_found(
+        self, sync: SyncPrimitive
+    ) -> None:
+        """Resolving an already-resolved barrier returns 'not found'.
 
-        When resolve() is called with missing contributions, the barrier
-        is marked resolved=True but stays in _barriers (cleanup only
-        runs after a successful merge). A second resolve() must raise.
+        Failed barriers are cleaned up immediately to prevent memory
+        leaks.  A second resolve() sees an absent barrier and returns
+        a not-found SyncResult.
         """
         barrier = sync.create_barrier(["a1", "a2"])
         sync.contribute(barrier.barrier_id, "a1", {"done": True})
-        # Resolve with a2 missing -- barrier stays with resolved=True
+        # Resolve with a2 missing -- barrier is cleaned up
         result = sync.resolve(barrier.barrier_id)
         assert result.synchronized is False
 
-        with pytest.raises(ValueError, match="Barrier already resolved"):
-            sync.resolve(barrier.barrier_id)
+        # Barrier has been cleaned up; second resolve returns not-found
+        result2 = sync.resolve(barrier.barrier_id)
+        assert result2.synchronized is False
+        assert "not found" in result2.conflict_details.lower()
 
-    def test_contribute_to_resolved_barrier_raises(self, sync: SyncPrimitive) -> None:
-        """Contributing to a resolved barrier raises ValueError.
+    def test_contribute_to_resolved_barrier_returns_false(
+        self, sync: SyncPrimitive
+    ) -> None:
+        """Contributing to a resolved barrier returns False.
 
-        When resolve() is called with missing contributions, the barrier
-        is marked resolved=True but stays in _barriers (cleanup only
-        runs after a successful merge). Subsequent contribute() calls
-        must raise ValueError.
+        Failed barriers are cleaned up immediately to prevent memory
+        leaks.  Subsequent contribute() calls see no barrier and
+        return False (barrier not found).
         """
         barrier = sync.create_barrier(["a1", "a2"])
         sync.contribute(barrier.barrier_id, "a1", {"done": True})
-        # Resolve with a2 missing -- barrier stays in dict
+        # Resolve with a2 missing -- barrier is cleaned up
         result = sync.resolve(barrier.barrier_id)
         assert result.synchronized is False
 
-        with pytest.raises(ValueError, match="Cannot contribute to resolved barrier"):
-            sync.contribute(barrier.barrier_id, "a1", {"more": "data"})
+        # Barrier has been cleaned up; contribute returns False
+        assert sync.contribute(barrier.barrier_id, "a1", {"more": "data"}) is False
 
     def test_resolved_barrier_removed_from_barriers(
         self, sync: SyncPrimitive
@@ -1257,6 +1262,25 @@ class TestSyncPrimitive:
 
         # After resolution, the barrier should no longer be accessible
         assert sync.get_barrier(barrier.barrier_id) is None
+
+    def test_failed_barrier_cleaned_up(self, sync: SyncPrimitive) -> None:
+        """Failed barriers are cleaned up to prevent memory leaks.
+
+        When resolve() fails due to missing contributions, the barrier
+        must be removed from _barriers so long-running instances don't
+        accumulate dead barriers.
+        """
+        barrier = sync.create_barrier(["a1", "a2"])
+        sync.contribute(barrier.barrier_id, "a1", {"done": True})
+        # Resolve with a2 missing
+        result = sync.resolve(barrier.barrier_id)
+        assert result.synchronized is False
+
+        # Barrier should be cleaned up -- not in list_barriers
+        assert sync.get_barrier(barrier.barrier_id) is None
+        assert all(
+            b.barrier_id != barrier.barrier_id for b in sync.list_barriers()
+        )
 
 
 # ---------------------------------------------------------------------------

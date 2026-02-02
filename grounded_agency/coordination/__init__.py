@@ -14,6 +14,7 @@ from .delegation import (
     DelegationResult,
     DelegationTask,
 )
+from .evidence_bridge import CrossAgentEvidenceBridge, SharedEvidence
 from .exceptions import (
     AgentNotRegisteredError,
     BarrierResolvedError,
@@ -21,7 +22,6 @@ from .exceptions import (
     CoordinationError,
     TaskLifecycleError,
 )
-from .evidence_bridge import CrossAgentEvidenceBridge, SharedEvidence
 from .orchestrator import OrchestrationConfig, OrchestrationResult, OrchestrationRuntime
 from .registry import AgentDescriptor, AgentRegistry
 from .synchronization import SyncBarrier, SyncPrimitive, SyncResult, SyncStrategy

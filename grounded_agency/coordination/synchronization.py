@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
+from ._evidence_helpers import record_coordination_evidence
 from .audit import CoordinationAuditLog
 
 logger = logging.getLogger(__name__)
@@ -137,33 +138,20 @@ class SyncPrimitive:
     ) -> EvidenceAnchor:
         """Create an evidence anchor and record an audit event.
 
-        Args:
-            ref_prefix: Prefix for the evidence ref (e.g. ``"sync"``).
-            ref_id: Unique ID appended to the prefix.
-            event_type: Audit event type string.
-            source_agent_id: Agent that initiated the action.
-            target_agent_ids: Agents affected by the action.
-            capability_id: Ontology capability ID.
-            metadata: Metadata stored on the evidence anchor.
-            audit_details: Details for the audit event.  Defaults to
-                *metadata* when not provided.
+        Delegates to the shared ``record_coordination_evidence`` helper.
         """
-        anchor = EvidenceAnchor(
-            ref=f"{ref_prefix}:{ref_id}",
-            kind="coordination",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            metadata=metadata,
-        )
-        self._evidence_store.add_anchor(anchor, capability_id=capability_id)
-        self._audit_log.record(
+        return record_coordination_evidence(
+            self._evidence_store,
+            self._audit_log,
+            ref_prefix=ref_prefix,
+            ref_id=ref_id,
             event_type=event_type,
             source_agent_id=source_agent_id,
             target_agent_ids=target_agent_ids,
             capability_id=capability_id,
-            details=audit_details if audit_details is not None else metadata,
-            evidence_refs=[anchor.ref],
+            metadata=metadata,
+            audit_details=audit_details,
         )
-        return anchor
 
     # ------------------------------------------------------------------
     # Barrier lifecycle
@@ -259,6 +247,9 @@ class SyncPrimitive:
         # Check all participants have contributed
         missing = all_participants - set(proposals.keys())
         if missing:
+            # Clean up the resolved barrier to prevent memory leak
+            with self._lock:
+                self._barriers.pop(barrier_id, None)
             return SyncResult(
                 barrier_id=barrier_id,
                 synchronized=False,
@@ -290,6 +281,9 @@ class SyncPrimitive:
             if all(v == values[0] for v in values[1:]):
                 agreed_state = dict(values[0])
             else:
+                # Clean up the resolved barrier to prevent memory leak
+                with self._lock:
+                    self._barriers.pop(barrier_id, None)
                 return SyncResult(
                     barrier_id=barrier_id,
                     synchronized=False,

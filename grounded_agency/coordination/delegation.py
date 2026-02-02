@@ -8,6 +8,7 @@ creates evidence anchors, and records audit events.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import threading
@@ -412,8 +413,19 @@ class DelegationProtocol:
             return self._tasks.get(task_id)
 
     def get_result(self, task_id: str) -> DelegationResult | None:
+        """Return a snapshot copy of the delegation result.
+
+        Returns a defensive copy so callers cannot mutate the shared
+        internal state (e.g. ``evidence_anchors``).
+        """
         with self._lock:
-            return self._results.get(task_id)
+            result = self._results.get(task_id)
+            if result is None:
+                return None
+            snapshot = copy.copy(result)
+            snapshot.evidence_anchors = list(result.evidence_anchors)
+            snapshot.output_data = dict(result.output_data)
+            return snapshot
 
     def list_tasks(self) -> list[DelegationTask]:
         """Return all tracked delegation tasks."""
