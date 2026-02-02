@@ -21,7 +21,7 @@ from .audit import CoordinationAuditLog
 logger = logging.getLogger(__name__)
 
 
-class SyncStrategy(enum.StrEnum):
+class SyncStrategy(str, enum.Enum):
     """Supported merge strategies for barrier resolution."""
 
     LAST_WRITER_WINS = "last_writer_wins"
@@ -59,6 +59,17 @@ class SyncBarrier:
     )
     proposals: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "barrier_id": self.barrier_id,
+            "participants": sorted(self.participants),
+            "required_state": dict(self.required_state),
+            "timeout_seconds": self.timeout_seconds,
+            "created_at": self.created_at,
+            "proposals": {k: dict(v) for k, v in self.proposals.items()},
+        }
+
 
 @dataclass(slots=True)
 class SyncResult:
@@ -79,6 +90,20 @@ class SyncResult:
     participants: tuple[str, ...] = field(default_factory=tuple)
     evidence_anchors: list[EvidenceAnchor] = field(default_factory=list)
     conflict_details: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "barrier_id": self.barrier_id,
+            "synchronized": self.synchronized,
+            "agreed_state": dict(self.agreed_state),
+            "participants": list(self.participants),
+            "evidence_anchors": [
+                {"ref": a.ref, "kind": a.kind, "timestamp": a.timestamp}
+                for a in self.evidence_anchors
+            ],
+            "conflict_details": self.conflict_details,
+        }
 
 
 class SyncPrimitive:
@@ -192,9 +217,7 @@ class SyncPrimitive:
                 barrier_id=barrier_id,
                 synchronized=False,
                 participants=participants,
-                conflict_details=(
-                    f"Missing contributions from: {sorted(missing)}"
-                ),
+                conflict_details=(f"Missing contributions from: {sorted(missing)}"),
             )
 
         # Merge according to strategy

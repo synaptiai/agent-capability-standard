@@ -46,6 +46,16 @@ class AgentDescriptor:
                 f"trust_score must be in [0.0, 1.0], got {self.trust_score}"
             )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "agent_id": self.agent_id,
+            "capabilities": sorted(self.capabilities),
+            "trust_score": self.trust_score,
+            "metadata": dict(self.metadata),
+            "registered_at": self.registered_at,
+        }
+
 
 class AgentRegistry:
     """Registry for multi-agent coordination.
@@ -80,9 +90,7 @@ class AgentRegistry:
         # Validate every declared capability exists in ontology
         unknown = [c for c in caps if self._cap_registry.get_capability(c) is None]
         if unknown:
-            raise ValueError(
-                f"Unknown capabilities not in ontology: {sorted(unknown)}"
-            )
+            raise ValueError(f"Unknown capabilities not in ontology: {sorted(unknown)}")
 
         descriptor = AgentDescriptor(
             agent_id=agent_id,
@@ -119,16 +127,13 @@ class AgentRegistry:
         return matches
 
     def discover_by_capabilities(
-        self, capability_ids: set[str] | frozenset[str] | list[str],
+        self,
+        capability_ids: set[str] | frozenset[str] | list[str],
     ) -> list[AgentDescriptor]:
         """Find agents that declare *all* of the given capabilities."""
         required = frozenset(capability_ids)
         with self._lock:
-            matches = [
-                a
-                for a in self._agents.values()
-                if required <= a.capabilities
-            ]
+            matches = [a for a in self._agents.values() if required <= a.capabilities]
         matches.sort(key=lambda a: a.trust_score, reverse=True)
         return matches
 

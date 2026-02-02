@@ -14,6 +14,7 @@ import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
 from .audit import CoordinationAuditLog
@@ -45,6 +46,20 @@ class SharedEvidence:
     shared_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "anchor": {
+                "ref": self.anchor.ref,
+                "kind": self.anchor.kind,
+                "timestamp": self.anchor.timestamp,
+            },
+            "source_agent_id": self.source_agent_id,
+            "trust_score": self.trust_score,
+            "original_trust": self.original_trust,
+            "shared_at": self.shared_at,
+        }
 
 
 class CrossAgentEvidenceBridge:
@@ -149,7 +164,8 @@ class CrossAgentEvidenceBridge:
     # ------------------------------------------------------------------
 
     def _find_prior_sharing_unlocked(
-        self, evidence_ref: str,
+        self,
+        evidence_ref: str,
     ) -> SharedEvidence | None:
         """Find the first prior sharing event for this evidence ref.
 

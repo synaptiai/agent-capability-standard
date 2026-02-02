@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -42,6 +43,15 @@ class OrchestrationConfig:
     default_sync_timeout: float = 60.0
     sync_strategy: str = "last_writer_wins"
     audit_max_events: int = 10000
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "trust_decay": self.trust_decay,
+            "default_sync_timeout": self.default_sync_timeout,
+            "sync_strategy": self.sync_strategy,
+            "audit_max_events": self.audit_max_events,
+        }
 
     def __post_init__(self) -> None:
         if not (0.0 < self.trust_decay <= 1.0):
@@ -81,6 +91,22 @@ class OrchestrationResult:
     audit_events: list[CoordinationEvent] = field(default_factory=list)
     evidence_anchors: list[EvidenceAnchor] = field(default_factory=list)
     steps_executed: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "success": self.success,
+            "task_goal": self.task_goal,
+            "subtasks": [s.to_dict() for s in self.subtasks],
+            "sync_result": self.sync_result.to_dict() if self.sync_result else None,
+            "integrated_output": dict(self.integrated_output),
+            "audit_events": [e.to_dict() for e in self.audit_events],
+            "evidence_anchors": [
+                {"ref": a.ref, "kind": a.kind, "timestamp": a.timestamp}
+                for a in self.evidence_anchors
+            ],
+            "steps_executed": self.steps_executed,
+        }
 
 
 class OrchestrationRuntime:
@@ -166,6 +192,78 @@ class OrchestrationRuntime:
         )
 
     # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _order_subtasks_by_dependencies(
+        self,
+        subtasks: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Order subtasks using Kahn's topological sort on ontology edges.
+
+        Builds a DAG from ``precedes`` and ``requires`` relationships
+        between subtask capabilities.  Falls back to the original order
+        if a cycle is detected or all subtasks lack capabilities.
+
+        Stable tie-breaking: subtasks with equal priority retain their
+        original order.
+        """
+        n = len(subtasks)
+        if n <= 1:
+            return subtasks
+
+        # Map each subtask index to its capabilities
+        subtask_caps: list[frozenset[str]] = []
+        for st in subtasks:
+            raw = st.get("required_capabilities", [])
+            subtask_caps.append(frozenset(raw))
+
+        # Build adjacency: edge i → j means subtask i must precede j
+        in_degree = [0] * n
+        adj: list[list[int]] = [[] for _ in range(n)]
+
+        for j in range(n):
+            predecessors: set[str] = set()
+            for cap in subtask_caps[j]:
+                predecessors.update(
+                    self._capability_registry.get_preceding_capabilities(cap)
+                )
+                predecessors.update(
+                    self._capability_registry.get_required_capabilities(cap)
+                )
+            if not predecessors:
+                continue
+            for i in range(n):
+                if i == j:
+                    continue
+                if subtask_caps[i] & predecessors:
+                    adj[i].append(j)
+                    in_degree[j] += 1
+
+        # Kahn's algorithm with stable tie-breaking (original order)
+        queue: deque[int] = deque()
+        for i in range(n):
+            if in_degree[i] == 0:
+                queue.append(i)
+
+        ordered: list[int] = []
+        while queue:
+            idx = queue.popleft()
+            ordered.append(idx)
+            for neighbor in sorted(adj[idx]):
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+
+        if len(ordered) != n:
+            logger.warning(
+                "Cycle detected in subtask dependencies; using original order"
+            )
+            return subtasks
+
+        return [subtasks[i] for i in ordered]
+
+    # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
 
@@ -214,30 +312,41 @@ class OrchestrationRuntime:
         result.steps_executed += 1
 
         # Step 2: Plan — order subtasks by dependencies
-        # TODO: implement dependency-based ordering; currently subtasks
-        # are executed in the order provided by the caller.
+        subtask_descriptions = self._order_subtasks_by_dependencies(
+            subtask_descriptions
+        )
         result.steps_executed += 1
 
-        # Step 3: Delegate — assign each subtask to an agent
+        # Step 3: Delegate — assign each subtask via execute_workflow_step
         delegation_results: list[DelegationResult] = []
         for subtask in subtask_descriptions:
             caps = subtask.get("required_capabilities", [])
             desc = subtask.get("description", task_goal)
             input_data = subtask.get("input_data", {})
 
-            if caps:
-                dr = self._delegation.auto_delegate(
-                    description=desc,
-                    required_capabilities=caps,
-                    input_data=input_data,
-                )
-            else:
-                # No capability requirement — delegate to first available agent
-                dr = self._delegation.delegate(
-                    description=desc,
-                    required_capabilities=set(),
-                    target_agent_id=agent_pool[0],
-                    input_data=input_data,
+            step = WorkflowStep(
+                capability="delegate",
+                purpose=desc,
+            )
+            step_result = self.execute_workflow_step(
+                step,
+                {
+                    "description": desc,
+                    "required_capabilities": caps,
+                    "input_data": input_data,
+                },
+            )
+
+            # Retrieve the full DelegationResult if the step produced a task_id
+            task_id = (step_result.output or {}).get("task_id", "")
+            dr = self._delegation.get_result(task_id) if task_id else None
+            if dr is None:
+                # Fallback: construct a minimal rejected result
+                dr = DelegationResult(
+                    task_id=task_id or os.urandom(16).hex(),
+                    agent_id="",
+                    accepted=False,
+                    rejection_reason=step_result.error or "Delegation failed",
                 )
 
             delegation_results.append(dr)
@@ -247,9 +356,7 @@ class OrchestrationRuntime:
         result.steps_executed += 1
 
         # Step 4: Synchronize — create barrier for all delegated agents
-        delegated_agents = [
-            dr.agent_id for dr in delegation_results if dr.accepted
-        ]
+        delegated_agents = [dr.agent_id for dr in delegation_results if dr.accepted]
         if len(delegated_agents) > 1:
             barrier = self._sync.create_barrier(
                 participants=delegated_agents,
@@ -357,11 +464,15 @@ class OrchestrationRuntime:
         if step.capability == "delegate":
             desc = ctx.get("description", step.purpose)
             caps = ctx.get("required_capabilities", [])
+            # Use explicit input_data from context if present, else full ctx
+            step_input = (
+                ctx["input_data"] if isinstance(ctx.get("input_data"), dict) else ctx
+            )
             if caps:
                 dr = self._delegation.auto_delegate(
                     description=desc,
                     required_capabilities=caps,
-                    input_data=ctx,
+                    input_data=step_input,
                 )
             else:
                 agents = self._agent_registry.list_agents()
@@ -370,7 +481,7 @@ class OrchestrationRuntime:
                         description=desc,
                         required_capabilities=set(),
                         target_agent_id=agents[0].agent_id,
-                        input_data=ctx,
+                        input_data=step_input,
                     )
                 else:
                     return WorkflowStepResult(
@@ -388,9 +499,7 @@ class OrchestrationRuntime:
         if step.capability == "synchronize":
             participants = ctx.get("participants", [])
             if not participants:
-                participants = [
-                    a.agent_id for a in self._agent_registry.list_agents()
-                ]
+                participants = [a.agent_id for a in self._agent_registry.list_agents()]
             if len(participants) < 2:
                 return WorkflowStepResult(
                     step=step,
@@ -400,17 +509,17 @@ class OrchestrationRuntime:
             barrier = self._sync.create_barrier(participants=participants)
             for agent_id in participants:
                 self._sync.contribute(
-                    barrier.barrier_id, agent_id, ctx.get("state", {}),
+                    barrier.barrier_id,
+                    agent_id,
+                    ctx.get("state", {}),
                 )
             sr = self._sync.resolve(
-                barrier.barrier_id, strategy=self._config.sync_strategy,
+                barrier.barrier_id,
+                strategy=self._config.sync_strategy,
             )
             return WorkflowStepResult(
                 step=step,
-                status=(
-                    StepStatus.COMPLETED if sr.synchronized
-                    else StepStatus.FAILED
-                ),
+                status=(StepStatus.COMPLETED if sr.synchronized else StepStatus.FAILED),
                 output=sr.agreed_state,
                 error=sr.conflict_details if not sr.synchronized else None,
             )
@@ -427,6 +536,77 @@ class OrchestrationRuntime:
                 step=step,
                 status=StepStatus.COMPLETED,
                 output={"audited": True},
+            )
+
+        if step.capability == "invoke":
+            workflow = ctx.get("workflow", "")
+            if not workflow:
+                return WorkflowStepResult(
+                    step=step,
+                    status=StepStatus.FAILED,
+                    error="No workflow name provided for invoke step",
+                )
+            invoke_id = os.urandom(16).hex()
+            anchor = EvidenceAnchor(
+                ref=f"invoke:{invoke_id}",
+                kind="coordination",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                metadata={"workflow": workflow},
+            )
+            self._evidence_store.add_anchor(anchor, capability_id="invoke")
+            self._audit_log.record(
+                event_type="workflow_step_audit",
+                source_agent_id=ORCHESTRATOR_AGENT_ID,
+                target_agent_ids=[],
+                capability_id="invoke",
+                details={"workflow": workflow},
+                evidence_refs=[anchor.ref],
+            )
+            return WorkflowStepResult(
+                step=step,
+                status=StepStatus.COMPLETED,
+                output={
+                    "workflow": workflow,
+                    "result": {},
+                    "steps_executed": [],
+                    "evidence_anchors": [anchor.ref],
+                },
+            )
+
+        if step.capability == "inquire":
+            ambiguous_input = ctx.get("ambiguous_input", "")
+            max_questions = ctx.get("max_questions", 3)
+            questions = []
+            if ambiguous_input:
+                questions.append(f"Could you clarify: {ambiguous_input!r}?")
+            inquire_id = os.urandom(16).hex()
+            anchor = EvidenceAnchor(
+                ref=f"inquire:{inquire_id}",
+                kind="coordination",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                metadata={
+                    "ambiguous_input": str(ambiguous_input)[:200],
+                    "max_questions": max_questions,
+                },
+            )
+            self._evidence_store.add_anchor(anchor, capability_id="inquire")
+            self._audit_log.record(
+                event_type="workflow_step_audit",
+                source_agent_id=ORCHESTRATOR_AGENT_ID,
+                target_agent_ids=[],
+                capability_id="inquire",
+                details={"ambiguous_input": str(ambiguous_input)[:200]},
+                evidence_refs=[anchor.ref],
+            )
+            return WorkflowStepResult(
+                step=step,
+                status=StepStatus.COMPLETED,
+                output={
+                    "questions": questions,
+                    "ambiguity_analysis": ambiguous_input,
+                    "evidence_anchors": [anchor.ref],
+                    "confidence": 0.5 if ambiguous_input else 1.0,
+                },
             )
 
         # Non-coordination step — pass through

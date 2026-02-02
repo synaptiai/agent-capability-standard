@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_EVENTS = 10000
 
 
-class EventType(enum.StrEnum):
+class EventType(str, enum.Enum):
     """Known coordination event types."""
 
     DELEGATION = "delegation"
@@ -148,8 +148,7 @@ class CoordinationAuditLog:
             return [
                 e
                 for e in self._events
-                if e.source_agent_id == agent_id
-                or agent_id in e.target_agent_ids
+                if e.source_agent_id == agent_id or agent_id in e.target_agent_ids
             ]
 
     def get_events_by_type(self, event_type: str) -> list[CoordinationEvent]:
@@ -160,11 +159,7 @@ class CoordinationAuditLog:
     def get_events_for_task(self, task_id: str) -> list[CoordinationEvent]:
         """Return events whose details contain the given task_id."""
         with self._lock:
-            return [
-                e
-                for e in self._events
-                if e.details.get("task_id") == task_id
-            ]
+            return [e for e in self._events if e.details.get("task_id") == task_id]
 
     def get_events_since(self, start_index: int) -> list[CoordinationEvent]:
         """Return events added at or after *start_index* (0-based).

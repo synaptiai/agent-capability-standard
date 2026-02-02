@@ -48,6 +48,17 @@ class DelegationTask:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "task_id": self.task_id,
+            "description": self.description,
+            "required_capabilities": sorted(self.required_capabilities),
+            "input_data": dict(self.input_data),
+            "constraints": dict(self.constraints),
+            "created_at": self.created_at,
+        }
+
 
 @dataclass(slots=True)
 class DelegationResult:
@@ -69,6 +80,20 @@ class DelegationResult:
     rejection_reason: str = ""
     output_data: dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "task_id": self.task_id,
+            "agent_id": self.agent_id,
+            "accepted": self.accepted,
+            "evidence_anchors": [
+                {"ref": a.ref, "kind": a.kind, "timestamp": a.timestamp}
+                for a in self.evidence_anchors
+            ],
+            "rejection_reason": self.rejection_reason,
+            "output_data": dict(self.output_data),
+        }
+
 
 class DelegationProtocol:
     """Manages typed task delegation between agents.
@@ -89,6 +114,61 @@ class DelegationProtocol:
         self._tasks: dict[str, DelegationTask] = {}
         self._results: dict[str, DelegationResult] = {}
         self._lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _create_delegation_anchor(
+        self,
+        task_id: str,
+        description: str,
+        target_agent_id: str,
+        accepted: bool,
+        rejection_reason: str = "",
+    ) -> EvidenceAnchor:
+        """Create and store an evidence anchor for a delegation attempt."""
+        metadata: dict[str, Any] = {
+            "description": description[:100],
+            "target_agent": target_agent_id,
+            "accepted": accepted,
+        }
+        if rejection_reason:
+            metadata["rejection_reason"] = rejection_reason
+        anchor = EvidenceAnchor(
+            ref=f"delegation:{task_id}",
+            kind="coordination",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            metadata=metadata,
+        )
+        self._evidence_store.add_anchor(anchor, capability_id="delegate")
+        return anchor
+
+    def _record_delegation_event(
+        self,
+        task_id: str,
+        target_agent_ids: list[str],
+        accepted: bool,
+        required_capabilities: frozenset[str],
+        rejection_reason: str = "",
+        evidence_ref: str = "",
+    ) -> None:
+        """Record an audit event for a delegation attempt."""
+        details: dict[str, Any] = {
+            "task_id": task_id,
+            "accepted": accepted,
+            "required_capabilities": sorted(required_capabilities),
+        }
+        if rejection_reason:
+            details["rejection_reason"] = rejection_reason
+        self._audit_log.record(
+            event_type="delegation",
+            source_agent_id=ORCHESTRATOR_AGENT_ID,
+            target_agent_ids=target_agent_ids,
+            capability_id="delegate",
+            details=details,
+            evidence_refs=[evidence_ref] if evidence_ref else [],
+        )
 
     # ------------------------------------------------------------------
     # Delegation
@@ -132,9 +212,7 @@ class DelegationProtocol:
                 task_id=task_id,
                 agent_id=target_agent_id,
                 accepted=False,
-                rejection_reason=(
-                    f"Agent lacks capabilities: {sorted(missing)}"
-                ),
+                rejection_reason=(f"Agent lacks capabilities: {sorted(missing)}"),
             )
         else:
             result = DelegationResult(
@@ -144,17 +222,13 @@ class DelegationProtocol:
             )
 
         # Create evidence anchor for this delegation
-        anchor = EvidenceAnchor(
-            ref=f"delegation:{task_id}",
-            kind="coordination",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            metadata={
-                "description": description[:100],
-                "target_agent": target_agent_id,
-                "accepted": result.accepted,
-            },
+        anchor = self._create_delegation_anchor(
+            task_id=task_id,
+            description=description,
+            target_agent_id=target_agent_id,
+            accepted=result.accepted,
+            rejection_reason=result.rejection_reason,
         )
-        self._evidence_store.add_anchor(anchor, capability_id="delegate")
         result.evidence_anchors = [anchor]
 
         with self._lock:
@@ -162,17 +236,13 @@ class DelegationProtocol:
             self._results[task_id] = result
 
         # Audit event
-        self._audit_log.record(
-            event_type="delegation",
-            source_agent_id=ORCHESTRATOR_AGENT_ID,
+        self._record_delegation_event(
+            task_id=task_id,
             target_agent_ids=[target_agent_id],
-            capability_id="delegate",
-            details={
-                "task_id": task_id,
-                "accepted": result.accepted,
-                "required_capabilities": sorted(caps),
-            },
-            evidence_refs=[anchor.ref],
+            accepted=result.accepted,
+            required_capabilities=caps,
+            rejection_reason=result.rejection_reason,
+            evidence_ref=anchor.ref,
         )
 
         logger.debug(
@@ -216,30 +286,21 @@ class DelegationProtocol:
                 rejection_reason=rejection_reason,
             )
             # Evidence and audit for the rejection
-            anchor = EvidenceAnchor(
-                ref=f"delegation:{task_id}",
-                kind="coordination",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                metadata={
-                    "description": description[:100],
-                    "accepted": False,
-                    "rejection_reason": rejection_reason,
-                },
+            anchor = self._create_delegation_anchor(
+                task_id=task_id,
+                description=description,
+                target_agent_id="",
+                accepted=False,
+                rejection_reason=rejection_reason,
             )
-            self._evidence_store.add_anchor(anchor, capability_id="delegate")
             result.evidence_anchors = [anchor]
-            self._audit_log.record(
-                event_type="delegation",
-                source_agent_id=ORCHESTRATOR_AGENT_ID,
+            self._record_delegation_event(
+                task_id=task_id,
                 target_agent_ids=[],
-                capability_id="delegate",
-                details={
-                    "task_id": task_id,
-                    "accepted": False,
-                    "required_capabilities": sorted(caps),
-                    "rejection_reason": rejection_reason,
-                },
-                evidence_refs=[anchor.ref],
+                accepted=False,
+                required_capabilities=caps,
+                rejection_reason=rejection_reason,
+                evidence_ref=anchor.ref,
             )
             with self._lock:
                 self._tasks[task_id] = task

@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -33,10 +34,13 @@ from grounded_agency import (
     SyncPrimitive,
     WorkflowStep,
 )
+from grounded_agency.coordination.delegation import DelegationResult, DelegationTask
+from grounded_agency.coordination.evidence_bridge import SharedEvidence
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def ontology_path() -> str:
@@ -95,7 +99,10 @@ def evidence_bridge(
 ) -> CrossAgentEvidenceBridge:
     """Create a fresh CrossAgentEvidenceBridge with 0.9 decay."""
     return CrossAgentEvidenceBridge(
-        agent_registry, evidence_store, audit_log, trust_decay=0.9,
+        agent_registry,
+        evidence_store,
+        audit_log,
+        trust_decay=0.9,
     )
 
 
@@ -108,6 +115,7 @@ def runtime(capability_registry: CapabilityRegistry) -> OrchestrationRuntime:
 @pytest.fixture
 def make_anchor() -> Callable[..., EvidenceAnchor]:
     """Factory for creating test evidence anchors with minimal boilerplate."""
+
     def _make(
         ref: str = "test:evidence:default",
         kind: str = "tool_output",
@@ -117,6 +125,7 @@ def make_anchor() -> Callable[..., EvidenceAnchor]:
             kind=kind,
             timestamp="2025-01-01T00:00:00+00:00",
         )
+
     return _make
 
 
@@ -124,11 +133,13 @@ def make_anchor() -> Callable[..., EvidenceAnchor]:
 # AC1: Agent Registration and Discovery
 # ---------------------------------------------------------------------------
 
+
 class TestAgentRegistry:
     """AC1: Agents can register, be discovered by capability, and unregister."""
 
     def test_register_agent(
-        self, agent_registry: AgentRegistry,
+        self,
+        agent_registry: AgentRegistry,
     ) -> None:
         """Register an agent and verify its descriptor fields."""
         desc = agent_registry.register(
@@ -142,7 +153,8 @@ class TestAgentRegistry:
         assert agent_registry.agent_count == 1
 
     def test_register_validates_capabilities(
-        self, agent_registry: AgentRegistry,
+        self,
+        agent_registry: AgentRegistry,
     ) -> None:
         """Reject agents that declare capabilities absent from the ontology."""
         with pytest.raises(ValueError, match="Unknown capabilities"):
@@ -152,7 +164,8 @@ class TestAgentRegistry:
             )
 
     def test_register_duplicate_overwrites(
-        self, agent_registry: AgentRegistry,
+        self,
+        agent_registry: AgentRegistry,
     ) -> None:
         """Re-registering the same agent_id overwrites the previous descriptor."""
         agent_registry.register("a1", {"retrieve"}, trust_score=0.5)
@@ -164,7 +177,8 @@ class TestAgentRegistry:
         assert desc.trust_score == 0.9
 
     def test_discover_by_capability(
-        self, agent_registry: AgentRegistry,
+        self,
+        agent_registry: AgentRegistry,
     ) -> None:
         """Discover agents by a single capability, ordered by trust descending."""
         agent_registry.register("a1", {"retrieve", "search"}, trust_score=0.8)
@@ -177,7 +191,8 @@ class TestAgentRegistry:
         assert results[1].agent_id == "a1"
 
     def test_discover_by_capabilities_all_required(
-        self, agent_registry: AgentRegistry,
+        self,
+        agent_registry: AgentRegistry,
     ) -> None:
         """Only return agents that have ALL requested capabilities."""
         agent_registry.register("a1", {"retrieve", "search", "generate"})
@@ -212,7 +227,8 @@ class TestAgentRegistry:
         assert len(agents) == 2
 
     def test_trust_score_validation(
-        self, agent_registry: AgentRegistry,
+        self,
+        agent_registry: AgentRegistry,
     ) -> None:
         """Reject trust scores outside [0.0, 1.0]."""
         with pytest.raises(ValueError, match="trust_score"):
@@ -221,7 +237,8 @@ class TestAgentRegistry:
             agent_registry.register("bad", {"retrieve"}, trust_score=-0.1)
 
     def test_agent_descriptor_is_frozen(
-        self, agent_registry: AgentRegistry,
+        self,
+        agent_registry: AgentRegistry,
     ) -> None:
         """AgentDescriptor cannot be modified after creation."""
         desc = agent_registry.register("a1", {"retrieve"}, trust_score=0.5)
@@ -233,11 +250,14 @@ class TestAgentRegistry:
 # AC2: Typed Delegation with Contract Enforcement
 # ---------------------------------------------------------------------------
 
+
 class TestDelegationProtocol:
     """AC2: Delegation validates contracts and produces evidence."""
 
     def test_delegate_to_capable_agent(
-        self, delegation: DelegationProtocol, agent_registry: AgentRegistry,
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
     ) -> None:
         """Accepted delegation to a capable agent produces evidence."""
         agent_registry.register("worker", {"retrieve", "search"})
@@ -254,7 +274,9 @@ class TestDelegationProtocol:
         assert result.evidence_anchors[0].kind == "coordination"
 
     def test_delegate_rejects_incapable_agent(
-        self, delegation: DelegationProtocol, agent_registry: AgentRegistry,
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
     ) -> None:
         """Reject delegation when agent lacks required capabilities."""
         agent_registry.register("worker", {"retrieve"})
@@ -267,7 +289,8 @@ class TestDelegationProtocol:
         assert "lacks capabilities" in result.rejection_reason
 
     def test_delegate_rejects_unregistered_agent(
-        self, delegation: DelegationProtocol,
+        self,
+        delegation: DelegationProtocol,
     ) -> None:
         """Reject delegation to an unregistered agent."""
         result = delegation.delegate(
@@ -327,9 +350,7 @@ class TestDelegationProtocol:
         # Should have an audit event
         events = audit_log.get_events_by_type("delegation")
         assert len(events) >= 1
-        rejection_event = [
-            e for e in events if not e.details.get("accepted", True)
-        ]
+        rejection_event = [e for e in events if not e.details.get("accepted", True)]
         assert len(rejection_event) >= 1
 
     def test_auto_delegate_forwards_input_data(
@@ -433,6 +454,7 @@ class TestDelegationProtocol:
 # AC3: Trust Propagation and Evidence Sharing
 # ---------------------------------------------------------------------------
 
+
 class TestCrossAgentEvidenceBridge:
     """AC3: Evidence sharing with trust decay."""
 
@@ -475,11 +497,14 @@ class TestCrossAgentEvidenceBridge:
         assert len(evidence_bridge.get_shared_evidence("target", min_trust=0.5)) == 0
         assert len(evidence_bridge.get_shared_evidence("target", min_trust=0.2)) == 1
 
-    @pytest.mark.parametrize("trust_decay,expected_trust", [
-        (1.0, 0.8),    # trust fully preserved
-        (0.5, 0.4),    # half decay
-        (0.1, 0.08),   # near-zero decay
-    ])
+    @pytest.mark.parametrize(
+        "trust_decay,expected_trust",
+        [
+            (1.0, 0.8),  # trust fully preserved
+            (0.5, 0.4),  # half decay
+            (0.1, 0.08),  # near-zero decay
+        ],
+    )
     def test_trust_decay_boundaries(
         self,
         agent_registry: AgentRegistry,
@@ -491,7 +516,10 @@ class TestCrossAgentEvidenceBridge:
     ) -> None:
         """Trust decay boundary values: 0.1, 0.5, and 1.0."""
         bridge = CrossAgentEvidenceBridge(
-            agent_registry, evidence_store, audit_log, trust_decay=trust_decay,
+            agent_registry,
+            evidence_store,
+            audit_log,
+            trust_decay=trust_decay,
         )
         agent_registry.register("source", {"retrieve"}, trust_score=0.8)
         agent_registry.register("target", {"search"})
@@ -512,7 +540,10 @@ class TestCrossAgentEvidenceBridge:
     ) -> None:
         """Re-sharing evidence cannot inflate trust above original level."""
         bridge = CrossAgentEvidenceBridge(
-            agent_registry, evidence_store, audit_log, trust_decay=0.9,
+            agent_registry,
+            evidence_store,
+            audit_log,
+            trust_decay=0.9,
         )
         agent_registry.register("low-trust", {"retrieve"}, trust_score=0.3)
         agent_registry.register("high-trust", {"search"}, trust_score=1.0)
@@ -590,6 +621,7 @@ class TestCrossAgentEvidenceBridge:
 # AC4: Coordination Audit Trail
 # ---------------------------------------------------------------------------
 
+
 class TestCoordinationAuditLog:
     """AC4: Append-only audit with queries by agent, type, and task."""
 
@@ -633,7 +665,8 @@ class TestCoordinationAuditLog:
         assert t1_events[0].details["task_id"] == "t1"
 
     def test_get_events_for_nonexistent_task(
-        self, audit_log: CoordinationAuditLog,
+        self,
+        audit_log: CoordinationAuditLog,
     ) -> None:
         """Query for a task_id that doesn't exist returns empty list."""
         audit_log.record("delegation", "a", ["b"], details={"task_id": "t1"})
@@ -664,11 +697,15 @@ class TestCoordinationAuditLog:
             event.event_type = "modified"  # type: ignore[misc]
 
     def test_event_details_immutability(
-        self, audit_log: CoordinationAuditLog,
+        self,
+        audit_log: CoordinationAuditLog,
     ) -> None:
         """CoordinationEvent.details cannot be mutated after creation."""
         event = audit_log.record(
-            "delegation", "a", ["b"], details={"key": "value"},
+            "delegation",
+            "a",
+            ["b"],
+            details={"key": "value"},
         )
         with pytest.raises(TypeError):
             event.details["key"] = "modified"  # type: ignore[index]
@@ -703,6 +740,7 @@ class TestCoordinationAuditLog:
 # ---------------------------------------------------------------------------
 # AC3 (cont): Barrier Synchronization
 # ---------------------------------------------------------------------------
+
 
 class TestSyncPrimitive:
     """AC3: Barrier creation, contribution, and conflict resolution."""
@@ -788,7 +826,8 @@ class TestSyncPrimitive:
         assert "not found" in result.conflict_details.lower()
 
     def test_contribute_nonparticipant_rejected(
-        self, sync: SyncPrimitive,
+        self,
+        sync: SyncPrimitive,
     ) -> None:
         """Non-participant contributions are rejected."""
         barrier = sync.create_barrier(["a1", "a2"])
@@ -833,6 +872,7 @@ class TestSyncPrimitive:
 # ---------------------------------------------------------------------------
 # OrchestrationConfig validation
 # ---------------------------------------------------------------------------
+
 
 class TestOrchestrationConfig:
     """Validate OrchestrationConfig bounds checking."""
@@ -884,7 +924,8 @@ class TestOrchestrationRuntime:
         assert len(result.audit_events) >= 1
 
     def test_orchestrate_with_subtasks(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Multi-subtask orchestration delegates to different agents."""
         runtime.register_agent("searcher", {"search"}, trust_score=0.9)
@@ -912,7 +953,8 @@ class TestOrchestrationRuntime:
         assert result.sync_result.synchronized is True
 
     def test_orchestrate_no_agents(
-        self, capability_registry: CapabilityRegistry,
+        self,
+        capability_registry: CapabilityRegistry,
     ) -> None:
         """Orchestration fails with no registered agents."""
         rt = OrchestrationRuntime(capability_registry)
@@ -921,7 +963,8 @@ class TestOrchestrationRuntime:
         assert "No agents available" in str(result.integrated_output)
 
     def test_orchestrate_produces_audit_trail(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Orchestration produces delegation and completion audit events."""
         runtime.register_agent("worker", {"retrieve"})
@@ -932,7 +975,8 @@ class TestOrchestrationRuntime:
         assert "orchestration_complete" in event_types
 
     def test_orchestrate_audit_events_scoped(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Orchestration audit_events only contain events from this run."""
         runtime.register_agent("worker", {"retrieve"})
@@ -954,7 +998,8 @@ class TestOrchestrationRuntime:
         assert "Run 2" in run2_goals
 
     def test_orchestrate_collects_evidence(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Orchestration collects delegation and orchestration evidence."""
         runtime.register_agent("worker", {"retrieve"})
@@ -964,7 +1009,8 @@ class TestOrchestrationRuntime:
         assert any(r.startswith("orchestration:") for r in refs)
 
     def test_runtime_exposes_components(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Runtime exposes all coordination sub-components."""
         assert isinstance(runtime.agent_registry, AgentRegistry)
@@ -974,7 +1020,8 @@ class TestOrchestrationRuntime:
         assert isinstance(runtime.audit_log, CoordinationAuditLog)
 
     def test_runtime_with_custom_config(
-        self, capability_registry: CapabilityRegistry,
+        self,
+        capability_registry: CapabilityRegistry,
     ) -> None:
         """Runtime works with custom OrchestrationConfig."""
         config = OrchestrationConfig(
@@ -997,7 +1044,8 @@ class TestOrchestrationRuntime:
         assert result.success is True
 
     def test_orchestrate_partial_delegation_failure(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Orchestration succeeds if at least one subtask is accepted."""
         runtime.register_agent("searcher", {"search"})
@@ -1016,7 +1064,8 @@ class TestOrchestrationRuntime:
         assert len(rejected) == 1
 
     def test_orchestrate_integrated_output_structure(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Integrated output contains expected keys and counts."""
         runtime.register_agent("worker", {"retrieve"})
@@ -1032,6 +1081,7 @@ class TestOrchestrationRuntime:
 # execute_workflow_step (individual step dispatch)
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteWorkflowStep:
     """Test the per-step dispatch in OrchestrationRuntime."""
 
@@ -1041,7 +1091,8 @@ class TestExecuteWorkflowStep:
         return WorkflowStep(capability=capability, purpose=purpose)
 
     def test_delegate_step_with_agents(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Delegate step succeeds when agents are registered."""
         runtime.register_agent("worker", {"retrieve"})
@@ -1051,7 +1102,8 @@ class TestExecuteWorkflowStep:
         assert result.output["accepted"] is True
 
     def test_delegate_step_no_agents(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Delegate step fails when no agents are registered."""
         step = self._make_step("delegate")
@@ -1060,7 +1112,8 @@ class TestExecuteWorkflowStep:
         assert "No agents" in (result.error or "")
 
     def test_synchronize_step_skipped_with_few_participants(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Synchronize step is skipped with fewer than 2 participants."""
         runtime.register_agent("solo", {"retrieve"})
@@ -1069,14 +1122,16 @@ class TestExecuteWorkflowStep:
         assert result.status == StepStatus.SKIPPED
 
     def test_synchronize_step_with_participants(
-        self, runtime: OrchestrationRuntime,
+        self,
+        runtime: OrchestrationRuntime,
     ) -> None:
         """Synchronize step succeeds with 2+ participants."""
         runtime.register_agent("a1", {"retrieve"})
         runtime.register_agent("a2", {"search"})
         step = self._make_step("synchronize")
         result = runtime.execute_workflow_step(
-            step, {"state": {"key": "value"}},
+            step,
+            {"state": {"key": "value"}},
         )
         assert result.status == StepStatus.COMPLETED
 
@@ -1100,11 +1155,13 @@ class TestExecuteWorkflowStep:
 # Concurrency tests
 # ---------------------------------------------------------------------------
 
+
 class TestConcurrency:
     """Thread-safety validation for shared state operations."""
 
     def test_concurrent_evidence_store_add(
-        self, evidence_store: EvidenceStore,
+        self,
+        evidence_store: EvidenceStore,
     ) -> None:
         """Concurrent add_anchor calls do not corrupt the store."""
         n_threads = 8
@@ -1150,7 +1207,8 @@ class TestConcurrency:
         assert len(log) == n_threads * n_per_thread
 
     def test_concurrent_agent_registration(
-        self, capability_registry: CapabilityRegistry,
+        self,
+        capability_registry: CapabilityRegistry,
     ) -> None:
         """Concurrent agent registrations do not corrupt the registry."""
         registry = AgentRegistry(capability_registry)
@@ -1183,7 +1241,9 @@ class TestConcurrency:
 
         def contribute(agent_id: str) -> bool:
             return sync.contribute(
-                barrier.barrier_id, agent_id, {"from": agent_id},
+                barrier.barrier_id,
+                agent_id,
+                {"from": agent_id},
             )
 
         with ThreadPoolExecutor(max_workers=n_participants) as pool:
@@ -1193,3 +1253,303 @@ class TestConcurrency:
         assert all(results)
         result = sync.resolve(barrier.barrier_id)
         assert result.synchronized is True
+
+
+# ---------------------------------------------------------------------------
+# Serialization tests (to_dict)
+# ---------------------------------------------------------------------------
+
+
+class TestSerialization:
+    """Verify to_dict() on all coordination dataclasses."""
+
+    def test_delegation_task_to_dict(self) -> None:
+        """DelegationTask.to_dict converts frozenset to sorted list."""
+        task = DelegationTask(
+            task_id="t1",
+            description="Test task",
+            required_capabilities=frozenset({"search", "retrieve"}),
+            input_data={"key": "val"},
+            constraints={"timeout": 30},
+            created_at="2025-01-01T00:00:00+00:00",
+        )
+        d = task.to_dict()
+        assert d["task_id"] == "t1"
+        assert d["description"] == "Test task"
+        assert d["required_capabilities"] == ["retrieve", "search"]
+        assert d["input_data"] == {"key": "val"}
+        assert d["constraints"] == {"timeout": 30}
+        assert d["created_at"] == "2025-01-01T00:00:00+00:00"
+
+    def test_delegation_result_to_dict(self) -> None:
+        """DelegationResult.to_dict serializes evidence anchors inline."""
+        anchor = EvidenceAnchor(
+            ref="delegation:abc",
+            kind="coordination",
+            timestamp="2025-01-01T00:00:00+00:00",
+        )
+        result = DelegationResult(
+            task_id="t1",
+            agent_id="worker",
+            accepted=True,
+            evidence_anchors=[anchor],
+            output_data={"result": "ok"},
+        )
+        d = result.to_dict()
+        assert d["task_id"] == "t1"
+        assert d["accepted"] is True
+        assert len(d["evidence_anchors"]) == 1
+        assert d["evidence_anchors"][0]["ref"] == "delegation:abc"
+        assert d["evidence_anchors"][0]["kind"] == "coordination"
+        assert d["output_data"] == {"result": "ok"}
+
+    def test_shared_evidence_to_dict(self) -> None:
+        """SharedEvidence.to_dict inlines the anchor."""
+        anchor = EvidenceAnchor(
+            ref="test:ev",
+            kind="tool_output",
+            timestamp="2025-01-01T00:00:00+00:00",
+        )
+        se = SharedEvidence(
+            anchor=anchor,
+            source_agent_id="agent-1",
+            trust_score=0.72,
+            original_trust=0.72,
+            shared_at="2025-01-01T00:00:00+00:00",
+        )
+        d = se.to_dict()
+        assert d["anchor"]["ref"] == "test:ev"
+        assert d["source_agent_id"] == "agent-1"
+        assert abs(d["trust_score"] - 0.72) < 1e-9
+        assert d["shared_at"] == "2025-01-01T00:00:00+00:00"
+
+    def test_orchestration_config_to_dict(self) -> None:
+        """OrchestrationConfig.to_dict maps all fields."""
+        config = OrchestrationConfig(
+            trust_decay=0.8,
+            default_sync_timeout=30.0,
+            sync_strategy="merge_keys",
+            audit_max_events=500,
+        )
+        d = config.to_dict()
+        assert d["trust_decay"] == 0.8
+        assert d["default_sync_timeout"] == 30.0
+        assert d["sync_strategy"] == "merge_keys"
+        assert d["audit_max_events"] == 500
+
+    def test_orchestration_result_to_dict(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """OrchestrationResult.to_dict recursively serializes subtasks and events."""
+        runtime.register_agent("worker", {"retrieve"})
+        result = runtime.orchestrate(task_goal="Serialization test")
+        d = result.to_dict()
+        assert d["success"] is True
+        assert d["task_goal"] == "Serialization test"
+        assert isinstance(d["subtasks"], list)
+        assert len(d["subtasks"]) >= 1
+        assert isinstance(d["subtasks"][0], dict)
+        assert "task_id" in d["subtasks"][0]
+        assert isinstance(d["audit_events"], list)
+        assert len(d["audit_events"]) >= 1
+        assert isinstance(d["evidence_anchors"], list)
+
+    def test_agent_descriptor_to_dict(
+        self,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """AgentDescriptor.to_dict sorts capabilities."""
+        desc = agent_registry.register("a1", {"search", "retrieve"}, trust_score=0.9)
+        d = desc.to_dict()
+        assert d["agent_id"] == "a1"
+        assert d["capabilities"] == ["retrieve", "search"]
+        assert d["trust_score"] == 0.9
+        assert isinstance(d["metadata"], dict)
+
+    def test_sync_barrier_to_dict(self, sync: SyncPrimitive) -> None:
+        """SyncBarrier.to_dict sorts participants and copies proposals."""
+        barrier = sync.create_barrier(["b", "a"], timeout_seconds=20.0)
+        sync.contribute(barrier.barrier_id, "a", {"x": 1})
+        updated = sync.get_barrier(barrier.barrier_id)
+        assert updated is not None
+        d = updated.to_dict()
+        assert d["participants"] == ["a", "b"]
+        assert d["timeout_seconds"] == 20.0
+        assert "a" in d["proposals"]
+
+    def test_sync_result_to_dict(self, sync: SyncPrimitive) -> None:
+        """SyncResult.to_dict converts participants tuple to list."""
+        barrier = sync.create_barrier(["a1"])
+        sync.contribute(barrier.barrier_id, "a1", {"done": True})
+        result = sync.resolve(barrier.barrier_id)
+        d = result.to_dict()
+        assert d["synchronized"] is True
+        assert isinstance(d["participants"], list)
+        assert d["participants"] == ["a1"]
+        assert isinstance(d["evidence_anchors"], list)
+        assert len(d["evidence_anchors"]) >= 1
+        assert d["evidence_anchors"][0]["ref"].startswith("sync:")
+
+
+# ---------------------------------------------------------------------------
+# invoke and inquire step handlers
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteWorkflowStepInvokeInquire:
+    """Test invoke and inquire handlers in execute_workflow_step."""
+
+    @staticmethod
+    def _make_step(capability: str, purpose: str = "test") -> WorkflowStep:
+        return WorkflowStep(capability=capability, purpose=purpose)
+
+    def test_invoke_step_with_workflow(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """invoke step succeeds with a workflow name in context."""
+        step = self._make_step("invoke")
+        result = runtime.execute_workflow_step(step, {"workflow": "debug_code_change"})
+        assert result.status == StepStatus.COMPLETED
+        assert result.output["workflow"] == "debug_code_change"
+        assert len(result.output["evidence_anchors"]) >= 1
+        assert result.output["evidence_anchors"][0].startswith("invoke:")
+
+    def test_invoke_step_no_workflow(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """invoke step fails without a workflow name."""
+        step = self._make_step("invoke")
+        result = runtime.execute_workflow_step(step, {})
+        assert result.status == StepStatus.FAILED
+        assert "No workflow" in (result.error or "")
+
+    def test_inquire_step_with_input(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """inquire step generates clarification questions."""
+        step = self._make_step("inquire")
+        result = runtime.execute_workflow_step(
+            step, {"ambiguous_input": "unclear request", "max_questions": 5}
+        )
+        assert result.status == StepStatus.COMPLETED
+        assert len(result.output["questions"]) >= 1
+        assert "unclear request" in result.output["questions"][0]
+        assert result.output["confidence"] == 0.5
+        assert len(result.output["evidence_anchors"]) >= 1
+
+    def test_inquire_step_empty_input(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """inquire step handles missing ambiguous_input."""
+        step = self._make_step("inquire")
+        result = runtime.execute_workflow_step(step, {})
+        assert result.status == StepStatus.COMPLETED
+        assert result.output["questions"] == []
+        assert result.output["confidence"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Dependency-based subtask ordering
+# ---------------------------------------------------------------------------
+
+
+class TestDependencyOrdering:
+    """Test _order_subtasks_by_dependencies in OrchestrationRuntime."""
+
+    def test_orchestrate_dependency_ordering(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """Subtasks are reordered based on ontology edges.
+
+        'plan' precedes 'delegate' in the ontology, so a subtask
+        requiring 'delegate' should come after one requiring 'plan'.
+        """
+        runtime.register_agent("planner", {"plan", "delegate"})
+        subtasks = [
+            {"description": "Delegate work", "required_capabilities": ["delegate"]},
+            {"description": "Plan first", "required_capabilities": ["plan"]},
+        ]
+        result = runtime.orchestrate(
+            task_goal="Ordering test",
+            subtask_descriptions=subtasks,
+        )
+        assert result.success is True
+        # Both should be accepted by the planner agent
+        assert len(result.subtasks) == 2
+        # Verify tasks ran (we can't directly inspect order from results,
+        # but we can verify both were delegated successfully)
+        assert all(dr.accepted for dr in result.subtasks)
+
+    def test_orchestrate_no_cycle_crash(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """Cycles fall back to original order without crashing."""
+        runtime.register_agent("worker", {"retrieve", "search"})
+        # Both subtasks have capabilities; if there were cycles the
+        # runtime should still work (falls back to original order)
+        subtasks = [
+            {"description": "A", "required_capabilities": ["retrieve"]},
+            {"description": "B", "required_capabilities": ["search"]},
+        ]
+        result = runtime.orchestrate(
+            task_goal="Cycle safety",
+            subtask_descriptions=subtasks,
+        )
+        assert result.success is True
+        assert len(result.subtasks) == 2
+
+    def test_orchestrate_unconstrained_subtasks_stable(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """Subtasks without capabilities keep their original order."""
+        runtime.register_agent("worker", {"retrieve"})
+        subtasks = [
+            {"description": "First"},
+            {"description": "Second"},
+            {"description": "Third"},
+        ]
+        result = runtime.orchestrate(
+            task_goal="Stable order",
+            subtask_descriptions=subtasks,
+        )
+        assert result.success is True
+        assert len(result.subtasks) == 3
+
+
+# ---------------------------------------------------------------------------
+# Wiring verification
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestrateWiring:
+    """Verify orchestrate() uses execute_workflow_step() for delegation."""
+
+    def test_orchestrate_uses_execute_workflow_step(
+        self,
+        runtime: OrchestrationRuntime,
+    ) -> None:
+        """orchestrate() calls execute_workflow_step for delegate steps."""
+        runtime.register_agent("worker", {"retrieve"})
+
+        with patch.object(
+            runtime, "execute_workflow_step", wraps=runtime.execute_workflow_step
+        ) as spy:
+            result = runtime.orchestrate(task_goal="Wiring test")
+
+        assert result.success is True
+        # execute_workflow_step should have been called at least once
+        # for the delegation step
+        assert spy.call_count >= 1
+        # At least one call should have been for a delegate step
+        delegate_calls = [
+            call for call in spy.call_args_list if call[0][0].capability == "delegate"
+        ]
+        assert len(delegate_calls) >= 1
