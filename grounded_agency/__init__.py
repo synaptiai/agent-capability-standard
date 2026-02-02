@@ -30,6 +30,15 @@ from .capabilities.registry import CapabilityRegistry
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
+from .workflows.engine import (
+    BindingError,
+    StepStatus,
+    WorkflowDefinition,
+    WorkflowEngine,
+    WorkflowStep,
+    WorkflowStepResult,
+)
+from .workflows.tracer import ConformanceReport, StepTrace, WorkflowTracer
 
 # Configure package-level logger
 logger = logging.getLogger("grounded_agency")
@@ -57,6 +66,16 @@ __all__ = [
     "HookContext",
     "FallbackPermissionAllow",
     "FallbackPermissionDeny",
+    # Workflow engine
+    "StepStatus",
+    "WorkflowEngine",
+    "WorkflowDefinition",
+    "WorkflowStep",
+    "WorkflowStepResult",
+    "BindingError",
+    "WorkflowTracer",
+    "ConformanceReport",
+    "StepTrace",
     # Logging
     "logger",
 ]
