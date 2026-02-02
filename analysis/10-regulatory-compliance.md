@@ -585,57 +585,24 @@ This section outlines practical steps toward formal regulatory certification, le
 
 **Objective:** Develop a NIST AI RMF profile that maps the framework's capabilities to the four core functions.
 
-**Profile Structure:**
+**Status:** ✅ Complete — See [NIST AI RMF Profile (NIST-RMF-001)](../docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md)
 
-```
-GOVERN
-  GV-1: Policies and procedures
-    -> Domain profiles (healthcare, manufacturing, data-analysis)
-    -> Risk thresholds (auto_approve, require_review, require_human)
-    -> Block_autonomous capability lists
+The standalone NIST AI RMF profile document maps all 4 core functions and their 19 categories to framework implementations, with tier assessments and a maturity roadmap.
 
-  GV-2: Accountability structures
-    -> ProvenanceRecord (agent + capability tracking)
-    -> Audit hooks (skill invocation logging)
+**Tier Assessment Summary:**
 
-MAP
-  MP-1: Context establishment
-    -> Domain profiles define operational context
-    -> Trust weights calibrate source reliability
+| Function | Current Tier | Target Tier |
+|----------|-------------|-------------|
+| GOVERN | Tier 2 — Risk Informed | Tier 3 — Repeatable |
+| MAP | Tier 3 — Repeatable | Tier 4 — Adaptive |
+| MEASURE | Tier 2 — Risk Informed | Tier 3 — Repeatable |
+| MANAGE | Tier 3 — Repeatable | Tier 4 — Adaptive |
 
-  MP-2: Risk identification
-    -> Three-tier risk classification (low/medium/high)
-    -> Capability mutation flags
-    -> Conflicts_with edges identify incompatible operations
-
-MEASURE
-  ME-1: Risk measurement
-    -> Confidence scores on all capability outputs
-    -> Evidence anchor requirements per domain
-    -> Minimum confidence thresholds
-
-  ME-2: Continuous monitoring
-    -> EvidenceStore tracking tool executions
-    -> Checkpoint lifecycle tracking
-    -> Temporal decay model for information freshness
-
-MANAGE
-  MG-1: Risk response
-    -> Checkpoint-before-mutation enforcement
-    -> Rollback capability for state recovery
-    -> Recovery loop limits (max_loops)
-
-  MG-2: Risk documentation
-    -> Audit log of all skill invocations
-    -> ProvenanceRecord chain for all claims
-    -> World state versioning with parent links
-```
-
-**Recommended Actions:**
-1. Formalize the NIST AI RMF profile as a standalone document.
-2. Map each sub-category to specific framework capabilities with evidence.
-3. Identify tier levels (Partial, Risk Informed, Repeatable, Adaptive) for each function.
-4. Develop a maturity roadmap from current state to target profile.
+**Completed Actions:**
+1. ✅ Formalized the NIST AI RMF profile as a standalone document — `docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md`
+2. ✅ Mapped each sub-category to specific framework capabilities with evidence — All 19 categories covered with evidence file citations
+3. ✅ Identified tier levels (Partial, Risk Informed, Repeatable, Adaptive) for each function — See profile §8 (Tier Assessment Summary)
+4. ✅ Developed a maturity roadmap from current state to target profile — 3-phase roadmap in profile §9
 
 ---
 
@@ -648,10 +615,10 @@ MANAGE
 | EU AI Act Art. 13 (Transparency) | `explain` + `critique` capabilities | `skills/explain/SKILL.md`, `skills/critique/SKILL.md` |
 | EU AI Act Art. 14 (Human Oversight) | `require_human`, `inquire`, `block_autonomous` | `schemas/profiles/profile_schema.yaml` |
 | EU AI Act Art. 15 (Accuracy) | Typed contracts, schema validation | `schemas/capability_ontology.yaml` (input/output schemas) |
-| NIST AI RMF Govern | Domain profiles, accountability | `schemas/profiles/*.yaml` |
-| NIST AI RMF Map | Trust model, risk context | `schemas/authority_trust_model.yaml` |
-| NIST AI RMF Measure | Evidence anchors, confidence scores | `grounded_agency/state/evidence_store.py` |
-| NIST AI RMF Manage | Checkpoints, rollback, constrain | `grounded_agency/state/checkpoint_tracker.py` |
+| NIST AI RMF Govern | Domain profiles, accountability — [Profile §4](../docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md#4-govern-function) | `schemas/profiles/*.yaml`, `docs/compliance/iso42001/competency_framework.md` |
+| NIST AI RMF Map | Trust model, risk context — [Profile §5](../docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md#5-map-function) | `schemas/authority_trust_model.yaml`, `schemas/capability_ontology.yaml` |
+| NIST AI RMF Measure | Evidence anchors, confidence scores — [Profile §6](../docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md#6-measure-function) | `grounded_agency/state/evidence_store.py`, `tools/validate_*.py` |
+| NIST AI RMF Manage | Checkpoints, rollback, constrain — [Profile §7](../docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md#7-manage-function) | `grounded_agency/state/checkpoint_tracker.py`, `hooks/hooks.json` |
 | ISO 42001 Clause 8 | Capability ontology, workflow DSL | `schemas/capability_ontology.yaml`, `schemas/workflow_catalog.yaml` |
 | ISO 42001 Clause 9 | Audit hooks, evidence store | `hooks/hooks.json`, `grounded_agency/state/evidence_store.py` |
 | HIPAA (Access Controls) | `block_autonomous`, `require_human` | `schemas/profiles/healthcare.yaml` |
