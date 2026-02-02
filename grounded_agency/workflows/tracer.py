@@ -321,8 +321,8 @@ class WorkflowTracer:
             # Penalize out-of-order (half credit) and extra actions
             order_penalty = len(out_of_order) * 0.5
             extra_penalty = len(extra) * 0.1
-            raw_score = (covered / total) - (order_penalty / total) - (
-                extra_penalty / total
+            raw_score = (
+                (covered / total) - (order_penalty / total) - (extra_penalty / total)
             )
             score = max(0.0, min(1.0, raw_score))
 

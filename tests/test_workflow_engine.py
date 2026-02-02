@@ -131,9 +131,7 @@ class TestStepParsing:
         wf = engine.get_workflow("debug_code_change")
         assert wf is not None
         # checkpoint step has mutation: true
-        checkpoint_step = next(
-            s for s in wf.steps if s.capability == "checkpoint"
-        )
+        checkpoint_step = next(s for s in wf.steps if s.capability == "checkpoint")
         assert checkpoint_step.mutation is True
 
     def test_step_requires_checkpoint(self, engine: WorkflowEngine) -> None:
@@ -191,9 +189,7 @@ class TestStepParsing:
         mutation_steps = wf.mutation_steps
         assert len(mutation_steps) >= 2  # checkpoint, execute, rollback
 
-    def test_checkpoint_required_steps_property(
-        self, engine: WorkflowEngine
-    ) -> None:
+    def test_checkpoint_required_steps_property(self, engine: WorkflowEngine) -> None:
         wf = engine.get_workflow("debug_code_change")
         assert wf is not None
         cp_steps = wf.checkpoint_required_steps
@@ -224,9 +220,7 @@ class TestCapabilityValidation:
             # may legitimately downgrade flags (e.g., audit used as
             # non-mutating append-only). Only structural errors (capability
             # not found in ontology) should fail the build.
-            structural_errors = [
-                e for e in errors if "not found in ontology" in e
-            ]
+            structural_errors = [e for e in errors if "not found in ontology" in e]
             assert structural_errors == [], (
                 f"Workflow {name} has unknown capabilities: {structural_errors}"
             )
@@ -334,9 +328,7 @@ class TestValidationModeTracing:
         ]
         assert len(checkpoint_violations) > 0
 
-    def test_conformance_report_properties(
-        self, engine: WorkflowEngine
-    ) -> None:
+    def test_conformance_report_properties(self, engine: WorkflowEngine) -> None:
         tracer = WorkflowTracer(engine, "debug_code_change")
         report = tracer.get_report()
         assert report.workflow_name == "debug_code_change"
@@ -358,9 +350,9 @@ class TestBindingValidation:
             errors = engine.validate_bindings(name)
             # Workflows with input bindings referencing workflow-level inputs
             # should resolve correctly; no workflow should be "not found"
-            assert all(
-                e.error_type != "workflow_not_found" for e in errors
-            ), f"Workflow {name}: {errors}"
+            assert all(e.error_type != "workflow_not_found" for e in errors), (
+                f"Workflow {name}: {errors}"
+            )
 
     def test_unresolved_ref_detected(self) -> None:
         eng = WorkflowEngine(ONTOLOGY_PATH)
@@ -457,9 +449,7 @@ class TestBindingValidation:
         errors = eng.validate_bindings("test_nested")
         assert len(errors) == 0
 
-    def test_nonexistent_workflow_binding_check(
-        self, engine: WorkflowEngine
-    ) -> None:
+    def test_nonexistent_workflow_binding_check(self, engine: WorkflowEngine) -> None:
         errors = engine.validate_bindings("nonexistent")
         assert len(errors) == 1
         assert errors[0].error_type == "workflow_not_found"
@@ -533,9 +523,7 @@ class TestCheckpointIntegration:
         assert tracker is not None
 
         # Pre-create a checkpoint
-        existing_id = tracker.create_checkpoint(
-            scope=["*"], reason="Pre-existing"
-        )
+        existing_id = tracker.create_checkpoint(scope=["*"], reason="Pre-existing")
 
         wf = engine_with_tracker.get_workflow("debug_code_change")
         assert wf is not None
@@ -551,9 +539,7 @@ class TestCheckpointIntegration:
         wf = engine.get_workflow("debug_code_change")
         assert wf is not None
         execute_step = next(s for s in wf.steps if s.capability == "execute")
-        cp_id = engine.ensure_checkpoint_before_step(
-            execute_step, "debug_code_change"
-        )
+        cp_id = engine.ensure_checkpoint_before_step(execute_step, "debug_code_change")
         assert cp_id is None
 
     def test_checkpoint_reason_includes_context(
@@ -584,9 +570,7 @@ class TestCheckpointIntegration:
 class TestEdgeConstraintValidation:
     """Validate ontology edge constraints within workflows."""
 
-    def test_validate_edge_constraints_runs(
-        self, engine: WorkflowEngine
-    ) -> None:
+    def test_validate_edge_constraints_runs(self, engine: WorkflowEngine) -> None:
         # Should run without exception on real workflows
         for name in engine.list_workflows():
             errors = engine.validate_edge_constraints(name)
@@ -595,9 +579,7 @@ class TestEdgeConstraintValidation:
             # defines ideal ordering, workflows may deviate)
             assert isinstance(errors, list)
 
-    def test_nonexistent_workflow_edge_check(
-        self, engine: WorkflowEngine
-    ) -> None:
+    def test_nonexistent_workflow_edge_check(self, engine: WorkflowEngine) -> None:
         errors = engine.validate_edge_constraints("nonexistent")
         assert len(errors) == 1
         assert "not found" in errors[0]
@@ -615,9 +597,7 @@ class TestValidateAll:
         results = engine.validate_all()
         assert isinstance(results, dict)
 
-    def test_validate_all_keys_are_workflow_names(
-        self, engine: WorkflowEngine
-    ) -> None:
+    def test_validate_all_keys_are_workflow_names(self, engine: WorkflowEngine) -> None:
         results = engine.validate_all()
         known = set(engine.list_workflows())
         for key in results:
@@ -826,10 +806,7 @@ class TestBindingTraversalLimits:
         """More than _MAX_BINDING_ELEMENTS unique dicts must raise."""
         eng = WorkflowEngine(ONTOLOGY_PATH)
         # Create 10_001 unique dicts (each with unique id())
-        bindings: dict[str, Any] = {
-            f"k{i}": {"v": f"${{{i}}}"}
-            for i in range(10_001)
-        }
+        bindings: dict[str, Any] = {f"k{i}": {"v": f"${{{i}}}"} for i in range(10_001)}
         with pytest.raises(ValueError, match="max element count"):
             eng._extract_binding_refs(bindings)
 

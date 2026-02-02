@@ -275,9 +275,7 @@ class WorkflowEngine:
             FileNotFoundError: If catalog file doesn't exist
             ValueError: If catalog is a symlink
         """
-        data: dict[str, Any] = safe_yaml_load(
-            catalog_path, max_size=ONTOLOGY_MAX_BYTES
-        )
+        data: dict[str, Any] = safe_yaml_load(catalog_path, max_size=ONTOLOGY_MAX_BYTES)
 
         count = 0
         for name, wf_data in data.items():
@@ -320,8 +318,7 @@ class WorkflowEngine:
             cap = self._registry.get_capability(step.capability)
             if cap is None:
                 errors.append(
-                    f"Step {i} ({step.capability}): "
-                    f"capability not found in ontology"
+                    f"Step {i} ({step.capability}): capability not found in ontology"
                 )
                 continue
 
@@ -490,9 +487,7 @@ class WorkflowEngine:
             for key, value in bindings.items():
                 full_key = f"{parent_key}.{key}" if parent_key else key
                 refs.extend(
-                    self._extract_binding_refs(
-                        value, full_key, _depth + 1, _visited
-                    )
+                    self._extract_binding_refs(value, full_key, _depth + 1, _visited)
                 )
 
         elif isinstance(bindings, list):
@@ -508,9 +503,7 @@ class WorkflowEngine:
             for idx, item in enumerate(bindings):
                 full_key = f"{parent_key}[{idx}]"
                 refs.extend(
-                    self._extract_binding_refs(
-                        item, full_key, _depth + 1, _visited
-                    )
+                    self._extract_binding_refs(item, full_key, _depth + 1, _visited)
                 )
 
         return refs
@@ -720,9 +713,7 @@ class WorkflowEngine:
         for name in self._workflows:
             errors: list[str] = []
             errors.extend(self.validate_capabilities(name))
-            errors.extend(
-                e.message for e in self.validate_bindings(name)
-            )
+            errors.extend(e.message for e in self.validate_bindings(name))
             errors.extend(self.validate_edge_constraints(name))
             if errors:
                 results[name] = errors
