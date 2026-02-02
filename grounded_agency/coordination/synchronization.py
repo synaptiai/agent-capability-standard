@@ -160,7 +160,8 @@ class SyncPrimitive:
 
         Strategies:
         - ``last_writer_wins``: Last proposal overwrites earlier ones.
-        - ``merge_keys``: Shallow dict merge of all proposals.
+        - ``merge_keys``: Shallow dict merge; overlapping keys are
+          resolved last-writer-wins and logged in ``conflict_details``.
         - ``require_unanimous``: All proposals must be identical.
 
         Returns a ``SyncResult`` indicating success/failure.

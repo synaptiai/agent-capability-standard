@@ -406,6 +406,8 @@ class EvidenceStore:
     def _evict_lowest_priority(self) -> None:
         """SEC-004: Evict the lowest-priority, oldest anchor from the store.
 
+        Must be called with ``self._lock`` held.
+
         O(1) amortized: finds the lowest non-empty priority bucket, pops
         the leftmost (oldest) seq_id, then removes from all indexes via
         dict deletes.

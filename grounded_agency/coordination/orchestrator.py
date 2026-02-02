@@ -214,6 +214,8 @@ class OrchestrationRuntime:
         result.steps_executed += 1
 
         # Step 2: Plan — order subtasks by dependencies
+        # TODO: implement dependency-based ordering; currently subtasks
+        # are executed in the order provided by the caller.
         result.steps_executed += 1
 
         # Step 3: Delegate — assign each subtask to an agent
