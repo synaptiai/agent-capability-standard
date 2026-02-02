@@ -280,7 +280,15 @@ class TestCoverageReport:
     def test_partial_dict_has_expected_entries(self, adapter: OASFAdapter) -> None:
         partial = adapter.partial_capabilities()
         assert len(partial) == 7
-        expected = {"checkpoint", "simulate", "inquire", "synchronize", "state", "ground", "rollback"}
+        expected = {
+            "checkpoint",
+            "simulate",
+            "inquire",
+            "synchronize",
+            "state",
+            "ground",
+            "rollback",
+        }
         assert set(partial.keys()) == expected
 
     def test_partial_capabilities_have_valid_oasf_codes(
