@@ -8,7 +8,7 @@ events with full provenance for post-hoc analysis.
 
 from __future__ import annotations
 
-import enum
+import json
 import logging
 import os
 import threading
@@ -22,17 +22,6 @@ logger = logging.getLogger(__name__)
 
 # Default maximum events retained in memory
 DEFAULT_MAX_EVENTS = 10000
-
-
-class EventType(str, enum.Enum):
-    """Known coordination event types."""
-
-    DELEGATION = "delegation"
-    SYNCHRONIZATION = "synchronization"
-    EVIDENCE_SHARE = "evidence_share"
-    TASK_COMPLETE = "task_complete"
-    ORCHESTRATION_COMPLETE = "orchestration_complete"
-    WORKFLOW_STEP_AUDIT = "workflow_step_audit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +71,8 @@ class CoordinationEvent:
 class CoordinationAuditLog:
     """Append-only, bounded audit log for coordination events.
 
+    Lock order: 6 (lowest priority -- acquired last).
+
     Thread-safe via ``threading.Lock()``.  Uses ``collections.deque``
     with a max length so memory stays bounded — oldest events are
     silently dropped when the limit is reached.
@@ -118,7 +109,9 @@ class CoordinationAuditLog:
             target_agent_ids=tuple(target_agent_ids),
             capability_id=capability_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
-            details=types.MappingProxyType(dict(details) if details else {}),
+            details=types.MappingProxyType(
+                json.loads(json.dumps(details, default=str)) if details else {}
+            ),
             evidence_refs=tuple(evidence_refs) if evidence_refs else (),
         )
         with self._lock:

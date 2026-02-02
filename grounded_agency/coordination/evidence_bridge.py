@@ -50,11 +50,7 @@ class SharedEvidence:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON export."""
         return {
-            "anchor": {
-                "ref": self.anchor.ref,
-                "kind": self.anchor.kind,
-                "timestamp": self.anchor.timestamp,
-            },
+            "anchor": self.anchor.to_dict(),
             "source_agent_id": self.source_agent_id,
             "trust_score": self.trust_score,
             "original_trust": self.original_trust,
@@ -64,6 +60,8 @@ class SharedEvidence:
 
 class CrossAgentEvidenceBridge:
     """Facilitates evidence sharing between agents with trust propagation.
+
+    Lock order: 5.
 
     Thread-safe.  Integrates with ``AgentRegistry`` for trust scores
     and ``CoordinationAuditLog`` for audit trails.
@@ -75,13 +73,24 @@ class CrossAgentEvidenceBridge:
         evidence_store: EvidenceStore,
         audit_log: CoordinationAuditLog,
         trust_decay: float = DEFAULT_TRUST_DECAY,
+        min_trust_floor: float = 0.0,
+        max_shared_per_agent: int = 1000,
     ) -> None:
+        if not (0.0 < trust_decay <= 1.0):
+            raise ValueError(
+                f"trust_decay must be in (0.0, 1.0], got {trust_decay}"
+            )
         self._agent_registry = agent_registry
         self._evidence_store = evidence_store
         self._audit_log = audit_log
         self._trust_decay = trust_decay
+        self._min_trust_floor = min_trust_floor
+        self._max_shared_per_agent = max_shared_per_agent
         # Keyed by target_agent_id -> list of SharedEvidence
         self._shared: dict[str, list[SharedEvidence]] = defaultdict(list)
+        # Secondary indexes for O(1) lookup by evidence ref
+        self._by_ref: dict[str, SharedEvidence] = {}  # first sharing per ref
+        self._lineage: dict[str, list[SharedEvidence]] = defaultdict(list)  # all sharings per ref
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -114,6 +123,14 @@ class CrossAgentEvidenceBridge:
             ]
 
         propagated_trust = source.trust_score * self._trust_decay
+
+        if propagated_trust < self._min_trust_floor:
+            logger.debug(
+                "Skipping evidence share %s: trust %.3f below floor %.3f",
+                anchor.ref, propagated_trust, self._min_trust_floor,
+            )
+            return []
+
         shared_at = datetime.now(timezone.utc).isoformat()
         results: list[SharedEvidence] = []
 
@@ -136,7 +153,27 @@ class CrossAgentEvidenceBridge:
                     shared_at=shared_at,
                 )
                 self._shared[target_id].append(se)
+                self._lineage[anchor.ref].append(se)
                 results.append(se)
+
+                # Evict oldest evidence for this target if over the limit
+                if len(self._shared[target_id]) > self._max_shared_per_agent:
+                    evicted = self._shared[target_id].pop(0)
+                    # Clean up secondary indexes
+                    evicted_ref = evicted.anchor.ref
+                    if evicted_ref in self._lineage:
+                        try:
+                            self._lineage[evicted_ref].remove(evicted)
+                        except ValueError:
+                            pass
+                        if not self._lineage[evicted_ref]:
+                            del self._lineage[evicted_ref]
+                    if self._by_ref.get(evicted_ref) is evicted:
+                        del self._by_ref[evicted_ref]
+
+            # Track first sharing per ref for O(1) prior-sharing lookup
+            if anchor.ref not in self._by_ref and results:
+                self._by_ref[anchor.ref] = results[0]
 
         # Audit the sharing event
         self._audit_log.record(
@@ -170,12 +207,9 @@ class CrossAgentEvidenceBridge:
         """Find the first prior sharing event for this evidence ref.
 
         Must be called with ``self._lock`` held.
+        Uses the ``_by_ref`` secondary index for O(1) lookup.
         """
-        for entries in self._shared.values():
-            for se in entries:
-                if se.anchor.ref == evidence_ref:
-                    return se
-        return None
+        return self._by_ref.get(evidence_ref)
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -198,14 +232,12 @@ class CrossAgentEvidenceBridge:
             ]
 
     def get_evidence_lineage(self, evidence_ref: str) -> list[SharedEvidence]:
-        """Trace all sharing events for a given evidence ref across agents."""
+        """Trace all sharing events for a given evidence ref across agents.
+
+        Uses the ``_lineage`` secondary index for O(1) lookup.
+        """
         with self._lock:
-            return [
-                se
-                for entries in self._shared.values()
-                for se in entries
-                if se.anchor.ref == evidence_ref
-            ]
+            return list(self._lineage.get(evidence_ref, []))
 
     @property
     def total_shared(self) -> int:

@@ -13,6 +13,7 @@ Tests cover the 5 acceptance criteria from Issue #76:
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -245,6 +246,19 @@ class TestAgentRegistry:
         with pytest.raises(AttributeError):
             desc.trust_score = 5.0  # type: ignore[misc]
 
+    def test_agent_descriptor_metadata_immutable(
+        self,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """Attempting to mutate descriptor.metadata raises TypeError."""
+        desc = agent_registry.register(
+            "a1",
+            {"retrieve"},
+            metadata={"model": "gpt-4", "version": "1.0"},
+        )
+        with pytest.raises(TypeError):
+            desc.metadata["model"] = "modified"  # type: ignore[index]
+
 
 # ---------------------------------------------------------------------------
 # AC2: Typed Delegation with Contract Enforcement
@@ -449,6 +463,215 @@ class TestDelegationProtocol:
         assert len(events) == 1
         assert events[0].capability_id == "delegate"
 
+    def test_delegate_toctou_agent_unregistered_during_delegation(
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """TOCTOU: agent unregistered between initial check and store is rejected.
+
+        Simulates a race condition where another thread unregisters the
+        target agent after the initial ``get_agent()`` check passes but
+        before the result is stored under the delegation lock.
+
+        Two threading events coordinate the sequence:
+        1. ``unregister_now`` -- signals the worker thread to unregister
+        2. ``unregister_done`` -- confirms the unregister has completed
+        """
+        agent_registry.register("ephemeral", {"retrieve"})
+
+        unregister_now = threading.Event()
+        unregister_done = threading.Event()
+        call_count = 0
+        original_get_agent = agent_registry.get_agent
+
+        def intercepting_get_agent(agent_id: str):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: return the real agent (initial check passes)
+                result = original_get_agent(agent_id)
+                # Signal the worker thread to unregister, then wait
+                # until it has completed so the agent is truly gone.
+                unregister_now.set()
+                unregister_done.wait(timeout=5.0)
+                return result
+            else:
+                # Second call (re-verification inside lock): agent is gone
+                return original_get_agent(agent_id)
+
+        def unregister_worker():
+            unregister_now.wait(timeout=5.0)
+            agent_registry.unregister("ephemeral")
+            unregister_done.set()
+
+        t = threading.Thread(target=unregister_worker)
+        t.start()
+
+        with patch.object(
+            agent_registry, "get_agent", side_effect=intercepting_get_agent
+        ):
+            result = delegation.delegate(
+                description="Race condition test",
+                required_capabilities={"retrieve"},
+                target_agent_id="ephemeral",
+            )
+
+        t.join(timeout=5.0)
+
+        # The delegation must have been rejected due to the TOCTOU guard
+        assert result.accepted is False
+        assert result.status == "rejected"
+        assert "unregistered during delegation" in result.rejection_reason
+
+    def test_delegation_depth_limit_exceeded(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+    ) -> None:
+        """Delegation raises ValueError when _depth exceeds max_delegation_depth."""
+        protocol = DelegationProtocol(
+            agent_registry, evidence_store, audit_log, max_delegation_depth=3
+        )
+        agent_registry.register("worker", {"retrieve"})
+
+        # Depth within limit should succeed
+        result = protocol.delegate(
+            description="Shallow delegation",
+            required_capabilities={"retrieve"},
+            target_agent_id="worker",
+            _depth=3,
+        )
+        assert result.accepted is True
+
+        # Depth exceeding limit should raise
+        with pytest.raises(ValueError, match="Delegation depth limit exceeded"):
+            protocol.delegate(
+                description="Too deep",
+                required_capabilities={"retrieve"},
+                target_agent_id="worker",
+                _depth=4,
+            )
+
+    def test_delegation_depth_limit_default(
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """Default max_delegation_depth is 10; depth=11 raises ValueError."""
+        agent_registry.register("worker", {"retrieve"})
+        with pytest.raises(ValueError, match="Delegation depth limit exceeded: 11 > 10"):
+            delegation.delegate(
+                description="Way too deep",
+                required_capabilities={"retrieve"},
+                target_agent_id="worker",
+                _depth=11,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Delegation Lifecycle State Machine Validation
+# ---------------------------------------------------------------------------
+
+
+class TestDelegationLifecycle:
+    """Validate the accepted -> completed state machine on DelegationResult."""
+
+    def test_complete_rejected_task_raises(
+        self,
+        delegation: DelegationProtocol,
+    ) -> None:
+        """Completing a rejected task raises ValueError."""
+        result = delegation.delegate(
+            description="Ghost task",
+            required_capabilities={"retrieve"},
+            target_agent_id="nonexistent-agent",
+        )
+        assert result.accepted is False
+        assert result.status == "rejected"
+        with pytest.raises(ValueError, match="status is 'rejected'"):
+            delegation.complete_task(result.task_id)
+
+    def test_complete_already_completed_task_raises(
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """Completing an already-completed task raises ValueError."""
+        agent_registry.register("worker", {"retrieve"})
+        result = delegation.delegate(
+            description="Do work",
+            required_capabilities={"retrieve"},
+            target_agent_id="worker",
+        )
+        assert result.status == "accepted"
+        # First completion should succeed
+        completed = delegation.complete_task(
+            result.task_id, output_data={"done": True}
+        )
+        assert completed is not None
+        assert completed.status == "completed"
+        # Second completion should fail
+        with pytest.raises(ValueError, match="status is 'completed'"):
+            delegation.complete_task(result.task_id, output_data={"again": True})
+
+    def test_normal_lifecycle_delegate_then_complete(
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """Normal lifecycle: delegate (accepted) -> complete (completed)."""
+        agent_registry.register("worker", {"search"})
+        result = delegation.delegate(
+            description="Search the web",
+            required_capabilities={"search"},
+            target_agent_id="worker",
+        )
+        assert result.accepted is True
+        assert result.status == "accepted"
+
+        completed = delegation.complete_task(
+            result.task_id, output_data={"results": [1, 2, 3]}
+        )
+        assert completed is not None
+        assert completed.status == "completed"
+        assert completed.output_data == {"results": [1, 2, 3]}
+        # accepted field remains True for backwards compatibility
+        assert completed.accepted is True
+
+    def test_status_field_in_to_dict(
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """status field appears in to_dict() output at each lifecycle stage."""
+        agent_registry.register("worker", {"retrieve"})
+
+        # Accepted result
+        result = delegation.delegate(
+            description="Fetch data",
+            required_capabilities={"retrieve"},
+            target_agent_id="worker",
+        )
+        d = result.to_dict()
+        assert "status" in d
+        assert d["status"] == "accepted"
+
+        # Completed result
+        delegation.complete_task(result.task_id, output_data={"ok": True})
+        d = result.to_dict()
+        assert d["status"] == "completed"
+
+        # Rejected result
+        rejected = delegation.delegate(
+            description="Impossible",
+            required_capabilities={"retrieve"},
+            target_agent_id="ghost",
+        )
+        d = rejected.to_dict()
+        assert d["status"] == "rejected"
+
 
 # ---------------------------------------------------------------------------
 # AC3: Trust Propagation and Evidence Sharing
@@ -616,6 +839,108 @@ class TestCrossAgentEvidenceBridge:
                 source_agent_id="ghost",
             )
 
+    def test_trust_decay_zero_raises(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+    ) -> None:
+        """trust_decay=0.0 is rejected (must be > 0.0)."""
+        with pytest.raises(ValueError, match="trust_decay must be in"):
+            CrossAgentEvidenceBridge(
+                agent_registry, evidence_store, audit_log, trust_decay=0.0,
+            )
+
+    def test_trust_decay_negative_raises(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+    ) -> None:
+        """trust_decay=-0.5 is rejected (must be > 0.0)."""
+        with pytest.raises(ValueError, match="trust_decay must be in"):
+            CrossAgentEvidenceBridge(
+                agent_registry, evidence_store, audit_log, trust_decay=-0.5,
+            )
+
+    def test_trust_decay_above_one_raises(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+    ) -> None:
+        """trust_decay=1.5 is rejected (must be <= 1.0)."""
+        with pytest.raises(ValueError, match="trust_decay must be in"):
+            CrossAgentEvidenceBridge(
+                agent_registry, evidence_store, audit_log, trust_decay=1.5,
+            )
+
+    def test_trust_decay_valid_succeeds(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+    ) -> None:
+        """trust_decay=0.9 is accepted (within valid range)."""
+        bridge = CrossAgentEvidenceBridge(
+            agent_registry, evidence_store, audit_log, trust_decay=0.9,
+        )
+        assert bridge._trust_decay == 0.9
+
+    def test_min_trust_floor_blocks_low_trust_evidence(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+        make_anchor: Callable[..., EvidenceAnchor],
+    ) -> None:
+        """Evidence below min_trust_floor is not shared."""
+        bridge = CrossAgentEvidenceBridge(
+            agent_registry,
+            evidence_store,
+            audit_log,
+            trust_decay=0.9,
+            min_trust_floor=0.5,
+        )
+        # Agent with trust 0.3: propagated = 0.3 * 0.9 = 0.27, below floor 0.5
+        agent_registry.register("low-trust", {"retrieve"}, trust_score=0.3)
+        agent_registry.register("target", {"search"})
+
+        shared = bridge.share_evidence(
+            anchor=make_anchor("test:floor:blocked"),
+            source_agent_id="low-trust",
+            target_agent_ids=["target"],
+        )
+        assert shared == []
+        assert bridge.total_shared == 0
+
+    def test_min_trust_floor_allows_high_trust_evidence(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+        make_anchor: Callable[..., EvidenceAnchor],
+    ) -> None:
+        """Evidence above min_trust_floor is shared normally."""
+        bridge = CrossAgentEvidenceBridge(
+            agent_registry,
+            evidence_store,
+            audit_log,
+            trust_decay=0.9,
+            min_trust_floor=0.5,
+        )
+        # Agent with trust 0.8: propagated = 0.8 * 0.9 = 0.72, above floor 0.5
+        agent_registry.register("high-trust", {"retrieve"}, trust_score=0.8)
+        agent_registry.register("target", {"search"})
+
+        shared = bridge.share_evidence(
+            anchor=make_anchor("test:floor:allowed"),
+            source_agent_id="high-trust",
+            target_agent_ids=["target"],
+        )
+        assert len(shared) == 1
+        assert abs(shared[0].trust_score - 0.72) < 1e-9
+
 
 # ---------------------------------------------------------------------------
 # AC4: Coordination Audit Trail
@@ -709,6 +1034,26 @@ class TestCoordinationAuditLog:
         )
         with pytest.raises(TypeError):
             event.details["key"] = "modified"  # type: ignore[index]
+
+    def test_nested_details_deep_copied(
+        self,
+        audit_log: CoordinationAuditLog,
+    ) -> None:
+        """Mutating the original details dict after recording does NOT affect the stored event."""
+        original_details: dict = {"key": "value", "nested": {"inner": [1, 2, 3]}}
+        event = audit_log.record(
+            "delegation",
+            "a",
+            ["b"],
+            details=original_details,
+        )
+        # Mutate the original dict after recording
+        original_details["key"] = "mutated"
+        original_details["nested"]["inner"].append(999)
+
+        # Stored event must still have the original values
+        assert event.details["key"] == "value"
+        assert list(event.details["nested"]["inner"]) == [1, 2, 3]
 
     def test_get_events_since(self, audit_log: CoordinationAuditLog) -> None:
         """get_events_since returns only events after a given index."""
@@ -867,6 +1212,51 @@ class TestSyncPrimitive:
         assert fetched is not None
         assert fetched.barrier_id == barrier.barrier_id
         assert sync.get_barrier("nonexistent") is None
+
+    def test_resolve_already_resolved_raises(self, sync: SyncPrimitive) -> None:
+        """Resolving an already-resolved barrier raises ValueError.
+
+        When resolve() is called with missing contributions, the barrier
+        is marked resolved=True but stays in _barriers (cleanup only
+        runs after a successful merge). A second resolve() must raise.
+        """
+        barrier = sync.create_barrier(["a1", "a2"])
+        sync.contribute(barrier.barrier_id, "a1", {"done": True})
+        # Resolve with a2 missing -- barrier stays with resolved=True
+        result = sync.resolve(barrier.barrier_id)
+        assert result.synchronized is False
+
+        with pytest.raises(ValueError, match="Barrier already resolved"):
+            sync.resolve(barrier.barrier_id)
+
+    def test_contribute_to_resolved_barrier_raises(self, sync: SyncPrimitive) -> None:
+        """Contributing to a resolved barrier raises ValueError.
+
+        When resolve() is called with missing contributions, the barrier
+        is marked resolved=True but stays in _barriers (cleanup only
+        runs after a successful merge). Subsequent contribute() calls
+        must raise ValueError.
+        """
+        barrier = sync.create_barrier(["a1", "a2"])
+        sync.contribute(barrier.barrier_id, "a1", {"done": True})
+        # Resolve with a2 missing -- barrier stays in dict
+        result = sync.resolve(barrier.barrier_id)
+        assert result.synchronized is False
+
+        with pytest.raises(ValueError, match="Cannot contribute to resolved barrier"):
+            sync.contribute(barrier.barrier_id, "a1", {"more": "data"})
+
+    def test_resolved_barrier_removed_from_barriers(
+        self, sync: SyncPrimitive
+    ) -> None:
+        """Resolved barriers are removed from _barriers; get_barrier returns None."""
+        barrier = sync.create_barrier(["a1"])
+        sync.contribute(barrier.barrier_id, "a1", {"done": True})
+        result = sync.resolve(barrier.barrier_id)
+        assert result.synchronized is True
+
+        # After resolution, the barrier should no longer be accessible
+        assert sync.get_barrier(barrier.barrier_id) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1082,13 +1472,13 @@ class TestOrchestrationRuntime:
 # ---------------------------------------------------------------------------
 
 
+def _make_step(capability: str, purpose: str = "test") -> WorkflowStep:
+    """Helper to build a minimal WorkflowStep for testing."""
+    return WorkflowStep(capability=capability, purpose=purpose)
+
+
 class TestExecuteWorkflowStep:
     """Test the per-step dispatch in OrchestrationRuntime."""
-
-    @staticmethod
-    def _make_step(capability: str, purpose: str = "test") -> WorkflowStep:
-        """Helper to build a minimal WorkflowStep."""
-        return WorkflowStep(capability=capability, purpose=purpose)
 
     def test_delegate_step_with_agents(
         self,
@@ -1096,7 +1486,7 @@ class TestExecuteWorkflowStep:
     ) -> None:
         """Delegate step succeeds when agents are registered."""
         runtime.register_agent("worker", {"retrieve"})
-        step = self._make_step("delegate")
+        step = _make_step("delegate")
         result = runtime.execute_workflow_step(step, {"description": "Test"})
         assert result.status == StepStatus.COMPLETED
         assert result.output["accepted"] is True
@@ -1106,7 +1496,7 @@ class TestExecuteWorkflowStep:
         runtime: OrchestrationRuntime,
     ) -> None:
         """Delegate step fails when no agents are registered."""
-        step = self._make_step("delegate")
+        step = _make_step("delegate")
         result = runtime.execute_workflow_step(step)
         assert result.status == StepStatus.FAILED
         assert "No agents" in (result.error or "")
@@ -1117,7 +1507,7 @@ class TestExecuteWorkflowStep:
     ) -> None:
         """Synchronize step is skipped with fewer than 2 participants."""
         runtime.register_agent("solo", {"retrieve"})
-        step = self._make_step("synchronize")
+        step = _make_step("synchronize")
         result = runtime.execute_workflow_step(step)
         assert result.status == StepStatus.SKIPPED
 
@@ -1128,7 +1518,7 @@ class TestExecuteWorkflowStep:
         """Synchronize step succeeds with 2+ participants."""
         runtime.register_agent("a1", {"retrieve"})
         runtime.register_agent("a2", {"search"})
-        step = self._make_step("synchronize")
+        step = _make_step("synchronize")
         result = runtime.execute_workflow_step(
             step,
             {"state": {"key": "value"}},
@@ -1137,14 +1527,14 @@ class TestExecuteWorkflowStep:
 
     def test_audit_step(self, runtime: OrchestrationRuntime) -> None:
         """Audit step records an event and returns completed."""
-        step = self._make_step("audit")
+        step = _make_step("audit")
         result = runtime.execute_workflow_step(step, {"info": "test"})
         assert result.status == StepStatus.COMPLETED
         assert result.output["audited"] is True
 
     def test_passthrough_step(self, runtime: OrchestrationRuntime) -> None:
         """Non-coordination steps pass through with completed status."""
-        step = self._make_step("retrieve")
+        step = _make_step("retrieve")
         ctx = {"data": "passthrough"}
         result = runtime.execute_workflow_step(step, ctx)
         assert result.status == StepStatus.COMPLETED
@@ -1368,7 +1758,7 @@ class TestSerialization:
         assert isinstance(d["metadata"], dict)
 
     def test_sync_barrier_to_dict(self, sync: SyncPrimitive) -> None:
-        """SyncBarrier.to_dict sorts participants and copies proposals."""
+        """SyncBarrier.to_dict sorts participants, copies proposals, includes resolved."""
         barrier = sync.create_barrier(["b", "a"], timeout_seconds=20.0)
         sync.contribute(barrier.barrier_id, "a", {"x": 1})
         updated = sync.get_barrier(barrier.barrier_id)
@@ -1377,6 +1767,7 @@ class TestSerialization:
         assert d["participants"] == ["a", "b"]
         assert d["timeout_seconds"] == 20.0
         assert "a" in d["proposals"]
+        assert d["resolved"] is False
 
     def test_sync_result_to_dict(self, sync: SyncPrimitive) -> None:
         """SyncResult.to_dict converts participants tuple to list."""
@@ -1400,16 +1791,12 @@ class TestSerialization:
 class TestExecuteWorkflowStepInvokeInquire:
     """Test invoke and inquire handlers in execute_workflow_step."""
 
-    @staticmethod
-    def _make_step(capability: str, purpose: str = "test") -> WorkflowStep:
-        return WorkflowStep(capability=capability, purpose=purpose)
-
     def test_invoke_step_with_workflow(
         self,
         runtime: OrchestrationRuntime,
     ) -> None:
         """invoke step succeeds with a workflow name in context."""
-        step = self._make_step("invoke")
+        step = _make_step("invoke")
         result = runtime.execute_workflow_step(step, {"workflow": "debug_code_change"})
         assert result.status == StepStatus.COMPLETED
         assert result.output["workflow"] == "debug_code_change"
@@ -1421,7 +1808,7 @@ class TestExecuteWorkflowStepInvokeInquire:
         runtime: OrchestrationRuntime,
     ) -> None:
         """invoke step fails without a workflow name."""
-        step = self._make_step("invoke")
+        step = _make_step("invoke")
         result = runtime.execute_workflow_step(step, {})
         assert result.status == StepStatus.FAILED
         assert "No workflow" in (result.error or "")
@@ -1431,7 +1818,7 @@ class TestExecuteWorkflowStepInvokeInquire:
         runtime: OrchestrationRuntime,
     ) -> None:
         """inquire step generates clarification questions."""
-        step = self._make_step("inquire")
+        step = _make_step("inquire")
         result = runtime.execute_workflow_step(
             step, {"ambiguous_input": "unclear request", "max_questions": 5}
         )
@@ -1446,7 +1833,7 @@ class TestExecuteWorkflowStepInvokeInquire:
         runtime: OrchestrationRuntime,
     ) -> None:
         """inquire step handles missing ambiguous_input."""
-        step = self._make_step("inquire")
+        step = _make_step("inquire")
         result = runtime.execute_workflow_step(step, {})
         assert result.status == StepStatus.COMPLETED
         assert result.output["questions"] == []
@@ -1553,3 +1940,317 @@ class TestOrchestrateWiring:
             call for call in spy.call_args_list if call[0][0].capability == "delegate"
         ]
         assert len(delegate_calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Bounded collection eviction tests
+# ---------------------------------------------------------------------------
+
+
+class TestBoundedCollections:
+    """Verify bounded size limits on unbounded collections."""
+
+    def test_delegation_evicts_oldest_task_when_over_limit(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+    ) -> None:
+        """Oldest task is evicted when max_tasks is exceeded."""
+        protocol = DelegationProtocol(
+            agent_registry, evidence_store, audit_log, max_tasks=3
+        )
+        agent_registry.register("worker", {"retrieve"})
+
+        task_ids: list[str] = []
+        for _ in range(5):
+            result = protocol.delegate(
+                description="Test task",
+                required_capabilities={"retrieve"},
+                target_agent_id="worker",
+            )
+            task_ids.append(result.task_id)
+
+        # Only the last 3 tasks should survive
+        assert protocol.get_task(task_ids[0]) is None
+        assert protocol.get_task(task_ids[1]) is None
+        assert protocol.get_task(task_ids[2]) is not None
+        assert protocol.get_task(task_ids[3]) is not None
+        assert protocol.get_task(task_ids[4]) is not None
+
+        # Results should also be evicted in sync with tasks
+        assert protocol.get_result(task_ids[0]) is None
+        assert protocol.get_result(task_ids[1]) is None
+        assert protocol.get_result(task_ids[4]) is not None
+
+    def test_evidence_bridge_evicts_oldest_per_agent(
+        self,
+        agent_registry: AgentRegistry,
+        evidence_store: EvidenceStore,
+        audit_log: CoordinationAuditLog,
+        make_anchor: Callable[..., EvidenceAnchor],
+    ) -> None:
+        """Oldest shared evidence is evicted when max_shared_per_agent is exceeded."""
+        bridge = CrossAgentEvidenceBridge(
+            agent_registry,
+            evidence_store,
+            audit_log,
+            trust_decay=0.9,
+            max_shared_per_agent=3,
+        )
+        agent_registry.register("source", {"retrieve"}, trust_score=0.8)
+        agent_registry.register("target", {"search"})
+
+        for i in range(5):
+            bridge.share_evidence(
+                anchor=make_anchor(f"test:eviction:{i}"),
+                source_agent_id="source",
+                target_agent_ids=["target"],
+            )
+
+        # Only the last 3 entries should survive for "target"
+        shared = bridge.get_shared_evidence("target")
+        assert len(shared) == 3
+        refs = [se.anchor.ref for se in shared]
+        assert "test:eviction:0" not in refs
+        assert "test:eviction:1" not in refs
+        assert "test:eviction:2" in refs
+        assert "test:eviction:3" in refs
+        assert "test:eviction:4" in refs
+
+    def test_agent_registry_rejects_when_full(
+        self,
+        capability_registry: CapabilityRegistry,
+    ) -> None:
+        """Agent registry raises ValueError when max_agents is exceeded."""
+        registry = AgentRegistry(capability_registry, max_agents=2)
+        registry.register("a1", {"retrieve"})
+        registry.register("a2", {"search"})
+
+        with pytest.raises(ValueError, match="registry is full"):
+            registry.register("a3", {"retrieve"})
+
+    def test_agent_registry_allows_overwrite_when_full(
+        self,
+        capability_registry: CapabilityRegistry,
+    ) -> None:
+        """Re-registering an existing agent succeeds even when at capacity."""
+        registry = AgentRegistry(capability_registry, max_agents=2)
+        registry.register("a1", {"retrieve"}, trust_score=0.5)
+        registry.register("a2", {"search"})
+
+        # Overwriting a1 should succeed since it already exists
+        desc = registry.register("a1", {"retrieve"}, trust_score=0.9)
+        assert desc.trust_score == 0.9
+        assert registry.agent_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Enumeration APIs
+# ---------------------------------------------------------------------------
+
+
+class TestEnumerationAPIs:
+    """Test list_tasks(), list_results(), and list_barriers() methods."""
+
+    def test_list_tasks_returns_all(
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """list_tasks() returns all tracked delegation tasks."""
+        agent_registry.register("worker", {"retrieve", "search"})
+        delegation.delegate(
+            description="Task A",
+            required_capabilities={"retrieve"},
+            target_agent_id="worker",
+        )
+        delegation.delegate(
+            description="Task B",
+            required_capabilities={"search"},
+            target_agent_id="worker",
+        )
+
+        tasks = delegation.list_tasks()
+        assert len(tasks) == 2
+        descriptions = {t.description for t in tasks}
+        assert descriptions == {"Task A", "Task B"}
+
+    def test_list_tasks_empty(
+        self,
+        delegation: DelegationProtocol,
+    ) -> None:
+        """list_tasks() returns empty list when no tasks exist."""
+        assert delegation.list_tasks() == []
+
+    def test_list_results_returns_all(
+        self,
+        delegation: DelegationProtocol,
+        agent_registry: AgentRegistry,
+    ) -> None:
+        """list_results() returns all tracked delegation results."""
+        agent_registry.register("worker", {"retrieve", "search"})
+        r1 = delegation.delegate(
+            description="Task A",
+            required_capabilities={"retrieve"},
+            target_agent_id="worker",
+        )
+        r2 = delegation.delegate(
+            description="Task B",
+            required_capabilities={"search"},
+            target_agent_id="worker",
+        )
+
+        results = delegation.list_results()
+        assert len(results) == 2
+        result_ids = {r.task_id for r in results}
+        assert result_ids == {r1.task_id, r2.task_id}
+
+    def test_list_results_empty(
+        self,
+        delegation: DelegationProtocol,
+    ) -> None:
+        """list_results() returns empty list when no results exist."""
+        assert delegation.list_results() == []
+
+    def test_list_barriers_returns_active_only(
+        self,
+        sync: SyncPrimitive,
+    ) -> None:
+        """list_barriers() returns active barriers but not resolved ones."""
+        barrier_a = sync.create_barrier(["a1"])
+        barrier_b = sync.create_barrier(["b1"])
+
+        # Resolve barrier_a
+        sync.contribute(barrier_a.barrier_id, "a1", {"done": True})
+        sync.resolve(barrier_a.barrier_id)
+
+        # Only barrier_b should remain active
+        active = sync.list_barriers()
+        assert len(active) == 1
+        assert active[0].barrier_id == barrier_b.barrier_id
+
+    def test_list_barriers_empty(
+        self,
+        sync: SyncPrimitive,
+    ) -> None:
+        """list_barriers() returns empty list when no barriers exist."""
+        assert sync.list_barriers() == []
+
+    def test_list_barriers_multiple_active(
+        self,
+        sync: SyncPrimitive,
+    ) -> None:
+        """list_barriers() returns all active barriers."""
+        b1 = sync.create_barrier(["a1"])
+        b2 = sync.create_barrier(["a2"])
+        b3 = sync.create_barrier(["a3"])
+
+        active = sync.list_barriers()
+        assert len(active) == 3
+        active_ids = {b.barrier_id for b in active}
+        assert active_ids == {b1.barrier_id, b2.barrier_id, b3.barrier_id}
+
+
+# ---------------------------------------------------------------------------
+# Typed exception hierarchy
+# ---------------------------------------------------------------------------
+
+
+class TestCoordinationExceptions:
+    """Test that exception classes can be imported and have expected attributes."""
+
+    def test_coordination_error_is_base(self) -> None:
+        """CoordinationError is the base for all coordination exceptions."""
+        from grounded_agency.coordination.exceptions import CoordinationError
+
+        err = CoordinationError("generic error")
+        assert isinstance(err, Exception)
+        assert str(err) == "generic error"
+
+    def test_agent_not_registered_error(self) -> None:
+        """AgentNotRegisteredError stores agent_id and formats message."""
+        from grounded_agency.coordination.exceptions import (
+            AgentNotRegisteredError,
+            CoordinationError,
+        )
+
+        err = AgentNotRegisteredError("agent-42")
+        assert isinstance(err, CoordinationError)
+        assert err.agent_id == "agent-42"
+        assert "agent-42" in str(err)
+        assert "not registered" in str(err).lower()
+
+    def test_capability_mismatch_error(self) -> None:
+        """CapabilityMismatchError stores agent_id and missing capabilities."""
+        from grounded_agency.coordination.exceptions import (
+            CapabilityMismatchError,
+            CoordinationError,
+        )
+
+        err = CapabilityMismatchError("agent-7", {"search", "generate"})
+        assert isinstance(err, CoordinationError)
+        assert err.agent_id == "agent-7"
+        assert err.missing == {"search", "generate"}
+        assert "agent-7" in str(err)
+        assert "generate" in str(err)
+        assert "search" in str(err)
+
+    def test_barrier_resolved_error(self) -> None:
+        """BarrierResolvedError stores barrier_id and formats message."""
+        from grounded_agency.coordination.exceptions import (
+            BarrierResolvedError,
+            CoordinationError,
+        )
+
+        err = BarrierResolvedError("barrier-abc")
+        assert isinstance(err, CoordinationError)
+        assert err.barrier_id == "barrier-abc"
+        assert "barrier-abc" in str(err)
+        assert "already resolved" in str(err).lower()
+
+    def test_task_lifecycle_error(self) -> None:
+        """TaskLifecycleError stores task_id, current_status, and attempted_action."""
+        from grounded_agency.coordination.exceptions import (
+            CoordinationError,
+            TaskLifecycleError,
+        )
+
+        err = TaskLifecycleError("task-99", "completed", "complete")
+        assert isinstance(err, CoordinationError)
+        assert err.task_id == "task-99"
+        assert err.current_status == "completed"
+        assert err.attempted_action == "complete"
+        assert "task-99" in str(err)
+        assert "completed" in str(err)
+        assert "complete" in str(err)
+
+    def test_exceptions_importable_from_coordination(self) -> None:
+        """All exception types are importable from grounded_agency.coordination."""
+        from grounded_agency.coordination import (
+            AgentNotRegisteredError,
+            BarrierResolvedError,
+            CapabilityMismatchError,
+            CoordinationError,
+            TaskLifecycleError,
+        )
+
+        assert issubclass(AgentNotRegisteredError, CoordinationError)
+        assert issubclass(CapabilityMismatchError, CoordinationError)
+        assert issubclass(BarrierResolvedError, CoordinationError)
+        assert issubclass(TaskLifecycleError, CoordinationError)
+
+    def test_exceptions_importable_from_top_level(self) -> None:
+        """All exception types are importable from grounded_agency."""
+        from grounded_agency import (
+            AgentNotRegisteredError,
+            BarrierResolvedError,
+            CapabilityMismatchError,
+            CoordinationError,
+            TaskLifecycleError,
+        )
+
+        assert issubclass(AgentNotRegisteredError, CoordinationError)
+        assert issubclass(CapabilityMismatchError, CoordinationError)
+        assert issubclass(BarrierResolvedError, CoordinationError)
+        assert issubclass(TaskLifecycleError, CoordinationError)

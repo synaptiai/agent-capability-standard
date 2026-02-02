@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import types
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -35,7 +36,9 @@ class AgentDescriptor:
     agent_id: str
     capabilities: frozenset[str]
     trust_score: float = 1.0
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: types.MappingProxyType | dict[str, Any] = field(
+        default_factory=lambda: types.MappingProxyType({})
+    )
     registered_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -60,13 +63,20 @@ class AgentDescriptor:
 class AgentRegistry:
     """Registry for multi-agent coordination.
 
+    Lock order: 1 (highest priority -- acquired first).
+
     Thread-safe.  Validates declared capabilities against the
     ``CapabilityRegistry`` so only ontology-defined capabilities
     can be claimed.
     """
 
-    def __init__(self, capability_registry: CapabilityRegistry) -> None:
+    def __init__(
+        self,
+        capability_registry: CapabilityRegistry,
+        max_agents: int = 1000,
+    ) -> None:
         self._cap_registry = capability_registry
+        self._max_agents = max_agents
         self._agents: dict[str, AgentDescriptor] = {}
         self._lock = threading.Lock()
 
@@ -96,9 +106,16 @@ class AgentRegistry:
             agent_id=agent_id,
             capabilities=caps,
             trust_score=trust_score,
-            metadata=dict(metadata) if metadata else {},
+            metadata=types.MappingProxyType(dict(metadata) if metadata else {}),
         )
         with self._lock:
+            if (
+                len(self._agents) >= self._max_agents
+                and descriptor.agent_id not in self._agents
+            ):
+                raise ValueError(
+                    f"Agent registry is full ({self._max_agents} agents)"
+                )
             self._agents[descriptor.agent_id] = descriptor
         logger.debug("Registered agent %s with capabilities %s", agent_id, caps)
         return descriptor

@@ -7,12 +7,19 @@ synchronization, shared evidence, audit, and orchestration.
 
 from __future__ import annotations
 
-from .audit import CoordinationAuditLog, CoordinationEvent, EventType
+from .audit import CoordinationAuditLog, CoordinationEvent
 from .delegation import (
     ORCHESTRATOR_AGENT_ID,
     DelegationProtocol,
     DelegationResult,
     DelegationTask,
+)
+from .exceptions import (
+    AgentNotRegisteredError,
+    BarrierResolvedError,
+    CapabilityMismatchError,
+    CoordinationError,
+    TaskLifecycleError,
 )
 from .evidence_bridge import CrossAgentEvidenceBridge, SharedEvidence
 from .orchestrator import OrchestrationConfig, OrchestrationResult, OrchestrationRuntime
@@ -23,12 +30,17 @@ __all__ = [
     # Audit
     "CoordinationAuditLog",
     "CoordinationEvent",
-    "EventType",
     # Delegation
     "ORCHESTRATOR_AGENT_ID",
     "DelegationProtocol",
     "DelegationTask",
     "DelegationResult",
+    # Exceptions
+    "CoordinationError",
+    "AgentNotRegisteredError",
+    "CapabilityMismatchError",
+    "BarrierResolvedError",
+    "TaskLifecycleError",
     # Evidence bridge
     "CrossAgentEvidenceBridge",
     "SharedEvidence",

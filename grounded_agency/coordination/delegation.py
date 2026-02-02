@@ -68,6 +68,8 @@ class DelegationResult:
         task_id: Which task this result is for.
         agent_id: Agent that accepted (or was asked).
         accepted: Whether the delegation was accepted.
+        status: Lifecycle status -- ``"accepted"``, ``"rejected"``, or
+                ``"completed"``.  Kept consistent with *accepted*.
         evidence_anchors: Evidence produced during delegation.
         rejection_reason: Why delegation was rejected (if not accepted).
         output_data: Task output (populated by ``complete_task``).
@@ -79,6 +81,7 @@ class DelegationResult:
     evidence_anchors: list[EvidenceAnchor] = field(default_factory=list)
     rejection_reason: str = ""
     output_data: dict[str, Any] = field(default_factory=dict)
+    status: str = "accepted"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON export."""
@@ -86,10 +89,8 @@ class DelegationResult:
             "task_id": self.task_id,
             "agent_id": self.agent_id,
             "accepted": self.accepted,
-            "evidence_anchors": [
-                {"ref": a.ref, "kind": a.kind, "timestamp": a.timestamp}
-                for a in self.evidence_anchors
-            ],
+            "status": self.status,
+            "evidence_anchors": [a.to_dict() for a in self.evidence_anchors],
             "rejection_reason": self.rejection_reason,
             "output_data": dict(self.output_data),
         }
@@ -97,6 +98,8 @@ class DelegationResult:
 
 class DelegationProtocol:
     """Manages typed task delegation between agents.
+
+    Lock order: 3.
 
     Thread-safe.  Validates capability contracts, creates evidence
     anchors, and integrates with the audit log.
@@ -107,10 +110,14 @@ class DelegationProtocol:
         agent_registry: AgentRegistry,
         evidence_store: EvidenceStore,
         audit_log: CoordinationAuditLog,
+        max_tasks: int = 10000,
+        max_delegation_depth: int = 10,
     ) -> None:
         self._agent_registry = agent_registry
         self._evidence_store = evidence_store
         self._audit_log = audit_log
+        self._max_tasks = max_tasks
+        self._max_delegation_depth = max_delegation_depth
         self._tasks: dict[str, DelegationTask] = {}
         self._results: dict[str, DelegationResult] = {}
         self._lock = threading.Lock()
@@ -170,6 +177,16 @@ class DelegationProtocol:
             evidence_refs=[evidence_ref] if evidence_ref else [],
         )
 
+    def _evict_oldest_if_over_limit(self) -> None:
+        """Evict the oldest task entry when the collection exceeds max_tasks.
+
+        Must be called with ``self._lock`` held.
+        """
+        if len(self._tasks) > self._max_tasks:
+            oldest_key = next(iter(self._tasks))
+            del self._tasks[oldest_key]
+            self._results.pop(oldest_key, None)
+
     # ------------------------------------------------------------------
     # Delegation
     # ------------------------------------------------------------------
@@ -181,12 +198,21 @@ class DelegationProtocol:
         target_agent_id: str,
         input_data: dict[str, Any] | None = None,
         constraints: dict[str, Any] | None = None,
+        _depth: int = 0,
     ) -> DelegationResult:
         """Delegate a task to a specific agent.
 
         Validates the agent has the required capabilities.  Creates an
         evidence anchor and audit event regardless of acceptance.
+
+        Args:
+            _depth: Internal recursion depth counter for chained delegations.
+                Raises ``ValueError`` when it exceeds ``max_delegation_depth``.
         """
+        if _depth > self._max_delegation_depth:
+            raise ValueError(
+                f"Delegation depth limit exceeded: {_depth} > {self._max_delegation_depth}"
+            )
         task_id = os.urandom(16).hex()
         caps = frozenset(required_capabilities)
 
@@ -205,6 +231,7 @@ class DelegationProtocol:
                 agent_id=target_agent_id,
                 accepted=False,
                 rejection_reason=f"Agent not registered: {target_agent_id}",
+                status="rejected",
             )
         elif not caps <= agent.capabilities:
             missing = caps - agent.capabilities
@@ -213,12 +240,14 @@ class DelegationProtocol:
                 agent_id=target_agent_id,
                 accepted=False,
                 rejection_reason=(f"Agent lacks capabilities: {sorted(missing)}"),
+                status="rejected",
             )
         else:
             result = DelegationResult(
                 task_id=task_id,
                 agent_id=target_agent_id,
                 accepted=True,
+                status="accepted",
             )
 
         # Create evidence anchor for this delegation
@@ -232,8 +261,20 @@ class DelegationProtocol:
         result.evidence_anchors = [anchor]
 
         with self._lock:
+            # Re-verify agent still exists (TOCTOU protection).
+            # Between the initial get_agent() check and this critical section,
+            # another thread may have unregistered the target agent.
+            if result.accepted:
+                reverify = self._agent_registry.get_agent(target_agent_id)
+                if reverify is None:
+                    result.accepted = False
+                    result.rejection_reason = (
+                        f"Agent unregistered during delegation: {target_agent_id}"
+                    )
+                    result.status = "rejected"
             self._tasks[task_id] = task
             self._results[task_id] = result
+            self._evict_oldest_if_over_limit()
 
         # Audit event
         self._record_delegation_event(
@@ -284,6 +325,7 @@ class DelegationProtocol:
                 agent_id="",
                 accepted=False,
                 rejection_reason=rejection_reason,
+                status="rejected",
             )
             # Evidence and audit for the rejection
             anchor = self._create_delegation_anchor(
@@ -305,6 +347,7 @@ class DelegationProtocol:
             with self._lock:
                 self._tasks[task_id] = task
                 self._results[task_id] = result
+                self._evict_oldest_if_over_limit()
             return result
 
         # Best candidate is first (sorted by trust descending)
@@ -329,12 +372,22 @@ class DelegationProtocol:
         """Mark a delegated task as complete with output and evidence.
 
         Returns a snapshot of the result, or None if task_id is unknown.
+
+        Raises:
+            ValueError: If the task status is not ``"accepted"`` (e.g. the
+                task was already completed or was rejected).
         """
         with self._lock:
             result = self._results.get(task_id)
             if result is None:
                 return None
+            if result.status != "accepted":
+                raise ValueError(
+                    f"Cannot complete task {task_id}: "
+                    f"status is '{result.status}', expected 'accepted'"
+                )
             result.output_data = dict(output_data) if output_data else {}
+            result.status = "completed"
             if evidence_anchors:
                 result.evidence_anchors = result.evidence_anchors + list(
                     evidence_anchors
@@ -361,3 +414,13 @@ class DelegationProtocol:
     def get_result(self, task_id: str) -> DelegationResult | None:
         with self._lock:
             return self._results.get(task_id)
+
+    def list_tasks(self) -> list[DelegationTask]:
+        """Return all tracked delegation tasks."""
+        with self._lock:
+            return list(self._tasks.values())
+
+    def list_results(self) -> list[DelegationResult]:
+        """Return all tracked delegation results."""
+        with self._lock:
+            return list(self._results.values())

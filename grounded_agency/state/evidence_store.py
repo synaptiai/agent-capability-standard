@@ -293,6 +293,14 @@ class EvidenceAnchor:
             priority=PRIORITY_HIGH,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export."""
+        return {
+            "ref": self.ref,
+            "kind": self.kind,
+            "timestamp": self.timestamp,
+        }
+
     def mark_critical(self) -> None:
         """Mark this anchor as critical for forensic retention.
 
@@ -603,11 +611,6 @@ class EvidenceStore:
         """
         with self._lock:
             return [
-                {
-                    "ref": a.ref,
-                    "kind": a.kind,
-                    "timestamp": a.timestamp,
-                    "metadata": a.metadata,
-                }
+                {**a.to_dict(), "metadata": a.metadata}
                 for a in self._anchors
             ]

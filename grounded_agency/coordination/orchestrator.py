@@ -18,7 +18,7 @@ from typing import Any
 
 from ..capabilities.registry import CapabilityRegistry
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
-from ..workflows.engine import WorkflowStep, WorkflowStepResult
+from ..workflows.engine import StepStatus, WorkflowStep, WorkflowStepResult
 from .audit import CoordinationAuditLog, CoordinationEvent
 from .delegation import ORCHESTRATOR_AGENT_ID, DelegationProtocol, DelegationResult
 from .evidence_bridge import CrossAgentEvidenceBridge
@@ -101,16 +101,21 @@ class OrchestrationResult:
             "sync_result": self.sync_result.to_dict() if self.sync_result else None,
             "integrated_output": dict(self.integrated_output),
             "audit_events": [e.to_dict() for e in self.audit_events],
-            "evidence_anchors": [
-                {"ref": a.ref, "kind": a.kind, "timestamp": a.timestamp}
-                for a in self.evidence_anchors
-            ],
+            "evidence_anchors": [a.to_dict() for a in self.evidence_anchors],
             "steps_executed": self.steps_executed,
         }
 
 
 class OrchestrationRuntime:
     """Main entry point for multi-agent coordination.
+
+    Lock ordering (acquire in this order to prevent deadlocks):
+        1. AgentRegistry._lock
+        2. EvidenceStore._lock
+        3. DelegationProtocol._lock
+        4. SyncPrimitive._lock
+        5. CrossAgentEvidenceBridge._lock
+        6. CoordinationAuditLog._lock
 
     Creates and wires all sub-components.  The ``orchestrate()`` method
     executes the ``multi_agent_orchestration`` workflow end-to-end,
@@ -195,6 +200,54 @@ class OrchestrationRuntime:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _record_coordination_evidence(
+        self,
+        ref_prefix: str,
+        ref_id: str,
+        event_type: str,
+        source_agent_id: str,
+        target_agent_ids: list[str],
+        capability_id: str,
+        metadata: dict[str, Any],
+        audit_details: dict[str, Any] | None = None,
+        evidence_refs_override: list[str] | None = None,
+    ) -> EvidenceAnchor:
+        """Create an evidence anchor and record an audit event.
+
+        Args:
+            ref_prefix: Prefix for the evidence ref (e.g. ``"orchestration"``).
+            ref_id: Unique ID appended to the prefix.
+            event_type: Audit event type string.
+            source_agent_id: Agent that initiated the action.
+            target_agent_ids: Agents affected by the action.
+            capability_id: Ontology capability ID.
+            metadata: Metadata stored on the evidence anchor.
+            audit_details: Details for the audit event.  Defaults to
+                *metadata* when not provided.
+            evidence_refs_override: Override the evidence_refs list on the
+                audit event.  When ``None``, uses ``[anchor.ref]``.
+        """
+        anchor = EvidenceAnchor(
+            ref=f"{ref_prefix}:{ref_id}",
+            kind="coordination",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            metadata=metadata,
+        )
+        self._evidence_store.add_anchor(anchor, capability_id=capability_id)
+        self._audit_log.record(
+            event_type=event_type,
+            source_agent_id=source_agent_id,
+            target_agent_ids=target_agent_ids,
+            capability_id=capability_id,
+            details=audit_details if audit_details is not None else metadata,
+            evidence_refs=(
+                evidence_refs_override
+                if evidence_refs_override is not None
+                else [anchor.ref]
+            ),
+        )
+        return anchor
+
     def _order_subtasks_by_dependencies(
         self,
         subtasks: list[dict[str, Any]],
@@ -271,7 +324,6 @@ class OrchestrationRuntime:
         self,
         task_goal: str,
         subtask_descriptions: list[dict[str, Any]] | None = None,
-        agent_pool: list[str] | None = None,
     ) -> OrchestrationResult:
         """Execute the multi_agent_orchestration workflow end-to-end.
 
@@ -293,11 +345,8 @@ class OrchestrationRuntime:
         all_evidence: list[EvidenceAnchor] = []
         audit_start_idx = len(self._audit_log)
 
-        # Resolve agent pool
-        if agent_pool is None:
-            agent_pool = [a.agent_id for a in self._agent_registry.list_agents()]
-
-        if not agent_pool:
+        # Check that at least one agent is registered
+        if not self._agent_registry.list_agents():
             result.integrated_output = {"error": "No agents available"}
             return result
 
@@ -405,32 +454,28 @@ class OrchestrationRuntime:
 
         # Step 7: Audit — record the orchestration
         orchestration_id = os.urandom(16).hex()
-        audit_evidence = EvidenceAnchor(
-            ref=f"orchestration:{orchestration_id}",
-            kind="coordination",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+        audit_evidence = self._record_coordination_evidence(
+            ref_prefix="orchestration",
+            ref_id=orchestration_id,
+            event_type="orchestration_complete",
+            source_agent_id=ORCHESTRATOR_AGENT_ID,
+            target_agent_ids=delegated_agents,
+            capability_id="audit",
             metadata={
                 "task_goal": task_goal[:100],
                 "subtask_count": total_count,
                 "accepted_count": accepted_count,
             },
-        )
-        self._evidence_store.add_anchor(audit_evidence, capability_id="audit")
-        all_evidence.append(audit_evidence)
-
-        self._audit_log.record(
-            event_type="orchestration_complete",
-            source_agent_id=ORCHESTRATOR_AGENT_ID,
-            target_agent_ids=delegated_agents,
-            capability_id="audit",
-            details={
+            audit_details={
                 "task_goal": task_goal,
                 "subtask_count": total_count,
                 "accepted_count": accepted_count,
                 "verification_passed": verification_passed,
             },
-            evidence_refs=[e.ref for e in all_evidence],
+            evidence_refs_override=[e.ref for e in all_evidence]
+            + [f"orchestration:{orchestration_id}"],
         )
+        all_evidence.append(audit_evidence)
         result.steps_executed += 1
 
         result.evidence_anchors = all_evidence
@@ -457,8 +502,6 @@ class OrchestrationRuntime:
         to their respective components.  Non-coordination steps return
         a completed result with the context as output.
         """
-        from ..workflows.engine import StepStatus
-
         ctx = dict(context) if context else {}
 
         if step.capability == "delegate":
@@ -547,20 +590,14 @@ class OrchestrationRuntime:
                     error="No workflow name provided for invoke step",
                 )
             invoke_id = os.urandom(16).hex()
-            anchor = EvidenceAnchor(
-                ref=f"invoke:{invoke_id}",
-                kind="coordination",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                metadata={"workflow": workflow},
-            )
-            self._evidence_store.add_anchor(anchor, capability_id="invoke")
-            self._audit_log.record(
+            anchor = self._record_coordination_evidence(
+                ref_prefix="invoke",
+                ref_id=invoke_id,
                 event_type="workflow_step_audit",
                 source_agent_id=ORCHESTRATOR_AGENT_ID,
                 target_agent_ids=[],
                 capability_id="invoke",
-                details={"workflow": workflow},
-                evidence_refs=[anchor.ref],
+                metadata={"workflow": workflow},
             )
             return WorkflowStepResult(
                 step=step,
@@ -580,23 +617,18 @@ class OrchestrationRuntime:
             if ambiguous_input:
                 questions.append(f"Could you clarify: {ambiguous_input!r}?")
             inquire_id = os.urandom(16).hex()
-            anchor = EvidenceAnchor(
-                ref=f"inquire:{inquire_id}",
-                kind="coordination",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                metadata={
-                    "ambiguous_input": str(ambiguous_input)[:200],
-                    "max_questions": max_questions,
-                },
-            )
-            self._evidence_store.add_anchor(anchor, capability_id="inquire")
-            self._audit_log.record(
+            anchor = self._record_coordination_evidence(
+                ref_prefix="inquire",
+                ref_id=inquire_id,
                 event_type="workflow_step_audit",
                 source_agent_id=ORCHESTRATOR_AGENT_ID,
                 target_agent_ids=[],
                 capability_id="inquire",
-                details={"ambiguous_input": str(ambiguous_input)[:200]},
-                evidence_refs=[anchor.ref],
+                metadata={
+                    "ambiguous_input": str(ambiguous_input)[:200],
+                    "max_questions": max_questions,
+                },
+                audit_details={"ambiguous_input": str(ambiguous_input)[:200]},
             )
             return WorkflowStepResult(
                 step=step,

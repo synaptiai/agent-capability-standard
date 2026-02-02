@@ -29,11 +29,6 @@ class SyncStrategy(str, enum.Enum):
     REQUIRE_UNANIMOUS = "require_unanimous"
 
 
-# Backwards-compatible aliases
-STRATEGY_LAST_WRITER_WINS = SyncStrategy.LAST_WRITER_WINS
-STRATEGY_MERGE_KEYS = SyncStrategy.MERGE_KEYS
-STRATEGY_REQUIRE_UNANIMOUS = SyncStrategy.REQUIRE_UNANIMOUS
-
 _VALID_STRATEGIES = frozenset(SyncStrategy)
 
 
@@ -58,6 +53,7 @@ class SyncBarrier:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     proposals: dict[str, dict[str, Any]] = field(default_factory=dict)
+    resolved: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON export."""
@@ -68,6 +64,7 @@ class SyncBarrier:
             "timeout_seconds": self.timeout_seconds,
             "created_at": self.created_at,
             "proposals": {k: dict(v) for k, v in self.proposals.items()},
+            "resolved": self.resolved,
         }
 
 
@@ -98,16 +95,15 @@ class SyncResult:
             "synchronized": self.synchronized,
             "agreed_state": dict(self.agreed_state),
             "participants": list(self.participants),
-            "evidence_anchors": [
-                {"ref": a.ref, "kind": a.kind, "timestamp": a.timestamp}
-                for a in self.evidence_anchors
-            ],
+            "evidence_anchors": [a.to_dict() for a in self.evidence_anchors],
             "conflict_details": self.conflict_details,
         }
 
 
 class SyncPrimitive:
     """Barrier-based state agreement for multi-agent coordination.
+
+    Lock order: 4.
 
     Thread-safe.  Participants call ``contribute()`` to submit a state
     proposal, then ``resolve()`` to merge all proposals using a given
@@ -123,6 +119,51 @@ class SyncPrimitive:
         self._audit_log = audit_log
         self._barriers: dict[str, SyncBarrier] = {}
         self._lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _record_coordination_evidence(
+        self,
+        ref_prefix: str,
+        ref_id: str,
+        event_type: str,
+        source_agent_id: str,
+        target_agent_ids: list[str],
+        capability_id: str,
+        metadata: dict[str, Any],
+        audit_details: dict[str, Any] | None = None,
+    ) -> EvidenceAnchor:
+        """Create an evidence anchor and record an audit event.
+
+        Args:
+            ref_prefix: Prefix for the evidence ref (e.g. ``"sync"``).
+            ref_id: Unique ID appended to the prefix.
+            event_type: Audit event type string.
+            source_agent_id: Agent that initiated the action.
+            target_agent_ids: Agents affected by the action.
+            capability_id: Ontology capability ID.
+            metadata: Metadata stored on the evidence anchor.
+            audit_details: Details for the audit event.  Defaults to
+                *metadata* when not provided.
+        """
+        anchor = EvidenceAnchor(
+            ref=f"{ref_prefix}:{ref_id}",
+            kind="coordination",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            metadata=metadata,
+        )
+        self._evidence_store.add_anchor(anchor, capability_id=capability_id)
+        self._audit_log.record(
+            event_type=event_type,
+            source_agent_id=source_agent_id,
+            target_agent_ids=target_agent_ids,
+            capability_id=capability_id,
+            details=audit_details if audit_details is not None else metadata,
+            evidence_refs=[anchor.ref],
+        )
+        return anchor
 
     # ------------------------------------------------------------------
     # Barrier lifecycle
@@ -166,6 +207,8 @@ class SyncPrimitive:
             barrier = self._barriers.get(barrier_id)
             if barrier is None:
                 return False
+            if barrier.resolved:
+                raise ValueError(f"Cannot contribute to resolved barrier: {barrier_id}")
             if agent_id not in barrier.participants:
                 return False
             barrier.proposals[agent_id] = dict(state_proposal)
@@ -179,7 +222,7 @@ class SyncPrimitive:
     def resolve(
         self,
         barrier_id: str,
-        strategy: str = STRATEGY_LAST_WRITER_WINS,
+        strategy: str = SyncStrategy.LAST_WRITER_WINS,
     ) -> SyncResult:
         """Merge proposals and resolve the barrier.
 
@@ -205,6 +248,9 @@ class SyncPrimitive:
                     synchronized=False,
                     conflict_details="Barrier not found",
                 )
+            if barrier.resolved:
+                raise ValueError(f"Barrier already resolved: {barrier_id}")
+            barrier.resolved = True
 
             proposals = dict(barrier.proposals)
             participants = tuple(sorted(proposals.keys()))
@@ -224,11 +270,11 @@ class SyncPrimitive:
         agreed_state: dict[str, Any] = {}
         conflicts: list[str] = []
 
-        if strategy == STRATEGY_LAST_WRITER_WINS:
+        if strategy == SyncStrategy.LAST_WRITER_WINS:
             for agent_id in participants:
                 agreed_state.update(proposals[agent_id])
 
-        elif strategy == STRATEGY_MERGE_KEYS:
+        elif strategy == SyncStrategy.MERGE_KEYS:
             for agent_id in participants:
                 for key, value in proposals[agent_id].items():
                     if key in agreed_state and agreed_state[key] != value:
@@ -239,7 +285,7 @@ class SyncPrimitive:
                         )
                     agreed_state[key] = value
 
-        elif strategy == STRATEGY_REQUIRE_UNANIMOUS:
+        elif strategy == SyncStrategy.REQUIRE_UNANIMOUS:
             values = list(proposals.values())
             if all(v == values[0] for v in values[1:]):
                 agreed_state = dict(values[0])
@@ -251,31 +297,24 @@ class SyncPrimitive:
                     conflict_details="Proposals are not unanimous",
                 )
 
-        # Create evidence
-        anchor = EvidenceAnchor(
-            ref=f"sync:{barrier_id}",
-            kind="coordination",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+        # Create evidence and audit
+        anchor = self._record_coordination_evidence(
+            ref_prefix="sync",
+            ref_id=barrier_id,
+            event_type="synchronization",
+            source_agent_id=participants[0] if participants else "",
+            target_agent_ids=list(participants),
+            capability_id="synchronize",
             metadata={
                 "strategy": strategy,
                 "participant_count": len(participants),
                 "synchronized": True,
             },
-        )
-        self._evidence_store.add_anchor(anchor, capability_id="synchronize")
-
-        # Audit
-        self._audit_log.record(
-            event_type="synchronization",
-            source_agent_id=participants[0] if participants else "",
-            target_agent_ids=list(participants),
-            capability_id="synchronize",
-            details={
+            audit_details={
                 "barrier_id": barrier_id,
                 "strategy": strategy,
                 "synchronized": True,
             },
-            evidence_refs=[anchor.ref],
         )
 
         result = SyncResult(
@@ -286,8 +325,18 @@ class SyncPrimitive:
             evidence_anchors=[anchor],
             conflict_details="; ".join(conflicts) if conflicts else "",
         )
+
+        # Clean up resolved barrier
+        with self._lock:
+            self._barriers.pop(barrier_id, None)
+
         return result
 
     def get_barrier(self, barrier_id: str) -> SyncBarrier | None:
         with self._lock:
             return self._barriers.get(barrier_id)
+
+    def list_barriers(self) -> list[SyncBarrier]:
+        """Return all active (non-resolved) barriers."""
+        with self._lock:
+            return list(self._barriers.values())
