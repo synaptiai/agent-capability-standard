@@ -133,7 +133,7 @@ class OASFAdapter:
             self._index_entry(str(ga_code), ga_data)
 
     def _index_entry(self, code: str, data: dict[str, Any]) -> None:
-        """Index a single category or subcategory entry."""
+        """Index a single mapping entry (category, subcategory, or GA extension)."""
         assert self._index is not None
         capabilities = data.get("capabilities", [])
         if not capabilities:
@@ -234,11 +234,11 @@ class OASFAdapter:
         ]
 
     def list_all_mappings(self) -> list[OASFMapping]:
-        """List all mappings (categories and subcategories).
+        """List all mappings (categories, subcategories, and GA extensions).
 
         Returns mappings in YAML source order (categories first, then
-        subcategories within each category). Order is deterministic on
-        Python 3.7+.
+        subcategories within each category, then GA extensions). Order is
+        deterministic on Python 3.7+.
         """
         self._ensure_loaded()
         assert self._index is not None
@@ -318,9 +318,7 @@ class OASFAdapter:
     @property
     def ga_extension_count(self) -> int:
         """Number of GA extension entries."""
-        self._ensure_loaded()
-        assert self._raw is not None
-        return len(self._raw.get("ga_extensions", {}))
+        return len(self.list_ga_extensions())
 
     def list_ga_extensions(self) -> list[OASFMapping]:
         """List all GA extension mappings (capabilities with no OASF equivalent)."""
@@ -337,7 +335,7 @@ class OASFAdapter:
         assert self._raw is not None
         gaps = self._raw.get("coverage_gaps", {})
         unmapped = gaps.get("unmapped", {})
-        return [c["id"] for c in unmapped.get("capabilities", [])]
+        return [c["id"] for c in (unmapped.get("capabilities") or [])]
 
     def partial_capabilities(self) -> dict[str, list[str]]:
         """Return capabilities with incomplete OASF mappings.
@@ -350,8 +348,8 @@ class OASFAdapter:
         gaps = self._raw.get("coverage_gaps", {})
         partial = gaps.get("partial", {})
         return {
-            c["id"]: c["oasf_codes"]
-            for c in partial.get("capabilities", [])
+            c["id"]: c.get("oasf_codes", [])
+            for c in (partial.get("capabilities") or [])
         }
 
     def coverage_report(self) -> dict[str, Any]:
@@ -366,7 +364,8 @@ class OASFAdapter:
         unmapped = self.unmapped_capabilities()
         partial = self.partial_capabilities()
 
-        # 36 total capabilities in the ontology
+        # Intentionally hardcoded: forces test failures when ontology grows
+        # without updating coverage_gaps, acting as a change-detection tripwire.
         total_capabilities = 36
         fully_mapped = total_capabilities - len(unmapped) - len(partial)
 
