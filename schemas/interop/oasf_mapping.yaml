@@ -7,13 +7,14 @@
 # Grounded Agency: 36 atomic capabilities across 9 cognitive layers
 #
 # Mapping types:
-#   direct      — 1:1 capability correspondence
-#   domain      — Same capability with domain parameter specialization
-#   composition — Multiple capabilities required
-#   workflow    — Maps to a composed workflow pattern
+#   direct       — 1:1 capability correspondence
+#   domain       — Same capability with domain parameter specialization
+#   composition  — Multiple capabilities required
+#   workflow     — Maps to a composed workflow pattern
+#   ga_extension — GA-native capability with no OASF equivalent (synthetic GA-xxx code)
 
 meta:
-  version: "1.0.0"
+  version: "1.1.0"
   date: "2026-01-29"
   description: "Bidirectional mapping between OASF skill categories and Grounded Agency capabilities"
   oasf_version: "0.8.0"
@@ -658,35 +659,92 @@ categories:
         mapping_type: composition
 
 # ---------------------------------------------------------------------------
+# GA Extensions: Grounded Agency capabilities with no OASF equivalent
+# ---------------------------------------------------------------------------
+# These capabilities are unique to the Grounded Agency ontology and have no
+# corresponding OASF skill category. They are assigned synthetic GA-prefixed
+# codes so they can participate in the same translation/reverse-lookup pipeline.
+
+ga_extensions:
+  GA-001:
+    name: Causal Attribution
+    capabilities: [attribute]
+    mapping_type: ga_extension
+    layer: MODEL
+    domain_hint: causal
+    notes: >
+      Causal reasoning and attribution analysis. OASF has no dedicated
+      causal attribution skill category. Maps to the MODEL layer's
+      attribute capability for determining cause-effect relationships.
+
+  GA-002:
+    name: Data Integration
+    capabilities: [integrate]
+    mapping_type: ga_extension
+    layer: SYNTHESIZE
+    domain_hint: data
+    notes: >
+      Data merging and integration from multiple sources. Implicit in
+      OASF pipelines but not a standalone skill. Maps to the SYNTHESIZE
+      layer's integrate capability for combining heterogeneous data.
+
+  GA-003:
+    name: Memory Recall
+    capabilities: [recall]
+    mapping_type: ga_extension
+    layer: REMEMBER
+    domain_hint: memory
+    notes: >
+      Stored data retrieval from agent memory. OASF is task-oriented
+      and does not model internal agent memory as a skill category.
+      Maps to the REMEMBER layer's recall capability.
+
+  GA-004:
+    name: Event Reception
+    capabilities: [receive]
+    mapping_type: ga_extension
+    layer: PERCEIVE
+    domain_hint: event
+    notes: >
+      Pushed data and event acceptance. OASF is task-oriented, not
+      event-driven; there is no skill for passive data reception.
+      Maps to the PERCEIVE layer's receive capability.
+
+  GA-005:
+    name: Data Transmission
+    capabilities: [send]
+    mapping_type: ga_extension
+    layer: EXECUTE
+    domain_hint: network
+    notes: >
+      External data transmission. OASF treats output as implicit,
+      not a distinct skill. Maps to the EXECUTE layer's send
+      capability. High risk — requires checkpoint enforcement.
+
+  GA-006:
+    name: State Transition Modeling
+    capabilities: [transition]
+    mapping_type: ga_extension
+    layer: MODEL
+    domain_hint: dynamics
+    notes: >
+      State machine transition and dynamics modeling. No OASF category
+      covers state machine transitions explicitly. Maps to the MODEL
+      layer's transition capability for modeling system dynamics.
+
+# ---------------------------------------------------------------------------
 # Reverse Mapping: Grounded Agency → OASF
 # ---------------------------------------------------------------------------
-# Capabilities with NO OASF equivalent:
-#   attribute   — Causal reasoning: OASF has no dedicated causal attribution skill
-#   integrate   — Data merging: implicit in OASF pipelines, not a standalone skill
-#   recall      — Stored data retrieval: internal agent memory, not an OASF task category
-#   receive     — Pushed data/event acceptance: OASF is task-oriented, not event-driven
-#   send        — External data transmission: OASF treats output as implicit, not a distinct skill
-#   transition  — Dynamics modeling: no OASF category covers state machine transitions
-#
-# Capabilities with partial OASF mappings:
-#   checkpoint  — State preservation (partial: 12, 1201, 1202, 1204)
-#   simulate    — Counterfactual analysis (partial: 15, 1501, 1504)
-#   inquire     — Structured clarification (partial: 10, 1004)
-#   synchronize — Multi-agent state agreement (partial: 10, 1004)
-#   state       — World state representation (partial: 1, 15, 106, 1501, 1504)
-#   ground      — Evidence anchoring (partial: 1, 6, 103)
-#   rollback    — Recovery mechanism (partial: 12, 1202)
-#
-# These are documented in the OASF Safety Extensions Proposal:
-# Proposal from PR #29 (OASF safety extensions)
-#   docs/proposals/OASF_SAFETY_EXTENSIONS.md
+# See coverage_gaps section below for structured documentation of unmapped
+# and partially mapped capabilities.
+# OASF Safety Extensions Proposal: docs/proposals/OASF_SAFETY_EXTENSIONS.md
 
 reverse_mapping:
   # --- PERCEIVE layer ---
   retrieve:     ["1", "6", "103"]
   search:       ["1", "6", "103"]
   observe:      ["11", "12", "15", "1102", "1105", "1205", "1503"]
-  receive:      []
+  receive:      ["GA-004"]
   # --- UNDERSTAND layer ---
   detect:       ["1", "2", "3", "7", "8", "9", "11", "12", "14", "101", "110", "111", "201", "203", "207", "208", "302", "303", "705", "801", "802", "804", "901", "1104", "1205", "1401"]
   classify:     ["1", "2", "3", "4", "7", "14", "101", "108", "109", "202", "301", "303", "705", "1401"]
@@ -701,18 +759,18 @@ reverse_mapping:
   explain:      ["1", "5", "13", "15", "107", "501", "1303", "1502"]
   # --- MODEL layer ---
   state:        ["1", "15", "106", "1501", "1504"]
-  transition:   []
-  attribute:    []
+  transition:   ["GA-006"]
+  attribute:    ["GA-001"]
   ground:       ["1", "6", "103"]
   simulate:     ["15", "1501", "1504"]
   # --- SYNTHESIZE layer ---
   generate:     ["1", "2", "3", "5", "6", "7", "9", "11", "12", "102", "104", "204", "208", "304", "502", "504", "702", "703", "705", "903", "1102", "1203"]
   transform:    ["1", "2", "3", "5", "7", "9", "105", "106", "110", "206", "208", "302", "503", "701", "704", "901", "903", "905"]
-  integrate:    []
+  integrate:    ["GA-002"]
   # --- EXECUTE layer ---
   execute:      ["11", "12", "14", "1101", "1201", "1202", "1404"]
   mutate:       ["12", "1204"]
-  send:         []
+  send:         ["GA-005"]
   # --- VERIFY layer ---
   verify:       ["9", "11", "12", "13", "15", "905", "1101", "1102", "1103", "1201", "1202", "1203", "1204", "1302", "1502"]
   checkpoint:   ["12", "1201", "1202", "1204"]
@@ -721,9 +779,79 @@ reverse_mapping:
   audit:        ["11", "12", "13", "1204", "1303"]
   # --- REMEMBER layer ---
   persist:      ["12", "1204"]
-  recall:       []
+  recall:       ["GA-003"]
   # --- COORDINATE layer ---
   delegate:     ["10", "1002", "1003", "1004"]
   synchronize:  ["10", "1004"]
   invoke:       ["14", "1402", "1403"]
   inquire:      ["10", "1004"]
+
+# ---------------------------------------------------------------------------
+# Coverage Gaps: Structured documentation of mapping completeness
+# ---------------------------------------------------------------------------
+
+coverage_gaps:
+  unmapped:
+    description: >
+      GA capabilities with no OASF equivalent. These are wrapped with
+      synthetic GA-prefixed codes in the ga_extensions section above.
+    capabilities:
+      - id: attribute
+        layer: MODEL
+        ga_code: GA-001
+        reason: "OASF has no dedicated causal attribution skill"
+      - id: integrate
+        layer: SYNTHESIZE
+        ga_code: GA-002
+        reason: "Implicit in OASF pipelines, not a standalone skill"
+      - id: recall
+        layer: REMEMBER
+        ga_code: GA-003
+        reason: "Internal agent memory; not an OASF task category"
+      - id: receive
+        layer: PERCEIVE
+        ga_code: GA-004
+        reason: "OASF is task-oriented, not event-driven"
+      - id: send
+        layer: EXECUTE
+        ga_code: GA-005
+        reason: "OASF treats output as implicit, not a distinct skill"
+      - id: transition
+        layer: MODEL
+        ga_code: GA-006
+        reason: "No OASF category covers state machine transitions"
+
+  partial:
+    description: >
+      GA capabilities that map to some OASF categories but lack full
+      coverage of their semantics. These have OASF codes in the
+      reverse_mapping but the mapping is incomplete.
+    capabilities:
+      - id: checkpoint
+        layer: VERIFY
+        oasf_codes: ["12", "1201", "1202", "1204"]
+        gap: "Only DevOps/MLOps; missing from general safety workflows"
+      - id: simulate
+        layer: MODEL
+        oasf_codes: ["15", "1501", "1504"]
+        gap: "Only Advanced Reasoning; missing domain-specific simulation"
+      - id: inquire
+        layer: COORDINATE
+        oasf_codes: ["10", "1004"]
+        gap: "Only Agent Orchestration; missing human-in-the-loop clarification"
+      - id: synchronize
+        layer: COORDINATE
+        oasf_codes: ["10", "1004"]
+        gap: "Only Agent Orchestration; missing distributed state sync"
+      - id: state
+        layer: MODEL
+        oasf_codes: ["1", "15", "106", "1501", "1504"]
+        gap: "NLP and Reasoning only; missing general world-model representation"
+      - id: ground
+        layer: MODEL
+        oasf_codes: ["1", "6", "103"]
+        gap: "NLP and RAG only; missing domain-agnostic evidence anchoring"
+      - id: rollback
+        layer: VERIFY
+        oasf_codes: ["12", "1202"]
+        gap: "Only Deployment Orchestration; missing general recovery"
