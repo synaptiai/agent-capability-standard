@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from claude_agent_sdk import ClaudeAgentOptions
 
-from grounded_agency import (
+claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
+ClaudeAgentOptions = claude_agent_sdk.ClaudeAgentOptions
+
+from grounded_agency import (  # noqa: E402
     GroundedAgentAdapter,
     GroundedAgentConfig,
     RateLimitConfig,

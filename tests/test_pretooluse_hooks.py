@@ -8,9 +8,11 @@ when no checkpoint exists and allows them when one does.
 from __future__ import annotations
 
 import pytest
-from claude_agent_sdk import ClaudeAgentOptions
 
-from grounded_agency import GroundedAgentAdapter
+claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
+ClaudeAgentOptions = claude_agent_sdk.ClaudeAgentOptions
+
+from grounded_agency import GroundedAgentAdapter  # noqa: E402
 
 # =============================================================================
 # PreToolUse Hook Tests

@@ -335,7 +335,8 @@ class TestOrchestratorInjection:
         self, ontology_path: str, tmp_path: Path
     ):
         """Test that agents are injected when orchestrator has agents."""
-        from claude_agent_sdk import ClaudeAgentOptions
+        sdk = pytest.importorskip("claude_agent_sdk")
+        ClaudeAgentOptions = sdk.ClaudeAgentOptions
 
         from grounded_agency import CapabilityRegistry, OrchestrationRuntime
 
@@ -360,7 +361,8 @@ class TestOrchestratorInjection:
         self, ontology_path: str, tmp_path: Path
     ):
         """Test that existing agents on base options are NOT overridden."""
-        from claude_agent_sdk import ClaudeAgentOptions
+        sdk = pytest.importorskip("claude_agent_sdk")
+        ClaudeAgentOptions = sdk.ClaudeAgentOptions
 
         from grounded_agency import CapabilityRegistry, OrchestrationRuntime
 
@@ -386,7 +388,8 @@ class TestOrchestratorInjection:
         self, ontology_path: str, tmp_path: Path
     ):
         """Test no crash when orchestrator lacks to_sdk_agents method."""
-        from claude_agent_sdk import ClaudeAgentOptions
+        sdk = pytest.importorskip("claude_agent_sdk")
+        ClaudeAgentOptions = sdk.ClaudeAgentOptions
 
         class FakeOrchestrator:
             pass

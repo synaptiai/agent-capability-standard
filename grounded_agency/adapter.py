@@ -315,11 +315,17 @@ class GroundedAgentAdapter:
         }
 
         # Inject output_format if configured and not already set
-        if self.config.output_format is not None and getattr(base, "output_format", None) is None:
+        if (
+            self.config.output_format is not None
+            and getattr(base, "output_format", None) is None
+        ):
             kwargs["output_format"] = self.config.output_format
 
         # Inject max_budget_usd if configured and not already set
-        if self.config.max_budget_usd is not None and getattr(base, "max_budget_usd", None) is None:
+        if (
+            self.config.max_budget_usd is not None
+            and getattr(base, "max_budget_usd", None) is None
+        ):
             kwargs["max_budget_usd"] = self.config.max_budget_usd
 
         # Inject model if configured and not already set
@@ -327,7 +333,10 @@ class GroundedAgentAdapter:
             kwargs["model"] = self.config.model
 
         # Inject max_turns if configured and not already set
-        if self.config.max_turns is not None and getattr(base, "max_turns", None) is None:
+        if (
+            self.config.max_turns is not None
+            and getattr(base, "max_turns", None) is None
+        ):
             kwargs["max_turns"] = self.config.max_turns
 
         # Inject agents from orchestrator if available and not already set
