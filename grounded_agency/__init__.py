@@ -27,6 +27,7 @@ from ._types import (
 from .adapter import GroundedAgentAdapter, GroundedAgentConfig
 from .capabilities.mapper import ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
+from .client import GroundedClient
 from .coordination import (
     ORCHESTRATOR_AGENT_ID,
     AgentDescriptor,
@@ -51,6 +52,8 @@ from .coordination import (
     SyncStrategy,
     TaskLifecycleError,
 )
+from .mcp import create_grounded_mcp_server
+from .query import CostSummary, grounded_query
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
@@ -74,6 +77,12 @@ __all__ = [
     # Main adapter
     "GroundedAgentAdapter",
     "GroundedAgentConfig",
+    # Query and client wrappers
+    "grounded_query",
+    "GroundedClient",
+    "CostSummary",
+    # MCP integration
+    "create_grounded_mcp_server",
     # Capabilities
     "CapabilityRegistry",
     "ToolCapabilityMapper",
