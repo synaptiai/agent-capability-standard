@@ -30,6 +30,9 @@ trust_weights:
   pattern_inference: 0.72 # Inferred from user patterns
   context_inference: 0.68 # Inferred from context
 
+trust_model_reviewed: true
+trust_model_reviewed_at: "2026-02-03"
+
 risk_thresholds:
   auto_approve: low       # Low-risk can be auto-approved
   require_review: medium  # Medium requires user confirmation

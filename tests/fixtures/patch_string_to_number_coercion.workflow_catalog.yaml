@@ -1,0 +1,32 @@
+coercion_test_workflow:
+  goal: Test workflow requiring type coercion from string to number.
+  risk: low
+  inputs:
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+  steps:
+  - capability: detect
+    purpose: Detect a condition.
+    store_as: detect_out
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    failure_modes: []
+  - capability: measure
+    purpose: Quantify the detected condition.
+    store_as: measure_out
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    input_bindings:
+      target: ${detect_out.label: number}
+    failure_modes: []

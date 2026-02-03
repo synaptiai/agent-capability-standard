@@ -30,6 +30,9 @@ trust_weights:
   vendor_manual: 0.80     # Equipment documentation
   regulatory_standard: 0.95 # ISO/OSHA/FDA standards
 
+trust_model_reviewed: true
+trust_model_reviewed_at: "2026-02-03"
+
 risk_thresholds:
   auto_approve: low       # Only low-risk actions auto-approved
   require_review: medium  # Medium+ requires human review

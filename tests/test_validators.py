@@ -100,17 +100,16 @@ class TestValidateProfiles:
         assert result.returncode == 0
         assert "Validating:" in result.stdout
 
-    def test_reports_trust_calibration_warnings(self) -> None:
-        """SEC-009: Should report warnings about uncalibrated trust models."""
+    def test_no_trust_calibration_warnings(self) -> None:
+        """SEC-009: All profiles have trust_model_reviewed: true — no warnings."""
         result = run_validator("validate_profiles.py")
         assert result.returncode == 0
         output = result.stdout
-        # Validator passes but reports SEC-009 trust calibration warnings
         assert "PASS" in output.upper()
-        assert "SEC-009" in output, (
-            "Expected SEC-009 trust_model_reviewed warnings in output"
+        # All profiles now have trust_model_reviewed: true, so no SEC-009 warnings
+        assert "SEC-009" not in output, (
+            "Unexpected SEC-009 warnings — all profiles should have trust_model_reviewed: true"
         )
-        assert "trust_model_reviewed" in output
 
 
 # ─── Skill Refs Validator ───

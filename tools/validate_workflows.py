@@ -53,6 +53,10 @@ from yaml_util import (
     safe_yaml_load,
 )
 
+# Standard error codes (Section 9, STANDARD-v1.0.0.md)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from grounded_agency.errors import ErrorCode, StandardError, format_errors_response
+
 ROOT = Path(__file__).resolve().parents[1]
 ONTO = ROOT / "schemas" / "capability_ontology.yaml"
 WF   = ROOT / "schemas" / "workflow_catalog.yaml"
@@ -280,7 +284,7 @@ COERCIONS = load_coercions()
 
 # -------------------- Validation core --------------------
 
-def validate_refs_in_string(s: str, schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]]):
+def validate_refs_in_string(s: str, schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]], structured_errors: list[StandardError]):
     for m in REF_RE.finditer(s or ''):
         raw = m.group(1)
         store, path, typ_anno = parse_ref_expr(raw)
@@ -290,12 +294,22 @@ def validate_refs_in_string(s: str, schemas_by_store: dict[str, Any], external_i
             schema = schemas_by_store[store]
             if path and not schema_path_exists(schema, path):
                 errors.append(f"Bad reference ${{{raw}}}: path {'.'.join(path)} not in schema for {store}")
+                structured_errors.append(StandardError(
+                    code=ErrorCode.INVALID_BINDING_PATH,
+                    message=f"Bad reference ${{{raw}}}: path {'.'.join(path)} not in schema for {store}",
+                    location={"store": store, "path": ".".join(path), "ref": raw},
+                ))
                 continue
             actual_t, ambiguous = infer_binding_type(raw, schema)
             if typ_anno:
                 expected = parse_type(typ_anno)
                 if not is_type_compatible(expected, actual_t):
                     errors.append(f"Type mismatch ${{{raw}}}: expected {type_to_str(expected)} but schema has {type_to_str(actual_t)}")
+                    structured_errors.append(StandardError(
+                        code=ErrorCode.TYPE_MISMATCH,
+                        message=f"Type mismatch ${{{raw}}}: expected {type_to_str(expected)} but schema has {type_to_str(actual_t)}",
+                        location={"store": store, "ref": raw},
+                    ))
                     suggestions.append({
                         "kind":"binding_type_mismatch",
                         "ref": raw,
@@ -306,16 +320,31 @@ def validate_refs_in_string(s: str, schemas_by_store: dict[str, Any], external_i
             else:
                 if ambiguous:
                     errors.append(f"Ambiguous type for ${{{raw}}}: inferred {type_to_str(actual_t)} is ambiguous/unknown. Add a typed annotation.")
+                    structured_errors.append(StandardError(
+                        code=ErrorCode.AMBIGUOUS_TYPE,
+                        message=f"Ambiguous type for ${{{raw}}}: inferred {type_to_str(actual_t)} is ambiguous/unknown. Add a typed annotation.",
+                        location={"store": store, "ref": raw},
+                    ))
         elif store in external_inputs:
             schema = external_inputs[store]
             if path and isinstance(schema, dict) and 'properties' in schema and not schema_path_exists(schema, path):
                 errors.append(f"Bad external reference ${{{raw}}}: path {'.'.join(path)} not in inputs schema for {store}")
+                structured_errors.append(StandardError(
+                    code=ErrorCode.INVALID_BINDING_PATH,
+                    message=f"Bad external reference ${{{raw}}}: path {'.'.join(path)} not in inputs schema for {store}",
+                    location={"store": store, "path": ".".join(path), "ref": raw},
+                ))
                 continue
             actual_t, ambiguous = infer_binding_type(raw, schema) if isinstance(schema, dict) else ({'kind':'unknown'}, True)
             if typ_anno:
                 expected=parse_type(typ_anno)
                 if not is_type_compatible(expected, actual_t):
                     errors.append(f"Type mismatch ${{{raw}}} (external): expected {type_to_str(expected)} but schema has {type_to_str(actual_t)}")
+                    structured_errors.append(StandardError(
+                        code=ErrorCode.TYPE_MISMATCH,
+                        message=f"Type mismatch ${{{raw}}} (external): expected {type_to_str(expected)} but schema has {type_to_str(actual_t)}",
+                        location={"store": store, "ref": raw, "source": "external"},
+                    ))
                     suggestions.append({
                         "kind":"external_binding_type_mismatch",
                         "ref": raw,
@@ -326,20 +355,30 @@ def validate_refs_in_string(s: str, schemas_by_store: dict[str, Any], external_i
             else:
                 if ambiguous:
                     errors.append(f"Ambiguous external type for ${{{raw}}}: inferred {type_to_str(actual_t)} is ambiguous/unknown. Add typed annotation or refine inputs schema.")
+                    structured_errors.append(StandardError(
+                        code=ErrorCode.AMBIGUOUS_TYPE,
+                        message=f"Ambiguous external type for ${{{raw}}}: inferred {type_to_str(actual_t)} is ambiguous/unknown. Add typed annotation or refine inputs schema.",
+                        location={"store": store, "ref": raw, "source": "external"},
+                    ))
         else:
             errors.append(f"Unknown reference store '{store}' in ${{{raw}}}")
+            structured_errors.append(StandardError(
+                code=ErrorCode.MISSING_PRODUCER,
+                message=f"Unknown reference store '{store}' in ${{{raw}}}",
+                location={"store": store, "ref": raw},
+            ))
 
-def scan_refs(val: Any, schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]]):
+def scan_refs(val: Any, schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]], structured_errors: list[StandardError]):
     if isinstance(val, str):
-        validate_refs_in_string(val, schemas_by_store, external_inputs, errors, suggestions)
+        validate_refs_in_string(val, schemas_by_store, external_inputs, errors, suggestions, structured_errors)
     elif isinstance(val, list):
         for x in val:
-            scan_refs(x, schemas_by_store, external_inputs, errors, suggestions)
+            scan_refs(x, schemas_by_store, external_inputs, errors, suggestions, structured_errors)
     elif isinstance(val, dict):
         for x in val.values():
-            scan_refs(x, schemas_by_store, external_inputs, errors, suggestions)
+            scan_refs(x, schemas_by_store, external_inputs, errors, suggestions, structured_errors)
 
-def consumer_type_check(step: dict[str, Any], cap_node: dict[str, Any], schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]], workflow_name: str, step_index: int):
+def consumer_type_check(step: dict[str, Any], cap_node: dict[str, Any], schemas_by_store: dict[str, Any], external_inputs: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]], workflow_name: str, step_index: int, structured_errors: list[StandardError]):
     """Compare binding inferred type vs consumer input_schema expected type."""
     input_schema = cap_node.get('input_schema') or {}
     input_schema = resolve_schema_node(ROOT, input_schema)
@@ -376,6 +415,11 @@ def consumer_type_check(step: dict[str, Any], cap_node: dict[str, Any], schemas_
                     errors.append(
                         f"Consumer input type mismatch in workflow '{workflow_name}' step {step_index} ({step.get('capability')}): input '{key}' expects {type_to_str(expected_t)} but got {type_to_str(actual_t)} from ${{{raw}}}"
                     )
+                    structured_errors.append(StandardError(
+                        code=ErrorCode.TYPE_MISMATCH,
+                        message=f"Consumer input type mismatch: input '{key}' expects {type_to_str(expected_t)} but got {type_to_str(actual_t)} from ${{{raw}}}",
+                        location={"workflow": workflow_name, "step": step_index, "capability": step.get('capability'), "input_key": key},
+                    ))
 
                     # Suggest transform insertion if coercion exists
                     from_t = type_to_str(actual_t)
@@ -415,7 +459,7 @@ def build_transform_patch(workflow_name: str, step_index: int, input_key: str, r
         }
     }
 
-def check_workflow(name: str, wf: dict[str, Any], nodes: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]]):
+def check_workflow(name: str, wf: dict[str, Any], nodes: dict[str, Any], errors: list[str], suggestions: list[dict[str, Any]], structured_errors: list[StandardError]):
     steps = wf.get('steps',[]) or []
     inputs_decl = wf.get('inputs',{}) or {}
 
@@ -428,6 +472,11 @@ def check_workflow(name: str, wf: dict[str, Any], nodes: dict[str, Any], errors:
             else:
                 external_inputs[key] = {'type':'object','properties':{}}
                 errors.append(f"[{name}] inputs.{key} ref could not be resolved: {spec['ref']}")
+                structured_errors.append(StandardError(
+                    code=ErrorCode.INVALID_REF,
+                    message=f"inputs.{key} ref could not be resolved: {spec['ref']}",
+                    location={"workflow": name, "field": f"inputs.{key}.ref"},
+                ))
         elif isinstance(spec, dict):
             external_inputs[key] = resolve_schema_node(ROOT, spec)
         else:
@@ -439,34 +488,54 @@ def check_workflow(name: str, wf: dict[str, Any], nodes: dict[str, Any], errors:
         cap = st.get('capability')
         if cap not in nodes:
             errors.append(f"[{name}] step {i}: unknown capability '{cap}'")
+            structured_errors.append(StandardError(
+                code=ErrorCode.UNKNOWN_CAPABILITY,
+                message=f"Capability '{cap}' not found in ontology",
+                location={"workflow": name, "step": i, "field": "capability"},
+            ))
             continue
         node = nodes[cap]
 
         for r in node.get('requires',[]):
             if r not in seen:
                 errors.append(f"[{name}] step {i} '{cap}' missing required prereq '{r}' before it")
+                structured_errors.append(StandardError(
+                    code=ErrorCode.MISSING_PREREQUISITE,
+                    message=f"Capability '{cap}' missing required prerequisite '{r}' before it",
+                    location={"workflow": name, "step": i, "capability": cap, "prerequisite": r},
+                ))
 
         mref = st.get('mapping_ref')
         if mref and not (ROOT / mref).exists():
             errors.append(f"[{name}] step {i} '{cap}' mapping_ref missing file: {mref}")
+            structured_errors.append(StandardError(
+                code=ErrorCode.SCHEMA_NOT_FOUND,
+                message=f"mapping_ref missing file: {mref}",
+                location={"workflow": name, "step": i, "capability": cap, "field": "mapping_ref"},
+            ))
         cref = st.get('output_conforms_to')
         if cref:
             file_part = cref.split('#')[0]
             if not (ROOT / file_part).exists():
                 errors.append(f"[{name}] step {i} '{cap}' output_conforms_to missing file: {file_part}")
+                structured_errors.append(StandardError(
+                    code=ErrorCode.SCHEMA_NOT_FOUND,
+                    message=f"output_conforms_to missing file: {file_part}",
+                    location={"workflow": name, "step": i, "capability": cap, "field": "output_conforms_to"},
+                ))
 
         store = st.get('store_as')
         if store:
             out_schema = node.get('output_schema') or {'type':'object','properties':{}}
             schemas_by_store[store] = resolve_schema_node(ROOT, out_schema)
 
-        scan_refs(st.get('input_bindings',{}), schemas_by_store, external_inputs, errors, suggestions)
-        validate_refs_in_string(st.get('condition',''), schemas_by_store, external_inputs, errors, suggestions)
+        scan_refs(st.get('input_bindings',{}), schemas_by_store, external_inputs, errors, suggestions, structured_errors)
+        validate_refs_in_string(st.get('condition',''), schemas_by_store, external_inputs, errors, suggestions, structured_errors)
         for g in st.get('gates',[]) or []:
-            validate_refs_in_string(g.get('when',''), schemas_by_store, external_inputs, errors, suggestions)
+            validate_refs_in_string(g.get('when',''), schemas_by_store, external_inputs, errors, suggestions, structured_errors)
 
         # consumer-side type checking
-        consumer_type_check(st, node, schemas_by_store, external_inputs, errors, suggestions, name, i)
+        consumer_type_check(st, node, schemas_by_store, external_inputs, errors, suggestions, name, i, structured_errors)
 
         seen.add(cap)
 
@@ -524,12 +593,18 @@ def main() -> None:
 
     errors: list[str] = []
     suggestions: list[dict[str, Any]] = []
+    structured_errors: list[StandardError] = []
 
     for name, wf in workflows.items():
-        check_workflow(name, wf, nodes, errors, suggestions)
+        check_workflow(name, wf, nodes, errors, suggestions, structured_errors)
 
     # Always write suggestions JSON (even on pass)
-    SUGGESTIONS_JSON.write_text(json.dumps({"errors": errors, "suggestions": suggestions}, indent=2), encoding="utf-8")
+    output = {
+        "errors": errors,
+        "structured_errors": format_errors_response(structured_errors).get("errors", []),
+        "suggestions": suggestions,
+    }
+    SUGGESTIONS_JSON.write_text(json.dumps(output, indent=2), encoding="utf-8")
 
     if args.emit_patch and suggestions:
         modified = apply_patch_suggestions_to_yaml(workflows, suggestions)

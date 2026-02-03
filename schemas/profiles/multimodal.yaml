@@ -39,6 +39,9 @@ trust_weights:
   expert_assessment: 0.90      # Domain expert cross-modal evaluation
   model_prediction: 0.65       # Cross-modal model predictions
 
+trust_model_reviewed: true
+trust_model_reviewed_at: "2026-02-03"
+
 risk_thresholds:
   auto_approve: low           # Only low-risk analyses auto-approved
   require_review: medium      # Medium+ requires human review

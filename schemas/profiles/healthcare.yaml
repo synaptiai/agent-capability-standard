@@ -40,6 +40,9 @@ trust_weights:
   patient_reported: 0.75  # Patient self-reports
   caregiver_input: 0.72   # Family/caregiver information
 
+trust_model_reviewed: true
+trust_model_reviewed_at: "2026-02-03"
+
 risk_thresholds:
   auto_approve: none      # NO autonomous clinical actions
   require_review: low     # All actions require clinical review

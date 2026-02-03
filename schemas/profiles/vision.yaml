@@ -37,6 +37,9 @@ trust_weights:
   crowd_annotation: 0.72      # Crowdsourced annotations
   model_prediction: 0.65      # Predictions from other ML models
 
+trust_model_reviewed: true
+trust_model_reviewed_at: "2026-02-03"
+
 risk_thresholds:
   auto_approve: low           # Only low-risk visual analysis auto-approved
   require_review: medium      # Medium+ requires human review

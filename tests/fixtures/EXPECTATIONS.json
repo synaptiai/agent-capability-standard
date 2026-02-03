@@ -91,7 +91,12 @@
     "level": "L3",
     "category": "types"
   },
-  "fail_consumer_contract_mismatch": {
+  "fail_unknown_capabilities_v1": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "structural"
+  },
+  "fail_type_mismatch_binding": {
     "should_pass": false,
     "should_emit_suggestions": true,
     "level": "L3",
@@ -111,5 +116,11 @@
     "should_pass": true,
     "level": "L1",
     "category": "structural"
+  },
+  "patch_string_to_number_coercion": {
+    "should_pass": false,
+    "should_emit_suggestions": true,
+    "level": "L4",
+    "category": "patches"
   }
 }

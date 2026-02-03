@@ -1,0 +1,32 @@
+type_mismatch_workflow:
+  goal: Test workflow with consumer contract type mismatch.
+  risk: low
+  inputs:
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+  steps:
+  - capability: retrieve
+    purpose: Fetch source data.
+    store_as: retrieve_out
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    failure_modes: []
+  - capability: measure
+    purpose: Quantify with mismatched binding type.
+    store_as: measure_out
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    input_bindings:
+      target: ${retrieve_out.evidence_anchors: number}
+    failure_modes: []

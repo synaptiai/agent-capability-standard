@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ..capabilities.registry import CapabilityRegistry
+from ..errors import ErrorCode
 from ..state.checkpoint_tracker import CheckpointTracker
 from ..utils.safe_yaml import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
@@ -197,6 +198,13 @@ class WorkflowStepResult:
     checkpoint_id: str | None = None
 
 
+_ERROR_TYPE_TO_CODE: dict[str, ErrorCode] = {
+    "unresolved_ref": ErrorCode.INVALID_BINDING_PATH,
+    "type_mismatch": ErrorCode.TYPE_MISMATCH,
+    "missing_store_as": ErrorCode.MISSING_PRODUCER,
+}
+
+
 @dataclass(slots=True)
 class BindingError:
     """Describes a binding type mismatch or unresolvable reference."""
@@ -210,6 +218,11 @@ class BindingError:
     message: str
     expected_type: str | None = None
     actual_type: str | None = None
+
+    @property
+    def error_code(self) -> ErrorCode:
+        """Map internal error_type to standard error code (Section 9)."""
+        return _ERROR_TYPE_TO_CODE.get(self.error_type, ErrorCode.INVALID_BINDING_PATH)
 
 
 class WorkflowEngine:
