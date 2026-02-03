@@ -344,6 +344,10 @@ class CapabilityRegistry:
         """Get all capabilities in the ontology."""
         return list(self._loaded_nodes.values())
 
+    def all_edges(self) -> list[CapabilityEdge]:
+        """Get all edges in the ontology."""
+        return list(self._loaded_edges)
+
     @property
     def version(self) -> str:
         """Get ontology version."""

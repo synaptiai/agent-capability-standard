@@ -31,13 +31,13 @@ def validate_requires_edges(registry: CapabilityRegistry) -> list[str]:
     expected_requires = {
         ("checkpoint", "mutate"),
         ("checkpoint", "send"),
-        ("mutate", "verify"),  # verify is required BY mutate (incoming to mutate)
-        ("send", "verify"),  # verify is required BY send (incoming to send)
+        ("mutate", "verify"),  # verify requires mutate (mutate is incoming to verify)
+        ("send", "verify"),  # verify requires send (send is incoming to verify)
     }
 
     # Collect all actual requires edges
     actual_requires = set()
-    for edge in registry._loaded_edges:
+    for edge in registry.all_edges():
         if edge.edge_type == "requires":
             actual_requires.add((edge.from_cap, edge.to_cap))
 
