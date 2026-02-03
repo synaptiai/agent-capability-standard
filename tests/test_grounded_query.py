@@ -104,6 +104,7 @@ class TestGroundedQueryImport:
     @pytest.mark.asyncio
     async def test_grounded_query_callable(self, adapter: GroundedAgentAdapter):
         """Test that grounded_query is callable with the SDK installed."""
+        pytest.importorskip("claude_agent_sdk")
         from grounded_agency import grounded_query
 
         # SDK is installed; grounded_query should not raise ImportError.
@@ -118,6 +119,7 @@ class TestGroundedQueryImport:
 
     def test_grounded_client_instantiates(self):
         """Test that GroundedClient instantiates with the SDK installed."""
+        pytest.importorskip("claude_agent_sdk")
         from grounded_agency import GroundedClient
 
         client = GroundedClient()
@@ -213,6 +215,7 @@ class TestGroundedClientErrorPaths:
     @pytest.mark.asyncio
     async def test_query_outside_context_raises(self, adapter: GroundedAgentAdapter):
         """Test that query() raises RuntimeError outside async context."""
+        pytest.importorskip("claude_agent_sdk")
         from grounded_agency.client import GroundedClient
 
         client = GroundedClient(adapter=adapter)
@@ -225,6 +228,7 @@ class TestGroundedClientErrorPaths:
         self, adapter: GroundedAgentAdapter
     ):
         """Test that receive_response() raises RuntimeError outside async context."""
+        pytest.importorskip("claude_agent_sdk")
         from grounded_agency.client import GroundedClient
 
         client = GroundedClient(adapter=adapter)
