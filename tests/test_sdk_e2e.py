@@ -1,16 +1,16 @@
 """End-to-end tests for SDK integration (TEST-006).
 
 Tests real wrap_options(), permission callback, and hook registration
-without requiring the full Claude Agent SDK (conditional import).
+using the real Claude Agent SDK types.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
+from claude_agent_sdk import ClaudeAgentOptions
 
 from grounded_agency import (
     GroundedAgentAdapter,
@@ -18,17 +18,9 @@ from grounded_agency import (
     RateLimitConfig,
 )
 
-# Check if claude_agent_sdk is available
-try:
-    import claude_agent_sdk  # noqa: F401
-
-    SDK_AVAILABLE = True
-except ImportError:
-    SDK_AVAILABLE = False
-
 
 def _is_allowed(result: Any) -> bool:
-    """Check if permission result indicates allowed, handling SDK, fallback, and dict types."""
+    """Check if permission result indicates allowed, handling SDK and fallback types."""
     if isinstance(result, dict):
         return result.get("allowed", False) is True
     # SDK types use behavior='allow', fallback types use allowed=True
@@ -42,17 +34,6 @@ def _get_message(result: Any) -> str:
     if isinstance(result, dict):
         return result.get("message", "")
     return getattr(result, "message", "")
-
-
-@dataclass
-class MockClaudeAgentOptions:
-    """Mock for ClaudeAgentOptions when SDK is not available."""
-
-    enable_file_checkpointing: bool = False
-    can_use_tool: Any = None
-    hooks: dict[str, list[Any]] = field(default_factory=dict)
-    allowed_tools: list[str] = field(default_factory=list)
-    setting_sources: list[str] = field(default_factory=lambda: ["project"])
 
 
 @pytest.fixture
@@ -71,31 +52,31 @@ class TestWrapOptions:
     """Test wrap_options with mock SDK options."""
 
     def test_injects_file_checkpointing(self, adapter: GroundedAgentAdapter) -> None:
-        base = MockClaudeAgentOptions()
+        base = ClaudeAgentOptions()
         wrapped = adapter.wrap_options(base)
         assert wrapped.enable_file_checkpointing is True
 
     def test_injects_permission_callback(self, adapter: GroundedAgentAdapter) -> None:
-        base = MockClaudeAgentOptions()
+        base = ClaudeAgentOptions()
         wrapped = adapter.wrap_options(base)
         assert wrapped.can_use_tool is not None
         assert callable(wrapped.can_use_tool)
 
     def test_adds_skill_to_allowed_tools(self, adapter: GroundedAgentAdapter) -> None:
-        base = MockClaudeAgentOptions(allowed_tools=["Read", "Write"])
+        base = ClaudeAgentOptions(allowed_tools=["Read", "Write"])
         wrapped = adapter.wrap_options(base)
         assert "Skill" in wrapped.allowed_tools
 
     def test_preserves_existing_allowed_tools(
         self, adapter: GroundedAgentAdapter
     ) -> None:
-        base = MockClaudeAgentOptions(allowed_tools=["Read", "Write"])
+        base = ClaudeAgentOptions(allowed_tools=["Read", "Write"])
         wrapped = adapter.wrap_options(base)
         assert "Read" in wrapped.allowed_tools
         assert "Write" in wrapped.allowed_tools
 
     def test_adds_post_hooks(self, adapter: GroundedAgentAdapter) -> None:
-        base = MockClaudeAgentOptions()
+        base = ClaudeAgentOptions()
         wrapped = adapter.wrap_options(base)
         assert "PostToolUse" in wrapped.hooks
         # Should have 3 hooks: evidence collector, skill tracker, mutation consumer
@@ -103,7 +84,7 @@ class TestWrapOptions:
 
     def test_preserves_existing_hooks(self, adapter: GroundedAgentAdapter) -> None:
         existing_hook = {"hooks": [lambda: None]}
-        base = MockClaudeAgentOptions(
+        base = ClaudeAgentOptions(
             hooks={"PostToolUse": [existing_hook], "PreToolUse": []}
         )
         wrapped = adapter.wrap_options(base)
@@ -224,14 +205,11 @@ class TestFullE2EFlow:
         assert remaining > 0
 
 
-@pytest.mark.skipif(not SDK_AVAILABLE, reason="claude-agent-sdk not installed")
 class TestWithRealSDK:
-    """Tests that require the real Claude Agent SDK."""
+    """Tests that use the real Claude Agent SDK types."""
 
     def test_real_wrap_options(self, adapter: GroundedAgentAdapter) -> None:
         """Test wrap_options with real SDK types."""
-        from claude_agent_sdk import ClaudeAgentOptions
-
         base = ClaudeAgentOptions()
         wrapped = adapter.wrap_options(base)
         assert wrapped.enable_file_checkpointing is True

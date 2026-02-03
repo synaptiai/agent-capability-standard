@@ -13,10 +13,10 @@ Tests the grounded_agency package components:
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from claude_agent_sdk import ClaudeAgentOptions
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -72,19 +72,6 @@ def adapter(ontology_path: str, tmp_path: Path) -> GroundedAgentAdapter:
             checkpoint_dir=str(tmp_path / ".checkpoints"),
         )
     )
-
-
-# Mock SDK types for testing
-@dataclass
-class MockClaudeAgentOptions:
-    """Mock ClaudeAgentOptions for testing."""
-
-    allowed_tools: list = field(default_factory=list)
-    permission_mode: str = "default"
-    hooks: dict = field(default_factory=dict)
-    setting_sources: list = field(default_factory=lambda: ["project"])
-    enable_file_checkpointing: bool = False
-    can_use_tool: object = None
 
 
 # =============================================================================
@@ -485,7 +472,7 @@ class TestGroundedAgentAdapter:
 
     def test_wrap_options(self, adapter: GroundedAgentAdapter):
         """Test wrapping SDK options."""
-        base = MockClaudeAgentOptions(allowed_tools=["Read", "Write"])
+        base = ClaudeAgentOptions(allowed_tools=["Read", "Write"])
         wrapped = adapter.wrap_options(base)
 
         # Check injected settings
@@ -496,7 +483,7 @@ class TestGroundedAgentAdapter:
 
     def test_wrap_options_preserves_existing(self, adapter: GroundedAgentAdapter):
         """Test that wrap_options preserves existing tools."""
-        base = MockClaudeAgentOptions(allowed_tools=["Read", "Write", "Bash"])
+        base = ClaudeAgentOptions(allowed_tools=["Read", "Write", "Bash"])
         wrapped = adapter.wrap_options(base)
 
         assert "Read" in wrapped.allowed_tools
