@@ -34,6 +34,11 @@ python tools/validate_yaml_util_sync.py
 python tools/validate_transform_refs.py
 ```
 
+### Validate benchmark deps against ontology
+```bash
+python tools/validate_benchmark_deps.py
+```
+
 ### Sync skill-local schemas from ontology
 ```bash
 python tools/sync_skill_schemas.py
