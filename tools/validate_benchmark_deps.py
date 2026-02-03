@@ -19,8 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from grounded_agency.capabilities.registry import CapabilityRegistry
-from grounded_agency.utils.safe_yaml import safe_yaml_load
+from grounded_agency.capabilities.registry import CapabilityRegistry  # noqa: E402
+from grounded_agency.utils.safe_yaml import safe_yaml_load  # noqa: E402
 
 
 def validate_requires_edges(registry: CapabilityRegistry) -> list[str]:
