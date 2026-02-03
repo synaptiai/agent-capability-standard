@@ -15,13 +15,42 @@ Metrics:
 - Suggestion accuracy: Correct coercions suggested
 """
 
+from pathlib import Path
 from typing import Any
+
+from grounded_agency.utils.safe_yaml import safe_yaml_load
 
 from .base import BenchmarkScenario
 
+# Path to the canonical coercion registry
+_COERCION_REGISTRY_PATH = (
+    Path(__file__).parent.parent.parent
+    / "schemas"
+    / "transforms"
+    / "transform_coercion_registry.yaml"
+)
 
-# Type system from workflow DSL
-TYPES = {
+
+def _load_coercions() -> dict[tuple[str, str], str]:
+    """Load coercion mappings from the canonical transform_coercion_registry.yaml."""
+    if not _COERCION_REGISTRY_PATH.exists():
+        raise FileNotFoundError(
+            f"Coercion registry not found: {_COERCION_REGISTRY_PATH}. "
+            "Benchmark integrity requires this file."
+        )
+
+    data = safe_yaml_load(_COERCION_REGISTRY_PATH)
+    coercions: dict[tuple[str, str], str] = {}
+    for entry in data.get("coercions", []):
+        from_type = entry["from"]
+        to_type = entry["to"]
+        mapping_ref = entry.get("mapping_ref", "")
+        mapping_name = mapping_ref.rsplit("/", 1)[-1].replace(".yaml", "")
+        coercions[(from_type, to_type)] = mapping_name
+    return coercions
+
+
+_TYPES = {
     "string": {"compatible_with": ["string"]},
     "number": {"compatible_with": ["number", "integer"]},
     "integer": {"compatible_with": ["integer"]},
@@ -32,14 +61,7 @@ TYPES = {
     "array<any>": {"compatible_with": ["array<any>"]},
 }
 
-# Coercion registry from transforms/
-COERCIONS = {
-    ("string", "number"): "transform_mapping_coerce_string_to_number",
-    ("number", "string"): "transform_mapping_coerce_number_to_string",
-    ("object", "string"): "transform_mapping_stringify_object",
-    ("array<object>", "array<string>"): "transform_mapping_project_array_object_to_array_string",
-    ("any", "object"): "transform_mapping_wrap_any_to_object",
-}
+COERCIONS = _load_coercions()
 
 
 class WorkflowTypeErrorScenario(BenchmarkScenario):
@@ -55,7 +77,7 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
     def setup(self) -> None:
         """Create test workflows with known type mismatches."""
         self.test_workflows = [
-            # Workflow 1: array<string> → expects object
+            # Workflow 1: array<string> -> expects object
             {
                 "id": 1,
                 "name": "array_to_object_mismatch",
@@ -73,9 +95,9 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
                 ],
                 "has_error": True,
                 "error_type": "type_mismatch",
-                "coercion_exists": False,  # No direct array<string> → object
+                "coercion_exists": False,  # No direct array<string> -> object
             },
-            # Workflow 2: string → expects number (coercible)
+            # Workflow 2: string -> expects number (coercible)
             {
                 "id": 2,
                 "name": "string_to_number_coercible",
@@ -116,7 +138,7 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
                 "error_type": None,
                 "coercion_exists": False,
             },
-            # Workflow 4: number → expects string (coercible)
+            # Workflow 4: number -> expects string (coercible)
             {
                 "id": 4,
                 "name": "number_to_string_coercible",
@@ -157,7 +179,7 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
                 "error_type": "unresolved_reference",
                 "coercion_exists": False,
             },
-            # Workflow 6: object → expects string (coercible via stringify)
+            # Workflow 6: object -> expects string (coercible via stringify)
             {
                 "id": 6,
                 "name": "object_to_string_coercible",
@@ -178,7 +200,7 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
                 "coercion_exists": True,
                 "coercion": "transform_mapping_stringify_object",
             },
-            # Workflow 7: array<object> → array<string> (coercible via project)
+            # Workflow 7: array<object> -> array<string> (coercible via project)
             {
                 "id": 7,
                 "name": "array_object_to_array_string",
@@ -260,7 +282,8 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
                 if (
                     expected_type != "any"
                     and actual_type != expected_type
-                    and expected_type not in TYPES.get(actual_type, {}).get("compatible_with", [])
+                    and expected_type
+                    not in _TYPES.get(actual_type, {}).get("compatible_with", [])
                 ):
                     return {
                         "success": False,
@@ -306,11 +329,11 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
                 expected_type = step.get("input_expects", "any")
 
                 if expected_type != "any" and actual_type != expected_type:
-                    compatible = TYPES.get(actual_type, {}).get("compatible_with", [])
+                    compatible = _TYPES.get(actual_type, {}).get("compatible_with", [])
                     if expected_type not in compatible:
                         error = {
                             "type": "type_mismatch",
-                            "message": f"Type mismatch: {actual_type} → {expected_type}",
+                            "message": f"Type mismatch: {actual_type} -> {expected_type}",
                             "step": step.get("capability"),
                         }
                         errors.append(error)
@@ -363,7 +386,9 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
             )
 
         error_workflows = [w for w in self.test_workflows if w["has_error"]]
-        detection_rate = errors_detected / len(error_workflows) if error_workflows else 1.0
+        detection_rate = (
+            errors_detected / len(error_workflows) if error_workflows else 1.0
+        )
 
         self.log(f"Baseline detection rate: {detection_rate:.0%}")
         self.log("Baseline design-time detections: 0%")
@@ -400,7 +425,9 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
             if workflow.get("coercion_exists"):
                 total_coercible += 1
                 expected_coercion = workflow.get("coercion")
-                suggested_coercions = [s["insert_transform"] for s in result.get("suggestions", [])]
+                suggested_coercions = [
+                    s["insert_transform"] for s in result.get("suggestions", [])
+                ]
                 if expected_coercion in suggested_coercions:
                     correct_suggestions += 1
 
@@ -415,8 +442,12 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
             )
 
         error_workflows = [w for w in self.test_workflows if w["has_error"]]
-        detection_rate = errors_detected / len(error_workflows) if error_workflows else 1.0
-        suggestion_accuracy = correct_suggestions / total_coercible if total_coercible else 1.0
+        detection_rate = (
+            errors_detected / len(error_workflows) if error_workflows else 1.0
+        )
+        suggestion_accuracy = (
+            correct_suggestions / total_coercible if total_coercible else 1.0
+        )
 
         self.log(f"GA detection rate: {detection_rate:.0%}")
         self.log(f"GA design-time detection rate: {detection_rate:.0%}")
@@ -446,7 +477,9 @@ class WorkflowTypeErrorScenario(BenchmarkScenario):
         }
 
         self.log(f"Design-time detection improvement: +{design_time_improvement:.0%}")
-        self.log(f"Runtime errors prevented: {baseline_result['runtime_detection_rate']:.0%}")
+        self.log(
+            f"Runtime errors prevented: {baseline_result['runtime_detection_rate']:.0%}"
+        )
         self.log(f"Suggestion accuracy: {ga_result['suggestion_accuracy']:.0%}")
 
         return comparison

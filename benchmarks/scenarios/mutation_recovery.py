@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from grounded_agency.state.checkpoint_tracker import CheckpointTracker
+
 from .base import BenchmarkScenario
 
 
@@ -57,9 +59,7 @@ class MutationRecoveryScenario(BenchmarkScenario):
         # Generate original file content
         lines = [f"line_{i}: original_value_{i}" for i in range(self.file_lines)]
         self.original_content = "\n".join(lines)
-        self.original_hash = hashlib.sha256(
-            self.original_content.encode()
-        ).hexdigest()
+        self.original_hash = hashlib.sha256(self.original_content.encode()).hexdigest()
 
         # Create temporary directory for test files
         self.temp_dir = Path(tempfile.mkdtemp(prefix="ga_benchmark_"))
@@ -156,10 +156,13 @@ class MutationRecoveryScenario(BenchmarkScenario):
         Mutation failure leaves file in corrupted state
         with no automatic recovery.
         """
-        assert self.temp_dir is not None, "setup() must be called before run_baseline()"
+        if self.temp_dir is None:
+            raise RuntimeError("setup() must be called before run_baseline()")
         file_path = self.temp_dir / "baseline_file.txt"
 
-        result = self._simulate_mutation_with_failure(file_path, checkpoint_content=None)
+        result = self._simulate_mutation_with_failure(
+            file_path, checkpoint_content=None
+        )
 
         # Without checkpoint, recovery is impossible
         recovery_rate = 0.0 if result["failed"] else 1.0
@@ -180,23 +183,37 @@ class MutationRecoveryScenario(BenchmarkScenario):
 
     def run_ga(self) -> dict[str, Any]:
         """
-        Grounded Agency: Checkpoint before mutation.
+        Grounded Agency: Checkpoint before mutation using CheckpointTracker.
 
-        Creates recovery point, attempts mutation, and
-        rolls back on failure.
+        Creates recovery point via the real CheckpointTracker,
+        attempts mutation, and rolls back on failure.
         """
-        assert self.temp_dir is not None, "setup() must be called before run_ga()"
+        if self.temp_dir is None:
+            raise RuntimeError("setup() must be called before run_ga()")
         file_path = self.temp_dir / "ga_file.txt"
 
-        # Create checkpoint (GA approach)
-        checkpoint_content = self.original_content
-        checkpoint_hash = self.original_hash
+        # Use real CheckpointTracker for lifecycle management
+        checkpoint_dir = self.temp_dir / ".checkpoints"
+        tracker = CheckpointTracker(checkpoint_dir=checkpoint_dir)
 
-        self.log("GA: Created checkpoint before mutation")
+        checkpoint_id = tracker.create_checkpoint(
+            scope=[str(file_path)],
+            reason="Before mutation benchmark",
+        )
+        if not tracker.has_valid_checkpoint():
+            raise RuntimeError("Checkpoint should be valid after creation")
+
+        self.log(f"GA: Created checkpoint {checkpoint_id[:20]}... before mutation")
 
         result = self._simulate_mutation_with_failure(
-            file_path, checkpoint_content=checkpoint_content
+            file_path, checkpoint_content=self.original_content
         )
+
+        consumed_id = tracker.consume_checkpoint()
+        if consumed_id != checkpoint_id:
+            raise RuntimeError("Consumed checkpoint should match created")
+        if tracker.has_valid_checkpoint():
+            raise RuntimeError("No valid checkpoint should remain after consumption")
 
         recovery_rate = 1.0 if result["recovered"] or not result["failed"] else 0.0
         integrity_rate = 1.0 if result["data_integrity"] else 0.0
@@ -214,7 +231,7 @@ class MutationRecoveryScenario(BenchmarkScenario):
             "lines_lost": 0 if result["data_integrity"] else self.file_lines,
             "recovery_time_ms": result["recovery_time_ms"],
             "has_checkpoint": True,
-            "checkpoint_hash": checkpoint_hash,
+            "checkpoint_hash": self.original_hash,
         }
 
     def compare(

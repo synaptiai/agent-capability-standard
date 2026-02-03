@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- `CapabilityRegistry.all_edges()` public method for enumerating ontology edges
+- Benchmark drift-prevention validator (`tools/validate_benchmark_deps.py`) and CI job
 - Multi-agent coordination runtime with delegate, synchronize, and invoke patterns (#98)
 - NIST AI RMF 1.0 profile with tier assessments and maturity roadmap (#59)
 - EU AI Act conformity assessment preparation (#58, #97)
@@ -19,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- Remediate benchmark suite drift from ontology and SDK (#100)
+- Use public `all_edges()` API in benchmark validator instead of private `_loaded_edges` (#100)
 - Install real SDK, remove all mock/skip patterns (#99)
 
 ## [v1.0.5] — 2026-01-29

@@ -459,6 +459,14 @@ Returns all capabilities in the ontology.
 
 ---
 
+### `all_edges() -> list[CapabilityEdge]`
+
+Returns all edges (relationships) in the ontology.
+
+**Returns**: `list[CapabilityEdge]` -- Every edge in the ontology graph.
+
+---
+
 ### Properties
 
 #### `version -> str`
@@ -1774,7 +1782,7 @@ grounded_agency/
 |-----------------|-------------|--------|
 | `GroundedAgentAdapter` | 8 methods + 2 properties | `adapter.py` |
 | `GroundedAgentConfig` | 5 fields (dataclass) | `adapter.py` |
-| `CapabilityRegistry` | 15 methods + 3 properties | `capabilities/registry.py` |
+| `CapabilityRegistry` | 16 methods + 3 properties | `capabilities/registry.py` |
 | `CapabilityNode` | 9 fields + 1 class method | `capabilities/registry.py` |
 | `CapabilityEdge` | 3 fields | `capabilities/registry.py` |
 | `ToolCapabilityMapper` | 5 public methods | `capabilities/mapper.py` |

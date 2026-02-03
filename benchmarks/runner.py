@@ -45,9 +45,9 @@ def run_all_scenarios(
     results = {}
     for name, scenario_class in SCENARIOS.items():
         if verbose:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Running: {name}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
         results[name] = run_scenario(
             scenario_class, seed=seed, iterations=iterations, verbose=verbose
         )
@@ -125,70 +125,88 @@ def generate_report(
             ga_val = result.ga_metrics.get(ga_key, "N/A")
             improvement_val = result.improvement.get(improvement_key, "N/A")
 
-            baseline_str = f"{baseline_val:.1%}" if isinstance(baseline_val, float) else str(baseline_val)
+            baseline_str = (
+                f"{baseline_val:.1%}"
+                if isinstance(baseline_val, float)
+                else str(baseline_val)
+            )
             ga_str = f"{ga_val:.1%}" if isinstance(ga_val, float) else str(ga_val)
-            improvement_str = f"+{improvement_val:.1%}" if isinstance(improvement_val, float) else str(improvement_val)
+            improvement_str = (
+                f"+{improvement_val:.1%}"
+                if isinstance(improvement_val, float)
+                else str(improvement_val)
+            )
 
             lines.append(f"| {name} | {baseline_str} | {ga_str} | {improvement_str} |")
 
-        lines.extend([
-            "",
-            "## Detailed Results",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "## Detailed Results",
+                "",
+            ]
+        )
 
         for name, result in results.items():
-            lines.extend([
-                f"### {name}",
-                "",
-                f"**Description**: {SCENARIOS[name].description}",
-                "",
-                "#### Baseline Metrics",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"### {name}",
+                    "",
+                    f"**Description**: {SCENARIOS[name].description}",
+                    "",
+                    "#### Baseline Metrics",
+                    "",
+                ]
+            )
             for key, value in result.baseline_metrics.items():
                 if key != "results":
                     lines.append(f"- {key}: {_format_value(value)}")
 
-            lines.extend([
-                "",
-                "#### Grounded Agency Metrics",
-                "",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "#### Grounded Agency Metrics",
+                    "",
+                ]
+            )
             for key, value in result.ga_metrics.items():
                 if key != "results":
                     lines.append(f"- {key}: {_format_value(value)}")
 
-            lines.extend([
-                "",
-                "#### Improvement",
-                "",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "#### Improvement",
+                    "",
+                ]
+            )
             for key, value in result.improvement.items():
                 lines.append(f"- {key}: {_format_value(value)}")
 
             lines.append("")
 
-        lines.extend([
-            "---",
-            "",
-            "## Interpretation",
-            "",
-            "- **Scenario 1 (Conflicting Sources)**: Higher accuracy indicates better conflict resolution",
-            "- **Scenario 2 (Mutation Recovery)**: 100% recovery rate indicates checkpoint/rollback working",
-            "- **Scenario 3 (Decision Audit)**: Higher faithfulness indicates reliable explanations",
-            "- **Scenario 4 (Workflow Type Error)**: Design-time detection prevents runtime failures",
-            "- **Scenario 5 (Capability Gap)**: Pre-execution blocking saves wasted compute",
-            "",
-            "## Methodology",
-            "",
-            "Each scenario compares a baseline (naive) approach against a Grounded Agency approach.",
-            "Baseline approaches represent common patterns without GA's structural guarantees.",
-            "GA approaches use the capability ontology with evidence grounding, typed contracts,",
-            "and reversibility guarantees.",
-            "",
-            "For full methodology, see the [benchmark README](./README.md).",
-        ])
+        lines.extend(
+            [
+                "---",
+                "",
+                "## Interpretation",
+                "",
+                "- **Scenario 1 (Conflicting Sources)**: Higher accuracy indicates better conflict resolution",
+                "- **Scenario 2 (Mutation Recovery)**: 100% recovery rate indicates checkpoint/rollback working",
+                "- **Scenario 3 (Decision Audit)**: Higher faithfulness indicates reliable explanations",
+                "- **Scenario 4 (Workflow Type Error)**: Design-time detection prevents runtime failures",
+                "- **Scenario 5 (Capability Gap)**: Pre-execution blocking saves wasted compute",
+                "",
+                "## Methodology",
+                "",
+                "Each scenario compares a baseline (naive) approach against a Grounded Agency approach.",
+                "Baseline approaches represent common patterns without GA's structural guarantees.",
+                "GA approaches use the capability ontology with evidence grounding, typed contracts,",
+                "and reversibility guarantees.",
+                "",
+                "For full methodology, see the [benchmark README](./README.md).",
+            ]
+        )
 
         report = "\n".join(lines)
 
@@ -201,7 +219,13 @@ def generate_report(
 
 def _get_primary_metric(metrics: dict[str, Any]) -> str:
     """Get the primary metric key from a metrics dict."""
-    priority = ["accuracy", "recovery_rate", "faithfulness", "detection_rate"]
+    priority = [
+        "accuracy",
+        "recovery_rate",
+        "faithfulness",
+        "design_time_detection_rate",
+        "detection_rate",
+    ]
     for key in priority:
         if key in metrics:
             return key

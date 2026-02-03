@@ -16,50 +16,17 @@ Metrics:
 - Gap identification: Correctly identifies missing capabilities
 """
 
+from pathlib import Path
 from typing import Any
+
+from grounded_agency.capabilities.registry import CapabilityRegistry
 
 from .base import BenchmarkScenario
 
-
-# Simplified capability dependencies from ontology
-CAPABILITY_DEPS = {
-    "retrieve": [],
-    "search": [],
-    "observe": [],
-    "receive": [],
-    "detect": ["observe"],
-    "classify": ["detect"],
-    "measure": ["observe"],
-    "predict": ["measure"],
-    "compare": [],
-    "discover": ["search"],
-    "plan": ["compare"],
-    "decompose": [],
-    "critique": ["compare"],
-    "explain": [],
-    "state": ["observe"],
-    "transition": ["state"],
-    "attribute": ["state"],
-    "ground": [],
-    "simulate": ["state", "transition"],
-    "generate": [],
-    "transform": [],
-    "integrate": [],
-    "execute": ["plan"],
-    "mutate": ["checkpoint"],  # Hard dependency
-    "send": [],
-    "verify": [],
-    "checkpoint": [],
-    "rollback": ["checkpoint"],
-    "constrain": [],
-    "audit": [],
-    "persist": [],
-    "recall": [],
-    "delegate": ["plan"],
-    "synchronize": [],
-    "invoke": [],
-    "inquire": [],
-}
+# Path to the canonical ontology
+_ONTOLOGY_PATH = (
+    Path(__file__).parent.parent.parent / "schemas" / "capability_ontology.yaml"
+)
 
 
 class CapabilityGapScenario(BenchmarkScenario):
@@ -71,6 +38,7 @@ class CapabilityGapScenario(BenchmarkScenario):
     def __init__(self, seed: int = 42, verbose: bool = False):
         super().__init__(seed, verbose)
         self.test_cases: list[dict] = []
+        self.registry = CapabilityRegistry(_ONTOLOGY_PATH)
         # Agent has limited capabilities
         self.agent_capabilities = {
             "retrieve",
@@ -86,9 +54,12 @@ class CapabilityGapScenario(BenchmarkScenario):
         }
 
     def setup(self) -> None:
-        """Create test workflows with known capability requirements."""
+        """Create test workflows with known capability requirements.
+
+        Test cases exercise the real `requires` edges from the ontology.
+        """
         self.test_cases = [
-            # Case 1: All capabilities available
+            # Case 1: All capabilities available — no gap
             {
                 "id": 1,
                 "name": "fully_capable",
@@ -96,21 +67,21 @@ class CapabilityGapScenario(BenchmarkScenario):
                 "has_gap": False,
                 "missing": [],
             },
-            # Case 2: Missing 'send' capability
+            # Case 2: Missing 'send' capability — also missing its requires dep 'checkpoint'
             {
                 "id": 2,
                 "name": "missing_send",
                 "workflow": ["retrieve", "transform", "generate", "send"],
                 "has_gap": True,
-                "missing": ["send"],
+                "missing": ["checkpoint", "send"],
             },
-            # Case 3: Missing 'mutate' and 'checkpoint' (dependency chain)
+            # Case 3: Missing 'mutate' and its required 'checkpoint'
             {
                 "id": 3,
                 "name": "missing_mutation_chain",
                 "workflow": ["retrieve", "plan", "execute", "mutate"],
                 "has_gap": True,
-                "missing": ["checkpoint", "mutate"],  # mutate requires checkpoint
+                "missing": ["checkpoint", "mutate"],
             },
             # Case 4: Missing 'persist'
             {
@@ -120,15 +91,17 @@ class CapabilityGapScenario(BenchmarkScenario):
                 "has_gap": True,
                 "missing": ["persist"],
             },
-            # Case 5: Available workflow with dependencies
+            # Case 5: Available workflow with no transitive deps
+            # (compare has no hard requires edges — unlike verify which
+            #  requires mutate+send+checkpoint transitively)
             {
                 "id": 5,
                 "name": "with_deps_available",
-                "workflow": ["observe", "detect", "verify"],
+                "workflow": ["observe", "detect", "compare"],
                 "has_gap": False,
                 "missing": [],
             },
-            # Case 6: Missing 'delegate'
+            # Case 6: Missing 'delegate' and 'synchronize'
             {
                 "id": 6,
                 "name": "missing_delegate",
@@ -136,15 +109,15 @@ class CapabilityGapScenario(BenchmarkScenario):
                 "has_gap": True,
                 "missing": ["delegate", "synchronize"],
             },
-            # Case 7: Missing 'rollback' (requires checkpoint)
+            # Case 7: Missing 'rollback' — agent lacks it directly
             {
                 "id": 7,
                 "name": "missing_rollback",
                 "workflow": ["retrieve", "transform", "rollback"],
                 "has_gap": True,
-                "missing": ["checkpoint", "rollback"],
+                "missing": ["rollback"],
             },
-            # Case 8: Simple available workflow
+            # Case 8: Simple available workflow — no gap
             {
                 "id": 8,
                 "name": "simple_available",
@@ -152,21 +125,21 @@ class CapabilityGapScenario(BenchmarkScenario):
                 "has_gap": False,
                 "missing": [],
             },
-            # Case 9: Missing 'simulate' (requires state, transition)
+            # Case 9: Missing 'simulate' — agent lacks it directly
             {
                 "id": 9,
                 "name": "missing_simulate",
                 "workflow": ["observe", "simulate"],
                 "has_gap": True,
-                "missing": ["state", "transition", "simulate"],
+                "missing": ["simulate"],
             },
-            # Case 10: Missing 'audit'
+            # Case 10: Missing 'audit' — verify also requires mutate, send, checkpoint transitively
             {
                 "id": 10,
                 "name": "missing_audit",
                 "workflow": ["execute", "verify", "audit"],
                 "has_gap": True,
-                "missing": ["audit"],
+                "missing": ["audit", "checkpoint", "mutate", "send"],
             },
         ]
 
@@ -174,13 +147,17 @@ class CapabilityGapScenario(BenchmarkScenario):
         self.log(f"Agent capabilities: {len(self.agent_capabilities)}")
 
     def _get_all_required_capabilities(self, workflow: list[str]) -> set[str]:
-        """Get all capabilities required including dependencies."""
+        """Get all capabilities required including hard dependencies from ontology.
+
+        Uses CapabilityRegistry.get_required_capabilities() which returns only
+        'requires' edge targets — the hard dependencies that must be satisfied.
+        """
         required = set(workflow)
         to_check = list(workflow)
 
         while to_check:
             cap = to_check.pop()
-            deps = CAPABILITY_DEPS.get(cap, [])
+            deps = self.registry.get_required_capabilities(cap)
             for dep in deps:
                 if dep not in required:
                     required.add(dep)
@@ -364,19 +341,21 @@ class CapabilityGapScenario(BenchmarkScenario):
         detection_improvement = (
             ga_result["detection_rate"] - baseline_result["detection_rate"]
         )
-        compute_savings = (
-            baseline_result["compute_wasted"] + ga_result["compute_saved"]
-        )
+        compute_savings = baseline_result["compute_wasted"] + ga_result["compute_saved"]
 
         comparison = {
             "detection_improvement": detection_improvement,
-            "design_time_detection_improvement": ga_result["design_time_detection_rate"],
+            "design_time_detection_improvement": ga_result[
+                "design_time_detection_rate"
+            ],
             "compute_savings": compute_savings,
             "identification_accuracy": ga_result["identification_accuracy"],
         }
 
         self.log(f"Detection improvement: +{detection_improvement:.0%}")
         self.log(f"Compute savings: {compute_savings}")
-        self.log(f"Gap identification accuracy: {ga_result['identification_accuracy']:.0%}")
+        self.log(
+            f"Gap identification accuracy: {ga_result['identification_accuracy']:.0%}"
+        )
 
         return comparison

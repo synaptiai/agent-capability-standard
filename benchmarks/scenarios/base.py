@@ -8,10 +8,10 @@ Each scenario must implement:
 - compare(): Generate comparison metrics
 """
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
-import time
 
 
 @dataclass
@@ -95,11 +95,11 @@ class BenchmarkScenario(ABC):
             BenchmarkResult with all metrics
         """
         if self.verbose:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Scenario: {self.name}")
             print(f"Description: {self.description}")
             print(f"Iterations: {iterations}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
 
         self.setup()
 
@@ -109,7 +109,7 @@ class BenchmarkScenario(ABC):
 
         for i in range(iterations):
             if self.verbose and iterations > 1:
-                print(f"\n--- Iteration {i+1}/{iterations} ---")
+                print(f"\n--- Iteration {i + 1}/{iterations} ---")
 
             start = time.time()
 
@@ -135,9 +135,7 @@ class BenchmarkScenario(ABC):
             metadata={"iterations": iterations, "seed": self.seed},
         )
 
-    def _average_metrics(
-        self, results: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def _average_metrics(self, results: list[dict[str, Any]]) -> dict[str, Any]:
         """Average numeric metrics across multiple runs."""
         if not results:
             return {}

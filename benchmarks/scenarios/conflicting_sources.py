@@ -18,43 +18,49 @@ Metrics:
 
 import math
 import random
+import re
 from pathlib import Path
 from typing import Any
 
+from grounded_agency.state.evidence_store import EvidenceAnchor, EvidenceStore
 from grounded_agency.utils.safe_yaml import safe_yaml_load
 
 from .base import BenchmarkScenario
 
+_HIGH_TRUST_TYPES = ["hardware_sensor", "system_of_record", "primary_api"]
+_LOW_TRUST_TYPES = ["observability_pipeline", "derived_inference", "human_note"]
+
+_TRUST_MODEL_PATH = (
+    Path(__file__).parent.parent.parent / "schemas" / "authority_trust_model.yaml"
+)
+
 
 def _load_trust_model() -> tuple[dict[str, float], int]:
     """Load trust weights and decay settings from authority_trust_model.yaml."""
-    schema_path = Path(__file__).parent.parent.parent / "schemas" / "authority_trust_model.yaml"
+    if not _TRUST_MODEL_PATH.exists():
+        raise FileNotFoundError(
+            f"Trust model not found: {_TRUST_MODEL_PATH}. "
+            "Benchmark integrity requires this file."
+        )
 
-    if schema_path.exists():
-        model = safe_yaml_load(schema_path)
-        weights = model.get("source_ranking", {}).get("weights", {})
-        # Parse half_life from ISO 8601 duration (P14D = 14 days)
-        half_life_str = model.get("decay_model", {}).get("half_life", "P14D")
-        days = int(half_life_str.replace("P", "").replace("D", ""))
-        half_life_hours = days * 24
-        return weights, half_life_hours
-
-    # Fallback defaults if file not found
-    return {
-        "hardware_sensor": 0.95,
-        "system_of_record": 0.92,
-        "primary_api": 0.88,
-        "observability_pipeline": 0.80,
-        "derived_inference": 0.65,
-        "human_note": 0.55,
-    }, 14 * 24
+    model = safe_yaml_load(_TRUST_MODEL_PATH)
+    weights = model.get("source_ranking", {}).get("weights", {})
+    half_life_str = model.get("decay_model", {}).get("half_life", "P14D")
+    match = re.fullmatch(r"P(\d+)D", half_life_str)
+    if not match:
+        raise ValueError(
+            f"Unsupported half_life format '{half_life_str}'. Expected 'P<n>D'."
+        )
+    half_life_hours = int(match.group(1)) * 24
+    return weights, half_life_hours
 
 
-# Load trust weights from canonical source
-TRUST_WEIGHTS, TRUST_HALF_LIFE_HOURS = _load_trust_model()
+_TRUST_WEIGHTS, _TRUST_HALF_LIFE_HOURS = _load_trust_model()
 
 
-def recency_weight(hours_ago: float, half_life: float = TRUST_HALF_LIFE_HOURS) -> float:
+def _recency_weight(
+    hours_ago: float, half_life: float = _TRUST_HALF_LIFE_HOURS
+) -> float:
     """Calculate recency weight with exponential decay."""
     return math.exp(-hours_ago / half_life)
 
@@ -71,26 +77,35 @@ class ConflictingSourcesScenario(BenchmarkScenario):
         self.test_cases: list[dict] = []
 
     def setup(self) -> None:
-        """Generate test cases with known ground truth."""
+        """Generate test cases with known ground truth.
+
+        ~60% of cases favor source1 (high-trust, correct value),
+        ~40% favor source2 (low-trust but very recent).
+        """
         random.seed(self.seed)
         self.test_cases = []
 
         for i in range(self.num_cases):
+            source1_type = random.choice(_HIGH_TRUST_TYPES)
+            source2_type = random.choice(_LOW_TRUST_TYPES)
+
             # Ground truth: random value A or B
             ground_truth = random.choice(["A", "B"])
 
-            # Source 1: Primary API with random delay
-            source1_value = random.choice(["A", "B"])
-            source1_hours_ago = random.uniform(0.5, 48)
-
-            # Source 2: Different API, possibly different value
-            # Bias toward ground truth being more recent
-            if ground_truth == source1_value:
-                source2_value = random.choice(["A", "B"])
+            # ~60% chance source1 has the correct value (trust advantage)
+            if random.random() < 0.6:
+                # Source1 correct: high-trust + correct → GA picks source1
+                source1_value = ground_truth
+                source2_value = "B" if ground_truth == "A" else "A"
+                source1_hours_ago = random.uniform(1, 48)
                 source2_hours_ago = random.uniform(1, 72)
             else:
+                # Source2 correct: low-trust but very recent → recency helps
+                source1_value = "B" if ground_truth == "A" else "A"
                 source2_value = ground_truth
-                source2_hours_ago = random.uniform(0.1, source1_hours_ago)
+                # Source1 is stale, source2 is very recent
+                source1_hours_ago = random.uniform(24, 168)
+                source2_hours_ago = random.uniform(0.1, 2)
 
             self.test_cases.append(
                 {
@@ -98,12 +113,12 @@ class ConflictingSourcesScenario(BenchmarkScenario):
                     "ground_truth": ground_truth,
                     "source1": {
                         "value": source1_value,
-                        "type": "primary_api",
+                        "type": source1_type,
                         "hours_ago": source1_hours_ago,
                     },
                     "source2": {
                         "value": source2_value,
-                        "type": "primary_api",
+                        "type": source2_type,
                         "hours_ago": source2_hours_ago,
                     },
                 }
@@ -154,11 +169,13 @@ class ConflictingSourcesScenario(BenchmarkScenario):
 
     def run_ga(self) -> dict[str, Any]:
         """
-        Grounded Agency: Trust-weighted resolution.
+        Grounded Agency: Trust-weighted resolution with EvidenceStore.
 
         Uses source trust weights and temporal recency to
-        select the most reliable value.
+        select the most reliable value. Evidence anchors are
+        tracked through the real EvidenceStore.
         """
+        evidence_store = EvidenceStore(max_anchors=self.num_cases * 2)
         correct = 0
         results = []
 
@@ -167,14 +184,8 @@ class ConflictingSourcesScenario(BenchmarkScenario):
             s1 = case["source1"]
             s2 = case["source2"]
 
-            score1 = (
-                TRUST_WEIGHTS[s1["type"]]
-                * recency_weight(s1["hours_ago"])
-            )
-            score2 = (
-                TRUST_WEIGHTS[s2["type"]]
-                * recency_weight(s2["hours_ago"])
-            )
+            score1 = _TRUST_WEIGHTS[s1["type"]] * _recency_weight(s1["hours_ago"])
+            score2 = _TRUST_WEIGHTS[s2["type"]] * _recency_weight(s2["hours_ago"])
 
             # Select higher-scoring source
             if score1 >= score2:
@@ -188,32 +199,33 @@ class ConflictingSourcesScenario(BenchmarkScenario):
             if is_correct:
                 correct += 1
 
-            # Create evidence anchors
-            evidence = [
-                {
+            # Create evidence anchor via EvidenceStore
+            anchor = EvidenceAnchor.from_tool_output(
+                tool_name="retrieve",
+                tool_use_id=f"conflict_resolution_{case['id']}",
+                tool_input={
                     "source": winning_source,
-                    "trust_weight": TRUST_WEIGHTS[case[winning_source]["type"]],
-                    "recency_weight": recency_weight(
-                        case[winning_source]["hours_ago"]
-                    ),
-                    "final_score": max(score1, score2),
-                    "timestamp_hours_ago": case[winning_source]["hours_ago"],
-                }
-            ]
+                    "source_type": case[winning_source]["type"],
+                },
+            )
+            evidence_store.add_anchor(anchor, capability_id="retrieve")
 
             results.append(
                 {
                     "case_id": case["id"],
                     "selected": selected,
                     "correct": is_correct,
-                    "evidence_anchors": evidence,
+                    "evidence_anchors": [anchor.to_dict()],
                     "score_source1": score1,
                     "score_source2": score2,
                 }
             )
 
         accuracy = correct / len(self.test_cases)
+        evidence_count = len(evidence_store)
+
         self.log(f"GA accuracy: {accuracy:.2%}")
+        self.log(f"Evidence anchors collected: {evidence_count}")
 
         return {
             "accuracy": accuracy,
@@ -242,6 +254,8 @@ class ConflictingSourcesScenario(BenchmarkScenario):
         }
 
         self.log(f"Accuracy improvement: +{accuracy_improvement:.2%}")
-        self.log(f"Evidence completeness: {ga_result.get('evidence_completeness', 0):.0%}")
+        self.log(
+            f"Evidence completeness: {ga_result.get('evidence_completeness', 0):.0%}"
+        )
 
         return comparison

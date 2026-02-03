@@ -28,9 +28,7 @@ class DecisionAuditScenario(BenchmarkScenario):
     name = "decision_audit"
     description = "Tests evidence-based explanations vs confabulated ones"
 
-    def __init__(
-        self, seed: int = 42, verbose: bool = False, num_decisions: int = 50
-    ):
+    def __init__(self, seed: int = 42, verbose: bool = False, num_decisions: int = 50):
         super().__init__(seed, verbose)
         self.num_decisions = num_decisions
         self.decisions: list[dict] = []
@@ -50,12 +48,15 @@ class DecisionAuditScenario(BenchmarkScenario):
                 }
 
             # Determine winner based on weighted sum
-            weights = {"cost": 0.3, "latency": 0.3, "reliability": 0.25, "scalability": 0.15}
+            weights = {
+                "cost": 0.3,
+                "latency": 0.3,
+                "reliability": 0.25,
+                "scalability": 0.15,
+            }
             scores = {}
             for opt, values in options.items():
-                scores[opt] = sum(
-                    values[c] * weights[c] for c in criteria
-                )
+                scores[opt] = sum(values[c] * weights[c] for c in criteria)
 
             winner = max(scores, key=lambda x: scores[x])
 
@@ -115,7 +116,9 @@ class DecisionAuditScenario(BenchmarkScenario):
 
         if confabulate:
             # Cite a criterion that wasn't actually the best for this option
-            wrong_criterion = random.choice(["cost", "latency", "reliability", "scalability"])
+            wrong_criterion = random.choice(
+                ["cost", "latency", "reliability", "scalability"]
+            )
             explanation = {
                 "decision": winner,
                 "primary_reason": f"{winner} was chosen primarily for its {wrong_criterion}",
