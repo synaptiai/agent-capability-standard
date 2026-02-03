@@ -101,24 +101,19 @@ def create_grounded_mcp_server(
         tool_name_for_mapping = f"mcp__{name}__{_get_tool_name(t)}"
         metadata = getattr(t, "metadata", None) or {}
 
-        capability_id = metadata.get("capability_id", "execute")
-        risk = metadata.get("risk", "medium")
-        mutation = metadata.get("mutation", risk == "high")
-        requires_checkpoint = metadata.get("requires_checkpoint", risk == "high")
-
         adapter.mapper.register_mcp_tool(
             tool_name=tool_name_for_mapping,
-            capability_id=capability_id,
-            risk=risk,
-            mutation=mutation,
-            requires_checkpoint=requires_checkpoint,
+            capability_id=metadata.get("capability_id", "execute"),
+            risk=metadata.get("risk", "medium"),
+            mutation=metadata.get("mutation"),
+            requires_checkpoint=metadata.get("requires_checkpoint"),
         )
 
         logger.info(
             "Registered MCP tool %s → capability=%s risk=%s",
             tool_name_for_mapping,
-            capability_id,
-            risk,
+            metadata.get("capability_id", "execute"),
+            metadata.get("risk", "medium"),
         )
 
     return server
