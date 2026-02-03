@@ -153,6 +153,73 @@ class TestConformanceRunner:
         assert "PASSED" in result.stdout
 
 
+class TestConformanceHelpers:
+    """Unit tests for conformance runner helper functions."""
+
+    def test_read_emitted_codes_missing_file(self, tmp_path: Path) -> None:
+        """Returns empty set when suggestions JSON does not exist."""
+        # Import the helper by manipulating its module-level constant
+        import scripts.run_conformance as rc
+        original = rc.SUGGESTIONS_JSON
+        try:
+            rc.SUGGESTIONS_JSON = tmp_path / "nonexistent.json"
+            assert rc._read_emitted_codes() == set()
+        finally:
+            rc.SUGGESTIONS_JSON = original
+
+    def test_read_emitted_codes_valid_json(self, tmp_path: Path) -> None:
+        """Returns correct codes from well-formed suggestions JSON."""
+        import scripts.run_conformance as rc
+        original = rc.SUGGESTIONS_JSON
+        try:
+            f = tmp_path / "suggestions.json"
+            f.write_text(json.dumps({
+                "structured_errors": [
+                    {"code": "V101", "name": "UNKNOWN_CAPABILITY", "message": "test"},
+                    {"code": "V104", "name": "DUPLICATE_STORE_AS", "message": "test"},
+                ]
+            }))
+            rc.SUGGESTIONS_JSON = f
+            assert rc._read_emitted_codes() == {"V101", "V104"}
+        finally:
+            rc.SUGGESTIONS_JSON = original
+
+    def test_read_emitted_codes_malformed_json(self, tmp_path: Path) -> None:
+        """Returns empty set on malformed JSON."""
+        import scripts.run_conformance as rc
+        original = rc.SUGGESTIONS_JSON
+        try:
+            f = tmp_path / "bad.json"
+            f.write_text("{not valid json")
+            rc.SUGGESTIONS_JSON = f
+            assert rc._read_emitted_codes() == set()
+        finally:
+            rc.SUGGESTIONS_JSON = original
+
+    def test_clear_suggestions_removes_file(self, tmp_path: Path) -> None:
+        """_clear_suggestions deletes the file if it exists."""
+        import scripts.run_conformance as rc
+        original = rc.SUGGESTIONS_JSON
+        try:
+            f = tmp_path / "suggestions.json"
+            f.write_text("{}")
+            rc.SUGGESTIONS_JSON = f
+            rc._clear_suggestions()
+            assert not f.exists()
+        finally:
+            rc.SUGGESTIONS_JSON = original
+
+    def test_clear_suggestions_noop_when_missing(self, tmp_path: Path) -> None:
+        """_clear_suggestions is a no-op when file doesn't exist."""
+        import scripts.run_conformance as rc
+        original = rc.SUGGESTIONS_JSON
+        try:
+            rc.SUGGESTIONS_JSON = tmp_path / "nonexistent.json"
+            rc._clear_suggestions()  # should not raise
+        finally:
+            rc.SUGGESTIONS_JSON = original
+
+
 # ─── Transform Refs Validator ───
 
 

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ..capabilities.registry import CapabilityRegistry
-from ..errors import ErrorCode
+from ..errors import ErrorCode, ValidationError
 from ..state.checkpoint_tracker import CheckpointTracker
 from ..utils.safe_yaml import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
@@ -730,4 +730,65 @@ class WorkflowEngine:
             errors.extend(self.validate_edge_constraints(name))
             if errors:
                 results[name] = errors
+        return results
+
+    def validate_all_structured(self) -> dict[str, list[ValidationError]]:
+        """Run all validations, returning structured ValidationError objects.
+
+        This is the structured counterpart to validate_all(). Each plain-string
+        error is wrapped with the appropriate ErrorCode so consumers can
+        programmatically inspect error categories.
+
+        Returns:
+            Dict mapping workflow name to list of ValidationError instances
+        """
+        results: dict[str, list[ValidationError]] = {}
+        for name in self._workflows:
+            structured: list[ValidationError] = []
+
+            # Capability validation
+            for msg in self.validate_capabilities(name):
+                if "not found in ontology" in msg:
+                    code = ErrorCode.UNKNOWN_CAPABILITY
+                elif "downgrades" in msg:
+                    code = ErrorCode.CONSTRAINT_VIOLATED
+                else:
+                    code = ErrorCode.UNKNOWN_CAPABILITY
+                structured.append(ValidationError(
+                    code=code,
+                    message=msg,
+                    location={"workflow": name},
+                ))
+
+            # Binding validation → map error_code from BindingError
+            for binding_err in self.validate_bindings(name):
+                structured.append(ValidationError(
+                    code=binding_err.error_code,
+                    message=binding_err.message,
+                    location={
+                        "workflow": name,
+                        "step": binding_err.step_index,
+                        "capability": binding_err.step_capability,
+                        "binding_key": binding_err.binding_key,
+                    },
+                ))
+
+            # Edge constraint validation
+            for msg in self.validate_edge_constraints(name):
+                if "requires" in msg:
+                    code = ErrorCode.MISSING_PREREQUISITE
+                elif "preceded by" in msg:
+                    code = ErrorCode.MISSING_PREREQUISITE
+                elif "conflicts with" in msg:
+                    code = ErrorCode.CONSTRAINT_VIOLATED
+                else:
+                    code = ErrorCode.MISSING_PREREQUISITE
+                structured.append(ValidationError(
+                    code=code,
+                    message=msg,
+                    location={"workflow": name},
+                ))
+
+            if structured:
+                results[name] = structured
         return results

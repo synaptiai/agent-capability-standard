@@ -129,13 +129,13 @@ After Phase 2 decisions, update CLAUDE.md to match reality.
 
 ## Phase 4: Implement the error model
 
-This is the largest work item. The standard specifies 25 error codes and a structured JSON format that no tool emits.
+This is the largest work item. The standard specifies 23 error codes and a structured JSON format that no tool emits.
 
 ### 4.1 Create error code registry
 
 **New file:** `grounded_agency/errors.py`
 
-Define an enum or constants mapping for all 25 error codes:
+Define an enum or constants mapping for all 23 error codes:
 - V101-V105 (Validation)
 - B201-B205 (Binding)
 - S301-S304 (Schema)

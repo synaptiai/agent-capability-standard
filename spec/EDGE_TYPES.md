@@ -34,6 +34,8 @@ This means: a `checkpoint` MUST exist before any `mutate` operation.
 
 **Transitivity:** No. If A requires B and B requires C, A does not automatically require C.
 
+**Coexistence with `precedes`:** Some capability pairs have both a `requires` and a `precedes` edge. For example, `checkpoint → mutate` has both: `requires` enforces the safety invariant (mutations need a prior checkpoint), while `precedes` enforces temporal ordering. These serve complementary roles — `requires` is checked at validation time (L1), while `precedes` enforces step ordering within workflows.
+
 ---
 
 ### 2. `soft_requires` (Soft Dependency)

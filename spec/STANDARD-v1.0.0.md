@@ -109,7 +109,7 @@ Capabilities are classified into 9 cognitive layers:
 | **EXECUTE** | Change the world | Yes | 3 |
 | **VERIFY** | Ensure correctness | Varies | 5 |
 | **REMEMBER** | Persist state | Varies | 2 |
-| **COORDINATE** | Multi-agent interaction | Varies | 4 |
+| **COORDINATE** | Multi-agent and user interaction | Varies | 4 |
 
 ### 4.3 Edge Types and Dependency Semantics
 

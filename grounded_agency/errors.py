@@ -11,7 +11,7 @@ This is a leaf module -- zero imports from other grounded_agency modules.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -66,7 +66,7 @@ class ErrorCode(Enum):
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
-class StandardError:
+class ValidationError:
     """A single structured error conforming to Section 9.7.
 
     Parameters
@@ -105,7 +105,7 @@ class StandardError:
 # Formatting helpers (Section 9.7)
 # ---------------------------------------------------------------------------
 
-def format_error(error: StandardError) -> dict[str, Any]:
+def format_error(error: ValidationError) -> dict[str, Any]:
     """Return the standard JSON-serialisable envelope for a single error.
 
     The output matches the format mandated by Section 9.7::
@@ -133,7 +133,7 @@ def format_error(error: StandardError) -> dict[str, Any]:
     return {"error": inner}
 
 
-def format_errors_response(errors: list[StandardError]) -> dict[str, Any]:
+def format_errors_response(errors: list[ValidationError]) -> dict[str, Any]:
     """Return a JSON-serialisable response containing multiple errors.
 
     Returns::

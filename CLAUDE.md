@@ -240,7 +240,7 @@ Medium-risk capabilities (`execute`, `rollback`, `delegate`, `synchronize`, `inv
 - `risk: "medium"`
 - `execute` also has `requires_approval: true`
 
-Other mutation capabilities (`checkpoint`, `rollback`, `audit`, `persist`) have:
+Other mutation capabilities (`checkpoint`, `audit`, `persist`) have:
 - `mutation: true`
 - Lower risk levels (low or medium)
 

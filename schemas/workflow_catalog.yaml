@@ -223,6 +223,19 @@ clarify_intent:
       action: skip
       message: Request is sufficiently clear, no clarification needed.
     failure_modes: []
+  - capability: checkpoint
+    purpose: Save state before sending clarification questions to user.
+    risk: low
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: clarify_checkpoint_out
+    input_bindings:
+      scope:
+      - clarification_request_out
+    failure_modes: []
   - capability: send
     purpose: Present clarifying questions to user.
     risk: low
