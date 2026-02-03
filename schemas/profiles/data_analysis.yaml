@@ -35,6 +35,9 @@ trust_weights:
   api_feed: 0.70          # External API data
   web_scrape: 0.55        # Web scraped data
 
+trust_model_reviewed: true
+trust_model_reviewed_at: "2026-02-03"
+
 risk_thresholds:
   auto_approve: low       # Low-risk analysis auto-approved
   require_review: medium  # Medium requires data team review

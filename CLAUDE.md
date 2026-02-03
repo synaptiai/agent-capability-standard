@@ -97,7 +97,7 @@ Capabilities are organized into 9 cognitive layers (defined in ontology):
 | EXECUTE | Changing the world | 3 | execute, mutate, send |
 | VERIFY | Correctness assurance | 5 | verify, checkpoint, rollback, constrain, audit |
 | REMEMBER | State persistence | 2 | persist, recall |
-| COORDINATE | Multi-agent interaction | 4 | delegate, synchronize, invoke, inquire |
+| COORDINATE | Multi-agent and user interaction | 4 | delegate, synchronize, invoke, inquire |
 
 ### Skill Structure
 
@@ -122,7 +122,7 @@ The 36-capability model uses **domain parameters** instead of domain-specific va
 ### Hooks
 
 The plugin enforces safety through Claude Code hooks:
-- **PreToolUse (Write|Edit)**: Requires checkpoint marker before mutations
+- **PreToolUse (Write|Edit|MultiEdit|NotebookEdit|Bash)**: Requires checkpoint marker before mutations
 - **PostToolUse (Skill)**: Logs skill invocations to `.claude/audit.log`
 
 ### Ontology Edge Types
@@ -233,11 +233,16 @@ See [docs/integrations/claude_agent_sdk.md](docs/integrations/claude_agent_sdk.m
 High-risk capabilities (`mutate`, `send`) have:
 - `mutation: true`
 - `requires_checkpoint: true`
+- `requires_approval: true`
 - `risk: "high"`
 
-Medium-risk capabilities (`execute`, `delegate`, `invoke`) have:
-- `requires_approval: true`
+Medium-risk capabilities (`execute`, `rollback`, `delegate`, `synchronize`, `invoke`) have:
 - `risk: "medium"`
+- `execute` also has `requires_approval: true`
+
+Other mutation capabilities (`checkpoint`, `audit`, `persist`) have:
+- `mutation: true`
+- Lower risk levels (low or medium)
 
 These are enforced structurally—not by convention.
 

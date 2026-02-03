@@ -92,8 +92,7 @@ class CapabilityGapScenario(BenchmarkScenario):
                 "missing": ["persist"],
             },
             # Case 5: Available workflow with no transitive deps
-            # (compare has no hard requires edges — unlike verify which
-            #  requires mutate+send+checkpoint transitively)
+            # (neither compare nor verify have hard requires edges)
             {
                 "id": 5,
                 "name": "with_deps_available",
@@ -133,13 +132,13 @@ class CapabilityGapScenario(BenchmarkScenario):
                 "has_gap": True,
                 "missing": ["simulate"],
             },
-            # Case 10: Missing 'audit' — verify also requires mutate, send, checkpoint transitively
+            # Case 10: Missing 'audit' — verify is standalone (no hard requires)
             {
                 "id": 10,
                 "name": "missing_audit",
                 "workflow": ["execute", "verify", "audit"],
                 "has_gap": True,
-                "missing": ["audit", "checkpoint", "mutate", "send"],
+                "missing": ["audit"],
             },
         ]
 

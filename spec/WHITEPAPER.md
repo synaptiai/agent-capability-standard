@@ -320,7 +320,7 @@ Gates provide conditional control flow:
 
 ```yaml
 gates:
-  - when: ${checkpoint_out.created} == false
+  - when: ${checkpoint_out.checkpoint_id} == null
     action: stop
     message: "Cannot proceed without checkpoint"
 ```
@@ -344,7 +344,7 @@ failure_modes:
     recovery:
       goto_step: plan
       inject_context:
-        failure_evidence: ${verify_out.failures}
+        failure_evidence: ${verify_out.violations}
       max_loops: 3
 ```
 

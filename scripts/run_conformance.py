@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VAL = ROOT / "tools" / "validate_workflows.py"
+SUGGESTIONS_JSON = ROOT / "tools" / "validator_suggestions.json"
 FIX = ROOT / "tests" / "fixtures"
 
 EXPECT = json.loads((FIX / "EXPECTATIONS.json").read_text(encoding="utf-8"))
@@ -37,6 +38,33 @@ def run_fixture(name: str, path: Path) -> dict:
         "stdout": proc.stdout,
         "stderr": proc.stderr,
     }
+
+
+def _read_emitted_codes() -> set[str]:
+    """Read error codes from the validator's suggestions JSON output.
+
+    Returns an empty set if the file is missing or unreadable.
+    Callers should use ``_clear_suggestions()`` before each fixture run
+    to prevent stale data from a prior run.
+    """
+    if not SUGGESTIONS_JSON.exists():
+        return set()
+    try:
+        data = json.loads(SUGGESTIONS_JSON.read_text(encoding="utf-8"))
+        codes: set[str] = set()
+        for err in data.get("structured_errors", []):
+            code = err.get("code")
+            if code:
+                codes.add(code)
+        return codes
+    except (json.JSONDecodeError, KeyError):
+        return set()
+
+
+def _clear_suggestions() -> None:
+    """Remove stale suggestions JSON before each fixture run."""
+    if SUGGESTIONS_JSON.exists():
+        SUGGESTIONS_JSON.unlink()
 
 
 def main() -> None:
@@ -62,6 +90,7 @@ def main() -> None:
                 print(f"Missing fixture: {path}")
                 failed += 1
                 continue
+            _clear_suggestions()
             res = run_fixture(name, path)
             should_pass = meta.get("should_pass", False)
             if res["ok"] != should_pass:
@@ -72,6 +101,19 @@ def main() -> None:
                 print(res["stdout"])
                 print(res["stderr"])
             else:
+                # Verify expected error codes if specified
+                expected_codes = meta.get("expected_error_codes")
+                if expected_codes and not res["ok"]:
+                    emitted_codes = _read_emitted_codes()
+                    missing = set(expected_codes) - emitted_codes
+                    if missing:
+                        failed += 1
+                        print(
+                            f"FAIL: {name} missing expected error codes: "
+                            f"{sorted(missing)} (emitted: {sorted(emitted_codes)})"
+                        )
+                        results.append(res)
+                        continue
                 print(f"PASS: {name}")
             results.append(res)
 

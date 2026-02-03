@@ -52,6 +52,7 @@ from .coordination import (
     SyncStrategy,
     TaskLifecycleError,
 )
+from .errors import ErrorCode, ValidationError, format_error, format_errors_response
 from .mcp import create_grounded_mcp_server
 from .query import CostSummary, grounded_query
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
@@ -133,6 +134,11 @@ __all__ = [
     "CapabilityMismatchError",
     "BarrierResolvedError",
     "TaskLifecycleError",
+    # Error model
+    "ErrorCode",
+    "ValidationError",
+    "format_error",
+    "format_errors_response",
     # Logging
     "logger",
 ]

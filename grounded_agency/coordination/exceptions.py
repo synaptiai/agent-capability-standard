@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from ..errors import ErrorCode
+
 
 class CoordinationError(Exception):
     """Base exception for coordination runtime errors."""
 
+    error_code: ErrorCode | None = None
+
 
 class AgentNotRegisteredError(CoordinationError):
     """Raised when an operation references an unregistered agent."""
+
+    error_code = ErrorCode.EXECUTION_FAILED  # R402
 
     def __init__(self, agent_id: str) -> None:
         self.agent_id = agent_id
@@ -17,6 +23,8 @@ class AgentNotRegisteredError(CoordinationError):
 
 class CapabilityMismatchError(CoordinationError):
     """Raised when an agent lacks required capabilities."""
+
+    error_code = ErrorCode.UNKNOWN_CAPABILITY  # V101
 
     def __init__(self, agent_id: str, missing: set[str]) -> None:
         self.agent_id = agent_id

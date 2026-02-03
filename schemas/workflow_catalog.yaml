@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 # Workflow Catalog (36-capability model)
 # Maps to capability_ontology.yaml
 #
@@ -221,6 +222,19 @@ clarify_intent:
     - when: ${ambiguity_analysis_out.confidence} > 0.85
       action: skip
       message: Request is sufficiently clear, no clarification needed.
+    failure_modes: []
+  - capability: checkpoint
+    purpose: Save state before sending clarification questions to user.
+    risk: low
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: clarify_checkpoint_out
+    input_bindings:
+      scope:
+      - clarification_request_out
     failure_modes: []
   - capability: send
     purpose: Present clarifying questions to user.
@@ -1004,7 +1018,7 @@ digital_twin_sync_loop:
       recovery:
         goto_step: plan
         inject_context:
-          failure_evidence: ${verify_out.failures}
+          failure_evidence: ${verify_out.violations}
         max_loops: 3
     input_bindings: {}
     gates:

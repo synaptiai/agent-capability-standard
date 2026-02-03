@@ -22,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from grounded_agency import (
     GroundedAgentAdapter,
     GroundedAgentConfig,
-    OrchestrationConfig,
     OrchestrationRuntime,
 )
 

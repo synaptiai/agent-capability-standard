@@ -17,8 +17,10 @@ from typing import Any
 
 import pytest
 
+from grounded_agency.errors import ErrorCode, ValidationError
 from grounded_agency.state.checkpoint_tracker import CheckpointTracker
 from grounded_agency.workflows.engine import (
+    BindingError,
     WorkflowDefinition,
     WorkflowEngine,
     WorkflowStep,
@@ -574,10 +576,22 @@ class TestEdgeConstraintValidation:
         # Should run without exception on real workflows
         for name in engine.list_workflows():
             errors = engine.validate_edge_constraints(name)
-            # We don't assert zero errors because some workflows may
-            # intentionally have edge constraint issues (the ontology
-            # defines ideal ordering, workflows may deviate)
             assert isinstance(errors, list)
+
+    def test_all_workflows_pass_requires_constraints(
+        self, engine: WorkflowEngine
+    ) -> None:
+        """All 12 production workflows must satisfy 'requires' edges.
+
+        'precedes' and 'conflicts_with' violations are separate from the
+        hard prerequisite contract — this test focuses on 'requires' only.
+        """
+        for name in engine.list_workflows():
+            errors = engine.validate_edge_constraints(name)
+            requires_errors = [e for e in errors if ": requires '" in e]
+            assert requires_errors == [], (
+                f"Workflow {name} has unsatisfied requires edges: {requires_errors}"
+            )
 
     def test_nonexistent_workflow_edge_check(self, engine: WorkflowEngine) -> None:
         errors = engine.validate_edge_constraints("nonexistent")
@@ -602,6 +616,126 @@ class TestValidateAll:
         known = set(engine.list_workflows())
         for key in results:
             assert key in known
+
+
+# ---------------------------------------------------------------------------
+# validate_all_structured
+# ---------------------------------------------------------------------------
+
+
+class TestValidateAllStructured:
+    """Test the structured validation method that returns ValidationError objects."""
+
+    def test_returns_dict_of_validation_errors(self, engine: WorkflowEngine) -> None:
+        results = engine.validate_all_structured()
+        assert isinstance(results, dict)
+        for wf_name, errors in results.items():
+            assert isinstance(wf_name, str)
+            assert isinstance(errors, list)
+            for err in errors:
+                assert isinstance(err, ValidationError)
+                assert isinstance(err.code, ErrorCode)
+
+    def test_unknown_capability_maps_to_v101(self) -> None:
+        """An unknown capability in a workflow should produce V101."""
+        engine = WorkflowEngine(ONTOLOGY_PATH)
+        engine._workflows["bad_wf"] = WorkflowDefinition(
+            name="bad_wf",
+            goal="test",
+            risk="low",
+            steps=[WorkflowStep(capability="nonexistent_cap", purpose="test")],
+        )
+        results = engine.validate_all_structured()
+        assert "bad_wf" in results
+        codes = {err.code for err in results["bad_wf"]}
+        assert ErrorCode.UNKNOWN_CAPABILITY in codes
+
+    def test_safety_flag_downgrade_maps_to_f504(self) -> None:
+        """A step that downgrades ontology safety flags should produce F504."""
+        engine = WorkflowEngine(ONTOLOGY_PATH)
+        # mutate has mutation=true in ontology; downgrade it to false
+        engine._workflows["downgrade_wf"] = WorkflowDefinition(
+            name="downgrade_wf",
+            goal="test",
+            risk="low",
+            steps=[
+                WorkflowStep(capability="checkpoint", purpose="save state"),
+                WorkflowStep(
+                    capability="mutate",
+                    purpose="modify",
+                    mutation=False,  # downgrades ontology's mutation=true
+                ),
+            ],
+        )
+        results = engine.validate_all_structured()
+        assert "downgrade_wf" in results
+        codes = {err.code for err in results["downgrade_wf"]}
+        assert ErrorCode.CONSTRAINT_VIOLATED in codes
+
+    def test_structured_covers_same_workflows_as_plain(
+        self, engine: WorkflowEngine
+    ) -> None:
+        """validate_all_structured() should flag the same workflows as validate_all()."""
+        plain = engine.validate_all()
+        structured = engine.validate_all_structured()
+        assert set(structured.keys()) == set(plain.keys())
+
+
+# ---------------------------------------------------------------------------
+# BindingError.error_code
+# ---------------------------------------------------------------------------
+
+
+class TestBindingErrorCode:
+    """Test the BindingError.error_code property mapping."""
+
+    def test_unresolved_ref_maps_to_invalid_binding_path(self) -> None:
+        err = BindingError(
+            workflow_name="w",
+            step_index=0,
+            step_capability="retrieve",
+            binding_key="k",
+            reference="r",
+            error_type="unresolved_ref",
+            message="ref not found",
+        )
+        assert err.error_code == ErrorCode.INVALID_BINDING_PATH
+
+    def test_type_mismatch_maps_to_type_mismatch(self) -> None:
+        err = BindingError(
+            workflow_name="w",
+            step_index=0,
+            step_capability="retrieve",
+            binding_key="k",
+            reference="r",
+            error_type="type_mismatch",
+            message="type mismatch",
+        )
+        assert err.error_code == ErrorCode.TYPE_MISMATCH
+
+    def test_missing_store_as_maps_to_missing_producer(self) -> None:
+        err = BindingError(
+            workflow_name="w",
+            step_index=0,
+            step_capability="retrieve",
+            binding_key="k",
+            reference="r",
+            error_type="missing_store_as",
+            message="missing store",
+        )
+        assert err.error_code == ErrorCode.MISSING_PRODUCER
+
+    def test_unknown_error_type_falls_back_to_invalid_binding_path(self) -> None:
+        err = BindingError(
+            workflow_name="w",
+            step_index=0,
+            step_capability="retrieve",
+            binding_key="k",
+            reference="r",
+            error_type="some_future_type",
+            message="unknown",
+        )
+        assert err.error_code == ErrorCode.INVALID_BINDING_PATH
 
 
 # ---------------------------------------------------------------------------

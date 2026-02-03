@@ -57,7 +57,8 @@
   "fail_unknown_capability": {
     "should_pass": false,
     "level": "L1",
-    "category": "structural"
+    "category": "structural",
+    "expected_error_codes": ["V101"]
   },
   "fail_empty_steps": {
     "should_pass": true,
@@ -66,36 +67,48 @@
     "note": "Empty steps is structurally valid"
   },
   "fail_duplicate_store_as": {
-    "should_pass": true,
+    "should_pass": false,
     "level": "L1",
     "category": "structural",
-    "note": "Validator does not check for duplicate store_as"
+    "expected_error_codes": ["V104"]
   },
   "fail_bad_binding_path": {
     "should_pass": false,
     "level": "L2",
-    "category": "bindings"
+    "category": "bindings",
+    "expected_error_codes": ["B201"]
   },
   "fail_forward_reference": {
     "should_pass": false,
     "level": "L2",
-    "category": "bindings"
+    "category": "bindings",
+    "expected_error_codes": ["B202"]
   },
   "fail_missing_store_ref": {
     "should_pass": false,
     "level": "L2",
-    "category": "bindings"
+    "category": "bindings",
+    "expected_error_codes": ["B202"]
   },
   "fail_ambiguous_untyped": {
     "should_pass": false,
     "level": "L3",
-    "category": "types"
+    "category": "types",
+    "expected_error_codes": ["V101"],
+    "note": "Fixture uses v1 capability names; primary failure is unknown capabilities"
   },
-  "fail_consumer_contract_mismatch": {
+  "fail_unknown_capabilities_v1": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "structural",
+    "expected_error_codes": ["V101"]
+  },
+  "fail_type_mismatch_binding": {
     "should_pass": false,
     "should_emit_suggestions": true,
     "level": "L3",
-    "category": "types"
+    "category": "types",
+    "expected_error_codes": ["B203"]
   },
   "pass_checkpoint_before_mutate": {
     "should_pass": true,
@@ -105,11 +118,19 @@
   "fail_unknown_single_cap": {
     "should_pass": false,
     "level": "L1",
-    "category": "structural"
+    "category": "structural",
+    "expected_error_codes": ["V101"]
   },
   "pass_multi_workflow": {
     "should_pass": true,
     "level": "L1",
     "category": "structural"
+  },
+  "patch_string_to_number_coercion": {
+    "should_pass": false,
+    "should_emit_suggestions": true,
+    "level": "L4",
+    "category": "patches",
+    "expected_error_codes": ["B203"]
   }
 }

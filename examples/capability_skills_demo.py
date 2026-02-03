@@ -85,7 +85,7 @@ async def main():
     # Invoke the skill tracker hook (as SDK would)
     await skill_hook(skill_input_data, "skill_001", None)
 
-    print(f"\n--- After Skill Invocation ---")
+    print("\n--- After Skill Invocation ---")
     print(f"Valid checkpoint: {adapter.has_valid_checkpoint()}")
 
     checkpoint = adapter.checkpoint_tracker.get_active_checkpoint()

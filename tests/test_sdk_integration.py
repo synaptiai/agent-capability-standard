@@ -719,3 +719,52 @@ class TestIntegration:
     def test_capability_count_correct(self, adapter: GroundedAgentAdapter):
         """Test that capability count is correct."""
         assert adapter.capability_count == 36
+
+
+# ---------------------------------------------------------------------------
+# Edge semantics: requires edges reflect spec Section 4.4
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeSemantics:
+    """Verify ontology edge semantics match spec requirements.
+
+    These tests guard against regressions like the PR #101 issue where
+    wrong 'requires' edges made 'verify' unusable standalone.
+    """
+
+    def test_verify_has_no_requirements(self, registry: CapabilityRegistry) -> None:
+        """verify must be usable standalone (no requires edges targeting it)."""
+        assert registry.get_required_capabilities("verify") == []
+
+    def test_rollback_requires_checkpoint(self, registry: CapabilityRegistry) -> None:
+        """rollback must require checkpoint (spec Section 4.4)."""
+        required = registry.get_required_capabilities("rollback")
+        assert "checkpoint" in required
+
+    def test_send_requires_checkpoint(self, registry: CapabilityRegistry) -> None:
+        """send must require checkpoint (spec Section 4.4)."""
+        required = registry.get_required_capabilities("send")
+        assert "checkpoint" in required
+
+    def test_mutate_requires_checkpoint(self, registry: CapabilityRegistry) -> None:
+        """mutate must require checkpoint (spec Section 4.4)."""
+        required = registry.get_required_capabilities("mutate")
+        assert "checkpoint" in required
+
+    def test_only_three_requires_edges_exist(
+        self, registry: CapabilityRegistry
+    ) -> None:
+        """Exactly 3 requires edges: checkpoint→mutate, checkpoint→send,
+        checkpoint→rollback. No other capability should have requires deps."""
+        all_caps = registry.all_capabilities()
+        caps_with_reqs = {}
+        for cap in all_caps:
+            reqs = registry.get_required_capabilities(cap.id)
+            if reqs:
+                caps_with_reqs[cap.id] = reqs
+        assert set(caps_with_reqs.keys()) == {"mutate", "send", "rollback"}
+        for cap_id, reqs in caps_with_reqs.items():
+            assert reqs == ["checkpoint"], (
+                f"{cap_id} requires {reqs}, expected ['checkpoint']"
+            )

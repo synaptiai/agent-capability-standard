@@ -38,6 +38,9 @@ trust_weights:
   crowd_annotation: 0.70        # Crowdsourced audio labels
   model_prediction: 0.62        # Predictions from other audio models
 
+trust_model_reviewed: true
+trust_model_reviewed_at: "2026-02-03"
+
 risk_thresholds:
   auto_approve: low           # Only low-risk audio analysis auto-approved
   require_review: medium      # Medium+ requires human review

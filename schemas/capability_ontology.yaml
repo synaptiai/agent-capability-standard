@@ -1263,6 +1263,8 @@ nodes:
   layer: VERIFY
   description: Record what happened and why
   risk: low
+  # mutation: true because audit writes to persistent storage, but workflows
+  # may override to false because append-only writes are non-destructive
   mutation: true
   input_schema:
     type: object
@@ -1593,11 +1595,8 @@ edges:
 - from: checkpoint
   to: send
   type: requires
-- from: mutate
-  to: verify
-  type: requires
-- from: send
-  to: verify
+- from: checkpoint
+  to: rollback
   type: requires
 - from: verify
   to: rollback
@@ -1801,6 +1800,10 @@ edges:
   to: verify
   type: precedes
   rationale: Execution must complete before verification
+- from: send
+  to: verify
+  type: precedes
+  rationale: External communication must complete before verification
 - from: detect
   to: attribute
   type: precedes
