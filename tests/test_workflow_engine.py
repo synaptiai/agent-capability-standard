@@ -17,8 +17,8 @@ from typing import Any
 
 import pytest
 
-from grounded_agency.state.checkpoint_tracker import CheckpointTracker
 from grounded_agency.errors import ErrorCode, ValidationError
+from grounded_agency.state.checkpoint_tracker import CheckpointTracker
 from grounded_agency.workflows.engine import (
     BindingError,
     WorkflowDefinition,

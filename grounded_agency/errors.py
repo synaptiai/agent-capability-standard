@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Error codes (Section 9.2 -- 9.6)
 # ---------------------------------------------------------------------------

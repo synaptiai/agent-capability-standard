@@ -28,5 +28,5 @@ coercion_test_workflow:
     timeout: null
     retry: null
     input_bindings:
-      target: ${detect_out.label: number}
+      target: "${detect_out.detected: number}"
     failure_modes: []

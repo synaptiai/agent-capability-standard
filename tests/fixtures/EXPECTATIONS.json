@@ -108,7 +108,7 @@
     "should_emit_suggestions": true,
     "level": "L3",
     "category": "types",
-    "note": "Fixture has YAML parse error; error code verification skipped when no structured output"
+    "expected_error_codes": ["B203"]
   },
   "pass_checkpoint_before_mutate": {
     "should_pass": true,
@@ -131,6 +131,6 @@
     "should_emit_suggestions": true,
     "level": "L4",
     "category": "patches",
-    "note": "Fixture has YAML parse error; error code verification skipped when no structured output"
+    "expected_error_codes": ["B203"]
   }
 }

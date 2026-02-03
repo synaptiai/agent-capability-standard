@@ -57,10 +57,18 @@ from yaml_util import (
 # Try direct import first (works when package is pip-installed);
 # fall back to path manipulation for bare `python tools/validate_workflows.py`.
 try:
-    from grounded_agency.errors import ErrorCode, ValidationError, format_errors_response
+    from grounded_agency.errors import (
+        ErrorCode,
+        ValidationError,
+        format_errors_response,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from grounded_agency.errors import ErrorCode, ValidationError, format_errors_response
+    from grounded_agency.errors import (
+        ErrorCode,
+        ValidationError,
+        format_errors_response,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 ONTO = ROOT / "schemas" / "capability_ontology.yaml"
