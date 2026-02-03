@@ -25,7 +25,7 @@ import hmac
 import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import ToolCapabilityMapper
@@ -35,6 +35,9 @@ from .hooks.skill_tracker import create_skill_tracker
 from .state.checkpoint_tracker import CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
+
+if TYPE_CHECKING:
+    from .query import CostSummary
 
 logger = logging.getLogger("grounded_agency.adapter")
 
@@ -159,6 +162,10 @@ class GroundedAgentConfig:
         rate_limit: Per-risk-level rate limit configuration (SEC-010).
         ontology_hash: Expected SHA-256 hash for ontology integrity check (SEC-012).
                       If None, checks for a .sha256 sidecar file.
+        output_format: JSON schema for structured output (SDK ``output_format``).
+        max_budget_usd: Maximum cost budget in USD (SDK ``max_budget_usd``).
+        model: Default model name (SDK ``model``).
+        max_turns: Maximum agent turns (SDK ``max_turns``).
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -168,6 +175,10 @@ class GroundedAgentConfig:
     expiry_minutes: int = 30
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     ontology_hash: str | None = None
+    output_format: dict[str, Any] | None = None
+    max_budget_usd: float | None = None
+    model: str | None = None
+    max_turns: int | None = None
 
 
 @dataclass
@@ -204,11 +215,13 @@ class GroundedAgentAdapter:
     """
 
     config: GroundedAgentConfig = field(default_factory=GroundedAgentConfig)
+    orchestrator: Any | None = None  # Optional OrchestrationRuntime
     registry: CapabilityRegistry = field(init=False)
     mapper: ToolCapabilityMapper = field(init=False)
     checkpoint_tracker: CheckpointTracker = field(init=False)
     evidence_store: EvidenceStore = field(init=False)
     rate_limiter: RateLimiter = field(init=False)
+    cost_summary: CostSummary = field(init=False)
 
     def __post_init__(self) -> None:
         """Initialize components after dataclass creation."""
@@ -225,6 +238,11 @@ class GroundedAgentAdapter:
         self.checkpoint_tracker = CheckpointTracker(self.config.checkpoint_dir)
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
+
+        # Initialize cost tracking (import here to avoid circular import)
+        from .query import CostSummary
+
+        self.cost_summary = CostSummary()
 
     def wrap_options(self, base: Any) -> Any:
         """
@@ -265,7 +283,16 @@ class GroundedAgentAdapter:
         mutation_hook = self._make_mutation_consumer()
         post_hooks.append(self._wrap_hook(mutation_hook))
 
-        merged_hooks = {**existing_hooks, "PostToolUse": post_hooks}
+        # Build PreToolUse hooks for checkpoint enforcement in Python layer
+        pre_hooks = list(existing_hooks.get("PreToolUse", []))
+        checkpoint_pre_hook = self._make_pretooluse_checkpoint_hook()
+        pre_hooks.append(self._wrap_hook(checkpoint_pre_hook))
+
+        merged_hooks = {
+            **existing_hooks,
+            "PreToolUse": pre_hooks,
+            "PostToolUse": post_hooks,
+        }
 
         # Ensure Skill tool is allowed
         allowed_tools = list(getattr(base, "allowed_tools", None) or [])
@@ -277,15 +304,39 @@ class GroundedAgentAdapter:
         if "project" not in setting_sources:
             setting_sources = list(setting_sources) + ["project"]
 
-        # Use dataclasses.replace for clean option merging
-        return replace(
-            base,
-            enable_file_checkpointing=True,
-            can_use_tool=self._make_permission_callback(),
-            hooks=merged_hooks,
-            allowed_tools=allowed_tools,
-            setting_sources=setting_sources,
-        )
+        # Build kwargs for dataclasses.replace
+        kwargs: dict[str, Any] = {
+            "enable_file_checkpointing": True,
+            "can_use_tool": self._make_permission_callback(),
+            "hooks": merged_hooks,
+            "allowed_tools": allowed_tools,
+            "setting_sources": setting_sources,
+        }
+
+        # Inject output_format if configured and not already set
+        if self.config.output_format and not getattr(base, "output_format", None):
+            kwargs["output_format"] = self.config.output_format
+
+        # Inject max_budget_usd if configured and not already set
+        if self.config.max_budget_usd and not getattr(base, "max_budget_usd", None):
+            kwargs["max_budget_usd"] = self.config.max_budget_usd
+
+        # Inject model if configured and not already set
+        if self.config.model and not getattr(base, "model", None):
+            kwargs["model"] = self.config.model
+
+        # Inject max_turns if configured and not already set
+        if self.config.max_turns and not getattr(base, "max_turns", None):
+            kwargs["max_turns"] = self.config.max_turns
+
+        # Inject agents from orchestrator if available and not already set
+        if self.orchestrator and not getattr(base, "agents", None):
+            if hasattr(self.orchestrator, "to_sdk_agents"):
+                sdk_agents = self.orchestrator.to_sdk_agents()
+                if sdk_agents:
+                    kwargs["agents"] = sdk_agents
+
+        return replace(base, **kwargs)
 
     def _wrap_hook(
         self,
@@ -318,6 +369,62 @@ class GroundedAgentAdapter:
             if matcher:
                 config["matcher"] = matcher
             return config
+
+    def _make_pretooluse_checkpoint_hook(self) -> Any:
+        """
+        Create PreToolUse hook that enforces checkpoint-before-mutation.
+
+        This is the Python-layer equivalent of the shell hook
+        ``pretooluse_require_checkpoint.sh``, providing defense-in-depth
+        for environments where shell hooks are not active (e.g., when
+        using the SDK programmatically).
+
+        Returns a ``permissionDecision: "deny"`` when a mutation tool
+        is invoked without a valid checkpoint.
+
+        Returns:
+            Async hook callback function
+        """
+        tracker = self.checkpoint_tracker
+        mapper = self.mapper
+        strict = self.config.strict_mode
+
+        async def check_checkpoint_before_tool(
+            input_data: dict[str, Any],
+            tool_use_id: str | None,
+            context: HookContext | None,
+        ) -> dict[str, Any]:
+            """PreToolUse hook to enforce checkpoint before mutations."""
+            try:
+                tool_name = input_data.get("tool_name", "")
+                tool_input = input_data.get("tool_input", {})
+
+                mapping = mapper.map_tool(tool_name, tool_input)
+
+                if not mapping.requires_checkpoint:
+                    return {}
+
+                if tracker.has_valid_checkpoint():
+                    return {}
+
+                message = (
+                    f"PreToolUse: {tool_name} requires checkpoint. "
+                    f"Capability '{mapping.capability_id}' is {mapping.risk}-risk. "
+                    f"Create a checkpoint before proceeding."
+                )
+
+                if strict:
+                    logger.warning("PreToolUse denied: %s", message)
+                    return {"permissionDecision": "deny", "message": message}
+
+                logger.warning("PreToolUse warning (non-strict): %s", message)
+
+            except Exception as e:
+                logger.warning("PreToolUse checkpoint check failed: %s", e)
+
+            return {}
+
+        return check_checkpoint_before_tool
 
     def _make_mutation_consumer(self) -> Any:
         """

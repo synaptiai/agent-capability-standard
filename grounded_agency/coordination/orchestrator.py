@@ -154,6 +154,48 @@ class OrchestrationRuntime:
         )
 
     # ------------------------------------------------------------------
+    # SDK bridge
+    # ------------------------------------------------------------------
+
+    def to_sdk_agents(self) -> dict[str, Any]:
+        """Export registered agents as SDK ``AgentDefinition`` dicts.
+
+        Converts the :class:`AgentDescriptor` instances in the registry
+        into the format expected by the Claude Agent SDK's ``agents``
+        option.  Each agent gets:
+
+        - ``description``: From descriptor metadata or capabilities list.
+        - ``prompt``: From descriptor metadata ``system_prompt`` key.
+        - ``tools``: From descriptor metadata ``allowed_tools`` key.
+        - ``model``: From descriptor metadata ``model`` key.
+
+        Returns:
+            Dict mapping agent IDs to ``AgentDefinition``-compatible dicts.
+
+        Example::
+
+            runtime = OrchestrationRuntime(cap_registry)
+            runtime.register_agent("analyst", {"search", "retrieve"})
+            sdk_agents = runtime.to_sdk_agents()
+            # {'analyst': {'description': 'Agent with: retrieve, search', ...}}
+        """
+        result: dict[str, Any] = {}
+        for descriptor in self._agent_registry.list_agents():
+            meta = dict(descriptor.metadata) if descriptor.metadata else {}
+            agent_def: dict[str, Any] = {
+                "description": meta.get(
+                    "description",
+                    f"Agent with: {', '.join(sorted(descriptor.capabilities))}",
+                ),
+                "prompt": meta.get("system_prompt", ""),
+                "tools": list(meta.get("allowed_tools", [])),
+                "model": meta.get("model", "sonnet"),
+            }
+            result[descriptor.agent_id] = agent_def
+
+        return result
+
+    # ------------------------------------------------------------------
     # Properties (expose sub-components for direct access)
     # ------------------------------------------------------------------
 

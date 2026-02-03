@@ -282,6 +282,9 @@ class ToolCapabilityMapper:
     For Bash commands, performs additional analysis to determine
     if the command is read-only or mutating.
 
+    Supports dynamic registration of MCP tool mappings via
+    :meth:`register_mcp_tool`.
+
     Example:
         mapper = ToolCapabilityMapper(ontology)
         mapping = mapper.map_tool("Write", {"file_path": "/tmp/test.txt"})
@@ -296,10 +299,49 @@ class ToolCapabilityMapper:
             ontology: Raw ontology dict (optional, for validation)
         """
         self._ontology = ontology
+        self._dynamic_mappings: dict[str, ToolMapping] = {}
+
+    def register_mcp_tool(
+        self,
+        tool_name: str,
+        capability_id: str = "execute",
+        risk: str = "medium",
+        mutation: bool | None = None,
+        requires_checkpoint: bool | None = None,
+    ) -> None:
+        """Register a dynamic tool-to-capability mapping.
+
+        Used by :func:`grounded_agency.mcp.create_grounded_mcp_server`
+        to register MCP-provided tools so that safety enforcement
+        applies to them.
+
+        Args:
+            tool_name: The tool identifier (e.g., ``mcp__server__tool``).
+            capability_id: Ontology capability ID.
+            risk: Risk level — ``"low"``, ``"medium"``, or ``"high"``.
+            mutation: Whether the tool mutates state.  Defaults to
+                ``True`` if risk is ``"high"``.
+            requires_checkpoint: Whether a checkpoint is needed.
+                Defaults to ``True`` if risk is ``"high"``.
+        """
+        if mutation is None:
+            mutation = risk == "high"
+        if requires_checkpoint is None:
+            requires_checkpoint = risk == "high"
+
+        self._dynamic_mappings[tool_name] = ToolMapping(
+            capability_id=capability_id,
+            risk=risk,
+            mutation=mutation,
+            requires_checkpoint=requires_checkpoint,
+        )
 
     def map_tool(self, tool_name: str, tool_input: dict[str, Any]) -> ToolMapping:
         """
         Map a tool invocation to its capability metadata.
+
+        Checks dynamic mappings (registered via :meth:`register_mcp_tool`)
+        first, then static mappings, then Bash command analysis.
 
         Args:
             tool_name: SDK tool name (e.g., "Write", "Bash", "Read")
@@ -311,6 +353,10 @@ class ToolCapabilityMapper:
         # Handle Bash specially - analyze command content
         if tool_name == "Bash":
             return self._classify_bash_command(tool_input)
+
+        # Check dynamic mappings (MCP tools, etc.)
+        if tool_name in self._dynamic_mappings:
+            return self._dynamic_mappings[tool_name]
 
         # Static mapping for known tools
         if tool_name in _TOOL_MAPPINGS:
