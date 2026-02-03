@@ -754,24 +754,28 @@ class WorkflowEngine:
                     code = ErrorCode.CONSTRAINT_VIOLATED
                 else:
                     code = ErrorCode.UNKNOWN_CAPABILITY
-                structured.append(ValidationError(
-                    code=code,
-                    message=msg,
-                    location={"workflow": name},
-                ))
+                structured.append(
+                    ValidationError(
+                        code=code,
+                        message=msg,
+                        location={"workflow": name},
+                    )
+                )
 
             # Binding validation → map error_code from BindingError
             for binding_err in self.validate_bindings(name):
-                structured.append(ValidationError(
-                    code=binding_err.error_code,
-                    message=binding_err.message,
-                    location={
-                        "workflow": name,
-                        "step": binding_err.step_index,
-                        "capability": binding_err.step_capability,
-                        "binding_key": binding_err.binding_key,
-                    },
-                ))
+                structured.append(
+                    ValidationError(
+                        code=binding_err.error_code,
+                        message=binding_err.message,
+                        location={
+                            "workflow": name,
+                            "step": binding_err.step_index,
+                            "capability": binding_err.step_capability,
+                            "binding_key": binding_err.binding_key,
+                        },
+                    )
+                )
 
             # Edge constraint validation
             for msg in self.validate_edge_constraints(name):
@@ -783,11 +787,13 @@ class WorkflowEngine:
                     code = ErrorCode.CONSTRAINT_VIOLATED
                 else:
                     code = ErrorCode.MISSING_PREREQUISITE
-                structured.append(ValidationError(
-                    code=code,
-                    message=msg,
-                    location={"workflow": name},
-                ))
+                structured.append(
+                    ValidationError(
+                        code=code,
+                        message=msg,
+                        location={"workflow": name},
+                    )
+                )
 
             if structured:
                 results[name] = structured

@@ -19,6 +19,7 @@ from typing import Any
 # Error codes (Section 9.2 -- 9.6)
 # ---------------------------------------------------------------------------
 
+
 class ErrorCode(Enum):
     """All standard error codes grouped by category.
 
@@ -64,6 +65,7 @@ class ErrorCode(Enum):
 # Error dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class ValidationError:
     """A single structured error conforming to Section 9.7.
@@ -103,6 +105,7 @@ class ValidationError:
 # ---------------------------------------------------------------------------
 # Formatting helpers (Section 9.7)
 # ---------------------------------------------------------------------------
+
 
 def _error_to_dict(error: ValidationError) -> dict[str, Any]:
     """Convert a ValidationError to a JSON-serialisable dict.

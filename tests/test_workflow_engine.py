@@ -691,32 +691,48 @@ class TestBindingErrorCode:
 
     def test_unresolved_ref_maps_to_invalid_binding_path(self) -> None:
         err = BindingError(
-            workflow_name="w", step_index=0, step_capability="retrieve",
-            binding_key="k", reference="r", error_type="unresolved_ref",
+            workflow_name="w",
+            step_index=0,
+            step_capability="retrieve",
+            binding_key="k",
+            reference="r",
+            error_type="unresolved_ref",
             message="ref not found",
         )
         assert err.error_code == ErrorCode.INVALID_BINDING_PATH
 
     def test_type_mismatch_maps_to_type_mismatch(self) -> None:
         err = BindingError(
-            workflow_name="w", step_index=0, step_capability="retrieve",
-            binding_key="k", reference="r", error_type="type_mismatch",
+            workflow_name="w",
+            step_index=0,
+            step_capability="retrieve",
+            binding_key="k",
+            reference="r",
+            error_type="type_mismatch",
             message="type mismatch",
         )
         assert err.error_code == ErrorCode.TYPE_MISMATCH
 
     def test_missing_store_as_maps_to_missing_producer(self) -> None:
         err = BindingError(
-            workflow_name="w", step_index=0, step_capability="retrieve",
-            binding_key="k", reference="r", error_type="missing_store_as",
+            workflow_name="w",
+            step_index=0,
+            step_capability="retrieve",
+            binding_key="k",
+            reference="r",
+            error_type="missing_store_as",
             message="missing store",
         )
         assert err.error_code == ErrorCode.MISSING_PRODUCER
 
     def test_unknown_error_type_falls_back_to_invalid_binding_path(self) -> None:
         err = BindingError(
-            workflow_name="w", step_index=0, step_capability="retrieve",
-            binding_key="k", reference="r", error_type="some_future_type",
+            workflow_name="w",
+            step_index=0,
+            step_capability="retrieve",
+            binding_key="k",
+            reference="r",
+            error_type="some_future_type",
             message="unknown",
         )
         assert err.error_code == ErrorCode.INVALID_BINDING_PATH

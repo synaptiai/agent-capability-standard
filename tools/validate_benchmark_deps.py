@@ -4,7 +4,7 @@ Validate benchmark dependency claims against the canonical ontology.
 
 Ensures that:
 1. The CapabilityRegistry loads successfully
-2. All 4 real `requires` edges are present
+2. All 2 real `requires` edges are present
 3. No phantom `requires` edges exist
 4. Benchmark test cases reference only real capabilities
 5. Coercion registry loads and matches transform_coercion_registry.yaml
@@ -27,12 +27,10 @@ def validate_requires_edges(registry: CapabilityRegistry) -> list[str]:
     """Validate that the expected `requires` edges exist and no phantom ones do."""
     errors = []
 
-    # The 4 canonical requires edges (from → to, meaning 'to' requires 'from')
+    # The 2 canonical requires edges (from → to, meaning 'to' requires 'from')
     expected_requires = {
         ("checkpoint", "mutate"),
         ("checkpoint", "send"),
-        ("mutate", "verify"),  # verify requires mutate (mutate is incoming to verify)
-        ("send", "verify"),  # verify requires send (send is incoming to verify)
     }
 
     # Collect all actual requires edges

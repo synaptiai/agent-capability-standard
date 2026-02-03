@@ -765,4 +765,6 @@ class TestEdgeSemantics:
                 caps_with_reqs[cap.id] = reqs
         assert set(caps_with_reqs.keys()) == {"mutate", "send", "rollback"}
         for cap_id, reqs in caps_with_reqs.items():
-            assert reqs == ["checkpoint"], f"{cap_id} requires {reqs}, expected ['checkpoint']"
+            assert reqs == ["checkpoint"], (
+                f"{cap_id} requires {reqs}, expected ['checkpoint']"
+            )
