@@ -2,8 +2,8 @@
   "description": "Mock API responses for benchmark scenarios",
   "conflicting_sources": {
     "api_a": {
-      "type": "primary_api",
-      "trust_weight": 0.88,
+      "type": "system_of_record",
+      "trust_weight": 0.92,
       "responses": [
         {"user_id": "123", "status": "active", "timestamp_hours_ago": 3},
         {"user_id": "456", "status": "suspended", "timestamp_hours_ago": 12},
@@ -11,8 +11,8 @@
       ]
     },
     "api_b": {
-      "type": "primary_api",
-      "trust_weight": 0.88,
+      "type": "observability_pipeline",
+      "trust_weight": 0.80,
       "responses": [
         {"user_id": "123", "status": "suspended", "timestamp_hours_ago": 1},
         {"user_id": "456", "status": "active", "timestamp_hours_ago": 24},
