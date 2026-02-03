@@ -18,9 +18,12 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .adapter import GroundedAgentAdapter, GroundedAgentConfig
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import Message
 
 logger = logging.getLogger("grounded_agency.query")
 
@@ -46,7 +49,7 @@ async def grounded_query(
     options: Any | None = None,
     config: GroundedAgentConfig | None = None,
     adapter: GroundedAgentAdapter | None = None,
-) -> AsyncIterator[Any]:
+) -> AsyncIterator[Message]:
     """Drop-in replacement for ``query()`` with grounded safety.
 
     Creates or reuses a :class:`GroundedAgentAdapter`, wraps the
