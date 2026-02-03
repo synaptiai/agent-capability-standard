@@ -9,12 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+from claude_agent_sdk import ClaudeAgentOptions
 
-claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
-ClaudeAgentOptions = claude_agent_sdk.ClaudeAgentOptions
-
-from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig  # noqa: E402
+from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 
 # =============================================================================
 # Config Tests

@@ -16,13 +16,11 @@ import sys
 from pathlib import Path
 
 import pytest
-
-claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
-ClaudeAgentOptions = claude_agent_sdk.ClaudeAgentOptions
+from claude_agent_sdk import ClaudeAgentOptions
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from grounded_agency import (  # noqa: E402
+from grounded_agency import (
     CapabilityRegistry,
     CheckpointTracker,
     EvidenceAnchor,
