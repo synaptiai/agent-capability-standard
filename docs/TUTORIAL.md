@@ -249,7 +249,7 @@ fix_and_verify:
       input_bindings:
         plan: ${plan_out}
       gates:
-        - when: ${checkpoint_out.created} == false
+        - when: ${checkpoint_out.checkpoint_id} == null
           action: stop
           message: "Cannot proceed without checkpoint"
 
@@ -295,7 +295,7 @@ fix_and_verify:
 **Gate that blocks without checkpoint:**
 ```yaml
 gates:
-  - when: ${checkpoint_out.created} == false
+  - when: ${checkpoint_out.checkpoint_id} == null
     action: stop
     message: "Cannot proceed without checkpoint"
 ```
@@ -385,8 +385,8 @@ When types are ambiguous, add annotations:
 
 ```yaml
 input_bindings:
-  observations: ${integrate_out.unified_model.observations: array<object>}
-  domain: ${integrate_out.unified_model.meta.world_id: string}
+  observations: ${integrate_out.merged.observations: array<object>}
+  domain: ${integrate_out.merged.meta.world_id: string}
 ```
 
 ### 4.4 Transform Mappings

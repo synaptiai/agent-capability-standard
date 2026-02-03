@@ -229,7 +229,7 @@ Gates define conditional checks:
 
 ```yaml
 gates:
-  - when: ${checkpoint_out.created} == false
+  - when: ${checkpoint_out.checkpoint_id} == null
     action: stop
     message: "No checkpoint created. Do not mutate."
 ```
@@ -251,7 +251,7 @@ failure_modes:
     recovery:
       goto_step: plan
       inject_context:
-        failure_evidence: ${verify_out.failures}
+        failure_evidence: ${verify_out.violations}
       max_loops: 3
 ```
 
@@ -651,7 +651,7 @@ Typed annotations are OPTIONAL when:
       recovery:
         goto_step: plan
         inject_context:
-          failure_evidence: ${verify_out.failures}
+          failure_evidence: ${verify_out.violations}
         max_loops: 3
 ```
 

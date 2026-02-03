@@ -470,7 +470,7 @@ Each workflow step specifies:
   requires_checkpoint: false
   store_as: transform_out
   input_bindings:
-    source: ${receive_out.messages}
+    source: ${receive_out.data}
     target_schema: canonical_event
   mapping_ref: docs/schemas/transform_mapping.yaml
   output_conforms_to: docs/schemas/event_schema.yaml#/event
@@ -488,9 +488,9 @@ Each workflow step specifies:
 
 The `${ref}` syntax enables referencing outputs from earlier steps:
 
-- `${receive_out.messages}`: Field access
-- `${transform_out.transformed[0]}`: Array indexing
-- `${verify_out.failures: array<string>}`: Explicit type annotation
+- `${receive_out.data}`: Field access
+- `${transform_out.output[0]}`: Array indexing
+- `${verify_out.violations: array<string>}`: Explicit type annotation
 
 ### 7.3 Advanced Features
 
@@ -507,7 +507,7 @@ The `${ref}` syntax enables referencing outputs from earlier steps:
 
 ```yaml
 gates:
-  - when: ${checkpoint_out.created} == false
+  - when: ${checkpoint_out.checkpoint_id} == null
     action: stop
     message: No checkpoint created. Do not mutate.
 ```
@@ -520,7 +520,7 @@ failure_modes:
     recovery:
       goto_step: plan
       inject_context:
-        failure_evidence: ${verify_out.failures}
+        failure_evidence: ${verify_out.violations}
       max_loops: 3
 ```
 

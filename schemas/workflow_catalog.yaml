@@ -1018,7 +1018,7 @@ digital_twin_sync_loop:
       recovery:
         goto_step: plan
         inject_context:
-          failure_evidence: ${verify_out.failures}
+          failure_evidence: ${verify_out.violations}
         max_loops: 3
     input_bindings: {}
     gates:

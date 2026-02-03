@@ -53,7 +53,7 @@ critique_out.findings → plan.constraints
 plan_out.steps → act-plan.plan
 checkpoint_out.id → act-plan.checkpoint_ref
 act_plan_out.changes → verify.targets
-verify_out.verdict → (audit | rollback)
+verify_out.passed → (audit | rollback)
 ```
 
 ### Success Criteria
@@ -154,12 +154,12 @@ receive → transform → integrate → identity-resolution → world-state → 
 
 ```yaml
 act-plan:
-  condition: ${constrain_out.policy_ok} == true
-  gate: ${checkpoint_out.created} == true
+  condition: ${constrain_out.compliant} == true
+  gate: ${checkpoint_out.checkpoint_id} != null
   skip_if_false: true
 
 verify:
-  gate: ${verify_out.verdict} == 'FAIL' → rollback
+  gate: ${verify_out.passed} == false → rollback
 ```
 
 ### Recovery Pattern
@@ -169,7 +169,7 @@ on_verify_fail:
   action: rollback
   then: goto plan
   inject_context:
-    failure_evidence: ${verify_out.failures}
+    failure_evidence: ${verify_out.violations}
   max_loops: 3
 ```
 

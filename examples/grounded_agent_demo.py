@@ -48,7 +48,7 @@ async def demo_checkpoint_enforcement():
 
     # Check high-risk capabilities
     high_risk = adapter.registry.get_high_risk_capabilities()
-    print(f"\nHigh-risk capabilities (require checkpoint):")
+    print("\nHigh-risk capabilities (require checkpoint):")
     for cap in high_risk:
         print(f"  - {cap.id}: {cap.description}")
 
@@ -212,7 +212,7 @@ async def demo_with_sdk():
     print("=" * 60)
 
     try:
-        from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeAgentOptions
 
         print("Claude Agent SDK is available!")
 
@@ -272,11 +272,11 @@ async def demo_with_sdk():
         base = MockClaudeAgentOptions(allowed_tools=["Read", "Write"])
         wrapped = adapter.wrap_options(base)
 
-        print(f"\nBase options:")
+        print("\nBase options:")
         print(f"  allowed_tools: {base.allowed_tools}")
         print(f"  enable_file_checkpointing: {base.enable_file_checkpointing}")
 
-        print(f"\nWrapped options:")
+        print("\nWrapped options:")
         print(f"  allowed_tools: {wrapped.allowed_tools}")
         print(f"  enable_file_checkpointing: {wrapped.enable_file_checkpointing}")
         print(f"  can_use_tool set: {wrapped.can_use_tool is not None}")

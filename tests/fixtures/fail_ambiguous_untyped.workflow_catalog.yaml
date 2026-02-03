@@ -432,7 +432,7 @@ digital_twin_sync_loop:
     retry: null
     store_as: search_out
     input_bindings:
-      target: ${receive_out.source.name}
+      target: ${receive_out.source}
     failure_modes: []
   - capability: transform
     purpose: Normalize raw signals into canonical events compatible with world_state.observations.
@@ -445,7 +445,7 @@ digital_twin_sync_loop:
     store_as: transform_out
     failure_modes: []
     input_bindings:
-      source: '${receive_out.messages: array<object>}'
+      source: '${receive_out.data: array<object>}'
       target_schema: canonical_event
     gates: []
     mapping_ref: docs/schemas/transform_mapping_rawlog_to_observation.yaml
@@ -466,7 +466,7 @@ digital_twin_sync_loop:
       recovery: Ask for resolution strategy or authoritative source preference.
     input_bindings:
       sources:
-      - '${transform_out.transformed: object}'
+      - '${transform_out.output: object}'
       - '${previous_world_state: object}'
       resolution_strategy: prefer_authoritative_sources
     gates: []
@@ -500,8 +500,8 @@ digital_twin_sync_loop:
     store_as: world_state_out
     failure_modes: []
     input_bindings:
-      observations: '${integrate_out.unified_model.observations: array<object>}'
-      domain: ${integrate_out.unified_model.meta.world_id}
+      observations: '${integrate_out.merged.observations: array<object>}'
+      domain: ${integrate_out.merged.meta.world_id}
     gates: []
     output_conforms_to: docs/schemas/world_state_schema.yaml#/world_state
   - capability: diff-world-state
@@ -620,10 +620,10 @@ digital_twin_sync_loop:
       recovery: Require human approval to proceed.
     input_bindings: {}
     gates:
-    - when: ${checkpoint_out.created} == false
+    - when: ${checkpoint_out.checkpoint_id} == null
       action: stop
       message: No checkpoint created. Do not mutate.
-    condition: ${constrain_out.policy_ok} == true
+    condition: ${constrain_out.compliant} == true
     skip_if_false: true
   - capability: verify
     purpose: 'Verify outcome: PASS/FAIL with evidence.'
@@ -642,14 +642,11 @@ digital_twin_sync_loop:
       recovery:
         goto_step: plan
         inject_context:
-          failure_evidence: ${verify_out.failures}
+          failure_evidence: ${verify_out.violations}
         max_loops: 3
     input_bindings: {}
     gates:
-    - when: ${verify_out.verdict} == 'FAIL'
-      action: rollback
-      message: Verification failed. Rolling back.
-    - when: '${verify_out.verdict: string} == ''FAIL'''
+    - when: ${verify_out.passed} == false
       action: rollback
       message: Verification failed. Rolling back.
   - capability: audit

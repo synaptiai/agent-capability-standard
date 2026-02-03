@@ -25,7 +25,6 @@ from grounded_agency import (
     CostSummary,
     GroundedAgentAdapter,
     GroundedAgentConfig,
-    GroundedClient,
 )
 
 
@@ -97,7 +96,7 @@ async def demo_grounded_query_with_sdk():
     print("=" * 60)
 
     try:
-        from grounded_agency import grounded_query
+        from grounded_agency import grounded_query  # noqa: F401 (availability check)
 
         adapter = GroundedAgentAdapter(
             GroundedAgentConfig(
