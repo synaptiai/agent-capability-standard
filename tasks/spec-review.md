@@ -49,7 +49,7 @@ The standard (line 146) states:
 
 ### Section 9: Error model is specified but not implemented
 
-The standard defines a complete error model (25 error codes across 5 categories: V1xx, B2xx, S3xx, R4xx, F5xx) and a structured JSON response format. **None of this is implemented**:
+The standard defines a complete error model (23 error codes across 5 categories: V1xx, B2xx, S3xx, R4xx, F5xx) and a structured JSON response format. **None of this is implemented**:
 
 | Component | Standard requires | Actual |
 |-----------|------------------|--------|
