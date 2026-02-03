@@ -27,7 +27,8 @@ from grounded_agency import (
 )
 
 
-# Mock for demonstration without SDK
+# Mock for demonstration purposes — allows running this example without an API key.
+# In production, use claude_agent_sdk.ClaudeAgentOptions instead.
 @dataclass
 class MockClaudeAgentOptions:
     allowed_tools: list = field(default_factory=list)
