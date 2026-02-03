@@ -37,6 +37,7 @@ from .state.evidence_store import EvidenceAnchor, EvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
 
 if TYPE_CHECKING:
+    from .coordination.orchestrator import OrchestrationRuntime
     from .query import CostSummary
 
 logger = logging.getLogger("grounded_agency.adapter")
@@ -215,7 +216,7 @@ class GroundedAgentAdapter:
     """
 
     config: GroundedAgentConfig = field(default_factory=GroundedAgentConfig)
-    orchestrator: Any | None = None  # Optional OrchestrationRuntime
+    orchestrator: OrchestrationRuntime | None = None
     registry: CapabilityRegistry = field(init=False)
     mapper: ToolCapabilityMapper = field(init=False)
     checkpoint_tracker: CheckpointTracker = field(init=False)
