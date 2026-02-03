@@ -4,97 +4,160 @@ Date: 2026-02-03
 
 ## Summary
 
-The implementation is largely consistent with the specification. All 6 validation tools pass, counts are synchronized across all documentation files, and all referenced files exist. However, there are **7 discrepancies** between what `CLAUDE.md` documents and what the implementation actually does.
+This review compares the formal standard (`spec/STANDARD-v1.0.0.md`) against the actual implementation (ontology YAML, validators, SDK, skills, workflows). While the core architecture is sound, there are **significant discrepancies** — including an internally inconsistent appendix in the standard itself, missing error model implementation, and several claims in the standard that the ontology does not enforce.
 
 ---
 
-## Discrepancies Found
+## Part 1: STANDARD-v1.0.0.md vs Implementation
 
-### 1. Hooks matcher is broader than documented
+### CRITICAL: Appendix A contradicts Section 4.2 (internal inconsistency)
 
-| | Documented (CLAUDE.md:120) | Actual (hooks/hooks.json:5) |
+The standard is **self-contradictory**. Section 4.2 and Appendix A define completely different layer architectures:
+
+| Aspect | Section 4.2 (lines 98-112) | Appendix A (lines 679-690) |
+|--------|---------------------------|---------------------------|
+| Layer count | **9** layers | **8** layers |
+| Total capabilities | **36** | **99** (4+45+20+12+7+6+2+3) |
+| Layer names | PERCEIVE, UNDERSTAND, REASON, MODEL, SYNTHESIZE, EXECUTE, VERIFY, REMEMBER, COORDINATE | PERCEPTION, MODELING, REASONING, ACTION, SAFETY, META, MEMORY, COORDINATION |
+| PERCEIVE/PERCEPTION examples | (not listed) | `inspect`, `search`, `retrieve`, `receive` |
+| COORDINATE/COORDINATION count | 4 | 3 |
+
+Appendix A is a leftover from the archived v1 99-capability model. Specific stale references:
+- `inspect` — does not exist (current: `observe`)
+- `detect-*`, `identify-*`, `estimate-*` — old domain-specific variants (current: `detect`, `classify`, `measure` with domain params)
+- `act-plan` — does not exist (current: `execute` or `mutate`)
+- `mitigate`, `improve`, `prioritize` — do not exist in the 36-capability model
+- `invoke-workflow` — does not exist (current: `invoke`)
+- `model-schema` — does not exist (current: `state`)
+- META layer — does not exist in the current model
+- COORDINATION shows count 3, but implementation has 4 (missing `inquire`)
+
+**The implementation matches Section 4.2. Appendix A is entirely wrong.**
+
+### Section 4.4: `verify` → `constrain` relationship is wrong
+
+The standard (line 146) states:
+> | `verify` | `constrain` | Should have constraints to verify against |
+
+**Actual ontology**: `verify` and `constrain` are `alternative_to` each other (lines 1864-1871), meaning they are *substitutable*, not dependent. There is no `requires` or `soft_requires` edge from `verify` to `constrain`.
+
+### Section 6.1: Schema filename mismatch
+
+| Standard says (line 276) | Actual file |
+|--------------------------|-------------|
+| `identity_policy.yaml` | `identity_resolution_policy.yaml` |
+
+### Section 9: Error model is specified but not implemented
+
+The standard defines a complete error model (25 error codes across 5 categories: V1xx, B2xx, S3xx, R4xx, F5xx) and a structured JSON response format. **None of this is implemented**:
+
+| Component | Standard requires | Actual |
+|-----------|------------------|--------|
+| Validation tools | Emit V101, V102, etc. codes | Plain string error messages |
+| Workflow engine | BindingError with B2xx codes | Internal types (`unresolved_ref`, `type_mismatch`) |
+| SDK exceptions | F5xx safety error codes | Python exceptions without codes |
+| Error response format | `{error: {code, name, message, location, suggestion}}` | No structured format |
+| Tutorial references | V101, V102, B201, B204 shown in examples | Examples reference codes that tools don't emit |
+
+The error codes appear only in documentation (`docs/TUTORIAL.md`, `spec/SECURITY.md`), never in executable code.
+
+### Section 9.7: Error example references stale capability
+
+The standard's error response example (line 444):
+```json
+"suggestion": "Did you mean 'detect-anomaly'?"
+```
+
+`detect-anomaly` is from the old 99-capability model. The current model uses `detect` with `domain: anomaly`.
+
+### Section 10.3: Patch fixtures missing
+
+The standard requires three categories of conformance tests:
+1. Positive fixtures — **13 exist** ✓
+2. Negative fixtures — **8 exist** ✓
+3. Patch fixtures (invalid workflows with expected patch suggestions) — **0 exist** ✗
+
+The `fail_consumer_contract_mismatch` fixture is the closest candidate but it actually tests L1 structural errors (unknown capabilities like `inspect`), not L3 contract mismatches. It never reaches the type-checking code.
+
+### Section 11.5: Version headers missing
+
+The standard says workflow files SHOULD include `# Standard version: 1.0.0`. Neither the workflow catalog nor any fixture files include this header.
+
+### Section 12.5: Common patterns reference non-existent capabilities
+
+The "Safe Mutation" pattern (line 622) uses `act-plan` — this capability does not exist in the 36-model ontology.
+
+The "Multi-Source Integration" pattern (line 643) uses `identity-resolution` — this is not an atomic capability in the ontology.
+
+---
+
+## Part 2: CLAUDE.md vs Implementation
+
+### 1. Hooks matcher understated
+
+| | CLAUDE.md (line 120) | hooks.json |
 |--|---|---|
 | PreToolUse matcher | `Write\|Edit` | `Write\|Edit\|MultiEdit\|NotebookEdit\|Bash` |
 
-CLAUDE.md says the PreToolUse hook triggers on `Write|Edit`, but `hooks.json` also covers `MultiEdit`, `NotebookEdit`, and `Bash`. The documentation understates the actual enforcement scope.
+### 2. Medium-risk list incomplete
 
-### 2. Medium-risk capability list is incomplete
-
-| | Documented (CLAUDE.md:233) | Actual (ontology) |
+| | CLAUDE.md | Ontology |
 |--|---|---|
-| Medium-risk capabilities | `execute`, `delegate`, `invoke` | `execute`, `rollback`, `delegate`, `synchronize`, `invoke` |
+| Medium-risk | `execute`, `delegate`, `invoke` | `execute`, `rollback`, `delegate`, `synchronize`, `invoke` |
 
-`rollback` (VERIFY layer) and `synchronize` (COORDINATE layer) are `risk: medium` in the ontology but are not listed in the Safety Model section of CLAUDE.md.
+### 3. `requires_approval` incorrectly attributed
 
-### 3. `requires_approval` incorrectly attributed to delegate and invoke
+CLAUDE.md claims medium-risk capabilities (`execute`, `delegate`, `invoke`) all have `requires_approval: true`. **Only `execute` does** (plus the high-risk `mutate` and `send`). `delegate`, `synchronize`, and `invoke` do NOT have this flag.
 
-CLAUDE.md:233-234 states:
-> Medium-risk capabilities (`execute`, `delegate`, `invoke`) have:
-> - `requires_approval: true`
+### 4. Mutation capabilities partially documented
 
-**Actual ontology**: Only `execute` (line 1002), `mutate` (line 1045), and `send` (line 1083) have `requires_approval: true`. The capabilities `delegate`, `synchronize`, and `invoke` are medium-risk but do **not** have `requires_approval: true` set in the ontology.
+CLAUDE.md mentions `mutate` and `send` as mutation capabilities. The ontology has **6**: also `checkpoint`, `rollback`, `audit`, `persist`.
 
-### 4. Mutation capabilities are only partially documented
+### 5. COORDINATE layer description
 
-CLAUDE.md's Safety Model section only mentions `mutate` and `send` as having `mutation: true`. The ontology defines **6** mutation capabilities:
+CLAUDE.md: "Multi-agent interaction". Ontology: "Multi-agent **and user** interaction".
 
-| Capability | Risk | `mutation: true` | Documented in Safety Model? |
-|------------|------|-------------------|-----------------------------|
-| `mutate` | high | yes | yes |
-| `send` | high | yes | yes |
-| `checkpoint` | low | yes | **no** |
-| `rollback` | medium | yes | **no** |
-| `audit` | low | yes | **no** |
-| `persist` | low | yes | **no** |
+### 6. Workflow catalog overrides audit mutation flag
 
-### 5. COORDINATE layer description drops "and user"
+All workflows set `audit` to `mutation: false` despite ontology `mutation: true`. Documented as intentional in comments but not in CLAUDE.md or the ontology.
 
-| | CLAUDE.md:95 | Ontology (line 90) |
-|--|---|---|
-| COORDINATE description | "Multi-agent interaction" | "Multi-agent and user interaction" |
+### 7. Domain profiles missing SEC-009 trust review
 
-This matters because `inquire` specifically handles user interaction (not just multi-agent).
-
-### 6. Workflow catalog overrides audit's mutation flag
-
-The ontology defines `audit` with `mutation: true`, but every workflow in `workflow_catalog.yaml` overrides it to `mutation: false`. A comment at line 1241 explains:
-> audit has mutation: true in the ontology (writes audit log), but workflows mark it mutation: false because the mutation is append-only and non-destructive
-
-This is intentionally documented in the catalog, but not mentioned in CLAUDE.md or the ontology itself. The semantic disagreement between the ontology and the workflow catalog could be confusing.
-
-### 7. All domain profiles fail SEC-009 trust model review
-
-All 7 domain profiles (`audio`, `data_analysis`, `healthcare`, `manufacturing`, `multimodal`, `personal_assistant`, `vision`) have `trust_model_reviewed` unset (None). The profile schema defines this as a SEC-009 security control:
-> Trust weights may not reflect intentional calibration. Set trust_model_reviewed: true after reviewing trust_weights.
-
-Profile validation passes but with 7 warnings.
+All 7 profiles have `trust_model_reviewed: null`.
 
 ---
 
-## Verified as Consistent
+## Part 3: What's Consistent
 
-These areas have **no discrepancies**:
-
-- **Capability count**: 36 atomic capabilities — consistent across all 11+ documentation files
-- **Layer count**: 9 cognitive layers — consistent everywhere
-- **Layer composition**: Per-layer capability counts match (PERCEIVE:4, UNDERSTAND:6, REASON:4, MODEL:5, SYNTHESIZE:3, EXECUTE:3, VERIFY:5, REMEMBER:2, COORDINATE:4)
-- **Workflow count**: 12 composed workflows — consistent across CLAUDE.md, README.md, skills/README.md, and workflow_catalog.yaml
-- **Skill files**: 41 SKILL.md files exist (36 atomic + 5 composed) matching skills/README.md
-- **All referenced files exist**: ontology, profiles, templates, archive, interop mapping, edge types spec, modality guide, OASF proposal, SDK components
-- **SDK components**: All 5 documented classes (GroundedAgentAdapter, CapabilityRegistry, ToolCapabilityMapper, CheckpointTracker, EvidenceStore) exist in `grounded_agency/`
-- **Edge types**: 7 types documented in spec/EDGE_TYPES.md match the 7 types in the ontology (95 total edges)
-- **Validation tools**: All 6 validators pass (workflows, profiles, skill refs, ontology graph, YAML sync, transform refs)
+- **36 atomic capabilities** across **9 cognitive layers** — counts match everywhere
+- **12 workflow patterns** in catalog — consistent
+- **41 skill files** (36 atomic + 5 composed) — all present
+- **7 edge types** — spec/EDGE_TYPES.md matches ontology
+- **95 edges** — ontology graph validates (no orphans, no cycles, symmetric pairs verified)
+- **All 6 validators pass** (workflows, profiles, skill refs, ontology graph, YAML sync, transform refs)
+- **SDK components** — all 5 documented classes exist and match docs
+- **Conformance levels L1-L4** — validator code implements all levels
+- **22 conformance fixtures** — all pass expected behavior
+- **6 transform coercions** — registry matches implementation
 
 ---
 
 ## Severity Assessment
 
-| # | Discrepancy | Severity | Reason |
-|---|-------------|----------|--------|
-| 1 | Hooks matcher | Low | Implementation is stricter than documented (not weaker) |
-| 2 | Medium-risk list | Medium | Users may not realize rollback/synchronize are medium-risk |
-| 3 | requires_approval claim | **High** | Documentation claims a constraint that the ontology does not enforce |
-| 4 | Mutation list incomplete | Medium | 4 mutation capabilities not mentioned in safety model |
-| 5 | COORDINATE description | Low | Minor wording difference |
-| 6 | audit mutation override | Low | Intentionally documented in workflow catalog |
-| 7 | SEC-009 trust review | Medium | All profiles missing formal trust calibration |
+| # | Discrepancy | Severity | Category |
+|---|-------------|----------|----------|
+| A1 | Appendix A shows 99-cap/8-layer model | **Critical** | Standard internal inconsistency |
+| A2 | `verify` requires `constrain` claim | **High** | Standard vs ontology |
+| A3 | Error model not implemented | **High** | Standard vs implementation |
+| A4 | `identity_policy.yaml` filename | Medium | Standard vs implementation |
+| A5 | `act-plan`, `identity-resolution` in patterns | Medium | Standard references stale caps |
+| A6 | `detect-anomaly` in error example | Low | Standard references stale cap |
+| A7 | Patch fixtures missing | Medium | Conformance gap |
+| A8 | Version headers missing | Low | SHOULD-level recommendation |
+| B1 | Hooks matcher understated | Low | CLAUDE.md vs implementation |
+| B2 | Medium-risk list incomplete | Medium | CLAUDE.md vs ontology |
+| B3 | `requires_approval` for delegate/invoke | **High** | CLAUDE.md claims unenforced constraint |
+| B4 | Mutation list incomplete | Medium | CLAUDE.md vs ontology |
+| B5 | COORDINATE description | Low | CLAUDE.md vs ontology |
+| B6 | audit mutation override | Low | Ontology vs workflow catalog |
+| B7 | SEC-009 trust review | Medium | Profiles incomplete |
