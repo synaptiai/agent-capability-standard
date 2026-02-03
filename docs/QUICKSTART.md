@@ -49,7 +49,7 @@ pip install pyyaml
 
 ## Step 2: Validate the Reference Workflows (2 min)
 
-The standard includes 5 production-ready workflows. Let's validate them:
+The standard includes 12 reference workflows. Let's validate them:
 
 ```bash
 python tools/validate_workflows.py
@@ -276,6 +276,7 @@ Each domain provides:
 | Explore domain templates | [docs/domains/](domains/README.md) |
 | Build your own workflow | [TUTORIAL.md](TUTORIAL.md) |
 | Understand key terms | [GLOSSARY.md](GLOSSARY.md) |
+| Work with images, audio, video | [MODALITY_HANDLING.md](guides/MODALITY_HANDLING.md) |
 | Read the full spec | [STANDARD-v1.0.0.md](../spec/STANDARD-v1.0.0.md) |
 | Understand conformance levels | [CONFORMANCE.md](../spec/CONFORMANCE.md) |
 

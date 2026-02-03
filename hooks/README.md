@@ -32,22 +32,42 @@ Run **after** a tool executes for logging and audit.
 
 ## Configuration
 
-Hooks are configured in `settings.json`:
+Hooks are configured in `hooks.json` (loaded automatically by the Claude Code plugin):
 
 ```json
 {
   "hooks": {
-    "pretooluse_require_checkpoint": {
-      "enabled": true,
-      "configurable": true
-    },
-    "posttooluse_log_tool": {
-      "enabled": true,
-      "configurable": true
-    }
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pretooluse_require_checkpoint.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+          }
+        ]
+      }
+    ]
   }
 }
 ```
+
+Each hook entry specifies:
+- **matcher**: Regex pattern matching tool names that trigger the hook
+- **hooks**: Array of hook commands to execute
+- **type**: Hook type (`command` for shell scripts)
+- **command**: Path to the hook script (`${CLAUDE_PLUGIN_ROOT}` resolves to the plugin directory)
 
 ## Checkpoint System
 

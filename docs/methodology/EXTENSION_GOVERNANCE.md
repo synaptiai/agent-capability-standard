@@ -121,7 +121,7 @@ The maintainers decide:
 
 If accepted:
 1. Add to `schemas/capability_ontology.yaml`
-2. Create skill in `skills/<layer>/<name>/SKILL.md`
+2. Create skill in `skills/<name>/SKILL.md`
 3. Update documentation
 4. Add to reference workflow(s)
 5. Update validator
@@ -137,14 +137,14 @@ To manage ontology evolution, we use tiers:
 - Validated in reference workflows
 - Stable API
 - Full documentation
-- Currently: 34 capabilities
+- Currently: 36 capabilities
 
 ### Extended Tier
 
 - Proposed but not fully validated
 - May change based on feedback
 - Limited workflow coverage
-- Currently: 65 capabilities
+- Currently: 0 capabilities (all migrated to Core in v1.0.0)
 
 ### Experimental Tier
 

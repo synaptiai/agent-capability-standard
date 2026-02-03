@@ -4,7 +4,10 @@
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet?logo=anthropic)](https://github.com/synaptiai/synapti-marketplace)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](spec/STANDARD-v1.0.0.md)
+[![Spec](https://img.shields.io/badge/Spec-v1.0.0-blue.svg)](spec/STANDARD-v1.0.0.md)
+[![Plugin](https://img.shields.io/badge/Plugin-v1.0.5-green.svg)](CHANGELOG.md)
+
+> **Versioning:** The spec version (v1.0.0) tracks the standard itself. The plugin version (v1.0.5) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
 
 ```bash
 # Install as Claude Code plugin
@@ -159,6 +162,18 @@ python scripts/run_conformance.py
 
 **Next:** See [QUICKSTART.md](docs/QUICKSTART.md) for a guided walkthrough.
 
+## Choose Your Path
+
+| I want to... | Start here |
+|--------------|------------|
+| **Evaluate** if this fits my needs | [FAQ](docs/FAQ.md) → [Whitepaper](spec/WHITEPAPER.md) |
+| **Use** this in Claude Code | [Quickstart](docs/QUICKSTART.md) (10 min) |
+| **Build** agents with the Python SDK | [SDK Guide](docs/integrations/claude_agent_sdk.md) |
+| **Read** the formal specification | [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) |
+| **Create** custom workflows | [Tutorial](docs/TUTORIAL.md) (30 min) |
+| **Contribute** to the standard | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| **Deploy** in a regulated industry | [Compliance Suite](docs/compliance/) |
+
 ## What's Included
 
 ### 36 Atomic Capabilities
@@ -192,7 +207,7 @@ See [WORKFLOW_PATTERNS.md](docs/WORKFLOW_PATTERNS.md) for the complete pattern c
 
 ### 12 Composed Workflows
 
-Production-ready workflow compositions with gates, recovery loops, and typed bindings:
+Reference workflow compositions defined in the [workflow catalog](schemas/workflow_catalog.yaml), with gates, recovery loops, and typed bindings. Five of these are also available as [composed skills](skills/README.md#composed-skills-5) for direct invocation:
 
 | Workflow | Goal | Risk |
 |----------|------|------|
@@ -208,6 +223,18 @@ Production-ready workflow compositions with gates, recovery loops, and typed bin
 | `multi_agent_orchestration` | Coordinate agents for complex tasks | Medium |
 | `data_quality_pipeline` | Detect, classify, and clean data quality issues | Medium |
 | `model_deployment` | Safely deploy ML model to production | High |
+
+### Domain Profiles
+
+Pre-configured trust weights, risk thresholds, and checkpoint policies for specific industries:
+
+| Domain | Key Feature | Profile |
+|--------|------------|---------|
+| Healthcare | Advisory-only, 7-year audit retention | [Guide](docs/domains/healthcare/) |
+| Manufacturing | Sensor trust (0.92-0.95), human-required mutations | [Guide](docs/domains/manufacturing/) |
+| Data Analysis | Lineage grounding, statistical uncertainty | [Guide](docs/domains/data-analysis/) |
+| Personal Assistant | Highest user trust (0.98), never auto-send | [Guide](docs/domains/personal-assistant/) |
+| Vision / Audio / Multimodal | Cross-modal consistency, spatial/temporal grounding | [Guide](docs/guides/MODALITY_HANDLING.md) |
 
 ### Canonical Schemas
 

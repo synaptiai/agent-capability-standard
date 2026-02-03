@@ -113,6 +113,8 @@ Multi-agent and user interaction.
 
 ## Composed Skills (5)
 
+> **Note:** These 5 composed skills implement a subset of the [12 reference workflows](../schemas/workflow_catalog.yaml). Additional workflows can be composed by following the [Tutorial](../docs/TUTORIAL.md).
+
 | Skill | Description |
 |-------|-------------|
 | `debug-workflow` | Execute a safe, auditable debugging workflow |

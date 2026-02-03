@@ -70,6 +70,17 @@ Start here for a strategic overview:
 
 **10** (Regulatory Compliance) --> **04** (Security Scan) --> **11** (Technical Debt Register) --> **01** (Architecture -- Safety section)
 
+### Quick Access by Role
+
+| Role | Start Here | Key Focus |
+|------|-----------|-----------|
+| **Executive** | [13. Executive Summary](13-executive-summary.md) | Market opportunity, investment highlights |
+| **Security** | [04. Security Scan](04-security-scan-findings.md) | STRIDE analysis, 16 risks (all resolved) |
+| **DevOps** | [09. Deployment Runbook](09-deployment-runbook.md) | Release checklist, rollback procedures |
+| **Developer** | [05. API Reference](05-api-reference.md) + [07. Common Tasks](07-common-tasks.md) | SDK API, usage patterns |
+| **Architect** | [01. Architecture](01-architectural-analysis.md) + [02. Diagrams](02-system-diagrams-and-features.md) | Subsystems, design patterns |
+| **Compliance** | [10. Regulatory](10-regulatory-compliance.md) | EU AI Act, NIST, ISO mapping |
+
 ---
 
 ## Generation Metadata

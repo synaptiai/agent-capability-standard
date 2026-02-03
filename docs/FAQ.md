@@ -365,6 +365,24 @@ See `schemas/authority_trust_model.yaml` for configuration.
 
 ---
 
+## Multimodal Support
+
+### Does this work with images, audio, and video?
+
+Yes. The standard includes modality-specific domain profiles and grounding requirements:
+
+- **Vision**: Spatial grounding with bounding boxes and confidence scores
+- **Audio**: Temporal grounding with timestamps and speaker diarization
+- **Multimodal**: Cross-modal consistency checks and fusion strategies
+
+See the [Modality Handling Guide](guides/MODALITY_HANDLING.md) for full details.
+
+### How do modality profiles differ from regular domain profiles?
+
+Modality profiles add source-type-specific trust weights and grounding requirements. For example, the vision profile requires spatial coordinates for all detections, while the audio profile requires temporal anchors.
+
+---
+
 ## Adoption
 
 ### How do I get started?
@@ -409,6 +427,30 @@ MCP defines how to connect tools to language models. This standard defines:
 - World state and trust models
 
 They are complementary: MCP for connection, this standard for capability semantics.
+
+### How does this relate to OASF (Open Agent Skill Framework)?
+
+The standard provides an interoperability layer with OASF. Of the 36 capabilities, 23 are fully mapped to OASF skill codes, 7 are partially mapped, and 6 use synthetic GA-extension codes. See [OASF Coverage Report](integrations/oasf_coverage.md) for the full mapping.
+
+### How does this relate to A2A (Agent-to-Agent protocol)?
+
+A2A defines how agents communicate with each other (inter-agent transport). This standard defines what agents can *do* (intra-agent capability semantics). They are complementary:
+- **A2A**: "How do agents talk to each other?"
+- **Agent Capability Standard**: "What can each agent do, and how do capabilities compose safely?"
+
+### What makes this different from other agent frameworks?
+
+The key distinction is **spec vs. framework**:
+
+| Aspect | Frameworks (LangChain, AutoGPT, CrewAI) | This Standard |
+|--------|------------------------------------------|---------------|
+| What it is | Implementation library | Specification |
+| Contracts | Implicit (runtime discovery) | Explicit (typed I/O schemas) |
+| Safety | Optional middleware | Structural (checkpoint required for mutation) |
+| Validation | Runtime errors | Static analysis (4 conformance levels) |
+| Provenance | Rarely tracked | Required (evidence anchors) |
+
+The standard can be implemented *within* existing frameworks. It's not a replacement—it's a layer of reliability on top.
 
 ---
 
