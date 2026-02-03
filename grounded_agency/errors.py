@@ -105,6 +105,22 @@ class ValidationError:
 # Formatting helpers (Section 9.7)
 # ---------------------------------------------------------------------------
 
+def _error_to_dict(error: ValidationError) -> dict[str, Any]:
+    """Convert a ValidationError to a JSON-serialisable dict.
+
+    Omits ``suggestion`` when it is ``None``.
+    """
+    d: dict[str, Any] = {
+        "code": error.code_str,
+        "name": error.name,
+        "message": error.message,
+        "location": error.location,
+    }
+    if error.suggestion is not None:
+        d["suggestion"] = error.suggestion
+    return d
+
+
 def format_error(error: ValidationError) -> dict[str, Any]:
     """Return the standard JSON-serialisable envelope for a single error.
 
@@ -122,15 +138,7 @@ def format_error(error: ValidationError) -> dict[str, Any]:
 
     When *suggestion* is ``None`` the key is omitted from the inner dict.
     """
-    inner: dict[str, Any] = {
-        "code": error.code_str,
-        "name": error.name,
-        "message": error.message,
-        "location": error.location,
-    }
-    if error.suggestion is not None:
-        inner["suggestion"] = error.suggestion
-    return {"error": inner}
+    return {"error": _error_to_dict(error)}
 
 
 def format_errors_response(errors: list[ValidationError]) -> dict[str, Any]:
@@ -148,15 +156,4 @@ def format_errors_response(errors: list[ValidationError]) -> dict[str, Any]:
     Each element uses the same inner structure as :func:`format_error`
     (without the outer ``"error"`` wrapper).
     """
-    items: list[dict[str, Any]] = []
-    for err in errors:
-        item: dict[str, Any] = {
-            "code": err.code_str,
-            "name": err.name,
-            "message": err.message,
-            "location": err.location,
-        }
-        if err.suggestion is not None:
-            item["suggestion"] = err.suggestion
-        items.append(item)
-    return {"errors": items}
+    return {"errors": [_error_to_dict(err) for err in errors]}
