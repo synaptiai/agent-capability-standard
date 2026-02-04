@@ -293,7 +293,9 @@ class WorkflowSynthesizer:
             match = match_by_cap.get(cap_id)
             step: dict[str, Any] = {
                 "capability": cap_id,
-                "purpose": match.reasoning if match else f"Auto-added: {cap.description}",
+                "purpose": match.reasoning
+                if match
+                else f"Auto-added: {cap.description}",
                 "risk": cap.risk,
                 "mutation": cap.mutation,
                 "requires_checkpoint": cap.requires_checkpoint,
@@ -372,9 +374,7 @@ class WorkflowSynthesizer:
                 step["input_bindings"]["input"] = f"${{{prev_store}}}"
         return steps
 
-    def check_existing_workflows(
-        self, capability_ids: set[str]
-    ) -> str | None:
+    def check_existing_workflows(self, capability_ids: set[str]) -> str | None:
         """Check if an existing catalog workflow covers 80%+ of needed capabilities."""
         for wf_name in self.engine.list_workflows():
             wf = self.engine.get_workflow(wf_name)
@@ -388,9 +388,7 @@ class WorkflowSynthesizer:
                 return wf_name
         return None
 
-    def _validate_workflow(
-        self, workflow: SynthesizedWorkflow
-    ) -> dict[str, Any]:
+    def _validate_workflow(self, workflow: SynthesizedWorkflow) -> dict[str, Any]:
         """Validate synthesized workflow structure."""
         errors: list[str] = []
 

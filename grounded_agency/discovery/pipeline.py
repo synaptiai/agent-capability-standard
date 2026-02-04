@@ -56,9 +56,7 @@ class DiscoveryPipeline:
         self.analyzer = TaskAnalyzer(registry, llm_fn=llm_fn)
         self.classifier = CapabilityClassifier(registry)
         self.gap_detector = GapDetector(registry, llm_fn=llm_fn)
-        self.synthesizer = WorkflowSynthesizer(
-            registry, engine, llm_fn=llm_fn
-        )
+        self.synthesizer = WorkflowSynthesizer(registry, engine, llm_fn=llm_fn)
 
         # Per-turn cache keyed by prompt hash
         self._cache: dict[str, DiscoveryResult] = {}

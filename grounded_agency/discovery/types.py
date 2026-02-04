@@ -14,7 +14,9 @@ from typing import Any
 # Type alias for the pluggable LLM function.
 # Accepts (prompt: str, schema: dict | None) and returns parsed dict.
 # This decouples the discovery module from any specific LLM client.
-LLMFunction = Callable[[str, dict[str, Any] | None], Coroutine[Any, Any, dict[str, Any]]]
+LLMFunction = Callable[
+    [str, dict[str, Any] | None], Coroutine[Any, Any, dict[str, Any]]
+]
 
 
 @dataclass(slots=True)

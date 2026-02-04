@@ -38,7 +38,12 @@ ANALYSIS_OUTPUT_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {
                 "type": "object",
-                "required": ["requirement_index", "capability_id", "confidence", "reasoning"],
+                "required": [
+                    "requirement_index",
+                    "capability_id",
+                    "confidence",
+                    "reasoning",
+                ],
                 "properties": {
                     "requirement_index": {"type": "integer"},
                     "capability_id": {"type": "string"},
@@ -59,8 +64,15 @@ GAP_PROPOSAL_SCHEMA: dict[str, Any] = {
         "layer": {
             "type": "string",
             "enum": [
-                "PERCEIVE", "UNDERSTAND", "REASON", "MODEL",
-                "SYNTHESIZE", "EXECUTE", "VERIFY", "REMEMBER", "COORDINATE",
+                "PERCEIVE",
+                "UNDERSTAND",
+                "REASON",
+                "MODEL",
+                "SYNTHESIZE",
+                "EXECUTE",
+                "VERIFY",
+                "REMEMBER",
+                "COORDINATE",
             ],
         },
         "description": {"type": "string"},
@@ -118,6 +130,7 @@ BINDING_GENERATION_SCHEMA: dict[str, Any] = {
 
 # ── Formatting helpers ──────────────────────────────────────────
 
+
 def _format_capability_list(registry: CapabilityRegistry) -> str:
     """Format all capabilities as compact reference text for LLM context."""
     lines: list[str] = []
@@ -143,8 +156,16 @@ def _format_capability_schemas(
     """Format capability input/output schemas for binding generation."""
     parts: list[str] = []
     for cap in capabilities:
-        io = f"  inputs: {json.dumps(cap.input_schema, indent=2)}" if cap.input_schema else ""
-        oo = f"  outputs: {json.dumps(cap.output_schema, indent=2)}" if cap.output_schema else ""
+        io = (
+            f"  inputs: {json.dumps(cap.input_schema, indent=2)}"
+            if cap.input_schema
+            else ""
+        )
+        oo = (
+            f"  outputs: {json.dumps(cap.output_schema, indent=2)}"
+            if cap.output_schema
+            else ""
+        )
         parts.append(f"- {cap.id}:\n{io}\n{oo}")
     return "\n".join(parts)
 
@@ -160,6 +181,7 @@ def _format_layer_descriptions(registry: CapabilityRegistry) -> str:
 
 
 # ── Prompt builders ─────────────────────────────────────────────
+
 
 def build_analysis_prompt(
     task_description: str,

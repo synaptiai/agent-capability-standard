@@ -68,7 +68,9 @@ class TestTaskAnalyzerWithLLM:
     @pytest.mark.asyncio
     async def test_llm_analysis(self, analyzer_with_llm: TaskAnalyzer):
         """LLM analysis should return structured requirements and matches."""
-        reqs, matches = await analyzer_with_llm.analyze("Find files and detect patterns")
+        reqs, matches = await analyzer_with_llm.analyze(
+            "Find files and detect patterns"
+        )
         assert len(reqs) == 2
         assert len(matches) == 2
         assert matches[0].capability_id == "search"
@@ -77,7 +79,9 @@ class TestTaskAnalyzerWithLLM:
     @pytest.mark.asyncio
     async def test_llm_confidence_scores(self, analyzer_with_llm: TaskAnalyzer):
         """LLM matches should have confidence from response."""
-        reqs, matches = await analyzer_with_llm.analyze("Find files and detect patterns")
+        reqs, matches = await analyzer_with_llm.analyze(
+            "Find files and detect patterns"
+        )
         assert matches[0].confidence == 0.9
         assert matches[1].confidence == 0.85
 

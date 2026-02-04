@@ -104,20 +104,18 @@ class TestDiscoveryPipelineWithEvidenceStore:
     """Tests for evidence store integration."""
 
     @pytest.mark.asyncio
-    async def test_evidence_stored(self, registry, engine, evidence_store: EvidenceStore):
+    async def test_evidence_stored(
+        self, registry, engine, evidence_store: EvidenceStore
+    ):
         """Discovery should add evidence to the store."""
-        pipeline = DiscoveryPipeline(
-            registry, engine, evidence_store=evidence_store
-        )
+        pipeline = DiscoveryPipeline(registry, engine, evidence_store=evidence_store)
         await pipeline.discover("Search for files")
         assert len(evidence_store) > 0
 
     @pytest.mark.asyncio
     async def test_evidence_refs(self, registry, engine, evidence_store: EvidenceStore):
         """Evidence anchors should have tool refs."""
-        pipeline = DiscoveryPipeline(
-            registry, engine, evidence_store=evidence_store
-        )
+        pipeline = DiscoveryPipeline(registry, engine, evidence_store=evidence_store)
         result = await pipeline.discover("Search for files")
         for anchor_dict in result.evidence_anchors:
             assert "ref" in anchor_dict

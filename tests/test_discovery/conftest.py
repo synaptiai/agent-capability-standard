@@ -21,13 +21,17 @@ from grounded_agency.workflows.engine import WorkflowEngine
 @pytest.fixture
 def ontology_path() -> str:
     """Path to the real capability ontology."""
-    return str(Path(__file__).parent.parent.parent / "schemas" / "capability_ontology.yaml")
+    return str(
+        Path(__file__).parent.parent.parent / "schemas" / "capability_ontology.yaml"
+    )
 
 
 @pytest.fixture
 def catalog_path() -> str:
     """Path to the real workflow catalog."""
-    return str(Path(__file__).parent.parent.parent / "schemas" / "workflow_catalog.yaml")
+    return str(
+        Path(__file__).parent.parent.parent / "schemas" / "workflow_catalog.yaml"
+    )
 
 
 @pytest.fixture
@@ -62,8 +66,18 @@ def mock_llm_fn() -> LLMFunction:
             # Analysis + classification prompt
             return {
                 "requirements": [
-                    {"action": "find", "target": "files", "constraints": [], "domain_hint": None},
-                    {"action": "detect", "target": "patterns", "constraints": [], "domain_hint": "pattern"},
+                    {
+                        "action": "find",
+                        "target": "files",
+                        "constraints": [],
+                        "domain_hint": None,
+                    },
+                    {
+                        "action": "detect",
+                        "target": "patterns",
+                        "constraints": [],
+                        "domain_hint": "pattern",
+                    },
                 ],
                 "matches": [
                     {
@@ -90,9 +104,17 @@ def mock_llm_fn() -> LLMFunction:
                 "description": "Negotiate terms with external parties",
                 "risk": "medium",
                 "mutation": False,
-                "input_schema": {"type": "object", "properties": {"terms": {"type": "object"}}},
-                "output_schema": {"type": "object", "properties": {"agreement": {"type": "object"}}},
-                "suggested_edges": [{"from": "negotiate", "to": "inquire", "type": "requires"}],
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"terms": {"type": "object"}},
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {"agreement": {"type": "object"}},
+                },
+                "suggested_edges": [
+                    {"from": "negotiate", "to": "inquire", "type": "requires"}
+                ],
                 "reasoning": "Negotiation requires inquiry but is a distinct coordination action",
             }
         elif "workflow composer" in prompt.lower():
@@ -126,7 +148,9 @@ def analyzer(registry: CapabilityRegistry) -> TaskAnalyzer:
 
 
 @pytest.fixture
-def analyzer_with_llm(registry: CapabilityRegistry, mock_llm_fn: LLMFunction) -> TaskAnalyzer:
+def analyzer_with_llm(
+    registry: CapabilityRegistry, mock_llm_fn: LLMFunction
+) -> TaskAnalyzer:
     """TaskAnalyzer with mock LLM."""
     return TaskAnalyzer(registry, llm_fn=mock_llm_fn)
 
@@ -144,13 +168,17 @@ def gap_detector(registry: CapabilityRegistry) -> GapDetector:
 
 
 @pytest.fixture
-def gap_detector_with_llm(registry: CapabilityRegistry, mock_llm_fn: LLMFunction) -> GapDetector:
+def gap_detector_with_llm(
+    registry: CapabilityRegistry, mock_llm_fn: LLMFunction
+) -> GapDetector:
     """GapDetector with mock LLM."""
     return GapDetector(registry, llm_fn=mock_llm_fn)
 
 
 @pytest.fixture
-def synthesizer(registry: CapabilityRegistry, engine: WorkflowEngine) -> WorkflowSynthesizer:
+def synthesizer(
+    registry: CapabilityRegistry, engine: WorkflowEngine
+) -> WorkflowSynthesizer:
     """WorkflowSynthesizer without LLM."""
     return WorkflowSynthesizer(registry, engine)
 

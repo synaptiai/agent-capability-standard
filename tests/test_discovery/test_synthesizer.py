@@ -106,7 +106,9 @@ class TestTopologicalSort:
         ordered = synthesizer._topological_sort(caps)
         assert set(ordered) == caps
 
-    def test_checkpoint_reordered_before_mutation(self, synthesizer: WorkflowSynthesizer):
+    def test_checkpoint_reordered_before_mutation(
+        self, synthesizer: WorkflowSynthesizer
+    ):
         """_ensure_checkpoint_ordering should move checkpoint before first mutation."""
         # Guard: test depends on mutate having requires_checkpoint in ontology
         cap = synthesizer.registry.get_capability("mutate")
@@ -140,7 +142,9 @@ class TestWorkflowSynthesis:
                 domain="pattern",
             ),
         ]
-        workflow = await synthesizer.synthesize(matches, "Find files and detect patterns")
+        workflow = await synthesizer.synthesize(
+            matches, "Find files and detect patterns"
+        )
         assert workflow.name != ""
         assert len(workflow.steps) >= 2
         assert workflow.confidence > 0

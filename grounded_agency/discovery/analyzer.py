@@ -228,9 +228,7 @@ class TaskAnalyzer:
             if self.registry.get_capability(cap_id) is not None:
                 matches.append(CapabilityMatch.from_dict(match_data, req))
             else:
-                logger.warning(
-                    "LLM returned unknown capability '%s', skipping", cap_id
-                )
+                logger.warning("LLM returned unknown capability '%s', skipping", cap_id)
 
         return requirements, matches
 
