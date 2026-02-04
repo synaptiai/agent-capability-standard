@@ -167,6 +167,8 @@ class GroundedAgentConfig:
         max_budget_usd: Maximum cost budget in USD (SDK ``max_budget_usd``).
         model: Default model name (SDK ``model``).
         max_turns: Maximum agent turns (SDK ``max_turns``).
+        enable_discovery: If True, inject a PreToolUse hook that runs
+            capability discovery on user prompts automatically.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -180,6 +182,7 @@ class GroundedAgentConfig:
     max_budget_usd: float | None = None
     model: str | None = None
     max_turns: int | None = None
+    enable_discovery: bool = False
 
 
 @dataclass
@@ -240,10 +243,24 @@ class GroundedAgentAdapter:
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
 
+        # Lazy-initialized by _get_or_create_workflow_engine
+        self._workflow_engine: Any = None
+
         # Initialize cost tracking (import here to avoid circular import)
         from .query import CostSummary
 
         self.cost_summary = CostSummary()
+
+    def _get_or_create_workflow_engine(self) -> Any:
+        """Lazy-create a WorkflowEngine for discovery integration."""
+        if self._workflow_engine is None:
+            from .workflows.engine import WorkflowEngine
+
+            self._workflow_engine = WorkflowEngine(
+                ontology_path=self.config.ontology_path,
+                checkpoint_tracker=self.checkpoint_tracker,
+            )
+        return self._workflow_engine
 
     def wrap_options(self, base: Any) -> Any:
         """
@@ -288,6 +305,22 @@ class GroundedAgentAdapter:
         pre_hooks = list(existing_hooks.get("PreToolUse", []))
         checkpoint_pre_hook = self._make_pretooluse_checkpoint_hook()
         pre_hooks.append(self._wrap_hook(checkpoint_pre_hook))
+
+        # Add discovery injector if enabled
+        if self.config.enable_discovery:
+            from .discovery.pipeline import DiscoveryPipeline
+            from .hooks.discovery_injector import create_discovery_injector
+
+            discovery_pipeline = DiscoveryPipeline(
+                registry=self.registry,
+                engine=self._get_or_create_workflow_engine(),
+                evidence_store=self.evidence_store,
+            )
+            discovery_hook = create_discovery_injector(
+                pipeline=discovery_pipeline,
+                store=self.evidence_store,
+            )
+            pre_hooks.append(self._wrap_hook(discovery_hook))
 
         merged_hooks = {
             **existing_hooks,
