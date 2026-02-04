@@ -52,6 +52,18 @@ from .coordination import (
     SyncStrategy,
     TaskLifecycleError,
 )
+from .discovery import (
+    CapabilityGap,
+    CapabilityMatch,
+    DiscoveryPipeline,
+    DiscoveryResult,
+    GapDetector,
+    LLMFunction,
+    ProposedCapability,
+    SynthesizedWorkflow,
+    TaskRequirement,
+    WorkflowSynthesizer,
+)
 from .errors import ErrorCode, ValidationError, format_error, format_errors_response
 from .mcp import create_grounded_mcp_server
 from .query import CostSummary, grounded_query
@@ -134,6 +146,17 @@ __all__ = [
     "CapabilityMismatchError",
     "BarrierResolvedError",
     "TaskLifecycleError",
+    # Discovery
+    "DiscoveryPipeline",
+    "GapDetector",
+    "WorkflowSynthesizer",
+    "CapabilityGap",
+    "CapabilityMatch",
+    "DiscoveryResult",
+    "LLMFunction",
+    "ProposedCapability",
+    "SynthesizedWorkflow",
+    "TaskRequirement",
     # Error model
     "ErrorCode",
     "ValidationError",
