@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from grounded_agency.discovery.analyzer import TaskAnalyzer, _VERB_HEURISTICS
+from grounded_agency.discovery.analyzer import _VERB_HEURISTICS, TaskAnalyzer
 
 
 class TestTaskAnalyzerKeywordFallback:

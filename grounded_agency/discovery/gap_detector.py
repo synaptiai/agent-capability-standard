@@ -97,6 +97,6 @@ class GapDetector:
             f"Respond with JSON:\n{json.dumps(schema)}"
         )
 
-        assert self._llm_fn is not None  # guarded by caller
-        response = await self._llm_fn(prompt, schema)
+        # Caller gates on `self._llm_fn is not None`
+        response = await self._llm_fn(prompt, schema)  # type: ignore[misc]
         return ProposedCapability.from_dict(response)

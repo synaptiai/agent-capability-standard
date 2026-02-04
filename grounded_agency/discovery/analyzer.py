@@ -140,7 +140,11 @@ _VERB_HEURISTICS: dict[str, str] = {
     "confirm": "inquire",
 }
 
-# Confidence for keyword fallback (lower than LLM-based matching)
+# Confidence for keyword fallback — intentionally below classifier's
+# MATCH_THRESHOLD (0.6) so that keyword-only matches are routed to gap
+# detection.  This is by design: keyword heuristics are too imprecise to
+# accept without LLM validation, so they serve as *suggestions* that the
+# gap detector can propose as new capabilities.
 _KEYWORD_CONFIDENCE = 0.5
 
 
@@ -195,9 +199,9 @@ class TaskAnalyzer:
 
         prompt = f"{system_prompt}\n\n{user_prompt}\n\nRespond with JSON:\n{json.dumps(schema)}"
 
-        assert self._llm_fn is not None  # guarded by caller
+        # Caller gates on `self._llm_fn is not None`
         try:
-            response = await self._llm_fn(prompt, schema)
+            response = await self._llm_fn(prompt, schema)  # type: ignore[misc]
         except Exception as e:
             logger.warning("LLM analysis failed, falling back to keywords: %s", e)
             return self._analyze_with_keywords(task_description, domain)

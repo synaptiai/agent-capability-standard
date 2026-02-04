@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from grounded_agency.discovery.classifier import MATCH_THRESHOLD, CapabilityClassifier
 from grounded_agency.discovery.types import CapabilityMatch, TaskRequirement
 
@@ -104,7 +102,7 @@ class TestCapabilityClassifier:
         _, gaps = classifier.classify([req], [match])
         assert len(gaps) == 1
         # Should find some nearby capabilities
-        assert len(gaps[0].nearest_existing) >= 0  # May or may not find matches
+        assert len(gaps[0].nearest_existing) >= 1
 
     def test_multiple_matches_same_requirement(self, classifier: CapabilityClassifier):
         """Multiple matches for the same requirement should all be evaluated."""

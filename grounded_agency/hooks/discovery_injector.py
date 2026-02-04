@@ -10,6 +10,7 @@ Follows the same factory-function pattern as evidence_collector.py.
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from ..state.evidence_store import EvidenceStore
@@ -43,8 +44,9 @@ def create_discovery_injector(
     """
     # Track whether we've analyzed the current turn.
     # Bounded to prevent unbounded growth in long-running processes.
+    # Uses OrderedDict as an ordered set for LRU-style eviction.
     _MAX_TRACKED_TURNS = 500
-    _analyzed_turns: set[str] = set()
+    _analyzed_turns: OrderedDict[str, None] = OrderedDict()
 
     async def inject_discovery(
         input_data: dict[str, Any],
@@ -68,11 +70,13 @@ def create_discovery_injector(
             if turn_key in _analyzed_turns:
                 return {}
 
-            # Evict all entries if set grows too large (bounded memory)
+            # Evict oldest half when capacity reached (LRU-style)
             if len(_analyzed_turns) >= _MAX_TRACKED_TURNS:
-                _analyzed_turns.clear()
+                evict_count = _MAX_TRACKED_TURNS // 2
+                for _ in range(evict_count):
+                    _analyzed_turns.popitem(last=False)
 
-            _analyzed_turns.add(turn_key)
+            _analyzed_turns[turn_key] = None
 
             # Run discovery (pipeline has its own per-prompt cache)
             result = await pipeline.discover(prompt)

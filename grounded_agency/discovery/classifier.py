@@ -96,11 +96,11 @@ class CapabilityClassifier:
         for req in requirements:
             if (req.action, req.target) not in matched_reqs:
                 gaps.append(
-                        CapabilityGap(
-                            requirement=req,
-                            nearest_existing=self._find_nearest(req),
-                        )
+                    CapabilityGap(
+                        requirement=req,
+                        nearest_existing=self._find_nearest(req),
                     )
+                )
 
         return accepted, gaps
 

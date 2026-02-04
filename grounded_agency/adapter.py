@@ -243,6 +243,9 @@ class GroundedAgentAdapter:
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
 
+        # Lazy-initialized by _get_or_create_workflow_engine
+        self._workflow_engine: Any = None
+
         # Initialize cost tracking (import here to avoid circular import)
         from .query import CostSummary
 
@@ -250,7 +253,7 @@ class GroundedAgentAdapter:
 
     def _get_or_create_workflow_engine(self) -> Any:
         """Lazy-create a WorkflowEngine for discovery integration."""
-        if not hasattr(self, "_workflow_engine"):
+        if self._workflow_engine is None:
             from .workflows.engine import WorkflowEngine
 
             self._workflow_engine = WorkflowEngine(

@@ -126,11 +126,8 @@ class WorkflowSynthesizer:
         # Generate workflow name from task
         name = self._generate_name(task_description)
 
-        # Calculate confidence from matches
-        if matches:
-            confidence = sum(m.confidence for m in matches) / len(matches)
-        else:
-            confidence = 0.0
+        # Calculate confidence from matches (matches guaranteed non-empty here)
+        confidence = sum(m.confidence for m in matches) / len(matches)
 
         workflow = SynthesizedWorkflow(
             name=name,
@@ -198,7 +195,7 @@ class WorkflowSynthesizer:
         """
         # Build adjacency: cap_id → set of capabilities that must come after
         graph: dict[str, set[str]] = defaultdict(set)
-        in_degree: dict[str, int] = {cap_id: 0 for cap_id in capability_ids}
+        in_degree: dict[str, int] = dict.fromkeys(capability_ids, 0)
         seen_edges: set[tuple[str, str]] = set()
 
         for cap_id in capability_ids:
@@ -223,13 +220,13 @@ class WorkflowSynthesizer:
         # Kahn's algorithm with layer-based tiebreaking
         queue: list[str] = sorted(
             [cap_id for cap_id, deg in in_degree.items() if deg == 0],
-            key=lambda c: self._layer_order(c),
+            key=self._layer_order,
         )
         result: list[str] = []
 
         while queue:
             # Sort by layer order for deterministic tiebreaking
-            queue.sort(key=lambda c: self._layer_order(c))
+            queue.sort(key=self._layer_order)
             cap_id = queue.pop(0)
             result.append(cap_id)
 
@@ -242,7 +239,7 @@ class WorkflowSynthesizer:
         remaining = capability_ids - set(result)
         if remaining:
             logger.warning("Cycle detected in capability graph: %s", remaining)
-            result.extend(sorted(remaining, key=lambda c: self._layer_order(c)))
+            result.extend(sorted(remaining, key=self._layer_order))
 
         # Ensure checkpoint comes before any mutation capability
         result = self._ensure_checkpoint_ordering(result)
@@ -340,8 +337,8 @@ class WorkflowSynthesizer:
             f"Respond with JSON:\n{json.dumps(schema)}"
         )
 
-        assert self._llm_fn is not None  # guarded by caller
-        response = await self._llm_fn(prompt, schema)
+        # Caller gates on `self._llm_fn is not None`
+        response = await self._llm_fn(prompt, schema)  # type: ignore[misc]
 
         # Merge LLM bindings back into steps
         llm_steps = response.get("steps", [])
@@ -375,7 +372,7 @@ class WorkflowSynthesizer:
                 step["input_bindings"]["input"] = f"${{{prev_store}}}"
         return steps
 
-    def _check_existing_workflows(
+    def check_existing_workflows(
         self, capability_ids: set[str]
     ) -> str | None:
         """Check if an existing catalog workflow covers 80%+ of needed capabilities."""
@@ -429,6 +426,6 @@ class WorkflowSynthesizer:
         # Take first few words, lowercase, replace spaces with underscores
         words = task_description.lower().split()[:5]
         clean = "_".join(
-            re.sub(r"[^a-z0-9]", "", w) for w in words if re.sub(r"[^a-z0-9]", "", w)
+            part for part in (re.sub(r"[^a-z0-9]", "", w) for w in words) if part
         )
         return clean or "synthesized_workflow"

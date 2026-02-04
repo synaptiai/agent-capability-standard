@@ -106,7 +106,7 @@ class DiscoveryPipeline:
             )
             # Check for existing workflow match
             cap_ids = {m.capability_id for m in accepted_matches}
-            existing_match = self.synthesizer._check_existing_workflows(cap_ids)
+            existing_match = self.synthesizer.check_existing_workflows(cap_ids)
 
         # Build evidence anchors
         evidence_anchors = self._collect_evidence(task_description, accepted_matches)

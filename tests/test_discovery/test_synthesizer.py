@@ -61,6 +61,17 @@ class TestConflictDetection:
         conflicts = synthesizer._check_conflicts(set())
         assert len(conflicts) == 0
 
+    def test_detects_actual_conflicts(self, synthesizer: WorkflowSynthesizer):
+        """Conflicting capabilities (rollback + persist) should be reported."""
+        conflicts = synthesizer._check_conflicts({"rollback", "persist"})
+        assert len(conflicts) == 1
+        # The pair should be present in either order
+        pair_found = any(
+            (a == "rollback" and b == "persist") or (a == "persist" and b == "rollback")
+            for a, b in conflicts
+        )
+        assert pair_found
+
 
 class TestTopologicalSort:
     """Tests for topological sort with layer-based tiebreaking."""
@@ -88,6 +99,22 @@ class TestTopologicalSort:
         order1 = synthesizer._topological_sort(caps)
         order2 = synthesizer._topological_sort(caps)
         assert order1 == order2
+
+    def test_all_inputs_present_in_output(self, synthesizer: WorkflowSynthesizer):
+        """Topological sort must emit every input capability (no data loss)."""
+        caps = {"search", "detect", "explain", "generate", "transform"}
+        ordered = synthesizer._topological_sort(caps)
+        assert set(ordered) == caps
+
+    def test_checkpoint_reordered_before_mutation(self, synthesizer: WorkflowSynthesizer):
+        """_ensure_checkpoint_ordering should move checkpoint before first mutation."""
+        # Guard: test depends on mutate having requires_checkpoint in ontology
+        cap = synthesizer.registry.get_capability("mutate")
+        assert cap is not None and cap.requires_checkpoint
+        # Simulate a case where checkpoint ended up after mutate
+        ordered = ["search", "mutate", "checkpoint", "audit"]
+        result = synthesizer._ensure_checkpoint_ordering(ordered)
+        assert result.index("checkpoint") < result.index("mutate")
 
 
 class TestWorkflowSynthesis:
@@ -193,10 +220,10 @@ class TestExistingWorkflowMatch:
 
     def test_no_match_for_unrelated(self, synthesizer: WorkflowSynthesizer):
         """Unrelated capability sets should not match existing workflows."""
-        result = synthesizer._check_existing_workflows({"xyzzy_nonexistent"})
+        result = synthesizer.check_existing_workflows({"xyzzy_nonexistent"})
         assert result is None
 
     def test_empty_set_no_match(self, synthesizer: WorkflowSynthesizer):
         """Empty capability set should not match."""
-        result = synthesizer._check_existing_workflows(set())
+        result = synthesizer.check_existing_workflows(set())
         assert result is None
