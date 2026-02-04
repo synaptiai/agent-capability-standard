@@ -1,6 +1,6 @@
 {
   "name": "agent-capability-standard",
-  "version": "1.0.5",
+  "version": "1.2.0",
   "description": "Grounded Agency: 36 atomic capabilities across 9 cognitive layers with typed contracts, safety-by-construction, and grounded reasoning for reliable AI agents",
   "author": {
     "name": "Agent Capability Standard Contributors",

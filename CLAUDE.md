@@ -185,6 +185,10 @@ python tools/sync_skill_schemas.py
 ```
 This generates `skills/<name>/schemas/output_schema.yaml` from the ontology.
 
+## Releasing
+
+When creating a new release, update the version in `.claude-plugin/plugin.json` to match the new tag before committing. This file does not auto-sync with git tags.
+
 ## Claude Agent SDK Integration
 
 The `grounded_agency/` Python package provides SDK integration:
