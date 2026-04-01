@@ -5,9 +5,9 @@
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet?logo=anthropic)](https://github.com/synaptiai/synapti-marketplace)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Spec](https://img.shields.io/badge/Spec-v1.0.0-blue.svg)](spec/STANDARD-v1.0.0.md)
-[![Plugin](https://img.shields.io/badge/Plugin-v1.0.5-green.svg)](CHANGELOG.md)
+[![Plugin](https://img.shields.io/badge/Plugin-v1.2.0-green.svg)](CHANGELOG.md)
 
-> **Versioning:** The spec version (v1.0.0) tracks the standard itself. The plugin version (v1.0.5) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
+> **Versioning:** The spec version (v1.0.0) tracks the standard itself. The plugin version (v1.2.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
 
 ```bash
 # Install as Claude Code plugin
