@@ -17,6 +17,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 import pytest
@@ -35,6 +36,7 @@ from grounded_agency import (
     SyncPrimitive,
     WorkflowStep,
 )
+from grounded_agency.capabilities.registry import CapabilityNode
 from grounded_agency.coordination.delegation import DelegationResult, DelegationTask
 from grounded_agency.coordination.evidence_bridge import SharedEvidence
 
@@ -2286,3 +2288,74 @@ class TestCoordinationExceptions:
         assert issubclass(CapabilityMismatchError, CoordinationError)
         assert issubclass(BarrierResolvedError, CoordinationError)
         assert issubclass(TaskLifecycleError, CoordinationError)
+
+
+class TestCapabilityRegistryPublication:
+    """Regression tests for the lazy-load race in CapabilityRegistry.
+
+    `_load_ontology` assigned `self._ontology` before building
+    `self._nodes_by_id`, and `_ensure_loaded` was an unlocked check-then-act.
+    A second thread arriving in that window saw a non-None ontology, skipped
+    loading, and read an empty index -- surfacing as
+    `ValueError: Unknown capabilities not in ontology: ['retrieve']` from
+    AgentRegistry.register under concurrent registration.
+    """
+
+    ONTOLOGY = (
+        Path(__file__).resolve().parents[1] / "schemas" / "capability_ontology.yaml"
+    )
+
+    def test_ontology_is_published_after_every_index(self) -> None:
+        """The invariant that makes the unlocked fast path safe.
+
+        While indexes are still being built, `_ontology` must remain None, so
+        no other thread can conclude the registry is loaded.
+        """
+        registry = CapabilityRegistry(self.ONTOLOGY)
+        observed: list[bool] = []
+
+        real_from_dict = CapabilityNode.from_dict
+
+        def spy(data: dict) -> CapabilityNode:
+            # True would mean the ontology was already visible to other threads
+            # while the node index was still being populated.
+            observed.append(registry._ontology is not None)
+            return real_from_dict(data)
+
+        with mock.patch.object(CapabilityNode, "from_dict", staticmethod(spy)):
+            registry._ensure_loaded()
+
+        assert observed, "expected nodes to be indexed"
+        assert not any(observed), (
+            "_ontology was published while _nodes_by_id was still being built"
+        )
+
+    def test_loaded_registry_is_complete(self) -> None:
+        registry = CapabilityRegistry(self.ONTOLOGY)
+        registry._ensure_loaded()
+
+        assert registry._ontology is not None
+        assert registry._nodes_by_id is not None
+        assert registry.get_capability("retrieve") is not None
+
+    def test_concurrent_first_access_never_sees_a_partial_registry(self) -> None:
+        """Many threads racing a cold registry must all resolve 'retrieve'."""
+        for _ in range(5):
+            registry = CapabilityRegistry(self.ONTOLOGY)
+            errors: list[str] = []
+
+            def probe(
+                registry: CapabilityRegistry = registry,
+                errors: list[str] = errors,
+            ) -> None:
+                try:
+                    if registry.get_capability("retrieve") is None:
+                        errors.append("get_capability('retrieve') returned None")
+                except Exception as exc:  # noqa: BLE001 - recorded, then asserted
+                    errors.append(f"{type(exc).__name__}: {exc}")
+
+            with ThreadPoolExecutor(max_workers=16) as pool:
+                for future in as_completed([pool.submit(probe) for _ in range(16)]):
+                    future.result()
+
+            assert not errors, errors
