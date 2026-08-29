@@ -336,6 +336,10 @@ world_state:
       - world_id
       - as_of
       - timezone
+      # STANDARD §6.3 lists snapshot identity and derivation as MUST; both were
+      # declared but optional here until issue #107.
+      - version_id
+      - lineage
       properties:
         world_id:
           type: string

@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- `tools/validate_canonical_schemas.py` and a CI job covering the five canonical
+  schemas designated by spec §6.1, which no validator checked before. It asserts
+  §6.2/§6.3 required fields, trust-model internal consistency, alias-threshold
+  ordering, and cross-file agreement with the benchmark fixture. Every defect
+  from #105 and #106 is covered by a negative test proving the validator now
+  catches it (#107)
 - `CapabilityRegistry.all_edges()` public method for enumerating ontology edges
 - Benchmark drift-prevention validator (`tools/validate_benchmark_deps.py`) and CI job
 - Multi-agent coordination runtime with delegate, synchronize, and invoke patterns (#98)
@@ -40,6 +46,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   than decaying asymptotically to zero. It was declared in the schema and cited
   by the ISO 42001, EU AI Act and NIST AI RMF artifacts as an implemented
   control, but was read by nothing (#106)
+- `tools/sync_skill_schemas.py` is idempotent: its comment rewrite reapplied
+  itself to already-rewritten text, so each run stacked another `(repo-level)`
+  prefix onto the 17 bundled workflow catalogs. CLAUDE.md documents the command,
+  so following the project's own instructions corrupted those files (#107)
+- `skills/receive/reference/event_schema.yaml` was an orphan copy that
+  `sync_skill_schemas.py` could not reach, because the sync only bundles into
+  skills that carry a `reference/workflow_catalog.yaml`. It is now resynced and
+  the canonical-schema validator asserts every vendored copy matches its
+  source (#107)
 - Remediate benchmark suite drift from ontology and SDK (#100)
 - Use public `all_edges()` API in benchmark validator instead of private `_loaded_edges` (#100)
 - Install real SDK, remove all mock/skip patterns (#99)
