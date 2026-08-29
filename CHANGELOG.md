@@ -46,10 +46,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   than decaying asymptotically to zero. It was declared in the schema and cited
   by the ISO 42001, EU AI Act and NIST AI RMF artifacts as an implemented
   control, but was read by nothing (#106)
-- `tools/sync_skill_schemas.py` is idempotent: its comment rewrite reapplied
-  itself to already-rewritten text, so each run stacked another `(repo-level)`
-  prefix onto the 17 bundled workflow catalogs. CLAUDE.md documents the command,
-  so following the project's own instructions corrupted those files (#107)
+- `tools/sync_skill_schemas.py` is idempotent and self-healing: its comment
+  rewrite reapplied itself to already-rewritten text, so each run stacked
+  another `(repo-level)` prefix onto the 17 bundled workflow catalogs. CLAUDE.md
+  documents the command, so following the project's own instructions corrupted
+  those files. The rewrite now strips every existing prefix before re-applying
+  exactly one, so a tree a previous run had already doubled is repaired rather
+  than left stable-but-corrupt (#107)
 - `skills/receive/reference/event_schema.yaml` was an orphan copy that
   `sync_skill_schemas.py` could not reach, because the sync only bundles into
   skills that carry a `reference/workflow_catalog.yaml`. It is now resynced and
