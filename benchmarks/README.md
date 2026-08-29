@@ -168,9 +168,20 @@ class NewScenario(BenchmarkScenario):
 
 ### Scenario 1 (Conflicting Sources)
 
-- **~50% baseline accuracy** indicates random selection
-- **85%+ GA accuracy** demonstrates trust model effectiveness
+- Baseline picks a winner at random, so its accuracy tracks the coin flip
+- GA should beat the baseline by a wide margin; the trust model is working when
+  trust-weighted resolution recovers cases the coin flip loses
 - Sources use diverse types (high-trust vs low-trust) to exercise weighting
+- Ground truth deliberately includes a stale-but-authoritative vs
+  fresh-but-weak branch, so the result is sensitive to the decay curve in
+  `schemas/authority_trust_model.yaml`
+
+Run the scenario for the current measured figures rather than relying on a
+number quoted here:
+
+```bash
+python benchmarks/runner.py --scenario conflicting_sources
+```
 
 ### Scenario 2 (Mutation Recovery)
 

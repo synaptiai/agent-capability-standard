@@ -16,7 +16,6 @@ Metrics:
 - Evidence: Completeness of audit trail
 """
 
-import math
 import random
 import re
 from pathlib import Path
@@ -45,7 +44,7 @@ def _load_trust_model() -> tuple[dict[str, float], int]:
 
     model = safe_yaml_load(_TRUST_MODEL_PATH)
     weights = model.get("source_ranking", {}).get("weights", {})
-    half_life_str = model.get("decay_model", {}).get("half_life", "P14D")
+    half_life_str = model.get("decay_model", {}).get("half_life", "P10D")
     match = re.fullmatch(r"P(\d+)D", half_life_str)
     if not match:
         raise ValueError(
@@ -61,8 +60,13 @@ _TRUST_WEIGHTS, _TRUST_HALF_LIFE_HOURS = _load_trust_model()
 def _recency_weight(
     hours_ago: float, half_life: float = _TRUST_HALF_LIFE_HOURS
 ) -> float:
-    """Calculate recency weight with exponential decay."""
-    return math.exp(-hours_ago / half_life)
+    """Weight an observation by age using true half-life decay.
+
+    Returns exactly 0.5 at ``hours_ago == half_life``.  The earlier form
+    ``exp(-hours_ago / half_life)`` treated ``half_life`` as an exponential
+    time constant, decaying 1/ln(2) ~ 1.44x too fast (issue #105).
+    """
+    return 0.5 ** (hours_ago / half_life)
 
 
 class ConflictingSourcesScenario(BenchmarkScenario):

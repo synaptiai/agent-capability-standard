@@ -34,7 +34,7 @@
     "human_note": 0.55
   },
   "temporal_decay": {
-    "half_life_hours": 336,
+    "half_life_hours": 240,
     "min_weight": 0.25
   }
 }

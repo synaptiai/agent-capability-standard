@@ -46,7 +46,7 @@ We present **Grounded Agency**, a capability ontology and workflow framework tha
 
 2. **World State Schema** (§4): A canonical representation for modeling real and digital systems with entities, relationships, state variables, observations, and transition rules. Every element carries provenance records, evidence anchors, and typed uncertainty (epistemic, aleatoric, or mixed).
 
-3. **Trust Model** (§5): A Bayesian conflict resolution system with source authority weights (hardware sensor: 0.95, human note: 0.55), temporal decay (τ₁/₂ = 14 days), and field-specific expertise mapping.
+3. **Trust Model** (§5): A Bayesian conflict resolution system with source authority weights (hardware sensor: 0.95, human note: 0.55), temporal decay (τ₁/₂ = 10 days), and field-specific expertise mapping.
 
 4. **Identity Resolution** (§6): An 8-feature scoring system for entity disambiguation with merge/split policies, hard constraints, and confidence thresholds.
 
@@ -370,10 +370,10 @@ Six source types are ranked by default trustworthiness:
 Information trustworthiness decays over time unless refreshed:
 
 ```
-recency(t) = exp(-(t - t_observed) / τ₁/₂)
+recency(t) = 0.5 ** ((t - t_observed) / τ₁/₂)
 ```
 
-where τ₁/₂ = 14 days by default. Trust never decays below a minimum threshold of 0.25.
+where τ₁/₂ = 10 days by default. Trust never decays below a minimum threshold of 0.25.
 
 ### 5.3 Conflict Resolution Function
 

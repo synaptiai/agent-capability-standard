@@ -66,6 +66,32 @@ def format_result(result: BenchmarkResult) -> str:
     return "\n".join(lines)
 
 
+def _is_fractional_metric(key: str) -> bool:
+    """Whether a float metric is a 0-1 fraction that should render as a percentage.
+
+    Keys suffixed ``_percent`` already carry a 0-100 value and must not be
+    rescaled again; the ``_percent`` suffix is authoritative and is therefore
+    checked before the substring heuristics (issue #105).
+    """
+    if key.endswith("_percent"):
+        return False
+    return "rate" in key or "accuracy" in key or "improvement" in key
+
+
+def _render_float(key: str, value: float, *, default_is_fraction: bool = False) -> str:
+    """Render a float metric with the unit implied by its key.
+
+    ``default_is_fraction`` is set by callers that only ever render
+    improvement deltas, which are 0-1 fractions unless the key says
+    otherwise.
+    """
+    if key.endswith("_percent"):
+        return f"{value:.1f}%"
+    if default_is_fraction or _is_fractional_metric(key):
+        return f"{value:.1%}"
+    return f"{value:.2f}"
+
+
 def _format_metrics(metrics: dict[str, Any]) -> str:
     """Format metrics dict for display."""
     parts = []
@@ -73,10 +99,7 @@ def _format_metrics(metrics: dict[str, Any]) -> str:
         if key == "results":
             continue  # Skip detailed results
         if isinstance(value, float):
-            if "rate" in key or "accuracy" in key or "improvement" in key:
-                parts.append(f"{key}={value:.1%}")
-            else:
-                parts.append(f"{key}={value:.2f}")
+            parts.append(f"{key}={_render_float(key, value)}")
         else:
             parts.append(f"{key}={value}")
     return ", ".join(parts[:5])  # Limit displayed metrics
@@ -132,7 +155,7 @@ def generate_report(
             )
             ga_str = f"{ga_val:.1%}" if isinstance(ga_val, float) else str(ga_val)
             improvement_str = (
-                f"+{improvement_val:.1%}"
+                f"+{_render_float(improvement_key, improvement_val, default_is_fraction=True)}"
                 if isinstance(improvement_val, float)
                 else str(improvement_val)
             )
@@ -259,7 +282,9 @@ def print_summary(results: dict[str, BenchmarkResult]) -> None:
         # Highlight key improvements
         for key, value in result.improvement.items():
             if isinstance(value, float) and value > 0:
-                print(f"  → {key}: +{value:.1%}")
+                print(
+                    f"  → {key}: +{_render_float(key, value, default_is_fraction=True)}"
+                )
 
     print("\n" + "=" * 60)
     print("All scenarios demonstrate GA improvements over baselines")

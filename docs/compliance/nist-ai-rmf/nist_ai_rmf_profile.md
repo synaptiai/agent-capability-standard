@@ -160,7 +160,7 @@ Each NIST category is assessed using:
 
 | Category | Framework Implementation | Coverage |
 |----------|--------------------------|----------|
-| **GV-6** | Trust model defines source weights for external data (`hardware_sensor: 0.95`, `system_of_record: 0.92`, down to `unverified: 0.20`). `invoke` capability handles external API calls with typed contracts. No formal third-party AI vendor assessment procedure. Evidence: `schemas/authority_trust_model.yaml` | Partial — Trust weights for data sources exist; third-party vendor assessment is a gap |
+| **GV-6** | Trust model defines source weights for external data (`hardware_sensor: 0.95`, `system_of_record: 0.92`, down to `human_note: 0.55`). `invoke` capability handles external API calls with typed contracts. No formal third-party AI vendor assessment procedure. Evidence: `schemas/authority_trust_model.yaml` | Partial — Trust weights for data sources exist; third-party vendor assessment is a gap |
 
 > **GOVERN Function — Tier Assessment**
 >
@@ -256,7 +256,7 @@ Each NIST category is assessed using:
 |-------------|--------------------------|----------|----------|
 | **ME-2.1** — Evaluation conducted | Conformance test suite validates structural properties; 6 validators check ontology, workflows, profiles, skill refs, transform refs, YAML sync | `scripts/run_conformance.py`, `tools/validate_ontology.py`, `tools/validate_workflows.py`, `tools/validate_profiles.py`, `tools/validate_skill_refs.py`, `tools/validate_transform_refs.py`, `tools/validate_yaml_util_sync.py` | Full |
 | **ME-2.2** — Evaluation results documented | EvidenceStore captures tool executions as evidence anchors; checkpoint tracker records state transitions; audit log records all skill invocations | `grounded_agency/state/evidence_store.py`, `grounded_agency/state/checkpoint_tracker.py`, `.claude/audit.log` | Partial — Evidence is captured structurally but aggregated reporting/dashboards are a gap |
-| **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P14D`); audit hooks capture all skill invocations in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are gaps |
+| **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P10D`); audit hooks capture all skill invocations in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are gaps |
 
 ### 6.3 ME-3: Trustworthy AI Actor Competency
 

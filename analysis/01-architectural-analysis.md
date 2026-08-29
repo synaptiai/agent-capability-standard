@@ -51,7 +51,7 @@ The system decomposes into **six subsystems**: Schema (formal definitions), SDK 
 | `schemas/workflow_catalog.yaml` | 1,909 | 12 reference workflows with step bindings, gates, failure modes |
 | `schemas/world_state_schema.yaml` | 491 | World model: entities, relationships, state variables, observations, transitions |
 | `schemas/entity_taxonomy.yaml` | 193 | 24 entity classes (11 digital + 13 physical), 57 subtypes, 10 core relations |
-| `schemas/authority_trust_model.yaml` | 58 | 6 source authority ranks with temporal decay (half-life: 14 days) |
+| `schemas/authority_trust_model.yaml` | 62 | 6 source authority ranks with temporal decay (half-life: 10 days) |
 | `schemas/identity_resolution_policy.yaml` | 87 | 8-feature confidence scoring, merge/split thresholds |
 | `schemas/event_schema.yaml` | 176 | Canonical event structure with anchors and uncertainty |
 | `schemas/profiles/profile_schema.yaml` | 102 | Profile schema: trust weights, risk thresholds, checkpoint/evidence policies |

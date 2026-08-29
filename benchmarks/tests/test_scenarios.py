@@ -651,3 +651,103 @@ class TestSetupRequired:
         scenario = MutationRecoveryScenario(seed=42)
         with pytest.raises(RuntimeError, match="setup\\(\\) must be called"):
             scenario.run_ga()
+
+
+class TestTemporalDecayModel:
+    """Regression tests for the authority trust model's decay curve.
+
+    Issue #105: ``recency_factor`` was written as ``exp(-age/half_life)``,
+    which yields 0.368 at ``age == half_life`` rather than 0.5, making the
+    curve 1/ln(2) ~ 1.44x steeper than the declared half-life implies.
+    """
+
+    def test_recency_weight_halves_at_half_life(self) -> None:
+        """The defining property of a half-life: f(half_life) == 0.5."""
+        from benchmarks.scenarios.conflicting_sources import (
+            _TRUST_HALF_LIFE_HOURS,
+            _recency_weight,
+        )
+
+        assert _recency_weight(_TRUST_HALF_LIFE_HOURS) == pytest.approx(0.5, abs=1e-9)
+
+    def test_recency_weight_quarters_at_two_half_lives(self) -> None:
+        """Decay compounds: f(2*half_life) == 0.25."""
+        from benchmarks.scenarios.conflicting_sources import (
+            _TRUST_HALF_LIFE_HOURS,
+            _recency_weight,
+        )
+
+        assert _recency_weight(2 * _TRUST_HALF_LIFE_HOURS) == pytest.approx(
+            0.25, abs=1e-9
+        )
+
+    def test_recency_weight_is_one_at_zero_age(self) -> None:
+        """A just-observed value suffers no decay."""
+        from benchmarks.scenarios.conflicting_sources import _recency_weight
+
+        assert _recency_weight(0.0) == pytest.approx(1.0, abs=1e-12)
+
+    def test_schema_and_fixture_half_life_agree(self) -> None:
+        """The mock-API fixture must not drift from the canonical schema."""
+        import json
+        from pathlib import Path
+
+        from grounded_agency.utils.safe_yaml import safe_yaml_load
+
+        root = Path(__file__).resolve().parents[2]
+        schema = safe_yaml_load(root / "schemas" / "authority_trust_model.yaml")
+        fixture = json.loads(
+            (root / "benchmarks" / "fixtures" / "mock_apis.json").read_text()
+        )
+
+        schema_days = int(schema["decay_model"]["half_life"].removeprefix("P")[:-1])
+        assert fixture["temporal_decay"]["half_life_hours"] == schema_days * 24, (
+            "mock_apis.json half_life_hours drifted from authority_trust_model.yaml"
+        )
+
+
+class TestMetricFormatting:
+    """Regression tests for benchmark metric rendering.
+
+    Issue #105: keys suffixed ``_percent`` already carry a 0-100 value, but
+    the formatter applied ``:.1%``, multiplying by 100 a second time and
+    reporting a +63% improvement as +6304.3%.
+    """
+
+    def test_percent_suffixed_metric_is_not_rescaled(self) -> None:
+        from benchmarks.runner import _format_metrics
+
+        rendered = _format_metrics({"accuracy_improvement_percent": 63.04})
+
+        assert "63.0%" in rendered
+        assert "6304" not in rendered
+
+    def test_fractional_metric_is_still_rendered_as_percentage(self) -> None:
+        from benchmarks.runner import _format_metrics
+
+        rendered = _format_metrics({"accuracy": 0.74})
+
+        assert "74.0%" in rendered
+
+    def test_improvement_summary_keeps_fractions_as_percentages(self) -> None:
+        """Improvement deltas are fractions; only ``_percent`` keys are pre-scaled."""
+        from benchmarks.runner import _render_float
+
+        assert (
+            _render_float("evidence_completeness", 1.0, default_is_fraction=True)
+            == "100.0%"
+        )
+        assert (
+            _render_float(
+                "accuracy_improvement_percent", 60.87, default_is_fraction=True
+            )
+            == "60.9%"
+        )
+
+    def test_absolute_metrics_are_not_rendered_as_percentages(self) -> None:
+        from benchmarks.runner import _format_metrics
+
+        rendered = _format_metrics({"correct_count": 46.0, "recovery_time_ms": 0.052})
+
+        assert "correct_count=46.00" in rendered
+        assert "recovery_time_ms=0.05" in rendered

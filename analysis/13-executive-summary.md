@@ -158,7 +158,7 @@ Every capability in the ontology returns structured evidence:
 - **`provenance`**: Lineage information linking the output to the inputs and intermediate steps that produced it.
 - **`confidence`**: Aggregate confidence score reflecting source authority, temporal freshness, and corroboration.
 
-The trust model applies source authority rankings (primary source > peer-reviewed > institutional > domain expert > crowd-sourced > AI-generated) with temporal decay (half-life: 14 days) and conflict resolution policies.
+The trust model applies source authority rankings (primary source > peer-reviewed > institutional > domain expert > crowd-sourced > AI-generated) with temporal decay (half-life: 10 days) and conflict resolution policies.
 
 ### 3.6 Trust Model
 
