@@ -765,3 +765,56 @@ class TestValidateRFCs:
         directory = self._fixture(tmp_path, name="RFC-0009-a.md")
         self._fixture(tmp_path, name="RFC-0009-b.md")
         assert "Duplicate RFC number" in self._assert_rejected(directory)
+
+    def test_heading_inside_a_fence_does_not_satisfy_a_section(
+        self, tmp_path: Path
+    ) -> None:
+        """A fenced example must not be read as document structure (finding F2).
+
+        This is the false-PASS half: without stripping fences, a required
+        heading appearing inside a code sample would satisfy the check while
+        the RFC has no such section.
+        """
+        directory = self._fixture(
+            tmp_path,
+            lambda t: (
+                t.replace("## Backward compatibility", "## Placeholder")
+                + "\n\n```md\n## Backward compatibility\nnot a real section\n```\n"
+            ),
+        )
+        assert "Backward compatibility" in self._assert_rejected(directory)
+
+    def test_path_inside_a_fence_is_not_checked_for_existence(
+        self, tmp_path: Path
+    ) -> None:
+        """The false-FAIL half: a path in a YAML sample is illustrative."""
+        directory = self._fixture(
+            tmp_path,
+            lambda t: (
+                t
+                + "\n\n```yaml\n# see docs/not_a_real_file.md\nref: `docs/not_a_real_file.md`\n```\n"
+            ),
+        )
+        result = run_validator("validate_rfcs.py", ["--rfc-dir", str(directory)])
+        assert result.returncode == 0, result.stdout
+
+    def test_tilde_fences_are_stripped_too(self, tmp_path: Path) -> None:
+        directory = self._fixture(
+            tmp_path,
+            lambda t: (
+                t.replace("## Backward compatibility", "## Placeholder")
+                + "\n\n~~~md\n## Backward compatibility\nnot a real section\n~~~\n"
+            ),
+        )
+        assert "Backward compatibility" in self._assert_rejected(directory)
+
+    def test_unreadable_rfc_fails_cleanly(self, tmp_path: Path) -> None:
+        directory = tmp_path / "rfcs"
+        directory.mkdir()
+        (directory / "RFC-0009-x.md").write_bytes(b"\xff\xfe\x00binary")
+
+        result = run_validator("validate_rfcs.py", ["--rfc-dir", str(directory)])
+
+        assert result.returncode != 0
+        assert "Traceback" not in result.stderr, result.stderr
+        assert "Could not read" in result.stdout
