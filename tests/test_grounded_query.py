@@ -11,6 +11,7 @@ these tests focus on:
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -19,6 +20,11 @@ from grounded_agency import (
     CostSummary,
     GroundedAgentAdapter,
 )
+
+# Upper bound for the one test that reaches the real SDK. Generous enough that
+# a healthy API answers well inside it, short enough that an unreachable one
+# does not stall the suite.
+SDK_CALL_TIMEOUT_SECONDS = 20.0
 
 # =============================================================================
 # CostSummary Tests
@@ -103,23 +109,43 @@ class TestGroundedQueryImport:
 
     @pytest.mark.asyncio
     async def test_grounded_query_callable(self, adapter: GroundedAgentAdapter):
-        """Test that grounded_query is callable with the SDK installed."""
+        """Test that grounded_query is callable with the SDK installed.
+
+        The call is real -- no mock, no skip (see #99) -- but it is bounded in
+        two ways, because on a machine with a live CLI session this drives an
+        actual billable query with no natural end:
+
+        * the loop stops after the first message, which is all that is needed
+          to prove the wrapper yields from the SDK;
+        * the whole thing runs under a timeout, so an unreachable or slow API
+          cannot stall the suite. Wall time for this file has ranged from
+          seconds to minutes depending on whether the runner was logged in.
+
+        Only ImportError is a real failure here. Every other outcome --
+        validation error, no connection, no session, or timeout -- is the
+        environment, not the wrapper.
+        """
         from claude_agent_sdk import ClaudeSDKError
 
         from grounded_agency import grounded_query
 
-        # SDK is installed; grounded_query should not raise ImportError.
-        # It may raise ValueError (streaming mode required when can_use_tool is
-        # set), a connection error when trying to reach the API, or any
-        # ClaudeSDKError when the environment has no usable CLI session -- CI
-        # runners are not logged in, which surfaces as ResultError/ProcessError.
-        # Only ImportError is a real failure here; everything else is the
-        # environment, not the wrapper.
-        try:
+        async def consume_first_message() -> None:
             async for _ in grounded_query("test", adapter=adapter):
-                pass
-        except (ConnectionError, OSError, ValueError, ClaudeSDKError):
-            # Expected: SDK validation, no live API connection, or no session
+                break
+
+        try:
+            await asyncio.wait_for(
+                consume_first_message(), timeout=SDK_CALL_TIMEOUT_SECONDS
+            )
+        except (
+            ConnectionError,
+            OSError,
+            ValueError,
+            ClaudeSDKError,
+            asyncio.TimeoutError,
+        ):
+            # Expected: SDK validation, no live API connection, no session, or
+            # an API too slow to answer inside the budget.
             pass
 
     def test_grounded_client_instantiates(self):

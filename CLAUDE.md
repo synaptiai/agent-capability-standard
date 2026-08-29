@@ -62,8 +62,14 @@ python scripts/run_conformance.py
 ### Setup Python environment (one-time)
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install pyyaml
+pip install -e ".[dev]"
 ```
+
+Install the `dev` extra rather than individual packages, so the local
+toolchain matches CI. `ruff` is pinned to an exact version on purpose:
+formatting is not covered by semver, and an unpinned bump once turned CI red
+on a commit that touched only `.gitignore`. When bumping it, run
+`ruff format` and land the reformat in the same commit.
 
 ## Architecture
 

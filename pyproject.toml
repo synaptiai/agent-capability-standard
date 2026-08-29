@@ -39,17 +39,23 @@ dependencies = [
 
 [project.optional-dependencies]
 sdk = [
-    "claude-agent-sdk",
+    "claude-agent-sdk>=0.2.148,<0.3",
 ]
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
-    "mypy>=1.0",
-    "ruff>=0.1.0",
-    "types-PyYAML>=6.0",
-    "hypothesis>=6.0",
-    "jsonschema>=4.0",
-    "claude-agent-sdk",
+    "pytest>=7.0,<10",
+    "pytest-asyncio>=0.21,<2",
+    "mypy>=1.0,<3",
+    # Pinned exactly, not bounded. Formatting is not covered by semver: any
+    # ruff release may reformat code or extend `ruff format` to new file
+    # types, which turns a green CI red with no source change. 0.16.5 began
+    # formatting Python blocks inside Markdown and broke this repo's CI on a
+    # commit that touched only .gitignore. Bump deliberately, with the
+    # reformat in the same commit.
+    "ruff==0.16.5",
+    "types-PyYAML>=6.0,<7",
+    "hypothesis>=6.0,<7",
+    "jsonschema>=4.0,<5",
+    "claude-agent-sdk>=0.2.148,<0.3",
 ]
 all = [
     "grounded-agency[sdk,dev]",

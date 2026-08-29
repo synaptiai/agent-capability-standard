@@ -33,9 +33,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Comprehensive analysis documentation package (13 documents, ~570KB)
 
 ### Changed
+- Development dependencies are version-bounded instead of open-ended. `ruff` is
+  pinned exactly (formatting is not semver-safe: 0.16.5 began formatting Python
+  blocks inside Markdown and turned CI red on a commit touching only
+  `.gitignore`), and `claude-agent-sdk`, `mypy`, `pytest`, `pytest-asyncio`,
+  `hypothesis`, `jsonschema` and `types-PyYAML` now carry upper bounds. `mypy`
+  was unbounded at `>=1.0` while 2.x had shipped, so CI was one resolution away
+  from a silent major upgrade
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- `test_grounded_query_callable` no longer drives an unbounded billable API
+  call. It still exercises the real SDK with no mock and no skip, but stops
+  after the first message and runs under a timeout; the file went from minutes
+  to seconds on a machine with a live CLI session
 - Trust decay is now a true half-life: `recency_factor` is `0.5 ** (age/half_life)`,
   which returns exactly 0.5 at `age == half_life`. The previous
   `exp(-age/half_life)` treated `half_life` as an exponential time constant and
