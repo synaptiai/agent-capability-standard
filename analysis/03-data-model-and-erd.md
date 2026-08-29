@@ -603,7 +603,7 @@ erDiagram
 
     ConflictResolution {
         string formula "score = trust * confidence * recency"
-        string recency_factor "0.5 ** (age/half_life)"
+        string recency_factor "max(0.5 ** (age/half_life), min_trust)"
         string[] tie_breakers "Ordered fallback rules"
     }
 
@@ -646,7 +646,7 @@ When two sources disagree on a value, the conflict resolution function computes 
 
 ```
 score = trust_weight(source) * confidence * recency_factor
-recency_factor = 0.5 ** (age / half_life)
+recency_factor = max(0.5 ** (age / half_life), min_trust)
 ```
 
 Where:

@@ -347,7 +347,7 @@ The trust model defines a formal conflict resolution function:
 
 ```
 score = trust_weight(source) * confidence * recency_factor
-recency_factor = 0.5 ** (age / half_life)
+recency_factor = max(0.5 ** (age / half_life), min_trust)
 ```
 
 With explicit tie-breakers:

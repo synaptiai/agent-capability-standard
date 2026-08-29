@@ -14,6 +14,15 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   applied a correct half-life curve were, in effect, decaying more slowly than the reference.
   (#105)
 
+### Added
+- **§8.1 now states the decay semantics normatively.** Time decay MUST be a true
+  half-life (factor `0.5` at `age == half_life`), and `decay_model.min_trust` is
+  defined as a floor on the *decay factor* — not on the composed §8.2 score and
+  not on the static source weight. The floor was previously declared in
+  `authority_trust_model.yaml`, cited by compliance artifacts as an implemented
+  control, unenforced by the reference implementation, and undefined by the spec.
+  (#106)
+
 ## v1.0.0 — 2026-01-24
 
 ### Specification

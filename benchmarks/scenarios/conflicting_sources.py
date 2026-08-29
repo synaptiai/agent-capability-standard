@@ -34,7 +34,7 @@ _TRUST_MODEL_PATH = (
 )
 
 
-def _load_trust_model() -> tuple[dict[str, float], int]:
+def _load_trust_model() -> tuple[dict[str, float], int, float]:
     """Load trust weights and decay settings from authority_trust_model.yaml."""
     if not _TRUST_MODEL_PATH.exists():
         raise FileNotFoundError(
@@ -44,29 +44,41 @@ def _load_trust_model() -> tuple[dict[str, float], int]:
 
     model = safe_yaml_load(_TRUST_MODEL_PATH)
     weights = model.get("source_ranking", {}).get("weights", {})
-    half_life_str = model.get("decay_model", {}).get("half_life", "P10D")
+    decay = model.get("decay_model", {})
+    half_life_str = decay.get("half_life", "P10D")
     match = re.fullmatch(r"P(\d+)D", half_life_str)
     if not match:
         raise ValueError(
             f"Unsupported half_life format '{half_life_str}'. Expected 'P<n>D'."
         )
     half_life_hours = int(match.group(1)) * 24
-    return weights, half_life_hours
+    min_trust = float(decay.get("min_trust", 0.0))
+    if not 0.0 <= min_trust <= 1.0:
+        raise ValueError(f"min_trust must be in [0.0, 1.0], got {min_trust}")
+    return weights, half_life_hours, min_trust
 
 
-_TRUST_WEIGHTS, _TRUST_HALF_LIFE_HOURS = _load_trust_model()
+_TRUST_WEIGHTS, _TRUST_HALF_LIFE_HOURS, _TRUST_MIN = _load_trust_model()
 
 
 def _recency_weight(
-    hours_ago: float, half_life: float = _TRUST_HALF_LIFE_HOURS
+    hours_ago: float,
+    half_life: float = _TRUST_HALF_LIFE_HOURS,
+    min_trust: float = _TRUST_MIN,
 ) -> float:
-    """Weight an observation by age using true half-life decay.
+    """Weight an observation by age using floored half-life decay.
 
     Returns exactly 0.5 at ``hours_ago == half_life``.  The earlier form
     ``exp(-hours_ago / half_life)`` treated ``half_life`` as an exponential
     time constant, decaying 1/ln(2) ~ 1.44x too fast (issue #105).
+
+    Decay stops at ``decay_model.min_trust``, so an observation never becomes
+    worthless purely through age -- it only ever loses its recency advantage
+    over fresher ones.  With the shipped values the floor is reached at exactly
+    two half-lives (``0.5**2 == 0.25``).  This clamp was declared in the schema
+    but unimplemented until issue #106.
     """
-    return 0.5 ** (hours_ago / half_life)
+    return max(0.5 ** (hours_ago / half_life), min_trust)
 
 
 class ConflictingSourcesScenario(BenchmarkScenario):

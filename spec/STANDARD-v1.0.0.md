@@ -352,6 +352,15 @@ Trust scores MUST support:
 | Field authority | Sources may be authoritative for specific fields |
 | Confidence weight | Self-reported confidence from source |
 
+Time decay MUST be a true half-life: the decay factor for an observation of age
+equal to the configured `half_life` MUST be `0.5`. Implementations SHOULD use
+`0.5 ** (age / half_life)`.
+
+`decay_model.min_trust`, when present, is a floor on the **decay factor** — not
+on the composed score of §8.2 and not on the static source weight. Age alone
+therefore never reduces an observation's weight to zero; it only removes that
+observation's recency advantage over fresher ones.
+
 ### 8.2 Conflict Resolution
 
 When sources disagree, resolution strategies include:
