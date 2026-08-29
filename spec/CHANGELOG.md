@@ -23,6 +23,24 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   control, unenforced by the reference implementation, and undefined by the spec.
   (#106)
 
+### Changed
+- **§6.2 and §6.3 now name the fields the canonical schemas actually declare.**
+  §6.2 described observations with `id` / `raw_payload` / `canonical_payload` /
+  `evidence_anchors` — names that appear in no schema file. The canonical event
+  in `event_schema.yaml` has always carried all seven fields as `event_id` /
+  `raw` / `canonical` / `anchors`, and `transform_mapping_rawlog_to_observation.yaml`
+  writes those names. §6.3 likewise placed snapshot identity at the top level
+  when `world_state_schema.yaml` keeps it under `meta`. Both tables now match
+  the schemas; §6.2 also states explicitly that the canonical-event namespace is
+  distinct from the capability-I/O namespace of §4.1, so an event's `anchors`
+  is not a capability's `evidence_anchors`. Clarification only — no field
+  changed shape. (#107)
+- **Three fields the spec marks MUST are now `required` in the schemas.**
+  `event.provenance` (§6.2), and `world_state.meta.version_id` and
+  `meta.lineage` (§6.3), were declared but optional. Per §11.4 adding a required
+  field is breaking for producers that omitted them; no in-repo fixture did.
+  (#107)
+
 ## v1.0.0 — 2026-01-24
 
 ### Specification

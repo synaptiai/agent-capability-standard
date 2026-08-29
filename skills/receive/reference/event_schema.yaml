@@ -76,6 +76,9 @@ event:
   - raw
   - canonical
   - anchors
+  # STANDARD §6.2 lists provenance as MUST; it was declared but optional here
+  # until issue #107.
+  - provenance
   properties:
     event_id:
       type: string

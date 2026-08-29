@@ -277,31 +277,50 @@ failure_modes:
 
 ### 6.2 Observation Requirements
 
-All observations MUST record:
+Field names in this section are those of the `event` object in
+`event_schema.yaml`. They belong to the **canonical-event namespace**, which is
+distinct from the capability-I/O namespace of §4.1 — a capability's
+`evidence_anchors` output and an event's `anchors` field are different things.
+
+All canonical events MUST record:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | string | Yes | Unique observation ID |
-| `timestamp` | datetime | Yes | When observed |
-| `source` | object | Yes | Where observed |
-| `raw_payload` | any | Yes | Original unmodified data |
-| `canonical_payload` | object | Yes | Normalized data |
-| `evidence_anchors` | array | Yes | Links to original evidence |
+| `event_id` | string | Yes | Unique event ID |
+| `timestamp` | string | Yes | ISO-8601 time of observation |
+| `source` | object | Yes | Where observed (`kind`, `name`) |
+| `event_type` | string | Yes | Normalized event type |
+| `raw` | any | Yes | Original unmodified data |
+| `canonical` | object | Yes | Normalized data |
+| `anchors` | array | Yes | Links to original evidence |
 | `provenance` | object | Yes | Traceability record |
 
+Projecting a canonical event into `world_state.observations[]` narrows it to
+the `ObservationEvent` type, whose `payload` carries the event's `canonical`
+value. `transform_mapping_rawlog_to_observation.yaml` defines that projection.
+
 ### 6.3 World State Requirements
+
+Field names in this section are those of `world_state_schema.yaml`. Snapshot
+identity and derivation live under `meta`, not at the top level.
 
 World state snapshots MUST record:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `version_id` | string | Yes | Unique snapshot ID |
-| `parent_version_id` | string | No | Previous snapshot (null for initial) |
-| `timestamp` | datetime | Yes | When snapshot was created |
+| `meta.world_id` | string | Yes | Namespace for the modelled world |
+| `meta.as_of` | string | Yes | ISO-8601 time the snapshot describes |
+| `meta.timezone` | string | Yes | IANA timezone |
+| `meta.version_id` | string | Yes | Unique snapshot ID |
+| `meta.parent_version_id` | string | No | Previous snapshot (null for initial) |
+| `meta.lineage` | array | Yes | Ordered ancestor version IDs |
 | `entities` | array | Yes | Current entity states |
-| `relationships` | array | No | Entity relationships |
-| `lineage` | object | Yes | How this state was derived |
-| `uncertainty` | object | No | Confidence and uncertainty information |
+| `relationships` | array | Yes | Entity relationships |
+| `state_variables` | array | Yes | Observed state variables |
+| `observations` | array | Yes | Observations this state derives from |
+| `transition_rules` | array | Yes | Rules governing state transitions |
+| `actions` | array | Yes | Action records |
+| `indexes` | object | Yes | Lookup indexes |
 | `retention_policy` | object | No | How long to retain |
 
 ---

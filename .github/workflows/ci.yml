@@ -36,6 +36,9 @@ jobs:
       - name: Validate skill references
         run: python tools/validate_skill_refs.py
 
+      - name: Validate canonical schemas
+        run: python tools/validate_canonical_schemas.py
+
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest

@@ -6,6 +6,7 @@ Tests all 5 validators: ontology, workflows, profiles, skill refs, yaml sync.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -337,3 +338,211 @@ class TestJsonSchemaValidation:
         }
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(bad, ontology_schema)
+
+
+# ─── Canonical Schema Validator ───
+
+
+class TestValidateCanonicalSchemas:
+    """Tests for tools/validate_canonical_schemas.py (issue #107).
+
+    STANDARD-v1.0.0 §6.1 designates five canonical schemas. Until this
+    validator existed nothing checked them, so the defects in #105 and #106 all
+    shipped through a green CI. The negative cases below reproduce those exact
+    defects to prove the validator would now catch them.
+
+    Drift is injected into a temporary copy via ``--schemas-dir`` rather than
+    into the tracked files, following the ``--catalog`` precedent in
+    validate_workflows.py. Mutating tracked schemas in place races with any
+    concurrent run and can leave the tree dirty if a test is interrupted.
+    """
+
+    SCHEMAS = ROOT / "schemas"
+
+    def _schemas_copy(self, tmp_path: Path) -> Path:
+        target = tmp_path / "schemas"
+        shutil.copytree(self.SCHEMAS, target)
+        return target
+
+    def _assert_drift_is_caught(
+        self, tmp_path: Path, filename: str, old: str, new: str
+    ) -> None:
+        """Inject a defect into a throwaway copy; the validator must reject it."""
+        schemas = self._schemas_copy(tmp_path)
+        path = schemas / filename
+        original = path.read_text()
+        assert old in original, f"anchor not found in {filename}: {old!r}"
+        path.write_text(original.replace(old, new, 1))
+
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--schemas-dir", str(schemas)]
+        )
+
+        assert result.returncode != 0, (
+            f"validator passed despite injected drift in {filename}"
+        )
+        assert "FAIL" in result.stdout
+
+    def test_passes_with_current_schemas(self) -> None:
+        result = run_validator("validate_canonical_schemas.py")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "PASS" in result.stdout
+
+    def test_verbose_flag_lists_every_canonical_schema(self) -> None:
+        result = run_validator("validate_canonical_schemas.py", ["--verbose"])
+        assert result.returncode == 0
+        for name in (
+            "world_state_schema",
+            "event_schema",
+            "entity_taxonomy",
+            "authority_trust_model",
+            "identity_resolution_policy",
+        ):
+            assert name in result.stdout
+
+    def test_schemas_dir_override_accepts_an_untouched_copy(
+        self, tmp_path: Path
+    ) -> None:
+        schemas = self._schemas_copy(tmp_path)
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--schemas-dir", str(schemas)]
+        )
+        assert result.returncode == 0, result.stdout
+
+    def test_catches_exponential_decay_regression(self, tmp_path: Path) -> None:
+        """Issue #105: exp(-age/half_life) is not a half-life."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "authority_trust_model.yaml",
+            "recency_factor: max(0.5 ** (age/half_life), min_trust)",
+            "recency_factor: exp(-age/half_life)",
+        )
+
+    def test_catches_benchmark_fixture_drift(self, tmp_path: Path) -> None:
+        """Issue #105: mock_apis.json silently disagreed with the schema."""
+        self._assert_drift_is_caught(
+            tmp_path, "authority_trust_model.yaml", "half_life: P10D", "half_life: P14D"
+        )
+
+    def test_catches_phantom_field_authority_source(self, tmp_path: Path) -> None:
+        """Issue #105: the NIST profile cited a source that never existed."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "authority_trust_model.yaml",
+            "    - hardware_sensor\n    - system_of_record",
+            "    - unverified\n    - system_of_record",
+        )
+
+    def test_catches_source_ranking_asymmetry(self, tmp_path: Path) -> None:
+        self._assert_drift_is_caught(
+            tmp_path,
+            "authority_trust_model.yaml",
+            "    human_note: 0.55",
+            "    human_note: 0.55\n    ghost_source: 0.5",
+        )
+
+    def test_catches_out_of_range_min_trust(self, tmp_path: Path) -> None:
+        self._assert_drift_is_caught(
+            tmp_path, "authority_trust_model.yaml", "min_trust: 0.25", "min_trust: 25"
+        )
+
+    def test_catches_missing_spec_6_2_required_field(self, tmp_path: Path) -> None:
+        """STANDARD §6.2 lists provenance as MUST."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "event_schema.yaml",
+            "  - provenance\n  properties:\n    event_id:",
+            "  properties:\n    event_id:",
+        )
+
+    def test_catches_missing_spec_6_3_required_field(self, tmp_path: Path) -> None:
+        """STANDARD §6.3 lists snapshot lineage as MUST."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "world_state_schema.yaml",
+            "      - version_id\n      - lineage",
+            "      - version_id",
+        )
+
+    def test_catches_unordered_alias_thresholds(self, tmp_path: Path) -> None:
+        self._assert_drift_is_caught(
+            tmp_path,
+            "identity_resolution_policy.yaml",
+            "auto_merge: 0.9",
+            "auto_merge: 0.5",
+        )
+
+    def test_catches_malformed_schema_version(self, tmp_path: Path) -> None:
+        self._assert_drift_is_caught(
+            tmp_path, "entity_taxonomy.yaml", "  version: 1.0.0", "  version: v1"
+        )
+
+    def test_catches_missing_canonical_schema_file(self, tmp_path: Path) -> None:
+        """STANDARD §6.1 requires all five files to be present."""
+        schemas = self._schemas_copy(tmp_path)
+        (schemas / "entity_taxonomy.yaml").unlink()
+
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--schemas-dir", str(schemas)]
+        )
+
+        assert result.returncode != 0
+        assert "§6.1" in result.stdout
+
+    def test_vendored_skill_copies_match_their_source(self) -> None:
+        """A skill's reference/ copy must not drift from schemas/ (issue #107).
+
+        sync_skill_schemas.py only reaches skills that bundle a
+        reference/workflow_catalog.yaml, so skills/receive/reference/ is an
+        orphan copy no tooling maintains.
+        """
+        for name in ("world_state_schema", "event_schema"):
+            expected = (self.SCHEMAS / f"{name}.yaml").read_text()
+            copies = sorted((ROOT / "skills").glob(f"*/reference/{name}.yaml"))
+            assert copies, f"expected vendored copies of {name}.yaml"
+            for copy in copies:
+                assert copy.read_text() == expected, (
+                    f"{copy.relative_to(ROOT)} drifted; "
+                    f"run python tools/sync_skill_schemas.py"
+                )
+
+
+# ─── Skill Schema Sync ───
+
+
+class TestSyncSkillSchemas:
+    """Tests for tools/sync_skill_schemas.py (issue #107)."""
+
+    def test_sync_is_idempotent(self) -> None:
+        """Re-running the sync on a synced tree must change nothing.
+
+        The comment rewrite `schemas/workflows/` -> `(repo-level)
+        schemas/workflows/` used to reapply itself to already-rewritten text,
+        so each run stacked another `(repo-level)` prefix onto the 17 bundled
+        catalogs. CLAUDE.md documents this command, so following the project's
+        own instructions corrupted those files.
+        """
+        catalogs = sorted((ROOT / "skills").glob("*/reference/workflow_catalog.yaml"))
+        assert catalogs, "expected bundled workflow catalogs"
+        before = {path: path.read_text() for path in catalogs}
+
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "sync_skill_schemas.py")],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+        for path, original in before.items():
+            assert path.read_text() == original, (
+                f"{path.relative_to(ROOT)} changed on a no-op sync; "
+                f"sync_skill_schemas.py is not idempotent"
+            )
+
+    def test_sync_does_not_stack_the_repo_level_note(self) -> None:
+        for path in sorted((ROOT / "skills").glob("*/reference/workflow_catalog.yaml")):
+            assert "(repo-level) (repo-level)" not in path.read_text(), (
+                f"{path.relative_to(ROOT)} carries a doubled '(repo-level)' note"
+            )
