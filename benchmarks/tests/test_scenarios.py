@@ -849,7 +849,7 @@ class TestTrustFloor:
         import importlib
         from unittest import mock
 
-        import benchmarks.scenarios.conflicting_sources as scenario
+        from benchmarks.scenarios import conflicting_sources as scenario
 
         broken = {
             "source_ranking": {"weights": {"human_note": 0.55}},
@@ -864,7 +864,7 @@ class TestTrustFloor:
     def test_out_of_range_min_trust_is_rejected(self) -> None:
         from unittest import mock
 
-        import benchmarks.scenarios.conflicting_sources as scenario
+        from benchmarks.scenarios import conflicting_sources as scenario
 
         broken = {
             "source_ranking": {"weights": {"human_note": 0.55}},
