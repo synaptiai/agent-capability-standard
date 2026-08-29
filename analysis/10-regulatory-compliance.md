@@ -327,7 +327,7 @@ The trust model implements temporal decay with configurable parameters:
 
 ```yaml
 decay_model:
-  half_life: P14D        # Trust halves every 14 days
+  half_life: P10D        # Trust halves every 10 days
   min_trust: 0.25        # Floor prevents zero-trust collapse
   refresh_events:
     - heartbeat
@@ -347,7 +347,7 @@ The trust model defines a formal conflict resolution function:
 
 ```
 score = trust_weight(source) * confidence * recency_factor
-recency_factor = exp(-age / half_life)
+recency_factor = 0.5 ** (age / half_life)
 ```
 
 With explicit tie-breakers:

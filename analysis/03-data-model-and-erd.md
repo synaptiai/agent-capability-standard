@@ -574,7 +574,7 @@ The authority trust model (defined in `schemas/authority_trust_model.yaml`) prov
 
 **FieldAuthority** maps specific data fields to their authoritative sources. For example, `serial_number` is most reliably sourced from hardware sensors and systems of record, while `error_rate_5m` is best obtained from the observability pipeline. This prevents lower-trust sources from overriding higher-trust sources on specific fields.
 
-**DecayModel** describes how trust in a claim degrades over time when not refreshed. The model uses an exponential decay function with a configurable half-life (default 14 days), a minimum trust floor (0.25), and a set of events that refresh the trust score (heartbeat, healthcheck, authoritative_update).
+**DecayModel** describes how trust in a claim degrades over time when not refreshed. The model uses an exponential decay function with a configurable half-life (default 10 days), a minimum trust floor (0.25), and a set of events that refresh the trust score (heartbeat, healthcheck, authoritative_update).
 
 **ConflictResolution** defines the scoring function used when multiple sources provide conflicting information about the same entity or state variable. The formula combines trust weight, confidence, and a time-based recency factor. When scores are tied, the system applies a cascade of tie-breakers.
 
@@ -596,14 +596,14 @@ erDiagram
     }
 
     DecayModel {
-        string half_life "ISO-8601 duration (P14D)"
+        string half_life "ISO-8601 duration (P10D)"
         float min_trust "Trust floor (0.25)"
         string[] refresh_events "Events that reset decay"
     }
 
     ConflictResolution {
         string formula "score = trust * confidence * recency"
-        string recency_factor "exp(-age/half_life)"
+        string recency_factor "0.5 ** (age/half_life)"
         string[] tie_breakers "Ordered fallback rules"
     }
 
@@ -646,14 +646,14 @@ When two sources disagree on a value, the conflict resolution function computes 
 
 ```
 score = trust_weight(source) * confidence * recency_factor
-recency_factor = exp(-age / half_life)
+recency_factor = 0.5 ** (age / half_life)
 ```
 
 Where:
 - `trust_weight(source)` is the source's rank weight (0.55 to 0.95)
 - `confidence` is the claim's self-reported confidence (0.0 to 1.0)
 - `age` is the time since the claim was last refreshed
-- `half_life` is the decay model's configured half-life (default: 14 days)
+- `half_life` is the decay model's configured half-life (default: 10 days)
 
 **Tie-breaker cascade** (applied in order when scores are equal):
 1. Prefer authoritative source (check FieldAuthority mappings)

@@ -266,7 +266,7 @@ Training-related responsibilities:
 | **PreToolUse checkpoint gate** | Shell hook intercepts Write, Edit, MultiEdit, NotebookEdit, Bash tool calls; blocks if no valid checkpoint marker | Hook runs before tool execution; tool cannot proceed without passing |
 | **Conflict edges** | `conflicts_with` relationships prevent mutually exclusive capabilities from co-executing | Validated at design time by workflow validator |
 | **Domain blocking** | `block_autonomous` capability lists prevent autonomous execution regardless of approval status | Enforced at profile evaluation level |
-| **Trust decay** | Source trust halves every 14 days (τ₁/₂ = 14d, floor = 0.25) | Mathematical model; no override mechanism |
+| **Trust decay** | Source trust halves every 10 days (τ₁/₂ = 10d, floor = 0.25) | Mathematical model; no override mechanism |
 
 **Reference:** `hooks/hooks.json`, `schemas/capability_ontology.yaml` — edges
 
@@ -301,7 +301,7 @@ The framework classifies all 36 capabilities into three risk tiers:
 | Hallucination (ungrounded output) | Evidence grounding requirement; `ground` capability | Reduced but not eliminated — depends on underlying LLM | Evidence coverage KPI (EUAIA-PMM-001) |
 | Unauthorized mutation | Checkpoint gate, approval requirement, domain blocking | Very low — structural enforcement prevents bypass | Checkpoint enforcement rate KPI |
 | Data exfiltration via `send` | Checkpoint gate, domain blocking, approval requirement | Very low — structural enforcement; domain profiles can fully block | Mutation frequency KPI |
-| Stale data influence | Trust decay (τ₁/₂ = 14d), minimum trust floor (0.25) | Low — mathematical decay ensures bounded staleness | Confidence drift KPI |
+| Stale data influence | Trust decay (τ₁/₂ = 10d), minimum trust floor (0.25) | Low — mathematical decay ensures bounded staleness | Confidence drift KPI |
 | Over-reliance on AI output | Human oversight controls, `inquire` escalation, `critique` self-assessment | Medium — depends on deployer implementation of oversight | Human escalation rate KPI |
 | Domain profile misconfiguration | Schema validation, profile validator | Low — structural validation catches schema violations | Profile configuration compliance KPI |
 | Workflow composition error | Design-time type inference, edge constraint validation | Low — caught at design time before execution | Validator pass rate KPI |

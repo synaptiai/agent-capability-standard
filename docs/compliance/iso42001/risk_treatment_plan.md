@@ -53,7 +53,7 @@ The three-tier model provides a consistent risk evaluation:
 | Risk | Treatment | Control | Implementation |
 |------|-----------|---------|---------------|
 | Incorrect output | Accept + Detect | Evidence grounding | Output schemas require `evidence_anchors` and `confidence` |
-| Stale data | Mitigate | Temporal decay | Trust model halves trust every 14 days; min trust floor 0.25 |
+| Stale data | Mitigate | Temporal decay | Trust model halves trust every 10 days; min trust floor 0.25 |
 | Hallucination | Mitigate | Grounding requirement | `ground` capability anchors claims to evidence; `require_grounding` in evidence policy |
 | Bias in classification | Detect + Escalate | Critique loop | `critique` capability for self-assessment; `inquire` for human escalation |
 | Resource exhaustion | Mitigate | Loop limits | `max_loops` on recovery loops prevents infinite retry |

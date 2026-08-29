@@ -76,7 +76,7 @@ This QMS applies to:
 | Data analysis | Confidence scoring with domain-specific minimum thresholds | Evidence policies in domain profiles |
 | Data labelling | Required anchor types per domain profile | `evidence_policy.required_anchor_types` per profile |
 | Data storage | Append-only audit log; checkpoint metadata store; evidence store | `hooks/hooks.json`, `grounded_agency/state/checkpoint_tracker.py`, `grounded_agency/state/evidence_store.py` |
-| Data filtration | Trust decay model (halves every 14 days, floor 0.25) | Trust model in `grounded_agency/` |
+| Data filtration | Trust decay model (halves every 10 days, floor 0.25) | Trust model in `grounded_agency/` |
 | Data retention | Domain-specific retention (healthcare: 2555 days); Art. 12 minimum 10 years | Domain profiles `compliance` section; EUAIA-PMM-001 Section 9 |
 | Provenance tracking | ProvenanceRecord linking evidence to source, timestamp, and capability | EvidenceStore provenance API |
 

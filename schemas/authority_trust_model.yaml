@@ -38,7 +38,11 @@ field_authority:
     authorities:
     - observability_pipeline
 decay_model:
-  half_life: P14D
+  # Time to lose half the trust weight. See conflict_resolution_function
+  # for the curve. P10D reproduces the decay actually validated by the
+  # benchmark suite; the former P14D label described an exponential time
+  # constant, not a half-life (issue #105).
+  half_life: P10D
   min_trust: 0.25
   refresh_events:
   - heartbeat
@@ -46,7 +50,8 @@ decay_model:
   - authoritative_update
 conflict_resolution_function:
   formula: score = trust_weight(source) * confidence * recency_factor
-  recency_factor: exp(-age/half_life)
+  # True half-life decay: recency_factor(age = half_life) == 0.5.
+  recency_factor: 0.5 ** (age/half_life)
   tie_breakers:
   - prefer_authoritative_source
   - prefer_high_confidence

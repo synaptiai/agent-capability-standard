@@ -21,6 +21,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- Trust decay is now a true half-life: `recency_factor` is `0.5 ** (age/half_life)`,
+  which returns exactly 0.5 at `age == half_life`. The previous
+  `exp(-age/half_life)` treated `half_life` as an exponential time constant and
+  decayed 1/ln(2) ≈ 1.44x too fast. `decay_model.half_life` is correspondingly
+  set to `P10D`, the value that reproduces the curve the benchmark suite
+  actually validated — the former `P14D` was a mislabelled ~9.7-day half-life,
+  not a 14-day one (#105)
+- Benchmark metrics suffixed `_percent` are no longer scaled a second time by
+  the reporter, which printed a +63% accuracy improvement as +6304.3% (#105)
+- Documentation and compliance artifacts that asserted a 14-day trust half-life
+  now state the value the schema implements (#105)
+- Removed an unverified "85%+ GA accuracy" claim from the benchmark README in
+  favour of the command that reports the measured figure (#105)
+- Corrected NIST AI RMF profile reference to a trust source (`unverified: 0.20`)
+  that does not exist in `authority_trust_model.yaml` (#105)
 - Remediate benchmark suite drift from ontology and SDK (#100)
 - Use public `all_edges()` API in benchmark validator instead of private `_loaded_edges` (#100)
 - Install real SDK, remove all mock/skip patterns (#99)
