@@ -490,21 +490,43 @@ class TestValidateCanonicalSchemas:
         assert "§6.1" in result.stdout
 
     def test_vendored_skill_copies_match_their_source(self) -> None:
-        """A skill's reference/ copy must not drift from schemas/ (issue #107).
+        """Every reference/ copy in the real tree agrees with schemas/."""
+        result = run_validator("validate_canonical_schemas.py")
+        assert result.returncode == 0, result.stdout
+
+    def test_catches_drifted_vendored_copy(self, tmp_path: Path) -> None:
+        """A desynced skill copy must fail the validator (issue #107).
 
         sync_skill_schemas.py only reaches skills that bundle a
         reference/workflow_catalog.yaml, so skills/receive/reference/ is an
-        orphan copy no tooling maintains.
+        orphan copy no tooling maintains -- exactly the copy that had drifted.
         """
-        for name in ("world_state_schema", "event_schema"):
-            expected = (self.SCHEMAS / f"{name}.yaml").read_text()
-            copies = sorted((ROOT / "skills").glob(f"*/reference/{name}.yaml"))
-            assert copies, f"expected vendored copies of {name}.yaml"
-            for copy in copies:
-                assert copy.read_text() == expected, (
-                    f"{copy.relative_to(ROOT)} drifted; "
-                    f"run python tools/sync_skill_schemas.py"
-                )
+        skills = tmp_path / "skills"
+        (skills / "receive" / "reference").mkdir(parents=True)
+        copy = skills / "receive" / "reference" / "event_schema.yaml"
+        source = (self.SCHEMAS / "event_schema.yaml").read_text()
+        copy.write_text(source.replace("  - provenance\n", "", 1))
+
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--skills-dir", str(skills)]
+        )
+
+        assert result.returncode != 0
+        assert "has drifted" in result.stdout
+
+    def test_accepts_an_in_sync_vendored_copy(self, tmp_path: Path) -> None:
+        skills = tmp_path / "skills"
+        (skills / "receive" / "reference").mkdir(parents=True)
+        shutil.copy(
+            self.SCHEMAS / "event_schema.yaml",
+            skills / "receive" / "reference" / "event_schema.yaml",
+        )
+
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--skills-dir", str(skills)]
+        )
+
+        assert result.returncode == 0, result.stdout
 
 
 # ─── Skill Schema Sync ───
@@ -539,6 +561,43 @@ class TestSyncSkillSchemas:
             assert path.read_text() == original, (
                 f"{path.relative_to(ROOT)} changed on a no-op sync; "
                 f"sync_skill_schemas.py is not idempotent"
+            )
+
+    def test_rewrite_heals_already_doubled_prefixes(self) -> None:
+        """The rewrite must collapse existing stacking, not merely stop adding.
+
+        Replacing one layer then re-applying makes double-prefixed content a
+        fixed point: the sync would preserve corruption a previous run wrote
+        rather than repairing it.
+        """
+        import importlib.util
+
+        sys.path.insert(0, str(ROOT / "tools"))
+        spec = importlib.util.spec_from_file_location(
+            "sync_skill_schemas", ROOT / "tools" / "sync_skill_schemas.py"
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["sync_skill_schemas"] = module
+        spec.loader.exec_module(module)
+
+        old_prefix, new_prefix = next(
+            iter(module.WORKFLOW_CATALOG_COMMENT_REWRITES.items())
+        )
+        note = new_prefix[: -len(old_prefix)]  # e.g. "(repo-level) "
+        expected = f"#   - {new_prefix}x.yaml"
+
+        for layers in (0, 1, 2, 3):
+            content = f"#   - {note * layers}{old_prefix}x.yaml"
+
+            # The rewrite as implemented in bundle_workflow_catalog_deps.
+            while new_prefix in content:
+                content = content.replace(new_prefix, old_prefix)
+            content = content.replace(old_prefix, new_prefix)
+
+            assert content == expected, (
+                f"{layers} stacked note(s) collapsed to {content!r}, "
+                f"expected {expected!r}"
             )
 
     def test_sync_does_not_stack_the_repo_level_note(self) -> None:

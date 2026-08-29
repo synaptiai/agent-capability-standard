@@ -38,7 +38,7 @@ from yaml_util import YAMLSizeExceededError, safe_yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMAS_DIR = ROOT / "schemas"
-SKILLS_DIR = ROOT / "skills"
+DEFAULT_SKILLS_DIR = ROOT / "skills"
 TRUST_FIXTURE = ROOT / "benchmarks" / "fixtures" / "mock_apis.json"
 
 
@@ -98,6 +98,14 @@ ALIAS_THRESHOLD_ORDER = [
 
 
 # -------------------- Validation Functions --------------------
+
+
+def _display_path(path: Path) -> str:
+    """Repo-relative when possible; absolute otherwise (e.g. a test fixture)."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 def validate_header(schema: dict[str, Any], errors: list[str], name: str) -> None:
@@ -333,7 +341,9 @@ def validate_trust_fixture_sync(schema: dict[str, Any], errors: list[str]) -> No
             )
 
 
-def validate_vendored_copies(schemas_dir: Path, errors: list[str]) -> None:
+def validate_vendored_copies(
+    schemas_dir: Path, skills_dir: Path, errors: list[str]
+) -> None:
     """Skill reference/ copies of a canonical schema must match the source.
 
     `sync_skill_schemas.py` only bundles transitive dependencies into skills
@@ -347,10 +357,10 @@ def validate_vendored_copies(schemas_dir: Path, errors: list[str]) -> None:
             continue
 
         expected = source.read_text()
-        for copy in sorted(SKILLS_DIR.glob(f"*/reference/{name}.yaml")):
+        for copy in sorted(skills_dir.glob(f"*/reference/{name}.yaml")):
             if copy.read_text() != expected:
                 errors.append(
-                    f"[{name}] vendored copy {copy.relative_to(ROOT)} has drifted "
+                    f"[{name}] vendored copy {_display_path(copy)} has drifted "
                     f"from schemas/{name}.yaml; run "
                     f"python tools/sync_skill_schemas.py"
                 )
@@ -378,9 +388,15 @@ def main() -> None:
             "instead of mutating tracked files."
         ),
     )
+    parser.add_argument(
+        "--skills-dir",
+        default=None,
+        help="Override the skills directory searched for vendored copies.",
+    )
     args = parser.parse_args()
 
     schemas_dir = Path(args.schemas_dir) if args.schemas_dir else DEFAULT_SCHEMAS_DIR
+    skills_dir = Path(args.skills_dir) if args.skills_dir else DEFAULT_SKILLS_DIR
 
     errors: list[str] = []
     validated_count = 0
@@ -414,8 +430,7 @@ def main() -> None:
 
         validated_count += 1
 
-    if schemas_dir == DEFAULT_SCHEMAS_DIR:
-        validate_vendored_copies(schemas_dir, errors)
+    validate_vendored_copies(schemas_dir, skills_dir, errors)
 
     if errors:
         print("CANONICAL SCHEMA VALIDATION FAIL:")

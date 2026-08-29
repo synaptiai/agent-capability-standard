@@ -164,12 +164,15 @@ def sync_workflow_catalog_deps(dry_run: bool = False) -> tuple[int, int, list[st
         for old_path, new_path in WORKFLOW_CATALOG_TRANSITIVE_DEPS.items():
             content = content.replace(old_path, new_path)
 
-        # Rewrite comment-only domain workflow refs.  Collapse any occurrence
-        # that already carries the new prefix first, otherwise re-running the
-        # sync stacks the note ("(repo-level) (repo-level) schemas/workflows/")
-        # and this tool stops being idempotent (issue #107).
+        # Rewrite comment-only domain workflow refs.  Strip every existing
+        # prefix before re-applying exactly one, otherwise re-running the sync
+        # stacks the note ("(repo-level) (repo-level) schemas/workflows/") and
+        # this tool stops being idempotent.  The loop also heals content that
+        # a previous run already double-prefixed; collapsing a single layer
+        # would leave such content stable but still corrupt (issue #107).
         for old_prefix, new_prefix in WORKFLOW_CATALOG_COMMENT_REWRITES.items():
-            content = content.replace(new_prefix, old_prefix)
+            while new_prefix in content:
+                content = content.replace(new_prefix, old_prefix)
             content = content.replace(old_prefix, new_prefix)
 
         if content != original:
