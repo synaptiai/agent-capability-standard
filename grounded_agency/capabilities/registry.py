@@ -7,6 +7,7 @@ Enables querying capabilities, edges, and layers at runtime.
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,11 +85,22 @@ class CapabilityRegistry:
         # Edge indexes for O(1) lookups
         self._outgoing_edges: dict[str, list[CapabilityEdge]] | None = None
         self._incoming_edges: dict[str, list[CapabilityEdge]] | None = None
+        # Serializes lazy loading.  Reentrant because _load_ontology may reach
+        # back through a property that calls _ensure_loaded again.
+        self._load_lock = threading.RLock()
 
     def _ensure_loaded(self) -> None:
-        """Ensure ontology is loaded. Call before accessing data."""
-        if self._ontology is None:
-            self._load_ontology()
+        """Ensure ontology is loaded. Call before accessing data.
+
+        Thread-safe via double-checked locking.  The unlocked fast path is
+        sound only because _load_ontology publishes ``self._ontology`` last,
+        after every derived index is fully built -- see the note there.
+        """
+        if self._ontology is not None:
+            return
+        with self._load_lock:
+            if self._ontology is None:
+                self._load_ontology()
 
     @property
     def _loaded_ontology(self) -> dict[str, Any]:
@@ -137,27 +149,34 @@ class CapabilityRegistry:
             self._ontology_path, max_size=ONTOLOGY_MAX_BYTES
         )
 
-        self._ontology = ontology
-
-        # Index nodes by ID for fast lookup
-        self._nodes_by_id = {}
+        # Build every index into locals first.  `self._ontology` is what
+        # _ensure_loaded tests, so assigning it before the indexes exist
+        # publishes a half-built registry: another thread sees a non-None
+        # ontology, skips loading, and reads a None or empty _nodes_by_id --
+        # reporting every capability as unknown.  Publish last.
+        nodes_by_id: dict[str, CapabilityNode] = {}
         for node_data in ontology.get("nodes", []):
             node = CapabilityNode.from_dict(node_data)
-            self._nodes_by_id[node.id] = node
+            nodes_by_id[node.id] = node
 
-        # Parse edges and build indexes for O(1) lookups
-        self._edges = []
-        self._outgoing_edges = defaultdict(list)
-        self._incoming_edges = defaultdict(list)
+        edges: list[CapabilityEdge] = []
+        outgoing_edges: dict[str, list[CapabilityEdge]] = defaultdict(list)
+        incoming_edges: dict[str, list[CapabilityEdge]] = defaultdict(list)
         for edge_data in ontology.get("edges", []):
             edge = CapabilityEdge(
                 from_cap=edge_data["from"],
                 to_cap=edge_data["to"],
                 edge_type=edge_data["type"],
             )
-            self._edges.append(edge)
-            self._outgoing_edges[edge.from_cap].append(edge)
-            self._incoming_edges[edge.to_cap].append(edge)
+            edges.append(edge)
+            outgoing_edges[edge.from_cap].append(edge)
+            incoming_edges[edge.to_cap].append(edge)
+
+        self._nodes_by_id = nodes_by_id
+        self._edges = edges
+        self._outgoing_edges = outgoing_edges
+        self._incoming_edges = incoming_edges
+        self._ontology = ontology  # published last -- see note above
 
     def get_capability(self, cap_id: str) -> CapabilityNode | None:
         """
