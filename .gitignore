@@ -18,3 +18,6 @@ conformance_results.json
 .claude/settings.json
 .checkpoints/*
 .hypothesis/*
+# Session recorder / trail tooling
+.entire/
+.trail/
