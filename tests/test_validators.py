@@ -589,20 +589,33 @@ class TestSyncSkillSchemas:
         assert catalogs, "expected bundled workflow catalogs"
         before = {path: path.read_text() for path in catalogs}
 
-        result = subprocess.run(
-            [sys.executable, str(ROOT / "tools" / "sync_skill_schemas.py")],
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
+        # The sync writes to the tracked tree, so anything it changes is
+        # restored before this test returns. Without that, a failure -- or a
+        # concurrent checkout of a branch whose sync tool predates the
+        # idempotency fix -- leaves the repository dirty.
+        try:
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tools" / "sync_skill_schemas.py")],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
 
-        for path, original in before.items():
-            assert path.read_text() == original, (
-                f"{path.relative_to(ROOT)} changed on a no-op sync; "
+            drifted = [
+                path.relative_to(ROOT)
+                for path, original in before.items()
+                if path.read_text() != original
+            ]
+            assert not drifted, (
+                f"{drifted} changed on a no-op sync; "
                 f"sync_skill_schemas.py is not idempotent"
             )
+        finally:
+            for path, original in before.items():
+                if path.read_text() != original:
+                    path.write_text(original)
 
     def test_rewrite_heals_already_doubled_prefixes(self) -> None:
         """The rewrite must collapse existing stacking, not merely stop adding.
