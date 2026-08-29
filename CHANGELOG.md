@@ -36,6 +36,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   favour of the command that reports the measured figure (#105)
 - Corrected NIST AI RMF profile reference to a trust source (`unverified: 0.20`)
   that does not exist in `authority_trust_model.yaml` (#105)
+- `decay_model.min_trust` is now enforced: the recency factor is floored rather
+  than decaying asymptotically to zero. It was declared in the schema and cited
+  by the ISO 42001, EU AI Act and NIST AI RMF artifacts as an implemented
+  control, but was read by nothing (#106)
 - Remediate benchmark suite drift from ontology and SDK (#100)
 - Use public `all_edges()` API in benchmark validator instead of private `_loaded_edges` (#100)
 - Install real SDK, remove all mock/skip patterns (#99)

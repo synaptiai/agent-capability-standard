@@ -751,3 +751,61 @@ class TestMetricFormatting:
 
         assert "correct_count=46.00" in rendered
         assert "recovery_time_ms=0.05" in rendered
+
+
+class TestTrustFloor:
+    """Regression tests for ``decay_model.min_trust``.
+
+    Issue #106: the floor was declared in ``authority_trust_model.yaml`` and
+    cited by four compliance artifacts as an implemented control, but nothing
+    read it, so the recency factor decayed asymptotically to zero.
+    """
+
+    def test_recency_weight_never_falls_below_min_trust(self) -> None:
+        from benchmarks.scenarios.conflicting_sources import (
+            _TRUST_HALF_LIFE_HOURS,
+            _TRUST_MIN,
+            _recency_weight,
+        )
+
+        for multiple in (3, 10, 100, 10_000):
+            assert _recency_weight(multiple * _TRUST_HALF_LIFE_HOURS) == pytest.approx(
+                _TRUST_MIN
+            ), f"floor breached at {multiple} half-lives"
+
+    def test_floor_is_reached_at_two_half_lives(self) -> None:
+        """0.5**2 == 0.25 == min_trust, so decay stops at exactly 2 half-lives."""
+        from benchmarks.scenarios.conflicting_sources import (
+            _TRUST_HALF_LIFE_HOURS,
+            _TRUST_MIN,
+            _recency_weight,
+        )
+
+        assert _recency_weight(2 * _TRUST_HALF_LIFE_HOURS) == pytest.approx(
+            _TRUST_MIN, abs=1e-9
+        )
+
+    def test_decay_is_unclamped_above_the_floor(self) -> None:
+        from benchmarks.scenarios.conflicting_sources import (
+            _TRUST_HALF_LIFE_HOURS,
+            _recency_weight,
+        )
+
+        assert _recency_weight(_TRUST_HALF_LIFE_HOURS) == pytest.approx(0.5, abs=1e-9)
+
+    def test_schema_and_fixture_floor_agree(self) -> None:
+        import json
+        from pathlib import Path
+
+        from grounded_agency.utils.safe_yaml import safe_yaml_load
+
+        root = Path(__file__).resolve().parents[2]
+        schema = safe_yaml_load(root / "schemas" / "authority_trust_model.yaml")
+        fixture = json.loads(
+            (root / "benchmarks" / "fixtures" / "mock_apis.json").read_text()
+        )
+
+        assert (
+            fixture["temporal_decay"]["min_weight"]
+            == schema["decay_model"]["min_trust"]
+        ), "mock_apis.json min_weight drifted from authority_trust_model.yaml"

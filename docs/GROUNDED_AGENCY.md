@@ -370,7 +370,7 @@ Six source types are ranked by default trustworthiness:
 Information trustworthiness decays over time unless refreshed:
 
 ```
-recency(t) = 0.5 ** ((t - t_observed) / τ₁/₂)
+recency(t) = max(0.5 ** ((t - t_observed) / τ₁/₂), min_trust)
 ```
 
 where τ₁/₂ = 10 days by default. Trust never decays below a minimum threshold of 0.25.

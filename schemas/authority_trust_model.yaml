@@ -43,6 +43,9 @@ decay_model:
   # benchmark suite; the former P14D label described an exponential time
   # constant, not a half-life (issue #105).
   half_life: P10D
+  # Floor for recency_factor: age alone never drives an observation's weight to
+  # zero, it only removes its recency advantage over fresher ones. With the
+  # values above the floor is reached at exactly two half-lives (0.5**2 = 0.25).
   min_trust: 0.25
   refresh_events:
   - heartbeat
@@ -50,8 +53,10 @@ decay_model:
   - authoritative_update
 conflict_resolution_function:
   formula: score = trust_weight(source) * confidence * recency_factor
-  # True half-life decay: recency_factor(age = half_life) == 0.5.
-  recency_factor: 0.5 ** (age/half_life)
+  # True half-life decay, floored at decay_model.min_trust:
+  #   recency_factor(age = half_life) == 0.5
+  #   recency_factor(age -> inf)      == min_trust
+  recency_factor: max(0.5 ** (age/half_life), min_trust)
   tie_breakers:
   - prefer_authoritative_source
   - prefer_high_confidence
