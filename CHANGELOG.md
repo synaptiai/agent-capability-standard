@@ -13,6 +13,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   ordering, and cross-file agreement with the benchmark fixture. Every defect
   from #105 and #106 is covered by a negative test proving the validator now
   catches it (#107)
+- `spec/RFC-0002-agent-reliability-profile.md` proposing cross-session agent
+  behavioural reliability as a first-class concept, and naming the prerequisite
+  that blocks it: the standard has no agent identity object to attach a profile
+  to (#104)
+- `tools/validate_rfcs.py` and a CI job enforcing what `spec/GOVERNANCE.md`
+  already required of RFCs — motivation, alternatives, backward-compatibility
+  analysis and conformance test updates — plus header metadata, unique RFC
+  numbers, and that cited repository paths exist. RFC-0001 was missing two of
+  the required sections and now carries them (#104)
 - `CapabilityRegistry.all_edges()` public method for enumerating ontology edges
 - Benchmark drift-prevention validator (`tools/validate_benchmark_deps.py`) and CI job
 - Multi-agent coordination runtime with delegate, synchronize, and invoke patterns (#98)

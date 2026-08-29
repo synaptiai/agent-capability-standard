@@ -29,6 +29,11 @@ python tools/validate_ontology.py
 python tools/validate_canonical_schemas.py
 ```
 
+### Validate RFC structure against GOVERNANCE requirements
+```bash
+python tools/validate_rfcs.py
+```
+
 ### Validate YAML utility sync (safe_yaml.py ↔ yaml_util.py)
 ```bash
 python tools/validate_yaml_util_sync.py

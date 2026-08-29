@@ -659,3 +659,109 @@ class TestSyncSkillSchemas:
             assert "(repo-level) (repo-level)" not in path.read_text(), (
                 f"{path.relative_to(ROOT)} carries a doubled '(repo-level)' note"
             )
+
+
+# ─── RFC Validator ───
+
+
+class TestValidateRFCs:
+    """Tests for tools/validate_rfcs.py (issue #104).
+
+    spec/GOVERNANCE.md requires community proposals to arrive as RFCs carrying
+    motivation, alternatives, a backward-compatibility analysis, and conformance
+    test updates. Nothing enforced that, and RFC-0001 was missing two of them.
+    """
+
+    RFC = ROOT / "spec" / "RFC-0002-agent-reliability-profile.md"
+
+    def _fixture(
+        self, tmp_path: Path, mutate=None, name: str = "RFC-0009-x.md"
+    ) -> Path:
+        """Write a valid RFC (optionally mutated) into a throwaway directory."""
+        text = self.RFC.read_text().replace("# RFC-0002:", "# RFC-0009:")
+        if mutate is not None:
+            text = mutate(text)
+        directory = tmp_path / "rfcs"
+        directory.mkdir(exist_ok=True)
+        (directory / name).write_text(text)
+        return directory
+
+    def _assert_rejected(self, directory: Path) -> str:
+        result = run_validator("validate_rfcs.py", ["--rfc-dir", str(directory)])
+        assert result.returncode != 0, f"validator accepted it:\n{result.stdout}"
+        assert "FAIL" in result.stdout
+        return result.stdout
+
+    def test_passes_with_repository_rfcs(self) -> None:
+        result = run_validator("validate_rfcs.py")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "PASS" in result.stdout
+
+    def test_verbose_flag_lists_each_rfc(self) -> None:
+        result = run_validator("validate_rfcs.py", ["--verbose"])
+        assert result.returncode == 0
+        assert "RFC-0001" in result.stdout
+        assert "RFC-0002" in result.stdout
+
+    def test_accepts_a_valid_fixture(self, tmp_path: Path) -> None:
+        result = run_validator(
+            "validate_rfcs.py", ["--rfc-dir", str(self._fixture(tmp_path))]
+        )
+        assert result.returncode == 0, result.stdout
+
+    def test_rejects_missing_governance_section(self, tmp_path: Path) -> None:
+        """GOVERNANCE requires a backward-compatibility analysis."""
+        directory = self._fixture(
+            tmp_path,
+            lambda t: t.replace("## Backward compatibility", "## Something else"),
+        )
+        assert "Backward compatibility" in self._assert_rejected(directory)
+
+    def test_rejects_empty_section(self, tmp_path: Path) -> None:
+        def blank_motivation(text: str) -> str:
+            start = text.index("## Motivation")
+            end = text.index("## Goals")
+            return text.replace(text[start:end], "## Motivation\n\n")
+
+        assert "is empty" in self._assert_rejected(
+            self._fixture(tmp_path, blank_motivation)
+        )
+
+    def test_rejects_malformed_filename(self, tmp_path: Path) -> None:
+        directory = self._fixture(tmp_path, name="RFC-9-Bad_Name.md")
+        assert "Filename must match" in self._assert_rejected(directory)
+
+    def test_rejects_title_and_filename_number_mismatch(self, tmp_path: Path) -> None:
+        directory = self._fixture(
+            tmp_path, lambda t: t.replace("# RFC-0009:", "# RFC-0007:")
+        )
+        assert "Title says RFC-0007" in self._assert_rejected(directory)
+
+    def test_rejects_malformed_status(self, tmp_path: Path) -> None:
+        directory = self._fixture(
+            tmp_path, lambda t: t.replace("**Status:** Draft", "**Status:** kinda")
+        )
+        assert "Status" in self._assert_rejected(directory)
+
+    def test_rejects_malformed_date(self, tmp_path: Path) -> None:
+        directory = self._fixture(
+            tmp_path, lambda t: t.replace("**Date:** 2026-08-29", "**Date:** Aug 2026")
+        )
+        assert "Date" in self._assert_rejected(directory)
+
+    def test_rejects_phantom_path_reference(self, tmp_path: Path) -> None:
+        """An RFC must not cite files that do not exist."""
+        directory = self._fixture(
+            tmp_path,
+            lambda t: t.replace(
+                "`grounded_agency/coordination/registry.py`",
+                "`grounded_agency/coordination/no_such_file.py`",
+                1,
+            ),
+        )
+        assert "does not exist" in self._assert_rejected(directory)
+
+    def test_rejects_duplicate_rfc_numbers(self, tmp_path: Path) -> None:
+        directory = self._fixture(tmp_path, name="RFC-0009-a.md")
+        self._fixture(tmp_path, name="RFC-0009-b.md")
+        assert "Duplicate RFC number" in self._assert_rejected(directory)

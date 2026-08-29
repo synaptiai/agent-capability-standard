@@ -31,6 +31,19 @@ Agents fail in production primarily due to:
 4) **Trust and identity as first-class policies**
 5) **Validator emits patches** rather than only errors
 
+## Backward compatibility
+Not applicable: this RFC defines the initial publication of the standard, so
+there is no prior version to remain compatible with. Every guarantee it
+establishes — forward compatibility through ignored unknown fields, backward
+compatibility for existing workflows and capability semantics, and the schema
+evolution table — is stated in §11 and applies from v1.0.0 onward.
+
+## Conformance test updates
+Conformance levels L1–L4 are defined by this RFC rather than modified by it.
+The initial fixture set covers each level: positive fixtures that MUST pass,
+negative fixtures that MUST fail with a specific error code, and patch fixtures
+carrying expected coercion suggestions, run by `scripts/run_conformance.py`.
+
 ## Alternatives considered
 - Pure agent frameworks without schemas (fails in production)
 - Hard-coded pipelines (non-composable)
