@@ -39,6 +39,9 @@ jobs:
       - name: Validate canonical schemas
         run: python tools/validate_canonical_schemas.py
 
+      - name: Validate RFCs
+        run: python tools/validate_rfcs.py
+
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
