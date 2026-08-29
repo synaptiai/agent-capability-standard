@@ -809,3 +809,33 @@ class TestTrustFloor:
             fixture["temporal_decay"]["min_weight"]
             == schema["decay_model"]["min_trust"]
         ), "mock_apis.json min_weight drifted from authority_trust_model.yaml"
+
+    def test_absolute_valued_metric_is_not_rendered_as_percentage(self) -> None:
+        """``_get_primary_metric`` can fall back to an absolute count."""
+        from benchmarks.runner import _render_float
+
+        assert (
+            _render_float("compute_savings", 3600.0, default_is_fraction=True)
+            == "3600.00"
+        )
+        assert _render_float(
+            "detection_improvement", 1.0, default_is_fraction=True
+        ) == ("100.0%")
+
+    def test_all_fractional_metrics_render_consistently(self) -> None:
+        """Every 0-1 quality metric renders as a percentage, not a bare float."""
+        from benchmarks.runner import _format_metrics
+
+        rendered = _format_metrics(
+            {
+                "evidence_completeness": 1.0,
+                "evidence_coverage": 0.5,
+                "faithfulness": 0.38,
+                "detection_rate": 1.0,
+            }
+        )
+
+        assert "evidence_completeness=100.0%" in rendered
+        assert "evidence_coverage=50.0%" in rendered
+        assert "faithfulness=38.0%" in rendered
+        assert "detection_rate=100.0%" in rendered

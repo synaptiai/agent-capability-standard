@@ -75,7 +75,17 @@ def _is_fractional_metric(key: str) -> bool:
     """
     if key.endswith("_percent"):
         return False
-    return "rate" in key or "accuracy" in key or "improvement" in key
+    return any(
+        token in key
+        for token in (
+            "rate",
+            "accuracy",
+            "improvement",
+            "completeness",
+            "coverage",
+            "faithfulness",
+        )
+    )
 
 
 def _render_float(key: str, value: float, *, default_is_fraction: bool = False) -> str:
@@ -84,10 +94,15 @@ def _render_float(key: str, value: float, *, default_is_fraction: bool = False) 
     ``default_is_fraction`` is set by callers that only ever render
     improvement deltas, which are 0-1 fractions unless the key says
     otherwise.
+
+    A value outside [-1, 1] is never a fraction whatever its key suggests, so
+    it is rendered as a plain number.  ``_get_primary_metric`` falls back to
+    the first key in a metrics dict, which can be an absolute count such as
+    ``compute_savings``; without this guard 3600.0 would render as 360000.0%.
     """
     if key.endswith("_percent"):
         return f"{value:.1f}%"
-    if default_is_fraction or _is_fractional_metric(key):
+    if (default_is_fraction or _is_fractional_metric(key)) and -1.0 <= value <= 1.0:
         return f"{value:.1%}"
     return f"{value:.2f}"
 
@@ -149,11 +164,15 @@ def generate_report(
             improvement_val = result.improvement.get(improvement_key, "N/A")
 
             baseline_str = (
-                f"{baseline_val:.1%}"
+                _render_float(baseline_key, baseline_val, default_is_fraction=True)
                 if isinstance(baseline_val, float)
                 else str(baseline_val)
             )
-            ga_str = f"{ga_val:.1%}" if isinstance(ga_val, float) else str(ga_val)
+            ga_str = (
+                _render_float(ga_key, ga_val, default_is_fraction=True)
+                if isinstance(ga_val, float)
+                else str(ga_val)
+            )
             improvement_str = (
                 f"+{_render_float(improvement_key, improvement_val, default_is_fraction=True)}"
                 if isinstance(improvement_val, float)
@@ -183,7 +202,7 @@ def generate_report(
             )
             for key, value in result.baseline_metrics.items():
                 if key != "results":
-                    lines.append(f"- {key}: {_format_value(value)}")
+                    lines.append(f"- {key}: {_format_value(key, value)}")
 
             lines.extend(
                 [
@@ -194,7 +213,7 @@ def generate_report(
             )
             for key, value in result.ga_metrics.items():
                 if key != "results":
-                    lines.append(f"- {key}: {_format_value(value)}")
+                    lines.append(f"- {key}: {_format_value(key, value)}")
 
             lines.extend(
                 [
@@ -204,7 +223,7 @@ def generate_report(
                 ]
             )
             for key, value in result.improvement.items():
-                lines.append(f"- {key}: {_format_value(value)}")
+                lines.append(f"- {key}: {_format_value(key, value)}")
 
             lines.append("")
 
@@ -259,12 +278,16 @@ def _get_primary_metric(metrics: dict[str, Any]) -> str:
     return "unknown"
 
 
-def _format_value(value: Any) -> str:
-    """Format a value for display."""
+def _format_value(key: str, value: Any) -> str:
+    """Format a value for display.
+
+    Delegates to ``_render_float`` so the detailed report body agrees with the
+    summary table and the console output.  The earlier magnitude-only rule
+    rendered ``compute_wasted: 0.0`` as ``0.0%`` but ``detection_rate: 1.0`` as
+    ``1.00``, since it keyed off ``abs(value) < 1`` rather than the metric.
+    """
     if isinstance(value, float):
-        if abs(value) < 1:
-            return f"{value:.1%}"
-        return f"{value:.2f}"
+        return _render_float(key, value)
     return str(value)
 
 
