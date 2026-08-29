@@ -464,6 +464,47 @@ class TestValidateCanonicalSchemas:
             "      - version_id",
         )
 
+    def test_catches_zero_half_life(self, tmp_path: Path) -> None:
+        """A zero half-life divides by zero in the decay curve (finding F1)."""
+        self._assert_drift_is_caught(
+            tmp_path, "authority_trust_model.yaml", "half_life: P10D", "half_life: P0D"
+        )
+
+    def test_exp_detection_does_not_match_identifier_substrings(
+        self, tmp_path: Path
+    ) -> None:
+        """`regexp(` contains `exp(` but is not an exponential (finding F3)."""
+        schemas = self._schemas_copy(tmp_path)
+        path = schemas / "authority_trust_model.yaml"
+        path.write_text(
+            path.read_text().replace(
+                "recency_factor: max(0.5 ** (age/half_life), min_trust)",
+                "recency_factor: max(0.5 ** (regexp(age)/half_life), min_trust)",
+                1,
+            )
+        )
+
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--schemas-dir", str(schemas)]
+        )
+
+        assert result.returncode == 0, (
+            f"'regexp(' was misread as an exponential:\n{result.stdout}"
+        )
+
+    def test_unreadable_schema_fails_cleanly(self, tmp_path: Path) -> None:
+        """Bad bytes produce a validation error, not a traceback (finding F4)."""
+        schemas = self._schemas_copy(tmp_path)
+        (schemas / "entity_taxonomy.yaml").write_bytes(b"\xff\xfe\x00binary")
+
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--schemas-dir", str(schemas)]
+        )
+
+        assert result.returncode != 0
+        assert "Traceback" not in result.stderr, result.stderr
+        assert "Could not load" in result.stdout
+
     def test_catches_unordered_alias_thresholds(self, tmp_path: Path) -> None:
         self._assert_drift_is_caught(
             tmp_path,

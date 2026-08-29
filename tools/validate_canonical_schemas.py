@@ -57,6 +57,8 @@ REQUIRED_HEADER_FIELDS = ["name", "version", "description"]
 
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 ISO_DAYS_PATTERN = re.compile(r"^P(\d+)D$")
+# `exp(` as a call, not as a substring of an identifier such as `regexp(`.
+EXP_CALL_PATTERN = re.compile(r"(?<![A-Za-z0-9_])exp\s*\(")
 
 # STANDARD §6.2 Observation Requirements -- canonical-event namespace
 EVENT_REQUIRED_FIELDS = [
@@ -227,10 +229,20 @@ def validate_trust_model(schema: dict[str, Any], errors: list[str], name: str) -
 
     decay = schema.get("decay_model") or {}
     half_life = decay.get("half_life")
-    if not isinstance(half_life, str) or not ISO_DAYS_PATTERN.match(half_life):
+    half_life_match = (
+        ISO_DAYS_PATTERN.match(half_life) if isinstance(half_life, str) else None
+    )
+    if half_life_match is None:
         errors.append(
             f"[{name}] decay_model.half_life {half_life!r} is not an ISO-8601 "
             f"day duration (P<n>D)"
+        )
+    elif int(half_life_match.group(1)) < 1:
+        # `0.5 ** (age / 0)` raises ZeroDivisionError, and the loader in
+        # conflicting_sources.py evaluates it at import time (issue #107).
+        errors.append(
+            f"[{name}] decay_model.half_life {half_life!r} must be at least one "
+            f"day; a zero half-life divides by zero in the decay curve"
         )
 
     min_trust = decay.get("min_trust")
@@ -247,7 +259,7 @@ def validate_trust_model(schema: dict[str, Any], errors: list[str], name: str) -
     recency = str(
         (schema.get("conflict_resolution_function") or {}).get("recency_factor", "")
     )
-    if "exp(" in recency.replace(" ", ""):
+    if EXP_CALL_PATTERN.search(recency):
         errors.append(
             f"[{name}] conflict_resolution_function.recency_factor {recency!r} "
             f"uses exp(); a true half-life returns 0.5 at age == half_life. Use "
@@ -304,8 +316,8 @@ def validate_trust_fixture_sync(schema: dict[str, Any], errors: list[str]) -> No
         return
 
     try:
-        fixture = json.loads(TRUST_FIXTURE.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        fixture = json.loads(TRUST_FIXTURE.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         errors.append(f"[mock_apis.json] Could not read fixture: {exc}")
         return
 
@@ -356,9 +368,22 @@ def validate_vendored_copies(
         if not source.exists():
             continue
 
-        expected = source.read_text()
+        try:
+            expected = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"[{name}] Could not read {_display_path(source)}: {exc}")
+            continue
+
         for copy in sorted(skills_dir.glob(f"*/reference/{name}.yaml")):
-            if copy.read_text() != expected:
+            try:
+                actual = copy.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                errors.append(
+                    f"[{name}] Could not read {_display_path(copy)}: {exc}"
+                )
+                continue
+
+            if actual != expected:
                 errors.append(
                     f"[{name}] vendored copy {_display_path(copy)} has drifted "
                     f"from schemas/{name}.yaml; run "
@@ -415,8 +440,13 @@ def main() -> None:
 
         try:
             schema = safe_yaml_load(path) or {}
-        except (yaml.YAMLError, YAMLSizeExceededError) as exc:
-            errors.append(f"[{name}] YAML load error: {exc}")
+        except (
+            yaml.YAMLError,
+            YAMLSizeExceededError,
+            OSError,
+            UnicodeDecodeError,
+        ) as exc:
+            errors.append(f"[{name}] Could not load {_display_path(path)}: {exc}")
             continue
 
         validate_header(schema, errors, name)
