@@ -2,6 +2,18 @@
 
 This changelog tracks changes to the **Agent Capability Standard specification** itself. For plugin and project-level changes, see the [root CHANGELOG](../CHANGELOG.md).
 
+## Unreleased
+
+### Fixed
+- **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`
+  is `0.5 ** (age/half_life)`, which returns exactly 0.5 at `age == half_life`. The published
+  `exp(-age/half_life)` returned 0.3679 there, treating `half_life` as an exponential time
+  constant and decaying 1/ln(2) ≈ 1.44x too fast. `decay_model.half_life` is set to `P10D`,
+  the value reproducing the curve the reference implementation actually exhibited; the former
+  `P14D` was a mislabelled ~9.7-day half-life. Implementations that read `half_life` and
+  applied a correct half-life curve were, in effect, decaying more slowly than the reference.
+  (#105)
+
 ## v1.0.0 — 2026-01-24
 
 ### Specification
