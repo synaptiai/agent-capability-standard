@@ -51,7 +51,13 @@ def _load_trust_model() -> tuple[dict[str, float], int, float]:
         raise ValueError(
             f"Unsupported half_life format '{half_life_str}'. Expected 'P<n>D'."
         )
-    half_life_hours = int(match.group(1)) * 24
+    half_life_days = int(match.group(1))
+    if half_life_days < 1:
+        raise ValueError(
+            f"half_life must be at least one day, got '{half_life_str}'. "
+            "A zero half-life divides by zero in the decay curve."
+        )
+    half_life_hours = half_life_days * 24
     min_trust = float(decay.get("min_trust", 0.0))
     if not 0.0 <= min_trust <= 1.0:
         raise ValueError(f"min_trust must be in [0.0, 1.0], got {min_trust}")

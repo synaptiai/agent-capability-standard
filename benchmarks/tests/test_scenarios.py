@@ -839,3 +839,37 @@ class TestTrustFloor:
         assert "evidence_coverage=50.0%" in rendered
         assert "faithfulness=38.0%" in rendered
         assert "detection_rate=100.0%" in rendered
+
+    def test_zero_half_life_is_rejected(self) -> None:
+        """A zero half-life divides by zero in the decay curve.
+
+        `_load_trust_model` runs at import, so an accepted `P0D` would raise
+        ZeroDivisionError before any test could run.
+        """
+        import importlib
+        from unittest import mock
+
+        import benchmarks.scenarios.conflicting_sources as scenario
+
+        broken = {
+            "source_ranking": {"weights": {"human_note": 0.55}},
+            "decay_model": {"half_life": "P0D", "min_trust": 0.25},
+        }
+        with mock.patch.object(scenario, "safe_yaml_load", return_value=broken):
+            with pytest.raises(ValueError, match="at least one day"):
+                scenario._load_trust_model()
+
+        importlib.reload(scenario)
+
+    def test_out_of_range_min_trust_is_rejected(self) -> None:
+        from unittest import mock
+
+        import benchmarks.scenarios.conflicting_sources as scenario
+
+        broken = {
+            "source_ranking": {"weights": {"human_note": 0.55}},
+            "decay_model": {"half_life": "P10D", "min_trust": 25},
+        }
+        with mock.patch.object(scenario, "safe_yaml_load", return_value=broken):
+            with pytest.raises(ValueError, match=r"\[0.0, 1.0\]"):
+                scenario._load_trust_model()
