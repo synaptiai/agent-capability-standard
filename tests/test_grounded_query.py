@@ -104,16 +104,22 @@ class TestGroundedQueryImport:
     @pytest.mark.asyncio
     async def test_grounded_query_callable(self, adapter: GroundedAgentAdapter):
         """Test that grounded_query is callable with the SDK installed."""
+        from claude_agent_sdk import ClaudeSDKError
+
         from grounded_agency import grounded_query
 
         # SDK is installed; grounded_query should not raise ImportError.
-        # It may raise ValueError (streaming mode required when can_use_tool is set)
-        # or a connection error when trying to reach the API.
+        # It may raise ValueError (streaming mode required when can_use_tool is
+        # set), a connection error when trying to reach the API, or any
+        # ClaudeSDKError when the environment has no usable CLI session -- CI
+        # runners are not logged in, which surfaces as ResultError/ProcessError.
+        # Only ImportError is a real failure here; everything else is the
+        # environment, not the wrapper.
         try:
             async for _ in grounded_query("test", adapter=adapter):
                 pass
-        except (ConnectionError, OSError, ValueError):
-            # Expected: SDK validation or no live API connection
+        except (ConnectionError, OSError, ValueError, ClaudeSDKError):
+            # Expected: SDK validation, no live API connection, or no session
             pass
 
     def test_grounded_client_instantiates(self):

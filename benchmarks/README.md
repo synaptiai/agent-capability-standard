@@ -139,6 +139,7 @@ python benchmarks/runner.py --report --format json --output results/metrics.json
 # scenarios/new_scenario.py
 from .base import BenchmarkScenario
 
+
 class NewScenario(BenchmarkScenario):
     name = "new_scenario"
     description = "Tests new aspect of GA"
