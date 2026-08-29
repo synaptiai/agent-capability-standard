@@ -1,0 +1,44 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "78d1c259ffc0",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 10,
+  "files_touched": [
+    "docs/proposals/GROUNDED_HARNESS.md",
+    "docs/proposals/GROUNDED_HARNESS_ADR.md",
+    "docs/proposals/GROUNDED_HARNESS_IMPLEMENTATION_PLAN.md",
+    "docs/proposals/GROUNDED_HARNESS_V2.md",
+    "docs/proposals/GROUNDED_HARNESS_V3.md",
+    "docs/proposals/research/01_constitutional_architecture_analysis.md",
+    "docs/proposals/research/02_graph_db_vs_sqlite_analysis.md",
+    "docs/proposals/research/03_go_durable_runtimes_analysis.md",
+    "docs/proposals/research/04_agent_memory_architecture_analysis.md",
+    "docs/proposals/research/05_go_project_structure.md",
+    "docs/proposals/research/06_grpc_api_design.md",
+    "docs/proposals/research/07_github_issues_breakdown.md",
+    "docs/proposals/research/08_hatchet_dag_ontology_mapping.md",
+    "docs/proposals/reviews/01_architecture_review.md",
+    "docs/proposals/reviews/02_security_audit.md",
+    "docs/proposals/reviews/03_performance_analysis.md",
+    "docs/proposals/reviews/04_simplicity_review.md",
+    "docs/proposals/reviews/05_consistency_audit.md",
+    "docs/proposals/reviews/06_standards_compliance_audit.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/78/d1c259ffc0/0/metadata.json",
+      "transcript": "/78/d1c259ffc0/0/full.jsonl",
+      "context": "/78/d1c259ffc0/0/context.md",
+      "content_hash": "/78/d1c259ffc0/0/content_hash.txt",
+      "prompt": "/78/d1c259ffc0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 7782,
+    "cache_creation_tokens": 1037499,
+    "cache_read_tokens": 40146654,
+    "output_tokens": 144686,
+    "api_call_count": 125
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "78d1c259ffc0",
+  "session_id": "aea2a477-8363-41f0-8024-8a8494a646fc",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-29T12:00:14.70992Z",
+  "branch": "main",
+  "checkpoints_count": 10,
+  "files_touched": [
+    "docs/proposals/GROUNDED_HARNESS.md",
+    "docs/proposals/GROUNDED_HARNESS_ADR.md",
+    "docs/proposals/GROUNDED_HARNESS_IMPLEMENTATION_PLAN.md",
+    "docs/proposals/GROUNDED_HARNESS_V2.md",
+    "docs/proposals/GROUNDED_HARNESS_V3.md",
+    "docs/proposals/research/01_constitutional_architecture_analysis.md",
+    "docs/proposals/research/02_graph_db_vs_sqlite_analysis.md",
+    "docs/proposals/research/03_go_durable_runtimes_analysis.md",
+    "docs/proposals/research/04_agent_memory_architecture_analysis.md",
+    "docs/proposals/research/05_go_project_structure.md",
+    "docs/proposals/research/06_grpc_api_design.md",
+    "docs/proposals/research/07_github_issues_breakdown.md",
+    "docs/proposals/research/08_hatchet_dag_ontology_mapping.md",
+    "docs/proposals/reviews/01_architecture_review.md",
+    "docs/proposals/reviews/02_security_audit.md",
+    "docs/proposals/reviews/03_performance_analysis.md",
+    "docs/proposals/reviews/04_simplicity_review.md",
+    "docs/proposals/reviews/05_consistency_audit.md",
+    "docs/proposals/reviews/06_standards_compliance_audit.md"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "e6d48141-2a07-4de5-84c3-68a776d483fa",
+  "token_usage": {
+    "input_tokens": 7782,
+    "cache_creation_tokens": 1037499,
+    "cache_read_tokens": 40146654,
+    "output_tokens": 144686,
+    "api_call_count": 125
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-29T12:00:08.482825Z",
+    "agent_lines": 0,
+    "human_added": 0,
+    "human_modified": 160,
+    "human_removed": 14827,
+    "total_committed": 160,
+    "agent_percentage": 0
+  },
+  "transcript_path": ".claude/projects/-Users-danielbentes-agent-capability-standard/aea2a477-8363-41f0-8024-8a8494a646fc.jsonl"
+}
