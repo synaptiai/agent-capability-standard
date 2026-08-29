@@ -53,6 +53,20 @@ REQUIRED_SECTIONS = [
 # Inline code spans that look like repository paths.
 PATH_PATTERN = re.compile(r"`([A-Za-z0-9_./-]+\.(?:py|yaml|yml|json|md))`")
 
+# Fenced code blocks, so an example inside one is never read as document
+# structure: a `## Heading` in a fence would otherwise satisfy the
+# required-section check, and a path in a YAML sample would be checked for
+# existence.
+FENCE_PATTERN = re.compile(r"^(?P<fence>```+|~~~+).*?^(?P=fence)\s*$", re.M | re.S)
+
+
+def strip_fenced_blocks(text: str) -> str:
+    """Blank out fenced code blocks, preserving line numbering."""
+    def blank(match: re.Match[str]) -> str:
+        return "\n" * match.group(0).count("\n")
+
+    return FENCE_PATTERN.sub(blank, text)
+
 
 def parse_sections(text: str) -> dict[str, str]:
     """Map each `## Heading` to the body text beneath it."""
@@ -170,10 +184,16 @@ def main() -> None:
             else:
                 seen_numbers[number] = name
 
-        text = path.read_text(encoding="utf-8")
-        validate_metadata(text.splitlines(), errors, name)
-        validate_sections(text, errors, name)
-        validate_referenced_paths(text, errors, name)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"[{name}] Could not read the file: {exc}")
+            continue
+
+        prose = strip_fenced_blocks(text)
+        validate_metadata(prose.splitlines(), errors, name)
+        validate_sections(prose, errors, name)
+        validate_referenced_paths(prose, errors, name)
         validated_count += 1
 
     if errors:
