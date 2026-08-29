@@ -2,9 +2,11 @@
   "cli_version": "0.4.4",
   "checkpoint_id": "78d1c259ffc0",
   "strategy": "manual-commit",
-  "branch": "main",
-  "checkpoints_count": 11,
+  "branch": "feat/issue-104-agent-reliability-rfc",
+  "checkpoints_count": 12,
   "files_touched": [
+    "benchmarks/runner.py",
+    "benchmarks/scenarios/conflicting_sources.py",
     "docs/proposals/DURABLE_EXECUTION_ENGINE.md",
     "docs/proposals/GROUNDED_HARNESS.md",
     "docs/proposals/GROUNDED_HARNESS_ADR.md",
@@ -24,7 +26,10 @@
     "docs/proposals/reviews/03_performance_analysis.md",
     "docs/proposals/reviews/04_simplicity_review.md",
     "docs/proposals/reviews/05_consistency_audit.md",
-    "docs/proposals/reviews/06_standards_compliance_audit.md"
+    "docs/proposals/reviews/06_standards_compliance_audit.md",
+    "spec/RFC-0002-agent-reliability-profile.md",
+    "tools/validate_canonical_schemas.py",
+    "tools/validate_rfcs.py"
   ],
   "sessions": [
     {
@@ -40,13 +45,20 @@
       "context": "/78/d1c259ffc0/1/context.md",
       "content_hash": "/78/d1c259ffc0/1/content_hash.txt",
       "prompt": "/78/d1c259ffc0/1/prompt.txt"
+    },
+    {
+      "metadata": "/78/d1c259ffc0/2/metadata.json",
+      "transcript": "/78/d1c259ffc0/2/full.jsonl",
+      "context": "/78/d1c259ffc0/2/context.md",
+      "content_hash": "/78/d1c259ffc0/2/content_hash.txt",
+      "prompt": "/78/d1c259ffc0/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 12588,
-    "cache_creation_tokens": 1145714,
-    "cache_read_tokens": 41188171,
-    "output_tokens": 159779,
-    "api_call_count": 140
+    "input_tokens": 13178,
+    "cache_creation_tokens": 1842190,
+    "cache_read_tokens": 114929574,
+    "output_tokens": 360124,
+    "api_call_count": 431
   }
 }

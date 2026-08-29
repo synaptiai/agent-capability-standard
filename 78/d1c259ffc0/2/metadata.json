@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "78d1c259ffc0",
+  "session_id": "c69842d1-1aa1-4024-9571-d8dc59e17f56",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-29T16:47:01.433359Z",
+  "branch": "feat/issue-104-agent-reliability-rfc",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "benchmarks/runner.py",
+    "benchmarks/scenarios/conflicting_sources.py",
+    "spec/RFC-0002-agent-reliability-profile.md",
+    "tools/validate_canonical_schemas.py",
+    "tools/validate_rfcs.py"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "11e9862f-9194-4993-a7f2-975920ad05a8",
+  "token_usage": {
+    "input_tokens": 590,
+    "cache_creation_tokens": 696476,
+    "cache_read_tokens": 73741403,
+    "output_tokens": 200345,
+    "api_call_count": 291
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-29T16:46:57.867686Z",
+    "agent_lines": 0,
+    "human_added": 1775,
+    "human_modified": 24,
+    "human_removed": 0,
+    "total_committed": 1775,
+    "agent_percentage": 0
+  },
+  "transcript_path": ".claude/projects/-Users-danielbentes-agent-capability-standard/c69842d1-1aa1-4024-9571-d8dc59e17f56.jsonl"
+}
