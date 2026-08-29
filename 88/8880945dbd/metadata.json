@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "888880945dbd",
+  "strategy": "manual-commit",
+  "branch": "fix/pin-dev-deps-and-bound-sdk-test",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".claude/settings.local.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/88/8880945dbd/0/metadata.json",
+      "transcript": "/88/8880945dbd/0/full.jsonl",
+      "context": "/88/8880945dbd/0/context.md",
+      "content_hash": "/88/8880945dbd/0/content_hash.txt",
+      "prompt": "/88/8880945dbd/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 278,
+    "cache_creation_tokens": 1629830,
+    "cache_read_tokens": 67353469,
+    "output_tokens": 97389,
+    "api_call_count": 139
+  }
+}
