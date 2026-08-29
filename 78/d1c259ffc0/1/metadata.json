@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "78d1c259ffc0",
+  "session_id": "babfebcb-d0b8-4163-9a60-8475ef367427",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-29T12:00:16.57932Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/proposals/DURABLE_EXECUTION_ENGINE.md"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "91585781-ba3d-42c8-b5ce-035cd80627a2",
+  "token_usage": {
+    "input_tokens": 4806,
+    "cache_creation_tokens": 108215,
+    "cache_read_tokens": 1041517,
+    "output_tokens": 15093,
+    "api_call_count": 15
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-29T12:00:14.780614Z",
+    "agent_lines": 0,
+    "human_added": 581,
+    "human_modified": 723,
+    "human_removed": 0,
+    "total_committed": 1304,
+    "agent_percentage": 0
+  },
+  "transcript_path": ".claude/projects/-Users-danielbentes-agent-capability-standard/babfebcb-d0b8-4163-9a60-8475ef367427.jsonl"
+}

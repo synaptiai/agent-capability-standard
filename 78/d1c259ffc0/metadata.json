@@ -3,8 +3,9 @@
   "checkpoint_id": "78d1c259ffc0",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 10,
+  "checkpoints_count": 11,
   "files_touched": [
+    "docs/proposals/DURABLE_EXECUTION_ENGINE.md",
     "docs/proposals/GROUNDED_HARNESS.md",
     "docs/proposals/GROUNDED_HARNESS_ADR.md",
     "docs/proposals/GROUNDED_HARNESS_IMPLEMENTATION_PLAN.md",
@@ -32,13 +33,20 @@
       "context": "/78/d1c259ffc0/0/context.md",
       "content_hash": "/78/d1c259ffc0/0/content_hash.txt",
       "prompt": "/78/d1c259ffc0/0/prompt.txt"
+    },
+    {
+      "metadata": "/78/d1c259ffc0/1/metadata.json",
+      "transcript": "/78/d1c259ffc0/1/full.jsonl",
+      "context": "/78/d1c259ffc0/1/context.md",
+      "content_hash": "/78/d1c259ffc0/1/content_hash.txt",
+      "prompt": "/78/d1c259ffc0/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 7782,
-    "cache_creation_tokens": 1037499,
-    "cache_read_tokens": 40146654,
-    "output_tokens": 144686,
-    "api_call_count": 125
+    "input_tokens": 12588,
+    "cache_creation_tokens": 1145714,
+    "cache_read_tokens": 41188171,
+    "output_tokens": 159779,
+    "api_call_count": 140
   }
 }
