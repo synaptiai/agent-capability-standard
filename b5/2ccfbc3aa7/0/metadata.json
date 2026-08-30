@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "b52ccfbc3aa7",
+  "session_id": "c69842d1-1aa1-4024-9571-d8dc59e17f56",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-30T13:05:03.6545Z",
+  "branch": "docs/link-validator-and-rfc-0002-update",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "benchmarks/runner.py",
+    "benchmarks/scenarios/conflicting_sources.py",
+    "constraints.txt",
+    "docs/integrations/claude_agent_sdk.md",
+    "grounded_agency/query.py",
+    "pyproject.toml",
+    "spec/RFC-0002-agent-reliability-profile.md",
+    "tests/test_grounded_query.py",
+    "tools/validate_canonical_schemas.py",
+    "tools/validate_constraints.py",
+    "tools/validate_doc_links.py",
+    "tools/validate_rfcs.py"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "cabd0c25-e20b-420a-aa01-ab166bb0bdd2",
+  "checkpoint_transcript_start": 3852,
+  "transcript_lines_at_start": 3852,
+  "token_usage": {
+    "input_tokens": 110,
+    "cache_creation_tokens": 94576,
+    "cache_read_tokens": 19382589,
+    "output_tokens": 50588,
+    "api_call_count": 55
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-30T13:05:01.939622Z",
+    "agent_lines": 361,
+    "human_added": 4635,
+    "human_modified": 122,
+    "human_removed": 0,
+    "total_committed": 5118,
+    "agent_percentage": 7.053536537710042
+  },
+  "transcript_path": ".claude/projects/-Users-danielbentes-agent-capability-standard/c69842d1-1aa1-4024-9571-d8dc59e17f56.jsonl"
+}

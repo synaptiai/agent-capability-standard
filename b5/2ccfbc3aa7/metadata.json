@@ -1,0 +1,40 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "b52ccfbc3aa7",
+  "strategy": "manual-commit",
+  "branch": "docs/link-validator-and-rfc-0002-update",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "benchmarks/runner.py",
+    "benchmarks/scenarios/conflicting_sources.py",
+    "constraints.txt",
+    "docs/integrations/claude_agent_sdk.md",
+    "grounded_agency/query.py",
+    "pyproject.toml",
+    "spec/RFC-0002-agent-reliability-profile.md",
+    "tests/test_grounded_query.py",
+    "tools/validate_canonical_schemas.py",
+    "tools/validate_constraints.py",
+    "tools/validate_doc_links.py",
+    "tools/validate_rfcs.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b5/2ccfbc3aa7/0/metadata.json",
+      "transcript": "/b5/2ccfbc3aa7/0/full.jsonl",
+      "context": "/b5/2ccfbc3aa7/0/context.md",
+      "content_hash": "/b5/2ccfbc3aa7/0/content_hash.txt",
+      "prompt": "/b5/2ccfbc3aa7/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 110,
+    "cache_creation_tokens": 94576,
+    "cache_read_tokens": 19382589,
+    "output_tokens": 50588,
+    "api_call_count": 55
+  }
+}
