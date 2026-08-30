@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyyaml
+        run: pip install -e "."
 
       - name: Validate ontology graph
         run: python tools/validate_ontology.py
@@ -41,6 +41,9 @@ jobs:
 
       - name: Validate RFCs
         run: python tools/validate_rfcs.py
+
+      - name: Validate constraints agree with pyproject
+        run: python tools/validate_constraints.py
 
   lint:
     name: Lint & type-check
@@ -128,7 +131,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyyaml
+        run: pip install -e "."
 
       - name: Run conformance tests
         run: python scripts/run_conformance.py

@@ -50,7 +50,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - The `claude-agent-sdk` floor is `>=0.1.25`, the oldest release providing every
   symbol this package imports, rather than the newest release available. It was
   briefly `>=0.2.148`, which excluded working installs without cause
+- `pyyaml` carries an upper bound (`>=6.0,<7`) like everything else, and the two
+  CI jobs that installed it directly now install the package instead, so the
+  constraint is declared once rather than in three places
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
+
+- New `tools/validate_constraints.py`, run in CI, asserting that every pin in
+  `constraints.txt` names a package `pyproject.toml` declares and falls inside
+  the range declared for it. The two files state overlapping facts about the
+  same packages; this is what makes disagreement fail loudly instead of
+  surfacing as an opaque pip resolution error
 
 ### Fixed
 - `grounded_query` now closes the SDK's generator when a caller breaks out of

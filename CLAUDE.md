@@ -34,6 +34,11 @@ python tools/validate_canonical_schemas.py
 python tools/validate_rfcs.py
 ```
 
+### Validate constraints.txt agrees with pyproject.toml
+```bash
+python tools/validate_constraints.py
+```
+
 ### Validate YAML utility sync (safe_yaml.py ↔ yaml_util.py)
 ```bash
 python tools/validate_yaml_util_sync.py
