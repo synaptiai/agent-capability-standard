@@ -55,7 +55,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e ".[dev]"
+          pip install -e ".[dev]" -c constraints.txt
 
       - name: Ruff check
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
@@ -81,7 +81,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" -c constraints.txt
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
@@ -98,7 +98,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" -c constraints.txt
 
       - name: Run benchmark tests
         run: pytest benchmarks/tests/ -v --tb=short

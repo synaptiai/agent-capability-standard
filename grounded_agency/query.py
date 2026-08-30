@@ -102,11 +102,31 @@ async def grounded_query(
     base = options or ClaudeAgentOptions()
     wrapped = adapter.wrap_options(base)
 
-    async for message in sdk_query(prompt=prompt, options=wrapped):
-        # Capture cost and metadata from ResultMessage
-        if isinstance(message, ResultMessage):
-            _update_cost_summary(adapter, message)
-        yield message
+    stream = sdk_query(prompt=prompt, options=wrapped)
+    try:
+        async for message in stream:
+            # Capture cost and metadata from ResultMessage
+            if isinstance(message, ResultMessage):
+                _update_cost_summary(adapter, message)
+            yield message
+    finally:
+        # ``async for`` does not close its iterator when the loop body breaks
+        # or raises -- PEP 533 was deferred -- and this generator re-yields
+        # from the SDK's. Without this, a caller that breaks out of
+        # ``grounded_query`` leaves the inner generator open, so its
+        # ``finally: await query.close()`` -- the call that terminates the CLI
+        # subprocess -- is deferred to garbage collection rather than running
+        # at the break. The SDK guards its own re-yield the same way; see
+        # ``claude_agent_sdk/_internal/client.py``.
+        #
+        # Closed via getattr rather than ``contextlib.aclosing`` because the
+        # SDK types ``query()`` as an AsyncIterator, which does not promise
+        # ``aclose``. Every shipped version returns an async generator, so this
+        # branch is taken in practice; the guard keeps a future iterator-only
+        # return from raising AttributeError during cleanup.
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 def _update_cost_summary(adapter: GroundedAgentAdapter, result: Any) -> None:

@@ -62,14 +62,21 @@ python scripts/run_conformance.py
 ### Setup Python environment (one-time)
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]" -c constraints.txt
 ```
 
-Install the `dev` extra rather than individual packages, so the local
-toolchain matches CI. `ruff` is pinned to an exact version on purpose:
-formatting is not covered by semver, and an unpinned bump once turned CI red
-on a commit that touched only `.gitignore`. When bumping it, run
-`ruff format` and land the reformat in the same commit.
+Install the `dev` extra rather than individual packages, and pass
+`-c constraints.txt` — that file pins the exact tool versions CI runs, so the
+local formatter matches CI's exactly. Without it, `ruff>=0.16,<0.17` resolves
+to whatever 0.16.x is newest and a reformat can appear in CI that never
+appeared locally.
+
+The bounds in `pyproject.toml` are the *supported range*; `constraints.txt` is
+the *one version CI runs*. The range caps each dependency at the major this
+repo has been verified against, so a new major is a deliberate bump — run the
+suite on it, then raise the cap. Note the range still admits patch and minor
+drift: two installs a week apart are not identical unless both use the
+constraints file.
 
 ## Architecture
 
