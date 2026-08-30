@@ -29,11 +29,17 @@ workflows" and "runtime telemetry and observability hooks".
 **Prior art.** The three-axis framing below (delivery, calibration, adaptation)
 was proposed to this project in #104, which cites
 [10.5281/zenodo.19348539](https://doi.org/10.5281/zenodo.19348539), *PDR in
-Production*. That record is an unreviewed preprint, and **its author has since
-confirmed on #104 that no reproducible published dataset supports either the
-"6,342 cycles" figure or the claim of independent schema convergence across
+Production*. That record is an unreviewed preprint, and **its author has since stated on
+#104 that they do not have a reproducible published dataset supporting either
+the "6,342 cycles" figure or the claim of independent schema convergence across
 three teams**, agreeing that it is design context rather than validation
 evidence.
+
+The wording there is deliberate. The author said they do not have such a
+dataset; that is not the same as establishing that none exists, and this
+document must not convert the one into the other. What follows from it is
+narrow and sufficient: the figures are unavailable for verification, so nothing
+here may rest on them.
 
 It is cited here on that basis. This RFC adopts the axes on their technical
 merits; the standard must not present the record as evidence that they are
@@ -45,8 +51,10 @@ as support would violate the rule it exists to impose.
 - Express agent behavioural reliability as an optional, orthogonal signal.
 - Keep every axis derivable, in principle, from data the standard already
   defines — or say plainly that it is not.
-- Give safety-critical capability execution (§4.4) an optional gate that
-  reflects recent behaviour, not only source provenance.
+- Establish that safety-critical capability execution (§4.4) *should* be able
+  to gate on recent behaviour, not only source provenance — while recognising
+  that no axis is computable until the prerequisites below are met, so this
+  RFC specifies the direction and the blockers, not a usable gate.
 
 ## Non-goals
 - Replacing or re-weighting the §8 source trust model. Source authority and
@@ -68,8 +76,9 @@ expressible.
 
 ### 2) The blocking prerequisite is agent identity
 The standard has **no agent identity object**. `ProvenanceRecord.agent` and
-`ActionRecord.actor` are bare strings; `entity_taxonomy.yaml` defines no agent
-class. Separately, the reference implementation carries an unrelated third
+`ActionRecord.actor` are bare strings, and not even strings of the same kind —
+the first is documented *subagent/skill name*, the second *agent/human*.
+`entity_taxonomy.yaml` defines no agent class. Separately, the reference implementation carries an unrelated third
 notion of trust: `AgentDescriptor.trust_score` in
 `grounded_agency/coordination/registry.py`, a static self-declared float used
 only to order capability-discovery results, never updated from observed
@@ -88,7 +97,7 @@ what this standard can measure.
 
 | Axis | Substrate today | Status |
 |------|-----------------|--------|
-| `delivery_score` | `ActionRecord.status` (`planned`/`approved`/`executed`/`failed`/`rolled_back`) keyed by `actor` | **Provisional** — closest to derivable, but not yet a comparable score |
+| `delivery_score` | `ActionRecord.status` (`planned`/`approved`/`executed`/`failed`/`rolled_back`), nominally keyed by `actor` — but `actor` is untyped, see below | **Provisional** — closest to derivable, but not yet a comparable score |
 | `calibration_delta` | `Uncertainty.confidence` on claims, and `ActionRecord.status` as outcome | **Blocked on a join** |
 | `adaptation_score` | none | **Requires new telemetry** |
 
@@ -106,7 +115,11 @@ needs are missing:
    not yet done; excluding them is a decision the standard has not made.
 3. **`rolled_back` has no agreed sign.** A rollback following a correct
    checkpoint decision is the safety model working, not a delivery failure.
-   Scoring it as failure would penalise exactly the behaviour §4.4 rewards.
+   §3.3 requires that rollback be *possible* for any mutation and §4.4 requires
+   a checkpoint before one; neither says how a rollback should be scored, and
+   the `rollback` node in the ontology carries risk and mutation flags but no
+   scoring semantics. Counting it as failure would mark an agent down for
+   exercising a capability the standard requires it to have.
 
 Until an agent identity object resolves (1) and the standard fixes (2) and (3),
 any `delivery_score` is deployment-local and not comparable between
@@ -117,12 +130,25 @@ nothing joins the two: `ProvenanceRecord` carries `agent` and `claim_id`,
 `ActionRecord` carries `actor` and `status`, and no relation connects a claim to
 the action it informed.
 
-Nor may the gap be closed by assumption. An implementation **MUST NOT** infer
-that `ProvenanceRecord.agent` and `ActionRecord.actor` denote the same
-principal; the standard does not define them as the same identity space, and
-treating them as one would silently attribute a human operator's outcomes to an
-agent's calibration. Until decision 2 settles the identity object, and a
-claim-to-action relation exists, `calibration_delta` is not computable.
+Nor may the gap be closed by assumption, and the two fields are further apart
+than "both are strings" suggests. `ProvenanceRecord.agent` is documented
+*subagent/skill name*; `ActionRecord.actor` is documented *agent/human*. They
+are not two spellings of one principal — one names a skill, the other names an
+actor that may be a person. Joining them would attribute a skill's provenance
+to whoever last acted, or a human operator's outcomes to an agent's
+calibration.
+
+**Proposed normative text.** This RFC recommends that the standard state: *an
+implementation MUST NOT infer that `ProvenanceRecord.agent` and
+`ActionRecord.actor` denote the same principal.* It is written as a
+recommendation rather than asserted here, because a Draft RFC does not bind
+implementations, and because `STANDARD-v1.0.0.md` does not currently mention
+either type — both live only in `schemas/world_state_schema.yaml`. RFC-0001
+sets the same precedent, using RFC-2119 keywords only to describe fixture
+behaviour, never to bind implementers from RFC prose.
+
+Until decision 2 settles the identity object and a claim-to-action relation
+exists, `calibration_delta` is not computable.
 
 `adaptation_score` ("consistency under instruction variation or substrate
 change") has no corresponding record anywhere in the schemas. Standardising a
@@ -152,10 +178,18 @@ belongs in a domain profile alongside `risk_thresholds` and
 profiles already carry exactly this kind of tunable.
 
 ## Backward compatibility
-Every field proposed here is optional; implementations without behavioural
-telemetry omit the block. Per §11.4 adding an optional field is compatible, and
-per §11.1 this is a MINOR addition. No existing capability changes semantics and
-no existing workflow stops validating.
+**This RFC as revised adds no fields.** `adaptation_score` and the measurement
+window are explicitly not specified, `calibration_delta` is not computable, and
+`delivery_score` is provisional pending decisions the standard has not made. So
+there is no schema diff to assess, and nothing here can break an existing
+implementation.
+
+The analysis below therefore applies to the *eventual* profile block, and is
+recorded now so the shape is agreed before anything is written: every field
+would be optional, with implementations lacking behavioural telemetry omitting
+the block entirely. Per §11.4 adding an optional field is compatible, and per
+§11.1 that would be a MINOR addition. No existing capability would change
+semantics and no existing workflow would stop validating.
 
 The prerequisite in decision 2 is not compatible in the same way. Promoting
 `agent` from a bare string to a structured identity would be breaking for
@@ -172,11 +206,14 @@ no existing level changes. If a reliability gate is added, it needs:
 - a fixture where the profile is absent, asserting the gate is skipped rather
   than failing closed — otherwise "optional" is not optional.
 
-Decision 3's prohibition needs its own negative fixture, independent of any
-gate: a world state where a `ProvenanceRecord.agent` and an
-`ActionRecord.actor` share a string value, asserting that a conformant
-implementation does **not** thereby treat them as one principal and does not
-emit a `calibration_delta`. A MUST NOT that nothing tests is a comment.
+Decision 3's proposed prohibition would need its own fixture, and the current
+model has nowhere to put one. §10.3 defines fixtures as positive, negative and
+patch *workflows*; the prohibition is a statement about interpreting two fields
+of a world state, which no workflow exercises. Recording the gap rather than
+assuming it away: adopting that MUST NOT requires either a world-state fixture
+kind that conformance does not currently have, or restating the rule as a
+property of some capability's input contract so a workflow fixture can reach
+it. Whichever is chosen, an untested MUST NOT is a comment.
 
 ## Alternatives considered
 - **Add `§8.3 Agent Reliability Gate` as proposed in #104.** Smallest diff, and
@@ -204,7 +241,12 @@ emit a `calibration_delta`. A MUST NOT that nothing tests is a comment.
   is not comparable between implementations.
 - Does the agent identity object make `actor` type-discriminated, or does
   `ActionRecord` gain a separate field distinguishing agent actors from human
-  ones?
+  ones? The standard already has a precedent to follow rather than invent:
+  `event.source.kind` in `schemas/event_schema.yaml` is an enum separating
+  `human` from machine origins, and `Anchor.kind` includes `human_note`.
+- Where should the prohibition on joining `ProvenanceRecord.agent` to
+  `ActionRecord.actor` live, given conformance fixtures are workflows and this
+  is a world-state property?
 - Should `adaptation_score` be specified now as a reserved optional field, or
   omitted until the telemetry to compute it exists?
 - Is regression detection (a rolling decline over successive windows) a

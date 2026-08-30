@@ -30,11 +30,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `tools/validate_doc_links.py` and a CI job asserting that documentation
   cross-references resolve. Markdown links were the one reference kind nothing
   checked, which is how `docs/integrations/claude_agent_sdk.md` came to cite a
-  `comparisons/` directory that has never existed. Code-span paths are checked
-  in `CLAUDE.md` and `README.md` only — measured repo-wide, that check produces
-  104 findings of which essentially none are defects (package-relative paths,
-  tutorial placeholders, roadmap deliverables), and a validator that cries wolf
-  gets ignored
+  `comparisons/` directory that has never existed. It reads every link form
+  CommonMark allows — titles, angle brackets, images, and links whose text
+  contains nested brackets — because anchoring on the opening `[` cannot see a
+  badge, which had left the README's links to `LICENSE`, `spec/STANDARD-v1.0.0.md`
+  and `CHANGELOG.md` unvalidated. Code-span paths are checked in `CLAUDE.md` and
+  `README.md` only: repo-wide that check produces ~109 findings of which
+  essentially none are defects (package-relative paths, tutorial placeholders,
+  roadmap deliverables), and a validator that cries wolf gets ignored
 - `CapabilityRegistry.all_edges()` public method for enumerating ontology edges
 - Benchmark drift-prevention validator (`tools/validate_benchmark_deps.py`) and CI job
 - Multi-agent coordination runtime with delegate, synchronize, and invoke patterns (#98)
@@ -70,19 +73,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   original proposal and the RFC's first draft both overstated it: `actor` is a
   bare string documented as `agent/human` so the population cannot be restricted
   to agents, no terminal-status subset is defined, and `rolled_back` has no
-  agreed sign — a rollback after a correct checkpoint is the safety model
-  working, not a delivery failure (#104)
+  agreed sign — §3.3 requires rollback be possible and §4.4 requires a
+  checkpoint before one, but neither says how a rollback should be scored, so
+  counting it as failure marks an agent down for exercising a capability the
+  standard requires it to have (#104)
 - RFC-0002 makes it normative that an implementation MUST NOT infer that
   `ProvenanceRecord.agent` and `ActionRecord.actor` denote the same principal,
   with a conformance fixture required for the rule (#104)
 - RFC-0002's citation of the *PDR in Production* preprint now records that its
-  author has confirmed no reproducible dataset supports the "6,342 cycles" or
-  independent-convergence claims, replacing an unresolved caveat with the
-  author's own agreement that it is design context, not validation evidence
-  (#104)
+  author has stated they do not have a reproducible dataset supporting the
+  "6,342 cycles" or independent-convergence claims, replacing an unresolved
+  caveat with the author's own agreement that it is design context, not
+  validation evidence. The wording is deliberate: "I do not have one" is not
+  "none exists", and a document whose argument rests on §3.1 must not convert
+  the one into the other (#104)
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- `templates/SKILL_TEMPLATE_ENHANCED.md` nested a ```` ```markdown ```` block
+  containing ```` ```yaml ```` blocks of the same fence length. Per CommonMark
+  the outer block closes at the first bare fence, so the document's structure
+  from that point on was not what it appeared to be. The outer fence is now four
+  backticks. Found by the new link validator, which reported the resulting
+  unclosed fence
 - `grounded_query` now closes the SDK's generator when a caller breaks out of
   iteration. `async for` does not close its iterator on `break` (PEP 533 was
   deferred), so re-yielding from `sdk_query` without an explicit `aclose`
