@@ -620,5 +620,5 @@ class EvidenceStore:
 The `grounded_agency.adapters.oasf` module provides bidirectional mapping between
 OASF skill codes and Grounded Agency capabilities. See
 [schemas/interop/oasf_mapping.yaml](../../schemas/interop/oasf_mapping.yaml) for the
-mapping data and the [OASF comparison doc](../comparisons/OASF_COMPARISON.md) for
+mapping data and the [OASF comparison doc](../research/analysis/OASF_comparison.md) for
 design rationale.

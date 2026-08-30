@@ -45,6 +45,9 @@ jobs:
       - name: Validate constraints agree with pyproject
         run: python tools/validate_constraints.py
 
+      - name: Validate documentation links
+        run: python tools/validate_doc_links.py
+
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest

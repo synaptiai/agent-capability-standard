@@ -4,7 +4,7 @@ Use this template to create high-quality, production-ready Claude Code skills.
 
 ## Template
 
-```markdown
+````markdown
 ---
 name: <capability-name>
 description: <verb phrase describing what this capability does>. Use when <trigger conditions/keywords>.
@@ -141,7 +141,7 @@ target: <different example>
 
 **Workflow references:**
 - See `workflow_catalog.json#<workflow_name>` for usage in context
-```
+````
 
 ---
 
