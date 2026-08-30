@@ -1,0 +1,19 @@
+# Exact tool versions CI runs. Install with:
+#
+#     pip install -e ".[dev]" -c constraints.txt
+#
+# pyproject.toml declares the *supported range* for each dependency -- what the
+# package will work with. This file declares the *one version CI actually runs*
+# -- what a green check attests to. The two answer different questions, which is
+# why the exact version does not belong in the extra: an exact pin in package
+# metadata conflicts with a consumer's own toolchain.
+#
+# Only tools whose output is part of the build contract are pinned here.
+#
+# ruff: formatting is not covered by semver. Any release may reformat existing
+# code or extend `ruff format` to new file types, turning a green CI red with no
+# source change -- 0.16.5 began formatting Python blocks inside Markdown and
+# broke CI on a commit that touched only .gitignore. A range cannot express
+# "the formatter this repository is formatted with"; only an exact version can.
+# When bumping, run `ruff format` and land the reformat in the same commit.
+ruff==0.16.5

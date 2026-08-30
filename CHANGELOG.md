@@ -33,9 +33,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Comprehensive analysis documentation package (13 documents, ~570KB)
 
 ### Changed
+- Development dependencies are version-bounded instead of open-ended, and each
+  cap names the major this repo is verified against rather than the next
+  unreleased one: `mypy>=1.0,<2`, `pytest>=7.0,<9`, `pytest-asyncio>=0.21,<1`.
+  A cap set at the next unreleased major would not have changed what CI
+  installs — `mypy>=1.0,<3` admits mypy 2.x, which is precisely the upgrade the
+  bound exists to make deliberate. Raising a cap now means running the suite on
+  that major first
+- Exact tool versions moved to a new `constraints.txt`, installed via
+  `pip install -e ".[dev]" -c constraints.txt`. `ruff` is pinned there rather
+  than in the `dev` extra: formatting is not semver-safe (0.16.5 began
+  formatting Python blocks inside Markdown and turned CI red on a commit
+  touching only `.gitignore`), but an exact pin in package metadata would
+  conflict with a consumer's own ruff. The bounds describe what the package
+  supports; the constraints file describes what a green check attests to
+- The `claude-agent-sdk` floor is `>=0.1.25`, the oldest release providing every
+  symbol this package imports, rather than the newest release available. It was
+  briefly `>=0.2.148`, which excluded working installs without cause
+- `pyyaml` carries an upper bound (`>=6.0,<7`) like everything else, and the two
+  CI jobs that installed it directly now install the package instead, so the
+  constraint is declared once rather than in three places
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
+- New `tools/validate_constraints.py`, run in CI, asserting that every pin in
+  `constraints.txt` names a package `pyproject.toml` declares and falls inside
+  the range declared for it. The two files state overlapping facts about the
+  same packages; this is what makes disagreement fail loudly instead of
+  surfacing as an opaque pip resolution error
+
 ### Fixed
+- `grounded_query` now closes the SDK's generator when a caller breaks out of
+  iteration. `async for` does not close its iterator on `break` (PEP 533 was
+  deferred), so re-yielding from `sdk_query` without an explicit `aclose`
+  deferred the SDK's `finally: await query.close()` — the call that terminates
+  the CLI subprocess — to garbage collection, leaving the process alive past
+  its consumer
+- `test_grounded_query_callable` no longer drives an unbounded billable API
+  call. It still exercises the real SDK with no mock and no skip, but stops
+  after the first message and runs under a timeout. The timeout bounds the
+  query, not total wall time: `wait_for` cancels the task and then awaits
+  teardown, so the ceiling is the budget plus SDK cleanup
+- `test_grounded_query_callable` can now fail. It previously had no assertion
+  and caught `ValueError`, which is raised only when `wrap_options` produces a
+  contradictory options object — a wrapper defect that read as an environment
+  outcome. It now asserts that either a message arrived or a genuine
+  environment error was raised, so a wrapper yielding nothing is a failure
 - Trust decay is now a true half-life: `recency_factor` is `0.5 ** (age/half_life)`,
   which returns exactly 0.5 at `age == half_life`. The previous
   `exp(-age/half_life)` treated `half_life` as an exponential time constant and

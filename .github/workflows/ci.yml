@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyyaml
+        run: pip install -e "."
 
       - name: Validate ontology graph
         run: python tools/validate_ontology.py
@@ -42,6 +42,9 @@ jobs:
       - name: Validate RFCs
         run: python tools/validate_rfcs.py
 
+      - name: Validate constraints agree with pyproject
+        run: python tools/validate_constraints.py
+
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
@@ -55,7 +58,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e ".[dev]"
+          pip install -e ".[dev]" -c constraints.txt
 
       - name: Ruff check
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
@@ -81,7 +84,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" -c constraints.txt
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
@@ -98,7 +101,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" -c constraints.txt
 
       - name: Run benchmark tests
         run: pytest benchmarks/tests/ -v --tb=short
@@ -128,7 +131,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyyaml
+        run: pip install -e "."
 
       - name: Run conformance tests
         run: python scripts/run_conformance.py

@@ -11,6 +11,8 @@ these tests focus on:
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import aclosing
 from dataclasses import dataclass
 
 import pytest
@@ -19,6 +21,11 @@ from grounded_agency import (
     CostSummary,
     GroundedAgentAdapter,
 )
+
+# Upper bound for the one test that reaches the real SDK. Generous enough that
+# a healthy API answers well inside it, short enough that an unreachable one
+# does not stall the suite.
+SDK_CALL_TIMEOUT_SECONDS = 20.0
 
 # =============================================================================
 # CostSummary Tests
@@ -103,24 +110,64 @@ class TestGroundedQueryImport:
 
     @pytest.mark.asyncio
     async def test_grounded_query_callable(self, adapter: GroundedAgentAdapter):
-        """Test that grounded_query is callable with the SDK installed."""
+        """Test that grounded_query yields from the SDK, with the SDK installed.
+
+        The call is real -- no mock, no skip (see #99) -- but it is bounded,
+        because on a machine with a live CLI session this drives an actual
+        billable query with no natural end:
+
+        * the loop stops after the first message, which is all that is needed
+          to prove the wrapper yields from the SDK;
+        * it runs under a timeout, so an unreachable or slow API cannot stall
+          the suite indefinitely. Note the timeout bounds the *query*, not
+          total wall time: ``wait_for`` cancels the task and then awaits
+          teardown, so the true ceiling is the budget plus SDK cleanup.
+
+        The environment decides which of two outcomes is correct, and the
+        assertion accepts exactly those two: a logged-in machine yields a
+        message; a runner with no CLI session raises one of the environment
+        errors below. What it will no longer accept is *neither* -- a wrapper
+        that completes yielding nothing now fails instead of passing silently.
+
+        ``ValueError`` is deliberately absent from the tuple. The only
+        ValueError reachable here comes from ``wrap_options`` producing a
+        contradictory options object, which is a wrapper defect and must fail
+        loudly rather than read as an environment outcome.
+        """
         from claude_agent_sdk import ClaudeSDKError
 
         from grounded_agency import grounded_query
 
-        # SDK is installed; grounded_query should not raise ImportError.
-        # It may raise ValueError (streaming mode required when can_use_tool is
-        # set), a connection error when trying to reach the API, or any
-        # ClaudeSDKError when the environment has no usable CLI session -- CI
-        # runners are not logged in, which surfaces as ResultError/ProcessError.
-        # Only ImportError is a real failure here; everything else is the
-        # environment, not the wrapper.
+        received: list[object] = []
+        environment_error: BaseException | None = None
+
+        async def consume_first_message() -> None:
+            async with aclosing(grounded_query("test", adapter=adapter)) as stream:
+                async for message in stream:
+                    received.append(message)
+                    break
+
         try:
-            async for _ in grounded_query("test", adapter=adapter):
-                pass
-        except (ConnectionError, OSError, ValueError, ClaudeSDKError):
-            # Expected: SDK validation, no live API connection, or no session
-            pass
+            await asyncio.wait_for(
+                consume_first_message(), timeout=SDK_CALL_TIMEOUT_SECONDS
+            )
+        except (
+            ConnectionError,
+            OSError,
+            ClaudeSDKError,
+            # Redundant on 3.11+, where asyncio.TimeoutError is the builtin and
+            # already an OSError subclass -- but load-bearing on the 3.10 leg
+            # of the CI matrix, where it is a distinct asyncio.exceptions type.
+            asyncio.TimeoutError,
+        ) as exc:
+            # Expected: no live API connection, no CLI session, or an API too
+            # slow to answer inside the budget.
+            environment_error = exc
+
+        assert received or environment_error is not None, (
+            "grounded_query completed without yielding a message and without "
+            "an environment error -- the wrapper yielded nothing."
+        )
 
     def test_grounded_client_instantiates(self):
         """Test that GroundedClient instantiates with the SDK installed."""
@@ -128,6 +175,74 @@ class TestGroundedQueryImport:
 
         client = GroundedClient()
         assert client is not None
+
+
+class TestBoundedConsumption:
+    """The two properties test_grounded_query_callable relies on but cannot show.
+
+    That test takes whichever branch the environment dictates -- on a logged-out
+    runner it fast-fails in under two seconds and never reaches the timeout at
+    all -- so it demonstrates neither that the timeout bounds a slow producer
+    nor that breaking early closes the generator chain. Both are asserted here
+    against a local fake, which keeps the guarantees under test without adding
+    a second billable call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_wait_for_bounds_a_slow_producer(self):
+        """A producer slower than the budget is cut off by the budget."""
+
+        async def never_answers():
+            await asyncio.sleep(30)
+            yield "unreachable"
+
+        async def consume() -> None:
+            async with aclosing(never_answers()) as stream:
+                async for _ in stream:
+                    break
+
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(consume(), timeout=0.1)
+
+    @pytest.mark.asyncio
+    async def test_break_closes_the_sdk_generator(
+        self, adapter: GroundedAgentAdapter, monkeypatch
+    ):
+        """grounded_query closes the SDK generator when the caller breaks.
+
+        For the real SDK the inner ``finally`` is what terminates the CLI
+        subprocess, so deferring it to garbage collection leaves the process
+        alive past the consumer that spawned it. The stand-in generator here
+        records its own teardown, which lets the guarantee be asserted without
+        a billable call.
+
+        Closing only the outer generator does not achieve this: ``async for``
+        does not close its iterator on break (PEP 533 was deferred), so
+        grounded_query has to close the inner one itself.
+        """
+        import claude_agent_sdk
+
+        from grounded_agency import grounded_query
+
+        closed: list[str] = []
+
+        async def fake_sdk_query(*args, **kwargs):
+            try:
+                while True:
+                    yield "message"
+            finally:
+                closed.append("sdk generator closed")
+
+        monkeypatch.setattr(claude_agent_sdk, "query", fake_sdk_query)
+
+        async with aclosing(grounded_query("test", adapter=adapter)) as stream:
+            async for _ in stream:
+                break
+
+        assert closed == ["sdk generator closed"], (
+            "grounded_query did not close the SDK generator at the break; "
+            "the CLI subprocess would outlive its consumer"
+        )
 
 
 # =============================================================================
