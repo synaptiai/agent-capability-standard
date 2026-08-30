@@ -22,6 +22,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   analysis and conformance test updates — plus header metadata, unique RFC
   numbers, and that cited repository paths exist. RFC-0001 was missing two of
   the required sections and now carries them (#104)
+- `tools/validate_constraints.py` and a CI job asserting that every pin in
+  `constraints.txt` names a package `pyproject.toml` declares and falls inside
+  the range declared for it. The two files state overlapping facts about the
+  same packages; this is what makes disagreement fail loudly instead of
+  surfacing as an opaque pip resolution error
+- `tools/validate_doc_links.py` and a CI job asserting that documentation
+  cross-references resolve. Markdown links were the one reference kind nothing
+  checked, which is how `docs/integrations/claude_agent_sdk.md` came to cite a
+  `comparisons/` directory that has never existed. Code-span paths are checked
+  in `CLAUDE.md` and `README.md` only — measured repo-wide, that check produces
+  104 findings of which essentially none are defects (package-relative paths,
+  tutorial placeholders, roadmap deliverables), and a validator that cries wolf
+  gets ignored
 - `CapabilityRegistry.all_edges()` public method for enumerating ontology edges
 - Benchmark drift-prevention validator (`tools/validate_benchmark_deps.py`) and CI job
 - Multi-agent coordination runtime with delegate, synchronize, and invoke patterns (#98)
@@ -53,13 +66,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `pyyaml` carries an upper bound (`>=6.0,<7`) like everything else, and the two
   CI jobs that installed it directly now install the package instead, so the
   constraint is declared once rather than in three places
+- RFC-0002 downgrades `delivery_score` from "derivable now" to provisional. The
+  original proposal and the RFC's first draft both overstated it: `actor` is a
+  bare string documented as `agent/human` so the population cannot be restricted
+  to agents, no terminal-status subset is defined, and `rolled_back` has no
+  agreed sign — a rollback after a correct checkpoint is the safety model
+  working, not a delivery failure (#104)
+- RFC-0002 makes it normative that an implementation MUST NOT infer that
+  `ProvenanceRecord.agent` and `ActionRecord.actor` denote the same principal,
+  with a conformance fixture required for the rule (#104)
+- RFC-0002's citation of the *PDR in Production* preprint now records that its
+  author has confirmed no reproducible dataset supports the "6,342 cycles" or
+  independent-convergence claims, replacing an unresolved caveat with the
+  author's own agreement that it is design context, not validation evidence
+  (#104)
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
-
-- New `tools/validate_constraints.py`, run in CI, asserting that every pin in
-  `constraints.txt` names a package `pyproject.toml` declares and falls inside
-  the range declared for it. The two files state overlapping facts about the
-  same packages; this is what makes disagreement fail loudly instead of
-  surfacing as an opaque pip resolution error
 
 ### Fixed
 - `grounded_query` now closes the SDK's generator when a caller breaks out of

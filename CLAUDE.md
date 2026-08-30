@@ -39,6 +39,11 @@ python tools/validate_rfcs.py
 python tools/validate_constraints.py
 ```
 
+### Validate documentation links (no dangling cross-references)
+```bash
+python tools/validate_doc_links.py
+```
+
 ### Validate YAML utility sync (safe_yaml.py ↔ yaml_util.py)
 ```bash
 python tools/validate_yaml_util_sync.py

@@ -29,14 +29,17 @@ workflows" and "runtime telemetry and observability hooks".
 **Prior art.** The three-axis framing below (delivery, calibration, adaptation)
 was proposed to this project in #104, which cites
 [10.5281/zenodo.19348539](https://doi.org/10.5281/zenodo.19348539), *PDR in
-Production*. Recorded honestly: that record is an unreviewed preprint uploaded
-the same day the issue was filed, authored by the person who filed it; its
-claim of "independent schema convergence across three teams" rests in part on
-substantially identical proposals the same author opened across six
-repositories; and the acronym expands three different ways across the author's
-own primary sources. This RFC adopts the axes on their technical merits, not on
-that record's authority, and the standard should not present it as validating
+Production*. That record is an unreviewed preprint, and **its author has since
+confirmed on #104 that no reproducible published dataset supports either the
+"6,342 cycles" figure or the claim of independent schema convergence across
+three teams**, agreeing that it is design context rather than validation
 evidence.
+
+It is cited here on that basis. This RFC adopts the axes on their technical
+merits; the standard must not present the record as evidence that they are
+validated in production. The distinction matters beyond courtesy — §3.1 forbids
+claims without evidence, and a specification that cited unreproducible figures
+as support would violate the rule it exists to impose.
 
 ## Goals
 - Express agent behavioural reliability as an optional, orthogonal signal.
@@ -85,20 +88,49 @@ what this standard can measure.
 
 | Axis | Substrate today | Status |
 |------|-----------------|--------|
-| `delivery_score` | `ActionRecord.status` (`planned`/`approved`/`executed`/`failed`/`rolled_back`) keyed by `actor` | **Derivable now** |
+| `delivery_score` | `ActionRecord.status` (`planned`/`approved`/`executed`/`failed`/`rolled_back`) keyed by `actor` | **Provisional** — closest to derivable, but not yet a comparable score |
 | `calibration_delta` | `Uncertainty.confidence` on claims, and `ActionRecord.status` as outcome | **Blocked on a join** |
 | `adaptation_score` | none | **Requires new telemetry** |
+
+`delivery_score` was described as derivable in the original proposal, and an
+earlier draft of this RFC repeated that. It is not, and the reasons are
+structural rather than a matter of implementation effort. `ActionRecord`
+supplies `timestamp`, so a *window* is expressible — but three things a score
+needs are missing:
+
+1. **The population cannot be restricted to agents.** `actor` is a bare string
+   documented as `agent/human`, with no discriminator. An agent delivery rate
+   cannot be computed from a field that also holds people.
+2. **No terminal-status subset is defined.** `planned` and `approved` describe
+   work in flight. Counting them in a denominator penalises an agent for work
+   not yet done; excluding them is a decision the standard has not made.
+3. **`rolled_back` has no agreed sign.** A rollback following a correct
+   checkpoint decision is the safety model working, not a delivery failure.
+   Scoring it as failure would penalise exactly the behaviour §4.4 rewards.
+
+Until an agent identity object resolves (1) and the standard fixes (2) and (3),
+any `delivery_score` is deployment-local and not comparable between
+implementations — which is most of what a standardised score is for.
 
 `calibration_delta` compares predicted confidence against realised outcome, but
 nothing joins the two: `ProvenanceRecord` carries `agent` and `claim_id`,
 `ActionRecord` carries `actor` and `status`, and no relation connects a claim to
-the action it informed. Whether `agent` and `actor` even denote the same
-identity is undefined — which decision 2 would settle.
+the action it informed.
+
+Nor may the gap be closed by assumption. An implementation **MUST NOT** infer
+that `ProvenanceRecord.agent` and `ActionRecord.actor` denote the same
+principal; the standard does not define them as the same identity space, and
+treating them as one would silently attribute a human operator's outcomes to an
+agent's calibration. Until decision 2 settles the identity object, and a
+claim-to-action relation exists, `calibration_delta` is not computable.
 
 `adaptation_score` ("consistency under instruction variation or substrate
 change") has no corresponding record anywhere in the schemas. Standardising a
 field the standard cannot compute would be a claim without evidence, which is
-the failure mode §3.1 exists to prevent.
+the failure mode §3.1 exists to prevent. **This RFC therefore does not specify
+it.** Whether it is reserved now as an optional field or omitted until the
+telemetry exists is left open below; what this RFC rules out is specifying it as
+though it were measurable today. The proposal's author concurs.
 
 ### 4) A session boundary must be defined or the window dropped
 The proposal's `measurement_window_sessions: 30` presupposes a *session*
@@ -106,6 +138,12 @@ primitive. The standard defines none, and neither does the reference
 implementation. Either the standard defines a session boundary, or the window is
 expressed in terms it already has — observation count, or an ISO-8601 duration
 consistent with §8's `decay_model`.
+
+Until one of those is chosen, **this RFC specifies no window field**. A window
+measured in an undefined unit is not portable: two implementations could report
+`measurement_window_sessions: 30` over populations differing by an order of
+magnitude and both be conformant. The proposal's author concurs that the window
+should stay open pending a session or observation-window primitive.
 
 ### 5) Gating is optional and belongs with existing policy
 Where a deployment gates `mutate` or `send` (§4.4) on reliability, the threshold
@@ -134,6 +172,12 @@ no existing level changes. If a reliability gate is added, it needs:
 - a fixture where the profile is absent, asserting the gate is skipped rather
   than failing closed — otherwise "optional" is not optional.
 
+Decision 3's prohibition needs its own negative fixture, independent of any
+gate: a world state where a `ProvenanceRecord.agent` and an
+`ActionRecord.actor` share a string value, asserting that a conformant
+implementation does **not** thereby treat them as one principal and does not
+emit a `calibration_delta`. A MUST NOT that nothing tests is a comment.
+
 ## Alternatives considered
 - **Add `§8.3 Agent Reliability Gate` as proposed in #104.** Smallest diff, and
   rejected under decision 1: it files agent behaviour under source authority and
@@ -154,6 +198,13 @@ no existing level changes. If a reliability gate is added, it needs:
   durations it already has?
 - What relation joins a claim to the action it informed, so calibration is
   computable?
+- Which `ActionRecord.status` values constitute delivery? Specifically: are
+  `planned` and `approved` excluded as non-terminal, and is `rolled_back` a
+  failure or a successful safety response? Without an answer, `delivery_score`
+  is not comparable between implementations.
+- Does the agent identity object make `actor` type-discriminated, or does
+  `ActionRecord` gain a separate field distinguishing agent actors from human
+  ones?
 - Should `adaptation_score` be specified now as a reserved optional field, or
   omitted until the telemetry to compute it exists?
 - Is regression detection (a rolling decline over successive windows) a
