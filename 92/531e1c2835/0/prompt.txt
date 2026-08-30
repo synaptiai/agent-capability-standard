@@ -1,0 +1,2469 @@
+<!--
+PARALLEL EXECUTION RULE:
+When performing multiple independent operations (reads, API calls, TaskCreate),
+invoke ALL relevant tools simultaneously in a single message rather than sequentially.
+
+VARIABLE PERSISTENCE NOTE:
+Bash variables do NOT persist across separate tool calls. Each Bash invocation
+is independent. Store values mentally and substitute in subsequent commands.
+-->
+
+# Start Work on Issue #104
+
+Skill-driven workflow from issue assignment through implementation. Follows the Explore > Plan > Code > Verify loop with Task-driven progress tracking.
+
+## Required Skills
+
+This command operates with these domain skills loaded:
+- `llm-operator-principles` — foundational operator stance: convergence = zero findings, in-PR fixes by default, no calendar-time estimates, narrow escalation triggers. MUST be consulted before any other phase
+- `branch-and-task-management` — branch creation, task decomposition
+- `change-classification` — change context awareness
+- `capability-discovery` — detect available quality tools
+- `debugging-patterns` — activates on-demand for ALL issues when any verification step fails (not gated on `bug` label)
+- `preflight-checks` — pure bash pre-flight validation (Phase 0)
+- `criterion-verification-map` — per-criterion evidence collection (Phase 2 + Phase 4)
+- `holdout-validation` — cross-reference self-review claims against file state (Phase 4)
+- `issue-crafting` — invoked when the issue body is missing acceptance criteria or needs reframing
+- `specification-capture` — capture non-goals, failure modes, and interface contracts to the decision journal (Phase 1, before Spec Validation Gate)
+
+## References
+
+- [`references/escalation-format.md`](../references/escalation-format.md) — canonical six-field structure used by every Proactive-Autonomy escalation in this command (Spec Validation Gate, NEEDS-HUMAN-REVIEW verdict, visual verification BLOCKED, runtime verification skip request)
+- [`references/evidence-bundle-format.md`](../references/evidence-bundle-format.md) — canonical bundle shape Phase 4 step 5 produces and `Agent(verdict-judge)` consumes
+
+## Phase 0: PRE-FLIGHT
+
+Pure bash validation — fails fast before any agent reasoning.
+
+### Pre-Flight
+ISSUE_NUM=104
+PREFLIGHT_ERRORS=1
+PREFLIGHT_WARNINGS=0
+PREFLIGHT_STATE=BLOCKED
+PREFLIGHT_FAIL=Uncommitted changes
+
+If `PREFLIGHT_STATE=BLOCKED`, stop. Do not proceed to EXPLORE. The `PREFLIGHT_FAIL=` lines under the section enumerate the reasons.
+
+## Phase 1: EXPLORE
+
+Gather all context before planning.
+
+**Bug issue detection**: If issue labels include `bug`:
+- Phase 3 becomes: reproduce → isolate root cause → write failing test → fix → verify
+
+**Note**: `debugging-patterns` activates automatically for ALL issues when any verification step fails (build, test, server start, smoke test). No `bug` label required.
+
+### Issue Reference
+STATE=ok
+ISSUE_NUM=104
+
+### Issue Details
+TITLE="spec(trust): §8 Authority Trust lacks cross-session agent behavioral reliability — proposed agent_reliability_profile"
+LABELS=
+ASSIGNEES=
+MILESTONE=(none)
+BODY_LENGTH=3006
+
+#### Issue Body
+## Problem
+
+§8 Authority Trust covers observation-level time decay and conflict resolution, but there is no mechanism to track **agent behavioral consistency across sessions**. The trust model answers "how authoritative is this data source?" but not "has this agent been delivering consistently over the past 30 sessions?"
+
+This matters for federated trust (#85) and certification (#84): an agent that scores well in isolation but degrades cross-session is unsafe to certify or federate.
+
+## Gap
+
+The Authority Trust Model (§8.1) factors:
+- Source ranking (static)
+- Time decay (observation-level)
+- Field authority (static)
+- Confidence weight (self-reported)
+
+Missing: **agent behavioral delivery consistency** over rolling sessions. An agent with a strong trust score from historical observations may have degraded its actual delivery rate in the last 30 days — the current model won't surface this until enough negative observations accumulate to drag down the mean.
+
+## Proposed Addition: Optional `agent_reliability_profile` in §8
+
+A lightweight optional block on any agent identity, computed from observed behavioral data:
+
+```yaml
+agent_reliability_profile:
+  delivery_score: 0.92         # fraction of committed tasks completed (last 30 sessions)
+  calibration_delta: 0.04      # |avg_predicted_confidence − actual_success_rate|
+  adaptation_score: 0.88       # consistency under instruction variation / substrate change
+  measurement_window_sessions: 30
+  measured_at: "2026-03-31T00:00:00Z"
+  regression_detected: false   # true if rolling window declined >5%/session × 3 sessions
+```
+
+All three axes are **independently orthogonal** to each other and to source authority:
+- High delivery + poor calibration = overconfident agent
+- High delivery + high calibration + low adaptation = brittle to substrate change
+- Any axis can degrade independently
+
+## Integration Points
+
+- **§4.4 Safety-Critical Capabilities**: Workflows using `mutate` or `send` could gate on `delivery_score > threshold`
+- **§8.3 (if added) Agent Reliability Gate**: Optional gate type that checks `agent_reliability_profile` before allowing capability execution
+- **Issue #85 (Federated Trust)**: Cross-org federation is only meaningful when each party's agent has a behavioral reliability profile that the other side can verify
+- **Issue #84 (Certification)**: A certification level above L3 could require a 30-session `delivery_score ≥ 0.90`
+
+## Backward Compatible
+
+All fields are optional. Implementations without behavioral telemetry simply omit the block. The spec can note: "When present, SHOULD be used as an additional gating factor for safety-critical capability execution."
+
+## Reference Implementation
+
+PDR in Production v2.4 (DOI: [10.5281/zenodo.19348539](https://doi.org/10.5281/zenodo.19348539)) provides an empirically-validated implementation of this three-axis behavioral profile (delivery_score, calibration_delta, adaptation_score) with 6,342 cycles of production data across autonomous agent sessions.
+
+### Issue Comments
+COMMENT_COUNT=0
+STATE=empty
+
+### Repo Context
+REPO=synaptiai/agent-capability-standard
+DEFAULT_BRANCH=main
+CURRENT_BRANCH=main
+UNCOMMITTED_COUNT=8
+UNCOMMITTED_LINE= D docs/proposals/OASF_SAFETY_EXTENSIONS.md
+UNCOMMITTED_LINE=?? .entire/
+UNCOMMITTED_LINE=?? .trail/
+UNCOMMITTED_LINE=?? docs/MEDIUM_ARTICLE.md
+UNCOMMITTED_LINE=?? docs/MEDIUM_ARTICLE_V3.md
+UNCOMMITTED_LINE=?? docs/PROJECT_ARTICLE.md
+UNCOMMITTED_LINE=?? docs/TWITTER_THREAD.md
+UNCOMMITTED_LINE=?? docs/proposals/GROUNDED_HARNESS_V3.md
+
+**Parallel Agent + Skill calls:**
+
+- `Agent(Explore)`: "Read CLAUDE.md (.claude/CLAUDE.md or CLAUDE.md). Identify tech stack, testing commands, coding conventions, and any project-specific rules. Also search for code related to the issue keywords to understand affected modules."
+- `Skill(capability-discovery)`: Discover available agents, quality commands, and tech stack.
+
+**Spec-first validation** (after issue details are fetched):
+
+Parse the issue body for acceptance criteria:
+- Look for `## Acceptance Criteria` section with `- [ ]` items
+- Look for numbered requirement lists
+- Look for task lists in the body
+
+If zero acceptance criteria found and `specFirst.requireAcceptanceCriteria` is `true` (default), use `AskUserQuestion`:
+
+> No acceptance criteria found in issue #104. Autonomous verification requires knowing what "done" looks like before starting.
+>
+> Options:
+> 1. Add acceptance criteria now (I'll help you write them)
+> 2. Spec-free task (docs/config only) — proceed without AC
+> 3. Cancel — I'll update the issue first
+
+- Option 1: Use `Skill(issue-crafting)` to help write ACs, then update the issue via `gh issue edit`
+- Option 2: Only available if issue labels include any of `specFirst.allowSpecFreeLabels` (default: `documentation`, `chore`). Log to decision journal: "Spec-free task: {justification}"
+- Option 3: Stop workflow
+
+**Specification capture** (before Spec Validation Gate):
+
+Acceptance criteria alone do not describe the full specification. Before building the Spec Validation Gate, capture three additional specification elements (non-goals, failure modes, interface contracts) and persist them to the decision journal under a `## Specification` heading. The capture lifecycle is owned by the `specification-capture` skill — do NOT inline the prompts or the journal write. The skill handles journal-first detection, issue-body extraction, per-element user confirmation via `AskUserQuestion` (with the canonical six-field structure from `references/escalation-format.md`), and the journal write.
+
+```
+Skill(specification-capture):
+  Inputs:
+  - Issue context: {pre-fetched issue title, body, comments, labels}
+  - Journal path: .decisions/issue-$ISSUE_NUM.md
+  - Invocation reason: start
+```
+
+The skill returns the captured specification (non-goals, failure modes, interface contracts). It writes them to the journal and verifies the write before returning.
+
+After the skill returns, verify per the skill's "Verification gates" section:
+
+1. The journal `.decisions/issue-$ISSUE_NUM.md` contains a `## Specification` heading
+2. All three element subsections (`### Non-goals`, `### Failure modes`, `### Interface contracts`) are present and non-empty (or `none — {reason}` for failure-mode categories that don't apply)
+3. The returned payload matches the journal contents
+
+If any check fails, halt and re-invoke the skill with the failure noted. Do NOT proceed to the Spec Validation Gate with a partial specification — the Stranger Test at end-of-PLAN will fail downstream.
+
+**Manifest emit** — record the specification artifact in the journal manifest so downstream tooling and `/flow:status` can see it without parsing the freeform `## Specification` body:
+
+```bash
+"$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+  --issue "$ISSUE_NUM" \
+  --type specification \
+  --metadata by=specification-capture \
+  --metadata elements=non-goals,failure-modes,interface-contracts
+```
+
+If the helper exits non-zero, halt — a missing manifest entry breaks downstream artifact discovery (`/flow:status`, the `verdict-judge` evidence-bundle assembly). The emit is required even when the skill returned an existing-spec verbatim from the journal-first path: the freeform section may already be present, but the manifest entry is the audit trail of *this* invocation.
+
+Once the captured specification is in the journal, downstream phases reference it: `implementation-planner` agent receives it as the `Specification` field in its dispatch (Phase 2); the Phase 4 evidence-bundle producer pulls `Non-goals` into each criterion's `### Does NOT promise` subsection (per `references/evidence-bundle-format.md`).
+
+**Spec Validation Gate** (blocking):
+
+If acceptance criteria are found, build a **Spec Validation Table** and treat it as a gate, NOT a display. Every criterion MUST map to a concrete automated verification command before proceeding to Phase 2 (PLAN). This gate blocks progression when any criterion is vague, untestable, or marked `manual` without proper escalation.
+
+```markdown
+### Spec Validation Gate
+| # | Acceptance Criterion | Verification Command | Gate Status |
+|---|---------------------|----------------------|-------------|
+| 1 | {criterion text} | `{exact command, e.g. npm test -- --grep "auth"}` | PASS |
+| 2 | {vague criterion} | (none — cannot automate) | BLOCK |
+```
+
+**Gate rules:**
+
+- **PASS** — criterion has a concrete, runnable verification command (test command, curl, script invocation, build check, lint rule). The command must be specific enough that a zero-context agent could run it and collect evidence without further interpretation.
+- **BLOCK** — criterion is vague ("handle errors gracefully", "improve performance", "be user-friendly"), has no automatable check, or the verification method is unknown. Progression to PLAN is blocked.
+- **MANUAL (escalation only)** — `manual` verification is ONLY permitted when flagged as a Proactive-Autonomy escalation with the full six-field structure. Default behavior treats `manual` as BLOCK.
+
+**When any criterion BLOCKS**, the agent MUST NOT proceed to PLAN. Instead, issue a Proactive-Autonomy escalation via `AskUserQuestion` with all six fields:
+
+> **Situation** — Criterion #{n} "{vague text}" has no automatable verification. Shipping with this criterion means the plan cannot define what "done" looks like.
+>
+> **Tried** — I attempted to classify the criterion via `criterion-verification-map`. No verification type matched. Searched the codebase for existing tests covering similar behavior: {found|not found}.
+>
+> **Options**:
+> 1. Rewrite criterion as "{concrete measurable rewording}" with verification command `{specific command}`
+> 2. Rewrite criterion as "{alternative measurable rewording}" with verification command `{alternative command}`
+> 3. Mark as `manual` — I (the user) will verify this step myself at VERIFY phase. The plan will record manual evidence collection.
+>
+> **Recommendation** — Option {1|2} — measurable criteria produce better verdicts and prevent vague implementations.
+>
+> **Blocking?** — Yes. Blocks planning; Phase 2 cannot proceed until this resolves.
+>
+> **Risk** — Choosing Option 3 (`manual`) means no automated verdict for this criterion and requires a human-in-the-loop at VERIFY phase.
+
+Only after every criterion shows PASS or user-approved MANUAL can the workflow proceed to Phase 2.
+
+**Assign the issue:**
+
+```bash
+gh issue edit "$ISSUE_NUM" --add-assignee @me
+```
+
+**FlowGoal auto-creation (gated by `flow.goals.goalCreation`):**
+
+`goalCreation` is a 3-state setting — `auto` (default), `always`, or `off`:
+- `off` — never auto-create (manual `/flow:goal create` still works).
+- `always` — create a goal unconditionally (even a degenerate goal; flagged in the compact summary).
+- `auto` — create **iff** the Spec Validation Gate passed with ≥1 acceptance criterion carrying a `verification_command`. An issue that yields zero verifiable ACs (e.g. a spec-free `documentation`/`chore` issue) is skipped **silently** — no prompt, no error.
+
+The master switch `flow.goals.enabled: false` forces `off` regardless of `goalCreation` (whole feature off — distinct from `goalCreation: off`, which leaves the feature on and only suppresses auto-creation).
+
+FLOW_GOAL_MODE=auto
+FLOW_GOAL_STATE=create
+GOAL_ID=issue-104
+GOAL_PATH=.flow/goals/issue-104.goal.yaml
+
+Dispatch based on `FLOW_GOAL_STATE`:
+
+- **`create`** — branch on `FLOW_GOAL_MODE`:
+  - **`always`** — create the goal unconditionally. A degenerate goal (0 ACs, or 0 ACs carrying a `verification_command`) is allowed here but is flagged in the compact summary. Proceed to the skills below.
+  - **`auto`** — create the goal **iff** the Spec Validation Gate passed with ≥1 acceptance criterion carrying a `verification_command` (the "verifiable ACs win" rule — labels do not veto). If zero verifiable ACs (e.g. a spec-free `documentation`/`chore` issue that passed the gate with no commands), **skip silently**: do not invoke the skills, print no goal line, and treat exactly like `skip`. Otherwise proceed to the skills below.
+
+  In both create paths the visibility echo is gated on the post-write verify.
+- **`exists`** — non-terminal goal already on disk; print `FlowGoal already exists: <GOAL_PATH> (status: $GOAL_STATUS) — resuming. Use /flow:goal inspect <GOAL_ID> to review.`
+- **`terminal`** — goal is `achieved|failed|cancelled` and immutable. Refuse to resume; surface a six-field escalation per [`references/escalation-format.md`](../references/escalation-format.md): _Situation_: terminal goal at `<GOAL_PATH>`. _Tried_: detected `lifecycle.status=<GOAL_STATUS>`. _Options_: (1) Use `/flow:goal clear <GOAL_ID>` then re-run `/flow:start`, (2) Pick a new goal id, (3) Abort. _Recommendation_: Option 1 if the original goal is stale. _Blocking_: yes. _Risk_: mutating a terminal goal corrupts the audit trail.
+- **`blocked`** — cascade-resolve unavailable; surface `FLOW_GOAL_ERROR` and halt Phase 1.
+- **`skip`** — proceed without goal creation (v2 behavior preserved).
+
+For `FLOW_GOAL_STATE=create`:
+
+1. Invoke `Skill(goal-contract-capture)` with inputs:
+   - `goal id` = the `GOAL_ID` from the block above
+   - `scope` = `repo` (current repo), `branch` (will be set after Phase 2 branch creation), `issue` = `$ISSUE_NUM`
+   - `source` = pre-fetched issue body + Spec Validation Gate output
+   - `invocation reason` = `start`
+2. After the skill writes the YAML, invoke `Skill(goal-lifecycle)` to transition `draft → active`.
+3. **Post-write verify** — before emitting the visibility echo, confirm the contract was persisted and is in `active`:
+   ```bash
+   if [ ! -f "$GOAL_PATH" ]; then
+     echo "FLOW_GOAL_ERROR=goal-contract-capture returned success but $GOAL_PATH does not exist" >&2
+     # halt — do not proceed to Phase 2 with inconsistent state
+     exit 1
+   fi
+   if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+     STATUS=$(python3 -c "import sys, yaml; print((yaml.safe_load(open('$GOAL_PATH')) or {}).get('lifecycle', {}).get('status', 'unknown'))" 2>/dev/null)
+     if [ "$STATUS" != "active" ]; then
+       echo "FLOW_GOAL_ERROR=goal-lifecycle did not transition to active (current: $STATUS)" >&2
+       exit 1
+     fi
+   fi
+   ```
+4. Only after verify passes, proceed to create the FlowRun (next section). **Do not** emit a per-artifact `FlowGoal created:` line here — the compact runtime summary that supersedes it is emitted once both the goal and run exist (see **Runtime summary** below).
+
+### FlowRun (v3 runtime)
+
+`/flow:start` is a long-running workflow, so it gets a durable FlowRun linked to the FlowGoal. Runs are gated by `flow.runtime.enabled` (default `true`); v2 projects that opted out see `FLOW_RUN_STATE=skip` and the wiring is a no-op.
+
+FLOW_RUN_STATE=create
+RUN_ID=2026-08-29T115738Z-issue-104
+WORKFLOW=start-issue
+INITIAL_PHASE=preflight
+GOAL_LINK=issue-104
+
+Dispatch on `FLOW_RUN_STATE`: **`skip`** — proceed without a FlowRun (v2 behavior; the wiring is a no-op). **`blocked`** — `cascade-resolve.sh` was unavailable; surface the `FLOW_RUN_ERROR` line to the user and halt Phase 1 rather than silently proceeding without a run (same posture as `FLOW_GOAL_STATE=blocked`). **`create`** — proceed as below.
+
+When `FLOW_RUN_STATE=create`, invoke `Skill(run-state-management)` to create `.flow/runs/$RUN_ID/run.yaml` (workflow=`start-issue`, goal=`$GOAL_LINK` — the FlowGoal created above, or `null` when goal creation was skipped), initial phase `preflight`. Because `/flow:start` is issue-scoped, also emit the `workflow-run` artifact to `.decisions/issue-$ISSUE_NUM.md`:
+
+```bash
+# Self-contained: re-derive the issue from 104 (the entry !-block's vars
+# do not persist here). RUN_ID is the value emitted by the FlowRun entry block.
+_RAW="104"; ARG1="${_RAW%% *}"; case "$ARG1" in ''|*[!0-9]*) ISSUE_NUM="" ;; *) ISSUE_NUM="$ARG1" ;; esac
+if [ -n "$ISSUE_NUM" ]; then
+  "$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+    --issue "$ISSUE_NUM" --type workflow-run \
+    --metadata workflow=start-issue --metadata run_id="$RUN_ID" --metadata status=active
+fi
+```
+
+### Runtime summary
+
+Once the goal (if any) and the FlowRun exist, emit **one** compact runtime summary **in place of** any per-artifact `FlowGoal created:` line. Do not dump the goal/run YAML — "invisible" means low-ceremony, not hidden-state. The summary has exactly these lines:
+
+- **Goal**: `<GOAL_ID>` (`<lifecycle status>`) — `<verifiable>` of `<total>` ACs carry a `verification_command`
+- **Workflow**: `start-issue`
+- **Run**: `<RUN_ID>` (the value emitted by the FlowRun block)
+- **Branch**: `<current branch>` (`git branch --show-current`)
+- _I'll work until the goal is achieved, blocked, or needs your decision._
+
+Compute the AC counts with the shared helper (it prints `<total>/<verifiable>`). It exits non-zero with no output when no goal owns the current branch — that is the **skip path** (goal creation was skipped), and the summary then omits the Goal line entirely:
+
+```bash
+"$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/flow-active-goal.sh" --verifiable-count 2>/dev/null || true
+```
+
+**Truthfulness gate (load-bearing):** if the goal is degenerate — `<total>` is `0`, or `<verifiable>` is `0` — or the goal is unevaluated, the Goal line MUST be flagged, never shown as a clean `active`:
+
+- **Goal**: `<GOAL_ID>` ⚠ **degenerate / needs-attention** — `0` verifiable ACs; this goal cannot auto-evaluate.
+
+A degenerate goal can only arise under `goalCreation: always` or a manual `/flow:goal create` — `auto` never creates one (it requires ≥1 verifiable AC). When goal creation was **skipped** (`auto` with zero verifiable ACs, or `off`): omit the Goal line entirely and show only Workflow / Run / Branch — never present a skipped goal as if one exists.
+
+Phase order: `preflight → explore → plan → code → verify`. At each subsequent phase boundary (PLAN, CODE, VERIFY), invoke `Skill(run-state-management)` to write a FlowActivity record and advance `state.current_phase`. After the Phase 4 verdict settles, transition the FlowRun: `state.status: completed` when the verdict is PASS (and update the `workflow-run` artifact to `status=completed`); `state.status: blocked` (with `blocked_reason`) when the verdict is FAIL or the session ends mid-workflow, so `/flow:resume` can pick it up.
+
+## Phase 2: PLAN
+
+Create branch and decompose tasks.
+
+**Branch creation** (Tier 1 — autonomous):
+
+```bash
+git fetch origin $DEFAULT_BRANCH
+git checkout -b "feature/issue-${ISSUE_NUM}-{kebab-desc}" "origin/$DEFAULT_BRANCH"
+```
+
+**Initialize decision journal:**
+
+```bash
+mkdir -p .decisions
+```
+
+Write journal header to `.decisions/issue-$ISSUE_NUM.md`.
+
+**Task decomposition** — dispatch implementation-planner agent:
+
+Each implementation task is an **atomic unit** that bundles three responsibilities, not three separate tasks:
+
+1. **Implementation** — the code change
+2. **Test** — the test(s) that verify the behavior the code change introduces
+3. **Verification-evidence collection** — the exact command that will be run in Phase 4 to prove this task's acceptance criterion is met, and the captured output that becomes evidence
+
+A task is not "done" until all three are complete. Splitting them into three sibling tasks (one for code, one for test, one for verify) is explicitly prohibited — it causes implementation to ship before tests catch up and verification to happen after the author has lost context.
+
+```
+Agent(implementation-planner):
+  "Parse acceptance criteria from issue #$ISSUE_NUM and create atomic tasks.
+   Issue context: {pre-fetched issue title, body, comments}
+   Specification (from EXPLORE): {non-goals, failure modes, interface contracts}
+   Spec Validation Gate results: {criterion -> verification command mapping}
+
+   For each acceptance criterion, use TaskCreate with a single atomic task:
+   - subject: imperative description of the behavior
+   - description: |
+       Criterion: {full criterion text}
+       Non-goals touched: {which non-goals this task must respect}
+       Failure modes covered: {which failure modes this task implements handling for}
+       Interface contract: {schema/signature this task must honor}
+       Implementation outline: {files + approach}
+       Test plan: {test file + cases + assertions}
+       Verification command: {exact command from Spec Validation Gate}
+       Expected evidence: {what success output looks like}
+
+   Set dependencies with TaskUpdate(addBlockedBy).
+   Identify parallel execution opportunities.
+   Return: task list, dependency graph, suggested order."
+```
+
+Each atomic task flows through implementation → test → evidence collection within the same task lifecycle in Phase 3 (CODE). Phase 4 (VERIFY) still runs the full evidence bundle assembly and independent verdict judge, but per-task evidence is captured at the moment the task completes, not in a bulk pass after all tasks have completed and context is fragmented.
+
+**Stranger Test check** (mandatory PLAN gate):
+
+Before proceeding to Phase 3 (CODE), the agent MUST run the Stranger Test against the assembled plan:
+
+> **Could a zero-context agent — one that has never seen this repo, this issue, or this plan conversation — execute every task in this plan and produce acceptable output?**
+
+Check each task for these failure modes:
+
+- **Implicit file references** — "update the auth module" without the path
+- **Undefined terms** — uses project jargon without definition
+- **Missing preconditions** — assumes setup, env vars, or state that is not written down
+- **Vague success criteria** — "make it work", "fix the issue", "handle it correctly"
+- **Unspecified verification command** — a zero-context agent would not know what to run to prove the task is done
+- **Missing interface contracts** — schema/signature/shape is not written in the task
+- **Missing failure-mode coverage** — the task does not reference which failure modes it must handle
+
+If ANY task fails the Stranger Test, the plan is incomplete. The agent must either rewrite the task to close the gap, or issue a Proactive-Autonomy escalation asking the user to fill in the missing context. Only after every task passes the Stranger Test can the workflow proceed to Phase 3.
+
+Record the Stranger Test result to `.decisions/issue-$ISSUE_NUM.md` under a `## Stranger Test` heading with either "PASS — {N} tasks reviewed" or "BLOCK — {task id}: {failure mode}".
+
+**Manifest emit** — append the stranger-test artifact (alongside the freeform `## Stranger Test` section) so the manifest captures the gate's outcome:
+
+```bash
+"$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+  --issue "$ISSUE_NUM" \
+  --type stranger-test \
+  --metadata result={PASS|BLOCK} \
+  --metadata task_count=$N
+```
+
+Add `--metadata failed_task=$TASK_ID` when result is BLOCK (the task ID that failed the gate, so downstream readers can locate the offending task without re-parsing the body).
+
+Display task plan. Proceed unless user objects.
+
+## Phase 3: CODE
+
+**TDD enforcement**: Check `settings.json` → `testing.tddMode`:
+- `enforce` (default) — write a failing test FIRST. Implementation without a preceding RED test is blocked.
+- `suggest` — recommend TDD but allow override. Only active when `testing.tddModeOptOut` is `true`.
+- `off` — no TDD guidance; tests still run in verification.
+
+Execute tasks following the per-task verification gate loop:
+
+```
+For each task (in dependency order):
+  1. TaskUpdate(taskId, status: "in_progress")
+  2. Read relevant files (follow existing patterns)
+  3. TDD enforcement (when tddMode=enforce):
+     a. RED: Write the failing test FIRST — the test MUST fail before any implementation
+     b. Verify it fails for the right reason (not syntax error, not wrong import)
+  4. GREEN: Implement the change — simplest code to make the test pass
+     - Follow existing patterns (co-located files, same framework)
+     - At minimum, one test per acceptance criterion or behavior
+     - Test edge cases, not just the happy path
+     - For bug fixes: write a test that would have caught the original bug
+  5. Run tests (existing + new):
+     IF tests FAIL → enter debug-fix-retest loop:
+       - Read failure output, identify root cause
+       - Fix the failing code (not the test, unless the test is wrong)
+       - Re-run tests
+       - Repeat until all tests pass (bounded by closedLoop.maxDebugIterations)
+       - Do NOT proceed to step 6. Do NOT call TaskUpdate(completed).
+       - Approaching `closedLoop.maxDebugIterations` is a signal to re-check whether you're fixing the wrong layer or whether two test failures are in tension — not a budget to stop at. Only halt for genuine non-convergence (same failure persists 3+ iterations with no progress AND the ceiling is reached); in that case file a six-field Proactive-Autonomy escalation per `skills/llm-operator-principles/SKILL.md` § Genuine non-convergence.
+     IF tests PASS → continue to step 6
+  6. REFACTOR: Clean up implementation and tests. Re-run tests — they must still pass.
+  7. Capture verification evidence:
+     - Run the verification command from the task description
+     - Record the output as evidence for this task's acceptance criterion
+     - IF verification command fails → enter debug-fix-retest loop (same rules as step 5)
+  8. Per-task change classification:
+     - Classify all files modified during this task using change-classification signals
+     - Flag any out-of-context files NOW — do not accumulate until commit time
+     - If out-of-context files found, use AskUserQuestion to resolve before proceeding
+  9. Incremental commit (Tier 1: autonomous)
+  10. ONLY after ALL of the following are true may TaskUpdate(completed) be called:
+      - All tests pass (existing + new)
+      - Verification evidence captured for this task's acceptance criterion
+      - No unresolved out-of-context files from this task
+      - TDD cycle completed (RED → GREEN → REFACTOR) when tddMode=enforce
+      TaskUpdate(taskId, status: "completed")
+```
+
+**Critical gate**: Step 5 is a HARD GATE. If tests fail, the task CANNOT be marked completed. The loop stays on the current task until tests pass or the user is escalated to. Skipping ahead to the next task with failing tests is explicitly prohibited.
+
+**Parallel task detection**: If tasks have no overlapping files and agent teams are enabled, suggest parallel execution via agent team.
+
+**Quality loop** (bounded by `qualityCheckMaxIterations`):
+
+```bash
+# Run quality commands discovered in Phase 1 (parallel)
+$LINT_CMD
+$TEST_CMD
+$TYPECHECK_CMD
+```
+
+If failures: fix and re-run. The iteration ceiling is a safety net against true infinite loops, not a budget — approaching it is a signal to re-check understanding, not to escalate. Only halt for genuine non-convergence per `skills/llm-operator-principles/SKILL.md` § Genuine non-convergence.
+
+**Build-and-run verification** (before proceeding to Phase 4):
+
+1. **Build the project** → if build fails, apply debugging-patterns: read errors, fix, rebuild (up to `closedLoop.maxBuildIterations`)
+2. **Start dev server** (if applicable) → if won't start, read logs, fix, retry (up to `closedLoop.maxServerRetries`)
+3. **Smoke test** → hit key endpoints or run the CLI with sample input
+4. If any step fails → enter debug-fix-retest loop. Do NOT proceed to Phase 4 until code builds and runs.
+
+Skipping the build-and-run step is ONLY permitted if the change falls into one of the three enumerated whitelist categories defined in the `runtime-verification` skill: `markdown-only`, `config-only`, or `dependency-bump-only`. Any other skip requires a Proactive-Autonomy escalation — see the skill for the required six-field structure. If in doubt, run it.
+
+## Phase 4: VERIFY
+
+Prove everything works with fix-forward:
+
+1. **Run full quality suite** (parallel Bash calls for lint, test, typecheck)
+2. **Runtime verification** (MANDATORY — not conditional on skill availability):
+
+   Invoke `Skill(runtime-verification)` for build, dev-server, smoke, E2E, and LSP-diagnostics checks. The skill owns the skip whitelist (the three enumerated categories `markdown-only`, `config-only`, `dependency-bump-only` with their required evidence) and the escalation protocol for out-of-whitelist skips per [`references/escalation-format.md`](../references/escalation-format.md). Any skip outside the whitelist requires an approved Proactive-Autonomy escalation surfaced via `AskUserQuestion` — blanket or subjective justifications are not valid. If in doubt, run it.
+
+   When the diff is UI-relevant (UI file extensions OR acceptance criteria with UI keywords — see the visual-verification skill for the exact detection rules), invoke `Skill(visual-verification)` in parallel. The two skills coordinate via the dev server URL: if `runtime-verification` cannot start the dev server, `visual-verification` returns SKIP with that reason and the completion gate treats the dev-server failure as the primary finding.
+3. **Self-review with fix-forward** — dispatch Agent(code-reviewer):
+   ```
+   Agent(code-reviewer):
+     "Review the diff on this branch against $DEFAULT_BRANCH.
+      Check for: logic errors, security issues, missing edge cases,
+      convention violations. Return P1/P2/P3 findings with file:line."
+   ```
+   **Fix-forward** (bounded by `fixForwardMaxIterations`, default 10 — safety net against true infinite loops, NOT a planned stop point; see `skills/llm-operator-principles/SKILL.md`):
+   - P1 findings → fix immediately (you just wrote this code, no "pre-existing" excuse)
+   - P2 findings → fix immediately
+   - P3 findings → fix immediately (same disposition as P1/P2 — the proximity test is not a deferral mechanism). Cosmetic P3 in untouched files only: fix if bounded (<10 lines) or document inline in the PR body under `### Known cosmetic notes`. Finding triage is NEVER a valid escalation trigger.
+   - After fixes: re-run quality commands, then targeted re-review on files changed by fixes
+   - Approaching the iteration ceiling without convergence is a signal to re-check understanding (are two findings in tension? are you fixing the wrong thing?), not to escalate the remaining findings. See `skills/llm-operator-principles/SKILL.md` § Genuine non-convergence for the one terminal case.
+4. **Holdout validation** — invoke `holdout-validation` skill to cross-reference self-review claims against actual file state:
+   ```
+   Skill(holdout-validation):
+     Inputs:
+     - Self-review findings: {P1/P2/P3 findings from step 3}
+     - Evidence bundle draft: {per-criterion evidence collected so far}
+     - File list: {all files modified/created on this branch}
+   ```
+   **Blocking treatment:**
+   - P1/P2 findings from holdout-validation → fix immediately before proceeding (same fix-forward loop as step 3)
+   - After fixes: re-run holdout-validation to confirm the conflict is resolved
+   - P3 findings → fix in-PR as part of the same convergence loop. Only cosmetic P3 in untouched files may be documented inline in the PR body under `### Known cosmetic notes` instead of fixed. Do NOT defer fixable P3 to the PR body.
+   - Only proceed to step 5 when holdout-validation returns PASS or no fixable findings remain
+
+   The holdout-validation output is passed to the verdict-judge in step 6 as a required input.
+5. **Per-criterion evidence collection** — execute verification tasks created in Phase 2:
+   ```
+   For each "Verify: ..." task:
+     1. TaskUpdate(verifyTaskId, status: "in_progress")
+     2. Run the verification command from the task description
+     3. Capture output as evidence
+     4. TaskUpdate(verifyTaskId, status: "completed", result: "EVIDENCE_COLLECTED")
+   ```
+   Assemble the evidence bundle following the canonical format in [`references/evidence-bundle-format.md`](../references/evidence-bundle-format.md). For every acceptance criterion, the bundle MUST include: `### Verification command` (the exact command from the Spec Validation Gate), `### Output` (captured stdout/stderr verbatim), `### Does NOT promise` (non-goals — pulled from the Phase 1 specification capture), `### What was tested` (informational), and the three mandatory completeness subsections `### What was NOT tested`, `### Known limitations of this evidence`, `### Negative/adversarial cases covered`. All four mandatory subsections (`Does NOT promise` plus the three completeness ones) accept `none` as a positive statement when the producer can affirmatively say there is nothing to disclose; bare blank is NOT permitted and triggers the verdict-judge auto-FAIL. If a mandatory subsection cannot be filled, escalate via `references/escalation-format.md` rather than emitting a blank field — the gap surfaces with better context than waiting for the auto-FAIL downstream.
+6. **Independent verdict** — if `verdict.enabled` is `true` (default), dispatch Agent(verdict-judge):
+   ```
+   Agent(verdict-judge):
+     "Evaluate whether acceptance criteria are met based on evidence.
+
+      Acceptance Criteria:
+      {list of ACs from issue body}
+
+      Evidence Bundle:
+      {assembled evidence from step 5}
+
+      Holdout Validation Output:
+      {findings from step 4 — P1/P2/P3 with file:line citations}"
+   ```
+   The verdict-judge receives ONLY the acceptance criteria, evidence bundle, and holdout-validation output.
+   It does NOT receive: the diff, decision journal, planning rationale, or self-review findings.
+
+   **Handle verdicts:**
+   - **All PASS** → proceed to completion gate
+   - **Any FAIL** → enter fix loop: fix the failing criterion, re-collect evidence, re-judge (bounded by `fixForwardMaxIterations` as a safety net, not a budget — see `skills/llm-operator-principles/SKILL.md`). FAIL on an acceptance criterion is a genuine escalation case (failing acceptance criteria is a product-level decision, not finding-triage) — but only escalate after genuine non-convergence (same criterion fails 3+ iterations with no progress AND the ceiling is reached).
+   - **NEEDS-HUMAN-REVIEW** (no FAILs):
+     - If `verdict.requireAllPass` is `true` → treat as FAIL (enter fix loop to produce definitive evidence)
+     - If `verdict.requireAllPass` is `false` (default) → present verdict table to user via `AskUserQuestion`:
+       > The verdict judge could not determine pass/fail for some criteria.
+       > {verdict table}
+       > Options:
+       > 1. Approve — these criteria are met (I've reviewed the evidence)
+       > 2. Reject — fix these criteria before proceeding
+     - Based on response: proceed or enter fix loop
+   **Manifest emit** — record the verdict artifact after the verdict-judge returns (and any fix-loop iterations have settled):
+
+   ```bash
+   "$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+     --issue "$ISSUE_NUM" \
+     --type verdict \
+     --metadata result={PASS|FAIL|NEEDS-HUMAN-REVIEW}
+   ```
+
+   Add `--metadata pr=$PR_NUMBER` when a PR exists (Phase 4 may run before or after PR creation depending on the workflow). When the verdict is FAIL after the fix loop exhausted iterations, add `--metadata failures=criterion-1,criterion-2` listing the criteria that did not converge — the manifest then carries enough context for `/flow:status` to surface the open verdicts without re-running the judge.
+
+7. **TaskList** — confirm all tasks show status: completed
+8. **Visual verification** — when UI-relevant changes detected (changed `.tsx`/`.jsx`/`.vue`/`.html`/`.css`/`.scss`/`.svelte` files OR acceptance criteria mention UI/page/render/display/visual/layout/responsive/component/style):
+
+   This step is normally already covered by step 2's parallel `Skill(visual-verification)` invocation. If step 2 returned `SKIP` because the dev server was unavailable, retry it here once `runtime-verification` has had a chance to fix the dev server failure. Otherwise, this step is a no-op confirmation — read the visual-verification result tasks from step 2 and confirm they reached a terminal state (PASS, FAIL, SKIP, SKIP_WARN, SKIP_USER_APPROVED, MANUAL, or BLOCKED).
+
+   The visual-verification skill owns task creation, browser-tool cascade, screenshot-analyze-verify loop, responsive checks, and result vocabulary. Do not re-implement those steps inline — delegate via `Skill(visual-verification)` per `skills/visual-verification/SKILL.md`. Read its Output Format section to know what to expect in the consolidated output.
+9. **Completion gate**: ALL of:
+   - All quality checks pass
+   - Runtime verification passed (or skipped under one of the three enumerated whitelist categories in the `runtime-verification` skill: `markdown-only`, `config-only`, `dependency-bump-only`)
+   - No unresolved P1 findings
+   - Holdout validation: PASS or P3-only (no unresolved P1/P2 conflicts)
+   - All tasks completed (including verification tasks)
+   - Verdict: all criteria PASS or user-approved (when `verdict.enabled`)
+   - Visual verification: no BLOCKED results (see escalation below)
+
+   **Visual verification escalation**: If any visual verification task has result containing "BLOCKED", use `AskUserQuestion`:
+   > Visual verification is required (`requireVisualVerification: true`) but no browser tools are available.
+   > UI files changed: {list of changed .tsx/.jsx/.vue/.html/.css/.scss files}
+   >
+   > Options:
+   > 1. Skip visual verification for this change (will be noted in PR body)
+   > 2. I will verify visually myself (manual verification)
+   > 3. Help me install browser tools (Playwright MCP recommended)
+
+   Based on response:
+   - Option 1 → `TaskUpdate` visual tasks with result "SKIP_USER_APPROVED"
+   - Option 2 → `TaskUpdate` visual tasks with result "MANUAL — user will verify"
+   - Option 3 → Provide Playwright MCP installation guidance, then retry browser tool cascade
+10. **Display summary**:
+   - Tasks completed: N/N
+   - Quality checks: pass/fail
+   - Self-review findings: P1: X, P2: Y, P3: Z (all P1/P2 fixed via fix-forward)
+   - Holdout validation: PASS / FINDINGS (P1: X, P2: Y, P3: Z — all P1/P2 fixed)
+   - Verdict: PASS (N/N criteria) / FAIL / NEEDS-HUMAN-REVIEW / N/A (spec-free task)
+   - Runtime verification: pass/fail/skip
+   - Visual verification: PASS / FAIL / SKIP / SKIP_WARN / SKIP_USER_APPROVED / MANUAL
+   - Branch: ready for PR
+
+## Completion
+
+Present next steps:
+
+- `/flow:pr` — create pull request (primary suggestion — fix-forward should have committed everything)
+- `/flow:commit` — if uncommitted changes remain
+- Continue working — keep implementing
+
+## Tier Classification
+
+| Action | Tier | Behavior |
+|--------|------|----------|
+| Branch creation | 1 | Autonomous |
+| File edits | 1 | Autonomous |
+| Commits | 1 | Autonomous, logged by hook |
+| Issue assignment | 2 | Journal-and-proceed |
+| Push | 2 | Journal-and-proceed |
+
+---
+
+<task-notification>
+<task-id>b1fn2cx08</task-id>
+<summary>Monitor event: "CI checks on PR #110"</summary>
+<event>Analyze (actions): pass
+Benchmark validation: pass
+CodeQL: skipping
+Conformance tests: pass
+Lint &amp; type-check: pass
+Validate YAML schemas: pass</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b1fn2cx08</task-id>
+<summary>Monitor event: "CI checks on PR #110"</summary>
+<event>Analyze (python): pass
+CodeQL: pass
+Tests (Python 3.11): pass</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b1fn2cx08</task-id>
+<summary>Monitor event: "CI checks on PR #110"</summary>
+<event>Tests (Python 3.10): pass
+Tests (Python 3.12): pass
+ALL CHECKS COMPLETE</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b1fn2cx08</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Monitor "CI checks on PR #110" stream ended</summary>
+</task-notification>
+
+---
+
+<!--
+PARALLEL EXECUTION RULE:
+Execute independent operations simultaneously.
+-->
+
+# Review PR #(#108 → #109 → #110)
+
+Multi-faceted code review with parallel analysis. Follows Explore > Plan > Code > Verify loop.
+
+## Required Skills
+
+- `llm-operator-principles` — foundational operator stance: convergence = zero findings, in-PR fixes by default, no calendar-time estimates, narrow escalation triggers. MUST be consulted before any other phase
+- `code-review-methodology` — 6-facet review, finding synthesis, adversarial protocol
+- `holdout-validation` — cross-reference self-review claims against file state (Phase 3)
+
+## Phase 1: EXPLORE
+
+`gh pr checkout` stays inline below (mutating working tree); read-only context-gathering is in the `!` block.
+
+### PR Reference
+STATE=blocked
+ERROR=PR number required (all-digit). Usage: /flow:review <pr-number>
+
+Then check out the PR branch (mutating, runs inline):
+
+```bash
+gh pr checkout "$PR_NUM"
+```
+
+**Agent(Explore)**: "Read the changed files in this PR and understand the context. What modules are affected? What patterns are being followed or changed?"
+
+Check for previous reviews — if this is a follow-up review, focus on changes since last review.
+
+**Parse structured findings from previous review/resolution cycles** (follow-up reviews only).
+
+### Previous Review Cycles
+STATE=blocked
+ERROR=PR number required (all-digit)
+
+If previous cycles exist, build a **Previous Feedback Status** table and cross-reference each finding's location against `git diff` to verify resolution.
+
+### FlowRun (v3 runtime)
+
+A review is a long-running workflow, so it gets a durable FlowRun. Runs are gated by `flow.runtime.enabled` (default `true`); v2 projects that opted out see `FLOW_RUN_STATE=skip` and the wiring is a no-op.
+
+FLOW_RUN_STATE=create
+RUN_ID=2026-08-29T184655Z-review
+WORKFLOW=review-pr
+INITIAL_PHASE=preflight
+
+When `FLOW_RUN_STATE=create`, invoke `Skill(run-state-management)` to create `.flow/runs/$RUN_ID/run.yaml` (workflow=`review-pr`, goal=`null`), initial phase `preflight`. Phase order: `preflight → fan-out → consolidate → report`. Review is **FlowRun-only — it creates NO FlowGoal**: a review session is bounded by the PR under review, and the PR's own review-thread state (the posted review comment plus its FLOW_REVIEW_CYCLE marker) is the durable record of what the review found. The `run.yaml` captures the workflow's resumability state; there is no separate goal contract to satisfy.
+
+## Phase 2: PLAN
+
+```
+TaskCreate("Security review", "Check for OWASP top 10, secrets, injection, auth/authz")
+TaskCreate("Code quality review", "Logic correctness, edge cases, error handling")
+TaskCreate("Convention review", "Commit format, branch naming, code patterns")
+TaskCreate("Test review", "Run quality commands, assess test coverage")
+TaskCreate("Requirements review", "Map acceptance criteria to implementation")
+TaskCreate("Error handling review", "Check for unhandled exceptions, silent failures, missing edge cases")
+TaskCreate("Holdout validation", "Cross-reference self-review claims against actual file state using holdout scenarios")
+```
+
+## Phase 3: CODE (Review Execution)
+
+### Path A: Agent Teams (when `agentTeams: true` AND `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is set)
+
+Implements the paired-reviewer + challenge-round protocol. The `team-coordination` skill (`plugins/flow/skills/team-coordination/SKILL.md`) is the protocol contract.
+
+**Path A gate check** (mandatory before paired dispatch — runs before A.1).
+
+### Path A Gate
+Path A skipped: agentTeams=false (from /Users/danielbentes/.claude/plugins/cache/synapti-marketplace/flow/3.2.2/settings.json). Using Path B (single-session).
+USE_PATH_A=0
+PATH_A_STATE=disabled
+
+If `USE_PATH_A=0`, skip the rest of Path A and dispatch Path B below.
+
+**Model selection.** When `USE_PATH_A=1`, the gate emits `AGENT_TEAM_MODEL` (default `sonnet`). Dispatch every Path A agent below — both the A.1 paired reviewers and the A.3 challenge rounds — passing `AGENT_TEAM_MODEL` as the Agent tool's per-invocation `model` override (the `model=...` shown in the `Agent(...)` examples maps to that tool argument). The override takes precedence over each agent's `model: inherit` frontmatter (precedence: dispatch override > frontmatter > session model), so the reviewers run on `AGENT_TEAM_MODEL` regardless of the session's model. **When `AGENT_TEAM_MODEL=inherit`, OMIT the `model` argument entirely** — the dispatch-time override accepts only `sonnet`/`opus`/`haiku`, and the session model (the behavior before this setting existed) is expressed by dropping the override, NOT by passing `model=inherit`. The two `Skill(holdout-validation)` invocations are unaffected (skills run inline in the parent context, not as model-dispatched subagents).
+
+#### A.1 — Independent Analysis (paired reviewers, parallel dispatch)
+
+Dispatch **12 invocations** (10 `Agent(...)` + 2 `Skill(holdout-validation)`) in a single parallel block — 5 agent facets × {skeptic, verifier} plus the holdout-validation skill in both lenses. Each variant carries an orthogonal lens; both run with no awareness of each other.
+
+Each `Agent(...)` call below carries `model=$AGENT_TEAM_MODEL` per **Model selection** above. (When the resolved value is `inherit`, drop the `model=` argument — the session model is the default when no override is passed.)
+
+```
+Agent(security-reviewer-skeptic, model=$AGENT_TEAM_MODEL):
+  "You are reviewing PR #(#108 → #109 → #110) as the SKEPTIC variant. Assume the diff is
+   broken until proven otherwise. Flag every security behavior you cannot prove
+   correct from the code as written: OWASP Top 10, secrets, auth/authz, input
+   validation, dependency vulnerabilities. Return P1/P2/P3 findings with
+   file:line citations and category. Do NOT include challenge information —
+   another reviewer will challenge your findings later."
+
+Agent(security-reviewer-verifier, model=$AGENT_TEAM_MODEL):
+  "You are reviewing PR #(#108 → #109 → #110) as the VERIFIER variant. Assume the diff is
+   correct as a baseline. Look only for missed security edge cases, undocumented
+   contract assumptions, or invariants that aren't enforced. Return P1/P2/P3
+   findings with file:line citations and category."
+
+Agent(code-reviewer-skeptic, model=$AGENT_TEAM_MODEL):
+  "PR #(#108 → #109 → #110) as SKEPTIC. Assume broken; flag logic/quality/edge-case
+   issues you cannot prove correct. P1/P2/P3 + file:line + category."
+
+Agent(code-reviewer-verifier, model=$AGENT_TEAM_MODEL):
+  "PR #(#108 → #109 → #110) as VERIFIER. Assume correct; look only for missed edge cases
+   and unenforced invariants. P1/P2/P3 + file:line + category."
+
+Agent(convention-checker-skeptic, model=$AGENT_TEAM_MODEL):
+  "PR #(#108 → #109 → #110) as SKEPTIC. Flag every convention violation (commits, branch
+   naming, code patterns) you cannot prove conformant. P1/P2/P3 + file:line."
+
+Agent(convention-checker-verifier, model=$AGENT_TEAM_MODEL):
+  "PR #(#108 → #109 → #110) as VERIFIER. Look for convention drift the skeptic might miss
+   (e.g., subtle stylistic divergence). P1/P2/P3 + file:line."
+
+Agent(test-runner-skeptic, model=$AGENT_TEAM_MODEL):
+  "PR #(#108 → #109 → #110) as SKEPTIC. Run quality commands (lint, test, typecheck) and
+   flag every failure or warning. Return findings with command output."
+
+Agent(test-runner-verifier, model=$AGENT_TEAM_MODEL):
+  "PR #(#108 → #109 → #110) as VERIFIER. Run quality commands and flag missing test
+   coverage or weak assertions in passing tests. Return findings."
+
+Agent(error-handler-inspector-skeptic, model=$AGENT_TEAM_MODEL):
+  "PR #(#108 → #109 → #110) as SKEPTIC. Flag every error-handling gap, silent failure,
+   or unhandled exception you cannot prove handled. P1/P2/P3 + file:line."
+
+Agent(error-handler-inspector-verifier, model=$AGENT_TEAM_MODEL):
+  "PR #(#108 → #109 → #110) as VERIFIER. Look for missed error contracts and unenforced
+   exception invariants. P1/P2/P3 + file:line."
+
+Skill(holdout-validation):
+  Inputs (skeptic lens):
+  - Self-review findings: {existing P1/P2/P3 findings}
+  - Evidence bundle draft: {requirements compliance map}
+  - File list: {all files changed in this PR}
+  - Lens: SKEPTIC — assume claims are unsupported until proven
+
+Skill(holdout-validation):
+  Inputs (verifier lens):
+  - Same inputs
+  - Lens: VERIFIER — assume claims are supported; look for missed cross-references
+```
+
+Each returns a structured finding list. Index returned findings by facet for the challenge round: `findings[facet][variant] = [F1, F2, ...]`.
+
+**Note on holdout-validation challenge participation** (designed asymmetry — not a tooling workaround): the two `Skill(holdout-validation)` invocations contribute findings to A.2 auto-consensus matching but **do NOT participate in the A.3 challenge round**. This is the principled split between two categorically different finding types:
+
+- **Adversarial challenge (AGREE/DISAGREE/REFINE) is for subjective judgment.** Reviewers can legitimately hold different opinions about whether a SQL pattern is actually exploitable, whether a race condition matters at the project's scale, or whether a P2 finding should be P1 instead. The challenge round surfaces those disagreements; the consolidator weights confidence by the disposition the OTHER reviewer assigned.
+- **Holdout findings are objective claim-verification.** The question they answer is binary: did the self-reported evidence match the file state? The file state is the arbiter, not reviewer opinion. A challenger cannot meaningfully DISAGREE with "the agent claimed test X exists; grep finds no test for X" — they can re-check the file (which produces the same answer) but they cannot vote it away.
+
+Including holdout in challenge would either (a) produce vacuous AGREE responses (re-check confirms what we already established) or (b) confuse the protocol (DISAGREE based on what — the file state changed? the claim was parsed differently?). The asymmetry is principled and intentional. The two holdout lenses (skeptic + verifier) DO produce a confidence signal: when both lenses raise the same finding the disposition is `consensus`; when only one lens raises it the disposition is `unchallenged` (meaning the OTHER lens parsed the claim differently or weighted holdout-scenario priority differently — itself a useful signal worth investigating, but not via AGREE/DISAGREE voting).
+
+Consequently, the cost table in `team-coordination/SKILL.md` lists **10** challenge calls rather than 12 — the 2-call savings is the principled exclusion, not a tooling shortcut. Holdout findings emit at A.4 with `consensus` (both lenses raised it independently) or `unchallenged` (one lens only); they NEVER carry `validated` / `refined` / `kept` because those dispositions are challenge-round outputs.
+
+**Post-condition on returned IDs**: each variant's findings must have IDs matching `^[A-Za-z][A-Za-z0-9_-]*$` before A.2 consumes them — the same allowlist that downstream consumers (`status.md:104-117`, `merge.md`) enforce. IDs that fail validation are skipped at A.2 with a `LEDGER_WARN: PR#{N} A.1 rejected non-conforming ID '{safe-id}' from {variant}` to stderr. This avoids producing markers that get silently dropped downstream and makes the A.2 lexicographic tiebreaker safe against pathological IDs.
+
+#### A.2 — Auto-consensus detection
+
+Before dispatching the challenge round, detect findings that BOTH variants raised independently. The match window is hard-coded for v1: same facet AND same file AND lines within ±2 AND priority within ±1 (P1↔P2 counts; P1↔P3 does not).
+
+```bash
+# Pseudocode (apply per facet, deterministic — see helpers below).
+# Iterate skeptic findings in lexicographic ID order so the loop itself is
+# deterministic. paired_b = set() tracks verifier findings already paired in
+# this facet — once paired, a finding cannot be paired again.
+# paired_b = set()
+# for finding_a in sorted(findings[facet][skeptic], key=lambda a: a.id):
+#   candidates = []
+#   for finding_b in findings[facet][verifier]:
+#     if finding_b.id in paired_b: continue            # skip already-paired
+#     if (line(finding_a) > 0) != (line(finding_b) > 0): continue  # see C10
+#     if same_file(finding_a, finding_b) AND
+#        abs(line(finding_a) - line(finding_b)) <= 2 AND
+#        priority_distance(finding_a.priority, finding_b.priority) <= 1:
+#       candidates.append(finding_b)
+#   if candidates:
+#     # Deterministic tiebreaker: smallest line distance, then smallest priority
+#     # distance, then lexicographic ID. Required so re-runs of the same review
+#     # produce the same consensus pairing.
+#     finding_b = min(candidates, key=lambda b: (
+#       abs(line(finding_a) - line(b)),
+#       priority_distance(finding_a.priority, b.priority),
+#       b.id
+#     ))
+#     mark (finding_a, finding_b) as auto-consensus -> confidence=HIGH, disposition=consensus
+#     paired_b.add(finding_b.id)
+#     remove finding_a and finding_b from challenge candidates for this facet
+```
+
+**Helper definitions** (specified to remove implementer ambiguity):
+
+| Helper | Definition |
+|--------|------------|
+| `line(finding)` | Integer parsed from the first `:N` group in `file:line`. For ranges (`file:42-50`), use the low end (`42`). For file-level findings (no line citation), treat as line `0`. The pseudocode above explicitly skips pairs where one side is line-bearing (`>0`) and the other is file-level (`==0`) — see the second `continue` in the loop — so file-level findings only ever match other file-level findings on the same file. |
+| `same_file(a, b)` | Compare normalized paths: strip leading `./`, resolve `..` segments, lowercase only on case-insensitive filesystems. Returns true on equality. |
+| `priority_distance(p1, p2)` | `0` if equal, `1` for P1↔P2 or P2↔P3, `2` for P1↔P3. The match window threshold is `≤ 1` so P1↔P3 NEVER match. |
+
+Auto-consensus findings skip the challenge round (no need — both reviewers already agreed independently).
+
+#### A.3 — Challenge Round (disposition-only, parallel)
+
+For findings NOT in auto-consensus, dispatch each variant to challenge the OTHER variant's findings. **Variants do NOT re-read the diff.** Up to 10 challenge prompts run in parallel (5 agent facets × 2 directions; holdout-validation excluded — see A.1 note). Each challenge `Agent(...)` carries `model=$AGENT_TEAM_MODEL` per **Model selection**.
+
+```
+Agent(security-reviewer-skeptic, model=$AGENT_TEAM_MODEL) [challenge mode]:
+  "You are reviewer-A (skeptic) for facet 'security'. Reviewer-B (verifier)
+   raised the following findings on the same diff you reviewed independently.
+   For each finding, respond with exactly one line:
+
+     {finding-id} AGREE
+     {finding-id} DISAGREE: {one-line reason}
+     {finding-id} REFINE: priority={P1|P2|P3} category={text}
+
+   Do NOT re-read the diff. Decide based on your prior independent analysis only.
+
+   Findings to challenge:
+   {list of verifier's non-auto-consensus findings: ID, file:line, priority, category}"
+
+Agent(security-reviewer-verifier, model=$AGENT_TEAM_MODEL) [challenge mode]:
+  "Same instructions, reversed: challenge the skeptic's non-auto-consensus
+   findings for facet 'security'."
+
+[... repeat for the other 5 facets in parallel ...]
+```
+
+Each challenge call returns a list of `{finding-id, disposition, optional reason/refinement}`.
+
+#### A.4 — Consolidation
+
+Apply the consolidation table from `team-coordination/SKILL.md` Phase 4. For each finding, look up its origin and the other variant's disposition:
+
+| Origin | Other variant's disposition | Confidence | Marker disposition vocab |
+|--------|------------------------------|------------|--------------------------|
+| Auto-consensus (A.2) | n/a | **HIGH** | `consensus` |
+| One raised, other AGREE | AGREE | **HIGH** | `validated` |
+| One raised, other REFINE | REFINE | **MEDIUM** | `refined` (use REFINE'd priority/category) |
+| One raised, other DISAGREE | DISAGREE | **LOW** | `kept` (record reason) |
+| One raised, other timed out / errored | none | **MEDIUM** | `unchallenged` |
+| Both raised, both DISAGREE'd | n/a | **DROPPED** | excluded from output, logged below |
+
+**DROPPED findings** are logged to `.decisions/issue-{N}.md` (where N = the issue this PR addresses) under a `## Dropped after challenge (PR #$PR_NUM, cycle {N})` heading with the finding details and both DISAGREE reasons. They never appear in the rendered tables or the FLOW_REVIEW_CYCLE marker.
+
+**Manifest emit** — for each DROPPED finding, append a `dropped-finding` artifact to the journal manifest so `/flow:learn` can detect repeated drop reasons across cycles (a recurring drop reason is a learnable signal):
+
+```bash
+"$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+  --issue $ISSUE \
+  --type dropped-finding \
+  --metadata cycle=$CYCLE \
+  --metadata finding_id=$FINDING_ID \
+  --metadata facet=$FACET \
+  --metadata reason="$REASON" \
+  --metadata pr="$PR_NUM"
+```
+
+Repeat once per dropped finding. The freeform `## Dropped after challenge` section preserves the verbose details (both DISAGREE reasons, file:line); the manifest entry is the queryable index.
+
+#### A.5 — Per-facet fallback application
+
+If any of A.1's variants failed (timeout, error, did-not-spawn), apply the fallback semantics from `team-coordination/SKILL.md` per facet — never block the review:
+
+| Failure | Action |
+|---------|--------|
+| One variant failed for facet F | Use the responding variant's findings only; mark each as `unchallenged` (MEDIUM). Note in output: `facet F: single-reviewer fallback (skeptic failed)`. |
+| Both variants failed for facet F | Re-dispatch single Agent for that facet using the Path B prompt. Note in output: `facet F: re-dispatched as single-reviewer (both variants failed)`. |
+| Challenge round failed for a facet | Skip A.3 for that facet; keep A.1 findings as `unchallenged`. Note in output: `facet F: challenge skipped (challenge prompt failed)`. |
+| A.2 auto-consensus matching errored on finding F (e.g., malformed `file:line`) | Skip auto-consensus for F; route F through A.3 challenge as if non-consensus. Log `LEDGER_WARN: PR#{N} A.2 skipped F:<id> due to <reason>` to stderr. |
+| A.4 consolidation lookup missing for finding F (e.g., orphaned challenge response) | Emit F as `unchallenged` MEDIUM. Append to `.decisions/issue-{N}.md` (where N = the issue this PR addresses) under a `## Consolidation gaps (PR #$PR_NUM, cycle {N})` heading with the orphan reason. Create the journal file with frontmatter if it does not exist. **Also emit `--type consolidation-gap`** via `bin/journal-record.sh` with `cycle`, `finding_id`, `reason`, and `pr` metadata so the manifest carries a machine-readable trail of fallback fires. |
+
+#### A.6 — Emit consolidated output
+
+Use the synthesized findings (with confidence + disposition) for steps in Phase 4 below. The FLOW_REVIEW_CYCLE marker emitted in Phase 4 step 7 uses the 7-field form when paired-reviewer mode produced the findings (example exercises three disposition values):
+
+```
+<!-- FLOW_REVIEW_CYCLE:{N} FINDINGS:[F1|P1|security|src/auth.ts:42|open|HIGH|consensus,F2|P2|correctness|src/api.ts:88|open|MEDIUM|refined,F3|P1|race|src/job.ts:17|open|LOW|kept] -->
+```
+
+When Path A is the orchestrator, the marker is **uniformly 7-field** — including for findings produced by per-facet fallbacks (which carry `MEDIUM|unchallenged`). The 5-field form is preserved ONLY for full Path B runs (gate failed at the top of this section). Mixing 5-field and 7-field rows within a single marker is forbidden — pad fallback findings to 7 fields with `MEDIUM|unchallenged` so all rows match. This rule is restated at Phase 4 step 7.
+
+After A.6 completes, jump to Phase 4 with the consolidated finding set.
+
+### Path B: Single Session (default)
+
+Path B dispatch is intentionally unchanged — its agents carry no `model` parameter and inherit the session model via frontmatter. The `agentTeamModel` setting applies to Path A only.
+
+**Parallel Agent dispatch** — 5 agents in single message:
+
+```
+Agent(code-reviewer):
+  "Review PR #(#108 → #109 → #110) diff for quality, logic, edge cases, security.
+   Return P1/P2/P3 findings with file:line."
+
+Agent(convention-checker):
+  "Validate commits, branch naming, conventions for PR #(#108 → #109 → #110)."
+
+Agent(test-runner):
+  "Run quality commands for PR #(#108 → #109 → #110) branch."
+
+Agent(error-handler-inspector):
+  "Inspect changed files in PR #(#108 → #109 → #110) for error handling gaps,
+   silent failures, unhandled exceptions. Return P1/P2/P3 findings."
+
+Agent(security-reviewer):
+  "Review PR #(#108 → #109 → #110) diff for OWASP Top 10, secrets, auth/authz,
+   input validation, dependency vulnerabilities. Return P1/P2/P3 with file:line."
+
+Skill(holdout-validation):
+  Inputs:
+  - Self-review findings: {P1/P2/P3 findings from code-reviewer agent}
+  - Evidence bundle draft: {per-criterion evidence from requirements review}
+  - File list: {all files changed in this PR}
+```
+
+**Main thread**: Requirements compliance — map acceptance criteria to implementation.
+
+TaskUpdate each review task as agents complete.
+
+**FlowActivity writes** (when `FLOW_RUN_STATE=create`): invoke `Skill(run-state-management)` to record a FlowActivity as the consolidate boundary completes — once the per-facet findings (Path A consolidation or Path B synthesis) have been merged into a single deduplicated finding set, advancing `state.current_phase` to `consolidate` per the `preflight → fan-out → consolidate → report` order.
+
+## Phase 4: VERIFY
+
+**CRITICAL: Posting review findings to the PR is MANDATORY. NEVER skip posting. The review is not complete until `gh pr review` has been executed and TaskUpdate confirms the post task is completed. Do not suggest next steps until posting is verified.**
+
+1. **TaskList**: Confirm all review facets complete
+2. **Synthesize findings**: Deduplicate by file:line, prioritize P1/P2/P3
+3. **Display findings** (finding-first pattern):
+
+```markdown
+## Review Summary for PR #$PR_NUM
+
+### Findings: P1: {X}, P2: {Y}, P3: {Z}
+
+### P1 — Critical
+| Finding | Suggested Fix |
+|---------|---------------|
+
+### Requirements Adherence
+| # | Criterion | Status | Evidence |
+|---|-----------|--------|----------|
+```
+
+4. **Determine review mode** — compare PR author vs current user:
+
+   ```bash
+   PR_AUTHOR=$(gh pr view "$PR_NUM" --json author --jq '.author.login')
+   CURRENT_USER=$(gh api user --jq '.login')
+   ```
+
+5. **Self-review (own PR — PR_AUTHOR == CURRENT_USER)**:
+
+   Fix-forward approach (bounded by `fixForwardMaxIterations`, default 10 — a safety net against true infinite loops, not a budget; see `skills/llm-operator-principles/SKILL.md`):
+   - P1 findings → fix immediately
+   - P2 findings → fix immediately
+   - P3 findings → fix immediately (the proximity test is not a deferral mechanism — P3 in touched files gets the same disposition as P1/P2)
+   - TaskCreate("Test coverage for fix-forward", "Write or update tests for each P1/P2/P3 fix applied during self-review")
+   - For each fix: write or update a test that covers the fixed behavior
+   - After fixes: run targeted re-review of only changed files
+   - TaskUpdate(testCoverageTaskId, status: "completed", result: "Tests written/updated for {N} fixes")
+   - No follow-up issue creation for fixable items — finding triage is NEVER a valid escalation trigger; fix in this PR
+   - Approaching the iteration ceiling without convergence is a signal to re-check the findings (are two findings in tension? misunderstood scope?), not to escalate
+   - TaskCreate("Post self-review comment", "Post review findings summary to PR via gh pr review --comment")
+   - TaskCreate("Post self-review resolution marker", "Post a FLOW_RESOLUTION_CYCLE issue comment (gh pr comment) recording the fix-forwarded finding IDs as RESOLVED — required so the merge finding-ledger gate balances for self-reviewed PRs. Skip only when zero findings were raised.")
+
+6. **External review (someone else's PR — PR_AUTHOR != CURRENT_USER)**:
+
+   - TaskCreate("Post review comment", "Post structured review findings to PR via gh pr review")
+   - P1/P2/P3 in already-touched files → REQUEST_CHANGES (P1/P2) or COMMENT with fix-expected language (P3) — the author must fix
+   - Cosmetic P3 in untouched files → COMMENT with fix-if-bounded-or-document-inline language (default mode) OR follow-up issue workflow (only when `minimalScope: true` or the PR author has explicitly invoked minimal scope)
+   - P1/P2 in untouched files → REQUEST_CHANGES; author must address in-PR (finding triage is NEVER a valid escalation trigger; see `skills/llm-operator-principles/SKILL.md`)
+
+   Findings in files the PR already modifies are NEVER out-of-scope — the author owns the known defects in any file they touch. Do NOT flag them as informational; flag them as blocking.
+
+   **Default mode (no `minimalScope` set):** for cosmetic P3 findings in untouched files, do NOT create follow-up issues and do NOT present an AskUserQuestion asking the author to defer. Recommend "fix if bounded (<10 lines) or document inline in the PR body" in the review comment.
+
+   **Minimal-scope mode (`settings.json` → `minimalScope: true`):** for cosmetic P3 findings in untouched files only, the original follow-up workflow is restored:
+
+   Present the findings and use the AskUserQuestion tool with contextual options: "These cosmetic P3 findings are in untouched files. Which ones should become follow-up issues?"
+
+   For each selected finding, create a GitHub issue using issue-crafting skill knowledge:
+   - Title: concise, solution-agnostic description of the finding
+   - Body: Context, Current State (file:line), Objective, Acceptance Criteria
+   - Labels: select from repo labels based on finding category
+   - Issue creation is Tier 2 (journal-and-proceed)
+
+   ```bash
+   gh issue create --title "{title}" --body "{body}" --label "{labels}"
+   ```
+
+   Include created issue numbers in the review comment body.
+
+   **Note**: Reviewers should recognize `improve:` commits as legitimate Boy Scout cleanup — approve if they pass the proximity test.
+
+7. **Post review findings** (MANDATORY — applies to both self-review and external review):
+
+   For follow-up reviews, include the **Previous Feedback Status** table:
+   ```markdown
+   ### Previous Feedback Status
+   | Cycle | Finding | Priority | Claimed Status | Verified |
+   |-------|---------|----------|----------------|----------|
+   ```
+   Cross-reference each prior finding's location against `git diff` to verify resolution.
+
+   Build `$BODY` using the appropriate template:
+   - Self-review: `templates/self-review-comment.md`
+   - External review: `templates/review-comment.md`
+
+   **Marker form selection** (FLOW_REVIEW_CYCLE):
+   - If Path A produced the findings (paired-reviewer mode), emit the **7-field** marker with Confidence + Disposition fields per finding. Render the Confidence + Disposition columns in the P1/P2/P3 tables.
+   - If Path B produced the findings (single-session, fallback, or `agentTeams: false`), emit the legacy **5-field** marker. Omit the Confidence + Disposition columns.
+   - When Path A had per-facet fallbacks, individual findings from fallback facets carry `unchallenged` disposition with MEDIUM confidence — emit them in the 7-field form alongside the rest. Mixed-form rows within a single marker are NOT permitted (parsers tolerate variable field count, but emitting both forms in one row list would be confusing); pad fallback findings to 7 fields with `MEDIUM|unchallenged`.
+
+   Post the review:
+   - Self-review → `gh pr review "$PR_NUM" --comment --body "$BODY"`
+   - External + P1 findings → `gh pr review "$PR_NUM" --request-changes --body "$BODY"`
+   - External + P2 findings (no P1) → `gh pr review "$PR_NUM" --request-changes --body "$BODY"`
+   - External + P3 only → `gh pr review "$PR_NUM" --comment --body "$BODY"` (fix-expected, not approve-with-nits)
+   - External + No findings → `gh pr review "$PR_NUM" --approve --body "$BODY"`
+
+   TaskUpdate(postCommentTaskId, status: "completed", result: "PASS — review posted as {approve/request-changes/comment}")
+
+   **Self-review resolution marker (MANDATORY when `PR_AUTHOR == CURRENT_USER`):**
+
+   Self-review is *raise + resolve in one action* — fix-forward (step 5) already fixed every
+   finding in-PR. The `FLOW_REVIEW_CYCLE` marker posted above records what was **found** (review
+   body, reviews stream, status `open`); it does NOT, on its own, tell the merge gate the findings
+   were **resolved**. The merge finding-ledger gate balances `FINDINGS − RESOLVED` and reads
+   `RESOLVED` only from a `FLOW_RESOLUTION_CYCLE` marker in the issue-comments stream
+   (`references/finding-ledger-parser.md` §3; `commands/merge.md` finding-ledger gate). Without
+   this marker, a self-reviewed PR whose every finding was fix-forwarded would false-block at merge.
+
+   So after posting the review body, emit a `FLOW_RESOLUTION_CYCLE` marker as a **PR issue comment**
+   — the same marker and placement `/flow:address` uses (`commands/address.md` step 9), built from
+   `templates/resolution-comment.md`. This is what collapses the two-actor flow (reviewer raises →
+   author resolves) into a single self-review action. Skip ONLY when there were zero findings (an
+   approve-style self-review with an empty `FINDINGS:[]` — nothing to resolve).
+
+   - `RESOLVED:[...]` — every finding ID that fix-forward fixed in-PR (the common case: all of them).
+   - `ESCALATED:[...]` — any finding that could NOT be fixed in-PR and was escalated with the
+     six-field structure (step 5 / `self-review-comment.md` "Escalated for Human Judgment"). The
+     merge gate blocks on a non-empty `ESCALATED`, which is correct — an escalated finding is an
+     open product decision, not a shipped fix.
+   - `DISPUTED:[]` — empty for self-review (there is no second actor to dispute).
+
+   ```bash
+   # $CYCLE_NUMBER is the same cycle the FLOW_REVIEW_CYCLE marker above used.
+   # RESOLVED/ESCALATED are comma-separated finding IDs (e.g. F1,F2,F3).
+   RES_BODY="$(build from templates/resolution-comment.md with the self-review cycle metrics)"
+   [ -n "$RES_BODY" ] || { echo "ERROR: empty resolution body — refusing to post a marker-less comment" >&2; }
+   gh pr comment "$PR_NUM" --body "$RES_BODY"; RES_EXIT=$?
+   ```
+
+   The resolution comment body MUST end with:
+   `<!-- FLOW_RESOLUTION_CYCLE:{CYCLE_NUMBER} RESOLVED:[{ids}] ESCALATED:[{ids}] DISPUTED:[] -->`
+
+   Mark the task completed ONLY if `RES_EXIT` is `0` (the `gh pr comment` succeeded and returned a
+   comment URL). If it is non-zero (auth/network/rate-limit) or `RES_BODY` was empty, leave the task
+   `in_progress`, retry, and do NOT advance to step 9 — a silently-absent resolution marker
+   re-introduces the merge false-block this emission exists to prevent.
+
+   TaskUpdate(resolutionCommentTaskId, status: "completed", result: "PASS — self-review resolution marker posted")
+
+   **Manifest emit** — record the review-cycle artifact in the issue's journal manifest. Use the issue number associated with this PR (parse from PR body: `gh pr view "$PR_NUM" --json body --jq '.body' | grep -oE '#[0-9]+' | head -1 | tr -d '#'`):
+
+   ```bash
+   ISSUE=$(gh pr view "$PR_NUM" --json body --jq '.body' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+   if [ -n "$ISSUE" ]; then
+     "$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+       --issue $ISSUE \
+       --type review-cycle \
+       --metadata cycle=$CYCLE_NUMBER \
+       --metadata path={A|B} \
+       --metadata findings_count=$TOTAL \
+       --metadata pr="$PR_NUM"
+   fi
+   ```
+
+   The `path` value is `A` when paired-reviewer mode produced the findings (7-field marker), `B` when Path B (5-field marker) produced them. `findings_count` is the total across P1+P2+P3 in the cycle. If the PR body does not link an issue, skip the emit (the marker on the PR comment is sufficient for that PR's own state; the manifest is keyed by issue, not PR).
+
+8. **Verify posting**: TaskList — confirm the posting task(s) are completed. Do NOT proceed to step 9 until verified. For external review: "Post review comment". For self-review: BOTH "Post self-review comment" AND "Post self-review resolution marker" must be `completed` — the resolution marker is what balances the merge finding-ledger gate, so a self-review that posted the review body but not the resolution marker is NOT done (it would false-block at merge). Mirror `commands/address.md` step 11's "ALL tasks including the resolution comment" gate.
+
+   **Zero-findings exception**: when the self-review raised zero findings (the review posts an empty `FINDINGS:[]` and there is nothing to resolve), the resolution marker is correctly skipped (per step 5 and step 7). In that case mark the "Post self-review resolution marker" task `completed` with `result: "SKIP — no findings to resolve"` so the gate is satisfied. A balanced ledger with no findings needs no resolution marker; only DO post one when at least one finding was fix-forwarded.
+
+9. **Post-review**: If self-review fixed everything, suggest `/flow:pr`. If external review, suggest `/flow:address $PR_NUM` for the PR author.
+
+**FlowActivity writes** (when `FLOW_RUN_STATE=create`): invoke `Skill(run-state-management)` to record a FlowActivity as the report boundary completes — once the review comment is posted (step 7) and posting is verified (step 8), advancing `state.current_phase` to `report` per the `preflight → fan-out → consolidate → report` order.
+
+**FlowRun terminal transition** (when `FLOW_RUN_STATE=create`): once the review comment is posted (or no-finding evidence is recorded), invoke `Skill(run-state-management)` to transition the FlowRun to `state.status: completed`. The `workflow-run` journal artifact is best-effort — a review is PR-scoped, not issue-scoped — so emit `bin/journal-record.sh --type workflow-run` only if a single issue can be inferred from the PR (the linked issue parsed from the PR body); otherwise the `run.yaml` is the durable record and no journal artifact is written. If the review failed or was cancelled before posting, transition to `state.status: cancelled` (with `blocked_reason`) instead so `/flow:resume` does not treat it as resumable.
+
+## Tier Classification
+
+| Action | Tier | Behavior |
+|---|---|---|
+| `gh pr checkout` | 1 | Autonomous |
+| Read PR diff / files / previous reviews | 1 | Autonomous, read-only |
+| Multi-agent dispatch (Path B: 5 agents + holdout) or paired-reviewer dispatch (Path A: 12 invocations + 10 challenge) | 1 | Autonomous; Tasks tracked |
+| Holdout validation (skill, parallel) | 1 | Autonomous |
+| Self-review fix-forward (when reviewing own PR) | 1 | File edits + commits autonomous; push is Tier 2 |
+| `gh pr review --comment / --request-changes / --approve` | 2 | Journal-and-proceed |
+| `gh pr comment` (self-review `FLOW_RESOLUTION_CYCLE` marker) | 2 | Journal-and-proceed |
+| Follow-up issue creation (cosmetic P3 in untouched files, external PR review only) | 2 | Journal-and-proceed |
+
+---
+
+<task-notification>
+<task-id>b1n4m9v6q</task-id>
+<summary>Monitor event: "CI on the rebased stack (#108, #109, #110)"</summary>
+<event>PR #108: complete, 1 failing of 10
+PR #109: complete, 0 failing of 10</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq9qwj21m</task-id>
+<summary>Monitor event: "CI on the stack after the race fix"</summary>
+<event>PR #108: complete, 0 failing of 10</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq9qwj21m</task-id>
+<summary>Monitor event: "CI on the stack after the race fix"</summary>
+<event>PR #109: complete, 0 failing of 10
+PR #110: complete, 0 failing of 10
+ALL THREE COMPLETE</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq9qwj21m</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Monitor "CI on the stack after the race fix" stream ended</summary>
+</task-notification>
+
+---
+
+# Merge PR #in order #108 → #109 → #110
+
+Tier 3 operation — **always requires human confirmation**. This is non-negotiable even in autonomous mode.
+
+## Required Skills
+
+- `llm-operator-principles` — foundational operator stance: convergence = zero findings, in-PR fixes by default, no calendar-time estimates, narrow escalation triggers. MUST be consulted before any other phase
+- `merge-and-release` — prerequisite verification, merge execution
+
+## References
+
+- [`references/escalation-format.md`](../references/escalation-format.md) — canonical six-field structure used by Phase 2's conflict-resolution escalation and Phase 3's merge-confirm prompt
+
+## Phase 1: Verify Prerequisites
+
+### PR Reference
+STATE=blocked
+ERROR=PR number required (all-digit). Usage: /flow:merge <pr-number>
+
+### Finding-Ledger Check
+
+Parse the latest `FLOW_RESOLUTION_CYCLE` and `FLOW_REVIEW_CYCLE` comments to verify all findings are resolved before merge. Marker schemas and the canonical extraction queries are documented in [`references/finding-ledger-parser.md`](../references/finding-ledger-parser.md); this command applies the merge-blocking subset (ESCALATED non-empty, FINDINGS without matching RESOLVED).
+
+### Finding-Ledger Gate
+LEDGER_GATE_STATE=blocked
+FINDING_LEDGER_BLOCK: PR number required (all-digit)
+
+### FlowGoal Gate (v3)
+
+Independent of the finding-ledger gate, the FlowGoal gate **gates on goal existence**: when an active goal exists for this branch it must have reached `lifecycle.status == achieved` to merge; when **no** active goal exists the gate is **not applicable** and merge proceeds (a PR without a FlowGoal is not blocked). The gate is disabled entirely when `flow.goals.enabled` is `false` or `flow.goals.goalCreation` is `off` — preserving the v2 `requireGoalForStart: false` UX (no merge gating).
+
+### FlowGoal Gate
+FLOW_GOAL_GATE_STATE=ok
+FLOW_GOAL_GATE_NOTE=no active FlowGoal for this branch — gate not applicable
+
+**If either the finding-ledger check or the FlowGoal gate fails**, stop immediately and display:
+
+```markdown
+## BLOCKED: Merge Prerequisites Not Met
+
+PR #$PR_NUM cannot be merged — one or more gates report unresolved items.
+
+| Gate | Issue | Details |
+|------|-------|---------|
+| Finding ledger | gh API unavailable | {if either GH_EXIT_RES or GH_EXIT_REV is non-zero, list both exit codes; else "N/A"} |
+| Finding ledger | Untrusted markers only | {if RES_UNTRUSTED or REV_UNTRUSTED is non-zero AND no trusted markers found, list counts} |
+| Finding ledger | Non-empty ESCALATED | {list of escalated finding IDs, if any} |
+| Finding ledger | Unmatched FINDINGS | {list of finding IDs with no RESOLVED entry, if any} |
+| FlowGoal | Not achieved | {if FLOW_GOAL_GATE_STATE=blocked, show FLOW_GOAL_ID + FLOW_GOAL_LIFECYCLE + FLOW_GOAL_BLOCK_REASON} |
+
+### Remediation
+
+1. Run `/flow:address $PR_NUM` to resolve remaining findings
+2. Ensure every finding in `FLOW_REVIEW_CYCLE:FINDINGS` has a matching `RESOLVED` entry in `FLOW_RESOLUTION_CYCLE`
+3. Ensure `ESCALATED:[]` is empty (all escalated items must be resolved or have explicit human override)
+4. If the FlowGoal gate blocks, run `/flow:goal evaluate $FLOW_GOAL_ID` and verify the verdict reaches `achieved`
+5. Re-run `/flow:merge $PR_NUM`
+
+This gate enforces the "no incomplete shipments" hard boundary.
+```
+
+Do NOT proceed to Phase 2. Exit here.
+
+### FlowRun (v3 runtime)
+
+`/flow:merge` runs the `merge-pr` workflow, so it gets a durable FlowRun. Runs are gated by `flow.runtime.enabled` (default `true`); v2 projects that opted out see `FLOW_RUN_STATE=skip` and the wiring is a no-op.
+
+FLOW_RUN_STATE=create
+RUN_ID=2026-08-29T191920Z-merge-pr-nonum
+WORKFLOW=merge-pr
+INITIAL_PHASE=preflight
+
+When `FLOW_RUN_STATE=create`, invoke `Skill(run-state-management)` to create `.flow/runs/$RUN_ID/run.yaml` (workflow=`merge-pr`, goal=`null` — the merge reads the linked FlowGoal for the gate below but the run itself is not goal-owned), initial phase `preflight`. Phase order: `preflight → verify → confirm → merge`. Write a FlowActivity at each boundary (verify, confirm, merge).
+
+**Linked-run completion check** (Phase 2 / verify): before allowing merge, verify that every FlowRun linked to this PR's branch (the `start-issue` run and any `address-pr` / `review-pr` runs) has reached `state.status: completed`. If any linked run is still `active`, refuse the merge — this is Tier 3, so there is **no override** beyond the standard merge confirmation. Surface the still-active run id and point to `/flow:resume`.
+
+## Phase 2: Display Assessment
+
+```markdown
+## Merge Assessment for PR #$PR_NUM
+
+| Check | Status | Details |
+|-------|--------|---------|
+| Approval | {Pass/Fail} | {N approvals, latest by @X} |
+| CI Checks | {Pass/Fail} | {N passed, M failed} |
+| Mergeable | {Pass/Fail} | {No conflicts / Has conflicts} |
+| Conversations | {Pass/Fail} | {All resolved / N unresolved} |
+| Stale Approval | {OK/Warning} | {Fresh / Commits after approval} |
+| Finding Ledger | {Pass/Fail} | {All resolved / N unresolved, M escalated} |
+
+**Merge strategy**: {from settings.merge.strategy, default: squash}
+**Delete branch**: {from settings.merge.deleteBranch, default: true}
+```
+
+If any check fails, explain what needs to be fixed and suggest actions.
+
+### Conflict Resolution Path
+
+If the Mergeable check fails (has conflicts):
+
+Use the AskUserQuestion tool with a Proactive-Autonomy escalation:
+
+> **Situation** — PR #$PR_NUM has merge conflicts that prevent merging.
+>
+> **What I tried** — Checked mergeable status via `gh pr view`. Conflicts exist between the PR branch and the base branch.
+>
+> **Options**:
+> 1. Resolve conflicts now — invokes `Skill(flow:resolve)` with $PR_NUM (Recommended)
+> 2. Cancel merge — address conflicts manually or rebase first
+>
+> **Recommendation** — Option 1. Automated conflict resolution handles most cases and re-verifies after resolution.
+>
+> **Blocking?** — Yes. Blocks merge; the workflow cannot proceed until conflicts resolve.
+>
+> **Risk** — Option 1 may produce incorrect resolution for semantic conflicts (caught by post-resolution verification). Option 2 delays merge.
+
+If Option 1: after resolution completes, re-run Phase 1 to verify PR is now mergeable.
+
+## Phase 3: Confirm and Execute
+
+Use the AskUserQuestion tool with contextual options to confirm: "PR #$PR_NUM is ready to merge. Proceed with squash merge and branch deletion?"
+
+Only after the user confirms via the tool:
+
+```bash
+# Read merge settings
+STRATEGY="squash"  # or from settings
+DELETE_FLAG="--delete-branch"  # or from settings
+
+gh pr merge "$PR_NUM" --$STRATEGY $DELETE_FLAG
+```
+
+## Phase 4: Post-Merge
+
+```bash
+# Verify merge
+gh pr view "$PR_NUM" --json state --jq '.state'
+
+# Switch to default branch
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo "main")
+git checkout $DEFAULT_BRANCH
+git pull origin $DEFAULT_BRANCH
+```
+
+**FlowRun terminal transition** (when `FLOW_RUN_STATE=create`): after a successful merge, invoke `Skill(run-state-management)` to transition the `merge-pr` FlowRun to `state.status: completed` and update its `workflow-run` journal artifact to `status=completed`. Then transition the linked FlowGoal to a terminal status if it is not already — the merge itself is the achievement signal. If the merge was cancelled, transition the run to `cancelled` (with `blocked_reason`) so it is not treated as resumable.
+
+**Manifest emit** — if this merge resolved any escalations (a Proactive-Autonomy escalation surfaced via `AskUserQuestion` during Phase 1's finding-ledger check, Phase 2's stale-approval warning, or the conflict-resolution path closed because the user provided one of the six canonical fields), record an `escalation-resolved` artifact for each:
+
+```bash
+ISSUE=$(gh pr view "$PR_NUM" --json body --jq '.body' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+if [ -n "$ISSUE" ]; then
+  # Repeat once per escalation that closed during this merge run.
+  "$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+    --issue $ISSUE \
+    --type escalation-resolved \
+    --metadata escalation_field={situation|tried|options|recommendation|blocking|risk} \
+    --metadata outcome="$USER_RESPONSE_SUMMARY"
+fi
+```
+
+The emit is conditional — most merges run cleanly without escalations, in which case skip this step. When it does fire, the manifest captures both *that* an escalation closed and *which canonical field* was the gate, enabling `/flow:learn` to detect recurring escalation patterns (e.g., the same field gating multiple merges → process or tooling improvement opportunity).
+
+Suggest: `/flow:release {type}` if this completes a milestone.
+
+## Tier Classification
+
+| Action | Tier | Behavior |
+|---|---|---|
+| Read PR status / reviews / comments / threads | 1 | Autonomous |
+| Finding-ledger gate check (parses `FLOW_REVIEW_CYCLE` / `FLOW_RESOLUTION_CYCLE`) | 1 | Autonomous; blocks on failure |
+| FlowGoal gate check (v3 opt-in; reads `.flow/goals/*.goal.yaml`) | 1 | Autonomous; blocks on `lifecycle.status != achieved` |
+| Stale-approval check | 1 | Autonomous; warns on stale |
+| Conflict-resolution escalation (`Skill(flow:resolve)` invocation) | 2 | Journal-and-proceed if user accepts; otherwise blocked |
+| `gh pr merge` | 3 | **Confirm** — always asks via `AskUserQuestion` |
+| Branch deletion (per `merge.deleteBranch` setting, default `true`) | 3 | **Confirm** — bundled into the merge prompt |
+| `git checkout <default-branch> && git pull` (post-merge cleanup) | 1 | Autonomous |
+
+---
+
+<task-notification>
+<task-id>bo012y1kl</task-id>
+<summary>Monitor event: "CI on rebased #109"</summary>
+<event>PR #109 complete: 0 failing of 10</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b91c05z1i</task-id>
+<summary>Monitor event: "CI on rebased #110"</summary>
+<event>PR #110 complete: 0 failing of 10</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+push
+
+---
+
+<bash-input> git branch -D sim3 sim-rebase2 sim4 sim-squash</bash-input>
+
+---
+
+<bash-stdout>Deleted branch sim3 (was 2c88543).
+Deleted branch sim-rebase2 (was 8cde7e4).
+Deleted branch sim4 (was 71e61f9).
+Deleted branch sim-squash (was 411b884).</bash-stdout><bash-stderr></bash-stderr>
+
+---
+
+fix both
+
+---
+
+/compact
+
+---
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. **Primary Request and Intent:**
+
+   The session began with `/flow:start 104` — start work on GitHub issue #104 in `synaptiai/agent-capability-standard`, which proposes adding an optional `agent_reliability_profile` block to spec §8 Authority Trust with three axes (`delivery_score`, `calibration_delta`, `adaptation_score`), citing Zenodo DOI 10.5281/zenodo.19348539.
+
+   The user then issued a standing methodological instruction (verbatim): *"Interview me relentlessly about every aspect of this plan until we reach a shared understanding. Walk down each branch of the design tree resolving dependencies between decisions one by one. If a question can be answered by exploring the codebase, explore the codebase instead. For each question, provide your recommended answer/alternatives (best out of 3 well researched alternatives)."* Plus: *"Analyze every aspect of the flow and dependencies in detail... Purposefully attempt to disprove or challenge your own assumptions at every step. Triple-verify everything... Deliberately seek out and employ at least twice as many verification tools or methods as you typically would... Even if you feel entirely confident in your solution, explicitly dedicate additional time and effort to systematically search for weaknesses, logical gaps, hidden assumptions, or oversights... Research, look up best practices, think of at least three approaches with tradeoffs for decisions I need to make. Use the AskUserQuestion tool for questions, clarifications and decisions I need to make."*
+
+   Subsequent explicit requests: gitignore `.entire` and `.trail`; `/flow:review (#108 → #109 → #110)`; `/flow:merge in order #108 → #109 → #110`; "push"; "fix both" (referring to pinning dev deps and the live billable API call in the unit suite).
+
+2. **Key Technical Concepts:**
+   - Half-life vs exponential time constant: `exp(-a/τ)` ≡ `0.5^(a/H)` when `H = τ·ln2`
+   - Semver-based dependency bounding; formatters not being semver-safe
+   - Unsafe publication / check-then-act race; double-checked locking with `threading.RLock`
+   - Stacked pull requests; GitHub rebase-merge rewriting SHAs (not fast-forward)
+   - TDD RED→GREEN→REFACTOR; mutation testing (verifying a test fails against the defect)
+   - Spec conformance levels L1–L4 (workflow validation only, distinct from certification Levels 1–3)
+   - `FLOW_REVIEW_CYCLE` / `FLOW_RESOLUTION_CYCLE` markers for the merge finding-ledger gate
+   - Canonical-event namespace vs capability-I/O namespace (`anchors` vs `evidence_anchors`)
+   - `asyncio.wait_for` for bounding async generators on Python 3.10+
+
+3. **Files and Code Sections:**
+
+   - **`schemas/authority_trust_model.yaml`** — the §6.1 canonical trust schema. Changed `half_life: P14D` → `P10D`, and `recency_factor: exp(-age/half_life)` → `max(0.5 ** (age/half_life), min_trust)`, with explanatory comments referencing #105/#106.
+
+   - **`benchmarks/scenarios/conflicting_sources.py`** — `_load_trust_model` now returns 3-tuple and validates:
+     ```python
+     half_life_days = int(match.group(1))
+     if half_life_days < 1:
+         raise ValueError(
+             f"half_life must be at least one day, got '{half_life_str}'. "
+             "A zero half-life divides by zero in the decay curve."
+         )
+     half_life_hours = half_life_days * 24
+     min_trust = float(decay.get("min_trust", 0.0))
+     if not 0.0 <= min_trust <= 1.0:
+         raise ValueError(f"min_trust must be in [0.0, 1.0], got {min_trust}")
+     ```
+     `_recency_weight` now: `return max(0.5 ** (hours_ago / half_life), min_trust)`
+
+   - **`benchmarks/runner.py`** — added `_is_fractional_metric` and `_render_float`:
+     ```python
+     def _render_float(key: str, value: float, *, default_is_fraction: bool = False) -> str:
+         if key.endswith("_percent"):
+             return f"{value:.1f}%"
+         if (default_is_fraction or _is_fractional_metric(key)) and -1.0 <= value <= 1.0:
+             return f"{value:.1%}"
+         return f"{value:.2f}"
+     ```
+     All four rendering paths (`_format_metrics`, report table baseline/GA/improvement, `print_summary`, `_format_value`) now route through it. Fixed `+6304.3%` → `+60.9%`.
+
+   - **`grounded_agency/capabilities/registry.py`** — the P1 race fix (F5). Added `import threading`, `self._load_lock = threading.RLock()`, double-checked locking in `_ensure_loaded`, and `_load_ontology` now builds `nodes_by_id`/`edges`/`outgoing_edges`/`incoming_edges` into locals and assigns `self._ontology = ontology  # published last` at the end.
+
+   - **`spec/STANDARD-v1.0.0.md`** — §8.1 gained normative decay text (true half-life MUST return 0.5; `min_trust` floors the *decay factor*). §6.2/§6.3 tables rewritten to name real schema fields (`event_id`, `raw`, `canonical`, `anchors`, `provenance`; `meta.world_id`/`as_of`/`timezone`/`version_id`/`lineage`) plus a namespace-distinction note.
+
+   - **`schemas/event_schema.yaml`** — `provenance` promoted into `event.required`.
+   - **`schemas/world_state_schema.yaml`** — `version_id` and `lineage` promoted into `meta.required`.
+
+   - **`tools/validate_canonical_schemas.py`** (new, ~380 lines) — 8 check families over the five §6.1 schemas; `--schemas-dir` / `--skills-dir` overrides; `EXP_CALL_PATTERN = re.compile(r"(?<![A-Za-z0-9_])exp\s*\(")`; `_display_path()` helper guarding `relative_to(ROOT)` ValueError; guarded reads for OSError/UnicodeDecodeError.
+
+   - **`tools/validate_rfcs.py`** (new, ~190 lines) — RFC structure validator; `FENCE_PATTERN = re.compile(r"^(?P<fence>```+|~~~+).*?^(?P=fence)\s*$", re.M | re.S)` and `strip_fenced_blocks()` that blanks fences while preserving line numbering.
+
+   - **`tools/sync_skill_schemas.py`** — made idempotent AND self-healing:
+     ```python
+     for old_prefix, new_prefix in WORKFLOW_CATALOG_COMMENT_REWRITES.items():
+         while new_prefix in content:
+             content = content.replace(new_prefix, old_prefix)
+         content = content.replace(old_prefix, new_prefix)
+     ```
+
+   - **`spec/RFC-0002-agent-reliability-profile.md`** (new) — Summary/Motivation/Goals/Non-goals/Key decisions (5)/Backward compatibility/Conformance test updates/Alternatives considered (4)/Open questions (5). Key decision 2 names the missing agent identity object as prerequisite; decision 3 tiers the axes by derivability.
+
+   - **`spec/RFC-0001-*.md`** — gained the two GOVERNANCE-required sections it lacked.
+
+   - **`pyproject.toml`** (most recent) — pinned extras:
+     ```toml
+     sdk = ["claude-agent-sdk>=0.2.148,<0.3"]
+     dev = [
+         "pytest>=7.0,<10", "pytest-asyncio>=0.21,<2", "mypy>=1.0,<3",
+         # ruff pinned exactly — formatting is not semver-safe
+         "ruff==0.16.5",
+         "types-PyYAML>=6.0,<7", "hypothesis>=6.0,<7", "jsonschema>=4.0,<5",
+         "claude-agent-sdk>=0.2.148,<0.3",
+     ]
+     ```
+
+   - **`tests/test_grounded_query.py`** (most recent) — added `import asyncio`, `SDK_CALL_TIMEOUT_SECONDS = 20.0`, and:
+     ```python
+     async def consume_first_message() -> None:
+         async for _ in grounded_query("test", adapter=adapter):
+             break
+     try:
+         await asyncio.wait_for(consume_first_message(), timeout=SDK_CALL_TIMEOUT_SECONDS)
+     except (ConnectionError, OSError, ValueError, ClaudeSDKError, asyncio.TimeoutError):
+         pass
+     ```
+
+   - **`.github/workflows/ci.yml`** — added "Validate canonical schemas" and "Validate RFCs" steps.
+   - **`CLAUDE.md`** — documented both new validators; setup now `pip install -e ".[dev]"` with the ruff-pin rationale.
+   - **`.gitignore`** — added `.entire/` and `.trail/`.
+
+4. **Errors and fixes:**
+
+   - **`exp(-age/half_life)` treated `half_life` as a time constant** — decayed 1.44× too fast. User chose "Correct formula + `half_life: P10D`" after I proved `336·ln2 = 9.70 days`, so `P14D` was always a mislabel. GA accuracy 75.0% → 74.0% (1pp, parser rounding), not the 65.0% keeping P14D would have cost.
+   - **`accuracy_improvement_percent` inflated 100×** (`+6304.3%`) — `:.1%` applied to an already-×100 value.
+   - **`min_trust: 0.25` declared but read by nothing** — user chose "Implement the floor in this PR", overriding my recommendation to only reword docs.
+   - **My own regression: `evidence_completeness` rendered `1.00` instead of `100.0%`** — I'd leaked the name heuristic into the improvement path; fixed with `default_is_fraction`.
+   - **CI red from unpinned tooling** — ruff 0.16.5 formatting Markdown code blocks; `claude-agent-sdk` 0.2.x `ResultError` not caught. Proved pre-existing (gitignore-only commit failed identically). Verified `ResultError` subclasses `ClaudeSDKError` in 0.2.148 via a scratch venv rather than assuming.
+   - **I mis-framed the §6.2 divergence** by comparing against `world_state.types.ObservationEvent` instead of `event_schema.yaml`'s `event`. Told the user plainly that their earlier answer had been given on a wrong premise, and re-asked.
+   - **Three tests initially passed against the defect they were meant to catch**: (a) mutated a comment instead of a `required` list; (b) fixture string didn't reproduce the real `(repo-level) (repo-level)` corruption; (c) F5 mutation applied at the wrong line. Each caught by re-running against faithfully-buggy code.
+   - **`git checkout -- tools/` silently reverted my F2 fix** — caught immediately by the regression tests written minutes earlier.
+   - **F5 P1 race**: `ValueError: Unknown capabilities not in ontology: ['retrieve']` on Python 3.10/3.11. `_load_ontology` published `_ontology` before building `_nodes_by_id`; `_ensure_loaded` unlocked.
+   - **My first sync fix was a fixed point, not self-healing** — flagged by advisor, verified by trace, fixed with a while-loop.
+   - **I claimed rebase-merge would fast-forward; it doesn't** — GitHub re-parents commits producing new SHAs. Corrected explicitly to the user; the recommendation still held because local `git rebase origin/main` replayed cleanly.
+   - **#110 had stopped descending from #109** — my rebase loop rebased both onto #108. Fixed with `git rebase --onto origin/feat/issue-107-... 8aabbb0`.
+   - **`test_sync_is_idempotent` left 17 tracked files dirty** — it runs the real sync against the tracked tree with no restore; added try/finally restore.
+
+5. **Problem Solving:**
+
+   The unifying finding across the session: **seven instances of a value duplicated somewhere with nothing asserting the copies agree** — the `half_life` name vs its formula; `authority_trust_model.yaml` vs `mock_apis.json`; schema sources vs the NIST profile's phantom `unverified: 0.20`; `min_trust` declared vs enforced; §6.2/§6.3 prose vs schemas; `schemas/*.yaml` vs 35 vendored skill copies (one an orphan `sync_skill_schemas.py` could not reach); and the sync tool's own input vs output. All passed CI with 828 green tests because CI validated the ontology, workflows, profiles and skill refs but **none of the five schemas §6.1 designates canonical**.
+
+   Research on the Zenodo DOI: unreviewed preprint uploaded the same day the issue was filed by its author; "independent schema convergence across three teams" is circular (same author seeded 6 repos); PDR expands three different ways across the author's own sources. Adopted the axes on merit, cited as prior art in the RFC only, with provenance recorded.
+
+6. **All user messages:**
+   - `/flow:start 104` (slash command with issue context)
+   - *"Interview me relentlessly about every aspect of this plan until we reach a shared understanding. Walk down each branch of the design tree resolving dependencies between decisions one by one. If a question can be answered by exploring the codebase, explore the codebase instead. For each question, provide your recommended answer/alternatives (best out of 3 well researched alternatives). — Analyze every aspect of the flow and dependencies in detail, and ensure full understanding before suggesting solutions. Investigate and explore multiple perspectives, even those that seem initially irrelevant or improbable. Purposefully attempt to disprove or challenge your own assumptions at every step. Triple-verify everything. Critically review each step, scrutinize your logic, assumptions, and conclusions, explicitly calling out uncertainties and alternative viewpoints. Independently verify your reasoning using alternative methodologies or tools, cross-checking every fact, inference, and conclusion against external data, calculation, or authoritative sources. Deliberately seek out and employ at least twice as many verification tools or methods as you typically would. Use mathematical validations, web searches, logic evaluation frameworks, MCP tools, and additional resources explicitly and liberally to cross-verify your claims. Even if you feel entirely confident in your solution, explicitly dedicate additional time and effort to systematically search for weaknesses, logical gaps, hidden assumptions, or oversights. Take a step back and think harder through this. Start by reading through the relevant files in the codebase — do this intelligently until you feel you have all the context you need to create a good plan for solving each issue. Research, look up best practices, think of at least three approaches with tradeoffs for decisions I need to make. Use the AskUserQuestion tool for questions, clarifications and decisions I need to make."*
+   - *"gitignore the .entire and .trail"*
+   - `/flow:review (#108 → #109 → #110)`
+   - `/flow:merge in order #108 → #109 → #110`
+   - *"push"*
+   - (bash-input) `git branch -D sim3 sim-rebase2 sim4 sim-squash`
+   - *"fix both"*
+
+   AskUserQuestion selections: Stash everything → RFC document under spec/ → Separate issue, fix before #104 → New concept + first-class agent identity → All three, tiered by derivability → New tools/validate_rfcs.py → "Research this first to determine what was meant and what this Zenodo DOI is so we can understand how this affects the spec" → Prior art in RFC only, with the caveat → File issue + fix it now, then #104 → All three in one issue → Report it and pause for your call → Correct formula + half_life: P10D → Drop the numeric claim entirely → Implement the floor in this PR → Push the chore to main, rebase → Leave Unreleased, decide at release → Build #107 first, then the RFC → Comment when the RFC is drafted → Full spec conformance as errors, reconcile the schemas → Fix the prose + promote the 3 fields → Rebase-merge all three in order → Proceed (mergeState CLEAN) → Clean up the 4 sim-* branches.
+
+7. **Pending Tasks:**
+   - None outstanding beyond confirming PR #111's CI. The user's "fix both" is complete and shipped as PR #111.
+   - Standing (user-owned, not requested of me): restore `stash@{1}` (~1,288 lines of article drafts + OASF deletion; note `CLAUDE.md` still references `docs/proposals/OASF_SAFETY_EXTENSIONS.md`, so committing that deletion leaves a dangling reference). `stash@{0}` is the redundant review-fixes stash.
+
+8. **Current Work:**
+
+   Immediately before this summary I completed the user's "fix both" request on branch `fix/pin-dev-deps-and-bound-sdk-test`:
+
+   - Pinned `pyproject.toml` dev/sdk extras — `ruff==0.16.5` exactly (with a comment explaining formatting is not semver-safe and that 0.16.5 broke CI on a `.gitignore`-only commit), upper bounds on the rest. Discovered `mypy>=1.0` was the next latent break, with 2.3.1 already shipped.
+   - Bounded the live SDK call in `tests/test_grounded_query.py` with `asyncio.wait_for` + `break` after the first message, honouring #99's "no mocks/skips" decision. File time: minutes → **4.58s**; full suite 276–367s → **142s**.
+   - Installed the pinned deps locally so `.venv` now matches CI (ruff 0.16.5, claude-agent-sdk 0.2.148 — previously 0.14.14 and 0.1.25).
+   - Verified: **936 tests pass**, ruff check / ruff format --check / mypy clean, 9/9 validators pass, conformance passes.
+   - Investigated the newly-surfaced `CanUseToolShadowedWarning: can_use_tool will not be invoked for: Skill` and determined it is **correct by design** — the blanket `Skill` allow in `adapter.py` is deliberate (docstring line 273) to avoid a checkpoint deadlock, and `_make_pretooluse_checkpoint_hook` is already registered as a matcher-less `PreToolUse` hook covering every tool. Documented in the PR body as "Noted, not changed".
+   - Updated `CLAUDE.md` and `CHANGELOG.md`, committed, pushed, opened **PR #111**, and started a Monitor on its CI.
+
+   Prior state: PRs #108, #109, #110 all merged into `main` (15 commits); issues #105, #106, #107 closed; #104 deliberately left open since RFC-0002 is a proposal awaiting the core team per `spec/GOVERNANCE.md`.
+
+9. **Optional Next Step:**
+
+   Report PR #111's CI result when the Monitor fires, then confirm whether to merge it. This follows directly from the user's *"fix both"* and my stated position: *"[PR #111](https://github.com/synaptiai/agent-capability-standard/pull/111) is open. Watching CI — this one matters more than usual, since the whole point is the pipeline's reproducibility."*
+
+   Merging is Tier 3 and requires explicit human confirmation, so I will not merge #111 without asking. No other work should begin without the user's direction.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/danielbentes/.REDACTED.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+---
+
+<task-notification>
+<task-id>b341vd3sn</task-id>
+<summary>Monitor event: "CI on PR #111"</summary>
+<event>PR #111 complete: 0 failing of 10</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b341vd3sn</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Monitor "CI on PR #111" stream ended</summary>
+</task-notification>
+
+---
+
+<!--
+PARALLEL EXECUTION RULE:
+Execute independent operations simultaneously.
+-->
+
+# Review PR #111
+
+Multi-faceted code review with parallel analysis. Follows Explore > Plan > Code > Verify loop.
+
+## Required Skills
+
+- `llm-operator-principles` — foundational operator stance: convergence = zero findings, in-PR fixes by default, no calendar-time estimates, narrow escalation triggers. MUST be consulted before any other phase
+- `code-review-methodology` — 6-facet review, finding synthesis, adversarial protocol
+- `holdout-validation` — cross-reference self-review claims against file state (Phase 3)
+
+## Phase 1: EXPLORE
+
+`gh pr checkout` stays inline below (mutating working tree); read-only context-gathering is in the `!` block.
+
+### PR Reference
+STATE=ok
+PR_NUM=111
+
+### PR Details
+TITLE="build: bound dev dependencies and stop the SDK test issuing an unbounded call"
+HEAD_BRANCH=fix/pin-dev-deps-and-bound-sdk-test
+BASE_BRANCH=main
+AUTHOR=@danielbentes
+CHANGED_FILES=4
+ADDITIONS=71
+DELETIONS=22
+LABELS=
+REVIEW_COUNT=0
+
+### Linked Issue
+LINKED_ISSUE=99
+
+### Previous Reviews
+REVIEW_COUNT=0
+STATE=empty
+
+### Diff Files
+DIFF_FILE_COUNT=4
+DIFF_FILE=CHANGELOG.md
+DIFF_FILE=CLAUDE.md
+DIFF_FILE=pyproject.toml
+DIFF_FILE=tests/test_grounded_query.py
+
+Then check out the PR branch (mutating, runs inline):
+
+```bash
+gh pr checkout "$PR_NUM"
+```
+
+**Agent(Explore)**: "Read the changed files in this PR and understand the context. What modules are affected? What patterns are being followed or changed?"
+
+Check for previous reviews — if this is a follow-up review, focus on changes since last review.
+
+**Parse structured findings from previous review/resolution cycles** (follow-up reviews only).
+
+### Previous Review Cycles
+STATE=ok
+
+#### Review-cycle markers
+REVIEW_CYCLE_COUNT=0
+STATE=empty
+
+#### Resolution-cycle markers
+RESOLUTION_CYCLE_COUNT=0
+STATE=empty
+
+If previous cycles exist, build a **Previous Feedback Status** table and cross-reference each finding's location against `git diff` to verify resolution.
+
+### FlowRun (v3 runtime)
+
+A review is a long-running workflow, so it gets a durable FlowRun. Runs are gated by `flow.runtime.enabled` (default `true`); v2 projects that opted out see `FLOW_RUN_STATE=skip` and the wiring is a no-op.
+
+FLOW_RUN_STATE=create
+RUN_ID=2026-08-30T073133Z-review
+WORKFLOW=review-pr
+INITIAL_PHASE=preflight
+
+When `FLOW_RUN_STATE=create`, invoke `Skill(run-state-management)` to create `.flow/runs/$RUN_ID/run.yaml` (workflow=`review-pr`, goal=`null`), initial phase `preflight`. Phase order: `preflight → fan-out → consolidate → report`. Review is **FlowRun-only — it creates NO FlowGoal**: a review session is bounded by the PR under review, and the PR's own review-thread state (the posted review comment plus its FLOW_REVIEW_CYCLE marker) is the durable record of what the review found. The `run.yaml` captures the workflow's resumability state; there is no separate goal contract to satisfy.
+
+## Phase 2: PLAN
+
+```
+TaskCreate("Security review", "Check for OWASP top 10, secrets, injection, auth/authz")
+TaskCreate("Code quality review", "Logic correctness, edge cases, error handling")
+TaskCreate("Convention review", "Commit format, branch naming, code patterns")
+TaskCreate("Test review", "Run quality commands, assess test coverage")
+TaskCreate("Requirements review", "Map acceptance criteria to implementation")
+TaskCreate("Error handling review", "Check for unhandled exceptions, silent failures, missing edge cases")
+TaskCreate("Holdout validation", "Cross-reference self-review claims against actual file state using holdout scenarios")
+```
+
+## Phase 3: CODE (Review Execution)
+
+### Path A: Agent Teams (when `agentTeams: true` AND `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is set)
+
+Implements the paired-reviewer + challenge-round protocol. The `team-coordination` skill (`plugins/flow/skills/team-coordination/SKILL.md`) is the protocol contract.
+
+**Path A gate check** (mandatory before paired dispatch — runs before A.1).
+
+### Path A Gate
+Path A skipped: agentTeams=false (from /Users/danielbentes/.claude/plugins/cache/synapti-marketplace/flow/3.2.2/settings.json). Using Path B (single-session).
+USE_PATH_A=0
+PATH_A_STATE=disabled
+
+If `USE_PATH_A=0`, skip the rest of Path A and dispatch Path B below.
+
+**Model selection.** When `USE_PATH_A=1`, the gate emits `AGENT_TEAM_MODEL` (default `sonnet`). Dispatch every Path A agent below — both the A.1 paired reviewers and the A.3 challenge rounds — passing `AGENT_TEAM_MODEL` as the Agent tool's per-invocation `model` override (the `model=...` shown in the `Agent(...)` examples maps to that tool argument). The override takes precedence over each agent's `model: inherit` frontmatter (precedence: dispatch override > frontmatter > session model), so the reviewers run on `AGENT_TEAM_MODEL` regardless of the session's model. **When `AGENT_TEAM_MODEL=inherit`, OMIT the `model` argument entirely** — the dispatch-time override accepts only `sonnet`/`opus`/`haiku`, and the session model (the behavior before this setting existed) is expressed by dropping the override, NOT by passing `model=inherit`. The two `Skill(holdout-validation)` invocations are unaffected (skills run inline in the parent context, not as model-dispatched subagents).
+
+#### A.1 — Independent Analysis (paired reviewers, parallel dispatch)
+
+Dispatch **12 invocations** (10 `Agent(...)` + 2 `Skill(holdout-validation)`) in a single parallel block — 5 agent facets × {skeptic, verifier} plus the holdout-validation skill in both lenses. Each variant carries an orthogonal lens; both run with no awareness of each other.
+
+Each `Agent(...)` call below carries `model=$AGENT_TEAM_MODEL` per **Model selection** above. (When the resolved value is `inherit`, drop the `model=` argument — the session model is the default when no override is passed.)
+
+```
+Agent(security-reviewer-skeptic, model=$AGENT_TEAM_MODEL):
+  "You are reviewing PR #111 as the SKEPTIC variant. Assume the diff is
+   broken until proven otherwise. Flag every security behavior you cannot prove
+   correct from the code as written: OWASP Top 10, secrets, auth/authz, input
+   validation, dependency vulnerabilities. Return P1/P2/P3 findings with
+   file:line citations and category. Do NOT include challenge information —
+   another reviewer will challenge your findings later."
+
+Agent(security-reviewer-verifier, model=$AGENT_TEAM_MODEL):
+  "You are reviewing PR #111 as the VERIFIER variant. Assume the diff is
+   correct as a baseline. Look only for missed security edge cases, undocumented
+   contract assumptions, or invariants that aren't enforced. Return P1/P2/P3
+   findings with file:line citations and category."
+
+Agent(code-reviewer-skeptic, model=$AGENT_TEAM_MODEL):
+  "PR #111 as SKEPTIC. Assume broken; flag logic/quality/edge-case
+   issues you cannot prove correct. P1/P2/P3 + file:line + category."
+
+Agent(code-reviewer-verifier, model=$AGENT_TEAM_MODEL):
+  "PR #111 as VERIFIER. Assume correct; look only for missed edge cases
+   and unenforced invariants. P1/P2/P3 + file:line + category."
+
+Agent(convention-checker-skeptic, model=$AGENT_TEAM_MODEL):
+  "PR #111 as SKEPTIC. Flag every convention violation (commits, branch
+   naming, code patterns) you cannot prove conformant. P1/P2/P3 + file:line."
+
+Agent(convention-checker-verifier, model=$AGENT_TEAM_MODEL):
+  "PR #111 as VERIFIER. Look for convention drift the skeptic might miss
+   (e.g., subtle stylistic divergence). P1/P2/P3 + file:line."
+
+Agent(test-runner-skeptic, model=$AGENT_TEAM_MODEL):
+  "PR #111 as SKEPTIC. Run quality commands (lint, test, typecheck) and
+   flag every failure or warning. Return findings with command output."
+
+Agent(test-runner-verifier, model=$AGENT_TEAM_MODEL):
+  "PR #111 as VERIFIER. Run quality commands and flag missing test
+   coverage or weak assertions in passing tests. Return findings."
+
+Agent(error-handler-inspector-skeptic, model=$AGENT_TEAM_MODEL):
+  "PR #111 as SKEPTIC. Flag every error-handling gap, silent failure,
+   or unhandled exception you cannot prove handled. P1/P2/P3 + file:line."
+
+Agent(error-handler-inspector-verifier, model=$AGENT_TEAM_MODEL):
+  "PR #111 as VERIFIER. Look for missed error contracts and unenforced
+   exception invariants. P1/P2/P3 + file:line."
+
+Skill(holdout-validation):
+  Inputs (skeptic lens):
+  - Self-review findings: {existing P1/P2/P3 findings}
+  - Evidence bundle draft: {requirements compliance map}
+  - File list: {all files changed in this PR}
+  - Lens: SKEPTIC — assume claims are unsupported until proven
+
+Skill(holdout-validation):
+  Inputs (verifier lens):
+  - Same inputs
+  - Lens: VERIFIER — assume claims are supported; look for missed cross-references
+```
+
+Each returns a structured finding list. Index returned findings by facet for the challenge round: `findings[facet][variant] = [F1, F2, ...]`.
+
+**Note on holdout-validation challenge participation** (designed asymmetry — not a tooling workaround): the two `Skill(holdout-validation)` invocations contribute findings to A.2 auto-consensus matching but **do NOT participate in the A.3 challenge round**. This is the principled split between two categorically different finding types:
+
+- **Adversarial challenge (AGREE/DISAGREE/REFINE) is for subjective judgment.** Reviewers can legitimately hold different opinions about whether a SQL pattern is actually exploitable, whether a race condition matters at the project's scale, or whether a P2 finding should be P1 instead. The challenge round surfaces those disagreements; the consolidator weights confidence by the disposition the OTHER reviewer assigned.
+- **Holdout findings are objective claim-verification.** The question they answer is binary: did the self-reported evidence match the file state? The file state is the arbiter, not reviewer opinion. A challenger cannot meaningfully DISAGREE with "the agent claimed test X exists; grep finds no test for X" — they can re-check the file (which produces the same answer) but they cannot vote it away.
+
+Including holdout in challenge would either (a) produce vacuous AGREE responses (re-check confirms what we already established) or (b) confuse the protocol (DISAGREE based on what — the file state changed? the claim was parsed differently?). The asymmetry is principled and intentional. The two holdout lenses (skeptic + verifier) DO produce a confidence signal: when both lenses raise the same finding the disposition is `consensus`; when only one lens raises it the disposition is `unchallenged` (meaning the OTHER lens parsed the claim differently or weighted holdout-scenario priority differently — itself a useful signal worth investigating, but not via AGREE/DISAGREE voting).
+
+Consequently, the cost table in `team-coordination/SKILL.md` lists **10** challenge calls rather than 12 — the 2-call savings is the principled exclusion, not a tooling shortcut. Holdout findings emit at A.4 with `consensus` (both lenses raised it independently) or `unchallenged` (one lens only); they NEVER carry `validated` / `refined` / `kept` because those dispositions are challenge-round outputs.
+
+**Post-condition on returned IDs**: each variant's findings must have IDs matching `^[A-Za-z][A-Za-z0-9_-]*$` before A.2 consumes them — the same allowlist that downstream consumers (`status.md:104-117`, `merge.md`) enforce. IDs that fail validation are skipped at A.2 with a `LEDGER_WARN: PR#{N} A.1 rejected non-conforming ID '{safe-id}' from {variant}` to stderr. This avoids producing markers that get silently dropped downstream and makes the A.2 lexicographic tiebreaker safe against pathological IDs.
+
+#### A.2 — Auto-consensus detection
+
+Before dispatching the challenge round, detect findings that BOTH variants raised independently. The match window is hard-coded for v1: same facet AND same file AND lines within ±2 AND priority within ±1 (P1↔P2 counts; P1↔P3 does not).
+
+```bash
+# Pseudocode (apply per facet, deterministic — see helpers below).
+# Iterate skeptic findings in lexicographic ID order so the loop itself is
+# deterministic. paired_b = set() tracks verifier findings already paired in
+# this facet — once paired, a finding cannot be paired again.
+# paired_b = set()
+# for finding_a in sorted(findings[facet][skeptic], key=lambda a: a.id):
+#   candidates = []
+#   for finding_b in findings[facet][verifier]:
+#     if finding_b.id in paired_b: continue            # skip already-paired
+#     if (line(finding_a) > 0) != (line(finding_b) > 0): continue  # see C10
+#     if same_file(finding_a, finding_b) AND
+#        abs(line(finding_a) - line(finding_b)) <= 2 AND
+#        priority_distance(finding_a.priority, finding_b.priority) <= 1:
+#       candidates.append(finding_b)
+#   if candidates:
+#     # Deterministic tiebreaker: smallest line distance, then smallest priority
+#     # distance, then lexicographic ID. Required so re-runs of the same review
+#     # produce the same consensus pairing.
+#     finding_b = min(candidates, key=lambda b: (
+#       abs(line(finding_a) - line(b)),
+#       priority_distance(finding_a.priority, b.priority),
+#       b.id
+#     ))
+#     mark (finding_a, finding_b) as auto-consensus -> confidence=HIGH, disposition=consensus
+#     paired_b.add(finding_b.id)
+#     remove finding_a and finding_b from challenge candidates for this facet
+```
+
+**Helper definitions** (specified to remove implementer ambiguity):
+
+| Helper | Definition |
+|--------|------------|
+| `line(finding)` | Integer parsed from the first `:N` group in `file:line`. For ranges (`file:42-50`), use the low end (`42`). For file-level findings (no line citation), treat as line `0`. The pseudocode above explicitly skips pairs where one side is line-bearing (`>0`) and the other is file-level (`==0`) — see the second `continue` in the loop — so file-level findings only ever match other file-level findings on the same file. |
+| `same_file(a, b)` | Compare normalized paths: strip leading `./`, resolve `..` segments, lowercase only on case-insensitive filesystems. Returns true on equality. |
+| `priority_distance(p1, p2)` | `0` if equal, `1` for P1↔P2 or P2↔P3, `2` for P1↔P3. The match window threshold is `≤ 1` so P1↔P3 NEVER match. |
+
+Auto-consensus findings skip the challenge round (no need — both reviewers already agreed independently).
+
+#### A.3 — Challenge Round (disposition-only, parallel)
+
+For findings NOT in auto-consensus, dispatch each variant to challenge the OTHER variant's findings. **Variants do NOT re-read the diff.** Up to 10 challenge prompts run in parallel (5 agent facets × 2 directions; holdout-validation excluded — see A.1 note). Each challenge `Agent(...)` carries `model=$AGENT_TEAM_MODEL` per **Model selection**.
+
+```
+Agent(security-reviewer-skeptic, model=$AGENT_TEAM_MODEL) [challenge mode]:
+  "You are reviewer-A (skeptic) for facet 'security'. Reviewer-B (verifier)
+   raised the following findings on the same diff you reviewed independently.
+   For each finding, respond with exactly one line:
+
+     {finding-id} AGREE
+     {finding-id} DISAGREE: {one-line reason}
+     {finding-id} REFINE: priority={P1|P2|P3} category={text}
+
+   Do NOT re-read the diff. Decide based on your prior independent analysis only.
+
+   Findings to challenge:
+   {list of verifier's non-auto-consensus findings: ID, file:line, priority, category}"
+
+Agent(security-reviewer-verifier, model=$AGENT_TEAM_MODEL) [challenge mode]:
+  "Same instructions, reversed: challenge the skeptic's non-auto-consensus
+   findings for facet 'security'."
+
+[... repeat for the other 5 facets in parallel ...]
+```
+
+Each challenge call returns a list of `{finding-id, disposition, optional reason/refinement}`.
+
+#### A.4 — Consolidation
+
+Apply the consolidation table from `team-coordination/SKILL.md` Phase 4. For each finding, look up its origin and the other variant's disposition:
+
+| Origin | Other variant's disposition | Confidence | Marker disposition vocab |
+|--------|------------------------------|------------|--------------------------|
+| Auto-consensus (A.2) | n/a | **HIGH** | `consensus` |
+| One raised, other AGREE | AGREE | **HIGH** | `validated` |
+| One raised, other REFINE | REFINE | **MEDIUM** | `refined` (use REFINE'd priority/category) |
+| One raised, other DISAGREE | DISAGREE | **LOW** | `kept` (record reason) |
+| One raised, other timed out / errored | none | **MEDIUM** | `unchallenged` |
+| Both raised, both DISAGREE'd | n/a | **DROPPED** | excluded from output, logged below |
+
+**DROPPED findings** are logged to `.decisions/issue-{N}.md` (where N = the issue this PR addresses) under a `## Dropped after challenge (PR #$PR_NUM, cycle {N})` heading with the finding details and both DISAGREE reasons. They never appear in the rendered tables or the FLOW_REVIEW_CYCLE marker.
+
+**Manifest emit** — for each DROPPED finding, append a `dropped-finding` artifact to the journal manifest so `/flow:learn` can detect repeated drop reasons across cycles (a recurring drop reason is a learnable signal):
+
+```bash
+"$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+  --issue $ISSUE \
+  --type dropped-finding \
+  --metadata cycle=$CYCLE \
+  --metadata finding_id=$FINDING_ID \
+  --metadata facet=$FACET \
+  --metadata reason="$REASON" \
+  --metadata pr="$PR_NUM"
+```
+
+Repeat once per dropped finding. The freeform `## Dropped after challenge` section preserves the verbose details (both DISAGREE reasons, file:line); the manifest entry is the queryable index.
+
+#### A.5 — Per-facet fallback application
+
+If any of A.1's variants failed (timeout, error, did-not-spawn), apply the fallback semantics from `team-coordination/SKILL.md` per facet — never block the review:
+
+| Failure | Action |
+|---------|--------|
+| One variant failed for facet F | Use the responding variant's findings only; mark each as `unchallenged` (MEDIUM). Note in output: `facet F: single-reviewer fallback (skeptic failed)`. |
+| Both variants failed for facet F | Re-dispatch single Agent for that facet using the Path B prompt. Note in output: `facet F: re-dispatched as single-reviewer (both variants failed)`. |
+| Challenge round failed for a facet | Skip A.3 for that facet; keep A.1 findings as `unchallenged`. Note in output: `facet F: challenge skipped (challenge prompt failed)`. |
+| A.2 auto-consensus matching errored on finding F (e.g., malformed `file:line`) | Skip auto-consensus for F; route F through A.3 challenge as if non-consensus. Log `LEDGER_WARN: PR#{N} A.2 skipped F:<id> due to <reason>` to stderr. |
+| A.4 consolidation lookup missing for finding F (e.g., orphaned challenge response) | Emit F as `unchallenged` MEDIUM. Append to `.decisions/issue-{N}.md` (where N = the issue this PR addresses) under a `## Consolidation gaps (PR #$PR_NUM, cycle {N})` heading with the orphan reason. Create the journal file with frontmatter if it does not exist. **Also emit `--type consolidation-gap`** via `bin/journal-record.sh` with `cycle`, `finding_id`, `reason`, and `pr` metadata so the manifest carries a machine-readable trail of fallback fires. |
+
+#### A.6 — Emit consolidated output
+
+Use the synthesized findings (with confidence + disposition) for steps in Phase 4 below. The FLOW_REVIEW_CYCLE marker emitted in Phase 4 step 7 uses the 7-field form when paired-reviewer mode produced the findings (example exercises three disposition values):
+
+```
+<!-- FLOW_REVIEW_CYCLE:{N} FINDINGS:[F1|P1|security|src/auth.ts:42|open|HIGH|consensus,F2|P2|correctness|src/api.ts:88|open|MEDIUM|refined,F3|P1|race|src/job.ts:17|open|LOW|kept] -->
+```
+
+When Path A is the orchestrator, the marker is **uniformly 7-field** — including for findings produced by per-facet fallbacks (which carry `MEDIUM|unchallenged`). The 5-field form is preserved ONLY for full Path B runs (gate failed at the top of this section). Mixing 5-field and 7-field rows within a single marker is forbidden — pad fallback findings to 7 fields with `MEDIUM|unchallenged` so all rows match. This rule is restated at Phase 4 step 7.
+
+After A.6 completes, jump to Phase 4 with the consolidated finding set.
+
+### Path B: Single Session (default)
+
+Path B dispatch is intentionally unchanged — its agents carry no `model` parameter and inherit the session model via frontmatter. The `agentTeamModel` setting applies to Path A only.
+
+**Parallel Agent dispatch** — 5 agents in single message:
+
+```
+Agent(code-reviewer):
+  "Review PR #111 diff for quality, logic, edge cases, security.
+   Return P1/P2/P3 findings with file:line."
+
+Agent(convention-checker):
+  "Validate commits, branch naming, conventions for PR #111."
+
+Agent(test-runner):
+  "Run quality commands for PR #111 branch."
+
+Agent(error-handler-inspector):
+  "Inspect changed files in PR #111 for error handling gaps,
+   silent failures, unhandled exceptions. Return P1/P2/P3 findings."
+
+Agent(security-reviewer):
+  "Review PR #111 diff for OWASP Top 10, secrets, auth/authz,
+   input validation, dependency vulnerabilities. Return P1/P2/P3 with file:line."
+
+Skill(holdout-validation):
+  Inputs:
+  - Self-review findings: {P1/P2/P3 findings from code-reviewer agent}
+  - Evidence bundle draft: {per-criterion evidence from requirements review}
+  - File list: {all files changed in this PR}
+```
+
+**Main thread**: Requirements compliance — map acceptance criteria to implementation.
+
+TaskUpdate each review task as agents complete.
+
+**FlowActivity writes** (when `FLOW_RUN_STATE=create`): invoke `Skill(run-state-management)` to record a FlowActivity as the consolidate boundary completes — once the per-facet findings (Path A consolidation or Path B synthesis) have been merged into a single deduplicated finding set, advancing `state.current_phase` to `consolidate` per the `preflight → fan-out → consolidate → report` order.
+
+## Phase 4: VERIFY
+
+**CRITICAL: Posting review findings to the PR is MANDATORY. NEVER skip posting. The review is not complete until `gh pr review` has been executed and TaskUpdate confirms the post task is completed. Do not suggest next steps until posting is verified.**
+
+1. **TaskList**: Confirm all review facets complete
+2. **Synthesize findings**: Deduplicate by file:line, prioritize P1/P2/P3
+3. **Display findings** (finding-first pattern):
+
+```markdown
+## Review Summary for PR #$PR_NUM
+
+### Findings: P1: {X}, P2: {Y}, P3: {Z}
+
+### P1 — Critical
+| Finding | Suggested Fix |
+|---------|---------------|
+
+### Requirements Adherence
+| # | Criterion | Status | Evidence |
+|---|-----------|--------|----------|
+```
+
+4. **Determine review mode** — compare PR author vs current user:
+
+   ```bash
+   PR_AUTHOR=$(gh pr view "$PR_NUM" --json author --jq '.author.login')
+   CURRENT_USER=$(gh api user --jq '.login')
+   ```
+
+5. **Self-review (own PR — PR_AUTHOR == CURRENT_USER)**:
+
+   Fix-forward approach (bounded by `fixForwardMaxIterations`, default 10 — a safety net against true infinite loops, not a budget; see `skills/llm-operator-principles/SKILL.md`):
+   - P1 findings → fix immediately
+   - P2 findings → fix immediately
+   - P3 findings → fix immediately (the proximity test is not a deferral mechanism — P3 in touched files gets the same disposition as P1/P2)
+   - TaskCreate("Test coverage for fix-forward", "Write or update tests for each P1/P2/P3 fix applied during self-review")
+   - For each fix: write or update a test that covers the fixed behavior
+   - After fixes: run targeted re-review of only changed files
+   - TaskUpdate(testCoverageTaskId, status: "completed", result: "Tests written/updated for {N} fixes")
+   - No follow-up issue creation for fixable items — finding triage is NEVER a valid escalation trigger; fix in this PR
+   - Approaching the iteration ceiling without convergence is a signal to re-check the findings (are two findings in tension? misunderstood scope?), not to escalate
+   - TaskCreate("Post self-review comment", "Post review findings summary to PR via gh pr review --comment")
+   - TaskCreate("Post self-review resolution marker", "Post a FLOW_RESOLUTION_CYCLE issue comment (gh pr comment) recording the fix-forwarded finding IDs as RESOLVED — required so the merge finding-ledger gate balances for self-reviewed PRs. Skip only when zero findings were raised.")
+
+6. **External review (someone else's PR — PR_AUTHOR != CURRENT_USER)**:
+
+   - TaskCreate("Post review comment", "Post structured review findings to PR via gh pr review")
+   - P1/P2/P3 in already-touched files → REQUEST_CHANGES (P1/P2) or COMMENT with fix-expected language (P3) — the author must fix
+   - Cosmetic P3 in untouched files → COMMENT with fix-if-bounded-or-document-inline language (default mode) OR follow-up issue workflow (only when `minimalScope: true` or the PR author has explicitly invoked minimal scope)
+   - P1/P2 in untouched files → REQUEST_CHANGES; author must address in-PR (finding triage is NEVER a valid escalation trigger; see `skills/llm-operator-principles/SKILL.md`)
+
+   Findings in files the PR already modifies are NEVER out-of-scope — the author owns the known defects in any file they touch. Do NOT flag them as informational; flag them as blocking.
+
+   **Default mode (no `minimalScope` set):** for cosmetic P3 findings in untouched files, do NOT create follow-up issues and do NOT present an AskUserQuestion asking the author to defer. Recommend "fix if bounded (<10 lines) or document inline in the PR body" in the review comment.
+
+   **Minimal-scope mode (`settings.json` → `minimalScope: true`):** for cosmetic P3 findings in untouched files only, the original follow-up workflow is restored:
+
+   Present the findings and use the AskUserQuestion tool with contextual options: "These cosmetic P3 findings are in untouched files. Which ones should become follow-up issues?"
+
+   For each selected finding, create a GitHub issue using issue-crafting skill knowledge:
+   - Title: concise, solution-agnostic description of the finding
+   - Body: Context, Current State (file:line), Objective, Acceptance Criteria
+   - Labels: select from repo labels based on finding category
+   - Issue creation is Tier 2 (journal-and-proceed)
+
+   ```bash
+   gh issue create --title "{title}" --body "{body}" --label "{labels}"
+   ```
+
+   Include created issue numbers in the review comment body.
+
+   **Note**: Reviewers should recognize `improve:` commits as legitimate Boy Scout cleanup — approve if they pass the proximity test.
+
+7. **Post review findings** (MANDATORY — applies to both self-review and external review):
+
+   For follow-up reviews, include the **Previous Feedback Status** table:
+   ```markdown
+   ### Previous Feedback Status
+   | Cycle | Finding | Priority | Claimed Status | Verified |
+   |-------|---------|----------|----------------|----------|
+   ```
+   Cross-reference each prior finding's location against `git diff` to verify resolution.
+
+   Build `$BODY` using the appropriate template:
+   - Self-review: `templates/self-review-comment.md`
+   - External review: `templates/review-comment.md`
+
+   **Marker form selection** (FLOW_REVIEW_CYCLE):
+   - If Path A produced the findings (paired-reviewer mode), emit the **7-field** marker with Confidence + Disposition fields per finding. Render the Confidence + Disposition columns in the P1/P2/P3 tables.
+   - If Path B produced the findings (single-session, fallback, or `agentTeams: false`), emit the legacy **5-field** marker. Omit the Confidence + Disposition columns.
+   - When Path A had per-facet fallbacks, individual findings from fallback facets carry `unchallenged` disposition with MEDIUM confidence — emit them in the 7-field form alongside the rest. Mixed-form rows within a single marker are NOT permitted (parsers tolerate variable field count, but emitting both forms in one row list would be confusing); pad fallback findings to 7 fields with `MEDIUM|unchallenged`.
+
+   Post the review:
+   - Self-review → `gh pr review "$PR_NUM" --comment --body "$BODY"`
+   - External + P1 findings → `gh pr review "$PR_NUM" --request-changes --body "$BODY"`
+   - External + P2 findings (no P1) → `gh pr review "$PR_NUM" --request-changes --body "$BODY"`
+   - External + P3 only → `gh pr review "$PR_NUM" --comment --body "$BODY"` (fix-expected, not approve-with-nits)
+   - External + No findings → `gh pr review "$PR_NUM" --approve --body "$BODY"`
+
+   TaskUpdate(postCommentTaskId, status: "completed", result: "PASS — review posted as {approve/request-changes/comment}")
+
+   **Self-review resolution marker (MANDATORY when `PR_AUTHOR == CURRENT_USER`):**
+
+   Self-review is *raise + resolve in one action* — fix-forward (step 5) already fixed every
+   finding in-PR. The `FLOW_REVIEW_CYCLE` marker posted above records what was **found** (review
+   body, reviews stream, status `open`); it does NOT, on its own, tell the merge gate the findings
+   were **resolved**. The merge finding-ledger gate balances `FINDINGS − RESOLVED` and reads
+   `RESOLVED` only from a `FLOW_RESOLUTION_CYCLE` marker in the issue-comments stream
+   (`references/finding-ledger-parser.md` §3; `commands/merge.md` finding-ledger gate). Without
+   this marker, a self-reviewed PR whose every finding was fix-forwarded would false-block at merge.
+
+   So after posting the review body, emit a `FLOW_RESOLUTION_CYCLE` marker as a **PR issue comment**
+   — the same marker and placement `/flow:address` uses (`commands/address.md` step 9), built from
+   `templates/resolution-comment.md`. This is what collapses the two-actor flow (reviewer raises →
+   author resolves) into a single self-review action. Skip ONLY when there were zero findings (an
+   approve-style self-review with an empty `FINDINGS:[]` — nothing to resolve).
+
+   - `RESOLVED:[...]` — every finding ID that fix-forward fixed in-PR (the common case: all of them).
+   - `ESCALATED:[...]` — any finding that could NOT be fixed in-PR and was escalated with the
+     six-field structure (step 5 / `self-review-comment.md` "Escalated for Human Judgment"). The
+     merge gate blocks on a non-empty `ESCALATED`, which is correct — an escalated finding is an
+     open product decision, not a shipped fix.
+   - `DISPUTED:[]` — empty for self-review (there is no second actor to dispute).
+
+   ```bash
+   # $CYCLE_NUMBER is the same cycle the FLOW_REVIEW_CYCLE marker above used.
+   # RESOLVED/ESCALATED are comma-separated finding IDs (e.g. F1,F2,F3).
+   RES_BODY="$(build from templates/resolution-comment.md with the self-review cycle metrics)"
+   [ -n "$RES_BODY" ] || { echo "ERROR: empty resolution body — refusing to post a marker-less comment" >&2; }
+   gh pr comment "$PR_NUM" --body "$RES_BODY"; RES_EXIT=$?
+   ```
+
+   The resolution comment body MUST end with:
+   `<!-- FLOW_RESOLUTION_CYCLE:{CYCLE_NUMBER} RESOLVED:[{ids}] ESCALATED:[{ids}] DISPUTED:[] -->`
+
+   Mark the task completed ONLY if `RES_EXIT` is `0` (the `gh pr comment` succeeded and returned a
+   comment URL). If it is non-zero (auth/network/rate-limit) or `RES_BODY` was empty, leave the task
+   `in_progress`, retry, and do NOT advance to step 9 — a silently-absent resolution marker
+   re-introduces the merge false-block this emission exists to prevent.
+
+   TaskUpdate(resolutionCommentTaskId, status: "completed", result: "PASS — self-review resolution marker posted")
+
+   **Manifest emit** — record the review-cycle artifact in the issue's journal manifest. Use the issue number associated with this PR (parse from PR body: `gh pr view "$PR_NUM" --json body --jq '.body' | grep -oE '#[0-9]+' | head -1 | tr -d '#'`):
+
+   ```bash
+   ISSUE=$(gh pr view "$PR_NUM" --json body --jq '.body' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+   if [ -n "$ISSUE" ]; then
+     "$(__fr="${CLAUDE_PLUGIN_ROOT:-}";[ -x "$__fr/bin/cascade-resolve.sh" ]||__fr=$({ echo plugins/flow;ls -d "$HOME"/.claude/plugins/cache/synapti-marketplace/flow/*/ 2>/dev/null|sort -Vr;echo "$HOME/.claude/plugins/marketplaces/synapti-marketplace/plugins/flow"; }|while read -r __p;do [ -x "${__p%/}/bin/cascade-resolve.sh" ]&&{ echo "${__p%/}";break;};done);echo "$__fr")/bin/journal-record.sh" \
+       --issue $ISSUE \
+       --type review-cycle \
+       --metadata cycle=$CYCLE_NUMBER \
+       --metadata path={A|B} \
+       --metadata findings_count=$TOTAL \
+       --metadata pr="$PR_NUM"
+   fi
+   ```
+
+   The `path` value is `A` when paired-reviewer mode produced the findings (7-field marker), `B` when Path B (5-field marker) produced them. `findings_count` is the total across P1+P2+P3 in the cycle. If the PR body does not link an issue, skip the emit (the marker on the PR comment is sufficient for that PR's own state; the manifest is keyed by issue, not PR).
+
+8. **Verify posting**: TaskList — confirm the posting task(s) are completed. Do NOT proceed to step 9 until verified. For external review: "Post review comment". For self-review: BOTH "Post self-review comment" AND "Post self-review resolution marker" must be `completed` — the resolution marker is what balances the merge finding-ledger gate, so a self-review that posted the review body but not the resolution marker is NOT done (it would false-block at merge). Mirror `commands/address.md` step 11's "ALL tasks including the resolution comment" gate.
+
+   **Zero-findings exception**: when the self-review raised zero findings (the review posts an empty `FINDINGS:[]` and there is nothing to resolve), the resolution marker is correctly skipped (per step 5 and step 7). In that case mark the "Post self-review resolution marker" task `completed` with `result: "SKIP — no findings to resolve"` so the gate is satisfied. A balanced ledger with no findings needs no resolution marker; only DO post one when at least one finding was fix-forwarded.
+
+9. **Post-review**: If self-review fixed everything, suggest `/flow:pr`. If external review, suggest `/flow:address $PR_NUM` for the PR author.
+
+**FlowActivity writes** (when `FLOW_RUN_STATE=create`): invoke `Skill(run-state-management)` to record a FlowActivity as the report boundary completes — once the review comment is posted (step 7) and posting is verified (step 8), advancing `state.current_phase` to `report` per the `preflight → fan-out → consolidate → report` order.
+
+**FlowRun terminal transition** (when `FLOW_RUN_STATE=create`): once the review comment is posted (or no-finding evidence is recorded), invoke `Skill(run-state-management)` to transition the FlowRun to `state.status: completed`. The `workflow-run` journal artifact is best-effort — a review is PR-scoped, not issue-scoped — so emit `bin/journal-record.sh --type workflow-run` only if a single issue can be inferred from the PR (the linked issue parsed from the PR body); otherwise the `run.yaml` is the durable record and no journal artifact is written. If the review failed or was cancelled before posting, transition to `state.status: cancelled` (with `blocked_reason`) instead so `/flow:resume` does not treat it as resumable.
+
+## Tier Classification
+
+| Action | Tier | Behavior |
+|---|---|---|
+| `gh pr checkout` | 1 | Autonomous |
+| Read PR diff / files / previous reviews | 1 | Autonomous, read-only |
+| Multi-agent dispatch (Path B: 5 agents + holdout) or paired-reviewer dispatch (Path A: 12 invocations + 10 challenge) | 1 | Autonomous; Tasks tracked |
+| Holdout validation (skill, parallel) | 1 | Autonomous |
+| Self-review fix-forward (when reviewing own PR) | 1 | File edits + commits autonomous; push is Tier 2 |
+| `gh pr review --comment / --request-changes / --approve` | 2 | Journal-and-proceed |
+| `gh pr comment` (self-review `FLOW_RESOLUTION_CYCLE` marker) | 2 | Journal-and-proceed |
+| Follow-up issue creation (cosmetic P3 in untouched files, external PR review only) | 2 | Journal-and-proceed |
+
+---
+
+<task-notification>
+<task-id>af38bd083823c9f00</task-id>
+<tool-use-id>toolu_011Gi5jsTSxisrjtdT4oFJLb</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Agent "Test + convention review PR 111" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All gates run. Here are the structured results.
+
+## Environment caveat (read first)
+
+| Fact | Value |
+|---|---|
+| Interpreter | `.venv/bin/python` → **Python 3.14.6** |
+| CI matrix | 3.10 / 3.11 / 3.12 (`.github/workflows/ci.yml:70-77`) |
+| `[tool.mypy] python_version` | `3.10` |
+
+The venv is **off the CI matrix**. Warning behaviour (asyncio, deprecations) differs from CI; one of the three warnings below is 3.14-only.
+
+Also: `ruff-0.16.5.dist-info` mtime is `Aug 30 01:22:24`, `pyproject.toml`'s pin commit `b9c2369` is `01:28:18`. The venv was installed **6 minutes before** the pins landed, so "installed matches pins" is compatibility, not post-pin verification.
+
+## Quality Check Results
+
+| Check | Command | Exit | Status | Details |
+|---|---|---|---|---|
+| Lint (CI scope) | `ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/` | 0 | **Pass** | All checks passed (+1 config warning, see F1) |
+| Format (CI scope) | `ruff format --check grounded_agency/ tests/ benchmarks/` | 0 | **Pass** | 88 files already formatted |
+| Lint (repo root) | `ruff check .` | 0 | **Pass** | All checks passed |
+| Format (repo root) | `ruff format --check .` | **1** | **Fail** | 28 files would be reformatted — **none in CI scope, all pre-existing** (see F2) |
+| Types | `mypy grounded_agency/` | 0 | **Pass** | Success: no issues found in 42 source files |
+| Tests (full) | `pytest -q` | 0 | **Pass** | **936 passed, 1 warning in 34.80s** (shell wall `real 35.36`) |
+| Tests (file) | `pytest tests/test_grounded_query.py -q` | 0 | **Pass** | run1 **15 passed in 1.81s** (`real 2.31`) / run2 **15 passed in 1.77s** (`real 2.35`) |
+| Validators (9/9) | `tools/validate_*.py` | all 0 | **Pass** | see below |
+| Conformance | `python scripts/run_conformance.py` | 0 | **Pass** | 23/23 scenarios PASS, "Conformance PASSED" |
+
+Validators, each run individually with its own exit code — all `0`:
+`validate_benchmark_deps` · `validate_canonical_schemas` (5 schemas) · `validate_ontology` (0 orphans, 36 caps) · `validate_profiles` (7) · `validate_rfcs` (2) · `validate_skill_refs` (42 skills) · `validate_transform_refs` (5) · `validate_workflows` · `validate_yaml_util_sync` (4 defs match).
+
+Artifacts written (expected, both gitignored — `git status` clean after the run): `/Users/danielbentes/agent-capability-standard/build/conformance_results.json`, `/Users/danielbentes/agent-capability-standard/tools/validator_suggestions.json`.
+
+## Findings
+
+### F1 (P2) — `pyproject.toml` carries a rule that ruff 0.16.5 removed
+
+Every single `ruff` invocation (4 of 4) emits:
+
+```
+warning: The following rules have been removed and ignoring them has no effect:
+    - UP038
+```
+
+Source, `/Users/danielbentes/agent-capability-standard/pyproject.toml`:
+```toml
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "UP038",  # isinstance(x, (A, B)) — unsafe to auto-convert for bool subclass
+]
+```
+`UP038` no longer exists in 0.16.5, so the entry is dead config that warns on every lint run. This is directly caused by the version this PR pins. CI does not fail on it (exit 0), but it is noise on every `lint` job.
+
+### F2 (P3) — 28 files fail root-scope `ruff format --check`, none touched by this PR
+
+`git diff --name-only main...HEAD` = `CHANGELOG.md`, `CLAUDE.md`, `pyproject.toml`, `tests/test_grounded_query.py`. None of the 28 offenders are among them, and none live under `grounded_agency/`, `tests/`, or `benchmarks/` — so **CI's format gate is green**. The failures are exactly the Markdown-code-block reformatting the pyproject comment describes, plus scripts outside CI's format scope:
+
+`analysis/01,03,04,05,07,08,09,11-*.md` · `docs/integrations/claude_agent_sdk.md` · `docs/integrations/oasf_coverage.md` · `examples/{checkpoint_enforcement,discovery,grounded_agent,mcp_tools}_demo.py` · `skills/constrain/reference/verification_patterns.md` · `skills/perspective-validation/scripts/validate_pvc.py` · `skills/rollback/reference/verification_patterns.md` · `tasks/alignment-plan.md` · `templates/verification_patterns.md` · `tools/{scaffold,sync_skill_schemas,validate_benchmark_deps,validate_canonical_schemas,validate_ontology,validate_profiles,validate_rfcs,validate_workflows,validate_yaml_util_sync}.py`
+
+Note the CI mismatch this exposes: `ruff check` covers `tools/` and `scripts/`, but `ruff format --check` does not.
+
+### F3 (P1 for the PR's own thesis) — the new bounds resolve to a *different, untested* toolchain from scratch
+
+The task's suggested `pip install -e ".[dev]" --dry-run` is not a resolution test — in a satisfied env it just prints "Requirement already satisfied" for everything. Both forms, labelled:
+
+- `.venv/bin/pip install -e ".[dev]" --dry-run` → exit 0, all satisfied, `Would install grounded-agency-0.1.0`. Proves: **the current env satisfies the pins.**
+- `.venv/bin/pip install --dry-run --ignore-installed ".[dev]"` → exit **0, no conflict**. Proves: **the constraints resolve cleanly from scratch.**
+
+But the from-scratch plan differs materially from what is installed:
+
+| Package | Installed (tested here) | Fresh resolve under new bounds | Bound |
+|---|---|---|---|
+| mypy | 1.19.1 | **2.3.1** | `mypy&gt;=1.0,&lt;3` |
+| pytest | 9.0.2 | 9.1.1 | `pytest&gt;=7.0,&lt;10` |
+| pytest-asyncio | 1.3.0 | 1.4.0 | `pytest-asyncio&gt;=0.21,&lt;2` |
+| hypothesis | 6.151.4 | 6.167.0 | `hypothesis&gt;=6.0,&lt;7` |
+| types-PyYAML | 6.0.12.20250915 | 6.0.12.20260815 | `types-PyYAML&gt;=6.0,&lt;7` |
+| ruff | 0.16.5 | 0.16.5 | `==0.16.5` (exact — held) |
+| claude-agent-sdk | 0.2.148 | 0.2.148 | `&gt;=0.2.148,&lt;0.3` (at floor) |
+
+`mypy&lt;3` admits a **major-version jump to 2.x**. A fresh CI runner gets mypy 2.3.1; the green `mypy grounded_agency/` above was produced by 1.19.1. The `ruff==0.16.5` exact pin is the only one that actually pins. The PR's stated goal is preventing formatter drift from turning CI red — that goal is met for ruff and not for mypy.
+
+### F4 (P2) — three warnings, and `pytest -q` only reports one
+
+Plain `pytest -q` says `1 warning`. A `-X dev -W always` pass over the same 936 tests surfaced two more, emitted at plugin-import time and therefore outside pytest's warnings summary.
+
+1. **`CanUseToolShadowedWarning`** — the one pytest reports. Universal, will appear on CI.
+```
+tests/test_grounded_query.py::TestGroundedQueryImport::test_grounded_query_callable
+  .venv/lib/python3.14/site-packages/claude_agent_sdk/types.py:1918: CanUseToolShadowedWarning:
+  can_use_tool will not be invoked for: Skill. An allowed_tools entry that allows a whole tool
+  auto-approves it before the callback is consulted. To gate every tool call, use a PreToolUse
+  hook; or narrow the entry so calls fall through to can_use_tool. Allow rules from settings
+  files can also shadow the callback but are not visible here.
+    _warn_if_can_use_tool_shadowed(options)
+```
+This is a substantive signal, not cosmetic: the SDK is saying the adapter's `can_use_tool` callback is being bypassed for `Skill` because `allowed_tools` whole-tool-allows it. Present in **both** the full run and the single-file run.
+
+2. **`PytestDeprecationWarning`** — universal, will appear on CI. Real config gap given `asyncio_mode = "auto"` in `pyproject.toml`:
+```
+.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning:
+  The configuration option "asyncio_default_fixture_loop_scope" is unset.
+    warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+```
+
+3. **`DeprecationWarning`** — **Python 3.14-only, will NOT appear on CI** (3.10–3.12):
+```
+.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:15: DeprecationWarning:
+  'asyncio.AbstractEventLoopPolicy' is deprecated and slated for removal in Python 3.16
+```
+
+Explicitly clean, and credible because the run was under `-X dev` (which enables the filters that normally hide these): **no `ResourceWarning`, no `RuntimeWarning` about unclosed async generators or never-awaited coroutines.** The `-X dev` run: `936 passed, 1 warning in 38.73s`.
+
+### F5 (P2) — the 20s bound was measured on the branch that doesn't exercise it
+
+`tests/test_grounded_query.py:137-138`:
+```python
+            await asyncio.wait_for(
+                consume_first_message(), timeout=SDK_CALL_TIMEOUT_SECONDS
+```
+with `SDK_CALL_TIMEOUT_SECONDS = 20.0` at line 27. At 1.81s / 1.77s for the whole file, the SDK call took the **fast-fail path** (no live CLI session → `ClaudeSDKError`/`ConnectionError`), not the timeout path. The test's own docstring says wall time "has ranged from seconds to minutes depending on whether the runner was logged in." So 1.8s is a lower bound for a logged-out runner and does **not** demonstrate that `wait_for` caps a live billable call at 20s. Verifying the PR's core claim requires a run on a logged-in machine.
+
+## Scope note
+
+`python benchmarks/runner.py --report --format json --output benchmarks/results/benchmark_results.json` is a CI gate (`ci.yml`, benchmarks job) that was not in the enumerated list, so it was not run. `benchmarks/tests/` itself *was* covered — `[tool.pytest.ini_options] testpaths = ["tests", "benchmarks/tests"]` means bare `pytest -q` includes it (68 of the 936).
+
+Nothing was modified; no `ruff format` was run without `--check`, and no pins were touched.</result>
+<usage><subagent_tokens>48576</subagent_tokens><tool_uses>22</tool_uses><duration_ms>359934</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a0dcbdd5e0a368607</task-id>
+<tool-use-id>toolu_01HY8H2xDopuTM6FYXFq9feF</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Agent "Error handling review PR 111" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Error Handling Inspection
+
+PR #111 · `fix/pin-dev-deps-and-bound-sdk-test` · all findings below are **runtime-verified** (executed injections and captured interpreter output), not grep-derived.
+
+### P1 — Critical (Blocks Merge)
+| Finding | Suggested Fix |
+|---------|---------------|
+
+### P2 — Should Fix
+| Finding | Suggested Fix |
+|---------|---------------|
+| **ERR-1 · error-handling/silent-failure · `tests/test_grounded_query.py:140-149`**&lt;br&gt;Yes — the except tuple hides genuine wrapper bugs. Under claude-agent-sdk 0.2.148 the *only* `ValueError` path reachable from this call is `_configure_can_use_tool` (`.venv/.../claude_agent_sdk/types.py:1910-1919`), raised when `can_use_tool` and `permission_prompt_tool_name` are both set — and **both are wrapper-controlled** (`grounded_agency/adapter.py:344` sets `can_use_tool`). So `ValueError` is a wrapper-defect signal, never environmental. Proven by injection: patching `wrap_options` to also set `permission_prompt_tool_name` makes the SDK raise `ValueError: can_use_tool callback cannot be used with permission_prompt_tool_name` — and the test body still passes green. Compounding it, the test has **no assertion**: a wrapper that yields zero messages also passes. | Drop `ValueError` from the tuple (let a wrapper-produced options conflict fail loudly), and assert a message was actually received — e.g. capture the first message into a local and `assert msg is not None` after the `try`. |
+| **ERR-2 · error-handling/resource-leak · `tests/test_grounded_query.py:132-134`**&lt;br&gt;The new `break` is the first consumer to exit `grounded_query` early, and it leaves two nested async generators unclosed. `async for` does not close its iterator on `break` (PEP 533 deferred), and `grounded_agency/query.py:105-109` re-yields from `sdk_query` with no `finally: await inner.aclose()` — the SDK does exactly that in its own wrapper for this reason (`.venv/.../claude_agent_sdk/_internal/client.py:56-69`), and the subprocess terminate lives in the inner `finally: await query.close()` (`_internal/client.py:194-196`). Observed on every run: `an error occurred during closing of asynchronous generator &lt;... InternalClient._process_query_inner ...&gt; / RuntimeError: aclose(): asynchronous generator is already running`, and under pytest `Loop &lt;... closed=True ...&gt; that handles pid 35524 is closed` after the summary — i.e. the CLI subprocess is reaped at loop teardown, not at `break`, via a finalization path that errors. Not `ResourceWarning`, not "Task was destroyed"; it is an asyncgen-finalization `RuntimeError` plus a post-close subprocess reap. | Requires closing at **both** levels — measured: test-side `contextlib.aclosing` alone → still 1 `RuntimeError`; `aclose` inside `grounded_query` alone → still 1; both → 0 (2/2 runs). Wrap the test's iteration in `async with contextlib.aclosing(grounded_query(...)) as stream:` **and** add `finally: await inner.aclose()` around the `async for` in `grounded_agency/query.py:105-109`. The test-only fix looks clean and does not close the leak. |
+| **ERR-3 · error-handling/silent-failure · `pyproject.toml:44-58`**&lt;br&gt;The bounds do not prevent the upgrade the CHANGELOG names. `pip index versions` (run here): mypy latest **2.3.1** — admitted by `mypy&gt;=1.0,&lt;3`; pytest latest **9.x** — admitted by `&lt;10`; pytest-asyncio latest **1.4.0** — admitted by `&lt;2`. All three upper bounds are no-ops against today's index. `CHANGELOG.md` ("CI was one resolution away from a silent major upgrade") remains true after the change, and CI's fresh `pip install -e ".[dev]"` (`.github/workflows/ci.yml:83,101`) resolves mypy 2.3.1 while this machine has 1.19.1 — contradicting `CLAUDE.md`'s new "so the local toolchain matches CI". Not red today: I installed mypy 2.3.1 in a scratch venv and `mypy grounded_agency/` reports `Success: no issues found in 42 source files`, same as 1.19.1. This is an intent/guard mismatch, not a broken build. | Bound to the major actually in use: `mypy&gt;=1.0,&lt;2`, `pytest&gt;=7.0,&lt;9`, `pytest-asyncio&gt;=0.21,&lt;1` — or keep the wide ranges and correct the CHANGELOG/CLAUDE.md wording, which currently claims a guarantee the constraints do not give. |
+
+### P3 — Consider
+| Finding | Suggested Fix |
+|---------|---------------|
+| **ERR-4 · error-handling/missing-fallback · `tests/test_grounded_query.py:136-139`**&lt;br&gt;`asyncio.wait_for` bounds the *query*, not wall time: it cancels the task and then waits indefinitely for teardown. Measured with a generator whose `finally` awaits 3s: budget 0.5s → actual 3.5s. The docstring's "cannot stall the suite" holds only while SDK teardown is prompt. | Note the caveat in the docstring, or bound teardown too (`asyncio.timeout` around the whole block, or `shield`-free re-timeout on close). |
+| **ERR-5 · error-handling · `tests/test_grounded_query.py:145`**&lt;br&gt;`asyncio.TimeoutError` is redundant on 3.11+ — verified on 3.14.6: `asyncio.TimeoutError is TimeoutError` → `True`, `issubclass(TimeoutError, OSError)` → `True`, so line 142's `OSError` already caught it. It is load-bearing for the 3.10 leg of the CI matrix (`ci.yml:74`), which I could not execute here. | Keep it, with a one-line comment that it is for the 3.10 leg — otherwise a future reader deletes it as dead. |
+| **ERR-6 · error-handling · `tests/test_grounded_query.py:124,128`**&lt;br&gt;"Only ImportError is a real failure here" is a dead contract. `from claude_agent_sdk import ClaudeSDKError` at line 128 executes first, so a missing SDK errors there; `grounded_query`'s own `ImportError` guard (`grounded_agency/query.py:93-97`) is never reached by this test. Residual real-failure surface is only exception types outside the tuple (`TypeError`, `AttributeError`, `RuntimeError`). | Reword the docstring to state what the test actually proves, or add a separate test that exercises the `query.py:93-97` guard with the SDK masked from `sys.modules`. |
+
+### Summary
+- Files inspected: 4 changed (`CHANGELOG.md`, `CLAUDE.md`, `pyproject.toml`, `tests/test_grounded_query.py`) plus `grounded_agency/query.py`, `client.py`, `adapter.py` and the installed SDK as mechanism.
+- Total findings: P1: 0, P2: 3, P3: 3
+- Answers to the four specific questions: (1) yes, `ValueError` silently absorbs a wrapper-produced defect — demonstrated by injection; (2) yes, the cancelled/broken-out generator is left unclosed, producing an asyncgen-finalization `RuntimeError` and a post-loop-close subprocess reap, and the fix needs both levels; (3) `CancelledError` does **not** leak — `wait_for` converts it to `TimeoutError` and teardown `finally` blocks do run to completion (verified), the only cost being unbounded teardown time (ERR-4); (4) the dependency bounds introduce no runtime silent failure, but `mypy&lt;3` / `pytest&lt;10` / `pytest-asyncio&lt;2` admit the very majors the PR claims to have fenced off.
+- Error handling coverage: the PR's direction is right (bounded call, real SDK preserved per issue #99), but the widened `except`-and-`pass` now makes this test structurally unable to fail for a `wrap_options` defect, and the `break` it introduces surfaces a pre-existing missing-`aclose` in `grounded_agency/query.py:105-109`.
+
+Scratch artifacts (repros, injection, fix matrix): `REDACTED` — `fixprobe.py`, `defect.py`, `repro.py`, `repro2.py`, `repro3.py`, `findings.md`. Saved a project memory at `/Users/danielbentes/agent-capability-standard/.claude/agent-memory/flow-error-handler-inspector/project_sdk_test_real_call.md` recording that this test stays unmocked by design (issue #99), so future reviews propose bounding rather than mocking.</result>
+<usage><subagent_tokens>66912</subagent_tokens><tool_uses>39</tool_uses><duration_ms>428063</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a1292256bbe7ca9ce</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Agent "Code quality review PR 111" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Code Review Findings — PR #111 `fix/pin-dev-deps-and-bound-sdk-test`
+
+### Stage 1 — Intent compliance
+Both stated goals are implemented: dev/sdk constraints are bounded (`pyproject.toml:40-59`) and the live SDK call is bounded by first-message `break` + `asyncio.wait_for` (`tests/test_grounded_query.py:132-149`). Verified clean on the pinned toolchain: `.venv/bin/ruff check` and `ruff format --check tests/test_grounded_query.py` both pass. Proceeding to Stage 2.
+
+### P1 — Critical (Blocks Merge)
+| Finding | Suggested Fix |
+|---------|---------------|
+| _(none)_ | |
+
+### P2 — Should Fix
+| Finding | Suggested Fix |
+|---------|---------------|
+| **F1 · correctness/dependency · `pyproject.toml:47`, `CHANGELOG.md:40-42`**&lt;br&gt;`mypy&gt;=1.0,&lt;3` does not prevent the hazard the CHANGELOG says it closes. Measured: a fresh venv with `pip install "mypy&gt;=1.0,&lt;3"` resolves **mypy 2.3.1** — exactly the "silent major upgrade" the entry claims to have averted. It also breaks the PR's "installing the pinned extra makes local match CI" claim for this package: the local `.venv` has mypy **1.19.1**, so the "mypy clean" verification ran on 1.19.1 while CI would install 2.3.1. (Not currently red — I ran `mypy grounded_agency/` under 2.3.1: `Success: no issues found in 42 source files`.) | Either `mypy&gt;=1.0,&lt;2` to lock the major that was actually verified, or `mypy&gt;=2.0,&lt;3` and re-run the verification on 2.x. Then correct the CHANGELOG sentence to match whichever is chosen. |
+| **F2 · correctness/resource-leak · `tests/test_grounded_query.py:133-134` (fix in `grounded_agency/query.py:105-109`)**&lt;br&gt;`break` out of `async for` does **not** close the underlying SDK generator, so the subprocess-terminating cleanup does not run at the break. Verified with a three-case repro on 3.14: (A) plain `break` → inner `finally` never runs at break time; (B) wrapping the *consumer* in `contextlib.aclosing` **also fails**, because `grounded_query` re-yields from `sdk_query` in a bare `async for` (`query.py:105`) — `GeneratorExit` unwinds `grounded_query` without closing `sdk_query`; (C) adding an inner `aclosing` in `grounded_query` → cleanup runs synchronously at break. The SDK documents this exact hazard in its own code (`claude_agent_sdk/_internal/client.py`): *"`async for` does NOT close its iterator when the loop body raises (PEP 533 was deferred). Explicitly aclose the inner generator first so its `finally: await query.close()` runs — i.e. the subprocess is terminated."* `grounded_query` is public API whose docstring (`query.py:83-85`) shows precisely the `async for` pattern, so callers who `break` leak the CLI subprocess until GC. In the test the window is bounded by pytest-asyncio's per-function loop teardown (confirmed: an instrumented two-test run showed the generator alive for the rest of `test_a` and collected before `test_b`), which is why this is P2 on library impact, not P1. Conditional extra consequence: on the `resume`/`session_store` path the deferred `finally` also delays `materialized.cleanup()`, which removes a temp dir holding a `.credentials.json` copy — not exercised by this test. | In `grounded_agency/query.py`, wrap the inner iteration: `async with contextlib.aclosing(sdk_query(prompt=prompt, options=wrapped)) as stream:` then `async for message in stream:`. Three lines, mirrors the SDK's own pattern. Optionally also wrap the consumer in the test for symmetry. |
+| **F3 · accuracy/dependency · `pyproject.toml:42`, `CHANGELOG.md:36`**&lt;br&gt;Two problems with the `claude-agent-sdk` constraint. (a) The raised floor `&gt;=0.2.148` is not justified by any API in this repo — I extracted the 0.1.25 wheel and every symbol the repo imports (`ClaudeAgentOptions`, `ClaudeSDKClient`, `ClaudeSDKError`, `ProcessError`, `HookMatcher`, `PermissionResultAllow/Deny`, `create_sdk_mcp_server`, `tool`, `ResultMessage`) is in `__all__`, and every option field used at `adapter.py:332-347` (`allowed_tools`, `setting_sources`, `can_use_tool`, `hooks`) exists on 0.1.25's `ClaudeAgentOptions`. The PR's stated rationale (0.2.x introduced `ResultError`) does not support a floor either: `ResultError` subclasses `ProcessError` → `ClaudeSDKError` (`_errors.py:56,25,6`), which the `except` tuple already caught on `main` before this PR. `&gt;=0.2.148` pins to the newest release on the day of writing and excludes 0.1.x installs that demonstrably work — including the author's own 0.1.25. (b) `&lt;0.3` leaves the whole 0.2.x range open, so the one dependency that actually broke CI keeps an unbounded upgrade path, while `ruff` — which the same reasoning applies to — got an exact pin. Separately, this constraint lives in the **`sdk`** extra, which end users install; the CHANGELOG frames the whole change as "Development dependencies are version-bounded". | Pick one and state it: either `&gt;=0.1.25,&lt;0.3` (honest floor, matches verified working installs) or `==0.2.148` (consistent with the ruff argument, if reproducibility is the goal). Update the CHANGELOG to say the `sdk` extra's runtime constraint changed too, since it is consumer-facing. |
+
+### P3 — Consider
+| Finding | Suggested Fix |
+|---------|---------------|
+| **F4 · accuracy · `tests/test_grounded_query.py:120-121`**&lt;br&gt;The docstring claims the timeout means a slow API "cannot stall the suite". `wait_for` cancels the inner task and then *waits for cancellation to complete*, including the SDK's `finally: await query.close()`. Measured: a 0.3 s timeout over a generator with a 0.2 s cleanup returned at **0.5 s**. Wall time is `timeout + cleanup`, unbounded if `query.close()` hangs. | Soften to "bounds the query itself; SDK teardown runs after the timeout", or add `pytest.mark.timeout` as the hard wall. |
+| **F5 · test-quality · `tests/test_grounded_query.py:145-149`**&lt;br&gt;Introduced regression in signal: `asyncio.TimeoutError` is now an accepted pass outcome, so a wrapper that never yields anything is indistinguishable from a slow API. Combined with the (pre-existing) absence of any assertion, the test can only fail on `ImportError`. | Record whether a message arrived (`received: list = []`, append before `break`) and assert `received or &lt;known env failure&gt;` — i.e. distinguish "SDK unreachable" from "wrapper yielded nothing". |
+| **F6 · maintainability · `pyproject.toml:42` and `:58`**&lt;br&gt;The `claude-agent-sdk` constraint is duplicated verbatim in the `sdk` and `dev` extras; a future bump must edit both or they silently diverge. | Make `dev` reference the constraint once, e.g. drop it from `dev` and have CI install `.[sdk,dev]` (the `all` extra at `:60-62` already composes both). |
+| **F7 · packaging · `pyproject.toml:54`**&lt;br&gt;`ruff==0.16.5` is an exact pin inside a published distribution's optional extra. Anyone installing `grounded-agency[dev]` gets a hard, unresolvable conflict with their own ruff. The pin's rationale (reproducing *this repo's* formatting) is a repo-local concern, not a package-metadata one. | Keep `ruff&gt;=0.16,&lt;0.17` in the extra and move the exact pin to a `requirements-dev.txt` / constraints file used by CI and the CLAUDE.md setup step. |
+| **F8 · pre-existing · `pyproject.toml:117`**&lt;br&gt;`ignore = ["UP038", ...]` is stale under the newly pinned ruff: every invocation now emits `warning: The following rules have been removed and ignoring them has no effect: - UP038`. Pinning ruff exactly is what makes this permanent noise on every CI run. | Delete the `UP038` entry from the ignore list. |
+
+**F2 context:** I deliberately did not execute `test_grounded_query_callable` against a live session — that would issue the billable call the PR is about. The generator-cleanup evidence comes from structurally identical repros plus reading the vendored 0.2.148 sources, not from a live run.
+
+### Categories with no findings
+- **Security (OWASP):** no injection, hardcoded secrets, authz, or unsanitized-input issues in the diff. The `.credentials.json` temp-dir note in F2 is a cleanup-timing consequence on a code path this PR does not exercise; I am not reporting it as a security finding.
+- **`asyncio.TimeoutError` vs `TimeoutError` across CI Pythons:** the code is **correct as written** on all three. Measured on 3.10.16: `asyncio.TimeoutError.__module__ == 'asyncio.exceptions'`, `is TimeoutError → False`, `issubclass(..., OSError) → False` — so listing it explicitly is *required* there. On 3.11 (measured) and 3.12 it is `builtins.TimeoutError`, an `OSError` subclass, making the entry harmless and redundant with the `OSError` already in the tuple. No change needed.
+- **Performance / concurrency beyond F2:** none.
+
+### Not verified
+- Wall-clock claims in the PR body and CHANGELOG (`minutes → 4.6 s`, `276-367 s → 142 s`, `936 tests pass`) require a live CLI session and were not reproduced, by choice.
+- Whether ruff 0.16.5 is green across the full `grounded_agency/ tests/ tools/ scripts/ benchmarks/` set — I checked only the changed test file.
+
+### Summary
+- Files reviewed: 4 changed (`CHANGELOG.md`, `CLAUDE.md`, `pyproject.toml`, `tests/test_grounded_query.py`) + `grounded_agency/query.py`, `grounded_agency/adapter.py`, vendored `claude_agent_sdk` 0.2.148 and 0.1.25
+- Total findings: P1: 0, P2: 3, P3: 5
+- Recommendation: **REQUEST_CHANGES** (F1 and F3 are rationale/effect mismatches in shipped metadata and a changelog; F2 is a real resource-leak path the change now exercises)
+
+Key files: `/Users/danielbentes/agent-capability-standard/pyproject.toml`, `/Users/danielbentes/agent-capability-standard/tests/test_grounded_query.py`, `/Users/danielbentes/agent-capability-standard/grounded_agency/query.py`, `/Users/danielbentes/agent-capability-standard/CHANGELOG.md`</result>
+<usage><subagent_tokens>70567</subagent_tokens><tool_uses>35</tool_uses><duration_ms>460839</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bn37y0ucb</task-id>
+<summary>Monitor event: "CI on PR #111 after cycle-2 fixes"</summary>
+<event>Conformance tests: pass
+Validate YAML schemas: pass</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bn37y0ucb</task-id>
+<summary>Monitor event: "CI on PR #111 after cycle-2 fixes"</summary>
+<event>Analyze (actions): pass
+Benchmark validation: pass
+CodeQL: pass
+Lint &amp; type-check: pass</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bn37y0ucb</task-id>
+<summary>Monitor event: "CI on PR #111 after cycle-2 fixes"</summary>
+<event>Analyze (python): pass</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bn37y0ucb</task-id>
+<summary>Monitor event: "CI on PR #111 after cycle-2 fixes"</summary>
+<event>Tests (Python 3.10): pass
+Tests (Python 3.11): pass
+Tests (Python 3.12): pass
+PR #111 CI COMPLETE: 0 failing of 10</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bn37y0ucb</task-id>
+<tool-use-id>toolu_014Me8u7m55e9udQ82rj5nvo</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Monitor "CI on PR #111 after cycle-2 fixes" stream ended</summary>
+</task-notification>
+
+---
+
+Address the deletion issue. Also analyze the author's comment: https://github.com/synaptiai/agent-capability-standard/issues/104 Use the AskUserQuestion tool for questions, clarifications and decisions I need to make.

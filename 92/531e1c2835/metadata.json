@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "92531e1c2835",
+  "strategy": "manual-commit",
+  "branch": "docs/link-validator-and-rfc-0002-update",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "docs/MEDIUM_ARTICLE.md",
+    "docs/MEDIUM_ARTICLE_V3.md",
+    "docs/PROJECT_ARTICLE.md",
+    "docs/TWITTER_THREAD.md",
+    "docs/integrations/claude_agent_sdk.md",
+    "docs/proposals/GROUNDED_HARNESS_V3.md",
+    "spec/RFC-0002-agent-reliability-profile.md",
+    "tools/validate_doc_links.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/92/531e1c2835/0/metadata.json",
+      "transcript": "/92/531e1c2835/0/full.jsonl",
+      "context": "/92/531e1c2835/0/context.md",
+      "content_hash": "/92/531e1c2835/0/content_hash.txt",
+      "prompt": "/92/531e1c2835/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 112,
+    "cache_creation_tokens": 309873,
+    "cache_read_tokens": 14941869,
+    "output_tokens": 44858,
+    "api_call_count": 56
+  }
+}
