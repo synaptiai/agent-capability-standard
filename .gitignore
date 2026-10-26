@@ -21,3 +21,8 @@ conformance_results.json
 # Session recorder / trail tooling
 .entire/
 .trail/
+
+# Rust core build outputs (maturin places the extension next to the package)
+core/target/
+grounded_agency/_core*.so
+grounded_agency/_core*.pyd

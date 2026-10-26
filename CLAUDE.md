@@ -75,6 +75,23 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
 ```
 
+The package is built with maturin: the validator and executor live in the Rust
+crate under `core/` and compile into `grounded_agency._core`, so a Rust
+toolchain (rustc >= 1.86) is required. After changing Rust code, re-run the
+`pip install -e` line to rebuild the extension.
+
+### Rust core checks
+```bash
+cd core
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features python -- -D warnings
+cargo test
+```
+
+CI pins the toolchain that runs these (`RUST_TOOLCHAIN` in
+`.github/workflows/ci.yml`), as `constraints.txt` pins ruff.
+
 Install the `dev` extra rather than individual packages, and pass
 `-c constraints.txt` — that file pins the exact tool versions CI runs, so the
 local formatter matches CI's exactly. Without it, `ruff>=0.16,<0.17` resolves

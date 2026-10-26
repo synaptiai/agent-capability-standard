@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+env:
+  # One Rust toolchain for every job, for the same reason constraints.txt pins
+  # ruff: a newer rustc, rustfmt or clippy can turn a green build red with no
+  # source change. RUSTUP_TOOLCHAIN makes the maturin builds behind
+  # `pip install -e` use it too. Bump deliberately.
+  RUST_TOOLCHAIN: "1.97.0"
+  RUSTUP_TOOLCHAIN: "1.97.0"
+  # Oldest rustc the crate supports (core/Cargo.toml `rust-version`).
+  RUST_MSRV: "1.86.0"
+
 jobs:
   validate-schemas:
     name: Validate YAML schemas
@@ -20,6 +30,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
 
       - name: Install dependencies
         run: pip install -e "."
@@ -48,6 +70,35 @@ jobs:
       - name: Validate documentation links
         run: python tools/validate_doc_links.py
 
+  rust-core:
+    name: Rust core (fmt, clippy, tests, MSRV)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt,clippy
+
+      - name: Rustfmt
+        run: cargo +"$RUST_TOOLCHAIN" fmt --check
+
+      - name: Clippy (library and CLI)
+        run: cargo +"$RUST_TOOLCHAIN" clippy --locked --all-targets -- -D warnings
+
+      - name: Clippy (Python extension)
+        run: cargo +"$RUST_TOOLCHAIN" clippy --locked --all-targets --features python -- -D warnings
+
+      - name: Tests
+        run: cargo +"$RUST_TOOLCHAIN" test --locked
+
+      - name: Builds on the minimum supported Rust version
+        run: |
+          rustup toolchain install "$RUST_MSRV" --profile minimal
+          cargo +"$RUST_MSRV" check --locked --all-targets --features python
+
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
@@ -58,6 +109,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
 
       - name: Install dependencies
         run: |
@@ -86,6 +149,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
+
       - name: Install dependencies
         run: pip install -e ".[dev]" -c constraints.txt
 
@@ -102,6 +177,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
 
       - name: Install dependencies
         run: pip install -e ".[dev]" -c constraints.txt
@@ -132,6 +219,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
 
       - name: Install dependencies
         run: pip install -e "."
