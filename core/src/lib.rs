@@ -5,6 +5,11 @@
 //! package — runs one implementation. See `tasks/design-114.md`.
 
 pub mod diag;
+pub mod ontology;
+pub mod refs;
+pub mod schema;
+pub mod types;
+pub mod validate;
 pub mod yaml;
 
 #[cfg(feature = "python")]

@@ -58,7 +58,9 @@
     "should_pass": false,
     "level": "L1",
     "category": "structural",
-    "expected_error_codes": ["V101"]
+    "expected_error_codes": [
+      "V101"
+    ]
   },
   "fail_empty_steps": {
     "should_pass": true,
@@ -70,45 +72,59 @@
     "should_pass": false,
     "level": "L1",
     "category": "structural",
-    "expected_error_codes": ["V104"]
+    "expected_error_codes": [
+      "V104"
+    ]
   },
   "fail_bad_binding_path": {
     "should_pass": false,
     "level": "L2",
     "category": "bindings",
-    "expected_error_codes": ["B201"]
+    "expected_error_codes": [
+      "B201"
+    ]
   },
   "fail_forward_reference": {
     "should_pass": false,
     "level": "L2",
     "category": "bindings",
-    "expected_error_codes": ["B202"]
+    "expected_error_codes": [
+      "B202"
+    ]
   },
   "fail_missing_store_ref": {
     "should_pass": false,
     "level": "L2",
     "category": "bindings",
-    "expected_error_codes": ["B202"]
+    "expected_error_codes": [
+      "B202"
+    ]
   },
   "fail_ambiguous_untyped": {
     "should_pass": false,
     "level": "L3",
     "category": "types",
-    "expected_error_codes": ["V101"],
+    "expected_error_codes": [
+      "V101"
+    ],
     "note": "Fixture uses v1 capability names; primary failure is unknown capabilities"
   },
   "fail_unknown_capabilities_v1": {
     "should_pass": false,
     "level": "L1",
     "category": "structural",
-    "expected_error_codes": ["V101"]
+    "expected_error_codes": [
+      "V101"
+    ]
   },
   "fail_type_mismatch_binding": {
     "should_pass": false,
     "should_emit_suggestions": true,
     "level": "L3",
     "category": "types",
-    "expected_error_codes": ["B203"]
+    "expected_error_codes": [
+      "B203"
+    ]
   },
   "pass_checkpoint_before_mutate": {
     "should_pass": true,
@@ -119,7 +135,9 @@
     "should_pass": false,
     "level": "L1",
     "category": "structural",
-    "expected_error_codes": ["V101"]
+    "expected_error_codes": [
+      "V101"
+    ]
   },
   "pass_multi_workflow": {
     "should_pass": true,
@@ -131,6 +149,45 @@
     "should_emit_suggestions": true,
     "level": "L4",
     "category": "patches",
-    "expected_error_codes": ["B203"]
+    "expected_error_codes": [
+      "B203"
+    ]
+  },
+  "pass_reference_paths": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "bindings"
+  },
+  "fail_invalid_annotation": {
+    "should_pass": false,
+    "level": "L3",
+    "category": "types",
+    "expected_error_codes": [
+      "B205"
+    ]
+  },
+  "fail_self_reference": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "bindings",
+    "expected_error_codes": [
+      "B202"
+    ]
+  },
+  "fail_missing_purpose": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "structural",
+    "expected_error_codes": [
+      "S304"
+    ]
+  },
+  "fail_non_mapping_workflow": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "structural",
+    "expected_error_codes": [
+      "S303"
+    ]
   }
 }

@@ -1,0 +1,18 @@
+# Negative fixture (STANDARD v1.1 §5.4, §9.3): an annotation that names no
+# type is B205 INVALID_ANNOTATION, not a silent wildcard.
+invalid_annotation:
+  goal: Reject an annotation that is not a type.
+  risk: low
+  steps:
+  - capability: search
+    purpose: Search for something.
+    store_as: search_out
+    input_bindings:
+      query: find it
+  - capability: compare
+    purpose: Compare results.
+    store_as: compare_out
+    input_bindings:
+      options: '${search_out.results: banana}'
+  success:
+  - Never valid

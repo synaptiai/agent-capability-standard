@@ -85,6 +85,124 @@ class TestValidateWorkflows:
         )
         assert result.returncode != 0
 
+    def test_warnings_pass_unless_strict(self, tmp_path: Path) -> None:
+        """A warning (W612) passes by default and fails under --strict."""
+        catalog = tmp_path / "warn.workflow_catalog.yaml"
+        catalog.write_text(
+            "w:\n"
+            "  goal: g\n"
+            "  risk: low\n"
+            "  steps:\n"
+            "  - capability: search\n"
+            "    purpose: p\n"
+            "    store_as: s\n"
+            "    input_bindings: {query: q}\n"
+            "  - capability: integrate\n"
+            "    purpose: p\n"
+            "    store_as: i\n"
+            "    input_bindings:\n"
+            "      sources:\n"
+            "      - ${s.results: array<object>}\n"
+        )
+        lenient = run_validator("validate_workflows.py", ["--catalog", str(catalog)])
+        assert lenient.returncode == 0, lenient.stdout
+        assert "W612" in lenient.stdout
+        strict = run_validator(
+            "validate_workflows.py", ["--catalog", str(catalog), "--strict"]
+        )
+        assert strict.returncode == 1
+
+    def test_suggestions_json_shape(self, tmp_path: Path) -> None:
+        """Structured output plus a transform patch for a consumer mismatch."""
+        catalog = tmp_path / "coerce.workflow_catalog.yaml"
+        catalog.write_text(
+            "w:\n"
+            "  goal: g\n"
+            "  risk: low\n"
+            "  steps:\n"
+            "  - capability: search\n"
+            "    purpose: p\n"
+            "    store_as: s\n"
+            "    input_bindings: {query: q}\n"
+            "  - capability: search\n"
+            "    purpose: p\n"
+            "    store_as: t\n"
+            "    input_bindings: {query: q, scope: '${s.total_count}'}\n"
+        )
+        result = run_validator(
+            "validate_workflows.py", ["--catalog", str(catalog), "--emit-patch"]
+        )
+        assert result.returncode == 1
+        data = json.loads((ROOT / "tools" / "validator_suggestions.json").read_text())
+        assert set(data) >= {
+            "errors",
+            "warnings",
+            "structured_errors",
+            "structured_warnings",
+            "suggestions",
+        }
+        assert all(e["severity"] == "error" for e in data["structured_errors"])
+        (suggestion,) = data["suggestions"]
+        assert suggestion["kind"] == "consumer_input_type_mismatch"
+        assert (suggestion["from_type"], suggestion["to_type"]) == ("integer", "string")
+        diff = (ROOT / "tools" / "validator_patch.diff").read_text()
+        assert "capability: transform" in diff
+
+
+def test_patch_application_handles_two_transforms_for_one_step() -> None:
+    """Both transforms go before the consumer, and both updates land on it."""
+    import importlib.util
+
+    sys.path.insert(0, str(ROOT / "tools"))  # for its `yaml_util` import
+    spec = importlib.util.spec_from_file_location(
+        "validate_workflows", ROOT / "tools" / "validate_workflows.py"
+    )
+    assert spec is not None and spec.loader is not None
+    validate_workflows = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validate_workflows)
+
+    workflows = {
+        "w": {
+            "steps": [
+                {"capability": "search", "store_as": "s"},
+                {"capability": "search", "store_as": "t", "input_bindings": {}},
+            ]
+        }
+    }
+
+    def patch(key: str) -> dict:
+        return {
+            "kind": "consumer_input_type_mismatch",
+            "workflow": "w",
+            "patch": {
+                "insert_at_step_index": 1,
+                "new_step": {"capability": "transform", "store_as": f"coerce_{key}"},
+                "update_step": {
+                    "step_index": 1,
+                    "input_bindings_update": {key: f"${{coerce_{key}.transformed}}"},
+                },
+            },
+        }
+
+    import yaml
+
+    out = yaml.safe_load(
+        validate_workflows.apply_patch_suggestions_to_yaml(
+            workflows, [patch("scope"), patch("query")]
+        )
+    )
+    steps = out["w"]["steps"]
+    assert [s["capability"] for s in steps] == [
+        "search",
+        "transform",
+        "transform",
+        "search",
+    ]
+    assert steps[3]["input_bindings"] == {
+        "scope": "${coerce_scope.transformed}",
+        "query": "${coerce_query.transformed}",
+    }
+
 
 # ─── Profile Validator ───
 

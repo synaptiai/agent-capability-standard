@@ -17,6 +17,7 @@ crate-type = ["rlib", "cdylib"]
 python = ["dep:pyo3"]
 
 [dependencies]
+indexmap = "2.14.2"
 saphyr = "0.3.1"
 saphyr-parser = "0.3.2"
 serde = { version = "1.0.229", features = ["derive"] }

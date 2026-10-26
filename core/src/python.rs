@@ -7,6 +7,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyList, PyString};
 use serde_json::Value;
 
+use crate::validate::{self, Context};
 use crate::yaml::{self, YamlError};
 
 pub(crate) fn to_py(py: Python<'_>, v: &Value) -> PyResult<Py<PyAny>> {
@@ -77,6 +78,25 @@ fn load_yaml_str(py: Python<'_>, text: String) -> PyResult<Py<PyAny>> {
     to_py(py, &v)
 }
 
+/// Validate a workflow catalog file. Returns `{"diagnostics": [...],
+/// "suggestions": [...]}`; raises if the ontology or catalog cannot be loaded.
+#[pyfunction]
+fn validate_catalog(
+    py: Python<'_>,
+    catalog_path: std::path::PathBuf,
+    ontology_path: std::path::PathBuf,
+    schema_root: std::path::PathBuf,
+) -> PyResult<Py<PyAny>> {
+    let report = py
+        .detach(|| {
+            let ctx = Context::load(&ontology_path, &schema_root)?;
+            validate::validate_catalog_file(&ctx, &catalog_path)
+        })
+        .map_err(PyValueError::new_err)?;
+    let value = serde_json::to_value(&report).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    to_py(py, &value)
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -84,5 +104,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ONTOLOGY_MAX_BYTES", yaml::ONTOLOGY_MAX_BYTES)?;
     m.add_function(wrap_pyfunction!(load_yaml, m)?)?;
     m.add_function(wrap_pyfunction!(load_yaml_str, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_catalog, m)?)?;
     Ok(())
 }

@@ -1,0 +1,13 @@
+# Negative fixture (STANDARD §5.5(1)): a step's inputs cannot reference its
+# own output, which does not exist yet. B202 MISSING_PRODUCER.
+self_reference:
+  goal: Reject a step that binds to its own output.
+  risk: low
+  steps:
+  - capability: search
+    purpose: Search using its own results.
+    store_as: search_out
+    input_bindings:
+      query: '${search_out.results: array<object>}'
+  success:
+  - Never valid

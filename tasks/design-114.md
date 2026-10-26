@@ -31,9 +31,12 @@ tools/validate_workflows.py thin CLI over the core
   `[tool.maturin] manifest-path = "core/Cargo.toml"`, `module-name =
   "grounded_agency._core"`, `features = ["python"]`, `python-source = "."`.
   No pure-Python fallback.
-* Dependencies (Rust): serde, serde_json (`float_roundtrip`), saphyr,
-  chrono, chrono-tz, sha2, hmac, hex, pyo3 (optional). Nothing else without a
-  recorded reason.
+* Dependencies (Rust): serde, serde_json (`float_roundtrip`,
+  `preserve_order`), saphyr + saphyr-parser, chrono, chrono-tz, sha2, hmac,
+  hex, pyo3 (optional), libc (unix: `O_NOFOLLOW`), indexmap (ordered maps of
+  typed values — capabilities in file order, scopes in declaration order —
+  which `serde_json::Map` cannot hold; already in the tree via
+  `preserve_order`). Nothing else without a recorded reason.
 * Values crossing the boundary are JSON-compatible; Python passes native
   objects, the core converts with a depth cap of 128.
 
@@ -123,7 +126,9 @@ earliest step that targets them.
 ## 6. References and bindings
 
 * Reference: `${root(.ident | [n] | [a:b])*( : type)?}`; whitespace around
-  `:` allowed. Root = prior `store_as`, else workflow input, else `_recovery`.
+  `:` allowed. Identifiers: `[A-Za-z_][A-Za-z0-9_-]*` (a `store_as` that is
+  not one → S303). Root = prior `store_as`, else workflow input, else
+  `_recovery`.
 * Scopes: input_bindings, condition, `phase: before` gates, wait.correlate,
   approval.shows/recheck.source, quorum refs → prior steps + inputs.
   `phase: after` gates, failure_modes[].when, recovery.inject_context → also
