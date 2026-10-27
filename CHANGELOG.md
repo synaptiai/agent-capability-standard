@@ -187,6 +187,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- **Domain workflow catalogs.** The four catalogs under `schemas/workflows/`
+  failed validation before this release (mostly untyped references, plus
+  ordering and binding errors) and nothing checked them. They now pass in
+  strict mode, and CI validates them
 - **The Python PreToolUse checkpoint hook never blocked anything.** It
   returned a top-level `permissionDecision`, which the Claude Agent SDK
   ignores; it now denies through `hookSpecificOutput` (#114)

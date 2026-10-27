@@ -1,3 +1,4 @@
+# Standard version: 1.1.0
 # Manufacturing Domain Workflows
 # Composed from 36 atomic capabilities
 # Profile: schemas/profiles/manufacturing.yaml
@@ -37,8 +38,8 @@ production_line_monitoring:
       mutation: false
       store_as: normalized_data_out
       input_bindings:
-        source: ${sensor_data_out.data}
-        target_schema: canonical_sensor_reading
+        input: ${sensor_data_out.data}
+        target_format: canonical_sensor_reading
 
     - capability: state
       purpose: Build current production line state representation.
@@ -67,7 +68,7 @@ production_line_monitoring:
       mutation: false
       store_as: risk_assessment_out
       input_bindings:
-        target: ${anomaly_out.matches}
+        target: "${anomaly_out.matches: array<object>}"
         metric: operational_risk
       gates:
         - when: ${anomaly_out.detected} == false
@@ -81,9 +82,11 @@ production_line_monitoring:
       mutation: false
       store_as: forecast_out
       input_bindings:
-        target: ${anomaly_out.matches}
+        target: anomaly_progression
         horizon: 4h
-        conditions: ${line_state_out.state}
+        conditions:
+          anomalies: "${anomaly_out.matches: array<object>}"
+          line_state: ${line_state_out.state}
 
     - capability: plan
       purpose: Generate recommended intervention actions.
@@ -94,7 +97,7 @@ production_line_monitoring:
         goal: resolve_anomaly
         constraints:
           max_downtime: 30m
-          safety_requirements: ${profile.checkpoint_policy}
+          safety_requirements: "${profile.checkpoint_policy: object}"
 
     - capability: generate
       purpose: Create alert notification with full context.
@@ -106,9 +109,9 @@ production_line_monitoring:
         specification:
           type: production_alert
           severity: ${risk_assessment_out.value}
-          anomaly: ${anomaly_out.matches}
-          forecast: ${forecast_out.prediction}
-          recommendations: ${intervention_plan_out.steps}
+          anomaly: "${anomaly_out.matches: array<object>}"
+          forecast: "${forecast_out.prediction: object}"
+          recommendations: "${intervention_plan_out.steps: array<object>}"
 
     - capability: audit
       purpose: Record monitoring cycle and any alerts generated.
@@ -118,9 +121,9 @@ production_line_monitoring:
       input_bindings:
         event:
           type: production_monitoring_cycle
-          timestamp: ${line_state_out.timestamp}
+          timestamp: ${sensor_data_out.timestamp}
           anomalies_detected: ${anomaly_out.detected}
-          alert_generated: ${alert_out.content}
+          alert_generated: "${alert_out.content: object}"
 
   inputs:
     profile:
@@ -179,7 +182,7 @@ quality_control_loop:
       input_bindings:
         options:
           - ${measurements_out}
-          - ${spec_out.data}
+          - "${spec_out.data: object}"
         criteria:
           - within_tolerance
           - cpk_index
@@ -200,7 +203,7 @@ quality_control_loop:
       mutation: false
       store_as: grounded_disposition_out
       input_bindings:
-        claim: ${disposition_out.labels[0]}
+        claim: "${disposition_out.labels[0].label: string}"
         sources:
           - ${measurements_out}
           - ${spec_out}
@@ -224,7 +227,7 @@ quality_control_loop:
       store_as: checkpoint_out
       input_bindings:
         scope: quality_decision
-        label: "QC-${batch.batch_id}-${timestamp}"
+        label: "QC-${batch.batch_id}"
 
     - capability: audit
       purpose: Record complete quality inspection with lineage.
@@ -237,7 +240,7 @@ quality_control_loop:
           batch_id: ${batch.batch_id}
           measurements: ${measurements_out}
           disposition: ${disposition_out}
-          evidence: ${grounded_disposition_out.evidence}
+          evidence: "${grounded_disposition_out.evidence: array<object>}"
           checkpoint_id: ${checkpoint_out.checkpoint_id}
 
   inputs:
@@ -305,13 +308,13 @@ predictive_maintenance:
       mutation: false
       store_as: root_cause_out
       input_bindings:
-        effect: ${degradation_out.matches}
+        effect: "${degradation_out.matches: array<object>}"
         candidates:
           - wear
           - contamination
           - misalignment
           - overload
-        context: ${equipment_history_out.data}
+        context: "${equipment_history_out.data: object}"
 
     - capability: predict
       purpose: Forecast time to failure and probability.
@@ -368,7 +371,7 @@ predictive_maintenance:
         goal: prevent_equipment_failure
         constraints:
           strategy: ${strategy_comparison_out.recommendation}
-          available_parts: ${equipment_history_out.data.spare_parts}
+          available_parts: "${equipment_history_out.data.spare_parts: array<object>}"
           crew_availability: check_cmms
 
     - capability: generate
@@ -383,7 +386,7 @@ predictive_maintenance:
           asset: ${equipment.asset_id}
           prediction: ${failure_forecast_out}
           strategy: ${strategy_comparison_out.recommendation}
-          plan: ${maintenance_plan_out.steps}
+          plan: "${maintenance_plan_out.steps: array<object>}"
           priority: ${impact_out.value}
 
     - capability: audit
@@ -451,7 +454,7 @@ supply_chain_sync:
       store_as: integrated_inventory_out
       input_bindings:
         sources:
-          - ${inventory_search_out.results}
+          - "${inventory_search_out.results: array<object>}"
           - ${erp_inventory}
           - ${wms_inventory}
         strategy: sum_by_location
@@ -475,7 +478,7 @@ supply_chain_sync:
       input_bindings:
         options:
           - ${inventory_state_out.state}
-          - ${material_params_out.data}
+          - "${material_params_out.data: object}"
         criteria:
           - below_reorder_point
           - below_safety_stock
@@ -500,7 +503,7 @@ supply_chain_sync:
       store_as: demand_forecast_out
       input_bindings:
         target: material_demand
-        horizon: ${lead_time_days}d
+        horizon: ${lead_time}
         conditions: ${production_schedule}
       gates:
         - when: ${reorder_needed_out.detected} == false
@@ -515,9 +518,9 @@ supply_chain_sync:
       input_bindings:
         goal: replenish_inventory
         constraints:
-          demand: ${demand_forecast_out.prediction}
-          lead_time: ${material_params_out.data.lead_time}
-          economic_order_qty: ${material_params_out.data.eoq}
+          demand: "${demand_forecast_out.prediction: object}"
+          lead_time: "${material_params_out.data.lead_time: number}"
+          economic_order_qty: "${material_params_out.data.eoq: number}"
           supplier_minimums: ${supplier_constraints}
 
     - capability: generate
@@ -529,8 +532,8 @@ supply_chain_sync:
       input_bindings:
         specification:
           type: purchase_order_draft
-          materials: ${reorder_needed_out.matches}
-          quantities: ${order_plan_out.steps}
+          materials: "${reorder_needed_out.matches: array<object>}"
+          quantities: "${order_plan_out.steps: array<object>}"
           suppliers: ${preferred_suppliers}
 
     - capability: checkpoint
@@ -540,7 +543,7 @@ supply_chain_sync:
       store_as: checkpoint_out
       input_bindings:
         scope: supply_chain_action
-        label: "SCM-${timestamp}"
+        label: SCM-replenishment
 
     - capability: audit
       purpose: Record supply chain synchronization cycle.
@@ -551,8 +554,8 @@ supply_chain_sync:
         event:
           type: supply_chain_sync
           materials_checked: ${inventory_search_out.total_count}
-          reorders_identified: ${reorder_needed_out.matches}
-          po_drafts_created: ${po_draft_out.content}
+          reorders_identified: "${reorder_needed_out.matches: array<object>}"
+          po_drafts_created: "${po_draft_out.content: object}"
           checkpoint_id: ${checkpoint_out.checkpoint_id}
 
   inputs:
@@ -567,13 +570,15 @@ supply_chain_sync:
       description: Upcoming production schedule
     preferred_suppliers:
       type: array
+      items: {type: string}
       description: Preferred supplier list
     supplier_constraints:
       type: object
       description: Supplier minimum order constraints
-    lead_time_days:
-      type: integer
-      default: 14
+    lead_time:
+      type: string
+      description: Replenishment lead time, as the demand forecast horizon
+      default: 14d
     profile:
       type: object
       ref: schemas/profiles/manufacturing.yaml

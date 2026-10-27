@@ -9,6 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python tools/validate_workflows.py
 ```
 
+### Validate the domain workflow catalogs (CI runs these in strict mode)
+```bash
+for c in schemas/workflows/*.yaml; do python tools/validate_workflows.py --catalog "$c" --strict; done
+```
+
 ### Validate domain profiles against schema
 ```bash
 python tools/validate_profiles.py

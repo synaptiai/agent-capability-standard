@@ -126,11 +126,10 @@ Re-planned after D-lang (Rust core): the validator and executor move into
 
 ## Follow-ups found along the way (outside this issue's scope)
 
-- `schemas/workflows/*.yaml` (four domain catalogs) already fail validation on
-  `main` (45/55/30/42 diagnostics, mostly B204 untyped references) and CI does
-  not validate them. Under v1.1 they also show `detect precedes classify`
-  (V102) in three workflows and W605. Needs its own data-cleanup change plus a
-  CI step.
+- [x] `schemas/workflows/*.yaml` (four domain catalogs) already failed
+  validation on `main` (45/55/30/42 diagnostics, mostly B204 untyped
+  references) and CI did not validate them. Done as its own change after S7:
+  all four pass `--strict`, and CI validates them.
 
 Each stage: ruff, mypy, full pytest, every `tools/validate_*.py`,
 `scripts/run_conformance.py`, then independent code + test review, fixes, commit.
@@ -167,9 +166,9 @@ step and quorums counting reviewers that never ran (S6).
 ruff, ruff format, mypy, full pytest.
 
 **Not done / follow-ups:**
-- The domain catalogs under `schemas/workflows/` still fail validation, as
-  they did on `main`; they need their own clean-up and a CI step (RFC-0003
-  open question).
+- The domain catalogs under `schemas/workflows/`, which already failed on
+  `main`, were cleaned up after S7 and are now validated in CI with
+  `--strict`.
 - Agent identity for E2 (named agent, attested fresh context) waits for
   RFC-0002.
 - The #114 reply and the Q3 issue (22 reproduced disagreements between

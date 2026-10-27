@@ -52,6 +52,13 @@ jobs:
       - name: Validate workflows
         run: python tools/validate_workflows.py
 
+      - name: Validate domain workflow catalogs
+        run: |
+          for catalog in schemas/workflows/*.yaml; do
+            echo "== $catalog"
+            python tools/validate_workflows.py --catalog "$catalog" --strict
+          done
+
       - name: Validate domain profiles
         run: python tools/validate_profiles.py
 

@@ -1,3 +1,4 @@
+# Standard version: 1.1.0
 # Data Analysis Domain Workflows
 # Composed from 36 atomic capabilities
 # Profile: schemas/profiles/data_analysis.yaml
@@ -41,9 +42,9 @@ data_pipeline_validation:
       mutation: false
       store_as: schema_validation_out
       input_bindings:
-        target: ${pipeline_output_out.data}
+        target: "${pipeline_output_out.data: array<object>}"
         constraints:
-          - ${schema_out.data}
+          - "${schema_out.data: object}"
         action_on_violation: log
 
     - capability: measure
@@ -53,7 +54,7 @@ data_pipeline_validation:
       mutation: false
       store_as: stats_out
       input_bindings:
-        target: ${pipeline_output_out.data}
+        target: "${pipeline_output_out.data: array<object>}"
         metric: descriptive_statistics
         unit: per_column
 
@@ -75,7 +76,7 @@ data_pipeline_validation:
       input_bindings:
         options:
           - ${stats_out}
-          - ${historical_stats_out.data}
+          - "${historical_stats_out.data: object}"
         criteria:
           - mean_drift
           - variance_change
@@ -99,7 +100,7 @@ data_pipeline_validation:
       mutation: false
       store_as: dq_checks_out
       input_bindings:
-        target: ${pipeline_output_out.data}
+        target: "${pipeline_output_out.data: array<object>}"
         conditions:
           - no_null_primary_keys
           - referential_integrity
@@ -141,10 +142,10 @@ data_pipeline_validation:
           type: data_validation_report
           pipeline_id: ${pipeline.id}
           run_id: ${pipeline.run_id}
-          result: ${validation_result_out.labels[0]}
-          schema_issues: ${schema_validation_out.violations}
-          statistical_anomalies: ${anomaly_out.matches}
-          dq_failures: ${dq_checks_out.violations}
+          result: "${validation_result_out.labels[0]: object}"
+          schema_issues: "${schema_validation_out.violations: array<object>}"
+          statistical_anomalies: "${anomaly_out.matches: array<object>}"
+          dq_failures: "${dq_checks_out.violations: array<object>}"
 
     - capability: audit
       purpose: Record validation execution.
@@ -156,8 +157,7 @@ data_pipeline_validation:
           type: pipeline_validation
           pipeline_id: ${pipeline.id}
           run_id: ${pipeline.run_id}
-          result: ${validation_result_out.labels[0]}
-          timestamp: ${pipeline_output_out.timestamp}
+          result: "${validation_result_out.labels[0]: object}"
 
   inputs:
     pipeline:
@@ -208,7 +208,7 @@ anomaly_investigation:
       mutation: false
       store_as: observation_out
       input_bindings:
-        target: ${anomaly_data_out.data}
+        target: ${anomaly.data_source}
         aspects: [distribution, temporal_pattern, correlations]
 
     - capability: discover
@@ -217,7 +217,7 @@ anomaly_investigation:
       mutation: false
       store_as: pattern_discovery_out
       input_bindings:
-        data: ${anomaly_data_out.data}
+        data: "${anomaly_data_out.data: array<object>}"
         constraints:
           focus: ${anomaly.type}
         method: unsupervised_clustering
@@ -257,7 +257,7 @@ anomaly_investigation:
       store_as: period_comparison_out
       input_bindings:
         options:
-          - ${anomaly_data_out.data}
+          - "${anomaly_data_out.data: array<object>}"
           - ${baseline_data}
         criteria:
           - value_distribution
@@ -297,7 +297,7 @@ anomaly_investigation:
       input_bindings:
         goal: resolve_anomaly
         constraints:
-          likely_cause: ${attribution_out.causes[0]}
+          likely_cause: "${attribution_out.causes[0]: object}"
           available_actions: ${available_remediation_actions}
 
     - capability: explain
@@ -308,9 +308,9 @@ anomaly_investigation:
       input_bindings:
         conclusion:
           anomaly: ${anomaly}
-          likely_cause: ${attribution_out.causes[0]}
+          likely_cause: "${attribution_out.causes[0]: object}"
           impact: ${impact_out.value}
-          recommendation: ${remediation_plan_out.steps[0]}
+          recommendation: "${remediation_plan_out.steps[0]: object}"
         audience: data_team
         depth: detailed
 
@@ -323,9 +323,9 @@ anomaly_investigation:
         event:
           type: anomaly_investigation
           anomaly_id: ${anomaly.id}
-          likely_cause: ${attribution_out.causes[0]}
+          likely_cause: "${attribution_out.causes[0]: object}"
           impact_assessment: ${impact_out.value}
-          recommendations: ${remediation_plan_out.steps}
+          recommendations: "${remediation_plan_out.steps: array<object>}"
 
   inputs:
     anomaly:
@@ -337,7 +337,7 @@ anomaly_investigation:
         data_source: {type: string}
         filter_criteria: {type: object}
         detection_time: {type: string}
-        affected_systems: {type: array}
+        affected_systems: {type: array, items: {type: string}}
     baseline_data:
       type: object
       description: Normal baseline data for comparison
@@ -349,6 +349,7 @@ anomaly_investigation:
       default: 7d
     available_remediation_actions:
       type: array
+      items: {type: string}
     profile:
       type: object
       ref: schemas/profiles/data_analysis.yaml
@@ -382,8 +383,9 @@ report_generation:
       mutation: false
       store_as: data_query_out
       input_bindings:
-        query: ${template_out.data.queries}
-        scope: ${report.data_sources}
+        query:
+          queries: "${template_out.data.queries: object}"
+          data_sources: ${report.data_sources}
         limit: ${report.row_limit}
 
     - capability: measure
@@ -393,8 +395,8 @@ report_generation:
       mutation: false
       store_as: metrics_out
       input_bindings:
-        target: ${data_query_out.results}
-        metric: ${template_out.data.metrics}
+        target: "${data_query_out.results: array<object>}"
+        metric: "${template_out.data.metrics: string}"
 
     - capability: compare
       purpose: Compare current metrics to benchmarks.
@@ -429,9 +431,9 @@ report_generation:
       mutation: false
       store_as: drivers_out
       input_bindings:
-        effect: ${trends_out.matches}
+        effect: "${trends_out.matches: array<object>}"
         candidates: ${report.potential_drivers}
-        context: ${data_query_out.results}
+        context: ${data_query_out}
 
     - capability: predict
       purpose: Forecast metrics for next period.
@@ -440,7 +442,7 @@ report_generation:
       mutation: false
       store_as: forecast_out
       input_bindings:
-        target: ${template_out.data.forecast_metrics}
+        target: "${template_out.data.forecast_metrics: string}"
         horizon: ${report.forecast_horizon}
         conditions: ${metrics_out}
 
@@ -468,7 +470,7 @@ report_generation:
       input_bindings:
         specification:
           type: analytics_report
-          template: ${template_out.data}
+          template: "${template_out.data: object}"
           metrics: ${metrics_out}
           comparisons: ${benchmark_comparison_out}
           insights: ${grounded_insights_out}
@@ -481,7 +483,7 @@ report_generation:
       mutation: false
       store_as: formatted_report_out
       input_bindings:
-        input: ${report_content_out.content}
+        input: "${report_content_out.content: object}"
         source_format: raw_report
         target_format: ${report.output_format}
         options:
@@ -499,7 +501,6 @@ report_generation:
           report_id: ${report.id}
           template_id: ${report.template_id}
           data_sources: ${report.data_sources}
-          generation_time: ${timestamp}
 
   inputs:
     report:
@@ -508,11 +509,11 @@ report_generation:
       properties:
         id: {type: string}
         template_id: {type: string}
-        data_sources: {type: array}
+        data_sources: {type: array, items: {type: string}}
         row_limit: {type: integer, default: 100000}
         benchmarks: {type: object}
         significance_threshold: {type: number, default: 0.05}
-        potential_drivers: {type: array}
+        potential_drivers: {type: array, items: {type: string}}
         forecast_horizon: {type: string, default: "30d"}
         output_format: {type: string, default: "pdf"}
         audience: {type: string}
@@ -562,8 +563,10 @@ model_monitoring:
       mutation: false
       store_as: current_performance_out
       input_bindings:
-        target: ${predictions_out.data}
-        metric: ${model.performance_metrics}
+        target:
+          predictions: ${predictions_out.data}
+          metrics: ${model.performance_metrics}
+        metric: model_performance
 
     - capability: compare
       purpose: Compare current performance to baseline.
@@ -574,7 +577,7 @@ model_monitoring:
       input_bindings:
         options:
           - ${current_performance_out}
-          - ${baseline_out.data}
+          - "${baseline_out.data: object}"
         criteria:
           - accuracy_change
           - precision_change
@@ -596,8 +599,8 @@ model_monitoring:
       mutation: false
       store_as: current_distributions_out
       input_bindings:
-        target: ${predictions_out.data.features}
-        aspects: [distribution, statistics]
+        target: ${model.id}
+        aspects: [input_feature_distribution, statistics]
 
     - capability: detect
       purpose: Detect data drift in input features.
@@ -608,7 +611,7 @@ model_monitoring:
       input_bindings:
         data:
           current: ${current_distributions_out.observation}
-          baseline: ${training_distributions_out.data}
+          baseline: "${training_distributions_out.data: object}"
         pattern: distribution_shift
         threshold: ${model.drift_threshold}
 
@@ -630,7 +633,7 @@ model_monitoring:
       mutation: false
       store_as: drift_attribution_out
       input_bindings:
-        effect: ${data_drift_out.matches}
+        effect: "${data_drift_out.matches: array<object>}"
         candidates: ${model.features}
         context: ${current_distributions_out.observation}
       gates:
@@ -677,7 +680,7 @@ model_monitoring:
           performance: ${current_performance_out}
           data_drift: ${data_drift_out}
           concept_drift: ${concept_drift_out}
-          recommendations: ${intervention_plan_out.steps}
+          recommendations: "${intervention_plan_out.steps: array<object>}"
 
     - capability: audit
       purpose: Record monitoring cycle.
@@ -691,7 +694,7 @@ model_monitoring:
           performance_status: ${performance_comparison_out}
           data_drift_detected: ${data_drift_out.detected}
           concept_drift_detected: ${concept_drift_out.detected}
-          intervention_recommended: ${intervention_plan_out.steps[0]}
+          intervention_recommended: "${intervention_plan_out.steps[0]: object}"
 
   inputs:
     model:
@@ -700,9 +703,9 @@ model_monitoring:
       properties:
         id: {type: string}
         baseline_metrics: {type: string}
-        performance_metrics: {type: array}
+        performance_metrics: {type: array, items: {type: string}}
         training_stats: {type: string}
-        features: {type: array}
+        features: {type: array, items: {type: string}}
         drift_threshold: {type: number, default: 0.1}
         concept_drift_threshold: {type: number, default: 0.05}
     monitoring_window:

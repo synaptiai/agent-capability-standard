@@ -188,5 +188,6 @@ Python package; `tools/validate_workflows.py` and the Python
 
 - How agent identity (RFC-0002) will extend E2 with a named agent and
   attestation of `fresh_context`.
-- Whether the four domain catalogs under `schemas/workflows/` should be
-  brought to zero diagnostics and validated in CI (they fail on main today).
+- None further for the domain catalogs: the four under `schemas/workflows/`,
+  which failed validation before this RFC, now pass in strict mode and are
+  validated in CI.

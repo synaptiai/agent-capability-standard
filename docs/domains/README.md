@@ -147,9 +147,9 @@ workflows:          # Recommended workflows
 
 6. **Document** in `docs/domains/<your-domain>/README.md`
 
-7. **Validate** workflows against the capability ontology (without `--catalog` the validator checks only `schemas/workflow_catalog.yaml`):
+7. **Validate** workflows against the capability ontology (without `--catalog` the validator checks only `schemas/workflow_catalog.yaml`). CI runs this in strict mode for every file in `schemas/workflows/`, so warnings fail too:
    ```bash
-   python tools/validate_workflows.py --catalog schemas/workflows/<your-domain>_workflows.yaml
+   python tools/validate_workflows.py --catalog schemas/workflows/<your-domain>_workflows.yaml --strict
    ```
 
 ## How Domains Demonstrate Domain-Agnostic Capabilities
