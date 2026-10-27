@@ -14,7 +14,7 @@ agreed with the maintainer in the interview; each records the option chosen.
 | D-rfc | RFC-0003 status | **Accepted**, target **Standard v1.1.0** (MINOR) |
 | D-mech | Extension mechanism (issue Q1) | Optional DSL fields + monotonic-restriction rule + must-understand `workflow_extensions.requires` |
 | D-appr | Step-level `requires_approval: false` downgrades | Bug: **warn** (W-code), fix catalog + fixtures |
-| D-prec | `precedes` | Ordering-only when both present; add `soft_requires` constrain→{execute,mutate,send}, plan→{execute,mutate} |
+| D-prec | `precedes` | Ordering-only when both present; add `soft_requires` constrain→{execute,mutate,send} (plan→ soft edges dropped after review: any-of let a plan replace the policy check); pre-flight checks use `constrain` (early `verify` stays V102) |
 | D-conf | `conflicts_with` | Concurrency exclusion (same `parallel_group`), de-duplicated |
 | D-audit | audit mutation override | Ontology node field `mutation_overridable: true` (audit only) |
 | D-arch | Validator vs engine | **CLI wraps the engine**: one implementation in `grounded_agency/workflows/` |
@@ -72,20 +72,13 @@ Re-planned after D-lang (Rust core): the validator and executor move into
 - [ ] S7 RFC-0003, STANDARD v1.1.0, EDGE_TYPES errata, docs, changelogs;
       Q3 issue + #114 reply drafts (not posted).
 
-## Open questions for the maintainer (raised by the S4 review)
+## Decisions after the S4 review
 
-- `soft_requires` is any-of per target (agreed), so the new
-  `plan→execute/mutate` and `constrain→execute/mutate` edges merge into
-  "plan OR constrain": plan → checkpoint → mutate with no constrain step gets
-  no warning, although the constrain edge's rationale says policy should be
-  checked before mutation. Options: drop the `plan→` soft edges, or group
-  soft edges so each group is any-of and groups are all-of.
-- `mutate/execute/send precedes verify` makes a pre-flight verify (verify →
-  … → mutate → verify) a V102 error. Keep (pre-flight checks use
-  `constrain`), or limit `precedes` to the first occurrence of `to`?
-- Fields defined for v1.1 extensions (`triggers`, `handler`, `wait`,
-  `approval`, `quorum`, `on_error`, `on_exhausted`,
-  `workflow_extensions.requires`) are W604 until S5 implements them.
+- `soft_requires` plan→{execute, mutate} dropped (any-of merged it with the
+  policy check).
+- `precedes` stays strict: a pre-flight check is `constrain`; an early
+  `verify` is V102. Document in STANDARD v1.1 and EDGE_TYPES (S7).
+- v1.1 extension fields stay W604 until S5 validates each one.
 
 ## Follow-ups found along the way (outside this issue's scope)
 

@@ -144,7 +144,9 @@
     "should_pass": true,
     "level": "L4",
     "category": "advanced",
-    "expected_warning_codes": []
+    "expected_warning_codes": [
+      "W601"
+    ]
   },
   "fail_unknown_single_cap": {
     "should_pass": false,

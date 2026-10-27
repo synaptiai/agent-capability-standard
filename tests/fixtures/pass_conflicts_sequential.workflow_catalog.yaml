@@ -8,6 +8,13 @@ mutate_then_rollback:
   - capability: plan
     purpose: Plan the change.
     store_as: plan_out
+  - capability: constrain
+    purpose: Check the change against policy.
+    store_as: policy_out
+    input_bindings:
+      target: ${plan_out}
+      constraints:
+      - change_policy
   - capability: checkpoint
     purpose: Save a restore point.
     store_as: checkpoint_out

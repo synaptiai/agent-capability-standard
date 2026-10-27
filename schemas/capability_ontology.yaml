@@ -1686,14 +1686,6 @@ edges:
   to: send
   type: soft_requires
   rationale: Policy should be checked before external communication (presence; precedes covers order)
-- from: plan
-  to: execute
-  type: soft_requires
-  rationale: Execution should follow a plan (presence; precedes covers order)
-- from: plan
-  to: mutate
-  type: soft_requires
-  rationale: Mutation should follow a plan (presence; precedes covers order)
 - from: detect
   to: attribute
   type: enables

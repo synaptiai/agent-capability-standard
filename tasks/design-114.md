@@ -126,8 +126,11 @@ in the same `parallel_group` (steps of one group run concurrently).
 
 All edge checks are linear in the number of steps.
 
-New ontology edges: `soft_requires` constrain→{execute, mutate, send},
-plan→{execute, mutate}. Handler steps are outside the sequence for
+New ontology edges: `soft_requires` constrain→{execute, mutate, send}. (No
+plan→ soft edges: with any-of per target they would let a plan stand in for
+the policy check; `precedes` plan→{execute, mutate} already orders a plan.)
+A pre-flight check before a mutation is `constrain`, not `verify`:
+`{execute, mutate, send} precedes verify` makes an early verify V102. Handler steps are outside the sequence for
 precedes/conflicts; their `requires` are checked against steps up to the
 earliest step that targets them.
 
