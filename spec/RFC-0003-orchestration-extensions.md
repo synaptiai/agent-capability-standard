@@ -211,6 +211,15 @@ They reported five gaps, closed in the candidate before it is final:
   takes a per-reviewer mapping; verdicts carry `scope: full | delta`; and
   `min_full` counts passing full sweeps (§5.16). This revisits E4's
   `require_full_sweep`, dropped earlier, in a form the quorum can count.
+- **Standing mandates in unattended runs** were never asked, since the
+  unattended plan applied first, and `defer_to_queue` ended the whole run.
+  A mandate is now asked (`unavailable` falls back to the plan), and a
+  deferral holds back only the step and what depends on it: steps that
+  read its output, steps that may act on the world, and steps the ontology
+  orders after it (§5.14). Deferring only data readers was rejected after
+  review: a "reboot" that reads nothing from a deferred "drain" would run
+  on an undrained node. Running every later step was rejected for the same
+  reason as a "continue" failure action.
 
 ## Open questions
 

@@ -226,7 +226,16 @@ the candidate (no new extension versions). Decisions (user, 2026-10-27):
   float `min_pass`/`min_full` ignored at run time (pre-existing for
   `min_pass`), duplicates in mapping lists, names unchecked when
   `reviewers` is malformed.
-- [ ] **G1** mandates in unattended runs, `unavailable` decision,
-  dependent deferral (executor state, snapshot), §5.14, fixtures, docs
+- [x] **G1** mandates in unattended runs, `unavailable` decision,
+  dependent deferral (executor state, snapshot), §5.14, fixtures, docs. Two review rounds. First:
+  deferring only data readers was unsafe (a "reboot" after a deferred
+  "drain"); the user chose to also defer steps that act on the world and
+  steps the ontology orders later. Also fixed: deferred handler ending
+  `escalated`, duplicate queued records after a loop, dependents without
+  records, run results without a list of deferrals, a Python `Host`
+  regression for mandates. Second: snapshot refused with a handler before a
+  deferred step, a retried invoke keeping stale deferrals, a nested
+  escalation lost, an approved invoke queued twice, ontology order not
+  seen through nested runs, a forged-snapshot panic (pre-existing).
 - [ ] Spec changelog, RFC-0003, CHANGELOG, design-114 §16, guides
 - [ ] Code and test review; fix all findings; reply on #114 (ask first)

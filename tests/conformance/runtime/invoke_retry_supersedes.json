@@ -1,0 +1,263 @@
+{
+  "description": "A retried invoke runs its workflow again: what the failed attempt deferred is superseded, so the queue does not hold an action that then ran.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child"
+          },
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/nightly-sync"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "status"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "unavailable",
+        "approvers": [],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "down"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "total_count": 0,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "deferred": [],
+    "action_records": [
+      {
+        "status": "rejected",
+        "reason": "superseded: the invoke step ran its workflow again"
+      },
+      {
+        "status": "executed"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "retry"
+  ]
+}

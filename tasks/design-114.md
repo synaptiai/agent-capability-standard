@@ -83,7 +83,7 @@ meaning. New codes:
 | W603 | DEPRECATED_FORM | accepted legacy form (goto_step by capability id, self-referencing gate without `phase`) |
 | W604 | UNKNOWN_FIELD | unknown key (with closest-match hint); `x-` keys exempt |
 | W605 | MISSING_SPEC_VERSION | no `spec_version` and no `# Standard version:` header |
-| W606 | UNATTENDED_APPROVAL | an unattended trigger reaches an approval step with no `approval.when_unattended` |
+| W606 | UNATTENDED_APPROVAL | an unattended trigger reaches an approval step with no `approval.when_unattended` and no standing mandate |
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
 | W608 | WAIT_SPANS_CHECKPOINT | a `wait` sits between a checkpoint and a later step that requires one (mutate, send, raised flag), with no new checkpoint |
 | W609 | UNTRIGGERED_FAILURE_MODE | structured recovery with neither `on_error` nor `when` |
@@ -332,7 +332,8 @@ step `timeout`: invalid → W614.
 * A trigger whose attendance is unattended (explicit, or the
   schedule/event default; `invoke` inherits and is not counted statically)
   + a step whose effective `requires_approval` is true without
-  `approval.when_unattended` → W606 (validate/approval.rs; also without
+  `approval.when_unattended` or a `standing_mandate` approver → W606
+  (validate/approval.rs; also without
   approval@1 declared, since the step will still fail with F502).
 
 ## 12. Wait (E1)
@@ -385,8 +386,12 @@ reask)}, expires?, when_unattended: defer_to_queue|skip|fail (default fail)}`
 * Runtime: RequestApproval carries the shown values and their SHA-256 digest
   (canonical JSON). A decision is valid only if the digest matches, distinct
   approver ids ≥ min_approvers, not expired, and unused (single use).
-  Unattended runs follow `when_unattended`: fail → F502, skip → step skipped,
-  defer_to_queue → run ends `deferred` with a planned ActionRecord.
+  An unattended run asks a standing mandate (not a person); when there is
+  none or it answers `unavailable`, `when_unattended` applies: fail → F502,
+  skip → step skipped, defer_to_queue → a planned ActionRecord and the step
+  and its dependents are deferred (§16.3); the run ends `deferred`.
+  (Changed after the porting feedback: before, every unattended approval
+  went straight to the plan and `defer_to_queue` ended the whole run.)
 * ActionRecord status gains `rejected`, `expired`; optional `approval`
   sub-object.
 
@@ -495,12 +500,12 @@ runner.py` drives it with a host object.
 | `InvokeCapability{step, capability, inputs, domain, deadline, attempt}` | run the capability | `Output{value}` or `Error{code: R401/R402, message}` |
 | `CreateCheckpoint{step}` | take a checkpoint before a step that needs one (or for `pause_and_checkpoint`) | `Checkpoint{checkpoint_id}`, or `Error` (the step fails with F501) |
 | `Rollback{checkpoint_id, step}` | restore it | `RolledBack`, or `Error` (the run fails with F503) |
-| `RequestApproval{step, approver, mode, shown, digest, expires_at}` | ask | `Decision{decision_id, decision: approved/rejected, approvers, digest}`; no decision by `expires_at` → F502 |
+| `RequestApproval{step, approver, mode, shown, digest, expires_at}` | ask | `Decision{decision_id, decision: approved/rejected/unavailable, approvers, digest}`; no decision by `expires_at` → F502 |
 | `RecheckSource{step, source, compare}` | re-read the source now | `Current{value}`, or `Error` (F502) |
 | `AwaitEvent{step, event_type, source_kind, correlate, accept_from, liveness, deadline}` | wait | `Event{event, principal}`, `LivenessLost` (R406) or `Error` (R402) |
 | `Sleep{until}` | call `tick` at or after `until` | — |
-| `Completed{outcome, cause, outputs, action_records}` | finished: `completed`, `escalated` (with the `cause` code), `deferred`, `replan_required` | — |
-| `Failed{code, step, message, action_records}` | finished with an error | — |
+| `Completed{outcome, cause, outputs, action_records, deferred}` | finished: `completed`, `escalated` (with the `cause` code), `deferred`, `replan_required` | — |
+| `Failed{code, step, message, action_records, deferred}` | finished with an error | — |
 
 Every action carries `frame` (the stack of workflow names: nested `invoke`
 runs surface their actions through the parent) and `id`.
@@ -510,6 +515,28 @@ runs surface their actions through the parent) and `id`.
 For each step of the normal flow in list order (handlers are skipped;
 parallel groups run in declaration order):
 
+0. Deferral: once a step of the frame is deferred, a later step is deferred
+   too, before its condition is evaluated, if it reads a deferred step's
+   store (any `${...}` in an executable field, i.e. not `purpose` or a
+   failure mode's prose; or a quorum reviewer), or, unless it is a handler,
+   if it may act on the world (effective `requires_checkpoint` or
+   `requires_approval`, a wait, an `invoke`, `delegate`, `synchronize` or
+   `rollback`) or `precedes` edges, transitively, order its capability
+   after a deferred one, including capabilities deferred in a nested run
+   (`Step.reads`, `acts`, `after`, precomputed; `Frame.nested_caps`).
+   A deferred dependent is not asked; one that requires approval gets a
+   `planned` record. Each deferral is logged on the state (`deferrals`:
+   frame names, the step path through nested runs, store_as, reason,
+   record) and reported on the terminal action. `Frame.deferred` is kept
+   in list order (a handler may precede the steps it escalates from). A
+   frame that completes with deferred steps ends `deferred`; a deferred
+   handler ends its run `deferred` with the escalation's cause, which a
+   parent treats as an escalated nested run (R402); failure, escalation and
+   replanning take precedence. A recovery loop to `target` drops the
+   frame's deferrals from `target` on and every logged deferral under
+   them; an invoke step that starts its workflow (again) drops those under
+   it; their `planned` records become `rejected` ("superseded"). An
+   approved invoke whose nested run deferred stays `executed`.
 1. `condition`: false or an evaluation error (R405, traced) → skip, unless
    `skip_if_false: false`, which raises R403.
 2. Before-gates in order; an evaluation error fires the gate. `stop` →
@@ -519,11 +546,14 @@ parallel groups run in declaration order):
    value's type; references inside a longer string are interpolated, a
    string as-is and other values as compact JSON). Absent or skipped →
    `null`.
-4. Approval: if the effective `requires_approval` is true. Unattended runs
-   follow `when_unattended` (`fail` → F502 with a `rejected` record, `skip`
-   → skip the step, also recorded `rejected` with the reason,
-   `defer_to_queue` → `Completed{deferred}` with a `planned` action
-   record). Otherwise `RequestApproval` with `shown` = the resolved `shows`
+4. Approval: if the effective `requires_approval` is true. An unattended
+   run with a `human` approver, or one whose standing mandate answers
+   `unavailable`, follows `when_unattended` (`fail` → F502 with a
+   `rejected` record, `skip` → skip the step, also recorded `rejected` with
+   the reason, `defer_to_queue` → a `planned` action record and the step
+   is deferred: its index is added to the frame's `deferred`, its store is
+   cleared, and the next step begins). `unavailable` in an attended run is
+   F502 with a `rejected` record. Otherwise `RequestApproval` with `shown` = the resolved `shows`
    (default: `[inputs]`) and `digest` = SHA-256 (hex) of the canonical JSON
    (RFC 8785) of `shown`. A decision counts only if `decision` is
    `approved`, its `digest` matches, it has at least `min_approvers`
@@ -565,7 +595,8 @@ parallel groups run in declaration order):
      steps_executed (in step order), evidence_anchors}`; a child that fails
      (including a failed rollback inside it) or escalates is
      the step's error (R402, retried as usual); a child that ends
-     `deferred` or `replan_required` ends the whole run that way.
+     `deferred` defers the invoke step (as above); one that ends
+     `replan_required` ends the whole run that way.
    * `constrain` with `quorum` → evaluated by the executor (no host call),
      §16.4.
    * anything else → `InvokeCapability`, deadline = now + `timeout`. The
@@ -623,11 +654,13 @@ evidence_anchors}`; not compliant → F504.
   (site and message; R405), `gate_fired`, `rolled_back`,
   `checkpoint_created`, `checkpoint_consumed`, `checkpoints_invalidated`,
   `approval_unattended`, `approval_requested`, `approval_decided`,
+  `step_deferred`,
   `approval_expired`, `recheck`, `event_dropped`, `event_received`,
   `retry`, `quorum`, `failure_mode_fired`, `loop`, `recovery_exhausted`,
   `escalated`, `invoke_started`, `invoke_returned`.
 * Action records (world_state 1.1.0 `ActionRecord`) for every step that
-  required approval: `planned` (deferred), `approved` → `executed` (or
+  required approval: `planned` (deferred, or deferred because it depends on
+  a deferred step), `approved` → `executed` (or
   `failed` if the step then failed), `rejected` (refused, invalid, or
   unattended `fail`/`skip`), `expired` (also an approval that a recheck
   found stale), with the `approval` sub-record and a `reason` when the

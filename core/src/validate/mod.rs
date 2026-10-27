@@ -573,10 +573,15 @@ impl WorkflowCheck<'_> {
                 self.report,
             );
             // A malformed approval block is reported as such; W606 would
-            // only repeat it.
+            // only repeat it. A standing mandate is a plan: it is asked even
+            // in an unattended run.
             let plan_for_unattended = match step.get("approval") {
                 None => false,
-                Some(Value::Object(a)) => a.contains_key("when_unattended"),
+                Some(Value::Object(a)) => {
+                    a.contains_key("when_unattended")
+                        || a.get("approver").and_then(|p| p.get("kind"))
+                            == Some(&Value::String("standing_mandate".into()))
+                }
                 Some(_) => true,
             };
             if requires_approval && unattended && !plan_for_unattended {
@@ -739,6 +744,22 @@ impl WorkflowCheck<'_> {
                         .at("field", key),
                     );
                 }
+            }
+        }
+        // The executor reads retry.max as a count: anything else would
+        // silently mean no retries.
+        if let Some(max) = step.get("retry").and_then(|r| r.get("max")) {
+            if count(max).is_none() {
+                self.report.push(
+                    loc.diag(
+                        Code::SchemaValidationFailed,
+                        format!(
+                            "retry.max must be a non-negative integer, found {}",
+                            yaml::kind_of(max)
+                        ),
+                    )
+                    .at("field", "retry.max"),
+                );
             }
         }
         if let Some(Value::String(s)) = step.get("store_as") {
@@ -1393,6 +1414,22 @@ pub(crate) mod tests {
             Some("did you mean 'requires_approval'?")
         );
         assert_eq!(w[2].location["field"], "gates[0].mesage");
+    }
+
+    #[test]
+    fn retry_max_is_a_count() {
+        let with = |max: Value| {
+            codes(
+                json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1", "steps": [
+                {"capability": "observe", "purpose": "p", "store_as": "o",
+                 "input_bindings": {"target": "x"}, "retry": {"max": max}}]}}),
+            )
+        };
+        assert!(with(json!(2)).is_empty());
+        assert!(with(json!(2.0)).is_empty());
+        for bad in [json!("3"), json!(2.5), json!(-1)] {
+            assert_eq!(with(bad), ["S303"]);
+        }
     }
 
     #[test]

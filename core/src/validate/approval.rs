@@ -239,12 +239,12 @@ pub(crate) fn has_unattended_trigger(wf: &Map<String, Value>, declared: &Declare
 
 /// W606 for a step that needs approval in a workflow an unattended trigger
 /// can start, when it does not say what to do then
-/// (`approval.when_unattended`).
+/// (`approval.when_unattended`) and has no standing mandate to ask.
 pub(crate) fn unattended(loc: &StepLoc<'_>, report: &mut Report) {
     report.push(
         loc.diag(
             Code::UnattendedApproval,
-            "this step needs approval, but a trigger starts the workflow unattended and the step has no approval.when_unattended (defer_to_queue, skip or fail; needs approval@1), so an unattended run fails here with F502",
+            "this step needs approval, but a trigger starts the workflow unattended and the step has neither approval.when_unattended (defer_to_queue, skip or fail) nor a standing_mandate approver (needs approval@1), so an unattended run fails here with F502",
         )
         .at("field", "approval.when_unattended"),
     );
@@ -413,8 +413,16 @@ mod tests {
         );
         assert_eq!(
             run(
-                schedule,
+                schedule.clone(),
                 Some(json!({"approver": {"kind": "human"}, "when_unattended": "skip"}))
+            ),
+            Vec::<&str>::new()
+        );
+        // A standing mandate is asked even in an unattended run.
+        assert_eq!(
+            run(
+                schedule,
+                Some(json!({"approver": {"kind": "standing_mandate", "mandate_ref": "m"}}))
             ),
             Vec::<&str>::new()
         );

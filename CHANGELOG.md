@@ -120,6 +120,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Comprehensive analysis documentation package (13 documents, ~570KB)
 
 ### Changed
+- **Unattended runs ask standing mandates, and deferral continues (#114).**
+  A `standing_mandate` approver is asked even when nobody is present; the
+  host answers `approved`, or `unavailable` when no mandate covers the
+  action, and only then does `when_unattended` apply. `defer_to_queue`
+  defers the step and every later step that depends on it (reads its
+  output, may act on the world, or follows it in the ontology), runs the
+  steps that only read, reason or record, and ends the run `deferred`, so a scheduled sweep
+  finishes its other work. `RunResult.deferred` lists the deferrals, and the
+  default `Host` answers `unavailable` for a standing mandate
 - **Quorum independence per reviewer (#114).** `forbidden_inputs`
   takes a per-reviewer mapping, verdicts carry `scope: full | delta`,
   and `quorum.min_full` requires passing full sweeps

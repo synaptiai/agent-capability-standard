@@ -1,5 +1,5 @@
 {
-  "description": "A nested run that defers defers the whole run.",
+  "description": "A nested run that defers some steps defers its invoke step: the parent runs what does not read it, and ends deferred.",
   "catalog": {
     "w": {
       "goal": "g",
@@ -21,6 +21,17 @@
           "store_as": "o",
           "input_bindings": {
             "target": "after"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "${i.result: object}",
+            "conditions": [
+              "applied"
+            ]
           }
         }
       ]
@@ -112,6 +123,24 @@
           "evidence_anchors": []
         }
       }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "frame": [
+          "w"
+        ],
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "observation": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
     }
   ],
   "end": {
@@ -121,7 +150,14 @@
       {
         "status": "planned"
       }
-    ]
+    ],
+    "outputs": {
+      "o": {
+        "observation": {}
+      }
+    }
   },
-  "trace_kinds": []
+  "trace_kinds": [
+    "step_deferred"
+  ]
 }

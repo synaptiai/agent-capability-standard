@@ -1,0 +1,217 @@
+{
+  "description": "After a deferral, steps that may act on the world (here a second mutate) and steps the ontology orders after a deferred one, transitively (verify after mutate, audit after verify and so after mutate) wait too, as does a step whose gate reads the deferred output; read-only steps that depend on none of them run.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "other",
+          "input_bindings": {
+            "target": "elsewhere"
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m2",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            }
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "config",
+            "conditions": [
+              "applied"
+            ]
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "gated",
+          "input_bindings": {
+            "target": "x"
+          },
+          "gates": [
+            {
+              "when": "${m.success} == false",
+              "action": "warn"
+            }
+          ]
+        },
+        {
+          "capability": "audit",
+          "purpose": "audit step",
+          "store_as": "log",
+          "input_bindings": {
+            "event": "sweep done"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "tail",
+          "input_bindings": {
+            "target": "elsewhere"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "observation": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "step": 8
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "observation": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "deferred",
+    "action_records": [
+      {
+        "status": "planned"
+      },
+      {
+        "status": "planned",
+        "reason": "it may act on the world, after a deferred step"
+      }
+    ],
+    "deferred": [
+      {
+        "step": 2
+      },
+      {
+        "step": 4,
+        "reason": "it may act on the world, after a deferred step"
+      },
+      {
+        "step": 5,
+        "reason": "the ontology orders verify after mutate, which was deferred"
+      },
+      {
+        "step": 6,
+        "reason": "it reads 'm', which was deferred"
+      },
+      {
+        "step": 7,
+        "reason": "the ontology orders audit after mutate, which was deferred"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "step_deferred"
+  ]
+}

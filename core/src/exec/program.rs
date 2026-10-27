@@ -60,6 +60,34 @@ pub struct Step {
     pub failure_modes: Vec<FailureMode>,
     pub timeout: Option<Duration>,
     pub retry: Option<Retry>,
+    /// The roots the step reads in its executable fields (not `purpose` or
+    /// a failure mode's prose), and the reviewers its quorum counts: a step
+    /// that reads a deferred step's store is deferred too (§5.14).
+    pub reads: Vec<String>,
+    /// The step may act on, or wait on, the world: its effective
+    /// `requires_checkpoint` or `requires_approval` is true, it waits, or it
+    /// is an `invoke`, `delegate`, `synchronize` or `rollback`. After a
+    /// deferral it is deferred too (§5.14).
+    pub acts: bool,
+    /// Capabilities the ontology orders before this one through `precedes`
+    /// edges, transitively (as `mutate` before `verify`): after one of them
+    /// is deferred, so is this step.
+    pub after: Vec<String>,
+}
+
+/// Every reference root in `v`, in document order.
+fn roots(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::String(s) => out.extend(
+            crate::refs::find_refs(s)
+                .into_iter()
+                .filter_map(|m| m.parsed.ok())
+                .map(|r| r.root),
+        ),
+        Value::Array(a) => a.iter().for_each(|x| roots(x, out)),
+        Value::Object(m) => m.values().for_each(|x| roots(x, out)),
+        _ => {}
+    }
 }
 
 pub struct Workflow {
@@ -317,7 +345,7 @@ impl Program {
         let retry = raw.get("retry").and_then(Value::as_object).map(|r| Retry {
             max: r
                 .get("max")
-                .and_then(Value::as_u64)
+                .and_then(crate::validate::count)
                 .map_or(0, |m| u32::try_from(m).unwrap_or(u32::MAX)),
             backoff: r
                 .get("backoff")
@@ -325,14 +353,61 @@ impl Program {
                 .unwrap_or("none")
                 .to_string(),
         });
+        let mut reads = Vec::new();
+        let mut executable = raw.clone();
+        executable.remove("purpose");
+        executable.remove("description");
+        if let Some(Value::Array(modes)) = executable.get_mut("failure_modes") {
+            for fm in modes.iter_mut().filter_map(Value::as_object_mut) {
+                fm.remove("condition");
+                if fm.get("recovery").is_some_and(Value::is_string) {
+                    fm.remove("recovery");
+                }
+            }
+        }
+        roots(&Value::Object(executable), &mut reads);
+        if let Some(Value::Array(rs)) = raw.get("quorum").and_then(|q| q.get("reviewers")) {
+            reads.extend(rs.iter().filter_map(Value::as_str).map(str::to_string));
+        }
+        reads.sort_unstable();
+        reads.dedup();
+        let requires_checkpoint = node.requires_checkpoint || flag("requires_checkpoint");
+        let requires_approval = node.requires_approval || flag("requires_approval");
+        // Acting on the world: a checkpoint or approval requirement, a
+        // wait, another agent or workflow, or a rollback.
+        let acts = requires_checkpoint
+            || requires_approval
+            || raw.contains_key("wait")
+            || matches!(
+                capability.as_str(),
+                "invoke" | "delegate" | "synchronize" | "rollback"
+            );
+        // `precedes` is transitive: everything ordered before this
+        // capability, directly or through others.
+        let mut after: Vec<String> = Vec::new();
+        let mut queue = vec![capability.as_str()];
+        while let Some(c) = queue.pop() {
+            for from in ctx
+                .ontology
+                .incoming(c, crate::ontology::EdgeType::Precedes)
+            {
+                if from != capability && !after.iter().any(|a| a == from) {
+                    after.push(from.to_string());
+                    queue.push(from);
+                }
+            }
+        }
         Ok(Step {
+            reads,
+            acts,
+            after,
             index,
             store_as: raw
                 .get("store_as")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-            requires_checkpoint: node.requires_checkpoint || flag("requires_checkpoint"),
-            requires_approval: node.requires_approval || flag("requires_approval"),
+            requires_checkpoint,
+            requires_approval,
             required_outputs,
             handler: recovery_declared && capability == "invoke" && flag("handler"),
             capability,

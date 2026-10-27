@@ -6,8 +6,8 @@ use super::canonical;
 use super::program::{GateAction, Program, Step, Workflow};
 use super::quorum;
 use super::{
-    Action, Attendance, Body, Checkpoint, Frame, MAX_FRAMES, MAX_TIME, Outcome, Pending, Purpose,
-    Response, Stage, State, StepError, StepState, SubmitError, check_inputs,
+    Action, Attendance, Body, Checkpoint, Deferral, Frame, MAX_FRAMES, MAX_TIME, Outcome, Pending,
+    Purpose, Response, Stage, State, StepError, StepState, SubmitError, check_inputs,
 };
 use crate::duration;
 use crate::expr::ast::RefAt;
@@ -257,16 +257,18 @@ impl<'a> Machine<'a> {
         Flow::Wait
     }
 
-    /// End the whole run (deferral and replanning end every frame).
+    /// End the whole run from any frame (replanning ends every frame).
     fn finish_run(&mut self, outcome: Outcome) -> Flow {
         self.trace("run_finished", None, json!({"outcome": outcome}));
         let outputs = Value::Object(self.st.frames[0].stores.clone());
         let records = self.st.records.clone();
+        let deferred = self.deferred_report();
         self.finish(Body::Completed {
             outcome,
             cause: None,
             outputs,
             action_records: records,
+            deferred,
         })
     }
 
@@ -330,7 +332,16 @@ impl<'a> Machine<'a> {
     /// After a step: the next one, or the end of an escalation.
     fn next_step(&mut self) -> Flow {
         if let Some(cause) = self.frame_ref().escalation.clone() {
-            return self.end_frame(Ok((Outcome::Escalated, Some(cause))));
+            // A handler that was deferred (or whose nested run deferred
+            // steps) did not finish handling: the run is deferred, not
+            // escalated, and keeps the cause.
+            let f = self.frame_ref();
+            let outcome = if f.deferred.contains(&f.step) {
+                Outcome::Deferred
+            } else {
+                Outcome::Escalated
+            };
+            return self.end_frame(Ok((outcome, Some(cause))));
         }
         let f = self.frame();
         f.step += 1;
@@ -346,17 +357,26 @@ impl<'a> Machine<'a> {
             json!({"code": code, "message": message}),
         );
         let records = self.st.records.clone();
+        let deferred = self.deferred_report();
         self.finish(Body::Failed {
             code: code.to_string(),
             step,
             message: message.to_string(),
             action_records: records,
+            deferred,
         })
     }
 
     /// The top frame ends: the run ends, or the parent's invoke step gets
     /// the result.
     fn end_frame(&mut self, end: Result<(Outcome, Option<String>), (String, String)>) -> Flow {
+        // A run that completed with deferred steps ends deferred.
+        let end = match end {
+            Ok((Outcome::Completed, cause)) if !self.frame_ref().deferred.is_empty() => {
+                Ok((Outcome::Deferred, cause))
+            }
+            other => other,
+        };
         if self.st.frames.len() == 1 {
             return match end {
                 Ok((outcome, cause)) => {
@@ -367,11 +387,13 @@ impl<'a> Machine<'a> {
                     );
                     let outputs = Value::Object(self.st.frames[0].stores.clone());
                     let records = self.st.records.clone();
+                    let deferred = self.deferred_report();
                     self.finish(Body::Completed {
                         outcome,
                         cause,
                         outputs,
                         action_records: records,
+                        deferred,
                     })
                 }
                 Err((code, message)) => self.fail_run(&code, &message),
@@ -412,6 +434,43 @@ impl<'a> Machine<'a> {
                     cause.unwrap_or_default()
                 ),
             ),
+            // The nested run escalated, but its handler was deferred: an
+            // escalated nested run, as above.
+            Ok((Outcome::Deferred, Some(cause))) => self.exec_error(
+                "R402",
+                format!(
+                    "invoked workflow '{}' escalated ({cause}) and its handler was deferred",
+                    child.workflow
+                ),
+            ),
+            // The nested run deferred some of its steps: so is the invoke
+            // step, and whatever depends on it. The invocation itself ran,
+            // so its record (if approved) is executed; the nested run's own
+            // records are the queued actions.
+            Ok((Outcome::Deferred, None)) => {
+                if let Some(r) = self.frame_ref().cur.record {
+                    if self.st.records[r]["status"] == "approved" {
+                        self.st.records[r]["status"] = json!("executed");
+                        self.st.records[r]["reason"] =
+                            json!("its nested run deferred steps, which are queued separately");
+                    }
+                }
+                let wf = &self.program.workflows[&child.workflow];
+                let mut caps: Vec<String> = child
+                    .deferred
+                    .iter()
+                    .map(|&d| wf.steps[d].capability.clone())
+                    .chain(child.nested_caps.into_values().flatten())
+                    .collect();
+                caps.sort_unstable();
+                caps.dedup();
+                let step = self.frame_ref().step;
+                self.frame().nested_caps.insert(step, caps);
+                self.defer_step(&format!(
+                    "invoked workflow '{}' deferred steps",
+                    child.workflow
+                ))
+            }
             Ok((outcome, _)) => self.finish_run(outcome),
             Err((code, message)) => self.exec_error(
                 "R402",
@@ -444,6 +503,12 @@ impl<'a> Machine<'a> {
         let program = self.program;
         let wf = &program.workflows[&self.frame_ref().workflow];
         let step = &wf.steps[index];
+        // Before its condition: a step that depends on a deferred step waits
+        // for it, rather than running on a missing value or an unchanged
+        // world.
+        if let Some(why) = self.deferred_cause(step) {
+            return self.defer_step(&why);
+        }
         if let Some(c) = &step.condition {
             let ok = match eval::eval_condition(c, &FrameBindings(self.frame_ref())) {
                 Ok(b) => b,
@@ -560,32 +625,15 @@ impl<'a> Machine<'a> {
             return self.set_stage(Stage::Checkpoint);
         }
         let spec = self.approval_spec();
-        if self.st.attendance == Attendance::Unattended {
-            let plan = spec
-                .get("when_unattended")
-                .and_then(Value::as_str)
-                .unwrap_or("fail");
-            self.trace_step("approval_unattended", json!({"when_unattended": plan}));
-            return match plan {
-                "skip" => {
-                    self.record_refused(
-                        "rejected",
-                        None,
-                        "the run is unattended (when_unattended: skip); the step was skipped",
-                    );
-                    self.skip_step("approval needed, but the run is unattended")
-                }
-                "defer_to_queue" => {
-                    let r = self.record("planned", None);
-                    self.frame().cur.record = Some(r);
-                    self.finish_run(Outcome::Deferred)
-                }
-                _ => {
-                    let why = "approval is needed, but the run is unattended";
-                    self.record_refused("rejected", None, why);
-                    self.step_error("F502", why)
-                }
-            };
+        // A standing mandate needs no one present: it is asked even in an
+        // unattended run, and the plan applies only if none covers the step.
+        let mandate = spec
+            .get("approver")
+            .and_then(|a| a.get("kind"))
+            .and_then(Value::as_str)
+            == Some("standing_mandate");
+        if self.st.attendance == Attendance::Unattended && !mandate {
+            return self.unattended(None, "the run is unattended");
         }
         let bindings = FrameBindings(self.frame_ref());
         let mut shown = match spec.get("shows") {
@@ -648,6 +696,181 @@ impl<'a> Machine<'a> {
         )
     }
 
+    /// An unattended run that cannot be approved follows the step's
+    /// `when_unattended`: `fail` (F502, the default), `skip`, or
+    /// `defer_to_queue` (a `planned` record; the step and the steps that read
+    /// it are deferred, and the run ends `deferred`).
+    fn unattended(&mut self, approval: Option<Value>, why: &str) -> Flow {
+        let plan = self
+            .approval_spec()
+            .get("when_unattended")
+            .and_then(Value::as_str)
+            .unwrap_or("fail")
+            .to_string();
+        self.trace_step(
+            "approval_unattended",
+            json!({"when_unattended": plan, "reason": why}),
+        );
+        match plan.as_str() {
+            "skip" => {
+                self.record_refused(
+                    "rejected",
+                    approval,
+                    &format!("{why} (when_unattended: skip); the step was skipped"),
+                );
+                self.skip_step(&format!("approval needed, but {why}"))
+            }
+            "defer_to_queue" => {
+                let r = self.record("planned", approval);
+                self.st.records[r]["reason"] =
+                    json!(format!("{why} (when_unattended: defer_to_queue)"));
+                self.frame().cur.record = Some(r);
+                self.defer_step(why)
+            }
+            _ => {
+                let why = format!("approval is needed, but {why}");
+                self.record_refused("rejected", approval, &why);
+                self.step_error("F502", why)
+            }
+        }
+    }
+
+    /// Defer the current step (§5.14): it does not run now, and later steps
+    /// that depend on it are deferred too (`deferred_cause`). The queued
+    /// action is its `planned` record; a dependent step that requires
+    /// approval gets one too.
+    fn defer_step(&mut self, why: &str) -> Flow {
+        self.trace_step("step_deferred", json!({"reason": why}));
+        let step = self.frame_ref().step;
+        let record = match self.frame_ref().cur.record {
+            // The queued action (when_unattended: defer_to_queue).
+            Some(r) if self.st.records[r]["status"] == "planned" => Some(r),
+            // An invoke that ran: its nested run's records are the queue.
+            Some(_) => None,
+            None if self.step_ref().requires_approval => {
+                let r = self.record("planned", None);
+                self.st.records[r]["reason"] = json!(why);
+                Some(r)
+            }
+            None => None,
+        };
+        let store_as = self.step_ref().store_as.clone();
+        if let Some(store) = &store_as {
+            let f = self.frame();
+            f.stores.remove(store);
+            f.ran_inputs.remove(store);
+        }
+        // Kept in list order: a handler may come before the steps it
+        // escalates from.
+        let deferred = &mut self.frame().deferred;
+        if let Err(at) = deferred.binary_search(&step) {
+            deferred.insert(at, step);
+        }
+        self.st.deferrals.push(Deferral {
+            frame: self.names(),
+            path: self.st.frames.iter().map(|f| f.step).collect(),
+            store_as,
+            reason: why.to_string(),
+            record,
+        });
+        self.next_step()
+    }
+
+    /// Why `step` must wait for a deferred step of this frame, if it must:
+    /// it reads a deferred step's store; or (unless it is a handler, the
+    /// escalation path) it may act on the world, or the ontology orders its
+    /// capability after a deferred one (`precedes`, as `verify` after
+    /// `mutate`).
+    fn deferred_cause(&self, step: &Step) -> Option<String> {
+        let f = self.frame_ref();
+        if f.deferred.is_empty() {
+            return None;
+        }
+        let wf = &self.program.workflows[&f.workflow];
+        let deferred = || f.deferred.iter().map(|&d| &wf.steps[d]);
+        if let Some(store) = deferred()
+            .filter_map(|d| d.store_as.as_deref())
+            .find(|s| step.reads.iter().any(|r| r == s))
+        {
+            return Some(format!("it reads '{store}', which was deferred"));
+        }
+        if step.handler {
+            return None;
+        }
+        if step.acts {
+            return Some("it may act on the world, after a deferred step".to_string());
+        }
+        deferred()
+            .map(|d| &d.capability)
+            .chain(f.nested_caps.values().flatten())
+            .find(|c| step.after.contains(c))
+            .map(|c| {
+                format!(
+                    "the ontology orders {} after {c}, which was deferred",
+                    step.capability
+                )
+            })
+    }
+
+    /// A recovery loop to `target` runs its steps again: they are no longer
+    /// deferred, here or in the nested runs under them, and the actions
+    /// they queued are superseded.
+    fn undefer_from(&mut self, target: usize) {
+        let f = self.frame();
+        f.deferred.retain(|&d| d < target);
+        f.nested_caps.retain(|&k, _| k < target);
+        let depth = self.st.frames.len() - 1;
+        let prefix: Vec<usize> = self.st.frames[..depth].iter().map(|f| f.step).collect();
+        self.supersede(
+            |d| d.path.len() > depth && d.path[..depth] == prefix[..] && d.path[depth] >= target,
+            "superseded: a recovery loop ran the step again",
+        );
+    }
+
+    /// An invoke step starts its nested run (again, after a retry): what an
+    /// earlier attempt deferred under it is superseded.
+    fn undefer_nested(&mut self) {
+        let path: Vec<usize> = self.st.frames.iter().map(|f| f.step).collect();
+        let step = self.frame_ref().step;
+        self.frame().nested_caps.remove(&step);
+        self.supersede(
+            |d| d.path.len() > path.len() && d.path[..path.len()] == path[..],
+            "superseded: the invoke step ran its workflow again",
+        );
+    }
+
+    /// Drop the deferrals `gone` selects; their queued actions are
+    /// superseded (`rejected`, with the reason).
+    fn supersede(&mut self, gone: impl Fn(&Deferral) -> bool, reason: &str) {
+        let (dropped, kept): (Vec<Deferral>, Vec<Deferral>) =
+            std::mem::take(&mut self.st.deferrals)
+                .into_iter()
+                .partition(|d| gone(d));
+        self.st.deferrals = kept;
+        for r in dropped.iter().filter_map(|d| d.record) {
+            if self.st.records[r]["status"] == "planned" {
+                self.st.records[r]["status"] = json!("rejected");
+                self.st.records[r]["reason"] = json!(reason);
+            }
+        }
+    }
+    /// The run's deferrals, as the terminal action reports them.
+    fn deferred_report(&self) -> Vec<Value> {
+        self.st
+            .deferrals
+            .iter()
+            .map(|d| {
+                json!({
+                    "frame": d.frame,
+                    "step": d.path.last(),
+                    "store_as": d.store_as,
+                    "reason": d.reason,
+                    "action_id": d.record.map(|r| self.st.records[r]["action_id"].clone()),
+                })
+            })
+            .collect()
+    }
+
     fn decide(
         &mut self,
         decision_id: String,
@@ -675,6 +898,25 @@ impl<'a> Machine<'a> {
                 "expires_at": expires_at.map(iso),
             })
         };
+        if decision == "unavailable" {
+            // No one could decide: in an unattended run, the plan applies;
+            // in an attended one, the step cannot go ahead.
+            // Single use like any decision; no one approved, so no
+            // approvers are recorded, whatever the host sent.
+            self.trace_step(
+                "approval_decided",
+                json!({"decision_id": decision_id, "decision": decision, "valid": false}),
+            );
+            self.st.used_decisions.insert(decision_id.clone());
+            let mut record = sub("unavailable");
+            record["approvers"] = json!([]);
+            if self.st.attendance == Attendance::Unattended {
+                return self.unattended(Some(record), "no standing mandate covers the action");
+            }
+            let why = "the approver was unavailable";
+            self.record_refused("rejected", Some(record), why);
+            return self.step_error("F502", why);
+        }
         let reused = !self.st.used_decisions.insert(decision_id.clone());
         // (status, reason) for a decision that does not let the step run.
         let problem: Option<(&str, String)> = if reused {
@@ -900,6 +1142,7 @@ impl<'a> Machine<'a> {
             return self.exec_error("R402", e);
         }
         self.trace_step("invoke_started", json!({"workflow": target}));
+        self.undefer_nested();
         self.st.frames.push(Frame::new(&target, child_inputs));
         Flow::Continue
     }
@@ -1236,6 +1479,7 @@ impl<'a> Machine<'a> {
             .iter()
             .filter_map(|s| s.store_as.clone())
             .collect();
+        self.undefer_from(target);
         let frame = self.frame();
         frame.loops.insert(key, json!(taken + 1));
         let mut recovery = match frame.recovery.take() {

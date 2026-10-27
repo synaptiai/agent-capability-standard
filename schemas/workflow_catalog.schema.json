@@ -447,7 +447,7 @@
           "type": "string",
           "enum": ["defer_to_queue", "skip", "fail"],
           "default": "fail",
-          "description": "What an unattended run does here: queue the action and end deferred, skip the step, or fail with F502."
+          "description": "What an unattended run does here when no standing mandate approves: queue the action and defer the step and what depends on it (the run ends deferred), skip the step, or fail with F502."
         }
       }
     },

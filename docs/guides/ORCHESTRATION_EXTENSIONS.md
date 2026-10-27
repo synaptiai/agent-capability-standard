@@ -242,16 +242,44 @@ and what the decision binds to:
   re-reads a source just before acting and asks again (`reask`), replans or
   stops when it changed.
 - A `standing_mandate` approver names its mandate in `mandate_ref`, for
-  pre-approved routine actions.
+  pre-approved routine actions. It needs no one present, so it is asked
+  even in an unattended run; your host answers `approved`, or
+  `unavailable` when no mandate covers the action.
 - `approval` on a step that does not require approval is an error (S303);
   raise `requires_approval: true` if you mean it.
 - If a schedule or event trigger can start the run unattended (or a
   trigger says `attendance: unattended`), say what to do when nobody is
-  there to approve: without `when_unattended` the step warns (W606) and an
-  unattended run fails there.
+  there to approve: without `when_unattended` or a standing mandate the
+  step warns (W606) and an unattended run fails there.
+- `defer_to_queue` queues the action (a `planned` record) and defers the
+  step. Later steps that depend on it wait too: those that read its output
+  (or a step that does), those that may act on or wait on the world (a
+  checkpoint or approval requirement, a wait, an `invoke`, `delegate`,
+  `synchronize` or `rollback`), and those the ontology orders after a
+  deferred capability (`verify` after `mutate`, transitively). Steps that
+  read, reason or record and depend on none of them run, and the run ends
+  `deferred`, listing every deferral. A nightly sweep can thus finish its
+  other work and leave one send for a person to approve:
+
+  ```yaml
+  - capability: send
+    store_as: notify_out
+    approval:
+      approver: {kind: standing_mandate, mandate_ref: mandates/nightly-notify}
+      when_unattended: defer_to_queue   # if no mandate covers this send
+  - capability: retrieve                # read-only, independent: runs
+    store_as: status_out
+  - capability: mutate                  # acts on the world: waits
+    store_as: cleanup_out
+  ```
+- A run that fails or escalates after a deferral still lists its
+  deferrals; a recovery loop that runs a deferred step again supersedes
+  its earlier `planned` record.
 - Decisions are recorded on the world state's action record
-  (`world_state_schema.yaml` 1.1.0): status `approved`, `rejected` or
-  `expired`, with an `approval` entry holding the digest and approvers.
+  (`world_state_schema.yaml` 1.1.0): status `approved`, `rejected`,
+  `expired` or `planned`, with an `approval` entry holding the digest,
+  the decision (`approved`, `rejected`, `expired` or `unavailable`) and
+  the approvers.
 
 ## Delegation hints (`delegation@1`)
 

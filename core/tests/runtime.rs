@@ -355,6 +355,35 @@ fn restore_refuses_malformed_states() {
             Box::new(|s| s["frames"][0]["cur"]["record"] = serde_json::json!(3)),
         ),
         (
+            "deferred step out of range",
+            Box::new(|s| s["frames"][0]["deferred"] = serde_json::json!([5])),
+        ),
+        (
+            "deferred step twice",
+            Box::new(|s| s["frames"][0]["deferred"] = serde_json::json!([0, 0])),
+        ),
+        (
+            "deferral in an unknown workflow",
+            Box::new(|s| {
+                s["deferrals"] = serde_json::json!([{"frame": ["x"], "path": [0],
+                    "store_as": null, "reason": "r", "record": null}]);
+            }),
+        ),
+        (
+            "deferral with a missing record",
+            Box::new(|s| {
+                s["deferrals"] = serde_json::json!([{"frame": ["w"], "path": [0],
+                    "store_as": null, "reason": "r", "record": 3}]);
+            }),
+        ),
+        (
+            "deferral path of the wrong length",
+            Box::new(|s| {
+                s["deferrals"] = serde_json::json!([{"frame": ["w"], "path": [0, 0],
+                    "store_as": null, "reason": "r", "record": null}]);
+            }),
+        ),
+        (
             "bad version",
             Box::new(|s| s["version"] = serde_json::json!(99)),
         ),
@@ -370,6 +399,12 @@ fn restore_refuses_malformed_states() {
             "{what}: a forged state was restored"
         );
     }
+    // A state saved before deferrals were tracked still restores.
+    let older = forged(&snap, |s| {
+        s.as_object_mut().unwrap().remove("deferrals");
+        s["frames"][0].as_object_mut().unwrap().remove("deferred");
+    });
+    assert!(Run::restore(&ctx, &catalog, &older, None).is_ok());
 }
 
 #[test]
@@ -409,4 +444,42 @@ fn values_must_be_ijson() {
     let run = Run::start(&ctx, &one_step(), "w", topic(), late).unwrap();
     let snap = run.snapshot(None);
     assert!(Run::restore(&ctx, &one_step(), &snap, None).is_ok());
+}
+
+#[test]
+fn restore_refuses_a_parent_frame_that_is_not_invoking() {
+    // A nested run is pending; the parent frame must sit at its invoke step.
+    let ctx = ctx();
+    let catalog = serde_json::json!({
+        "a": {"goal": "g", "risk": "low", "spec_version": "1.1", "steps": [
+            {"capability": "invoke", "purpose": "p", "store_as": "i",
+             "workflow_id": "b", "input_bindings": {"workflow": "b"}}]},
+        "b": {"goal": "g", "risk": "low", "spec_version": "1.1", "steps": [
+            {"capability": "observe", "purpose": "p", "store_as": "o",
+             "input_bindings": {"target": "t"}}]}
+    });
+    let run = Run::start(&ctx, &catalog, "a", Map::new(), opts()).unwrap();
+    let snap = run.snapshot(None);
+    assert!(Run::restore(&ctx, &catalog, &snap, None).is_ok());
+    for (what, edit) in [
+        (
+            "parent past its steps",
+            Box::new(|s: &mut Value| {
+                s["frames"][0]["step"] = serde_json::json!(1);
+                s["frames"][0]["stage"] = serde_json::json!({"stage": "Begin"});
+            }) as Box<dyn Fn(&mut Value)>,
+        ),
+        (
+            "parent not executing",
+            Box::new(|s: &mut Value| {
+                s["frames"][0]["stage"] = serde_json::json!({"stage": "Begin"})
+            }),
+        ),
+    ] {
+        let bad = forged(&snap, edit);
+        assert!(
+            Run::restore(&ctx, &catalog, &bad, None).is_err(),
+            "{what}: a forged state was restored"
+        );
+    }
 }

@@ -1,0 +1,190 @@
+{
+  "description": "A mandate that answers unavailable with when_unattended: skip skips the step; a skipped step defers nothing.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/nightly-sync"
+            },
+            "when_unattended": "skip"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "other",
+          "input_bindings": {
+            "target": "elsewhere"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "${m.success: boolean}",
+            "conditions": [
+              "applied"
+            ]
+          }
+        },
+        {
+          "capability": "explain",
+          "purpose": "explain step",
+          "store_as": "e",
+          "input_bindings": {
+            "conclusion": "${v.passed}"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "unavailable",
+        "approvers": [],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "observation": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 4
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "explain",
+        "step": 5
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "explanation": "ok",
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "status": "rejected",
+        "reason": "no standing mandate covers the action (when_unattended: skip); the step was skipped",
+        "approval": {
+          "decision": "unavailable",
+          "approvers": []
+        }
+      }
+    ],
+    "deferred": []
+  },
+  "trace_kinds": [
+    "approval_unattended",
+    "step_skipped"
+  ]
+}

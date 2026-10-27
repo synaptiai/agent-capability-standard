@@ -9,7 +9,7 @@ mod machine;
 pub mod program;
 mod quorum;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -144,12 +144,17 @@ pub enum Body {
         cause: Option<String>,
         outputs: Value,
         action_records: Vec<Value>,
+        /// Steps deferred to a queue, or deferred because they depend on
+        /// one (§5.14): `{frame, step, store_as, reason, action_id}`.
+        deferred: Vec<Value>,
     },
     Failed {
         code: String,
         step: Option<usize>,
         message: String,
         action_records: Vec<Value>,
+        /// As for `Completed`: deferrals made before the run failed.
+        deferred: Vec<Value>,
     },
 }
 
@@ -365,6 +370,15 @@ pub(crate) struct Frame {
     pub cur: StepState,
     /// While running a handler: the code that caused the escalation.
     pub escalation: Option<String>,
+    /// Steps of this frame deferred to a queue, or deferred because they
+    /// depend on one (§5.14), in list order. The frame ends `deferred` when
+    /// any is.
+    #[serde(default)]
+    pub deferred: Vec<usize>,
+    /// For a deferred invoke step: the capabilities its nested run deferred
+    /// (transitively), so ontology order sees through nested runs.
+    #[serde(default)]
+    pub nested_caps: BTreeMap<usize, Vec<String>>,
 }
 
 /// What the pending action is waiting for, beyond the action itself.
@@ -416,9 +430,25 @@ pub(crate) struct State {
     pub used_decisions: BTreeSet<String>,
     pub records: Vec<Value>,
     pub trace: Vec<Value>,
+    /// Every deferral of the run, in order, across nested runs.
+    #[serde(default)]
+    pub deferrals: Vec<Deferral>,
 }
 
-/// A run of one workflow.
+/// One deferred step (§5.14).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Deferral {
+    /// The workflows of the frames, root first, as on actions.
+    pub frame: Vec<String>,
+    /// The step each of those frames was at: the last is the deferred
+    /// step, the others the invoke steps that led to it. A recovery loop
+    /// drops the deferrals under the steps it runs again.
+    pub path: Vec<usize>,
+    pub store_as: Option<String>,
+    pub reason: String,
+    /// The action record it left (`planned`), if any.
+    pub record: Option<usize>,
+}
 pub struct Run {
     program: Program,
     state: State,
@@ -489,6 +519,7 @@ impl Run {
             used_decisions: BTreeSet::new(),
             records: Vec::new(),
             trace: Vec::new(),
+            deferrals: Vec::new(),
         };
         let mut run = Run { program, state };
         run.machine()
@@ -642,6 +673,49 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
         if f.cur.record.is_some_and(|r| r >= st.records.len()) {
             return Err("a step refers to a missing action record".into());
         }
+        // Deferred steps come before the current one, except while a
+        // handler runs: it may be listed before the steps it escalates from.
+        let ordered = f.deferred.windows(2).all(|w| w[0] < w[1]);
+        let in_range = f
+            .deferred
+            .iter()
+            .all(|&d| d < wf.steps.len() && (f.escalation.is_some() || d <= f.step));
+        let caps_known = f.nested_caps.keys().all(|k| f.deferred.contains(k));
+        if !ordered || !in_range || !caps_known {
+            return Err(format!(
+                "the deferred steps of '{}' are out of range or out of order",
+                f.workflow
+            ));
+        }
+    }
+    // A frame below the top waits on its invoke step for the nested run.
+    for f in &st.frames[..st.frames.len() - 1] {
+        let wf = &program.workflows[&f.workflow];
+        let invoking = f.stage == Stage::Execute
+            && wf
+                .steps
+                .get(f.step)
+                .is_some_and(|s| s.capability == "invoke");
+        if !invoking {
+            return Err(format!(
+                "'{}' has a nested run but is not at an invoke step",
+                f.workflow
+            ));
+        }
+    }
+    for d in &st.deferrals {
+        let well_formed = !d.frame.is_empty()
+            && d.frame.len() == d.path.len()
+            && d.frame.iter().zip(&d.path).all(|(w, &i)| {
+                program
+                    .workflows
+                    .get(w)
+                    .is_some_and(|wf| i < wf.steps.len())
+            })
+            && d.record.is_none_or(|r| r < st.records.len());
+        if !well_formed {
+            return Err("a deferral refers to a missing workflow, step or record".into());
+        }
     }
     if let Some(p) = &st.pending {
         if p.action.body.is_terminal() || p.action.id >= st.next_id {
@@ -677,6 +751,8 @@ impl Frame {
             stage: Stage::Begin,
             cur: StepState::default(),
             escalation: None,
+            deferred: Vec::new(),
+            nested_caps: BTreeMap::new(),
         }
     }
 }

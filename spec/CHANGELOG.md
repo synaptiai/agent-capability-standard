@@ -92,6 +92,16 @@ and reported five gaps; these close them.
   (`review_verdict_schema.yaml` 1.1.0; absent means `delta`), and
   `quorum.min_full` requires that many passing full sweeps; the tally
   gains `full_passes`.
+- **Standing mandates in unattended runs, and deferral that continues
+  (§5.14).** A `standing_mandate` approver is asked even when the run is
+  unattended; `when_unattended` applies only when it answers the new
+  decision `unavailable` (`world_state_schema.yaml` 1.1.0), and W606 no
+  longer fires for it. `defer_to_queue` now defers the step and every later
+  step that depends on it (reads its output, may act on or wait on the
+  world, or comes after it by an ontology `precedes` edge) and runs the
+  steps that only read, reason or record; the run still ends `deferred`, and every terminal action
+  lists the run's deferrals. Before, a mandate was never asked unattended
+  and a deferral ended the whole run.
 
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`

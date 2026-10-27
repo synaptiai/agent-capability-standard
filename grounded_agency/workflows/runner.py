@@ -95,7 +95,21 @@ class Host:
     def request_approval(self, action: Action) -> Response:
         """Ask ``action["approver"]`` to approve ``action["shown"]``; return
         ``{"kind": "Decision", "decision_id", "decision": "approved" |
-        "rejected", "approvers": [...], "digest": action["digest"]}``."""
+        "rejected" | "unavailable", "approvers": [...], "digest":
+        action["digest"]}``. ``unavailable`` means no one could decide (no
+        standing mandate covers the action): an unattended run then follows
+        the step's ``when_unattended``.
+
+        By default a standing mandate is unavailable (this host holds no
+        mandates), and any other approver raises ``NotImplementedError``."""
+        if action["approver"].get("kind") == "standing_mandate":
+            return {
+                "kind": "Decision",
+                "decision_id": f"no-mandate-{action['id']}",
+                "decision": "unavailable",
+                "approvers": [],
+                "digest": action["digest"],
+            }
         raise NotImplementedError("no approval channel")
 
     def recheck_source(self, action: Action) -> Response:
@@ -127,6 +141,10 @@ class RunResult:
     trace: list[dict[str, Any]] = field(default_factory=list)
     cause: str | None = None
     """The code that caused an escalation."""
+    deferred: list[dict[str, Any]] = field(default_factory=list)
+    """Steps deferred to a queue, or deferred because they depend on one
+    (``frame``, ``step``, ``store_as``, ``reason``, ``action_id``), whatever
+    the outcome."""
 
     @property
     def ok(self) -> bool:
@@ -300,6 +318,7 @@ class WorkflowRunner:
                 action_records=action["action_records"],
                 trace=trace,
                 cause=action.get("cause"),
+                deferred=action.get("deferred", []),
             )
         return RunResult(
             outcome=None,
@@ -307,4 +326,5 @@ class WorkflowRunner:
             message=action["message"],
             action_records=action["action_records"],
             trace=trace,
+            deferred=action.get("deferred", []),
         )

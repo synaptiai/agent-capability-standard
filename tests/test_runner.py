@@ -369,3 +369,80 @@ def test_running_out_of_actions_keeps_the_run(runner: WorkflowRunner) -> None:
     resumed = caught.value.run
     assert not resumed.finished
     assert runner.drive(resumed, FakeHost(Clock())).ok
+
+
+MANDATE_CATALOG = """\
+# Standard version: 1.1.0
+nightly_sync:
+  goal: Sync a setting overnight, then report.
+  risk: high
+  workflow_extensions:
+    requires: [approval@1]
+  inputs:
+    setting: {type: string, required: true}
+  steps:
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: cp
+    input_bindings:
+      scope: config
+  - capability: constrain
+    purpose: Check the change against policy.
+    store_as: policy
+    input_bindings:
+      target: ${setting}
+      constraints: [policy]
+  - capability: mutate
+    purpose: Apply the change.
+    store_as: applied
+    input_bindings:
+      target: ${setting}
+      operation: {set: true}
+    approval:
+      approver: {kind: standing_mandate, mandate_ref: mandates/nightly}
+      when_unattended: defer_to_queue
+  - capability: retrieve
+    purpose: Read the current configuration for the report.
+    store_as: report
+    input_bindings:
+      target: ${setting}
+"""
+
+
+@pytest.fixture()
+def mandate_runner(tmp_path: Path) -> WorkflowRunner:
+    catalog = tmp_path / "catalog.yaml"
+    catalog.write_text(MANDATE_CATALOG)
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    return WorkflowRunner(engine)
+
+
+def test_unattended_mandate_is_asked(mandate_runner: WorkflowRunner) -> None:
+    """A standing mandate is asked even when nobody is present (§5.14)."""
+    host = FakeHost(Clock())
+    result = mandate_runner.run(
+        "nightly_sync", {"setting": "x"}, host, attendance="unattended"
+    )
+    assert result.ok, result
+    assert host.calls == ["checkpoint", "constrain", "mutate", "retrieve"]
+    assert result.deferred == []
+
+
+def test_hosts_without_mandates_defer(mandate_runner: WorkflowRunner) -> None:
+    """The default host holds no mandates: the action is queued, and the
+    read-only report still runs."""
+
+    class NoApprovals(FakeHost):
+        request_approval = Host.request_approval
+
+    host = NoApprovals(Clock())
+    result = mandate_runner.run(
+        "nightly_sync", {"setting": "x"}, host, attendance="unattended"
+    )
+    assert result.outcome == "deferred"
+    assert host.calls == ["checkpoint", "constrain", "retrieve"]
+    assert [(d["step"], d["store_as"]) for d in result.deferred] == [(2, "applied")]
+    assert [r["status"] for r in result.action_records] == ["planned"]
+    assert result.action_records[0]["approval"]["decision"] == "unavailable"
+    assert result.deferred[0]["action_id"] == result.action_records[0]["action_id"]

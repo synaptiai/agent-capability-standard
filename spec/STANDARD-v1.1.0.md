@@ -531,8 +531,10 @@ kind, a malformed cron, duration or time zone, and an unknown `overlap` or
 
 An `invoke` step whose target declares triggers but none of kind `invoke`
 is V107. A step whose effective `requires_approval` is true, in a workflow
-with an unattended trigger, and with no `approval.when_unattended` is W606:
-an unattended run fails there (F502).
+with an unattended trigger, with no `approval.when_unattended` and no
+`standing_mandate` approver is W606: an unattended run fails there (F502).
+(With a mandate and no `when_unattended`, an `unavailable` answer still
+fails it.)
 
 #### 5.10.1 Durations
 
@@ -696,13 +698,64 @@ The shown values MUST be I-JSON (RFC 7493: integers within ±2^53, no
 duplicate keys), so that every implementation computes the same canonical
 JSON (RFC 8785). A decision is valid only if the SHA-256 digest of the
 canonical JSON of the shown values matches, at least `min_approvers` distinct approvers agree, it
-has not expired, and it has not been used before. Unattended runs follow
-`when_unattended`: `fail` → F502, `skip` → the step is skipped,
-`defer_to_queue` → the run ends `deferred` with a `planned` action record.
+has not expired, and it has not been used before. A decision is
+`approved`, `rejected`, or `unavailable`: no one could decide (no standing
+mandate covers the action). A mandate's approval names the approvers it
+stands for, and `min_approvers` counts them as for people. An
+`unavailable` decision is single-use too, and records no approvers.
+
+A `standing_mandate` approver needs no one present, so it is asked in an
+unattended run too; `when_unattended` applies only when it answers
+`unavailable`. A `human` approver is not asked in an unattended run, and
+`when_unattended` applies at once. In an attended run, `unavailable` is a
+refusal (F502). The plans:
+
+- `fail` (default) → F502.
+- `skip` → the step is skipped.
+- `defer_to_queue` → a `planned` action record, and the step is
+  **deferred**: it does not run now.
+
+Once a step of a workflow is deferred, each later step of that workflow is
+deferred too if it depends on a deferred step:
+
+1. it reads a deferred step's store (a reference in any executable field,
+   i.e. not `purpose` or a failure mode's prose, or a quorum reviewer);
+2. it may act on, or wait on, the world: its effective
+   `requires_checkpoint` or `requires_approval` is true, it waits (§5.13),
+   or it is an `invoke`, `delegate`, `synchronize` or `rollback`. A handler
+   (§5.11) is exempt from this rule, since it is the escalation path;
+3. ontology `precedes` edges, followed transitively, order its capability
+   after a deferred step's (as `verify` after `mutate`), including a
+   capability that a nested run deferred.
+
+A step is checked before its condition, so it waits rather than running
+on a missing value or an unchanged world; a deferred dependent is not
+asked for approval and does not follow its own `when_unattended`. Other
+steps, those that read, reason or record (`retrieve`, `observe`, `plan`,
+`audit`, `persist`, `checkpoint`, …) and depend on nothing deferred, still
+run. A deferred step that requires approval gets its own `planned` record.
+A nested run that ends `deferred` defers its `invoke` step; the
+invocation itself ran, so its record (if any) is `executed`, and the
+nested run's records are the queued actions. A recovery loop whose target
+is a deferred step, or one before it, runs the step again, and an invoke
+step that runs its workflow again (a retry) starts it afresh; either way
+the records of the earlier deferrals become `rejected` ("superseded"), so
+a queue never holds the same action twice.
+
+A run with deferred steps ends `deferred`, unless it fails, escalates or
+needs a replan, which take precedence. Whatever the outcome, the terminal
+action lists every deferral (`deferred`: frame, step, `store_as`, reason
+and the `action_id` of its record), so the host knows which queued actions
+belong to the run and what still waits for them. A handler that is
+deferred (or whose nested run deferred steps) has not finished handling,
+so that run ends `deferred`, keeping the escalation's cause; a nested run
+that ends so is, for its invoke step, an escalated nested run (R402).
+
 The decision is recorded on the action record (`world_state_schema.yaml`
 1.1.0: `approval` with the digest, decision and approvers; status
 `rejected` or `expired`, with a `reason`, when it was refused, invalid or
-lapsed, or when an unattended run did not ask).
+lapsed, or when an unattended run did not ask; `planned`, with the reason,
+when it was deferred).
 
 ### 5.15 Delegation
 
@@ -1004,7 +1057,7 @@ NOT change any code's severity otherwise.
 | W603 | DEPRECATED_FORM | Accepted legacy form (self-reading gate without `phase`, goto_step by capability id) |
 | W604 | UNKNOWN_FIELD | Unrecognised field, ignored; or a binding key outside the capability's inputs (§5.5); with a closest-match hint |
 | W605 | MISSING_SPEC_VERSION | No `spec_version` and no version header |
-| W606 | UNATTENDED_APPROVAL | An unattended trigger reaches an approval step without `when_unattended` |
+| W606 | UNATTENDED_APPROVAL | An unattended trigger reaches an approval step without `when_unattended` or a standing mandate |
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
 | W608 | WAIT_SPANS_CHECKPOINT | A wait sits between a checkpoint and a later step that requires one (§5.13) |
 | W609 | UNTRIGGERED_FAILURE_MODE | Structured recovery with neither `on_error` nor `when`, or a failure mode that fires only on R406 where no wait has `liveness` |
@@ -1374,7 +1427,8 @@ Field names starting with `x-` are reserved for vendor extensions.
   recovery and escalation, wait, approval, delegation, quorum (§5.9–§5.16)
 - Canonical schemas: `event_schema.yaml` 1.1.0 (`source.kind` gains
   `agent`); `world_state_schema.yaml` 1.1.0 (action status `rejected` and
-  `expired`, the `approval` record of §5.14, and a `reason`)
+  `expired`, the `approval` record of §5.14 with decisions `approved`,
+  `rejected`, `expired` and `unavailable`, and a `reason`)
 - `review_verdict_schema.yaml` 1.1.0 for quorum verdicts, with `scope`
   (§5.16)
 - Ontology: `delegate` inputs `fresh_context`, `model_family`, `role` and

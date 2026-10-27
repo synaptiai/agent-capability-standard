@@ -61,7 +61,7 @@ a run.
 | `InvokeCapability` | runs `capability` with `inputs` | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
-| `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}` |
+| `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
 | `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ...}` (the authenticated party that delivered it, §5.15) or `{"kind": "LivenessLost"}` (R406) |
 | `Sleep` | waits until `until` (retry backoff) | — (the runner calls `tick`) |
@@ -95,14 +95,22 @@ ontology contract requires, or the step fails (R402).
   and is used only once the step is approved and about to run. When none
   is valid, the executor asks for a new one (`CreateCheckpoint`). A
   completed wait invalidates earlier checkpoints.
-- **Approvals.** Every step that requires approval asks for it. The
+- **Approvals.** Every step that requires approval asks for it, unless it
+  is deferred. The
   decision must match the digest of what was shown, have enough distinct
-  approvers, arrive before `expires`, and not be reused. An unattended run
-  follows `approval.when_unattended`: `fail` (F502, the default), `skip`, or
-  `defer_to_queue` (the run ends `deferred`). `recheck` re-reads a source
-  before acting, then asks again (showing what changed), replans or stops
-  if it changed. Every approval leaves an action record, with a `reason`
-  when the action did not go ahead.
+  approvers, arrive before `expires`, and not be reused. A run that is
+  unattended asks only a standing mandate; when there is none, or it
+  answers `unavailable`, the run follows `approval.when_unattended`:
+  `fail` (F502, the default), `skip`, or `defer_to_queue`. A deferral
+  holds back the step and every later step that depends on it (reads its
+  output, may act on the world, or comes after it in the ontology), runs
+  the steps that only read, reason or record, and ends the run `deferred`.
+  In an attended run
+  `unavailable` is F502. The default `Host` holds no mandates: it answers
+  `unavailable` for one. `recheck` re-reads a source before acting, then
+  asks again (showing what changed), replans or stops if it changed.
+  Every approval leaves an action record, with a `reason` when the action
+  did not go ahead.
 - **Waits.** `AwaitEvent` has a deadline from the step's `timeout`. Events
   that don't match (`event_type`, `source_kind`, `correlate`,
   `accept_from`) are dropped and the wait goes on. A lapse is R401;
@@ -129,8 +137,10 @@ ontology contract requires, or the step fails (R402).
 
 `RunResult` gives the `outcome` (`completed`, `escalated`, `deferred`,
 `replan_required`) or the failure `code`, plus the outputs, the action
-records (world state `ActionRecord`s for every approved action) and the
-trace (every decision the executor took).
+records (world state `ActionRecord`s for every step that required
+approval), the deferrals (`deferred`: each deferred step, why, and the
+`action_id` of its queued action) and the trace (every decision the
+executor took).
 
 ## Driving a run yourself
 

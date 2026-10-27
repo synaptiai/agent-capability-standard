@@ -303,7 +303,8 @@ types:
         - failed
         - rolled_back
         description: rejected and expired (Standard v1.1 §5.14) record an approval
-          that was refused or lapsed; an action deferred to a queue stays planned.
+          that was refused or lapsed; an action deferred to a queue stays planned
+          (its approval, if any, says why it was not approved now).
       reason:
         type: string
         nullable: true
@@ -326,6 +327,9 @@ types:
             - approved
             - rejected
             - expired
+            - unavailable
+            description: unavailable means no one could decide (no standing mandate
+              covered the action); the step's when_unattended then applied.
           approvers:
             type: array
             items:

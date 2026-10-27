@@ -1,5 +1,5 @@
 {
-  "description": "defer_to_queue ends the run deferred with a planned record.",
+  "description": "defer_to_queue records a planned action; the run ends deferred.",
   "catalog": {
     "w": {
       "goal": "g",
