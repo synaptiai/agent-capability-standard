@@ -51,6 +51,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `grounded_agency.workflows.WorkflowRunner` and a `Host`
   ([guide](docs/guides/RUNNING_WORKFLOWS.md)); runtime conformance fixtures
   in `tests/conformance/runtime/`
+- `docs/research/analysis/validator-engine-disagreements-1.0.md`: minimal
+  reproductions of the 22 cases where the 1.0 validator and engine judged
+  the same workflow differently, and how each behaves now (#114, question 3)
 - A step that raises `requires_checkpoint` above the ontology is now held to
   it: F501 when no checkpoint runs before it
 - `world_state_schema.yaml` 1.1.0: action records gain status `rejected`

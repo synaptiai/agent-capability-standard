@@ -1296,7 +1296,9 @@ Field names starting with `x-` are reserved for vendor extensions.
 
 ## Appendix C: Changes from 1.0.0
 
-**Clarifications of 1.0 semantics** (apply to 1.0 and 1.1 workflows):
+**Clarifications of 1.0 semantics** (apply to 1.0 and 1.1 workflows; the
+1.0 validator and engine disagreements they settle are reproduced in
+[validator-engine-disagreements-1.0](../docs/research/analysis/validator-engine-disagreements-1.0.md)):
 
 | Area | 1.0.0 text | 1.1.0 |
 |------|------------|-------|
