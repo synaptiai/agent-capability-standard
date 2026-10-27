@@ -237,5 +237,8 @@ the candidate (no new extension versions). Decisions (user, 2026-10-27):
   deferred step, a retried invoke keeping stale deferrals, a nested
   escalation lost, an approved invoke queued twice, ontology order not
   seen through nested runs, a forged-snapshot panic (pre-existing).
-- [ ] Spec changelog, RFC-0003, CHANGELOG, design-114 §16, guides
-- [ ] Code and test review; fix all findings; reply on #114 (ask first)
+- [x] Spec changelog, RFC-0003, CHANGELOG, design-114 §16, guides (kept
+  current in each stage's commit)
+- [x] Code and test review of every stage, all findings fixed; reply on
+  #114 posted at the user's request:
+  [comment](https://github.com/synaptiai/agent-capability-standard/issues/114#issuecomment-6454258786)
