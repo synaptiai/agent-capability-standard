@@ -16,6 +16,7 @@ Example:
 
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -171,27 +172,27 @@ class WorkflowStep:
         """Parse a step from catalog data.
 
         With a ``registry``, the safety fields are resolved against the
-        ontology. Malformed gates and failure modes are skipped here; the
-        validator reports them.
+        ontology. Malformed parts (a gate that is not a mapping, a non-string
+        ``when``, ...) are left out here; the validator reports them.
         """
         gates = [
             Gate(
-                when=str(g.get("when", "")),
-                action=str(g.get("action", "")),
-                message=str(g.get("message", "")),
-                phase=g.get("phase"),
+                when=_text(g.get("when")),
+                action=_text(g.get("action")),
+                message=_text(g.get("message")),
+                phase=g.get("phase") if isinstance(g.get("phase"), str) else None,
             )
-            for g in (data.get("gates") or [])
+            for g in _items(data.get("gates"))
             if isinstance(g, dict)
         ]
         failure_modes = [
             FailureMode(
-                condition=str(fm.get("condition", "")),
-                action=str(fm.get("action", "")),
+                condition=_text(fm.get("condition")),
+                action=_text(fm.get("action")),
                 recovery=fm.get("recovery") or "",
-                when=fm.get("when"),
+                when=fm.get("when") if isinstance(fm.get("when"), str) else None,
             )
-            for fm in (data.get("failure_modes") or [])
+            for fm in _items(data.get("failure_modes"))
             if isinstance(fm, dict)
         ]
         retry = None
@@ -204,7 +205,12 @@ class WorkflowStep:
 
         declared = {k: data[k] for k in SAFETY_KEYS if k in data}
         plain: dict[str, Any] = {k: data.get(k) for k in _PLAIN_STEP_FIELDS}
-        cap = registry.get_capability(data["capability"]) if registry else None
+        capability = data["capability"]
+        cap = (
+            registry.get_capability(capability)
+            if registry and isinstance(capability, str)
+            else None
+        )
         bindings = data.get("input_bindings")
         return cls(
             capability=data["capability"],
@@ -221,14 +227,20 @@ class WorkflowStep:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """The step as catalog data. Safety fields are written as their
-        effective values, which are never weaker than the ontology's for a
-        step parsed with a registry."""
+        """The step as catalog data.
+
+        A safety field is written when the source declared it or its value
+        is stricter than the field's default; otherwise it is left out and
+        inherits from the ontology. Written values are the effective ones,
+        never weaker than the ontology's for a step parsed with a registry.
+        """
         d: dict[str, Any] = {"capability": self.capability, "purpose": self.purpose}
         if self.store_as:
             d["store_as"] = self.store_as
         for k in SAFETY_KEYS:
-            d[k] = getattr(self, k)
+            value = getattr(self, k)
+            if k in self.declared or value not in (False, "low"):
+                d[k] = value
         if self.input_bindings:
             d["input_bindings"] = self.input_bindings
         if self.gates:
@@ -243,6 +255,17 @@ class WorkflowStep:
                 d[k] = value
         d.update(self.extra)
         return d
+
+
+def _items(value: Any) -> list[Any]:
+    """A list field's items; anything but a list has none (the validator
+    reports the wrong shape)."""
+    return value if isinstance(value, list) else []
+
+
+def _text(value: Any) -> str:
+    """A string field's text; anything but a string reads as empty."""
+    return value if isinstance(value, str) else ""
 
 
 def resolve_safety_flags(
@@ -294,9 +317,11 @@ _WORKFLOW_FIELDS = frozenset(
 class WorkflowDefinition:
     """A complete workflow.
 
-    A definition parsed from catalog data keeps that data as ``source``, and
-    validation reads the source, so it sees exactly what was written. A
-    definition built in code has no source and is validated as
+    A definition parsed from catalog data keeps that data as ``source``.
+    While its typed fields still render as they did when parsed, validation
+    reads the source, so it sees exactly what was written (including parts
+    the typed view leaves out). A definition built in code, edited after
+    parsing, or copied with :func:`dataclasses.replace` is validated as
     :meth:`to_dict` renders it.
     """
 
@@ -313,7 +338,13 @@ class WorkflowDefinition:
     # failing that, its catalog's ``# Standard version:`` header.
     spec_version: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
-    source: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    source: dict[str, Any] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    # to_dict() as parsed, to tell whether the typed fields were edited since.
+    _parsed: dict[str, Any] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @classmethod
     def from_dict(
@@ -324,14 +355,15 @@ class WorkflowDefinition:
         header_version: str | None = None,
     ) -> WorkflowDefinition:
         """Parse a workflow from catalog data. Steps that are not mappings
-        with a ``capability`` are skipped here; the validator reports them."""
+        with a string ``capability`` are skipped here; the validator reports
+        them."""
         steps = [
             WorkflowStep.from_dict(s, registry)
-            for s in (data.get("steps") or [])
-            if isinstance(s, dict) and "capability" in s
+            for s in _items(data.get("steps"))
+            if isinstance(s, dict) and isinstance(s.get("capability"), str)
         ]
         spec_version = data.get("spec_version")
-        return cls(
+        workflow = cls(
             name=name,
             goal=data.get("goal", ""),
             risk=data.get("risk", "low"),
@@ -345,8 +377,10 @@ class WorkflowDefinition:
                 spec_version if isinstance(spec_version, str) else header_version
             ),
             extra={k: v for k, v in data.items() if k not in _WORKFLOW_FIELDS},
-            source=data,
         )
+        workflow.source = data
+        workflow._parsed = copy.deepcopy(workflow.to_dict())
+        return workflow
 
     def to_dict(self) -> dict[str, Any]:
         """The workflow as catalog data, built from the typed fields."""
@@ -369,11 +403,12 @@ class WorkflowDefinition:
         return d
 
     def validation_data(self) -> dict[str, Any]:
-        """What the validator checks: the source when there is one (with a
-        header version carried over as ``spec_version``), else
-        :meth:`to_dict`."""
-        if self.source is None:
-            return self.to_dict()
+        """What the validator checks: the source while the typed fields are
+        unedited (with a header version carried over as ``spec_version``),
+        else :meth:`to_dict`."""
+        current = self.to_dict()
+        if self.source is None or current != self._parsed:
+            return current
         if "spec_version" in self.source or self.spec_version is None:
             return self.source
         return {**self.source, "spec_version": self.spec_version}
@@ -392,6 +427,15 @@ class WorkflowDefinition:
     def store_as_names(self) -> set[str]:
         """All store_as variable names defined by steps."""
         return {s.store_as for s in self.steps if s.store_as}
+
+
+def _with_version(data: Any, version: str | None) -> Any:
+    """``data`` with a catalog header's version as its ``spec_version``,
+    unless it declares one (a V109 then cites ``spec_version`` rather than
+    the header)."""
+    if version is None or not isinstance(data, dict) or "spec_version" in data:
+        return data
+    return {**data, "spec_version": version}
 
 
 @dataclass(slots=True)
@@ -461,6 +505,8 @@ class BindingError:
             reference=raw_ref.split(":", 1)[0].strip(),
             error_type=_CODE_TO_ERROR_TYPE.get(d.code, d.code.name.lower()),
             message=d.message,
+            expected_type=loc.get("expected_type"),
+            actual_type=loc.get("actual_type"),
             code=d.code,
         )
 
@@ -523,6 +569,10 @@ class WorkflowEngine:
         self._registry = CapabilityRegistry(ontology_path)
         self._checkpoint_tracker = checkpoint_tracker
         self._workflows: dict[str, WorkflowDefinition] = {}
+        # Catalog entries too malformed to load as workflows (not a mapping,
+        # no steps). They are still validated, so the engine reports what
+        # tools/validate_workflows.py reports for the same file.
+        self._unloadable: dict[str, Any] = {}
         self._validator: _core.Validator | None = None
 
     @property
@@ -573,12 +623,12 @@ class WorkflowEngine:
         for name, wf_data in data.items():
             if name.startswith("x-"):
                 continue
-            if not isinstance(wf_data, dict):
-                logger.warning("Skipping non-dict workflow entry: %s", name)
+            if not isinstance(wf_data, dict) or "steps" not in wf_data:
+                logger.warning("Not loading malformed workflow entry: %s", name)
+                self._workflows.pop(name, None)
+                self._unloadable[name] = _with_version(wf_data, header)
                 continue
-            if "steps" not in wf_data:
-                logger.warning("Skipping workflow without steps: %s", name)
-                continue
+            self._unloadable.pop(name, None)
             self._workflows[name] = WorkflowDefinition.from_dict(
                 name, wf_data, self._registry, header
             )
@@ -588,7 +638,25 @@ class WorkflowEngine:
         return count
 
     def add_workflow(self, workflow: WorkflowDefinition) -> None:
-        """Add (or replace) a workflow under its name."""
+        """Add (or replace) a workflow under its name.
+
+        Its steps' safety fields are resolved against the ontology, as for a
+        loaded workflow, so ``mutation_steps`` and the like see what the
+        engine enforces.
+
+        Raises:
+            ValueError: If the name starts with ``x-`` (vendor data, which
+                is never validated)
+        """
+        if workflow.name.startswith("x-"):
+            raise ValueError(
+                f"'{workflow.name}': names starting with 'x-' are vendor data, "
+                f"not workflows"
+            )
+        for step in workflow.steps:
+            for key, value in self.effective_flags(step).items():
+                setattr(step, key, value)
+        self._unloadable.pop(workflow.name, None)
         self._workflows[workflow.name] = workflow
 
     def get_workflow(self, name: str) -> WorkflowDefinition | None:
@@ -602,8 +670,15 @@ class WorkflowEngine:
     def effective_flags(self, step: WorkflowStep) -> dict[str, Any]:
         """The safety fields ``step`` is treated as: its own values made at
         least as strict as the ontology's. For a step parsed with this
-        engine's registry this equals the step's attributes."""
+        engine's registry this equals the step's attributes.
+
+        ``mutation: false`` overrides a ``mutation_overridable`` capability
+        only when the step declared it (``step.declared``); the attribute's
+        default is not a declaration.
+        """
         own = {k: getattr(step, k) for k in SAFETY_KEYS}
+        if own["mutation"] is False and step.declared.get("mutation") is not False:
+            del own["mutation"]
         return resolve_safety_flags(own, self._registry.get_capability(step.capability))
 
     # -- Validation ---------------------------------------------------------
@@ -617,12 +692,22 @@ class WorkflowEngine:
         them resolve. With ``workflow_name``, only that workflow's
         diagnostics are returned.
 
+        Entries of a loaded catalog that were too malformed to load as
+        workflows are validated too.
+
         Raises:
-            KeyError: If ``workflow_name`` is not loaded
+            KeyError: If ``workflow_name`` is neither loaded nor one of those
         """
-        if workflow_name is not None and workflow_name not in self._workflows:
+        if (
+            workflow_name is not None
+            and workflow_name not in self._workflows
+            and workflow_name not in self._unloadable
+        ):
             raise KeyError(f"Workflow not found: {workflow_name}")
-        catalog = {name: wf.validation_data() for name, wf in self._workflows.items()}
+        catalog = {
+            **self._unloadable,
+            **{name: wf.validation_data() for name, wf in self._workflows.items()},
+        }
         report = self._core_validator().validate(catalog)
         diagnostics = [ValidationError.from_core(d) for d in report["diagnostics"]]
         if workflow_name is None:

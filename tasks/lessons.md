@@ -26,3 +26,28 @@ diagnostics). CI never validates them.
 old tool on a `main` worktree first. Report what is new separately from what
 was already broken, and do not silently widen the change to fix pre-existing
 debt.
+
+## Check hook contracts against the SDK, not against our own tests (S4)
+
+**What happened.** The PreToolUse checkpoint hook returned a top-level
+`{"permissionDecision": "deny"}`. The SDK only reads a decision from
+`hookSpecificOutput`, so the deny never took effect; the tests asserted the
+same wrong shape and passed. The first reservation fix also assumed
+PostToolUse reports failures, but Claude Code sends those to
+`PostToolUseFailure`.
+
+**Rule.** For any hook or callback contract, read the SDK's own type
+definitions (`claude_agent_sdk.types`) before writing or reviewing it, and
+assert the SDK's shape in tests. Ask "which events fire, and when?" before
+relying on a cleanup path.
+
+## Let reviews finish before committing (S4)
+
+**What happened.** I committed and pushed S4 while three reviews were still
+running, to keep the work safe in an ephemeral container. The reviews then
+found real defects, so the branch carried a known-flawed commit until the
+fix commit.
+
+**Rule.** When the user asks for review before commit, wait for the reviews.
+If the work must be saved first, say so explicitly and name the follow-up
+commit that will carry the review fixes.

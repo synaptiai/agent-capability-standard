@@ -122,11 +122,14 @@ monitor_and_replan:
     retry: null
     store_as: critique_out
     input_bindings:
-      target: ${plan}
+      target:
+        plan: ${plan}
+        violations: "${violations_out.matches: array<object>}"
       criteria:
       - step_validity
       - goal_achievability
       - resource_availability
+      severity_threshold: major
     failure_modes: []
   - capability: plan
     purpose: Generate revised plan incorporating new constraints.
@@ -145,7 +148,7 @@ monitor_and_replan:
     gates:
     - when: ${critique_out.issues} == []
       action: skip
-      message: Critique found no issues with the current plan; keep it.
+      message: No violation of major severity or worse; keep the current plan.
     failure_modes:
     - condition: Unable to find viable plan
       action: stop
@@ -237,7 +240,7 @@ clarify_intent:
       filter:
         type: clarification_response
     gates:
-    - when: ${clarification_request_out} == null || ${clarification_request_out.confidence} < 0.5
+    - when: ${clarification_request_out} == null || ${clarification_request_out.questions} == []
       action: skip
       message: No clarifying questions were asked, nothing to receive.
     failure_modes:

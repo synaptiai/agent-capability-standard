@@ -139,6 +139,19 @@ impl Ontology {
                 output_schema: node.get("output_schema").cloned().unwrap_or(Value::Null),
                 id: id.clone(),
             };
+            // An override may only drop a mutation no other control
+            // protects (STANDARD v1.1 §5.2).
+            if cap.mutation_overridable
+                && (!cap.mutation
+                    || cap.risk != Risk::Low
+                    || cap.requires_checkpoint
+                    || cap.requires_approval)
+            {
+                return Err(format!(
+                    "capability '{id}': mutation_overridable needs mutation: true, risk: low \
+                     and neither requires_checkpoint nor requires_approval"
+                ));
+            }
             if capabilities.insert(id.clone(), cap).is_some() {
                 return Err(format!("duplicate capability id '{id}'"));
             }
@@ -202,6 +215,28 @@ mod tests {
         assert_eq!(m.risk, Risk::High);
         assert!(m.requires_checkpoint && m.requires_approval && !m.mutation_overridable);
         assert_eq!(o.incoming("mutate", EdgeType::Requires), ["checkpoint"]);
+    }
+
+    #[test]
+    fn mutation_overridable_only_where_harmless() {
+        let node = |extra: Value| {
+            let mut n = json!({"id": "x", "layer": "L", "mutation": true,
+                "mutation_overridable": true});
+            for (k, v) in extra.as_object().unwrap() {
+                n[k] = v.clone();
+            }
+            Ontology::from_value(&json!({"nodes": [n], "edges": []}))
+        };
+        assert!(node(json!({})).is_ok());
+        for bad in [
+            json!({"mutation": false}),
+            json!({"risk": "medium"}),
+            json!({"requires_checkpoint": true}),
+            json!({"requires_approval": true}),
+        ] {
+            let err = node(bad.clone()).err().unwrap_or_default();
+            assert!(err.contains("mutation_overridable"), "{bad}: {err}");
+        }
     }
 
     #[test]

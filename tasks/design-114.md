@@ -95,6 +95,9 @@ meaning. New codes:
   `domain`, `profile`, `risk_propagation`, `data_flow`. Anything else → W604.
 * Spec version: per-workflow `spec_version` ("1.0", "1.1", optional patch) or
   file header `# Standard version: X.Y.Z`. Neither → W605. Unsupported → V109.
+  The header is found among the file's leading comment lines; a BOM, blank
+  lines, `%` directives and a `---` marker may precede it. Versions are
+  `digits.digits[.digits]`, nothing else.
 * `workflow_extensions`: `supports_*` booleans (advisory) and `requires:
   ["name@major"]`. Known: `triggers@1`, `recovery@1`, `wait@1`, `approval@1`,
   `delegation@1`, `quorum@1`. Unknown name or major → V106.
@@ -111,12 +114,17 @@ meaning. New codes:
 
 ## 5. Edges
 
+A step *runs before* another when it comes earlier in the list and is not
+in the same `parallel_group` (steps of one group run concurrently).
+
 | Edge | Rule | Code |
 |------|------|------|
-| requires | `from` present at an earlier step | V102 |
-| precedes | if both present, the first `to` must not come before the first `from` | V102 |
-| soft_requires | `from` present at an earlier step | W601 |
-| conflicts_with | not in the same `parallel_group` (pairs de-duplicated) | F504 |
+| requires | a `from` step runs before each `to` step | V102 per `to` step |
+| precedes | if both are present, a `from` step runs before every `to` step | V102 once per edge, at the first offending `to` |
+| soft_requires | one of the target's incoming sources runs before it (any-of) | W601 per step |
+| conflicts_with | not in the same `parallel_group` | F504 once per (group, pair) |
+
+All edge checks are linear in the number of steps.
 
 New ontology edges: `soft_requires` constrain→{execute, mutate, send},
 plan→{execute, mutate}. Handler steps are outside the sequence for
@@ -183,7 +191,8 @@ string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no sur
   an `||` chain) later operands treat that reference as present, and with it
   every reference it is a prefix of up to that point: `${x}` present makes
   `${x.f}` non-null when `f` is required (optional segments below stay
-  nullable).
+  nullable). Below an untyped node nothing is required, so every further
+  segment may be null unless that exact prefix was narrowed.
 * After an unknown root (B202) or bad path (B201) no further diagnostic is
   reported for that operand.
 * Runtime errors (R405): a gate whose `when` errors FIRES; a `condition`

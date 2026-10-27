@@ -1,5 +1,5 @@
 {
- "description": "Static-check fixtures for ACS condition expressions. 'scope' gives each reference root's schema and whether it is always present; expect lists the diagnostic codes, in order, a validator MUST report.",
+ "description": "Static-check fixtures for ACS condition expressions. 'scope' gives each reference root's schema and whether it is always present; expect lists the diagnostic codes, in order, a validator MUST report. A root without 'schema' is untyped: nothing is known about its fields.",
  "version": "1.0",
  "scope": {
   "c": {
@@ -155,6 +155,9 @@
      }
     }
    },
+   "always_present": false
+  },
+  "untyped": {
    "always_present": false
   }
  },
@@ -509,6 +512,60 @@
   {
    "id": "prefix-guard-wrong-polarity-not-narrowed",
    "expr": "${skipped} != null || ${skipped.confidence} > 0.5",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "prefix-guard-keeps-optional-non-null-field-nullable",
+   "expr": "${skipped} != null && ${skipped.opt} > false",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "intermediate-prefix-guard-keeps-optional-field-nullable",
+   "expr": "${c.open} != null && ${c.open.k} > \"a\"",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "index-prefix-guard-narrows-required-field",
+   "expr": "${c.items[0]} != null && ${c.items[0].name: string} > \"a\"",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "root-guard-does-not-cover-index",
+   "expr": "${c} != null && ${c.items[0].name: string} > \"a\"",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "untyped-path-may-be-absent",
+   "expr": "${untyped.a.b: number} > 1",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "untyped-root-guard-does-not-cover-fields",
+   "expr": "${untyped} != null && ${untyped.a.b: number} > 1",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "untyped-path-guard-narrows-itself",
+   "expr": "${untyped.a.b} != null && ${untyped.a.b: number} > 1",
+   "expect": []
+  },
+  {
+   "id": "field-below-any-may-be-absent",
+   "expr": "${c.x.deep: number} > 1",
    "expect": [
     "W610"
    ]

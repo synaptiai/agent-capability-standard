@@ -35,8 +35,15 @@ class CapabilityNode:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CapabilityNode:
-        """Create CapabilityNode from ontology YAML node."""
-        return cls(
+        """Create CapabilityNode from ontology YAML node.
+
+        Raises:
+            ValueError: If ``mutation_overridable`` is set where dropping the
+                mutation would bypass another control (it needs
+                ``mutation: true``, ``risk: low`` and neither checkpoint nor
+                approval), as the Rust core also refuses.
+        """
+        node = cls(
             id=data["id"],
             layer=data["layer"],
             description=data.get("description", ""),
@@ -48,6 +55,18 @@ class CapabilityNode:
             input_schema=data.get("input_schema", {}),
             output_schema=data.get("output_schema", {}),
         )
+        if node.mutation_overridable and (
+            not node.mutation
+            or node.risk != "low"
+            or node.requires_checkpoint
+            or node.requires_approval
+        ):
+            raise ValueError(
+                f"capability '{node.id}': mutation_overridable needs mutation: "
+                f"true, risk: low and neither requires_checkpoint nor "
+                f"requires_approval"
+            )
+        return node
 
 
 @dataclass(slots=True)

@@ -38,7 +38,7 @@ safe_mutation:
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: mutate_out

@@ -1,4 +1,4 @@
-# Standard version: 1.0.0
+# Standard version: 1.1.0
 # Negative fixture (STANDARD §5.5(1)): a step's inputs cannot reference its
 # own output, which does not exist yet. B202 MISSING_PRODUCER.
 self_reference:

@@ -51,16 +51,40 @@ pub(crate) fn to_py(py: Python<'_>, v: &Value) -> PyResult<Py<PyAny>> {
 /// value: `None`, `bool`, `int` within 64 bits, finite `float`, `str`, `list`
 /// or `tuple`, and `dict` with `str` keys. Anything else is a `TypeError`.
 ///
-/// The same limits as for YAML apply: nesting at most [`yaml::MAX_DEPTH`]
-/// levels, and at most [`yaml::MAX_ALIAS_WEIGHT`] nodes in all, so a
-/// structure that shares or cycles through its own containers cannot expand
-/// without bound.
+/// Containers nest at most [`yaml::MAX_DEPTH`] levels, as in YAML, and a
+/// value holds at most [`yaml::MAX_ALIAS_WEIGHT`] nodes, so a structure that
+/// shares or cycles through its own containers cannot expand without bound.
+/// (YAML budgets only alias expansion; Python data has no aliases to tell
+/// apart from plain nodes, so every node counts.)
 pub(crate) fn from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     from_py_inner(obj, 0, &mut 0)
 }
 
+/// [`from_py`] for a catalog: each workflow under its own node budget, so
+/// several large workflows validated together are not refused.
+fn catalog_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
+    let Ok(d) = obj.cast::<PyDict>() else {
+        return from_py(obj);
+    };
+    let mut m = Map::new();
+    for (k, v) in d.iter() {
+        let Ok(key) = k.cast::<PyString>() else {
+            return Err(PyTypeError::new_err(format!(
+                "mapping keys must be strings, found {}",
+                k.get_type().name()?
+            )));
+        };
+        m.insert(key.to_str()?.to_owned(), from_py_inner(&v, 1, &mut 0)?);
+    }
+    Ok(Value::Object(m))
+}
+
 fn from_py_inner(obj: &Bound<'_, PyAny>, depth: usize, nodes: &mut usize) -> PyResult<Value> {
-    if depth > yaml::MAX_DEPTH {
+    // A container at `depth` opens nesting level depth + 1.
+    let container = obj.is_instance_of::<PyDict>()
+        || obj.is_instance_of::<PyList>()
+        || obj.is_instance_of::<PyTuple>();
+    if container && depth >= yaml::MAX_DEPTH {
         return Err(PyValueError::new_err(format!(
             "nesting deeper than {} levels",
             yaml::MAX_DEPTH
@@ -212,7 +236,10 @@ fn validate_catalog(
 
 /// A validator bound to one ontology, loaded once. The ontology's contracts
 /// are a snapshot taken at construction; other schema files (workflow input
-/// `$ref`s, `output_conforms_to`) are re-read on every call.
+/// `$ref`s, `output_conforms_to`) are re-read on every call. Calls release
+/// the GIL; when threads share one validator, a call may see a schema file
+/// re-read by another call partway through, so give each thread its own
+/// validator if files change during validation.
 #[pyclass(frozen, module = "grounded_agency._core")]
 struct Validator {
     ctx: Context,
@@ -248,7 +275,7 @@ impl Validator {
         catalog: &Bound<'_, PyAny>,
         header: Option<String>,
     ) -> PyResult<Py<PyAny>> {
-        let catalog = from_py(catalog)?;
+        let catalog = catalog_from_py(catalog)?;
         let report = py.detach(|| {
             self.ctx.schemas.clear_cache();
             validate::validate_catalog(&self.ctx, &catalog, header.as_deref())

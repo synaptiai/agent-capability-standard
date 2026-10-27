@@ -169,6 +169,9 @@ class GroundedAgentConfig:
         max_turns: Maximum agent turns (SDK ``max_turns``).
         enable_discovery: If True, inject a PreToolUse hook that runs
             capability discovery on user prompts automatically.
+        checkpoint_reservation_seconds: How long a tool call holds the
+            checkpoint it reserved if it never reports back (default: the
+            tracker's, 600). See CheckpointTracker.validate_and_reserve.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -183,6 +186,25 @@ class GroundedAgentConfig:
     model: str | None = None
     max_turns: int | None = None
     enable_discovery: bool = False
+    checkpoint_reservation_seconds: float | None = None
+
+
+def _checkpoint_denial(
+    capability_id: str, tool_name: str, reserved_checkpoint: str | None
+) -> str:
+    """Why a checkpoint-gated tool call may not proceed."""
+    if reserved_checkpoint is not None:
+        return (
+            f"Capability '{capability_id}' requires checkpoint, and checkpoint "
+            f"{reserved_checkpoint} is reserved by another in-flight mutation. "
+            f"Retry {tool_name} after it completes, or create a new checkpoint."
+        )
+    return (
+        f"Capability '{capability_id}' requires checkpoint. "
+        f"Create checkpoint before using {tool_name}. "
+        f"Use the 'checkpoint' skill or call "
+        f"adapter.checkpoint_tracker.create_checkpoint()."
+    )
 
 
 @dataclass
@@ -239,7 +261,10 @@ class GroundedAgentAdapter:
             )
         self.registry = CapabilityRegistry(self.config.ontology_path)
         self.mapper = ToolCapabilityMapper(self.registry.ontology)
-        self.checkpoint_tracker = CheckpointTracker(self.config.checkpoint_dir)
+        self.checkpoint_tracker = CheckpointTracker(
+            self.config.checkpoint_dir,
+            reservation_seconds=self.config.checkpoint_reservation_seconds,
+        )
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
 
@@ -301,6 +326,11 @@ class GroundedAgentAdapter:
         mutation_hook = self._make_mutation_consumer()
         post_hooks.append(self._wrap_hook(mutation_hook))
 
+        # PostToolUse only follows a successful call; a failed or
+        # interrupted one must give back the checkpoint it reserved.
+        failure_hooks = list(existing_hooks.get("PostToolUseFailure", []))
+        failure_hooks.append(self._wrap_hook(self._make_failure_releaser()))
+
         # Build PreToolUse hooks for checkpoint enforcement in Python layer
         pre_hooks = list(existing_hooks.get("PreToolUse", []))
         checkpoint_pre_hook = self._make_pretooluse_checkpoint_hook()
@@ -326,6 +356,7 @@ class GroundedAgentAdapter:
             **existing_hooks,
             "PreToolUse": pre_hooks,
             "PostToolUse": post_hooks,
+            "PostToolUseFailure": failure_hooks,
         }
 
         # Ensure Skill tool is allowed
@@ -422,8 +453,12 @@ class GroundedAgentAdapter:
         for environments where shell hooks are not active (e.g., when
         using the SDK programmatically).
 
-        Returns a ``permissionDecision: "deny"`` when a mutation tool
-        is invoked without a valid checkpoint.
+        PreToolUse runs for every tool call, including pre-approved ones
+        that never reach ``can_use_tool``, so this is where a checkpoint-gated
+        call reserves the active checkpoint, keyed by its ``tool_use_id``
+        (SEC-007). In strict mode it denies the call (``hookSpecificOutput``
+        with ``permissionDecision: "deny"``) when there is no valid
+        checkpoint or another call holds it.
 
         Returns:
             Async hook callback function
@@ -447,18 +482,23 @@ class GroundedAgentAdapter:
                 if not mapping.requires_checkpoint:
                     return {}
 
-                if tracker.has_valid_checkpoint():
+                reserved, checkpoint_id = tracker.validate_and_reserve(tool_use_id)
+                if reserved:
                     return {}
 
-                message = (
-                    f"PreToolUse: {tool_name} requires checkpoint. "
-                    f"Capability '{mapping.capability_id}' is {mapping.risk}-risk. "
-                    f"Create a checkpoint before proceeding."
+                message = "PreToolUse: " + _checkpoint_denial(
+                    mapping.capability_id, tool_name, checkpoint_id
                 )
 
                 if strict:
                     logger.warning("PreToolUse denied: %s", message)
-                    return {"permissionDecision": "deny", "message": message}
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": message,
+                        }
+                    }
 
                 logger.warning("PreToolUse warning (non-strict): %s", message)
 
@@ -471,11 +511,14 @@ class GroundedAgentAdapter:
 
     def _make_mutation_consumer(self) -> Any:
         """
-        Create PostToolUse hook that auto-consumes checkpoints after mutations.
+        Create PostToolUse hook that consumes the checkpoint a successful
+        checkpoint-gated call reserved.
 
-        This enforces one-checkpoint-per-mutation semantics: after a mutation
-        completes successfully, the checkpoint is consumed, requiring a new
-        checkpoint for subsequent mutations.
+        This enforces one-checkpoint-per-mutation semantics: after the
+        mutation completes, its checkpoint is consumed, requiring a new
+        checkpoint for subsequent mutations. Only the checkpoint reserved
+        under the call's ``tool_use_id`` is touched, so a call that held no
+        reservation cannot consume another call's checkpoint.
 
         Returns:
             Async hook callback function
@@ -488,23 +531,17 @@ class GroundedAgentAdapter:
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
-            """
-            PostToolUse hook: consume the checkpoint after a successful
-            mutation, or release the reservation check_permission took for
-            the call otherwise, so the checkpoint can cover a retry.
-            """
+            """PostToolUse hook: consume the call's reserved checkpoint, or
+            release it if the tool reported an error."""
             try:
                 tool_name = input_data.get("tool_name", "")
                 tool_input = input_data.get("tool_input", {})
 
-                # Check if this was a mutation
                 mapping = mapper.map_tool(tool_name, tool_input)
-                if not mapping.mutation:
-                    if mapping.requires_checkpoint:
-                        tracker.release_reservation()
+                if not mapping.requires_checkpoint:
                     return {}
 
-                # Check if mutation was successful (no error in response)
+                # Check if the call was successful (no error in response)
                 tool_response = input_data.get("tool_response")
                 is_error = False
                 if isinstance(tool_response, dict):
@@ -512,17 +549,13 @@ class GroundedAgentAdapter:
                 elif tool_response is not None and hasattr(tool_response, "is_error"):
                     is_error = getattr(tool_response, "is_error", False)
 
-                if is_error:
-                    # Mutation failed - don't consume checkpoint
-                    tracker.release_reservation()
-                    logger.info("Mutation %s failed, checkpoint preserved", tool_name)
+                if is_error or not mapping.mutation:
+                    # Nothing changed - keep the checkpoint for a retry
+                    tracker.release_reservation(tool_use_id)
+                    logger.info("%s changed nothing, checkpoint preserved", tool_name)
                     return {}
 
-                # Mutation succeeded — consume checkpoint directly.
-                # No has_valid_checkpoint() guard: consume_checkpoint() is
-                # already atomic and returns None if nothing to consume,
-                # avoiding a TOCTOU race between check and consume.
-                consumed_id = tracker.consume_checkpoint()
+                consumed_id = tracker.consume_checkpoint(tool_use_id)
                 if consumed_id is not None:
                     logger.info(
                         "Checkpoint %s consumed after %s", consumed_id, tool_name
@@ -535,6 +568,35 @@ class GroundedAgentAdapter:
             return {}
 
         return consume_after_mutation
+
+    def _make_failure_releaser(self) -> Any:
+        """
+        Create PostToolUseFailure hook that releases the checkpoint a failed
+        or interrupted call reserved, so it can cover a retry.
+
+        Returns:
+            Async hook callback function
+        """
+        tracker = self.checkpoint_tracker
+
+        async def release_after_failure(
+            input_data: dict[str, Any],
+            tool_use_id: str | None,
+            context: HookContext | None,
+        ) -> dict[str, Any]:
+            """PostToolUseFailure hook: release the call's reservation."""
+            try:
+                holder = tool_use_id or input_data.get("tool_use_id")
+                if holder and tracker.release_reservation(holder):
+                    logger.info(
+                        "%s failed, checkpoint reservation released",
+                        input_data.get("tool_name", ""),
+                    )
+            except Exception as e:
+                logger.warning("Failure releaser failed: %s", e)
+            return {}
+
+        return release_after_failure
 
     def _make_permission_callback(self) -> Any:
         """
@@ -594,25 +656,17 @@ class GroundedAgentAdapter:
 
                 # Check if checkpoint required
                 if mapping.requires_checkpoint:
-                    # SEC-007: Use atomic validate_and_reserve to prevent TOCTOU;
-                    # the reservation ends in consume_after_mutation.
-                    is_valid, checkpoint_id = tracker.validate_and_reserve()
+                    # SEC-007: Use atomic validate_and_reserve to prevent
+                    # TOCTOU. Keyed by the call's tool_use_id, this repeats
+                    # the PreToolUse reservation idempotently; the
+                    # reservation ends in consume_after_mutation or
+                    # release_after_failure.
+                    holder = getattr(context, "tool_use_id", None)
+                    is_valid, checkpoint_id = tracker.validate_and_reserve(holder)
                     if not is_valid:
-                        if checkpoint_id is not None:
-                            message = (
-                                f"Capability '{mapping.capability_id}' requires "
-                                f"checkpoint, and checkpoint {checkpoint_id} is "
-                                f"reserved by another in-flight mutation. Retry "
-                                f"{tool_name} after it completes, or create a new "
-                                f"checkpoint."
-                            )
-                        else:
-                            message = (
-                                f"Capability '{mapping.capability_id}' requires checkpoint. "
-                                f"Create checkpoint before using {tool_name}. "
-                                f"Use the 'checkpoint' skill or call "
-                                f"adapter.checkpoint_tracker.create_checkpoint()."
-                            )
+                        message = _checkpoint_denial(
+                            mapping.capability_id, tool_name, checkpoint_id
+                        )
 
                         if strict:
                             if has_sdk_types:

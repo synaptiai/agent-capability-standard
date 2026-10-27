@@ -163,10 +163,14 @@ impl Checker<'_> {
                     .diag(Code::InvalidAnnotation, format!("{e} in ${{{}}}", r.raw)))),
                 Ok(expected) => {
                     if !types::compatible(&expected, &actual) {
-                        report.push(at(self.loc.diag(
-                            Code::TypeMismatch,
-                            format!("type mismatch ${{{}}}: annotated {expected} but schema has {actual}", r.raw),
-                        )));
+                        report.push(
+                            at(self.loc.diag(
+                                Code::TypeMismatch,
+                                format!("type mismatch ${{{}}}: annotated {expected} but schema has {actual}", r.raw),
+                            ))
+                            .at("expected_type", expected.to_string())
+                            .at("actual_type", actual.to_string()),
+                        );
                         let (kind, hint) = if external {
                             (
                                 "external_binding_type_mismatch",
@@ -246,7 +250,9 @@ impl Checker<'_> {
                         )
                         .at("field", format!("input_bindings.{key}"))
                         .at("input_key", key.as_str())
-                        .at("ref", r.raw.as_str()),
+                        .at("ref", r.raw.as_str())
+                        .at("expected_type", expected.to_string())
+                        .at("actual_type", actual.to_string()),
                 );
                 let from_t = actual.to_string();
                 let to_t = expected.to_string();

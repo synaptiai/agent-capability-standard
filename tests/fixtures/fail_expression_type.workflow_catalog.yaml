@@ -1,4 +1,4 @@
-# Standard version: 1.0.0
+# Standard version: 1.1.0
 # Negative fixture (STANDARD v1.1 §5.8): ordering a boolean against a number
 # is a type error. B206.
 expression_type:

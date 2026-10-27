@@ -108,8 +108,10 @@ def main() -> None:
                     ("error", "structured_errors", not res["ok"]),
                     ("warning", "structured_warnings", True),
                 ):
+                    # A list names codes that must be emitted; an empty
+                    # list means none may be.
                     expected_codes = meta.get(f"expected_{kind}_codes")
-                    if not (expected_codes and applies):
+                    if expected_codes is None or not applies:
                         continue
                     emitted_codes = _read_emitted_codes(key)
                     missing = set(expected_codes) - emitted_codes
@@ -117,6 +119,10 @@ def main() -> None:
                         missing_msgs.append(
                             f"missing expected {kind} codes: "
                             f"{sorted(missing)} (emitted: {sorted(emitted_codes)})"
+                        )
+                    elif not expected_codes and emitted_codes:
+                        missing_msgs.append(
+                            f"expected no {kind} codes, emitted {sorted(emitted_codes)}"
                         )
                 if missing_msgs:
                     failed += 1

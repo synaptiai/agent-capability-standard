@@ -1,7 +1,7 @@
 //! Ontology edges, safety flags, unknown fields and spec versions
 //! (design-114 §4–§5).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
@@ -68,40 +68,50 @@ pub(crate) const WORKFLOW_EXTENSIONS_KEYS: &[&str] = &[
 /// minors of the current major).
 pub(crate) const SUPPORTED_VERSIONS: &[(u64, u64)] = &[(1, 0), (1, 1)];
 
+/// Keys longer than this get no did-you-mean hint: they are not typos of
+/// a field name, and the distance is quadratic in the key's length.
+const MAX_HINT_KEY_CHARS: usize = 64;
+
 /// Optimal-string-alignment distance (Levenshtein plus adjacent
-/// transpositions, so `stpes` is one edit from `steps`).
-fn distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
-    for (i, row) in d.iter_mut().enumerate() {
-        row[0] = i;
-    }
-    for (j, cell) in d[0].iter_mut().enumerate() {
-        *cell = j;
-    }
+/// transpositions, so `stpes` is one edit from `steps`), in three rows.
+fn distance(a: &[char], b: &[char]) -> usize {
+    let mut before: Vec<usize> = vec![0; b.len() + 1];
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur: Vec<usize> = vec![0; b.len() + 1];
     for i in 1..=a.len() {
+        cur[0] = i;
         for j in 1..=b.len() {
             let cost = usize::from(a[i - 1] != b[j - 1]);
-            let mut v = (d[i - 1][j] + 1)
-                .min(d[i][j - 1] + 1)
-                .min(d[i - 1][j - 1] + cost);
+            let mut v = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
             if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                v = v.min(d[i - 2][j - 2] + 1);
+                v = v.min(before[j - 2] + 1);
             }
-            d[i][j] = v;
+            cur[j] = v;
         }
+        std::mem::swap(&mut before, &mut prev);
+        std::mem::swap(&mut prev, &mut cur);
     }
-    d[a.len()][b.len()]
+    prev[b.len()]
 }
 
 /// The known key closest to `key`, if it is close enough to be a typo.
 fn closest<'k>(key: &str, known: &[&'k str]) -> Option<&'k str> {
-    let limit = (key.chars().count() / 3).max(1);
+    let key: Vec<char> = key.chars().collect();
+    if key.len() > MAX_HINT_KEY_CHARS {
+        return None;
+    }
+    let limit = (key.len() / 3).max(1);
     known
         .iter()
-        .map(|k| (distance(key, k), *k))
-        .filter(|(d, _)| *d <= limit)
+        .filter_map(|k| {
+            let k_chars: Vec<char> = k.chars().collect();
+            // The length difference alone is a lower bound on the distance.
+            if k_chars.len().abs_diff(key.len()) > limit {
+                return None;
+            }
+            let d = distance(&key, &k_chars);
+            (d <= limit).then_some((d, *k))
+        })
         .min_by_key(|(d, _)| *d)
         .map(|(_, k)| k)
 }
@@ -191,8 +201,27 @@ pub(crate) struct Placed<'a> {
     pub parallel_group: Option<&'a str>,
 }
 
-/// `precedes` (order, V102), `soft_requires` (presence, any-of, W601) and
-/// `conflicts_with` (concurrency, F504) over the workflow's steps in order.
+impl Placed<'_> {
+    /// Steps of one parallel group run at the same time, so neither
+    /// completes before the other starts.
+    fn concurrent_with(&self, other: &Placed<'_>) -> bool {
+        self.parallel_group.is_some() && self.parallel_group == other.parallel_group
+    }
+}
+
+/// Where each capability occurs, for O(1) "ran before" queries.
+struct Occurrences {
+    /// First position of the capability.
+    first: usize,
+    /// First position not concurrent with the first one (a different
+    /// group, or no group), if any.
+    first_elsewhere: Option<usize>,
+}
+
+/// `requires` (V102), `precedes` (order, V102), `soft_requires` (presence,
+/// any-of, W601) and `conflicts_with` (concurrency, F504) over the
+/// workflow's steps in order. A step "runs before" another when it comes
+/// earlier in the list and is not in the same parallel group.
 pub(crate) fn check_edges(
     ctx: &Context,
     workflow: &str,
@@ -205,28 +234,94 @@ pub(crate) fn check_edges(
             .at("step", p.index)
             .at("capability", p.capability)
     };
-    let first = |cap: &str| placed.iter().position(|p| p.capability == cap);
+    let mut occurs: HashMap<&str, Occurrences> = HashMap::new();
     for (pos, p) in placed.iter().enumerate() {
-        let before = &placed[..pos];
-        // precedes: when both are present, `from` must come first.
+        match occurs.get_mut(p.capability) {
+            None => {
+                occurs.insert(
+                    p.capability,
+                    Occurrences {
+                        first: pos,
+                        first_elsewhere: None,
+                    },
+                );
+            }
+            Some(o) => {
+                if o.first_elsewhere.is_none() && !placed[o.first].concurrent_with(p) {
+                    o.first_elsewhere = Some(pos);
+                }
+            }
+        }
+    }
+    // Whether `cap` runs before the step at `pos`.
+    let ran_before = |cap: &str, pos: usize| -> bool {
+        let Some(o) = occurs.get(cap) else {
+            return false;
+        };
+        let p = &placed[pos];
+        if o.first >= pos {
+            return false;
+        }
+        if !placed[o.first].concurrent_with(p) {
+            return true;
+        }
+        // The first occurrence shares p's group; the first one outside it
+        // is the earliest candidate left.
+        o.first_elsewhere.is_some_and(|e| e < pos)
+    };
+
+    let mut reported_precedes: HashSet<(&str, &str)> = HashSet::new();
+    for (pos, p) in placed.iter().enumerate() {
+        for req in ctx.ontology.incoming(p.capability, EdgeType::Requires) {
+            if !ran_before(req, pos) {
+                report.push(
+                    at(
+                        p,
+                        Code::MissingPrerequisite,
+                        format!(
+                            "capability '{}' missing required prerequisite '{req}' before it",
+                            p.capability
+                        ),
+                    )
+                    .at("prerequisite", req),
+                );
+            }
+        }
+        // precedes: when both are present, `from` must run first; reported
+        // once per edge, at the first step that breaks it.
         for from in ctx.ontology.incoming(p.capability, EdgeType::Precedes) {
-            if before.iter().any(|q| q.capability == from) {
+            if ran_before(from, pos) || reported_precedes.contains(&(from, p.capability)) {
                 continue;
             }
-            if let Some(later) = first(from).filter(|&f| f > pos) {
-                report.push(at(
+            let Some(o) = occurs.get(from) else {
+                continue;
+            };
+            reported_precedes.insert((from, p.capability));
+            let first = &placed[o.first];
+            let detail = if first.concurrent_with(p) {
+                format!(
+                    "'{from}' (step {}) runs concurrently in parallel_group '{}'",
+                    first.index,
+                    first.parallel_group.unwrap_or_default()
+                )
+            } else {
+                format!("'{from}' first appears at step {}", first.index)
+            };
+            report.push(
+                at(
                     p,
                     Code::MissingPrerequisite,
                     format!(
-                        "'{}' must come after '{from}' (precedes), but '{from}' first appears at step {}",
-                        p.capability, placed[later].index
+                        "'{}' must come after '{from}' (precedes), but {detail}",
+                        p.capability
                     ),
-                ));
-            }
+                )
+                .at("prerequisite", from),
+            );
         }
-        // soft_requires: any one source of the group should come earlier.
+        // soft_requires: any one source of the group should run earlier.
         let sources = ctx.ontology.incoming(p.capability, EdgeType::SoftRequires);
-        if !sources.is_empty() && !before.iter().any(|q| sources.contains(&q.capability)) {
+        if !sources.is_empty() && !sources.iter().any(|s| ran_before(s, pos)) {
             report.push(at(
                 p,
                 Code::SoftRequirementUnmet,
@@ -242,55 +337,68 @@ pub(crate) fn check_edges(
             ));
         }
     }
-    // conflicts_with: never in the same parallel group. The edges are
-    // symmetric, so compare unordered pairs once.
-    let pairs: HashSet<(&str, &str)> = ctx
+
+    // conflicts_with: never in the same parallel group; reported once per
+    // group and unordered pair, at the step that completes the pair.
+    let mut partners: HashMap<&str, Vec<&str>> = HashMap::new();
+    for e in ctx
         .ontology
         .edges
         .iter()
         .filter(|e| e.kind == EdgeType::ConflictsWith)
-        .map(|e| {
-            let (a, b) = (e.from.as_str(), e.to.as_str());
-            if a <= b { (a, b) } else { (b, a) }
-        })
-        .collect();
-    for (j, b) in placed.iter().enumerate() {
+    {
+        partners
+            .entry(e.from.as_str())
+            .or_default()
+            .push(e.to.as_str());
+        partners
+            .entry(e.to.as_str())
+            .or_default()
+            .push(e.from.as_str());
+    }
+    let mut in_group: HashMap<(&str, &str), usize> = HashMap::new();
+    let mut reported: HashSet<(&str, &str, &str)> = HashSet::new();
+    for b in placed {
         let Some(group) = b.parallel_group else {
             continue;
         };
-        for a in placed[..j]
-            .iter()
-            .filter(|a| a.parallel_group == Some(group))
-        {
-            let key = if a.capability <= b.capability {
-                (a.capability, b.capability)
-            } else {
-                (b.capability, a.capability)
+        for &other in partners.get(b.capability).into_iter().flatten() {
+            let Some(&first) = in_group.get(&(group, other)) else {
+                continue;
             };
-            if pairs.contains(&key) {
+            let pair = if other <= b.capability {
+                (group, other, b.capability)
+            } else {
+                (group, b.capability, other)
+            };
+            if reported.insert(pair) {
                 report.push(at(
                     b,
                     Code::ConstraintViolated,
                     format!(
-                        "'{}' conflicts with '{}' (step {}) and they share parallel_group '{group}'; conflicting capabilities must not run concurrently",
-                        b.capability, a.capability, a.index
+                        "'{}' conflicts with '{other}' (step {first}) and they share parallel_group '{group}'; conflicting capabilities must not run concurrently",
+                        b.capability
                     ),
                 ));
             }
         }
+        in_group.entry((group, b.capability)).or_insert(b.index);
     }
 }
 
 /// Parse `major.minor[.patch]`.
 fn parse_version(v: &str) -> Option<(u64, u64)> {
-    let mut parts = v.trim().split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    match parts.next() {
-        None => {}
-        Some(p) => {
-            p.parse::<u64>().ok()?;
+    let number = |p: &str| -> Option<u64> {
+        if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
         }
+        p.parse().ok()
+    };
+    let mut parts = v.split('.');
+    let major = number(parts.next()?)?;
+    let minor = number(parts.next()?)?;
+    if let Some(patch) = parts.next() {
+        number(patch)?;
     }
     parts.next().is_none().then_some((major, minor))
 }
@@ -351,9 +459,12 @@ pub(crate) fn spec_version(
 /// The version named by a `# Standard version: X.Y.Z` comment among the
 /// file's leading comment lines.
 pub fn header_version(text: &str) -> Option<String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     for line in text.lines() {
         let t = line.trim();
-        if t.is_empty() {
+        // Blank lines, YAML directives and the document start marker may
+        // come before or between the leading comments.
+        if t.is_empty() || t.starts_with('%') || t == "---" {
             continue;
         }
         let Some(comment) = t.strip_prefix('#') else {
@@ -378,8 +489,27 @@ mod tests {
             Some("requires_approval")
         );
         assert_eq!(closest("zzzzzz", STEP_KEYS), None);
-        assert_eq!(distance("kitten", "sitting"), 3);
-        assert_eq!(distance("stpes", "steps"), 1);
+        let d = |a: &str, b: &str| {
+            let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+            distance(&a, &b)
+        };
+        assert_eq!(d("kitten", "sitting"), 3);
+        assert_eq!(d("stpes", "steps"), 1);
+        assert_eq!(d("ab", "ba"), 1);
+        assert_eq!(d("", "abc"), 3);
+        assert_eq!(d("abc", ""), 3);
+        assert_eq!(d("ca", "abc"), 3);
+    }
+
+    #[test]
+    fn long_keys_get_no_hint_and_stay_fast() {
+        let key = "s".repeat(1_000_000);
+        let start = std::time::Instant::now();
+        assert_eq!(closest(&key, STEP_KEYS), None);
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        // At the cap a hint is still possible.
+        let near = format!("{}x", "requires_approval");
+        assert_eq!(closest(&near, STEP_KEYS), Some("requires_approval"));
     }
 
     #[test]
@@ -394,5 +524,18 @@ mod tests {
             Some("1.1.0")
         );
         assert_eq!(header_version("w: {}\n# Standard version: 1.1.0\n"), None);
+        for text in [
+            "\u{feff}# Standard version: 1.1.0\nw: {}\n",
+            "---\n# Standard version: 1.1.0\nw: {}\n",
+            "%YAML 1.2\n---\n# Standard version: 1.1.0\nw: {}\n",
+            "\n# a comment\n\n# Standard version: 1.1.0\n",
+        ] {
+            assert_eq!(header_version(text).as_deref(), Some("1.1.0"), "{text:?}");
+        }
+        for bad in ["+1.+1", " 1.1 ", "1.1 ", "1..1", "1.1.", "-1.1", "1.x"] {
+            assert_eq!(parse_version(bad), None, "{bad:?}");
+        }
+        // Leading zeros are digits; the version is still 1.1.
+        assert_eq!(parse_version("01.01"), Some((1, 1)));
     }
 }

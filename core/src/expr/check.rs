@@ -405,7 +405,12 @@ impl<'s> Checker<'s> {
         let mut walked = r.root.clone();
         for seg in &r.path {
             walked.push_str(&seg.to_string());
-            let Some(n) = node else { break };
+            let Some(n) = node else {
+                // Nothing is known below an untyped node, so every further
+                // segment may be absent unless a guard narrowed it.
+                maybe_null = !self.non_null.contains(&walked);
+                continue;
+            };
             let step = match seg {
                 Seg::Field(key) => {
                     let required = n

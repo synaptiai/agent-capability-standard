@@ -1,4 +1,4 @@
-# Standard version: 1.0.0
+# Standard version: 1.1.0
 # Negative fixture (STANDARD v1.1 §5.6): an after-gate cannot skip a step
 # that already ran (S303), and a before-gate cannot read the output its own
 # step has not produced yet (B202).

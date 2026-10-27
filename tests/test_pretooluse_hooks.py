@@ -12,6 +12,16 @@ from claude_agent_sdk import ClaudeAgentOptions
 
 from grounded_agency import GroundedAgentAdapter
 
+
+def _decision(result: dict) -> str | None:
+    """The PreToolUse permission decision, as the SDK reads it."""
+    return result.get("hookSpecificOutput", {}).get("permissionDecision")
+
+
+def _reason(result: dict) -> str:
+    return result.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
+
+
 # =============================================================================
 # PreToolUse Hook Tests
 # =============================================================================
@@ -33,8 +43,9 @@ class TestPreToolUseCheckpointHook:
             None,
         )
 
-        assert result.get("permissionDecision") == "deny"
-        assert "requires checkpoint" in result.get("message", "")
+        assert _decision(result) == "deny"
+        assert result["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert "requires checkpoint" in _reason(result)
 
     @pytest.mark.asyncio
     async def test_blocks_edit_without_checkpoint(
@@ -49,7 +60,7 @@ class TestPreToolUseCheckpointHook:
             None,
         )
 
-        assert result.get("permissionDecision") == "deny"
+        assert _decision(result) == "deny"
 
     @pytest.mark.asyncio
     async def test_allows_write_with_checkpoint(
@@ -66,7 +77,7 @@ class TestPreToolUseCheckpointHook:
         )
 
         # Should return empty dict (no denial)
-        assert result == {} or "permissionDecision" not in result
+        assert result == {}
 
     @pytest.mark.asyncio
     async def test_allows_read_always(self, strict_adapter: GroundedAgentAdapter):
@@ -79,7 +90,7 @@ class TestPreToolUseCheckpointHook:
             None,
         )
 
-        assert result == {} or "permissionDecision" not in result
+        assert result == {}
 
     @pytest.mark.asyncio
     async def test_allows_grep_always(self, strict_adapter: GroundedAgentAdapter):
@@ -108,7 +119,7 @@ class TestPreToolUseCheckpointHook:
         )
 
         # In non-strict mode, should NOT deny
-        assert result.get("permissionDecision") != "deny"
+        assert _decision(result) != "deny"
 
     @pytest.mark.asyncio
     async def test_blocks_destructive_bash(self, strict_adapter: GroundedAgentAdapter):
@@ -121,7 +132,7 @@ class TestPreToolUseCheckpointHook:
             None,
         )
 
-        assert result.get("permissionDecision") == "deny"
+        assert _decision(result) == "deny"
 
     @pytest.mark.asyncio
     async def test_allows_readonly_bash(self, strict_adapter: GroundedAgentAdapter):

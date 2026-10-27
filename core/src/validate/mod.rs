@@ -19,7 +19,7 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 use crate::diag::{Code, Diagnostic};
-use crate::ontology::{EdgeType, Ontology, Risk};
+use crate::ontology::{Ontology, Risk};
 use crate::refs;
 use crate::schema::SchemaStore;
 use crate::types::{self, Type};
@@ -43,8 +43,6 @@ pub struct Coercion {
 pub struct Contracts {
     pub input: Value,
     pub output: Value,
-    /// Sources of incoming `requires` edges.
-    pub requires: Vec<String>,
 }
 
 /// Everything validation needs besides the catalog itself.
@@ -104,15 +102,9 @@ impl Context {
                         empty()
                     }
                 };
-                let requires = ontology
-                    .incoming(&cap.id, EdgeType::Requires)
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect();
                 let c = Contracts {
                     input: resolve(&cap.input_schema),
                     output: resolve(&cap.output_schema),
-                    requires,
                 };
                 (cap.id.clone(), c)
             })
@@ -364,7 +356,6 @@ impl WorkflowCheck<'_> {
             }
             None => return,
         };
-        let mut seen: Vec<&str> = Vec::new();
         let mut placed: Vec<semantics::Placed<'_>> = Vec::new();
         let mut first_use: HashMap<&str, usize> = HashMap::new();
         for (i, step) in steps.iter().enumerate() {
@@ -397,6 +388,9 @@ impl WorkflowCheck<'_> {
                 step: i,
                 capability: cap,
             };
+            // Shape and unknown-key checks do not depend on the capability.
+            self.check_step_fields(&loc, step);
+            self.check_step_keys(&loc, step);
             let (Some(node), Some(contracts)) =
                 (self.ctx.ontology.get(cap), self.ctx.contracts.get(cap))
             else {
@@ -409,27 +403,12 @@ impl WorkflowCheck<'_> {
                 );
                 continue;
             };
-            self.check_step_fields(&loc, step);
-            self.check_step_keys(&loc, step);
             semantics::flag_downgrades(&loc, step, node, self.report);
             placed.push(semantics::Placed {
                 index: i,
                 capability: cap,
                 parallel_group: step.get("parallel_group").and_then(Value::as_str),
             });
-            for req in &contracts.requires {
-                if !seen.contains(&req.as_str()) {
-                    self.report.push(
-                        loc.diag(
-                            Code::MissingPrerequisite,
-                            format!(
-                                "capability '{cap}' missing required prerequisite '{req}' before it"
-                            ),
-                        )
-                        .at("prerequisite", req.as_str()),
-                    );
-                }
-            }
             self.check_files(&loc, step);
 
             let store = step.get("store_as").and_then(Value::as_str);
@@ -512,7 +491,6 @@ impl WorkflowCheck<'_> {
                     scope.maybe_absent.insert(store.to_string());
                 }
             }
-            seen.push(cap);
         }
         semantics::check_edges(self.ctx, self.name, &placed, self.report);
     }
@@ -1085,6 +1063,110 @@ mod tests {
         ]));
         let c = codes(together);
         assert_eq!(c.iter().filter(|x| **x == "F504").count(), 1, "{c:?}");
+    }
+
+    fn grouped(cap: &str, store: &str, group: &str) -> Value {
+        let mut s = st(cap, store);
+        s["parallel_group"] = json!(group);
+        s
+    }
+
+    fn count(c: &[&str], code: &str) -> usize {
+        c.iter().filter(|x| **x == code).count()
+    }
+
+    #[test]
+    fn a_concurrent_step_does_not_run_before() {
+        // observe precedes detect, but in one parallel group they overlap.
+        let c = codes(wf(json!([
+            grouped("observe", "o", "g"),
+            grouped("detect", "d", "g")
+        ])));
+        assert_eq!(count(&c, "V102"), 1, "{c:?}");
+        // Outside the group, or in an earlier group, it counts.
+        let c = codes(wf(json!([
+            grouped("observe", "o1", "g"),
+            st("observe", "o2"),
+            grouped("detect", "d", "g")
+        ])));
+        assert_eq!(count(&c, "V102"), 0, "{c:?}");
+        let c = codes(wf(json!([
+            grouped("observe", "o", "a"),
+            grouped("detect", "d", "b")
+        ])));
+        assert_eq!(count(&c, "V102"), 0, "{c:?}");
+        // A checkpoint running alongside the mutation covers nothing: both
+        // `checkpoint requires mutate` and `checkpoint precedes mutate` fail.
+        let report = validate_catalog(
+            &ctx(),
+            &wf(json!([
+                st("plan", "p"),
+                st("constrain", "k"),
+                grouped("checkpoint", "c", "g"),
+                grouped("mutate", "m", "g")
+            ])),
+            None,
+        );
+        let v102: Vec<&str> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == Code::MissingPrerequisite)
+            .map(|d| d.message.as_str())
+            .collect();
+        assert_eq!(v102.len(), 2, "{v102:?}");
+        assert!(v102[0].contains("missing required prerequisite 'checkpoint'"));
+        assert!(v102[1].contains("runs concurrently in parallel_group 'g'"));
+        // soft_requires likewise.
+        let c = codes(wf(json!([
+            grouped("observe", "o", "g"),
+            grouped("ground", "x", "g")
+        ])));
+        assert_eq!(count(&c, "W601"), 1, "{c:?}");
+    }
+
+    #[test]
+    fn precedes_is_reported_once_per_edge() {
+        let c = codes(wf(json!([
+            st("detect", "d1"),
+            st("detect", "d2"),
+            st("observe", "o")
+        ])));
+        assert_eq!(count(&c, "V102"), 1, "{c:?}");
+    }
+
+    #[test]
+    fn conflicts_are_reported_once_per_group_and_pair() {
+        let mut steps = vec![st("checkpoint", "c")];
+        for i in 0..40 {
+            let cap = if i % 2 == 0 { "rollback" } else { "persist" };
+            steps.push(grouped(cap, &format!("s{i}"), "g"));
+        }
+        steps.push(grouped("rollback", "r2", "h"));
+        steps.push(grouped("persist", "p2", "h"));
+        let c = codes(wf(Value::Array(steps)));
+        assert_eq!(count(&c, "F504"), 2, "{c:?}");
+    }
+
+    #[test]
+    fn edge_checks_scale_linearly() {
+        let steps: Vec<Value> = (0..20_000)
+            .map(|i| st("ground", &format!("g{i}")))
+            .collect();
+        let start = std::time::Instant::now();
+        let c = codes(wf(Value::Array(steps)));
+        assert_eq!(count(&c, "W601"), 20_000);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn unknown_capability_still_gets_key_checks() {
+        let c = codes(wf(json!([{"capability": "nope", "purpose": "p",
+            "store_as": "n", "bogus": 1}])));
+        assert_eq!(c, ["W604", "V101"]);
     }
 
     #[test]

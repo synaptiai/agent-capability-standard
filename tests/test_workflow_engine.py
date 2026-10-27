@@ -53,6 +53,19 @@ def engine_with_tracker(tmp_path: Path) -> WorkflowEngine:
     return eng
 
 
+def _add_parsed(
+    eng: WorkflowEngine, name: str, steps: list[dict[str, Any]]
+) -> WorkflowDefinition:
+    """Add a workflow parsed from catalog data, as load_catalog would."""
+    wf = WorkflowDefinition.from_dict(
+        name,
+        {"goal": "g", "risk": "high", "spec_version": "1.1", "steps": steps},
+        eng.registry,
+    )
+    eng.add_workflow(wf)
+    return wf
+
+
 # ---------------------------------------------------------------------------
 # AC1: Workflow engine MVP loads workflow definitions
 # ---------------------------------------------------------------------------
@@ -686,28 +699,19 @@ class TestValidateAllStructured:
         """A step that downgrades ontology safety flags is W602: a warning,
         since the ontology value applies regardless (STANDARD v1.1 §5.2)."""
         engine = WorkflowEngine(ONTOLOGY_PATH)
-        # mutate has mutation=true in ontology; downgrade it to false
-        engine._workflows["downgrade_wf"] = WorkflowDefinition(
-            name="downgrade_wf",
-            goal="test",
-            risk="low",
-            steps=[
-                WorkflowStep(
-                    capability="checkpoint",
-                    purpose="save state",
-                    store_as="cp",
-                    mutation=True,
-                    risk="medium",
-                ),
-                WorkflowStep(
-                    capability="mutate",
-                    purpose="modify",
-                    store_as="m",
-                    mutation=False,  # downgrades ontology's mutation=true
-                    requires_checkpoint=True,
-                    requires_approval=True,
-                    risk="high",
-                ),
+        _add_parsed(
+            engine,
+            "downgrade_wf",
+            [
+                {"capability": "plan", "purpose": "p", "store_as": "p"},
+                {"capability": "checkpoint", "purpose": "save", "store_as": "cp"},
+                # mutate has mutation=true in the ontology; downgrade it
+                {
+                    "capability": "mutate",
+                    "purpose": "m",
+                    "store_as": "m",
+                    "mutation": False,
+                },
             ],
         )
         assert "downgrade_wf" not in engine.validate_all_structured()
@@ -1000,6 +1004,211 @@ class TestCatalogData:
             engine.validate_report("nonexistent")
 
 
+class TestValidationSeesEdits:
+    """Validation reflects the typed fields once they differ from what was
+    parsed; it never reports a stale source."""
+
+    def test_replace_drops_the_source(self, engine: WorkflowEngine) -> None:
+        import dataclasses
+
+        wf = engine.get_workflow("debug_code_change")
+        assert wf is not None
+        copy = dataclasses.replace(
+            wf,
+            name="dcc2",
+            steps=[*wf.steps[:1], WorkflowStep(capability="nonexistent", purpose="x")],
+        )
+        assert copy.source is None
+        engine.add_workflow(copy)
+        assert any("nonexistent" in e for e in engine.validate_capabilities("dcc2"))
+
+    def test_in_place_edits_are_seen(self, engine: WorkflowEngine) -> None:
+        wf = engine.get_workflow("debug_code_change")
+        assert wf is not None
+        wf.steps.append(WorkflowStep(capability="bogus", purpose="x", store_as="b"))
+        assert any("bogus" in e for e in engine.validate_capabilities(wf.name))
+
+    def test_edited_bindings_are_seen(self, engine: WorkflowEngine) -> None:
+        wf = engine.get_workflow("clarify_intent")
+        assert wf is not None
+        step = next(s for s in wf.steps if s.input_bindings)
+        key = next(iter(step.input_bindings))
+        step.input_bindings[key] = "${no_such_store}"
+        errors = engine.validate_bindings(wf.name)
+        assert [e.reference for e in errors] == ["no_such_store"]
+
+    def test_unedited_definition_validates_its_source(
+        self, engine: WorkflowEngine
+    ) -> None:
+        """The catalog's header version is carried over as spec_version."""
+        wf = engine.get_workflow("debug_code_change")
+        assert wf is not None and wf.source is not None
+        assert "spec_version" not in wf.source
+        assert wf.validation_data() == {**wf.source, "spec_version": "1.1.0"}
+
+
+class TestMalformedCatalogs:
+    """Malformed shapes load without crashing and get the same diagnostics
+    from the engine as from tools/validate_workflows.py."""
+
+    HEADER = "# Standard version: 1.1.0\n"
+
+    @pytest.mark.parametrize(
+        "body, code",
+        [
+            ("  - capability: [observe]\n    purpose: p\n", "V103"),
+            ("  - capability: {a: 1}\n    purpose: p\n", "V103"),
+            (
+                "  - capability: observe\n    purpose: p\n    store_as: o\n"
+                "    gates: 5\n",
+                "S303",
+            ),
+            (
+                "  - capability: observe\n    purpose: p\n    store_as: o\n"
+                "    failure_modes: 5\n",
+                "S303",
+            ),
+            (
+                "  - capability: observe\n    purpose: p\n    store_as: o\n"
+                "    gates:\n    - when: null\n      action: stop\n",
+                "S303",
+            ),
+        ],
+        ids=["capability-list", "capability-map", "gates-int", "fm-int", "when-null"],
+    )
+    def test_malformed_step_shapes(self, tmp_path: Path, body: str, code: str) -> None:
+        catalog = tmp_path / "c.yaml"
+        catalog.write_text(f"{self.HEADER}w:\n  goal: g\n  risk: low\n  steps:\n{body}")
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        assert eng.load_catalog(catalog) == 1
+        assert code in {d.code.value for d in eng.validate_report()}
+
+    def test_steps_not_a_list(self, tmp_path: Path) -> None:
+        catalog = tmp_path / "c.yaml"
+        catalog.write_text(f"{self.HEADER}w:\n  goal: g\n  risk: low\n  steps: 5\n")
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        eng.load_catalog(catalog)
+        wf = eng.get_workflow("w")
+        assert wf is not None and wf.steps == []
+        assert [d.code for d in eng.validate_report()] == [
+            ErrorCode.SCHEMA_VALIDATION_FAILED
+        ]
+
+    def test_unloadable_entries_are_still_validated(self, tmp_path: Path) -> None:
+        catalog = tmp_path / "c.yaml"
+        catalog.write_text(
+            f"{self.HEADER}not_a_map: [1, 2]\nno_steps:\n  goal: g\n  risk: low\n"
+        )
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        assert eng.load_catalog(catalog) == 0
+        assert eng.list_workflows() == []
+        results = eng.validate_all_structured()
+        assert {n: [e.code.value for e in errs] for n, errs in results.items()} == {
+            "not_a_map": ["S303"],
+            "no_steps": ["S304"],
+        }
+        assert eng.validate_report("no_steps")[0].code is (
+            ErrorCode.MISSING_REQUIRED_FIELD
+        )
+
+    @pytest.mark.parametrize(
+        "fixture",
+        sorted(
+            p.name
+            for p in (Path(__file__).parent / "fixtures").glob(
+                "*.workflow_catalog.yaml"
+            )
+        ),
+    )
+    def test_engine_matches_the_file_validator(self, fixture: str) -> None:
+        from collections import Counter
+
+        from grounded_agency import _core
+
+        path = Path(__file__).parent / "fixtures" / fixture
+        root = ONTOLOGY_PATH.parent.parent
+        expected = Counter(
+            d["code"]
+            for d in _core.validate_catalog(path, ONTOLOGY_PATH, root)["diagnostics"]
+        )
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        eng.load_catalog(path)
+        assert Counter(d.code.value for d in eng.validate_report()) == expected
+
+    def test_catalogs_with_different_headers(self, tmp_path: Path) -> None:
+        old = tmp_path / "old.yaml"
+        old.write_text(
+            "# Standard version: 1.0.0\n"
+            "a:\n  goal: g\n  risk: low\n  steps:\n"
+            "  - capability: observe\n    purpose: p\n    store_as: o\n"
+        )
+        future = tmp_path / "future.yaml"
+        future.write_text(
+            "# Standard version: 3.0.0\n"
+            "b:\n  goal: g\n  risk: low\n  steps:\n"
+            "  - capability: observe\n    purpose: p\n    store_as: o\n"
+        )
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        eng.load_catalog(old)
+        eng.load_catalog(future)
+        report = eng.validate_report()
+        assert [(d.code.value, d.location["workflow"]) for d in report] == [
+            ("V109", "b")
+        ]
+
+
+class TestEngineMisc:
+    def test_binding_error_types_for_b203(self) -> None:
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        eng.load_catalog(
+            Path(__file__).parent
+            / "fixtures"
+            / "fail_type_mismatch_binding.workflow_catalog.yaml"
+        )
+        mismatches = [
+            e
+            for name in eng.list_workflows()
+            for e in eng.validate_bindings(name)
+            if e.error_code is ErrorCode.TYPE_MISMATCH
+        ]
+        assert mismatches
+        for e in mismatches:
+            assert e.expected_type and e.actual_type
+            assert e.expected_type != e.actual_type
+
+    def test_vendor_names_are_rejected(self) -> None:
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        with pytest.raises(ValueError, match="vendor data"):
+            eng.add_workflow(
+                WorkflowDefinition(name="x-bad", goal="g", risk="low", steps=[])
+            )
+
+    def test_registry_refuses_a_harmful_override(self) -> None:
+        from grounded_agency.capabilities.registry import CapabilityNode
+
+        with pytest.raises(ValueError, match="mutation_overridable"):
+            CapabilityNode.from_dict(
+                {
+                    "id": "mutate",
+                    "layer": "EXECUTE",
+                    "risk": "high",
+                    "mutation": True,
+                    "mutation_overridable": True,
+                }
+            )
+
+    def test_null_gate_fields_stay_empty(self) -> None:
+        step = WorkflowStep.from_dict(
+            {
+                "capability": "observe",
+                "purpose": "p",
+                "gates": [{"when": None, "action": "stop", "phase": 3}],
+            }
+        )
+        assert step.gates[0].when == ""
+        assert step.gates[0].phase is None
+
+
 class TestTracerUsesEffectiveFlags:
     def test_inherited_checkpoint_requirement_is_traced(self) -> None:
         """A step built in code that leaves requires_checkpoint False is still
@@ -1045,51 +1254,60 @@ class TestSafetyFlagValidation:
     def test_mutate_with_mutation_false_warns(self) -> None:
         """A crafted step declaring mutation=false for 'mutate' is caught."""
         eng = WorkflowEngine(ONTOLOGY_PATH)
-        eng.add_workflow(
-            WorkflowDefinition(
-                name="test_bypass_mutate",
-                goal="test",
-                risk="high",
-                steps=[
-                    WorkflowStep(
-                        capability="mutate",
-                        purpose="sneaky mutation",
-                        store_as="m",
-                        risk="high",
-                        mutation=False,  # Ontology says True — bypass attempt
-                        requires_checkpoint=True,
-                        requires_approval=True,
-                    ),
-                ],
-            )
+        wf = _add_parsed(
+            eng,
+            "test_bypass_mutate",
+            [{"capability": "mutate", "purpose": "sneaky", "mutation": False}],
         )
         assert self._downgrades(eng, "test_bypass_mutate") == ["mutation"]
         # The ontology value applies.
-        step = eng.get_workflow("test_bypass_mutate").steps[0]  # type: ignore[union-attr]
-        assert eng.effective_flags(step)["mutation"] is True
+        assert wf.steps[0].mutation is True
+        assert eng.effective_flags(wf.steps[0])["mutation"] is True
 
     def test_send_with_checkpoint_false_warns(self) -> None:
         """'send' with requires_checkpoint=false is flagged."""
         eng = WorkflowEngine(ONTOLOGY_PATH)
+        _add_parsed(
+            eng,
+            "test_bypass_send",
+            [{"capability": "send", "purpose": "s", "requires_checkpoint": False}],
+        )
+        assert self._downgrades(eng, "test_bypass_send") == ["requires_checkpoint"]
+
+    def test_code_built_defaults_are_not_downgrades(self) -> None:
+        """A step built in code that leaves the safety fields at their
+        defaults declares nothing: no W602, and the ontology applies."""
+        eng = WorkflowEngine(ONTOLOGY_PATH)
         eng.add_workflow(
             WorkflowDefinition(
-                name="test_bypass_send",
-                goal="test",
+                name="w",
+                goal="g",
                 risk="high",
+                spec_version="1.1",
                 steps=[
-                    WorkflowStep(
-                        capability="send",
-                        purpose="sneaky send",
-                        store_as="s",
-                        risk="high",
-                        mutation=True,
-                        requires_checkpoint=False,  # Ontology says True — bypass
-                        requires_approval=True,
-                    ),
+                    WorkflowStep(capability="plan", purpose="p", store_as="p"),
+                    WorkflowStep(capability="constrain", purpose="c", store_as="c"),
+                    WorkflowStep(capability="checkpoint", purpose="k", store_as="k"),
+                    WorkflowStep(capability="mutate", purpose="m", store_as="m"),
                 ],
             )
         )
-        assert self._downgrades(eng, "test_bypass_send") == ["requires_checkpoint"]
+        assert eng.validate_report("w") == []
+        wf = eng.get_workflow("w")
+        assert wf is not None
+        assert [s.capability for s in wf.mutation_steps] == ["checkpoint", "mutate"]
+        assert [s.capability for s in wf.checkpoint_required_steps] == ["mutate"]
+
+    def test_code_built_audit_default_is_not_an_override(self) -> None:
+        """mutation_overridable honours a declared mutation: false, not the
+        attribute's default."""
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        default = WorkflowStep(capability="audit", purpose="a")
+        declared = WorkflowStep(
+            capability="audit", purpose="a", declared={"mutation": False}
+        )
+        assert eng.effective_flags(default)["mutation"] is True
+        assert eng.effective_flags(declared)["mutation"] is False
 
     def test_honest_mutate_step_has_no_downgrade(self) -> None:
         eng = WorkflowEngine(ONTOLOGY_PATH)

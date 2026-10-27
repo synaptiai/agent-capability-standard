@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -572,8 +573,21 @@ def _denied(result: Any) -> bool:
 
 
 class TestCheckpointReservation:
-    """One checkpoint covers one mutation: a second concurrent mutation is
-    denied until the first consumes or releases it (SEC-007)."""
+    """One checkpoint covers one mutation: a tool call reserves it under its
+    tool_use_id, and another call is denied until the holder consumes it
+    (success) or releases it (failure, interrupt) (SEC-007)."""
+
+    @staticmethod
+    def _ctx(tool_use_id: str) -> Any:
+        return SimpleNamespace(tool_use_id=tool_use_id)
+
+    @staticmethod
+    def _post(tool_name: str, is_error: bool = False) -> dict[str, Any]:
+        return {
+            "tool_name": tool_name,
+            "tool_input": {"file_path": "a.txt"},
+            "tool_response": {"is_error": is_error},
+        }
 
     @pytest.mark.asyncio
     async def test_second_concurrent_mutation_is_denied(
@@ -582,33 +596,62 @@ class TestCheckpointReservation:
         checkpoint_id = adapter.create_checkpoint(["*"], "Test")
         callback = adapter._make_permission_callback()
 
-        first = await callback("Write", {"file_path": "a.txt"}, None)
-        second = await callback("Write", {"file_path": "b.txt"}, None)
+        first = await callback("Write", {"file_path": "a.txt"}, self._ctx("t1"))
+        again = await callback("Write", {"file_path": "a.txt"}, self._ctx("t1"))
+        second = await callback("Write", {"file_path": "b.txt"}, self._ctx("t2"))
 
         assert not _denied(first)
+        assert not _denied(again)  # same call: idempotent
         assert _denied(second)
         assert f"checkpoint {checkpoint_id} is reserved" in second.message
 
     @pytest.mark.asyncio
+    async def test_pretooluse_reserves_for_pre_approved_tools(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        """Pre-approved tools never reach can_use_tool; PreToolUse always
+        runs, so it takes the reservation."""
+        adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_checkpoint_hook()
+        callback = adapter._make_permission_callback()
+
+        ok = await pre({"tool_name": "Write", "tool_input": {}}, "t1", None)
+        blocked = await pre({"tool_name": "Edit", "tool_input": {}}, "t2", None)
+        same_call = await callback("Write", {}, self._ctx("t1"))
+
+        assert ok == {}
+        assert blocked["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert not _denied(same_call)
+
+    @pytest.mark.asyncio
     async def test_failed_mutation_releases_the_checkpoint(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        """Claude Code reports failures and interrupts through
+        PostToolUseFailure, not PostToolUse."""
+        adapter.create_checkpoint(["*"], "Test")
+        callback = adapter._make_permission_callback()
+        release = adapter._make_failure_releaser()
+
+        assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        await release(
+            {"tool_name": "Write", "tool_use_id": "t1", "error": "boom"}, "t1", None
+        )
+        assert adapter.has_valid_checkpoint()
+        assert not _denied(await callback("Write", {}, self._ctx("t2")))
+
+    @pytest.mark.asyncio
+    async def test_error_response_releases_the_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
         adapter.create_checkpoint(["*"], "Test")
         callback = adapter._make_permission_callback()
         consumer = adapter._make_mutation_consumer()
 
-        assert not _denied(await callback("Write", {"file_path": "a.txt"}, None))
-        await consumer(
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "a.txt"},
-                "tool_response": {"is_error": True},
-            },
-            "tool-1",
-            None,
-        )
+        assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        await consumer(self._post("Write", is_error=True), "t1", None)
         assert adapter.has_valid_checkpoint()
-        assert not _denied(await callback("Write", {"file_path": "a.txt"}, None))
+        assert not _denied(await callback("Write", {}, self._ctx("t2")))
 
     @pytest.mark.asyncio
     async def test_successful_mutation_consumes_the_checkpoint(
@@ -618,20 +661,75 @@ class TestCheckpointReservation:
         callback = adapter._make_permission_callback()
         consumer = adapter._make_mutation_consumer()
 
-        assert not _denied(await callback("Write", {"file_path": "a.txt"}, None))
-        await consumer(
-            {
-                "tool_name": "Write",
-                "tool_input": {"file_path": "a.txt"},
-                "tool_response": {"is_error": False},
-            },
-            "tool-1",
-            None,
-        )
+        assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        await consumer(self._post("Write"), "t1", None)
         assert not adapter.has_valid_checkpoint()
-        denied = await callback("Write", {"file_path": "b.txt"}, None)
+        denied = await callback("Write", {}, self._ctx("t2"))
         assert _denied(denied)
         assert "reserved" not in denied.message
+
+    @pytest.mark.asyncio
+    async def test_other_calls_cannot_end_a_reservation(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        """Neither a call without a reservation (here TodoWrite, a mutation
+        that needs no checkpoint) nor another call's failure touches the
+        holder's checkpoint."""
+        adapter.create_checkpoint(["*"], "Test")
+        callback = adapter._make_permission_callback()
+        consumer = adapter._make_mutation_consumer()
+        release = adapter._make_failure_releaser()
+
+        assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        await consumer(self._post("TodoWrite"), "t9", None)
+        await consumer(self._post("Edit"), "t2", None)
+        await release({"tool_name": "Edit", "tool_use_id": "t2"}, "t2", None)
+
+        assert adapter.has_valid_checkpoint()
+        assert _denied(await callback("Edit", {}, self._ctx("t3")))
+
+    @pytest.mark.asyncio
+    async def test_non_strict_unreserved_call_cannot_release(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
+        lenient = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                strict_mode=False,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+            )
+        )
+        lenient.create_checkpoint(["*"], "Test")
+        callback = lenient._make_permission_callback()
+        consumer = lenient._make_mutation_consumer()
+
+        assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        # Allowed with a warning, but holds no reservation.
+        assert not _denied(await callback("Edit", {}, self._ctx("t2")))
+        await consumer(self._post("Edit", is_error=True), "t2", None)
+        reserved, _ = lenient.checkpoint_tracker.validate_and_reserve("t3")
+        assert reserved is False
+
+    def test_wrap_options_registers_the_failure_hook(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        options = adapter.wrap_options(ClaudeAgentOptions())
+        assert options.hooks["PostToolUseFailure"]
+
+    def test_reservation_timeout_is_configurable(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
+        quick = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+                checkpoint_reservation_seconds=0,
+            )
+        )
+        quick.create_checkpoint(["*"], "Test")
+        tracker = quick.checkpoint_tracker
+        assert tracker.validate_and_reserve("t1")[0]
+        assert tracker.validate_and_reserve("t2")[0]  # t1's lapsed at once
 
 
 # =============================================================================

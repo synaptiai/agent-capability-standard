@@ -765,46 +765,60 @@ class TestValidateCanonicalSchemas:
 class TestSyncSkillSchemas:
     """Tests for tools/sync_skill_schemas.py (issue #107)."""
 
-    def test_sync_is_idempotent(self) -> None:
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        """A copy of everything the sync reads and writes."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_sync_deps", ROOT / "tools" / "sync_skill_schemas.py"
+        )
+        assert spec and spec.loader
+        sys.path.insert(0, str(ROOT / "tools"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for rel in (
+            "schemas/capability_ontology.yaml",
+            "schemas/workflow_catalog.yaml",
+            *module.WORKFLOW_CATALOG_TRANSITIVE_DEPS,
+        ):
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(ROOT / rel, tmp_path / rel)
+        shutil.copytree(ROOT / "skills", tmp_path / "skills")
+        return tmp_path
+
+    @staticmethod
+    def _sync(root: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "tools" / "sync_skill_schemas.py"),
+                "--root",
+                str(root),
+                *flags,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_sync_is_idempotent(self, tmp_path: Path) -> None:
         """Re-running the sync on a synced tree must change nothing.
 
         The comment rewrite `schemas/workflows/` -> `(repo-level)
         schemas/workflows/` used to reapply itself to already-rewritten text,
         so each run stacked another `(repo-level)` prefix onto the 17 bundled
-        catalogs. CLAUDE.md documents this command, so following the project's
-        own instructions corrupted those files.
+        catalogs. Runs on a copy, so the test never touches the tree (or
+        repairs drift that test_check_passes_on_the_tree must see).
         """
-        catalogs = sorted((ROOT / "skills").glob("*/reference/workflow_catalog.yaml"))
-        assert catalogs, "expected bundled workflow catalogs"
-        before = {path: path.read_text() for path in catalogs}
-
-        # The sync writes to the tracked tree, so anything it changes is
-        # restored before this test returns. Without that, a failure -- or a
-        # concurrent checkout of a branch whose sync tool predates the
-        # idempotency fix -- leaves the repository dirty.
-        try:
-            result = subprocess.run(
-                [sys.executable, str(ROOT / "tools" / "sync_skill_schemas.py")],
-                cwd=str(ROOT),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            assert result.returncode == 0, result.stdout + result.stderr
-
-            drifted = [
-                path.relative_to(ROOT)
-                for path, original in before.items()
-                if path.read_text() != original
-            ]
-            assert not drifted, (
-                f"{drifted} changed on a no-op sync; "
-                f"sync_skill_schemas.py is not idempotent"
-            )
-        finally:
-            for path, original in before.items():
-                if path.read_text() != original:
-                    path.write_text(original)
+        root = self._tree(tmp_path)
+        assert self._sync(root).returncode == 0
+        generated = sorted((root / "skills").rglob("*.yaml"))
+        before = {path: path.read_bytes() for path in generated}
+        second = self._sync(root)
+        assert second.returncode == 0, second.stdout + second.stderr
+        assert "SYNC COMPLETE: 0 of" in second.stdout
+        assert {p: p.read_bytes() for p in generated} == before
 
     @staticmethod
     def _module():
@@ -852,46 +866,52 @@ class TestSyncSkillSchemas:
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
+    @staticmethod
+    def _source_header() -> str:
+        return (ROOT / "schemas" / "workflow_catalog.yaml").read_text().splitlines()[0]
+
     def test_check_reports_a_drifted_catalog_and_sync_repairs_it(
         self, tmp_path: Path
     ) -> None:
         """A vendored catalog edited by hand (or left behind when the source
         changed) fails --check; a sync regenerates it from the source."""
-        for rel in (
-            "schemas/capability_ontology.yaml",
-            "schemas/workflow_catalog.yaml",
-            *self._module().WORKFLOW_CATALOG_TRANSITIVE_DEPS,
-        ):
-            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(ROOT / rel, tmp_path / rel)
-        shutil.copytree(ROOT / "skills", tmp_path / "skills")
-        vendored = (
-            tmp_path / "skills" / "observe" / "reference" / "workflow_catalog.yaml"
-        )
-        vendored.write_text(
-            vendored.read_text().replace("Standard version: 1.1.0", "x")
-        )
+        root = self._tree(tmp_path)
+        vendored = root / "skills" / "observe" / "reference" / "workflow_catalog.yaml"
+        header = self._source_header()
+        vendored.write_text(vendored.read_text().replace(header, "# edited", 1))
 
-        def sync(*flags: str) -> subprocess.CompletedProcess[str]:
-            return subprocess.run(
-                [
-                    sys.executable,
-                    str(ROOT / "tools" / "sync_skill_schemas.py"),
-                    "--root",
-                    str(tmp_path),
-                    *flags,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-
-        check = sync("--check")
+        check = self._sync(root, "--check")
         assert check.returncode == 1
         assert "skills/observe/reference/workflow_catalog.yaml" in check.stdout
-        assert sync().returncode == 0
-        assert sync("--check").returncode == 0
-        assert vendored.read_text().startswith("# Standard version: 1.1.0\n")
+        assert self._sync(root).returncode == 0
+        assert self._sync(root, "--check").returncode == 0
+        assert vendored.read_text().startswith(header + "\n")
+
+    def test_orphaned_output_schema_is_reported_and_removed(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._tree(tmp_path)
+        orphan_dir = root / "skills" / "retired" / "schemas"
+        orphan_dir.mkdir(parents=True)
+        orphan = orphan_dir / "output_schema.yaml"
+        shutil.copy(
+            root / "skills" / "observe" / "schemas" / "output_schema.yaml", orphan
+        )
+        hand_written = orphan_dir.parent / "notes.yaml"
+        hand_written.write_text("kept: true\n")
+
+        check = self._sync(root, "--check")
+        assert check.returncode == 1
+        assert "skills/retired/schemas/output_schema.yaml" in check.stdout
+        assert self._sync(root).returncode == 0
+        assert not orphan.exists() and hand_written.exists()
+        assert self._sync(root, "--check").returncode == 0
+
+    def test_crlf_checkout_is_not_drift(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path)
+        for path in (root / "skills").rglob("*.yaml"):
+            path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        assert self._sync(root, "--check").returncode == 0
 
     def test_vendored_catalog_carries_the_source_version(self) -> None:
         module = self._module()
@@ -899,7 +919,8 @@ class TestSyncSkillSchemas:
             (ROOT / "schemas" / "workflow_catalog.yaml").read_text()
         )
         first, second = rendered.splitlines()[:2]
-        assert first == "# Standard version: 1.1.0"
+        assert first == self._source_header()
+        assert first.startswith("# Standard version: ")
         assert second.startswith("# Vendored copy of schemas/workflow_catalog.yaml")
 
     def test_sync_does_not_stack_the_repo_level_note(self) -> None:

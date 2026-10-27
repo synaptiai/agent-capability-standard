@@ -26,6 +26,15 @@ _ELOOP_ERRNOS: set[int] = {getattr(_errno_mod, "ELOOP", 40), 62}
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class _Reservation:
+    """The active checkpoint held for one in-flight mutation (SEC-007)."""
+
+    checkpoint_id: str
+    holder: str  # the tool call's tool_use_id, or an anonymous token
+    reserved_at: float  # time.monotonic()
+
+
 @dataclass(slots=True)
 class Checkpoint:
     """
@@ -204,9 +213,9 @@ class CheckpointTracker:
         )
         self._lock = threading.Lock()
         self._active_checkpoint: Checkpoint | None = None
-        # (checkpoint id, time.monotonic() when reserved); in memory only,
-        # since a reservation does not outlive the process holding it.
-        self._reservation: tuple[str, float] | None = None
+        # In memory only: a reservation does not outlive the process that
+        # holds it.
+        self._reservation: _Reservation | None = None
         self._checkpoint_history: list[Checkpoint] = []
         self._load_persisted_state()
 
@@ -373,8 +382,9 @@ class CheckpointTracker:
                 self._checkpoint_history.append(self._active_checkpoint)
                 self._prune_history_if_needed()
 
+            # A reservation of the previous checkpoint stays with its
+            # holder (see consume_checkpoint); it does not cover this one.
             self._active_checkpoint = checkpoint
-            self._reservation = None
             self._write_marker(checkpoint)
             self._persist_state()
         return checkpoint_id
@@ -522,53 +532,75 @@ class CheckpointTracker:
             return self._active_checkpoint.is_valid()
 
     def _reserved(self) -> bool:
-        """Whether the active checkpoint is reserved. Caller holds the lock."""
-        if self._reservation is None or self._active_checkpoint is None:
-            return False
-        checkpoint_id, reserved_at = self._reservation
+        """Whether another holder can be refused the active checkpoint.
+        Caller holds the lock."""
+        r = self._reservation
         return (
-            checkpoint_id == self._active_checkpoint.id
-            and time.monotonic() - reserved_at < self._reservation_seconds
+            r is not None
+            and self._active_checkpoint is not None
+            and r.checkpoint_id == self._active_checkpoint.id
+            and time.monotonic() - r.reserved_at < self._reservation_seconds
         )
 
-    def validate_and_reserve(self) -> tuple[bool, str | None]:
+    def validate_and_reserve(
+        self, holder: str | None = None
+    ) -> tuple[bool, str | None]:
         """Atomically check the active checkpoint and reserve it for one
         mutation.
 
         SEC-007: Prevents the TOCTOU race between has_valid_checkpoint() and
         the mutation that relies on it. A checkpoint covers one mutation, so
-        only one caller at a time may hold it: concurrent callers cannot both
-        proceed on the same checkpoint. The holder ends the reservation with
-        consume_checkpoint() after the mutation succeeds, or
-        release_reservation() if it fails or does not run. A reservation
-        nobody ends lapses after ``reservation_seconds``.
+        only one holder at a time may hold it: concurrent tool calls cannot
+        both proceed on the same checkpoint. Reserving again with the same
+        ``holder`` (e.g. from both the PreToolUse hook and the permission
+        callback of one tool call) succeeds. The holder ends the reservation
+        with ``consume_checkpoint(holder)`` after the mutation succeeds, or
+        ``release_reservation(holder)`` if it fails or does not run. A
+        reservation nobody ends lapses after ``reservation_seconds``.
+
+        Args:
+            holder: Who holds the reservation, normally the tool call's
+                ``tool_use_id``. Omitted, an anonymous holder is used that
+                only ``release_reservation()`` / ``consume_checkpoint()``
+                without a holder can end.
 
         Returns:
-            ``(True, checkpoint_id)``: reserved for the caller.
-            ``(False, checkpoint_id)``: valid, but reserved by another caller.
+            ``(True, checkpoint_id)``: reserved for ``holder``.
+            ``(False, checkpoint_id)``: valid, but reserved by another holder.
             ``(False, None)``: no valid checkpoint.
         """
         with self._lock:
             checkpoint = self._active_checkpoint
             if checkpoint is None or not checkpoint.is_valid():
                 return False, None
+            r = self._reservation
+            if (
+                holder is not None
+                and r is not None
+                and r.holder == holder
+                and r.checkpoint_id == checkpoint.id
+            ):
+                return True, checkpoint.id
             if self._reserved():
                 return False, checkpoint.id
-            self._reservation = (checkpoint.id, time.monotonic())
+            self._reservation = _Reservation(
+                checkpoint_id=checkpoint.id,
+                holder=holder if holder is not None else f"anon_{os.urandom(8).hex()}",
+                reserved_at=time.monotonic(),
+            )
             return True, checkpoint.id
 
-    def release_reservation(self, checkpoint_id: str | None = None) -> bool:
+    def release_reservation(self, holder: str | None = None) -> bool:
         """End a reservation without consuming the checkpoint, e.g. after the
-        mutation failed. With ``checkpoint_id``, only a reservation of that
-        checkpoint is released.
+        mutation failed. With ``holder``, only that holder's reservation is
+        released; without, any.
 
         Returns:
             True if a reservation was released
         """
         with self._lock:
-            if self._reservation is None:
-                return False
-            if checkpoint_id is not None and self._reservation[0] != checkpoint_id:
+            r = self._reservation
+            if r is None or (holder is not None and r.holder != holder):
                 return False
             self._reservation = None
             return True
@@ -602,24 +634,40 @@ class CheckpointTracker:
         checkpoint = self.get_active_checkpoint()
         return checkpoint.id if checkpoint else None
 
-    def consume_checkpoint(self) -> str | None:
+    def consume_checkpoint(self, holder: str | None = None) -> str | None:
         """
-        Mark the active checkpoint as consumed.
+        Mark a checkpoint as consumed after a successful mutation, so a new
+        one is needed for further mutations. Thread-safe via self._lock
+        (SEC-007).
 
-        Called after a successful mutation to indicate the checkpoint
-        has been "used up" and a new one is needed for further mutations.
-        Thread-safe via self._lock (SEC-007).
+        Without ``holder``, the active checkpoint is consumed (and any
+        reservation ends). With ``holder``, only the checkpoint that holder
+        reserved is consumed: nothing happens for a tool call that holds no
+        reservation, and if a newer checkpoint was created meanwhile, the
+        reserved one is marked consumed in history and the newer one stays
+        active.
 
         Returns:
-            ID of consumed checkpoint, or None if no active checkpoint
+            ID of the consumed checkpoint, or None if nothing was consumed
         """
         with self._lock:
-            if self._active_checkpoint is None:
-                return None
+            if holder is None:
+                if self._active_checkpoint is None:
+                    return None
+                consumed = self._active_checkpoint
+            else:
+                r = self._reservation
+                if r is None or r.holder != holder:
+                    return None
+                active = self._active_checkpoint
+                if active is not None and active.id == r.checkpoint_id:
+                    consumed = active
+                else:
+                    self._reservation = None
+                    return self._consume_from_history(r.checkpoint_id)
 
             # Capture reference and clear active first to avoid intermediate
             # invalid state where active still points to consumed checkpoint.
-            consumed = self._active_checkpoint
             self._active_checkpoint = None
             self._reservation = None
 
@@ -633,6 +681,16 @@ class CheckpointTracker:
             self._persist_state()
 
             return checkpoint_id
+
+    def _consume_from_history(self, checkpoint_id: str) -> str | None:
+        """Mark a superseded checkpoint consumed. Caller holds the lock."""
+        for checkpoint in self._checkpoint_history:
+            if checkpoint.id == checkpoint_id and not checkpoint.consumed:
+                checkpoint.consumed = True
+                checkpoint.consumed_at = datetime.now(timezone.utc)
+                self._persist_state()
+                return checkpoint_id
+        return None
 
     def get_checkpoint_by_id(self, checkpoint_id: str) -> Checkpoint | None:
         """

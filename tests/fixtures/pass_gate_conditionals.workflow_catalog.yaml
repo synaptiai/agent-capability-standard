@@ -28,7 +28,7 @@ gated:
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: null
     retry: null
     store_as: mutate_out
