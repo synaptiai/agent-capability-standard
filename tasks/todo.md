@@ -97,7 +97,21 @@ Re-planned after D-lang (Rust core): the validator and executor move into
         reverse pass per distinct forbidden set (cycle-safe); duplicate
         reviewers and malformed lists reported once; fixtures fail for one
         reason each; migration note for the new delegation inputs.
-- [ ] S6 Sans-IO executor in the core + Python driver + runtime fixtures.
+- [x] S6 Sans-IO executor in the core (`core/src/exec/`: step algorithm,
+      program, runtime quorum, RFC 8785 canonical JSON, snapshots with
+      SHA-256/HMAC), `_core.Run`, Python driver (`WorkflowRunner`, `Host`),
+      53 runtime fixtures run by cargo (with a snapshot/restore replay that
+      compares every action as canonical JSON) and pytest; guide
+      `docs/guides/RUNNING_WORKFLOWS.md`. Review (15 findings): implicit
+      after-gates, quorums count only reviewers that ran (with the inputs
+      they ran with), RFC 8785 number ties (`ryu-js`), I-JSON inputs and
+      capped times, step-ordered `steps_executed`, polling instead of
+      spinning in the driver, structural checks on restore and signed
+      snapshots need their key, re-asks show the change, approval before
+      checkpoint consumption, nested rollback failures reach the parent,
+      `max_loops` ≤ 1000, drop counting, records for every approval
+      outcome, fireable codes are the ones a step can fail with (F501/F504
+      in, R405 out).
 - [ ] S7 RFC-0003, STANDARD v1.1.0, EDGE_TYPES errata, docs, changelogs;
       Q3 issue + #114 reply drafts (not posted).
 

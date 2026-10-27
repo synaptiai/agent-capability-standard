@@ -264,6 +264,7 @@ Hooks implementing SAFETY layer capabilities:
 | [FAQ.md](docs/FAQ.md) | Common questions |
 | [MODALITY_HANDLING.md](docs/guides/MODALITY_HANDLING.md) | Working with vision, audio, and multimodal domains |
 | [ORCHESTRATION_EXTENSIONS.md](docs/guides/ORCHESTRATION_EXTENSIONS.md) | Triggers, escalation, waiting, approval, delegation and quorum (Standard v1.1) |
+| [RUNNING_WORKFLOWS.md](docs/guides/RUNNING_WORKFLOWS.md) | Running workflows on the reference executor with a host |
 | [PERSPECTIVE_VALIDATION_CHECKLIST.md](skills/perspective-validation/CHECKLIST.md) | Socio-technical and governance review checklist (PVC) |
 
 ### For Implementers

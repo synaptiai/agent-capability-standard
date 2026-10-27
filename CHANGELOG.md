@@ -40,6 +40,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   recovery loop injects), fresh context and model families (F504). Declaring an extension the validator
   does not check is refused (V106). New guide:
   [docs/guides/ORCHESTRATION_EXTENSIONS.md](docs/guides/ORCHESTRATION_EXTENSIONS.md)
+- **Reference executor (#114).** A deterministic, sans-IO executor in the
+  Rust core runs validated workflows: conditions and gates, checkpoint
+  authorisation and invalidation after waits, digest-bound approvals with
+  expiry and rechecks, unattended behaviour, waits with event matching,
+  retries with backoff, deadlines, failure modes, recovery loops,
+  escalation to handlers, nested invocations and review quorums. Runs
+  snapshot to canonical JSON (RFC 8785) with a SHA-256 and optional HMAC,
+  and resume anywhere. Python drives it with
+  `grounded_agency.workflows.WorkflowRunner` and a `Host`
+  ([guide](docs/guides/RUNNING_WORKFLOWS.md)); runtime conformance fixtures
+  in `tests/conformance/runtime/`
 - A step that raises `requires_checkpoint` above the ontology is now held to
   it: F501 when no checkpoint runs before it
 - `world_state_schema.yaml` 1.1.0: action records gain status `rejected`

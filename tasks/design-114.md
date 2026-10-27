@@ -257,15 +257,17 @@ string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no sur
 * `failure_modes[]`: `condition` (prose), `action` (stop | rollback |
   request_more_context | pause_and_checkpoint | escalate; else S303),
   optional `on_error` (one code or a non-empty list of R401 | R402 | R403 |
-  R405 | F502; else S303), optional `when` (expression), `recovery` (string |
+  F501 | F502 | F504 — the codes a step can fail with; R405 never fails a
+  step; else S303), optional `when` (expression), `recovery` (string |
   object).
 * Fires when the step raised a matching `on_error`, or `when` is true after
   the step. First match in order. Neither present → documentation only; with
   an object recovery → W609.
 * `recovery` is a string or an object, else S303. Recovery object:
   `goto_step`, `inject_context` (map of ref-strings, else S303),
-  `max_loops` (int ≥ 1, default 1, a float with no fraction accepted as
-  JSON Schema does; else S303), `on_exhausted: {goto_step}` (S304 without
+  `max_loops` (int 1–1000, default 1, a float with no fraction accepted
+  as JSON Schema does; else S303 — a loop needs no host call, so it is
+  bounded), `on_exhausted: {goto_step}` (S304 without
   goto_step; S303 if not a mapping). `max_loops` / `on_exhausted` without a
   `goto_step` → S304. `on_error` is checked before the recovery@1 gate on
   `action: escalate`, since it is base 1.1.
@@ -438,19 +440,190 @@ require_model_families?: [str]}`
 
 ## 16. Executor (sans-IO)
 
-* `Executor::start(workflow, inputs, StartOptions{attendance, run_id, now})
-  → Run`. `run.next() → Action`, `run.submit(Response, now)`,
-  `run.tick(now)`, `run.snapshot()` (canonical JSON + SHA-256, optional
-  HMAC key), `Run::restore`.
-* Actions: InvokeCapability, CreateCheckpoint, Rollback, RequestApproval,
-  RecheckSource, AwaitEvent, Completed{outcome: completed | escalated |
-  deferred | replan_required}, Failed{code}.
-* Steps run sequentially (parallel groups in declaration order; a step may
-  not bind to a store of its own group). invoke steps run the target as a
-  nested run (depth ≤ 3; cycle → R402).
-* Checkpoints: each checkpoint authorises one effective-requires_checkpoint
-  step; if none is valid the executor emits CreateCheckpoint. Retries:
-  `retry.max` attempts, backoff none | linear (1s × n) | exponential
-  (1s × 2^(n-1)). Deadlines from `timeout`; late results → R401.
-* Trace: every decision (gate, condition, expression error, approval,
-  retry, escalation) is an event in the snapshot.
+The reference executor (`core/src/exec/`) is a deterministic state machine
+with no I/O: the host asks it what to do next, does it, and reports back.
+The same inputs and responses always give the same actions, trace and
+snapshot. Exposed to Python as `_core.Run`; `grounded_agency/workflows/
+runner.py` drives it with a host object.
+
+### 16.1 Interface
+
+* `Run::start(ctx, catalog, workflow, inputs, StartOptions{attendance,
+  run_id, now_ms}) → Result<Run, StartError>`. The catalog is validated
+  first; any error (not warning) refuses the start with the diagnostics.
+  Required inputs must be given; unknown inputs are refused.
+* Values a run takes in (inputs, outputs, events, recheck values) must be
+  I-JSON (RFC 7493): integers within ±2^53 and at most 100 levels deep;
+  anything else is refused (`StartError::Inputs`, `SubmitError::Malformed`),
+  so snapshots and digests represent every value exactly. Times are capped
+  at 2^53 ms for the same reason.
+* `run.next() → Action`: the pending action. Idempotent: it returns the
+  same action (same `id`) until a response to it is submitted.
+* `run.submit(id, Response, now_ms) → Result<(), SubmitError>`: the response
+  must answer the pending action (`id`) with a matching kind; otherwise it
+  is refused and the run is unchanged.
+* `run.tick(now_ms)`: tells the run the time. A pending action whose
+  deadline has passed times out (R401); a `Sleep` whose `until` has passed
+  ends.
+* `run.snapshot(key) → Snapshot { state (canonical JSON), sha256, hmac? }`;
+  `Run::restore(ctx, catalog, snapshot, key)` verifies the digest, the HMAC
+  when a key is given (a signed snapshot without its key is refused), that
+  the catalog and the ontology contracts its steps use are the ones the
+  snapshot was taken against, and that the state is one the executor could
+  have produced (frames, step indices, pending or terminal action, record
+  indices), before resuming.
+* Time is only what the host passes in (`now_ms`, Unix epoch ms).
+
+### 16.2 Actions and responses
+
+| Action | Host does | Response |
+|--------|-----------|----------|
+| `InvokeCapability{step, capability, inputs, domain, deadline, attempt}` | run the capability | `Output{value}` or `Error{code: R401/R402, message}` |
+| `CreateCheckpoint{step}` | take a checkpoint before a step that needs one (or for `pause_and_checkpoint`) | `Checkpoint{checkpoint_id}`, or `Error` (the step fails with F501) |
+| `Rollback{checkpoint_id, step}` | restore it | `RolledBack`, or `Error` (the run fails with F503) |
+| `RequestApproval{step, approver, mode, shown, digest, expires_at}` | ask | `Decision{decision_id, decision: approved/rejected, approvers, digest}`; no decision by `expires_at` → F502 |
+| `RecheckSource{step, source, compare}` | re-read the source now | `Current{value}`, or `Error` (F502) |
+| `AwaitEvent{step, event_type, source_kind, correlate, accept_from, liveness, deadline}` | wait | `Event{event, principal}`, `LivenessLost` (R401) or `Error` (R402) |
+| `Sleep{until}` | call `tick` at or after `until` | — |
+| `Completed{outcome, cause, outputs, action_records}` | finished: `completed`, `escalated` (with the `cause` code), `deferred`, `replan_required` | — |
+| `Failed{code, step, message, action_records}` | finished with an error | — |
+
+Every action carries `frame` (the stack of workflow names: nested `invoke`
+runs surface their actions through the parent) and `id`.
+
+### 16.3 Step algorithm
+
+For each step of the normal flow in list order (handlers are skipped;
+parallel groups run in declaration order):
+
+1. `condition`: false or an evaluation error (R405, traced) → skip, unless
+   `skip_if_false: false`, which raises R403.
+2. Before-gates in order; an evaluation error fires the gate. `stop` →
+   R403; `skip` → skip; `rollback` → `Rollback` to the latest checkpoint,
+   then R403; `warn` → trace.
+3. Inputs: each binding is resolved (a whole-string reference keeps the
+   value's type; references inside a longer string are interpolated, a
+   string as-is and other values as compact JSON). Absent or skipped →
+   `null`.
+4. Approval: if the effective `requires_approval` is true. Unattended runs
+   follow `when_unattended` (`fail` → F502 with a `rejected` record, `skip`
+   → skip the step, also recorded `rejected` with the reason,
+   `defer_to_queue` → `Completed{deferred}` with a `planned` action
+   record). Otherwise `RequestApproval` with `shown` = the resolved `shows`
+   (default: `[inputs]`) and `digest` = SHA-256 (hex) of the canonical JSON
+   (RFC 8785) of `shown`. A decision counts only if `decision` is
+   `approved`, its `digest` matches, it has at least `min_approvers`
+   distinct approvers (default 1), `now ≤ expires_at` (when `expires`), and
+   its `decision_id` was not used before in the run (digests compare
+   case-insensitively). Rejected or otherwise invalid → F502 with a
+   `rejected` record and its `reason`; expired → F502 with an `expired`
+   record. Then `recheck`, if any: `RecheckSource`; the current value is
+   compared with the value at approval time (`digest`: canonical digest;
+   `version`: the values' `version` fields); on change `reask` asks again,
+   showing `{recheck: {previous, current}}` after the shown values (so the
+   digest changes too), `replan` → `Completed{replan_required}`, `stop` →
+   F502.
+5. Checkpoint: if the effective `requires_checkpoint` is true, the latest
+   *valid* checkpoint is consumed (one checkpoint authorises one step).
+   This comes after approval, so a skipped, deferred or refused step uses
+   none. A checkpoint is valid once taken and stops being valid when
+   consumed or when a wait completes after it. None valid →
+   `CreateCheckpoint` (an `Error` response fails the step with F501).
+6. Execute:
+   * a step with `wait` → `AwaitEvent` (deadline = now + `timeout`). An
+     event counts if its `event_type` matches, its `source.kind` matches
+     `source_kind` (when given), every `correlate` key equals
+     (`event.canonical[key]`, else `event[key]`), and its `principal` is in
+     `accept_from` (when bound); otherwise it is dropped and the wait goes
+     on (drops are counted per reason, traced once per reason, and reported
+     with `event_received`). `LivenessLost` or the deadline → R401. The
+     output is built from the event: receive → `{data: [event], source:
+     event.source.kind, timestamp: event.timestamp, evidence_anchors:
+     event.anchors}` (the item gains `sender`: the principal); synchronize
+     → `{synchronized: true, agreed_state:
+     event.canonical, participants: agents, evidence_anchors:
+     event.anchors}`. A completed wait invalidates earlier checkpoints.
+   * `invoke` → the target (`workflow_id`, else the bound `workflow`) runs
+     as a nested run (at most 4 runs deep, else R402) with the bound
+     `input`, checked against its declared inputs (else R402). Its
+     `Completed{completed}` outputs become the step's output `{result,
+     steps_executed (in step order), evidence_anchors}`; a child that fails
+     (including a failed rollback inside it) or escalates is
+     the step's error (R402, retried as usual); a child that ends
+     `deferred` or `replan_required` ends the whole run that way.
+   * `constrain` with `quorum` → evaluated by the executor (no host call),
+     §16.4.
+   * anything else → `InvokeCapability`, deadline = now + `timeout`. The
+     output must be an object with the capability's required output
+     fields, else R402. A late response (`now > deadline`) is R401.
+   * a `checkpoint` step's output records a valid checkpoint
+     (`checkpoint_id`, else one derived from the run id and step).
+7. Errors R401/R402 are retried up to `retry.max` more times; between
+   attempts `Sleep` for the backoff (`none` 0; `linear` 1 s × n;
+   `exponential` 1 s × 2^(n−1); unknown → none).
+8. The output is stored under `store_as`, with the inputs the step ran
+   with (a quorum judges its reviewers by these); then after-gates (as 2,
+   without `skip`). A gate is an after-gate when it says `phase: after`, or
+   says no phase and reads the step's own output (§5.6).
+9. Failure modes, in order, the first that fires: `on_error` matches the
+   step's error code, or `when` is true (an evaluation error does not
+   fire). If the step erred and none fires, the run fails with that code.
+   The action runs first: `rollback` → `Rollback`; `pause_and_checkpoint` →
+   `CreateCheckpoint`; `stop`, `request_more_context`, `escalate` → nothing.
+   Then the recovery:
+   * a loop (`goto_step`, not escalate): if this failure mode has looped
+     fewer than `max_loops` (default 1, at most 1000) times, evaluate `inject_context`
+     into `_recovery`, clear the outputs of the target and every later
+     step, and continue at the target; exhausted → `on_exhausted` handler,
+     else `Failed{R404}`;
+   * `escalate` → the handler;
+   * none (or prose) → `Failed{code}`: the step's error, else R402.
+   A handler runs (as an `invoke`) and the run ends `Completed{escalated}`
+   with the cause recorded; a handler that fails ends `Failed`.
+10. After the last step: `Completed{completed, outputs}` where outputs are
+    all stored step outputs.
+
+### 16.4 Quorums at runtime
+
+`verdicts` resolves to a list. Only reviewer delegate steps that ran count.
+A verdict counts if it is an object whose `reviewer_id` equals the `agent`
+input one of them ran with, whose `pinned` equals the resolved `pinned_to`, whose
+`value` is in the vocabulary, that is the first from that reviewer, and —
+with `require_fresh_context` — whose delegate output's
+`effective.fresh_context` is true. With `require_model_families`, the
+families of counted reviewers (`effective.model_family`, else the bound
+`model_family`) must cover the set. Compliant iff no counted verdict is a
+blocking value, passes ≥ `min_pass` and coverage holds. Output:
+`{compliant, violations, tally: {passes, blocks, abstains, voters},
+evidence_anchors}`; not compliant → F504.
+
+### 16.5 Trace, records, snapshots
+
+* Trace events: `{seq, at, kind, frame, step, detail}`. Kinds:
+  `run_started`, `run_finished`, `run_failed`, `step_started`,
+  `step_skipped`, `step_completed`, `step_failed`, `expression_error`
+  (site and message; R405), `gate_fired`, `rolled_back`,
+  `checkpoint_created`, `checkpoint_consumed`, `checkpoints_invalidated`,
+  `approval_unattended`, `approval_requested`, `approval_decided`,
+  `approval_expired`, `recheck`, `event_dropped`, `event_received`,
+  `retry`, `quorum`, `failure_mode_fired`, `loop`, `recovery_exhausted`,
+  `escalated`, `invoke_started`, `invoke_returned`.
+* Action records (world_state 1.1.0 `ActionRecord`) for every step that
+  required approval: `planned` (deferred), `approved` → `executed` (or
+  `failed` if the step then failed), `rejected` (refused, invalid, or
+  unattended `fail`/`skip`), `expired` (also an approval that a recheck
+  found stale), with the `approval` sub-record and a `reason` when the
+  action did not go ahead.
+* The snapshot is the whole run state as canonical JSON (RFC 8785) with
+  its SHA-256; with a key, an HMAC-SHA-256 too. Restore refuses a snapshot
+  whose digest or HMAC does not match, that was taken against another
+  catalog or other ontology contracts, or whose state is not well formed
+  (§16.1). Numbers are printed as ECMAScript does (`ryu-js`).
+
+### 16.6 Runtime conformance fixtures
+
+`tests/conformance/runtime/*.json`: catalog (inline), workflow, inputs,
+attendance, a script of `{expect: <action kind and fields>, respond:
+<response>}` entries (or `tick`), and the expected end (`Completed`
+outcome or `Failed` code) and trace kinds. Run by `cargo test` and by
+pytest through the Python driver.

@@ -23,8 +23,14 @@ const ACTIONS: &[&str] = &[
     "escalate",
 ];
 
-/// Runtime codes a failure mode may fire on (§5.7).
-const ON_ERROR: &[&str] = &["R401", "R402", "R403", "R405", "F502"];
+/// Runtime codes a failure mode may fire on (§5.7): the codes a step can
+/// fail with. Expression errors (R405) are not among them: they are
+/// fail-safe at their site and never fail the step.
+const ON_ERROR: &[&str] = &["R401", "R402", "R403", "F501", "F502", "F504"];
+
+/// The most loops one failure mode may take: a loop needs no host call, so
+/// an unbounded one would spin the executor.
+pub(crate) const MAX_LOOPS: u64 = 1000;
 
 /// The root under which injected recovery context is read.
 pub(crate) const RECOVERY_ROOT: &str = "_recovery";
@@ -450,9 +456,9 @@ fn failure_mode(
         }
     }
     if let Some(max) = rec.get("max_loops").filter(|_| !escalate) {
-        if !count(max).is_some_and(|n| n >= 1) {
+        if !count(max).is_some_and(|n| (1..=MAX_LOOPS).contains(&n)) {
             report.push(s303(
-                format!("{rfield}.max_loops must be an integer of at least 1, found {max}"),
+                format!("{rfield}.max_loops must be an integer from 1 to {MAX_LOOPS}, found {max}"),
                 &format!("{rfield}.max_loops"),
             ));
         }
@@ -733,6 +739,13 @@ mod tests {
         assert!(fm(json!({"on_error": "R401"})).is_empty());
         assert!(fm(json!({"on_error": ["R402", "F502"]})).is_empty());
         assert_eq!(fm(json!({"on_error": "R999"})), ["S303"]);
+        // Expression errors are fail-safe and never fail a step.
+        assert_eq!(fm(json!({"on_error": "R405"})), ["S303"]);
+        assert!(fm(json!({"on_error": ["F501", "F504"]})).is_empty());
+        assert_eq!(
+            fm(json!({"when": "true", "recovery": {"goto_step": "p", "max_loops": 1001}})),
+            ["S303"]
+        );
         assert_eq!(fm(json!({"on_error": []})), ["S303"]);
         assert_eq!(fm(json!({"action": "panic"})), ["S303"]);
         // A structured recovery that can never fire.

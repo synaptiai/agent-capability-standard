@@ -379,7 +379,7 @@ failure_modes:
 | `condition` | string | Yes | Prose description of the failure |
 | `action` | enum | Yes | `stop`, `rollback`, `request_more_context`, `pause_and_checkpoint`, `escalate` |
 | `when` | string | No | Expression (§5.8), evaluated after the step; it can read the step's own output |
-| `on_error` | code or list | No | Fires on a runtime code: R401, R402, R403, R405, F502 (§5.12) |
+| `on_error` | code or list | No | Fires on a code the step failed with: R401, R402, R403, F501, F502, F504 (§5.12) |
 | `recovery` | string or object | No | Prose, or a recovery loop (§5.12) |
 
 A failure mode fires when the step raised a matching `on_error` code or its
@@ -562,14 +562,16 @@ handler is listed.
 ### 5.12 Recovery and Escalation
 
 A failure mode fires when the step raised a code listed in `on_error` (one
-code or a list: R401, R402, R403, R405, F502; anything else is S303) or its
+code or a list: R401, R402, R403, F501, F502, F504; anything else is S303 —
+an expression error, R405, is fail-safe at its site and never fails a step)
+or its
 `when` is true after the step. A structured recovery whose failure mode has
 neither can never fire and is W609.
 
 `recovery` is a description (a string, for people) or a recovery object;
 anything else is S303. A recovery object has `goto_step`, `inject_context`
-(a mapping of keys to references, else S303), `max_loops` (integer ≥ 1,
-default 1, else S303) and `on_exhausted: {goto_step}`. `max_loops` and
+(a mapping of keys to references, else S303), `max_loops` (integer from 1
+to 1000, default 1, else S303) and `on_exhausted: {goto_step}`. `max_loops` and
 `on_exhausted` need a `goto_step` loop (S304). `on_error` is checked
 whether or not the failure mode's action is allowed.
 
@@ -1034,7 +1036,12 @@ Fixture expectations MAY list `expected_warning_codes`; an empty list means
 the fixture MUST produce no warnings. Expression fixtures
 (`tests/conformance/expressions/eval.json` and `check.json`) are
 language-neutral; the reference suite also runs them against cel-go to
-check §5.8.2's CEL compatibility.
+check §5.8.2's CEL compatibility. Runtime fixtures
+(`tests/conformance/runtime/*.json`) script runs of the reference executor
+— the actions it must request, the responses it gets, and the end and trace
+it must reach — for the runtime semantics of §5.6, §5.7, §5.8.2 and
+§5.11–§5.16; they are informative for implementations that execute
+workflows.
 
 ---
 

@@ -56,5 +56,10 @@ the Rust core in `core/`).
   errors) and `tests/conformance/expressions/check.json` (static
   diagnostics). `tools/cel_differential` runs them against cel-go to check
   CEL compatibility.
+- Runtime fixtures, language-neutral: `tests/conformance/runtime/*.json`,
+  scripted runs of the reference executor (catalog, inputs, the expected
+  actions and the responses to them, the expected end and trace). Run by
+  `cargo test --test runtime` (each also replayed through a snapshot and
+  restore before every step) and `tests/test_runner.py`.
 
 Run the suite with `python scripts/run_conformance.py`.

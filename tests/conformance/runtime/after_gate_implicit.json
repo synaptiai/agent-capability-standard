@@ -1,0 +1,56 @@
+{
+  "description": "A gate without a phase that reads the step's own output runs after it (1.0 form).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          },
+          "gates": [
+            {
+              "when": "${r.confidence} < 0.5",
+              "action": "stop",
+              "message": "low confidence"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 1,
+          "confidence": 0.2,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R403",
+    "message": "low confidence"
+  },
+  "trace_kinds": [
+    "step_completed",
+    "gate_fired"
+  ]
+}

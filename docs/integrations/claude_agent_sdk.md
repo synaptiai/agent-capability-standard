@@ -473,6 +473,16 @@ Permission callback checks → Checkpoint valid → ALLOWED
 Evidence collector captures output
 ```
 
+## Running Workflows
+
+The adapter guards tool calls an agent makes freely. To run a catalog
+workflow step by step instead — with its gates, checkpoints, approvals,
+waits, recovery and quorums enforced — use
+`grounded_agency.workflows.WorkflowRunner` with a `Host` whose
+`invoke_capability` calls your tools. Pass the adapter's
+`CheckpointTracker` to the host to record the run's checkpoints in it. See
+[Running Workflows](../guides/RUNNING_WORKFLOWS.md).
+
 ## Validation
 
 After implementation, validate the integration:

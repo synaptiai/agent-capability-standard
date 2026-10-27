@@ -11,6 +11,7 @@ use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use serde_json::{Map, Value};
 
 use crate::diag::{Code, Severity};
+use crate::exec::{self, Attendance, Response, RestoreError, StartError, StartOptions};
 use crate::validate::{self, Context, Report};
 use crate::yaml::{self, YamlError};
 
@@ -284,6 +285,156 @@ impl Validator {
     }
 }
 
+fn start_err(py: Python<'_>, e: StartError) -> PyErr {
+    let message = e.to_string();
+    match e {
+        StartError::Invalid(diagnostics) => {
+            let value = serde_json::to_value(&diagnostics).unwrap_or(Value::Null);
+            match to_py(py, &value) {
+                Ok(d) => PyValueError::new_err((message, d)),
+                Err(err) => err,
+            }
+        }
+        StartError::Inputs(_) | StartError::Program(_) => PyValueError::new_err(message),
+    }
+}
+
+fn response_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Response> {
+    let value = from_py(obj)?;
+    serde_json::from_value(value)
+        .map_err(|e| PyValueError::new_err(format!("malformed response: {e}")))
+}
+
+/// A run of one workflow by the reference executor (design-114 §16): a
+/// deterministic state machine with no I/O. Ask `next()` what to do, do it,
+/// and `submit()` the result; pass the time with every call.
+#[pyclass(name = "Run", module = "grounded_agency._core")]
+struct PyRun {
+    run: exec::Run,
+}
+
+#[pymethods]
+impl PyRun {
+    /// Validate `catalog` and start `workflow`. Raises ValueError when the
+    /// catalog does not validate (with the error diagnostics as the second
+    /// argument) or the inputs do not match the workflow's.
+    #[staticmethod]
+    #[pyo3(signature = (validator, catalog, workflow, inputs = None, *, attendance = "attended", run_id, now_ms))]
+    #[allow(clippy::too_many_arguments)]
+    fn start(
+        py: Python<'_>,
+        validator: PyRef<'_, Validator>,
+        catalog: &Bound<'_, PyAny>,
+        workflow: String,
+        inputs: Option<&Bound<'_, PyAny>>,
+        attendance: &str,
+        run_id: String,
+        now_ms: u64,
+    ) -> PyResult<Self> {
+        let catalog = catalog_from_py(catalog)?;
+        let inputs = match inputs.map(from_py).transpose()? {
+            None => Map::new(),
+            Some(Value::Object(m)) => m,
+            Some(_) => return Err(PyTypeError::new_err("inputs must be a dict")),
+        };
+        let attendance = match attendance {
+            "attended" => Attendance::Attended,
+            "unattended" => Attendance::Unattended,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "attendance must be 'attended' or 'unattended', not '{other}'"
+                )));
+            }
+        };
+        let ctx = &validator.ctx;
+        let options = StartOptions {
+            attendance,
+            run_id,
+            now_ms,
+        };
+        let run = py
+            .detach(|| {
+                ctx.schemas.clear_cache();
+                exec::Run::start(ctx, &catalog, &workflow, inputs, options)
+            })
+            .map_err(|e| start_err(py, e))?;
+        Ok(PyRun { run })
+    }
+
+    /// Resume a run from `snapshot()`, against the same catalog. With a key,
+    /// the snapshot's HMAC must match.
+    #[staticmethod]
+    #[pyo3(signature = (validator, catalog, snapshot, key = None))]
+    fn restore(
+        py: Python<'_>,
+        validator: PyRef<'_, Validator>,
+        catalog: &Bound<'_, PyAny>,
+        snapshot: &Bound<'_, PyAny>,
+        key: Option<Vec<u8>>,
+    ) -> PyResult<Self> {
+        let catalog = catalog_from_py(catalog)?;
+        let snapshot: exec::Snapshot = serde_json::from_value(from_py(snapshot)?)
+            .map_err(|e| PyValueError::new_err(format!("malformed snapshot: {e}")))?;
+        let ctx = &validator.ctx;
+        let run = py
+            .detach(|| exec::Run::restore(ctx, &catalog, &snapshot, key.as_deref()))
+            .map_err(|e| match e {
+                RestoreError::Start(s) => start_err(py, s),
+                other => PyValueError::new_err(other.to_string()),
+            })?;
+        Ok(PyRun { run })
+    }
+
+    /// The pending action, or the terminal one (`Completed`/`Failed`).
+    fn next(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let value = serde_json::to_value(self.run.next())
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        to_py(py, &value)
+    }
+
+    /// Answer action `action_id`; raises ValueError (changing nothing) when
+    /// the response does not answer it.
+    fn submit(
+        &mut self,
+        py: Python<'_>,
+        action_id: u64,
+        response: &Bound<'_, PyAny>,
+        now_ms: u64,
+    ) -> PyResult<()> {
+        let response = response_from_py(response)?;
+        let run = &mut self.run;
+        py.detach(|| run.submit(action_id, response, now_ms))
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// Pass the time: ends a due `Sleep`, times out a pending action.
+    fn tick(&mut self, py: Python<'_>, now_ms: u64) {
+        let run = &mut self.run;
+        py.detach(|| run.tick(now_ms));
+    }
+
+    #[getter]
+    fn finished(&self) -> bool {
+        self.run.is_finished()
+    }
+
+    fn trace(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        to_py(py, &Value::Array(self.run.trace().to_vec()))
+    }
+
+    fn action_records(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        to_py(py, &Value::Array(self.run.action_records().to_vec()))
+    }
+
+    /// `{"state": canonical JSON, "sha256": ..., "hmac": ... or None}`.
+    #[pyo3(signature = (key = None))]
+    fn snapshot(&self, py: Python<'_>, key: Option<Vec<u8>>) -> PyResult<Py<PyAny>> {
+        let value = serde_json::to_value(self.run.snapshot(key.as_deref()))
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        to_py(py, &value)
+    }
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -294,6 +445,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(load_catalog, m)?)?;
     m.add_function(wrap_pyfunction!(validate_catalog, m)?)?;
     m.add_class::<Validator>()?;
+    m.add_class::<PyRun>()?;
     let codes: Vec<(&str, &str, &str)> = Code::ALL
         .iter()
         .map(|c| {

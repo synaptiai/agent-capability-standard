@@ -1,12 +1,13 @@
 //! Reference core of the Agent Capability Standard.
 //!
-//! The workflow validator (and, from S6, the executor) live here so that every
-//! consumer — `tools/validate_workflows.py` and the `grounded_agency` Python
-//! package — runs one implementation. See `tasks/design-114.md`.
+//! The workflow validator and the executor live here so that every consumer
+//! — `tools/validate_workflows.py` and the `grounded_agency` Python package —
+//! runs one implementation. See `tasks/design-114.md`.
 
 pub mod cron;
 pub mod diag;
 pub mod duration;
+pub mod exec;
 pub mod expr;
 pub mod ontology;
 pub mod refs;

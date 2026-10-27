@@ -1,0 +1,1511 @@
+//! The step algorithm (design-114 §16.3) over the run state.
+
+use serde_json::{Map, Value, json};
+
+use super::canonical;
+use super::program::{GateAction, Program, Step, Workflow};
+use super::quorum;
+use super::{
+    Action, Attendance, Body, Checkpoint, Frame, MAX_FRAMES, MAX_TIME, Outcome, Pending, Purpose,
+    Response, Stage, State, StepError, StepState, SubmitError, check_inputs,
+};
+use crate::duration;
+use crate::expr::ast::RefAt;
+use crate::expr::eval::{self, Bindings};
+use crate::refs;
+
+/// A safety net against an executor bug looping without host interaction;
+/// every real loop is bounded by step counts and `max_loops`.
+const MAX_TRANSITIONS: u32 = 1_000_000;
+
+/// How one transition left the machine.
+enum Flow {
+    /// Keep going without the host.
+    Continue,
+    /// An action is pending, or the run finished.
+    Wait,
+}
+
+/// The values a frame's references read: step outputs, then inputs, then
+/// `_recovery`.
+struct FrameBindings<'a>(&'a Frame);
+
+impl Bindings for FrameBindings<'_> {
+    fn get(&self, root: &str) -> Option<&Value> {
+        let f = self.0;
+        if root == "_recovery" {
+            return f.recovery.as_ref();
+        }
+        f.stores.get(root).or_else(|| f.inputs.get(root))
+    }
+}
+
+/// Resolve the references in a binding value: a string that is exactly one
+/// reference takes the referenced value; references inside a longer string
+/// are interpolated (strings as they are, other values as compact JSON).
+pub(crate) fn resolve(value: &Value, b: &dyn Bindings) -> Value {
+    match value {
+        Value::String(s) => resolve_str(s, b),
+        Value::Array(a) => Value::Array(a.iter().map(|v| resolve(v, b)).collect()),
+        Value::Object(m) => {
+            Value::Object(m.iter().map(|(k, v)| (k.clone(), resolve(v, b))).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn resolve_str(s: &str, b: &dyn Bindings) -> Value {
+    let found = refs::find_refs(s);
+    if found.is_empty() {
+        return Value::String(s.to_string());
+    }
+    let read = |r: &refs::Ref| {
+        let at = RefAt {
+            r: r.clone(),
+            ann: None,
+            pos: 0,
+        };
+        eval::resolve(&at, b).into_owned()
+    };
+    if let [m] = found.as_slice() {
+        if m.start == 0 && m.end == s.len() {
+            if let Ok(r) = &m.parsed {
+                return read(r);
+            }
+        }
+    }
+    let mut out = String::new();
+    let mut last = 0;
+    for m in &found {
+        out.push_str(&s[last..m.start]);
+        match &m.parsed {
+            Ok(r) => match read(r) {
+                Value::String(t) => out.push_str(&t),
+                other => out.push_str(&other.to_string()),
+            },
+            Err(_) => out.push_str(&s[m.start..m.end]),
+        }
+        last = m.end;
+    }
+    out.push_str(&s[last..]);
+    Value::String(out)
+}
+
+/// `ms` since the Unix epoch as an RFC 3339 UTC timestamp.
+pub(crate) fn iso(ms: u64) -> String {
+    let secs = ms / 1000;
+    let days = i64::try_from(secs / 86_400).unwrap_or(i64::MAX / 2);
+    let rem = secs % 86_400;
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60,
+        ms % 1000
+    )
+}
+
+/// `now + d`, capped at [`MAX_TIME`] so every time stays an exact JSON
+/// number.
+fn later(now: u64, d: std::time::Duration) -> u64 {
+    now.saturating_add(u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .min(MAX_TIME)
+}
+
+/// What an approval request asked for.
+struct Asked<'s> {
+    digest: &'s str,
+    expires_at: Option<u64>,
+    min: u64,
+}
+
+pub(crate) struct Machine<'a> {
+    pub program: &'a Program,
+    pub st: &'a mut State,
+}
+
+impl<'a> Machine<'a> {
+    // ---- frames and steps ----
+
+    fn frame(&mut self) -> &mut Frame {
+        self.st
+            .frames
+            .last_mut()
+            .expect("a running run has a frame")
+    }
+
+    fn frame_ref(&self) -> &Frame {
+        self.st.frames.last().expect("a running run has a frame")
+    }
+
+    fn workflow(&self) -> &'a Workflow {
+        let program: &'a Program = self.program;
+        &program.workflows[&self.frame_ref().workflow]
+    }
+
+    fn step_ref(&self) -> &'a Step {
+        let f = self.frame_ref();
+        &self.workflow().steps[f.step]
+    }
+
+    fn names(&self) -> Vec<String> {
+        self.st.frames.iter().map(|f| f.workflow.clone()).collect()
+    }
+
+    // ---- trace and records ----
+
+    pub(crate) fn trace(&mut self, kind: &str, step: Option<usize>, detail: Value) {
+        let event = json!({
+            "seq": self.st.trace.len(),
+            "at": self.st.now,
+            "kind": kind,
+            "frame": self.names(),
+            "step": step,
+            "detail": detail,
+        });
+        self.st.trace.push(event);
+    }
+
+    fn trace_step(&mut self, kind: &str, detail: Value) {
+        let step = self.frame_ref().step;
+        self.trace(kind, Some(step), detail);
+    }
+
+    fn record(&mut self, status: &str, approval: Option<Value>) -> usize {
+        let step = self.frame_ref().step;
+        let purpose = self
+            .step_ref()
+            .raw
+            .get("purpose")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let n = self.st.records.len();
+        let mut record = json!({
+            "action_id": format!("{}/{}/{step}/{n}", self.st.run_id, self.names().join("/")),
+            "timestamp": iso(self.st.now),
+            "actor": "agent",
+            "intent": purpose,
+            "status": status,
+        });
+        if let Some(a) = approval {
+            record["approval"] = a;
+        }
+        self.st.records.push(record);
+        n
+    }
+
+    /// A record for an action that did not go ahead, with the reason.
+    fn record_refused(&mut self, status: &str, approval: Option<Value>, reason: &str) {
+        let r = self.record(status, approval);
+        self.st.records[r]["reason"] = json!(reason);
+        self.frame().cur.record = Some(r);
+    }
+
+    fn set_record_status(&mut self, status: &str) {
+        if let Some(r) = self.frame_ref().cur.record {
+            self.st.records[r]["status"] = json!(status);
+        }
+    }
+
+    /// An approved action that then failed. A record that is already
+    /// rejected, expired or executed keeps its status.
+    fn record_failed(&mut self) {
+        if let Some(r) = self.frame_ref().cur.record {
+            if self.st.records[r]["status"] == "approved" {
+                self.st.records[r]["status"] = json!("failed");
+            }
+        }
+    }
+
+    // ---- actions ----
+
+    fn emit(&mut self, body: Body, purpose: Purpose, deadline: Option<u64>) -> Flow {
+        let action = Action {
+            id: self.st.next_id,
+            frame: self.names(),
+            body,
+        };
+        self.st.next_id += 1;
+        self.st.pending = Some(Pending {
+            action,
+            purpose,
+            deadline,
+        });
+        Flow::Wait
+    }
+
+    fn finish(&mut self, body: Body) -> Flow {
+        let action = Action {
+            id: self.st.next_id,
+            frame: self.names(),
+            body,
+        };
+        self.st.next_id += 1;
+        self.st.pending = None;
+        self.st.finished = Some(action);
+        Flow::Wait
+    }
+
+    /// End the whole run (deferral and replanning end every frame).
+    fn finish_run(&mut self, outcome: Outcome) -> Flow {
+        self.trace("run_finished", None, json!({"outcome": outcome}));
+        let outputs = Value::Object(self.st.frames[0].stores.clone());
+        let records = self.st.records.clone();
+        self.finish(Body::Completed {
+            outcome,
+            cause: None,
+            outputs,
+            action_records: records,
+        })
+    }
+
+    // ---- the loop ----
+
+    pub(crate) fn drive(&mut self) {
+        let mut fuel = MAX_TRANSITIONS;
+        while self.st.finished.is_none() && self.st.pending.is_none() {
+            fuel -= 1;
+            if fuel == 0 {
+                self.fail_run("R402", "the executor exceeded its transition budget");
+                return;
+            }
+            match self.transition() {
+                Flow::Continue | Flow::Wait => {}
+            }
+        }
+    }
+
+    fn transition(&mut self) -> Flow {
+        match self.frame_ref().stage.clone() {
+            Stage::Begin => self.begin(),
+            Stage::Checkpoint => self.checkpoint(),
+            Stage::Approval => self.approval(),
+            Stage::Recheck => self.recheck(),
+            Stage::Execute => self.execute(),
+            Stage::Backoff { until } => self.emit(Body::Sleep { until }, Purpose::Sleep, None),
+            Stage::After => self.after(),
+            Stage::Failure => self.failure(),
+        }
+    }
+
+    fn set_stage(&mut self, stage: Stage) -> Flow {
+        self.frame().stage = stage;
+        Flow::Continue
+    }
+
+    // ---- step outcomes ----
+
+    /// The step failed before or while executing: on to its failure modes.
+    fn step_error(&mut self, code: &str, message: impl Into<String>) -> Flow {
+        let message = message.into();
+        self.trace_step("step_failed", json!({"code": code, "message": message}));
+        self.frame().cur.error = Some(StepError {
+            code: code.to_string(),
+            message,
+        });
+        self.set_stage(Stage::Failure)
+    }
+
+    fn skip_step(&mut self, why: &str) -> Flow {
+        self.trace_step("step_skipped", json!({"reason": why}));
+        if let Some(store) = self.step_ref().store_as.clone() {
+            let f = self.frame();
+            f.stores.remove(&store);
+            f.ran_inputs.remove(&store);
+        }
+        self.next_step()
+    }
+
+    /// After a step: the next one, or the end of an escalation.
+    fn next_step(&mut self) -> Flow {
+        if let Some(cause) = self.frame_ref().escalation.clone() {
+            return self.end_frame(Ok((Outcome::Escalated, Some(cause))));
+        }
+        let f = self.frame();
+        f.step += 1;
+        f.stage = Stage::Begin;
+        Flow::Continue
+    }
+
+    fn fail_run(&mut self, code: &str, message: &str) -> Flow {
+        let step = self.st.frames.last().map(|f| f.step);
+        self.trace(
+            "run_failed",
+            step,
+            json!({"code": code, "message": message}),
+        );
+        let records = self.st.records.clone();
+        self.finish(Body::Failed {
+            code: code.to_string(),
+            step,
+            message: message.to_string(),
+            action_records: records,
+        })
+    }
+
+    /// The top frame ends: the run ends, or the parent's invoke step gets
+    /// the result.
+    fn end_frame(&mut self, end: Result<(Outcome, Option<String>), (String, String)>) -> Flow {
+        if self.st.frames.len() == 1 {
+            return match end {
+                Ok((outcome, cause)) => {
+                    self.trace(
+                        "run_finished",
+                        None,
+                        json!({"outcome": outcome, "cause": cause}),
+                    );
+                    let outputs = Value::Object(self.st.frames[0].stores.clone());
+                    let records = self.st.records.clone();
+                    self.finish(Body::Completed {
+                        outcome,
+                        cause,
+                        outputs,
+                        action_records: records,
+                    })
+                }
+                Err((code, message)) => self.fail_run(&code, &message),
+            };
+        }
+        let child = self.st.frames.pop().expect("checked above");
+        let result = match &end {
+            Ok((o, _)) => json!(o),
+            Err((c, _)) => json!(c),
+        };
+        self.trace_step(
+            "invoke_returned",
+            json!({"workflow": child.workflow, "result": result}),
+        );
+        match end {
+            Ok((Outcome::Completed, _)) => {
+                // In step order, which survives a snapshot (object keys
+                // are sorted there).
+                let steps: Vec<Value> = self.program.workflows[&child.workflow]
+                    .steps
+                    .iter()
+                    .filter_map(|s| s.store_as.as_deref())
+                    .filter(|s| child.stores.contains_key(*s))
+                    .map(|s| json!(s))
+                    .collect();
+                self.frame().cur.output = Some(json!({
+                    "result": Value::Object(child.stores),
+                    "steps_executed": steps,
+                    "evidence_anchors": [],
+                }));
+                self.set_stage(Stage::After)
+            }
+            Ok((Outcome::Escalated, cause)) => self.exec_error(
+                "R402",
+                format!(
+                    "invoked workflow '{}' escalated ({})",
+                    child.workflow,
+                    cause.unwrap_or_default()
+                ),
+            ),
+            Ok((outcome, _)) => self.finish_run(outcome),
+            Err((code, message)) => self.exec_error(
+                "R402",
+                format!(
+                    "invoked workflow '{}' failed with {code}: {message}",
+                    child.workflow
+                ),
+            ),
+        }
+    }
+
+    // ---- stages ----
+
+    fn begin(&mut self) -> Flow {
+        let escalating = self.frame_ref().escalation.is_some();
+        let (index, count) = (self.frame_ref().step, self.workflow().steps.len());
+        if !escalating {
+            if index >= count {
+                return self.end_frame(Ok((Outcome::Completed, None)));
+            }
+            if self.step_ref().handler {
+                let f = self.frame();
+                f.step += 1;
+                return Flow::Continue;
+            }
+        }
+        self.frame().cur = StepState::default();
+        let capability = self.step_ref().capability.clone();
+        self.trace_step("step_started", json!({"capability": capability}));
+        let program = self.program;
+        let wf = &program.workflows[&self.frame_ref().workflow];
+        let step = &wf.steps[index];
+        if let Some(c) = &step.condition {
+            let ok = match eval::eval_condition(c, &FrameBindings(self.frame_ref())) {
+                Ok(b) => b,
+                Err(e) => {
+                    self.trace_step(
+                        "expression_error",
+                        json!({"site": "condition", "code": "R405", "message": e.msg}),
+                    );
+                    false
+                }
+            };
+            if !ok {
+                if !step.skip_if_false {
+                    return self
+                        .step_error("R403", "the condition is false and skip_if_false is false");
+                }
+                return self.skip_step("condition is false");
+            }
+        }
+        for (g, gate) in step.gates.iter().enumerate().filter(|(_, g)| !g.after) {
+            if !self.gate_fires(g, gate) {
+                continue;
+            }
+            let message = gate
+                .message
+                .clone()
+                .unwrap_or_else(|| format!("gates[{g}] fired"));
+            match gate.action {
+                GateAction::Stop => return self.step_error("R403", message),
+                GateAction::Skip => return self.skip_step("a gate skipped the step"),
+                GateAction::Rollback => return self.rollback(Purpose::GateRollback { message }),
+                GateAction::Warn => {}
+            }
+        }
+        let bindings = step.raw.get("input_bindings").cloned().unwrap_or(json!({}));
+        let inputs = resolve(&bindings, &FrameBindings(self.frame_ref()));
+        self.frame().cur.inputs = inputs;
+        self.set_stage(Stage::Approval)
+    }
+
+    /// Evaluate a gate; an evaluation error fires it (fail-safe).
+    fn gate_fires(&mut self, g: usize, gate: &super::program::Gate) -> bool {
+        let fired = match eval::eval_condition(&gate.when, &FrameBindings(self.frame_ref())) {
+            Ok(b) => b,
+            Err(e) => {
+                self.trace_step(
+                    "expression_error",
+                    json!({"site": format!("gates[{g}].when"), "code": "R405", "message": e.msg}),
+                );
+                true
+            }
+        };
+        if fired {
+            let action = match gate.action {
+                GateAction::Stop => "stop",
+                GateAction::Rollback => "rollback",
+                GateAction::Skip => "skip",
+                GateAction::Warn => "warn",
+            };
+            self.trace_step(
+                "gate_fired",
+                json!({"gate": g, "action": action, "message": gate.message}),
+            );
+        }
+        fired
+    }
+
+    /// Roll back to the latest checkpoint; with none, the run fails (F503).
+    fn rollback(&mut self, purpose: Purpose) -> Flow {
+        let Some(cp) = self.st.checkpoints.last().map(|c| c.id.clone()) else {
+            return self.end_frame(Err((
+                "F503".to_string(),
+                "there is no checkpoint to roll back to".to_string(),
+            )));
+        };
+        let step = self.frame_ref().step;
+        self.emit(
+            Body::Rollback {
+                step,
+                checkpoint_id: cp,
+            },
+            purpose,
+            None,
+        )
+    }
+
+    /// Consumed only once the step is about to execute: a step that is
+    /// skipped, deferred or refused approval leaves the checkpoint valid.
+    fn checkpoint(&mut self) -> Flow {
+        if !self.step_ref().requires_checkpoint {
+            return self.set_stage(Stage::Execute);
+        }
+        if let Some(cp) = self.st.checkpoints.iter_mut().rev().find(|c| c.valid) {
+            cp.valid = false;
+            let id = cp.id.clone();
+            self.trace_step("checkpoint_consumed", json!({"checkpoint_id": id}));
+            return self.set_stage(Stage::Execute);
+        }
+        let step = self.frame_ref().step;
+        self.emit(Body::CreateCheckpoint { step }, Purpose::Checkpoint, None)
+    }
+
+    fn approval_spec(&self) -> Map<String, Value> {
+        self.step_ref()
+            .raw
+            .get("approval")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn approval(&mut self) -> Flow {
+        if !self.step_ref().requires_approval {
+            return self.set_stage(Stage::Checkpoint);
+        }
+        let spec = self.approval_spec();
+        if self.st.attendance == Attendance::Unattended {
+            let plan = spec
+                .get("when_unattended")
+                .and_then(Value::as_str)
+                .unwrap_or("fail");
+            self.trace_step("approval_unattended", json!({"when_unattended": plan}));
+            return match plan {
+                "skip" => {
+                    self.record_refused(
+                        "rejected",
+                        None,
+                        "the run is unattended (when_unattended: skip); the step was skipped",
+                    );
+                    self.skip_step("approval needed, but the run is unattended")
+                }
+                "defer_to_queue" => {
+                    let r = self.record("planned", None);
+                    self.frame().cur.record = Some(r);
+                    self.finish_run(Outcome::Deferred)
+                }
+                _ => {
+                    let why = "approval is needed, but the run is unattended";
+                    self.record_refused("rejected", None, why);
+                    self.step_error("F502", why)
+                }
+            };
+        }
+        let bindings = FrameBindings(self.frame_ref());
+        let mut shown = match spec.get("shows") {
+            Some(Value::Array(list)) => {
+                Value::Array(list.iter().map(|v| resolve(v, &bindings)).collect())
+            }
+            _ => json!([self.frame_ref().cur.inputs]),
+        };
+        // Asked again after a recheck saw the source change: show the
+        // change, so the approver (and the digest) see what is new.
+        if let (Value::Array(items), Some(previous), Some(current)) = (
+            &mut shown,
+            self.frame_ref().cur.previous.clone(),
+            self.frame_ref().cur.rebaseline.clone(),
+        ) {
+            items.push(json!({"recheck": {"previous": previous, "current": current}}));
+        }
+        let baseline = spec
+            .get("recheck")
+            .and_then(|r| r.get("source"))
+            .map(|s| resolve(s, &bindings));
+        let digest = canonical::digest(&shown);
+        let expires_at = spec
+            .get("expires")
+            .and_then(Value::as_str)
+            .and_then(|e| duration::parse(e).ok())
+            .map(|d| later(self.st.now, d));
+        let approver = spec
+            .get("approver")
+            .cloned()
+            .unwrap_or_else(|| json!({"kind": "human"}));
+        let min = approver
+            .get("min_approvers")
+            .and_then(|m| m.as_u64().or_else(|| m.as_f64().map(|f| f as u64)))
+            .unwrap_or(1);
+        let mode = spec
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("in_session")
+            .to_string();
+        let f = self.frame();
+        f.cur.baseline = f.cur.rebaseline.take().or(baseline);
+        let step = f.step;
+        self.trace_step("approval_requested", json!({"digest": digest}));
+        self.emit(
+            Body::RequestApproval {
+                step,
+                approver,
+                mode,
+                shown,
+                digest: digest.clone(),
+                expires_at,
+            },
+            Purpose::Approval {
+                digest,
+                expires_at,
+                min,
+            },
+            expires_at,
+        )
+    }
+
+    fn decide(
+        &mut self,
+        decision_id: String,
+        decision: &str,
+        approvers: &[String],
+        given: &str,
+        asked: Asked<'_>,
+    ) -> Flow {
+        let Asked {
+            digest: expected,
+            expires_at,
+            min,
+        } = asked;
+        let spec = self.approval_spec();
+        let now = self.st.now;
+        let distinct: std::collections::BTreeSet<&String> = approvers.iter().collect();
+        let sub = |decision: &str| {
+            json!({
+                "digest": expected,
+                "decision": decision,
+                "approvers": distinct.iter().collect::<Vec<_>>(),
+                "mode": spec.get("mode").and_then(Value::as_str).unwrap_or("in_session"),
+                "mandate_ref": spec.get("approver").and_then(|a| a.get("mandate_ref")),
+                "decided_at": iso(now),
+                "expires_at": expires_at.map(iso),
+            })
+        };
+        let reused = !self.st.used_decisions.insert(decision_id.clone());
+        // (status, reason) for a decision that does not let the step run.
+        let problem: Option<(&str, String)> = if reused {
+            Some((
+                "rejected",
+                format!("decision '{decision_id}' was already used"),
+            ))
+        } else if decision == "rejected" {
+            Some(("rejected", "approval was rejected".to_string()))
+        } else if decision != "approved" {
+            Some(("rejected", format!("'{decision}' is not a decision")))
+        } else if expires_at.is_some_and(|e| now > e) {
+            Some(("expired", "the approval expired".to_string()))
+        } else if !canonical::same_digest(given, expected) {
+            Some((
+                "rejected",
+                "the decision approves different values than were shown".to_string(),
+            ))
+        } else if (distinct.len() as u64) < min {
+            Some((
+                "rejected",
+                format!("{} distinct approver(s), {min} needed", distinct.len()),
+            ))
+        } else {
+            None
+        };
+        self.trace_step(
+            "approval_decided",
+            json!({"decision_id": decision_id, "decision": decision, "valid": problem.is_none()}),
+        );
+        if let Some((status, reason)) = problem {
+            let sub = sub(status);
+            self.record_refused(status, Some(sub), &reason);
+            return self.step_error("F502", reason);
+        }
+        let r = self.record("approved", Some(sub("approved")));
+        self.frame().cur.record = Some(r);
+        self.set_stage(Stage::Recheck)
+    }
+
+    fn recheck(&mut self) -> Flow {
+        let spec = self.approval_spec();
+        let Some(recheck) = spec.get("recheck").and_then(Value::as_object) else {
+            return self.set_stage(Stage::Checkpoint);
+        };
+        let source = recheck
+            .get("source")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let compare = recheck
+            .get("compare")
+            .and_then(Value::as_str)
+            .unwrap_or("digest")
+            .to_string();
+        let step = self.frame_ref().step;
+        self.emit(
+            Body::RecheckSource {
+                step,
+                source,
+                compare,
+            },
+            Purpose::Recheck,
+            None,
+        )
+    }
+
+    fn rechecked(&mut self, current: Value) -> Flow {
+        let spec = self.approval_spec();
+        let recheck = spec.get("recheck").cloned().unwrap_or(json!({}));
+        let compare = recheck
+            .get("compare")
+            .and_then(Value::as_str)
+            .unwrap_or("digest");
+        let baseline = self.frame_ref().cur.baseline.clone().unwrap_or(Value::Null);
+        let same = if compare == "version" {
+            eval::deep_eq(
+                baseline.get("version").unwrap_or(&Value::Null),
+                current.get("version").unwrap_or(&Value::Null),
+            )
+        } else {
+            canonical::digest(&baseline) == canonical::digest(&current)
+        };
+        self.trace_step("recheck", json!({"changed": !same}));
+        if same {
+            return self.set_stage(Stage::Checkpoint);
+        }
+        match recheck
+            .get("on_change")
+            .and_then(Value::as_str)
+            .unwrap_or("reask")
+        {
+            "replan" => {
+                self.set_record_status("expired");
+                self.finish_run(Outcome::ReplanRequired)
+            }
+            "stop" => {
+                self.set_record_status("expired");
+                self.step_error("F502", "the approved source changed before acting")
+            }
+            _ => {
+                self.set_record_status("expired");
+                let f = self.frame();
+                f.cur.previous = Some(baseline);
+                f.cur.rebaseline = Some(current);
+                f.cur.record = None;
+                self.set_stage(Stage::Approval)
+            }
+        }
+    }
+
+    fn execute(&mut self) -> Flow {
+        if self.frame_ref().cur.attempt == 0 {
+            self.frame().cur.attempt = 1;
+        }
+        let program = self.program;
+        let wf = &program.workflows[&self.frame_ref().workflow];
+        let step = &wf.steps[self.frame_ref().step];
+        let now = self.st.now;
+        let deadline = step.timeout.map(|t| later(now, t));
+        let index = step.index;
+        if wf.extension("wait@1") {
+            if let Some(Value::Object(wait)) = step.raw.get("wait") {
+                let bindings = FrameBindings(self.frame_ref());
+                let correlate = wait
+                    .get("correlate")
+                    .and_then(Value::as_object)
+                    .map(|c| {
+                        c.iter()
+                            .map(|(k, v)| (k.clone(), resolve(v, &bindings)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let accept_from = accept_from(&self.frame_ref().cur.inputs);
+                return self.emit(
+                    Body::AwaitEvent {
+                        step: index,
+                        event_type: wait
+                            .get("event_type")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        source_kind: wait
+                            .get("source_kind")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        correlate,
+                        accept_from,
+                        liveness: wait.get("liveness").cloned(),
+                        deadline,
+                    },
+                    Purpose::Event,
+                    deadline,
+                );
+            }
+        }
+        if step.capability == "invoke" {
+            return self.invoke(step);
+        }
+        if step.capability == "constrain" && wf.extension("quorum@1") {
+            if let Some(Value::Object(q)) = step.raw.get("quorum") {
+                let result = quorum::evaluate(q, self.frame_ref());
+                self.trace_step("quorum", json!({"tally": result.output["tally"]}));
+                self.frame().cur.output = Some(result.output);
+                if !result.compliant {
+                    // The output stays readable by failure modes.
+                    if let Some(store) = &step.store_as {
+                        let out = self.frame_ref().cur.output.clone().unwrap_or_default();
+                        self.frame().stores.insert(store.clone(), out);
+                    }
+                    return self.step_error("F504", result.message);
+                }
+                return self.set_stage(Stage::After);
+            }
+        }
+        let inputs = self.frame_ref().cur.inputs.clone();
+        let attempt = self.frame_ref().cur.attempt;
+        self.emit(
+            Body::InvokeCapability {
+                step: index,
+                capability: step.capability.clone(),
+                store_as: step.store_as.clone(),
+                domain: step
+                    .raw
+                    .get("domain")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                inputs,
+                deadline,
+                attempt,
+            },
+            Purpose::Capability,
+            deadline,
+        )
+    }
+
+    fn invoke(&mut self, step: &Step) -> Flow {
+        let inputs = &self.frame_ref().cur.inputs;
+        let target = step
+            .raw
+            .get("workflow_id")
+            .and_then(Value::as_str)
+            .or_else(|| inputs.get("workflow").and_then(Value::as_str))
+            .map(str::to_string);
+        let Some(target) = target else {
+            return self.exec_error("R402", "the invoke step names no workflow");
+        };
+        let Some(child) = self.program.workflows.get(&target) else {
+            return self.exec_error("R402", format!("workflow '{target}' is not in the catalog"));
+        };
+        if self.st.frames.len() >= MAX_FRAMES {
+            return self.exec_error(
+                "R402",
+                format!("invoking '{target}' would nest more than {MAX_FRAMES} runs"),
+            );
+        }
+        let child_inputs = inputs
+            .get("input")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if let Err(e) = check_inputs(child, &child_inputs) {
+            return self.exec_error("R402", e);
+        }
+        self.trace_step("invoke_started", json!({"workflow": target}));
+        self.st.frames.push(Frame::new(&target, child_inputs));
+        Flow::Continue
+    }
+
+    /// An execution error: retried while attempts remain (R401/R402), then
+    /// on to the failure modes.
+    fn exec_error(&mut self, code: &str, message: impl Into<String>) -> Flow {
+        let message = message.into();
+        let (attempt, retry) = {
+            let s = self.step_ref();
+            (
+                self.frame_ref().cur.attempt,
+                s.retry.as_ref().map(|r| (r.max, r.backoff.clone())),
+            )
+        };
+        if matches!(code, "R401" | "R402") {
+            if let Some((max, backoff)) = retry {
+                if attempt <= max {
+                    let wait_ms: u64 = match backoff.as_str() {
+                        "linear" => 1000u64.saturating_mul(u64::from(attempt)),
+                        "exponential" => {
+                            1000u64.saturating_mul(1u64 << attempt.saturating_sub(1).min(32))
+                        }
+                        _ => 0,
+                    };
+                    self.trace_step(
+                        "retry",
+                        json!({"code": code, "message": message, "attempt": attempt, "backoff_ms": wait_ms}),
+                    );
+                    if wait_ms == 0 {
+                        self.frame().cur.attempt = self.frame_ref().cur.attempt.saturating_add(1);
+                        return self.set_stage(Stage::Execute);
+                    }
+                    let until = self.st.now.saturating_add(wait_ms).min(MAX_TIME);
+                    return self.set_stage(Stage::Backoff { until });
+                }
+            }
+        }
+        self.step_error(code, message)
+    }
+
+    fn output(&mut self, value: Value) -> Flow {
+        let step = self.step_ref();
+        let missing: Vec<&String> = match &value {
+            Value::Object(m) => step
+                .required_outputs
+                .iter()
+                .filter(|k| !m.contains_key(k.as_str()))
+                .collect(),
+            _ => step.required_outputs.iter().collect(),
+        };
+        if !value.is_object() || !missing.is_empty() {
+            let detail = if value.is_object() {
+                format!(
+                    "the output lacks {}",
+                    missing
+                        .iter()
+                        .map(|m| format!("'{m}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                "the output is not an object".to_string()
+            };
+            let capability = step.capability.clone();
+            return self.exec_error(
+                "R402",
+                format!("{detail}, which the '{capability}' contract requires"),
+            );
+        }
+        if step.capability == "checkpoint" {
+            let id = value
+                .get("checkpoint_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| self.derived_checkpoint_id());
+            self.add_checkpoint(id);
+        }
+        self.frame().cur.output = Some(value);
+        self.set_stage(Stage::After)
+    }
+
+    fn derived_checkpoint_id(&self) -> String {
+        format!(
+            "{}:{}:{}:{}",
+            self.st.run_id,
+            self.frame_ref().workflow,
+            self.frame_ref().step,
+            self.st.checkpoints.len()
+        )
+    }
+
+    fn add_checkpoint(&mut self, id: String) {
+        self.trace_step("checkpoint_created", json!({"checkpoint_id": id}));
+        self.st.checkpoints.push(Checkpoint { id, valid: true });
+    }
+
+    fn event(&mut self, pending: Pending, event: Value, principal: Option<String>) -> Flow {
+        let step = self.step_ref();
+        let Body::AwaitEvent {
+            event_type,
+            source_kind,
+            correlate,
+            accept_from,
+            ..
+        } = &pending.action.body
+        else {
+            unreachable!("checked by submit");
+        };
+        let field = |k: &str| -> Value {
+            event
+                .get("canonical")
+                .and_then(|c| c.get(k))
+                .or_else(|| event.get(k))
+                .cloned()
+                .unwrap_or(Value::Null)
+        };
+        let reason = if event.get("event_type").and_then(Value::as_str) != Some(event_type) {
+            Some("event_type".to_string())
+        } else if source_kind.as_ref().is_some_and(|k| {
+            event
+                .get("source")
+                .and_then(|s| s.get("kind"))
+                .and_then(Value::as_str)
+                != Some(k.as_str())
+        }) {
+            Some("source_kind".to_string())
+        } else if let Some((k, _)) = correlate.iter().find(|(k, v)| !eval::deep_eq(&field(k), v)) {
+            Some(format!("correlate.{k}"))
+        } else if accept_from
+            .as_ref()
+            .is_some_and(|a| !principal.as_ref().is_some_and(|p| a.contains(p)))
+        {
+            Some("accept_from".to_string())
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            // Not ours: keep waiting on the same action. Drops are counted
+            // per reason and traced once each, so a noisy source cannot
+            // grow the trace without bound.
+            let counts = &mut self.frame().cur.dropped;
+            let n = counts.get(&reason).and_then(Value::as_u64).unwrap_or(0);
+            counts.insert(reason.clone(), json!(n.saturating_add(1)));
+            if n == 0 {
+                self.trace_step("event_dropped", json!({"reason": reason}));
+            }
+            self.st.pending = Some(pending);
+            return Flow::Wait;
+        }
+        let invalidated: Vec<String> = self
+            .st
+            .checkpoints
+            .iter_mut()
+            .filter(|c| c.valid)
+            .map(|c| {
+                c.valid = false;
+                c.id.clone()
+            })
+            .collect();
+        if !invalidated.is_empty() {
+            self.trace_step(
+                "checkpoints_invalidated",
+                json!({"checkpoint_ids": invalidated}),
+            );
+        }
+        let mut item = event.clone();
+        if let (Some(p), Value::Object(m)) = (&principal, &mut item) {
+            m.insert("sender".into(), json!(p));
+        }
+        let anchors = event.get("anchors").cloned().unwrap_or(json!([]));
+        let output = if step.capability == "synchronize" {
+            json!({
+                "synchronized": true,
+                "agreed_state": event.get("canonical").cloned().unwrap_or(json!({})),
+                "participants": self.frame_ref().cur.inputs.get("agents").cloned().unwrap_or(json!([])),
+                "evidence_anchors": anchors,
+            })
+        } else {
+            json!({
+                "data": [item],
+                "source": event.get("source").and_then(|s| s.get("kind")).cloned().unwrap_or(Value::Null),
+                "timestamp": event.get("timestamp").cloned().unwrap_or(Value::Null),
+                "evidence_anchors": anchors,
+            })
+        };
+        let dropped = Value::Object(self.frame_ref().cur.dropped.clone());
+        self.trace_step(
+            "event_received",
+            json!({"event_type": event_type, "dropped": dropped}),
+        );
+        self.frame().cur.output = Some(output);
+        self.set_stage(Stage::After)
+    }
+
+    fn after(&mut self) -> Flow {
+        let program = self.program;
+        let step = &program.workflows[&self.frame_ref().workflow].steps[self.frame_ref().step];
+        if let (Some(store), Some(out)) = (&step.store_as, self.frame_ref().cur.output.clone()) {
+            // The inputs the step ran with: a quorum judges its reviewers
+            // by these, not by re-resolving their bindings later.
+            let inputs = self.frame_ref().cur.inputs.clone();
+            let f = self.frame();
+            f.stores.insert(store.clone(), out);
+            f.ran_inputs.insert(store.clone(), inputs);
+        }
+        self.set_record_status("executed");
+        self.trace_step("step_completed", json!({}));
+        for (g, gate) in step.gates.iter().enumerate().filter(|(_, g)| g.after) {
+            if !self.gate_fires(g, gate) {
+                continue;
+            }
+            let message = gate
+                .message
+                .clone()
+                .unwrap_or_else(|| format!("gates[{g}] fired"));
+            match gate.action {
+                GateAction::Stop => return self.step_error("R403", message),
+                GateAction::Rollback => return self.rollback(Purpose::GateRollback { message }),
+                GateAction::Skip | GateAction::Warn => {}
+            }
+        }
+        self.set_stage(Stage::Failure)
+    }
+
+    fn failure(&mut self) -> Flow {
+        let program = self.program;
+        let step = &program.workflows[&self.frame_ref().workflow].steps[self.frame_ref().step];
+        let error = self.frame_ref().cur.error.clone();
+        for (f, fm) in step.failure_modes.iter().enumerate() {
+            let by_code = error
+                .as_ref()
+                .is_some_and(|e| fm.on_error.contains(&e.code));
+            let by_when = !by_code
+                && fm.when.as_ref().is_some_and(|w| {
+                    match eval::eval_condition(w, &FrameBindings(self.frame_ref())) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            self.trace_step(
+                                "expression_error",
+                                json!({"site": format!("failure_modes[{f}].when"), "code": "R405", "message": e.msg}),
+                            );
+                            false
+                        }
+                    }
+                });
+            if by_code || by_when {
+                self.trace_step(
+                    "failure_mode_fired",
+                    json!({"failure_mode": f, "action": fm.action}),
+                );
+                return match fm.action.as_str() {
+                    "rollback" => self.rollback(Purpose::FailureRollback { mode: f }),
+                    "pause_and_checkpoint" => {
+                        let index = step.index;
+                        self.emit(
+                            Body::CreateCheckpoint { step: index },
+                            Purpose::FailureCheckpoint { mode: f },
+                            None,
+                        )
+                    }
+                    _ => self.recover(f),
+                };
+            }
+        }
+        match error {
+            Some(e) => {
+                self.record_failed();
+                self.end_frame(Err((e.code, e.message)))
+            }
+            None => self.next_step(),
+        }
+    }
+
+    /// The recovery of fired failure mode `f`: loop, escalate, or end.
+    fn recover(&mut self, f: usize) -> Flow {
+        let program = self.program;
+        let wf = &program.workflows[&self.frame_ref().workflow];
+        let step = &wf.steps[self.frame_ref().step];
+        let fm = &step.failure_modes[f];
+        let (code, message) = match &self.frame_ref().cur.error {
+            Some(e) => (e.code.clone(), e.message.clone()),
+            None => (
+                "R402".to_string(),
+                format!(
+                    "failure mode {f} fired: {}",
+                    step.raw["failure_modes"][f]["condition"]
+                ),
+            ),
+        };
+        if self.frame_ref().cur.error.is_some() {
+            self.record_failed();
+        }
+        if fm.action == "escalate" {
+            return match fm.goto {
+                Some(h) => self.escalate(h, &code),
+                None => self.end_frame(Err((code, message))),
+            };
+        }
+        let Some(target) = fm.goto else {
+            return self.end_frame(Err((code, message)));
+        };
+        let key = format!("{}:{f}", step.index);
+        let taken = self
+            .frame_ref()
+            .loops
+            .get(&key)
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if taken >= fm.max_loops {
+            self.trace_step(
+                "recovery_exhausted",
+                json!({"failure_mode": f, "loops": taken}),
+            );
+            return match fm.on_exhausted {
+                Some(h) => self.escalate(h, "R404"),
+                None => self.end_frame(Err((
+                    "R404".to_string(),
+                    format!("recovery loop exhausted after {taken} loop(s): {message}"),
+                ))),
+            };
+        }
+        let injected: Map<String, Value> = fm
+            .recovery
+            .as_ref()
+            .and_then(|r| r.get("inject_context"))
+            .and_then(Value::as_object)
+            .map(|m| {
+                let b = FrameBindings(self.frame_ref());
+                m.iter().map(|(k, v)| (k.clone(), resolve(v, &b))).collect()
+            })
+            .unwrap_or_default();
+        let cleared: Vec<String> = wf.steps[target..]
+            .iter()
+            .filter_map(|s| s.store_as.clone())
+            .collect();
+        let frame = self.frame();
+        frame.loops.insert(key, json!(taken + 1));
+        let mut recovery = match frame.recovery.take() {
+            Some(Value::Object(m)) => m,
+            _ => Map::new(),
+        };
+        recovery.extend(injected);
+        frame.recovery = Some(Value::Object(recovery));
+        for s in &cleared {
+            frame.stores.remove(s);
+            frame.ran_inputs.remove(s);
+        }
+        frame.step = target;
+        frame.stage = Stage::Begin;
+        self.trace(
+            "loop",
+            Some(step.index),
+            json!({"failure_mode": f, "to": target, "loop": taken + 1}),
+        );
+        Flow::Continue
+    }
+
+    fn escalate(&mut self, handler: usize, cause: &str) -> Flow {
+        self.trace_step("escalated", json!({"handler": handler, "cause": cause}));
+        let f = self.frame();
+        f.escalation = Some(cause.to_string());
+        f.step = handler;
+        f.stage = Stage::Begin;
+        Flow::Continue
+    }
+
+    // ---- host interaction ----
+
+    pub(crate) fn submit(
+        &mut self,
+        id: u64,
+        response: Response,
+        now: u64,
+    ) -> Result<(), SubmitError> {
+        if self.st.finished.is_some() {
+            return Err(SubmitError::Finished);
+        }
+        let pending = self
+            .st
+            .pending
+            .clone()
+            .expect("an unfinished run has a pending action");
+        if pending.action.id != id {
+            return Err(SubmitError::WrongAction {
+                pending: pending.action.id,
+                got: id,
+            });
+        }
+        let ok = matches!(
+            (&pending.action.body, &response),
+            (
+                Body::InvokeCapability { .. },
+                Response::Output { .. } | Response::Error { .. }
+            ) | (
+                Body::CreateCheckpoint { .. },
+                Response::Checkpoint { .. } | Response::Error { .. }
+            ) | (
+                Body::Rollback { .. },
+                Response::RolledBack | Response::Error { .. }
+            ) | (Body::RequestApproval { .. }, Response::Decision { .. })
+                | (
+                    Body::RecheckSource { .. },
+                    Response::Current { .. } | Response::Error { .. }
+                )
+                | (
+                    Body::AwaitEvent { .. },
+                    Response::Event { .. } | Response::LivenessLost | Response::Error { .. }
+                )
+        );
+        if !ok {
+            return Err(SubmitError::Unexpected {
+                action: pending.action.body.kind(),
+                response: response.kind(),
+            });
+        }
+        let values: Vec<&Value> = match &response {
+            Response::Output { value } | Response::Current { value } => vec![value],
+            Response::Event { event, .. } => vec![event],
+            _ => Vec::new(),
+        };
+        for v in values {
+            super::ijson(v).map_err(SubmitError::Malformed)?;
+        }
+        self.st.now = self.st.now.max(now.min(MAX_TIME));
+        self.st.pending = None;
+        let late = pending.deadline.is_some_and(|d| self.st.now > d);
+        self.respond(pending, response, late);
+        self.drive();
+        Ok(())
+    }
+
+    fn respond(&mut self, pending: Pending, response: Response, late: bool) {
+        match (pending.purpose.clone(), response) {
+            (Purpose::Capability | Purpose::Event, _) if late => {
+                self.exec_error("R401", "the result arrived after the step's timeout");
+            }
+            (Purpose::Capability, Response::Output { value }) => {
+                self.output(value);
+            }
+            (Purpose::Capability | Purpose::Event, Response::Error { code, message }) => {
+                let code = if code == "R401" {
+                    code
+                } else {
+                    "R402".to_string()
+                };
+                self.exec_error(&code, message);
+            }
+            (Purpose::Event, Response::Event { event, principal }) => {
+                self.event(pending, event, principal);
+            }
+            (Purpose::Event, Response::LivenessLost) => {
+                self.exec_error("R401", "the event source stopped answering (liveness)");
+            }
+            (Purpose::Checkpoint, Response::Checkpoint { checkpoint_id }) => {
+                self.add_checkpoint(checkpoint_id);
+            }
+            (Purpose::Checkpoint, Response::Error { message, .. }) => {
+                self.step_error("F501", format!("could not take a checkpoint: {message}"));
+            }
+            (Purpose::FailureCheckpoint { mode }, Response::Checkpoint { checkpoint_id }) => {
+                self.add_checkpoint(checkpoint_id);
+                self.recover(mode);
+            }
+            (Purpose::FailureCheckpoint { .. }, Response::Error { message, .. }) => {
+                self.end_frame(Err((
+                    "F501".to_string(),
+                    format!("could not take a checkpoint: {message}"),
+                )));
+            }
+            (Purpose::GateRollback { message }, Response::RolledBack) => {
+                self.trace_step("rolled_back", json!({}));
+                self.step_error("R403", message);
+            }
+            (Purpose::FailureRollback { mode }, Response::RolledBack) => {
+                self.trace_step("rolled_back", json!({}));
+                self.recover(mode);
+            }
+            (
+                Purpose::GateRollback { .. } | Purpose::FailureRollback { .. },
+                Response::Error { message, .. },
+            ) => {
+                self.end_frame(Err((
+                    "F503".to_string(),
+                    format!("rollback failed: {message}"),
+                )));
+            }
+            (
+                Purpose::Approval {
+                    digest,
+                    expires_at,
+                    min,
+                },
+                Response::Decision {
+                    decision_id,
+                    decision,
+                    approvers,
+                    digest: given,
+                },
+            ) => {
+                let asked = Asked {
+                    digest: &digest,
+                    expires_at,
+                    min,
+                };
+                self.decide(decision_id, &decision, &approvers, &given, asked);
+            }
+            (Purpose::Recheck, Response::Current { value }) => {
+                self.rechecked(value);
+            }
+            (Purpose::Recheck, Response::Error { message, .. }) => {
+                self.step_error(
+                    "F502",
+                    format!("could not recheck the approved source: {message}"),
+                );
+            }
+            (purpose, response) => {
+                unreachable!("submit admitted {} for {purpose:?}", response.kind())
+            }
+        }
+    }
+
+    pub(crate) fn tick(&mut self, now: u64) {
+        if self.st.finished.is_some() {
+            return;
+        }
+        self.st.now = self.st.now.max(now.min(MAX_TIME));
+        let Some(pending) = self.st.pending.clone() else {
+            return;
+        };
+        match (&pending.action.body, &pending.purpose) {
+            (Body::Sleep { until }, _) if self.st.now >= *until => {
+                self.st.pending = None;
+                self.frame().cur.attempt = self.frame_ref().cur.attempt.saturating_add(1);
+                self.set_stage(Stage::Execute);
+            }
+            (_, Purpose::Approval { .. }) if pending.deadline.is_some_and(|d| self.st.now > d) => {
+                self.st.pending = None;
+                let digest = match &pending.purpose {
+                    Purpose::Approval { digest, .. } => digest.clone(),
+                    _ => String::new(),
+                };
+                let spec = self.approval_spec();
+                let sub = json!({
+                    "digest": digest,
+                    "decision": "expired",
+                    "approvers": [],
+                    "mode": spec.get("mode").and_then(Value::as_str).unwrap_or("in_session"),
+                    "mandate_ref": spec.get("approver").and_then(|a| a.get("mandate_ref")),
+                    "decided_at": iso(self.st.now),
+                    "expires_at": pending.deadline.map(iso),
+                });
+                self.record_refused(
+                    "expired",
+                    Some(sub),
+                    "no decision before the approval expired",
+                );
+                self.trace_step("approval_expired", json!({}));
+                self.step_error("F502", "no decision before the approval expired");
+            }
+            (_, Purpose::Capability | Purpose::Event)
+                if pending.deadline.is_some_and(|d| self.st.now > d) =>
+            {
+                self.st.pending = None;
+                self.exec_error("R401", "the step timed out");
+            }
+            _ => return,
+        }
+        self.drive();
+    }
+}
+
+/// A bound `accept_from` list (delegation@1), if any.
+fn accept_from(inputs: &Value) -> Option<Vec<String>> {
+    inputs
+        .get("accept_from")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamps() {
+        assert_eq!(iso(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso(951_782_400_123), "2000-02-29T00:00:00.123Z");
+        assert_eq!(iso(1_798_761_599_999), "2026-12-31T23:59:59.999Z");
+    }
+
+    #[test]
+    fn binding_resolution() {
+        let mut m = Map::new();
+        m.insert("a".into(), json!({"n": 3, "s": "x", "l": [1, 2]}));
+        assert_eq!(resolve(&json!("${a.n}"), &m), json!(3));
+        assert_eq!(resolve(&json!("n=${a.n} s=${a.s}"), &m), json!("n=3 s=x"));
+        assert_eq!(
+            resolve(&json!(["${a.l[1]}", {"k": "${nope}"}]), &m),
+            json!([2, {"k": null}])
+        );
+        assert_eq!(resolve(&json!("${a.n: number}"), &m), json!(3));
+    }
+}

@@ -138,12 +138,14 @@ deploy_with_escalation:
       workflow_id: page_oncall
 ```
 
-- **Firing.** `on_error` takes one code or a list (R401 timeout, R402
-  failure, R403 gate, R405 expression error, F502 approval). `when` is an
+- **Firing.** `on_error` takes one code or a list of the codes a step can
+  fail with (R401 timeout, R402 failure, R403 gate, F501 checkpoint, F502
+  approval, F504 quorum or constraint). Expression errors (R405) never fail
+  a step: they are fail-safe where they occur. `when` is an
   expression that can read the step's own output. A structured recovery
   with neither never fires (W609).
 - **Loops.** `goto_step` names the `store_as` of the current step or an
-  earlier one. Naming a capability still works when exactly one step uses
+  earlier one. `max_loops` is at most 1000. Naming a capability still works when exactly one step uses
   it, but is deprecated (W603). `max_loops` defaults to 1.
 - **Injected context.** Values in `inject_context` are readable as
   `${_recovery.<key>}` from the loop target onward. They are absent before

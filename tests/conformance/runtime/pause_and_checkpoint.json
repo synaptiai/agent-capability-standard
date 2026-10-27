@@ -1,0 +1,65 @@
+{
+  "description": "pause_and_checkpoint takes a checkpoint, then (with no recovery) ends the run.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "y"
+          },
+          "failure_modes": [
+            {
+              "condition": "low confidence",
+              "action": "pause_and_checkpoint",
+              "when": "${o.confidence} < 0.5"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "observation": 1,
+          "confidence": 0.1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "pause-1"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402"
+  },
+  "trace_kinds": [
+    "failure_mode_fired",
+    "checkpoint_created"
+  ]
+}

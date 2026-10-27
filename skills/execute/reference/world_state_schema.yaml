@@ -304,6 +304,11 @@ types:
         - rolled_back
         description: rejected and expired (Standard v1.1 §5.14) record an approval
           that was refused or lapsed; an action deferred to a queue stays planned.
+      reason:
+        type: string
+        nullable: true
+        description: Why the action did not go ahead (rejected, expired or refused
+          in an unattended run).
       approval:
         type: object
         nullable: true

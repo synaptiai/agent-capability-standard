@@ -76,8 +76,8 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
 ```
 
-The package is built with maturin: the validator (and, from stage S6 in
-`tasks/todo.md`, the executor) lives in the Rust crate under `core/` and
+The package is built with maturin: the validator and the executor live in
+the Rust crate under `core/` and
 compiles into `grounded_agency._core`, so a Rust toolchain (rustc >= 1.86) is
 required. After changing Rust code, re-run the `pip install -e` line to rebuild
 the extension.
@@ -276,6 +276,7 @@ python examples/capability_skills_demo.py
 | `ToolCapabilityMapper` | Maps SDK tools to capability metadata |
 | `CheckpointTracker` | Manages checkpoint lifecycle for mutation safety |
 | `EvidenceStore` | Collects evidence anchors from tool executions |
+| `WorkflowRunner` | Runs a workflow on the core's executor, dispatching actions to a `Host` ([guide](docs/guides/RUNNING_WORKFLOWS.md)) |
 
 ### Example Usage
 

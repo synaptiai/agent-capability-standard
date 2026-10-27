@@ -1,0 +1,131 @@
+{
+  "description": "An escalation runs the handler as a nested run and ends the run escalated.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "x"
+          },
+          "failure_modes": [
+            {
+              "condition": "observation failed",
+              "action": "escalate",
+              "on_error": "R402",
+              "recovery": {
+                "goto_step": "page"
+              }
+            }
+          ]
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "page",
+          "handler": true,
+          "workflow_id": "oncall",
+          "input_bindings": {
+            "workflow": "oncall",
+            "input": {
+              "why": "observe failed"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "recovery@1"
+        ]
+      }
+    },
+    "oncall": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "inquire",
+          "purpose": "inquire step",
+          "store_as": "q",
+          "input_bindings": {
+            "ambiguous_input": "${why}"
+          }
+        }
+      ],
+      "inputs": {
+        "why": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "down"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "inquire",
+        "frame": [
+          "w",
+          "oncall"
+        ],
+        "inputs": {
+          "ambiguous_input": "observe failed"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "questions": [],
+          "ambiguity_analysis": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "escalated",
+    "cause": "R402",
+    "outputs": {
+      "page": {
+        "result": {
+          "q": {
+            "questions": []
+          }
+        }
+      }
+    }
+  },
+  "trace_kinds": [
+    "failure_mode_fired",
+    "escalated",
+    "invoke_started",
+    "invoke_returned"
+  ]
+}

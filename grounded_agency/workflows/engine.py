@@ -585,11 +585,20 @@ class WorkflowEngine:
         """Access the checkpoint tracker, if configured."""
         return self._checkpoint_tracker
 
-    def _core_validator(self) -> _core.Validator:
+    def core_validator(self) -> _core.Validator:
         """The core validator, created on first use (it loads the ontology)."""
         if self._validator is None:
             self._validator = _core.Validator(self._ontology_path, self._schema_root)
         return self._validator
+
+    def catalog_data(self) -> dict[str, Any]:
+        """The loaded catalog as plain data: what validation checks and the
+        executor (:class:`~grounded_agency.workflows.runner.WorkflowRunner`)
+        runs. Entries too malformed to load as workflows are included."""
+        return {
+            **self._unloadable,
+            **{name: wf.validation_data() for name, wf in self._workflows.items()},
+        }
 
     def load_catalog(self, catalog_path: str | Path) -> int:
         """
@@ -704,11 +713,7 @@ class WorkflowEngine:
             and workflow_name not in self._unloadable
         ):
             raise KeyError(f"Workflow not found: {workflow_name}")
-        catalog = {
-            **self._unloadable,
-            **{name: wf.validation_data() for name, wf in self._workflows.items()},
-        }
-        report = self._core_validator().validate(catalog)
+        report = self.core_validator().validate(self.catalog_data())
         diagnostics = [ValidationError.from_core(d) for d in report["diagnostics"]]
         if workflow_name is None:
             return diagnostics

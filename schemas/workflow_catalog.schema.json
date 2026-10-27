@@ -144,7 +144,7 @@
     },
     "fireable_code": {
       "type": "string",
-      "enum": ["R401", "R402", "R403", "R405", "F502"]
+      "enum": ["R401", "R402", "R403", "F501", "F502", "F504"]
     },
     "trigger": {
       "type": "object",
@@ -555,7 +555,7 @@
               "properties": {
                 "goto_step": { "type": "string", "description": "store_as of the loop target or handler step." },
                 "inject_context": { "type": "object", "description": "Values readable as ${_recovery.<key>} from the loop target onward." },
-                "max_loops": { "type": "integer", "minimum": 1 },
+                "max_loops": { "type": "integer", "minimum": 1, "maximum": 1000 },
                 "on_exhausted": {
                   "type": "object",
                   "required": ["goto_step"],

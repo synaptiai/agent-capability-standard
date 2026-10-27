@@ -24,6 +24,9 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   §5.12), `wait@1` (§5.13), `approval@1` (§5.14), `delegation@1` (§5.15) and
   `quorum@1` (§5.16). A validator must refuse a declared extension it does
   not check (V106).
+- **Runtime conformance fixtures (§10.3)**: scripted runs of the reference
+  executor covering gates, conditions, checkpoints, approvals, waits,
+  retries, failure modes, recovery, escalation, invocation and quorums.
 - **Effective `requires_checkpoint` (§5.2.1)** raised by a step is enforced:
   F501 when no checkpoint runs before it.
 - **`event_schema.yaml` 1.1.0:** `source.kind` gains `agent`, so events from
