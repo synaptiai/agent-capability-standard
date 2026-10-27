@@ -41,7 +41,7 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   loop's `max_loops` is at most 1000.
 - **Approval digests (§5.14)** are computed over I-JSON values (RFC 7493),
   so every implementation's RFC 8785 canonical JSON agrees.
-- **`review_verdict_schema.yaml` 1.0.0** for the verdicts a quorum counts,
+- **`review_verdict_schema.yaml`** (1.1.0, with `scope`) for the verdicts a quorum counts,
   and ontology additions for delegation and quorums: `delegate` inputs
   `fresh_context`, `model_family`, `role` and output `effective`;
   `receive`/`synchronize` input `accept_from`; received items' `sender`;
@@ -85,6 +85,13 @@ and reported five gaps; these close them.
   deadline is still R401. **Migration:** a failure mode that handled lost
   liveness through `on_error: R401` must add R406. A failure mode that
   fires only on R406 where no wait has `liveness` is W609.
+- **Per-reviewer independence and full sweeps (§5.16).**
+  `quorum.forbidden_inputs` takes a mapping of reviewers to their own
+  lists as well as one list for all, so a verifier can see earlier rounds
+  that a fresh reviewer must not. Verdicts gain `scope: full | delta`
+  (`review_verdict_schema.yaml` 1.1.0; absent means `delta`), and
+  `quorum.min_full` requires that many passing full sweeps; the tally
+  gains `full_passes`.
 
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`

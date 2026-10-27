@@ -487,11 +487,16 @@
         "min_pass": { "type": "integer", "minimum": 1, "description": "Passes needed; at most the number of reviewers." },
         "pinned_to": { "type": "string", "description": "Reference every counted verdict must be pinned to (e.g. the commit reviewed)." },
         "forbidden_inputs": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "type": "string" },
-          "description": "Stores or inputs no reviewer may depend on, directly or transitively."
+          "oneOf": [
+            { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+            {
+              "type": "object",
+              "additionalProperties": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+            }
+          ],
+          "description": "Stores or inputs a reviewer may not depend on, directly or transitively: one list for every reviewer, or a mapping of reviewers to their own lists."
         },
+        "min_full": { "type": "integer", "minimum": 1, "description": "Passing verdicts with scope: full needed; at most the number of reviewers." },
         "require_fresh_context": { "type": "boolean", "description": "Every reviewer binds fresh_context: true." },
         "require_model_families": {
           "type": "array",

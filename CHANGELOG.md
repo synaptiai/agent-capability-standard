@@ -120,6 +120,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Comprehensive analysis documentation package (13 documents, ~570KB)
 
 ### Changed
+- **Quorum independence per reviewer (#114).** `forbidden_inputs`
+  takes a per-reviewer mapping, verdicts carry `scope: full | delta`,
+  and `quorum.min_full` requires passing full sweeps
+  (`review_verdict_schema.yaml` 1.1.0; `tally.full_passes`)
+- **Lost liveness is R406, separate from the R401 timeout (#114).**
+  Lost liveness is now R406 (`LIVENESS_LOST`); failure modes (`on_error`)
+  and `retry` take it, so a workflow can re-check a quiet worker and
+  escalate only when the wait expires. A failure mode that handled lost
+  liveness through `on_error: R401` must add R406
 - **Migration:** binding `fresh_context`, `model_family` or `role` on
   `delegate`, or `accept_from` on `receive`/`synchronize`, now needs
   `delegation@1` in `workflow_extensions.requires` (V106). These inputs were
@@ -190,11 +199,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
-- **A silent event source and an expired wait were both R401 (#114).**
-  Lost liveness is now R406 (`LIVENESS_LOST`); failure modes (`on_error`)
-  and `retry` take it, so a workflow can re-check a quiet worker and
-  escalate only when the wait expires. A failure mode that handled lost
-  liveness through `on_error: R401` must add R406
 - **Mistyped `input_bindings` keys were silent (#114).** A key the
   capability does not define is now W604 with a did-you-mean hint, and an
   `invoke` step's literal `input` is checked against the invoked workflow's

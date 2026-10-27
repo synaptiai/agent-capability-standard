@@ -206,6 +206,11 @@ They reported five gaps, closed in the candidate before it is final:
   mode that handled lost liveness through R401 must add R406. A failure
   action that warns and continues was considered and not added: it would
   let later steps run on the output of a step that failed.
+- **Quorum independence** applied one `forbidden_inputs` list to every
+  reviewer, and nothing could require a full sweep. `forbidden_inputs`
+  takes a per-reviewer mapping; verdicts carry `scope: full | delta`; and
+  `min_full` counts passing full sweeps (§5.16). This revisits E4's
+  `require_full_sweep`, dropped earlier, in a form the quorum can count.
 
 ## Open questions
 

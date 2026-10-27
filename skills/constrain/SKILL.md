@@ -34,8 +34,8 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 
 In a workflow, a constrain step that blocks can count independent reviews
 with a `quorum` (Standard v1.1 `quorum@1`): earlier `delegate` steps are
-the reviewers, and the output gains a `tally` of passes, blocks and
-abstentions. See
+the reviewers, and the output gains a `tally` of passes, blocks,
+abstentions, full-sweep passes and voters. See
 [ORCHESTRATION_EXTENSIONS.md](../../docs/guides/ORCHESTRATION_EXTENSIONS.md).
 
 ## Procedure

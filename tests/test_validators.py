@@ -578,9 +578,12 @@ class TestJsonSchemaValidation:
             "reviewer_id",
             "value",
             "pinned",
+            "scope",
             "evidence_anchors",
             "notes",
         }
+        # The executor counts full sweeps by these two values only.
+        assert verdict["properties"]["scope"]["enum"] == ["full", "delta"]
 
     def test_workflow_schema_rejects_malformed_spec_version(
         self, workflow_schema

@@ -480,12 +480,35 @@
     "category": "extensions",
     "expected_warning_codes": []
   },
+  "pass_quorum_per_reviewer": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced",
+    "expected_warning_codes": []
+  },
   "fail_quorum_independence": {
     "should_pass": false,
     "level": "L1",
     "category": "extensions",
     "expected_error_codes": [
       "F504"
+    ]
+  },
+  "fail_quorum_per_reviewer": {
+    "should_pass": false,
+    "level": "L4",
+    "category": "advanced",
+    "expected_error_codes": [
+      "F504"
+    ]
+  },
+  "fail_quorum_forbidden_map": {
+    "should_pass": false,
+    "level": "L4",
+    "category": "advanced",
+    "expected_error_codes": [
+      "S303",
+      "V107"
     ]
   },
   "fail_quorum_shape": {

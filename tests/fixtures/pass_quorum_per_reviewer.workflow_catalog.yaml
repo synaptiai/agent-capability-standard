@@ -1,0 +1,80 @@
+# Standard version: 1.1.0
+# Per-reviewer independence (STANDARD v1.1 §5.16): reviewer A verifies the
+# fixes and is given the earlier rounds; reviewer B reviews fresh and must not
+# see them. Neither may see the author's notes. One passing verdict must be a
+# sweep of the whole change (min_full).
+review_change:
+  goal: Merge a fix only after a verification and a fresh full review.
+  risk: high
+  workflow_extensions:
+    requires: [delegation@1, quorum@1, wait@1]
+  inputs:
+    change_ref: {type: string, required: true}
+    author_notes: {type: string}
+    prior_rounds: {type: array, items: {type: object}}
+  steps:
+  - capability: retrieve
+    purpose: Fetch the diff under review.
+    store_as: diff_out
+    input_bindings:
+      target: ${change_ref}
+  - capability: delegate
+    purpose: Verify the fixes against the earlier rounds.
+    store_as: review_a
+    input_bindings:
+      task:
+        review: "${diff_out.data: object}"
+        earlier_rounds: ${prior_rounds}
+      agent: reviewer-a
+      fresh_context: true
+      model_family: claude
+      role: reviewer
+  - capability: delegate
+    purpose: Review the whole change fresh, on another model family.
+    store_as: review_b
+    input_bindings:
+      task:
+        review: "${diff_out.data: object}"
+      agent: reviewer-b
+      fresh_context: true
+      model_family: gpt
+      role: reviewer
+  - capability: receive
+    purpose: Collect the reviewers' verdicts.
+    store_as: verdicts_out
+    timeout: 4h
+    input_bindings:
+      accept_from: [reviewer-a, reviewer-b]
+    wait:
+      event_type: review.verdict
+      source_kind: agent
+  - capability: constrain
+    purpose: Require two approvals and no request for changes.
+    store_as: quorum_out
+    input_bindings:
+      target: ${verdicts_out.data}
+      constraints: [two_independent_approvals]
+      action_on_violation: block
+    quorum:
+      verdicts: ${verdicts_out.data}
+      reviewers: [review_a, review_b]
+      vocabulary: [approve, request_changes, abstain]
+      pass_values: [approve]
+      blocking_values: [request_changes]
+      min_pass: 2
+      pinned_to: ${change_ref}
+      forbidden_inputs:
+        review_a: [author_notes]
+        review_b: [author_notes, prior_rounds]
+      min_full: 1
+      require_fresh_context: true
+      require_model_families: [claude, gpt]
+  - capability: checkpoint
+    purpose: Save a restore point before merging.
+    store_as: checkpoint_out
+  - capability: mutate
+    purpose: Merge the change.
+    store_as: merge_out
+    input_bindings:
+      target: ${change_ref}
+      operation: {merge: true}

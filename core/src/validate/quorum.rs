@@ -23,6 +23,7 @@ const QUORUM_KEYS: &[&str] = &[
     "forbidden_inputs",
     "require_fresh_context",
     "require_model_families",
+    "min_full",
 ];
 const REQUIRED: &[&str] = &[
     "verdicts",
@@ -73,13 +74,16 @@ impl<'a> Earlier<'a> {
 }
 
 /// Who reads what across a workflow (built once, on first use), and the
-/// stores each distinct set of forbidden inputs taints, so many quorum
-/// steps cost one pass per distinct set rather than one walk each.
+/// stores each distinct list of forbidden inputs taints, so many quorum
+/// steps cost one pass per distinct list rather than one walk each.
 pub(crate) struct Independence<'a> {
     steps: &'a [Value],
     /// Root (store or input) → the stores whose steps read it. Context a
     /// recovery loop injects is read through the root `_recovery`.
     readers: Option<HashMap<String, Vec<String>>>,
+    /// Store → the roots its steps read, in document order: `readers`
+    /// reversed, for walks from one reviewer.
+    reads: Option<HashMap<String, Vec<String>>>,
     taints: HashMap<Vec<String>, HashMap<String, Path>>,
 }
 
@@ -88,8 +92,70 @@ impl<'a> Independence<'a> {
         Independence {
             steps,
             readers: None,
+            reads: None,
             taints: HashMap::new(),
         }
+    }
+
+    /// Store → roots read, as `build_readers` sees them (every step with a
+    /// name, duplicates included; injected context under `_recovery`).
+    fn build_reads(steps: &[Value]) -> HashMap<String, Vec<String>> {
+        let mut reads: HashMap<String, Vec<String>> = HashMap::new();
+        let mut injected = Vec::new();
+        for step in steps.iter().filter_map(Value::as_object) {
+            for fm in step
+                .get("failure_modes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(inject) = fm.get("recovery").and_then(|r| r.get("inject_context")) {
+                    collect_roots(inject, &mut injected, 0);
+                }
+            }
+            let Some(store) = step.get("store_as").and_then(Value::as_str) else {
+                continue;
+            };
+            let roots = reads.entry(store.to_string()).or_default();
+            if let Some(b) = step.get("input_bindings") {
+                collect_roots(b, roots, 0);
+            }
+        }
+        reads
+            .entry(super::recovery::RECOVERY_ROOT.to_string())
+            .or_default()
+            .extend(injected);
+        reads
+    }
+
+    /// Whether `reviewer` depends, directly or transitively, on one of
+    /// `forbidden`: a breadth-first walk over what it reads, so the nearest
+    /// forbidden root is found, with the root the reviewer reads on the
+    /// way. Nothing is cached: each call is linear in the bindings.
+    fn reaches(&mut self, reviewer: &str, forbidden: &HashSet<&str>) -> Option<Path> {
+        let steps = self.steps;
+        let reads = self.reads.get_or_insert_with(|| Self::build_reads(steps));
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut queue: VecDeque<(&str, &str)> = VecDeque::new();
+        for r in reads.get(reviewer).into_iter().flatten() {
+            if seen.insert(r) {
+                queue.push_back((r, r));
+            }
+        }
+        while let Some((node, via)) = queue.pop_front() {
+            if forbidden.contains(node) {
+                return Some(Path {
+                    via: via.to_string(),
+                    forbidden: node.to_string(),
+                });
+            }
+            for r in reads.get(node).into_iter().flatten() {
+                if seen.insert(r) {
+                    queue.push_back((r, via));
+                }
+            }
+        }
+        None
     }
 
     fn build_readers(steps: &[Value]) -> HashMap<String, Vec<String>> {
@@ -173,6 +239,7 @@ impl<'a> Independence<'a> {
 
 /// Where a store's dependency on a forbidden store goes: the store it
 /// reads on the way, and the forbidden store at the end.
+#[derive(Clone)]
 struct Path {
     via: String,
     forbidden: String,
@@ -202,15 +269,23 @@ fn strings<'v>(
     at: &dyn Fn(Diagnostic) -> Diagnostic,
     report: &mut Report,
 ) -> Option<Vec<&'v str>> {
-    let field = format!("quorum.{key}");
-    let v = q.get(key)?;
+    string_list(q.get(key)?, &format!("quorum.{key}"), at, report)
+}
+
+/// `v` as a list of distinct strings, or S303 at `field`.
+fn string_list<'v>(
+    v: &'v Value,
+    field: &str,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) -> Option<Vec<&'v str>> {
     let Some(items) = v
         .as_array()
         .and_then(|a| a.iter().map(Value::as_str).collect::<Option<Vec<&str>>>())
     else {
         report.push(s303(
             at,
-            &field,
+            field,
             format!(
                 "{field} must be a list of strings, found {}",
                 yaml::kind_of(v)
@@ -220,7 +295,7 @@ fn strings<'v>(
     };
     let unique: HashSet<&str> = items.iter().copied().collect();
     if unique.len() != items.len() {
-        report.push(s303(at, &field, format!("{field} lists a value twice")));
+        report.push(s303(at, field, format!("{field} lists a value twice")));
     }
     Some(items)
 }
@@ -285,7 +360,8 @@ pub(crate) fn check(
         }
     }
 
-    let mut reviewers = strings(q, "reviewers", &at, report).unwrap_or_default();
+    let parsed = strings(q, "reviewers", &at, report);
+    let mut reviewers = parsed.clone().unwrap_or_default();
     // A duplicate is reported once (S303), then counted once.
     let mut seen = HashSet::new();
     reviewers.retain(|r| seen.insert(*r));
@@ -351,54 +427,16 @@ pub(crate) fn check(
     }
     vocabulary(q, reviewers.len(), &at, report);
 
-    if let Some(forbidden) = strings(q, "forbidden_inputs", &at, report) {
-        let known: HashSet<&str> = forbidden
-            .iter()
-            .copied()
-            .filter(|f| {
-                earlier.step(f).is_some_and(|s| !earlier.concurrent(s))
-                    || scope.inputs.contains_key(*f)
-            })
-            .collect();
-        for f in forbidden.iter().filter(|f| !known.contains(**f)) {
-            report.push(
-                at(Diagnostic::new(
-                    Code::UnresolvedTarget,
-                    format!(
-                        "quorum.forbidden_inputs: '{f}' is neither an input nor the store_as of a step that runs before this one"
-                    ),
-                ))
-                .at("field", "quorum.forbidden_inputs"),
-            );
-        }
-        let paths = independence.taint(&known);
-        for (r, _) in &delegates {
-            let how = if known.contains(r) {
-                Some(format!("reviewer '{r}' is itself a forbidden input"))
-            } else {
-                paths.get(*r).map(|p| {
-                    let via = if p.via == p.forbidden {
-                        String::new()
-                    } else {
-                        format!(" through '{}'", p.via)
-                    };
-                    format!(
-                        "reviewer '{r}' reads forbidden input '{}'{via}",
-                        p.forbidden
-                    )
-                })
-            };
-            if let Some(how) = how {
-                report.push(
-                    at(Diagnostic::new(
-                        Code::ConstraintViolated,
-                        format!("{how}, so its review is not independent"),
-                    ))
-                    .at("field", "quorum.forbidden_inputs"),
-                );
-            }
-        }
-    }
+    forbidden_inputs(
+        q,
+        parsed.is_some().then_some(reviewers.as_slice()),
+        &delegates,
+        earlier,
+        independence,
+        scope,
+        &at,
+        report,
+    );
 
     match q.get("require_fresh_context") {
         None | Some(Value::Bool(false)) => {}
@@ -460,7 +498,150 @@ pub(crate) fn check(
     }
 }
 
-/// vocabulary, pass_values, blocking_values and min_pass (S303).
+/// `forbidden_inputs`: a list every reviewer must be independent of, or a
+/// mapping of reviewers to their own lists. Names must be inputs or stores
+/// of steps that run before the quorum step (V107); a reviewer that
+/// depends on one of its forbidden names, directly or through bindings, is
+/// F504.
+///
+/// A list is one forbidden set for every reviewer, propagated once (and
+/// cached across quorum steps). A mapping can give every reviewer its own
+/// set, so each reviewer is checked by a forward walk over what it reads,
+/// with nothing kept afterwards: O(reviewers × bindings) time, O(bindings)
+/// memory.
+#[allow(clippy::too_many_arguments)]
+fn forbidden_inputs(
+    q: &Map<String, Value>,
+    reviewers: Option<&[&str]>,
+    delegates: &[(&str, &Map<String, Value>)],
+    earlier: &Earlier<'_>,
+    independence: &mut Independence<'_>,
+    scope: &Scope,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    let field = "quorum.forbidden_inputs";
+    let resolves = |f: &str| {
+        earlier.step(f).is_some_and(|s| !earlier.concurrent(s)) || scope.inputs.contains_key(f)
+    };
+    // Every name must resolve; each unresolved one is reported once, where
+    // it is listed.
+    let mut reported = HashSet::new();
+    let mut unresolved = |names: &[&str], at_field: &str, report: &mut Report| {
+        for f in names.iter().copied().filter(|f| !resolves(f)) {
+            if reported.insert(f.to_string()) {
+                report.push(
+                    at(Diagnostic::new(
+                        Code::UnresolvedTarget,
+                        format!(
+                            "{field}: '{f}' is neither an input nor the store_as of a step that runs before this one"
+                        ),
+                    ))
+                    .at("field", at_field.to_string()),
+                );
+            }
+        }
+    };
+    let independent = |r: &str, found: Option<Path>, report: &mut Report| {
+        let Some(p) = found else {
+            return;
+        };
+        let how = if p.via == r {
+            format!("reviewer '{r}' is itself a forbidden input")
+        } else if p.via == p.forbidden {
+            format!("reviewer '{r}' reads forbidden input '{}'", p.forbidden)
+        } else {
+            format!(
+                "reviewer '{r}' reads forbidden input '{}' through '{}'",
+                p.forbidden, p.via
+            )
+        };
+        report.push(
+            at(Diagnostic::new(
+                Code::ConstraintViolated,
+                format!("{how}, so its review is not independent"),
+            ))
+            .at("field", field),
+        );
+    };
+    let itself = |r: &str| Path {
+        via: r.to_string(),
+        forbidden: r.to_string(),
+    };
+    match q.get("forbidden_inputs") {
+        None => {}
+        Some(Value::Array(_)) => {
+            let Some(names) = strings(q, "forbidden_inputs", at, report) else {
+                return;
+            };
+            unresolved(&names, field, report);
+            let known: HashSet<&str> = names.iter().copied().filter(|f| resolves(f)).collect();
+            if known.is_empty() {
+                return;
+            }
+            let paths = independence.taint(&known);
+            let found: Vec<(&str, Option<Path>)> = delegates
+                .iter()
+                .map(|(r, _)| {
+                    let p = if known.contains(r) {
+                        Some(itself(r))
+                    } else {
+                        paths.get(*r).cloned()
+                    };
+                    (*r, p)
+                })
+                .collect();
+            for (r, p) in found {
+                independent(r, p, report);
+            }
+        }
+        Some(Value::Object(map)) => {
+            let mut lists: HashMap<&str, Vec<&str>> = HashMap::new();
+            for (r, list) in map {
+                let entry = format!("{field}.{r}");
+                // Keys are checked only against a well-formed reviewers list.
+                if reviewers.is_some_and(|rs| !rs.contains(&r.as_str())) {
+                    report.push(
+                        at(Diagnostic::new(
+                            Code::UnresolvedTarget,
+                            format!("{field}: '{r}' is not one of the quorum's reviewers"),
+                        ))
+                        .at("field", entry.clone()),
+                    );
+                }
+                if let Some(names) = string_list(list, &entry, at, report) {
+                    unresolved(&names, &entry, report);
+                    lists.insert(r.as_str(), names);
+                }
+            }
+            for (r, _) in delegates {
+                let Some(list) = lists.get(r) else {
+                    continue;
+                };
+                let known: HashSet<&str> = list.iter().copied().filter(|f| resolves(f)).collect();
+                if known.is_empty() {
+                    continue;
+                }
+                let p = if known.contains(r) {
+                    Some(itself(r))
+                } else {
+                    independence.reaches(r, &known)
+                };
+                independent(r, p, report);
+            }
+        }
+        Some(other) => report.push(s303(
+            at,
+            field,
+            format!(
+                "{field} must be a list of names, or a mapping of reviewers to lists, found {}",
+                yaml::kind_of(other)
+            ),
+        )),
+    }
+}
+
+/// vocabulary, pass_values, blocking_values, min_pass and min_full (S303).
 fn vocabulary(
     q: &Map<String, Value>,
     reviewers: usize,
@@ -504,14 +685,17 @@ fn vocabulary(
             format!("quorum.blocking_values: '{v}' is also a pass value"),
         ));
     }
-    if let Some(n) = q.get("min_pass") {
+    for key in ["min_pass", "min_full"] {
+        let Some(n) = q.get(key) else {
+            continue;
+        };
         let ok = count(n).is_some_and(|n| n >= 1 && (reviewers == 0 || n <= reviewers as u64));
         if !ok {
             report.push(s303(
                 at,
-                "quorum.min_pass",
+                &format!("quorum.{key}"),
                 format!(
-                    "quorum.min_pass must be an integer from 1 to the number of reviewers ({reviewers}), found {n}"
+                    "quorum.{key} must be an integer from 1 to the number of reviewers ({reviewers}), found {n}"
                 ),
             ));
         }
@@ -743,6 +927,120 @@ mod tests {
             ),
             Vec::<&str>::new()
         );
+    }
+
+    #[test]
+    fn independence_per_reviewer() {
+        // Reviewer a verifies fixes and may read the earlier round; b
+        // reviews fresh and must not.
+        let reads = |r: &str, a: &str, f: &str| {
+            reviewer(r, a, f, json!({"task": {"notes": "${author_notes}"}}))
+        };
+        let per = |map: Value| with(json!({"forbidden_inputs": map}));
+        let plain = |r: &str, a: &str, f: &str| reviewer(r, a, f, json!({}));
+        assert!(
+            run_with(
+                reads("ra", "a", "claude"),
+                plain("rb", "b", "gpt"),
+                per(json!({"rb": ["author_notes"]}))
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            run_with(
+                reads("ra", "a", "claude"),
+                plain("rb", "b", "gpt"),
+                per(json!({"ra": ["author_notes"]}))
+            ),
+            ["F504"]
+        );
+        // A reviewer with no list, or an empty one, has nothing forbidden.
+        assert!(run(per(json!({}))).is_empty());
+        assert!(run(per(json!({"ra": []}))).is_empty());
+        // Keys name reviewers; values are lists of resolvable names.
+        assert_eq!(run(per(json!({"rc": ["author_notes"]}))), ["V107"]);
+        assert_eq!(run(per(json!({"rb": ["nothing"]}))), ["V107"]);
+        assert_eq!(
+            run(per(json!({"ra": ["nothing"], "rb": ["nothing"]}))),
+            ["V107"]
+        );
+        assert_eq!(run(per(json!({"rb": "author_notes"}))), ["S303"]);
+        assert_eq!(run(per(json!(5))), ["S303"]);
+        // A list in the mapping is checked like the list form.
+        assert_eq!(
+            run(per(json!({"rb": ["author_notes", "author_notes"]}))),
+            ["S303"]
+        );
+        let catalog_of = |q: Value| {
+            catalog(
+                steps(plain("ra", "a", "claude"), plain("rb", "b", "gpt"), q),
+                &["delegation@1", "quorum@1"],
+            )
+        };
+        let report = super::super::validate_catalog(
+            &super::super::tests::ctx(),
+            &catalog_of(per(json!({"rb": ["nothing"]}))),
+            None,
+        );
+        assert_eq!(
+            report.diagnostics[0].location["field"],
+            "quorum.forbidden_inputs.rb"
+        );
+        // Names are checked even when reviewers is malformed; mapping keys
+        // are not, since there is nothing to check them against.
+        let bad_reviewers = |fi: Value| {
+            let mut q = with(json!({"forbidden_inputs": fi}));
+            q["reviewers"] = json!("ra");
+            codes(catalog_of(q))
+        };
+        assert!(bad_reviewers(json!(["nothing"])).contains(&"V107"));
+        assert!(!bad_reviewers(json!({"ra": ["author_notes"]})).contains(&"V107"));
+    }
+
+    #[test]
+    fn per_reviewer_independence_scales() {
+        // Every reviewer forbids a different link of one long chain that
+        // they all read: no shared set, so no cache helps.
+        let n = 600;
+        let mut s = vec![
+            json!({"capability": "retrieve", "purpose": "p", "store_as": "c0",
+                                "input_bindings": {"target": "x"}}),
+        ];
+        for i in 1..n {
+            s.push(json!({"capability": "retrieve", "purpose": "p",
+                          "store_as": format!("c{i}"),
+                          "input_bindings": {"target": format!("${{c{}.data}}", i - 1)}}));
+        }
+        let mut names = Vec::new();
+        let mut map = serde_json::Map::new();
+        for i in 0..n {
+            let mut r = reviewer(&format!("r{i}"), &format!("agent{i}"), "claude", json!({}));
+            r["input_bindings"]["task"] = json!({"x": format!("${{c{}.data}}", n - 1)});
+            s.push(r);
+            names.push(format!("r{i}"));
+            map.insert(format!("r{i}"), json!([format!("c{i}")]));
+        }
+        s.push(json!({"capability": "receive", "purpose": "p", "store_as": "verdicts"}));
+        s.push(gate(with(json!({"reviewers": names, "min_pass": 1,
+                                 "pinned_to": "${c0.data}", "forbidden_inputs": map,
+                                 "require_model_families": null}))));
+        let start = std::time::Instant::now();
+        let c = codes(catalog(Value::Array(s), &["delegation@1", "quorum@1"]));
+        assert_eq!(c.iter().filter(|c| **c == "F504").count(), n);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn min_full() {
+        assert!(run(with(json!({"min_full": 1}))).is_empty());
+        assert!(run(with(json!({"min_full": 2}))).is_empty());
+        for bad in [json!(0), json!(3), json!("1"), json!(1.5)] {
+            assert_eq!(run(with(json!({"min_full": bad}))), ["S303"]);
+        }
     }
 
     #[test]

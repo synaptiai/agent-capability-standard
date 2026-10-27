@@ -751,9 +751,10 @@ RFC-0002. Binding any of these inputs needs
     blocking_values: [request_changes]
     min_pass: 2
     pinned_to: ${change_ref}
-    forbidden_inputs: [author_notes]
+    forbidden_inputs: [author_notes]   # or per reviewer: {review_b: [prior_rounds]}
     require_fresh_context: true
     require_model_families: [claude, gpt]
+    min_full: 1
 ```
 
 `quorum` is allowed only on `constrain` with literal
@@ -768,9 +769,10 @@ RFC-0002. Binding any of these inputs needs
 | `blocking_values` | A subset of the vocabulary, disjoint from `pass_values`, that vetoes |
 | `min_pass` | Required: 1 ≤ `min_pass` ≤ number of reviewers |
 | `pinned_to` | Required: reference every counted verdict must be pinned to (e.g. the commit reviewed) |
-| `forbidden_inputs` | Stores or inputs no reviewer may depend on, directly or transitively through bindings — including context a recovery loop injects (`${_recovery.*}`) — (names that are neither inputs nor stores of steps running before the quorum step: V107; a dependency: F504) |
+| `forbidden_inputs` | Stores or inputs a reviewer may not depend on, directly or transitively through bindings — including context a recovery loop injects (`${_recovery.*}`). A list applies to every reviewer; a mapping gives each reviewer its own list (keys that are not reviewers: V107; a reviewer it omits has none). Names that are neither inputs nor stores of steps running before the quorum step: V107; a dependency: F504 |
 | `require_fresh_context` | Every reviewer binds `fresh_context: true` (F504 otherwise) |
 | `require_model_families` | Families the reviewers must cover; F504 when every reviewer binds a literal family and they do not cover the set (otherwise checked at runtime) |
+| `min_full` | Passing verdicts whose `scope` is `full` needed: 1 ≤ `min_full` ≤ number of reviewers. These are passes too, so a `min_full` above `min_pass` raises the passes needed |
 
 A missing required field is S304; a malformed value is S303; `verdicts` and
 `pinned_to` must be references; unknown fields are W604.
@@ -779,9 +781,14 @@ A verdict counts once per reviewer: only if its `reviewer_id` is a
 reviewer delegate's agent, its `pinned` equals the resolved `pinned_to`,
 its value is in the vocabulary, it is the first from that reviewer, and
 (when required) the delegate's `effective` settings show a fresh context.
+A verdict's `scope` (`review_verdict_schema.yaml` 1.1.0) is `full` (it
+swept the whole pinned change) or `delta` (only what changed since an
+earlier round); absent or any other value, it counts as `delta`, so it
+still passes or blocks but is never a full sweep.
 The step is compliant iff no counted verdict is blocking, passes ≥
-`min_pass`, and model-family coverage holds; otherwise F504. The output
-gains `tally` (`passes`, `blocks`, `abstains`, `voters`).
+`min_pass`, passes with scope `full` ≥ `min_full` (when set), and
+model-family coverage holds; otherwise F504. The output gains `tally`
+(`passes`, `blocks`, `abstains`, `full_passes`, `voters`).
 
 ---
 
@@ -1368,7 +1375,8 @@ Field names starting with `x-` are reserved for vendor extensions.
 - Canonical schemas: `event_schema.yaml` 1.1.0 (`source.kind` gains
   `agent`); `world_state_schema.yaml` 1.1.0 (action status `rejected` and
   `expired`, the `approval` record of §5.14, and a `reason`)
-- `review_verdict_schema.yaml` 1.0.0 for quorum verdicts (§5.16)
+- `review_verdict_schema.yaml` 1.1.0 for quorum verdicts, with `scope`
+  (§5.16)
 - Ontology: `delegate` inputs `fresh_context`, `model_family`, `role` and
   output `effective`; `receive`/`synchronize` input `accept_from`; received
   items' `sender`; `constrain` output `tally` (§5.15, §5.16); optional

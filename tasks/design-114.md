@@ -405,8 +405,10 @@ reask)}, expires?, when_unattended: defer_to_queue|skip|fail (default fail)}`
 
 `quorum: {verdicts: ref, reviewers: [store_as], vocabulary: [str],
 pass_values: [str], blocking_values?: [str], min_pass: int, pinned_to: ref,
-forbidden_inputs?: [store_as], require_fresh_context?: bool,
-require_model_families?: [str]}`
+forbidden_inputs?: [store_as] | {reviewer: [store_as]},
+require_fresh_context?: bool, require_model_families?: [str],
+min_full?: int}` (the mapping form and `min_full` were added after the
+porting feedback)
 
 * Only on `constrain` with literal `action_on_violation: block` (S303).
   Required keys (S304): verdicts, reviewers, vocabulary, pass_values,
@@ -415,10 +417,13 @@ require_model_families?: [str]}`
   earlier and not in the quorum step's parallel group (V107), to distinct
   literal agents (F504: a verdict counts once per agent). vocabulary ≥ 2
   unique; pass_values ⊆ vocabulary, non-empty; blocking_values ⊆
-  vocabulary, disjoint from pass_values; 1 ≤ min_pass ≤ |reviewers| (S303).
-  Unknown `forbidden_inputs` names → V107.
+  vocabulary, disjoint from pass_values; 1 ≤ min_pass ≤ |reviewers| and
+  1 ≤ min_full ≤ |reviewers| (S303). Unknown `forbidden_inputs` names, and
+  mapping keys that are not reviewers → V107; a list that is not strings →
+  S303.
 * Independence (F504): no reviewer's bindings depend, directly or
-  transitively, on a forbidden store or input; require_fresh_context → each
+  transitively, on one of its forbidden stores or inputs (the list, or its
+  own entry in the mapping); require_fresh_context → each
   reviewer binds literal `fresh_context: true`; require_model_families →
   literal model families cover the set (any non-literal → checked at
   runtime). Dependencies (validate/quorum.rs `Independence`): a reverse
@@ -429,15 +434,23 @@ require_model_families?: [str]}`
   quorum steps), recording per store the next hop and the forbidden store
   reached. Linear per distinct forbidden set, safe on cycles, and each
   reviewer's diagnostic is O(1). Reviewers listed twice are judged once.
+  The mapping form can give each reviewer its own set, so each reviewer is
+  instead checked by a forward breadth-first walk over what it reads
+  (`Independence::reaches`), uncached: O(reviewers × bindings) time and
+  O(bindings) memory (a 1 MB catalog with 4000 reviewers on a 5000-step
+  chain validates in about 2 s).
 * Runtime (executor evaluates; no host call for this step): a verdict counts
   if its reviewer_id equals a reviewer delegate's `agent`, its `pinned`
   equals the resolved pinned_to, its value is in the vocabulary, it is the
   first from that reviewer, and (if required) the delegate's attestation
   satisfies fresh_context. Any counted blocking value vetoes. Compliant iff no
-  veto, passes ≥ min_pass, model-family coverage holds. Output: compliant,
-  violations, tally {passes, blocks, abstains, voters}. Non-compliant → F504.
-* `schemas/review_verdict_schema.yaml#/review_verdict`: reviewer_id, value,
-  pinned (required), evidence_anchors, notes.
+  veto, passes ≥ min_pass, passes with scope `full` ≥ min_full, model-family
+  coverage holds. A verdict's `scope` is `full` or `delta` (absent or any
+  other value → delta, noted in the violations; it still counts). Counts
+  (`min_pass`, `min_full`) accept integral floats, as the validator does. Output: compliant, violations, tally
+  {passes, blocks, abstains, full_passes, voters}. Non-compliant → F504.
+* `schemas/review_verdict_schema.yaml#/review_verdict` (1.1.0): reviewer_id,
+  value, pinned (required), scope, evidence_anchors, notes.
 
 ## 16. Executor (sans-IO)
 
@@ -592,11 +605,14 @@ A verdict counts if it is an object whose `reviewer_id` equals the `agent`
 input one of them ran with, whose `pinned` equals the resolved `pinned_to`, whose
 `value` is in the vocabulary, that is the first from that reviewer, and —
 with `require_fresh_context` — whose delegate output's
-`effective.fresh_context` is true. With `require_model_families`, the
+`effective.fresh_context` is true. Its `scope` only decides whether a pass
+is a full sweep (`full`; anything else is a delta). With
+`require_model_families`, the
 families of counted reviewers (`effective.model_family`, else the bound
 `model_family`) must cover the set. Compliant iff no counted verdict is a
-blocking value, passes ≥ `min_pass` and coverage holds. Output:
-`{compliant, violations, tally: {passes, blocks, abstains, voters},
+blocking value, passes ≥ `min_pass`, passes with scope `full` ≥ `min_full`
+and coverage holds. Output:
+`{compliant, violations, tally: {passes, blocks, abstains, full_passes, voters},
 evidence_anchors}`; not compliant → F504.
 
 ### 16.5 Trace, records, snapshots

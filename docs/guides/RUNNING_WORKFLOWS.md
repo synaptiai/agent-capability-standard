@@ -123,8 +123,9 @@ ontology contract requires, or the step fails (R402).
   literal.
 - **Quorums.** A `constrain` step with a `quorum` counts the verdicts
   itself: one per reviewer whose delegate step ran, pinned to `pinned_to`,
-  using the vocabulary, from fresh-context reviewers when required. Any blocking verdict, or too
-  few passes, fails the step with F504.
+  using the vocabulary, from fresh-context reviewers when required. Any
+  blocking verdict, too few passes, too few full-sweep passes (`min_full`)
+  or uncovered model families fail the step with F504.
 
 `RunResult` gives the `outcome` (`completed`, `escalated`, `deferred`,
 `replan_required`) or the failure `code`, plus the outputs, the action

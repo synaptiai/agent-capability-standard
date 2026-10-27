@@ -317,7 +317,10 @@ before the run goes on:
 
 - A verdict ([`review_verdict_schema.yaml`](../../schemas/review_verdict_schema.yaml))
   has `reviewer_id`, `value` and `pinned`. It counts once per reviewer, and
-  only if it is about the resolved `pinned_to` and uses the vocabulary.
+  only if it is about the resolved `pinned_to` and uses the vocabulary. Its
+  optional `scope` says whether it swept the whole change (`full`) or only
+  what changed since an earlier round (`delta`, the default, also for any
+  other value).
 - Reviewers must be `delegate` steps that run before the quorum, to
   distinct agents (V107, F504).
 - Independence is checked statically where the bindings are literal: a
@@ -325,8 +328,23 @@ before the run goes on:
   through context a recovery loop injects,
   one without `fresh_context: true` when it is required, or literal model
   families that cannot cover `require_model_families` are F504.
-- At run time the step is compliant when no counted verdict blocks and
-  at least `min_pass` pass; its output gains a `tally`.
+- At run time the step is compliant when no counted verdict blocks, at
+  least `min_pass` pass, and at least `min_full` of the passes have scope
+  `full`; its output gains a `tally` (with `full_passes`).
+
+Reviewers can have different rules. Give `forbidden_inputs` a mapping to
+keep one reviewer away from what another may read, for example a verifier
+that sees the earlier rounds and a fresh reviewer that must not:
+
+```yaml
+  quorum:
+    # ...
+    reviewers: [verify_fixes, fresh_review]
+    forbidden_inputs:
+      verify_fixes: [author_notes]
+      fresh_review: [author_notes, prior_rounds]
+    min_full: 1                           # one pass must be a full sweep
+```
 
 ## Durations
 

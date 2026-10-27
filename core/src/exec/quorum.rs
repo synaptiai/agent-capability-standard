@@ -8,6 +8,7 @@ use serde_json::{Map, Value, json};
 use super::Frame;
 use super::machine::resolve;
 use crate::expr::eval::{self, Bindings};
+use crate::validate::count;
 
 pub(crate) struct Verdict {
     pub output: Value,
@@ -58,7 +59,9 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
     let vocabulary: BTreeSet<String> = strings(q, "vocabulary").into_iter().collect();
     let pass: BTreeSet<String> = strings(q, "pass_values").into_iter().collect();
     let block: BTreeSet<String> = strings(q, "blocking_values").into_iter().collect();
-    let min_pass = q.get("min_pass").and_then(Value::as_u64).unwrap_or(1);
+    // Read as the validator reads them: an integral float is an integer.
+    let min_pass = q.get("min_pass").and_then(count).unwrap_or(1);
+    let min_full = q.get("min_full").and_then(count).unwrap_or(0);
     let need_fresh = q.get("require_fresh_context") == Some(&Value::Bool(true));
     let families: BTreeSet<String> = strings(q, "require_model_families").into_iter().collect();
 
@@ -103,7 +106,7 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
         .collect();
 
     let mut counted: BTreeSet<String> = BTreeSet::new();
-    let (mut passes, mut blocks, mut abstains) = (0u64, 0u64, 0u64);
+    let (mut passes, mut blocks, mut abstains, mut full_passes) = (0u64, 0u64, 0u64, 0u64);
     let mut covered: BTreeSet<String> = BTreeSet::new();
     let mut violations: Vec<Value> = Vec::new();
     for v in verdicts.as_array().into_iter().flatten() {
@@ -123,6 +126,19 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
             violations.push(reject("value outside the vocabulary"));
             continue;
         };
+        // A verdict without a scope reviewed only a delta. An unknown scope
+        // is a delta too: it still counts (a blocking verdict still vetoes),
+        // but never as a full sweep.
+        let full = match v.get("scope") {
+            None => false,
+            Some(Value::String(s)) if s == "full" => true,
+            Some(Value::String(s)) if s == "delta" => false,
+            Some(_) => {
+                violations.push(json!({"reviewer_id": id,
+                    "note": "scope is neither full nor delta; counted as delta"}));
+                false
+            }
+        };
         if need_fresh && !reviewer.fresh {
             violations.push(reject("the reviewer did not run with a fresh context"));
             continue;
@@ -138,6 +154,9 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
             blocks += 1;
         } else if pass.contains(value) {
             passes += 1;
+            if full {
+                full_passes += 1;
+            }
         } else {
             abstains += 1;
         }
@@ -149,6 +168,11 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
     }
     if passes < min_pass {
         reasons.push(format!("{passes} pass(es), {min_pass} needed"));
+    }
+    if full_passes < min_full {
+        reasons.push(format!(
+            "{full_passes} full-sweep pass(es), {min_full} needed"
+        ));
     }
     if !missing.is_empty() {
         let names: Vec<&str> = missing.iter().map(|s| s.as_str()).collect();
@@ -169,6 +193,7 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
                 "passes": passes,
                 "blocks": blocks,
                 "abstains": abstains,
+                "full_passes": full_passes,
                 "voters": counted.iter().collect::<Vec<_>>(),
             },
             "evidence_anchors": [],

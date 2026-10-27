@@ -16,6 +16,7 @@ mod recovery;
 mod semantics;
 mod wait;
 
+pub(crate) use extensions::count;
 pub use semantics::header_version;
 
 use std::collections::{HashMap, HashSet};

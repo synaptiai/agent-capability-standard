@@ -1300,6 +1300,9 @@ nodes:
             type: integer
           abstains:
             type: integer
+          full_passes:
+            type: integer
+            description: Passing verdicts with scope full (min_full)
           voters:
             type: array
             items:

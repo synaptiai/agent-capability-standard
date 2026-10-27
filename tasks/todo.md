@@ -218,8 +218,14 @@ the candidate (no new extension versions). Decisions (user, 2026-10-27):
   `LivenessLost` → R401 in the spec, a host `Error` R406 on a wait keeps
   its code, W609 for an R406-only failure mode where no wait has liveness,
   stale code lists, deadline renewal documented, fixtures.
-- [ ] **G2** quorum `forbidden_inputs` map, verdict `scope` (schema 1.1.0),
-  `min_full` (validator + executor), §5.16, fixtures, docs
+- [x] **G2** quorum `forbidden_inputs` map, verdict `scope` (schema 1.1.0),
+  `min_full` (validator + executor), §5.16, fixtures, docs. Review: fixed quadratic time
+  and memory for per-reviewer sets (forward walk, uncached: 60 s / 6 GB →
+  2 s / 118 MB on a 1 MB catalog), a list-form slowdown, a blocking verdict
+  with an unknown scope losing its veto (now counted as a delta), integral
+  float `min_pass`/`min_full` ignored at run time (pre-existing for
+  `min_pass`), duplicates in mapping lists, names unchecked when
+  `reviewers` is malformed.
 - [ ] **G1** mandates in unattended runs, `unavailable` decision,
   dependent deferral (executor state, snapshot), §5.14, fixtures, docs
 - [ ] Spec changelog, RFC-0003, CHANGELOG, design-114 §16, guides
