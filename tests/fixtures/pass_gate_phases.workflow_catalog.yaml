@@ -9,6 +9,8 @@ gate_phases:
   - capability: checkpoint
     purpose: Save state before the change.
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
   - capability: constrain
     purpose: Check the change is allowed.
     store_as: constrain_out

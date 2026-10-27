@@ -8,6 +8,8 @@ undeclared_escalation:
   - capability: observe
     purpose: Observe.
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes:
     - condition: Observation failed.
       on_error: R402

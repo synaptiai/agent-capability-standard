@@ -18,6 +18,8 @@ bad_approvals:
   - capability: checkpoint
     purpose: Save a restore point.
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
   - capability: mutate
     purpose: A standing mandate must name its mandate.
     store_as: mutate_out
@@ -29,6 +31,8 @@ bad_approvals:
   - capability: checkpoint
     purpose: Save another restore point.
     store_as: checkpoint2_out
+    input_bindings:
+      scope: "workspace"
   - capability: send
     purpose: An approver needs a kind.
     store_as: send_out

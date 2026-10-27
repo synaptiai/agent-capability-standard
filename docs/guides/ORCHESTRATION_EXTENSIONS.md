@@ -111,10 +111,13 @@ deploy_with_escalation:
     - capability: plan
       store_as: plan_out
       input_bindings:
+        goal: Deploy the release to production
         constraints: ["${_recovery.failure_evidence: array<object>}"]
     # ... constrain, checkpoint ...
     - capability: execute
       store_as: deploy_out
+      input_bindings:
+        code: ./scripts/deploy.sh
       failure_modes:
         - condition: The deployment command failed or timed out.
           on_error: [R401, R402]
@@ -122,6 +125,8 @@ deploy_with_escalation:
           recovery: {goto_step: page_oncall_out}
     - capability: verify
       store_as: verify_out
+      input_bindings:
+        conditions: [health_checks_pass, error_rate_below_slo]
       failure_modes:
         - condition: Verification failed.
           when: ${verify_out.passed} == false
@@ -226,7 +231,11 @@ and what the decision binds to:
 
 ```yaml
 - capability: mutate
-  # purpose, store_as, input_bindings ...
+  # purpose, store_as ...
+  input_bindings:
+    target: deploy/release.yaml
+    operation:
+      apply: "${plan_out.steps: array<object>}"
   approval:
     approver: {kind: human, role: release-manager, min_approvers: 2}
     mode: out_of_band                # or in_session (the default)
@@ -264,13 +273,21 @@ and what the decision binds to:
   ```yaml
   - capability: send
     store_as: notify_out
+    input_bindings:
+      destination: ops-channel
+      payload: Nightly sweep finished.
     approval:
       approver: {kind: standing_mandate, mandate_ref: mandates/nightly-notify}
       when_unattended: defer_to_queue   # if no mandate covers this send
   - capability: retrieve                # read-only, independent: runs
     store_as: status_out
+    input_bindings:
+      target: reports/nightly-status.json
   - capability: mutate                  # acts on the world: waits
     store_as: cleanup_out
+    input_bindings:
+      target: build/cache
+      operation: {delete: stale_entries}
   ```
 - A run that fails or escalates after a deferral still lists its
   deferrals; a recovery loop that runs a deferred step again supersedes

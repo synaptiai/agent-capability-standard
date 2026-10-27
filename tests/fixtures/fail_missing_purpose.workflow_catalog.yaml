@@ -7,5 +7,7 @@ missing_purpose:
   steps:
   - capability: observe
     store_as: observe_out
+    input_bindings:
+      target: "system"
   success:
   - Never valid

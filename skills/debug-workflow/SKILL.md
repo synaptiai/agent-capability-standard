@@ -1,7 +1,7 @@
 ---
 name: debug-workflow
 description: Execute the Debug Code Change workflow end-to-end with safety gates. Use when debugging code changes, investigating issues, or performing root cause analysis with audit trail.
-argument-hint: "[goal] [scope] [constraints]"
+argument-hint: "[bug] [user_input]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Bash, Edit, Git, Web
@@ -11,14 +11,14 @@ agent: general-purpose
 
 ## Intent
 
-Run the composed workflow **debug-workflow** using atomic capability skills to systematically debug code changes with full safety and audit capabilities.
+Run the composed workflow **debug_code_change** (`reference/workflow_catalog.yaml`) using atomic capability skills to diagnose and fix a bug with full safety and audit capabilities.
 
 **Success criteria:**
 - Every step output is grounded with evidence anchors
 - Safety gates are respected (checkpoint before any mutation)
 - All issues are traced to root cause with supporting evidence
 - Final result includes complete audit trail
-- Rollback pathway documented and verified
+- Rollback runs only when verification fails
 
 **Compatible schemas:**
 - `reference/workflow_catalog.yaml`
@@ -27,45 +27,46 @@ Run the composed workflow **debug-workflow** using atomic capability skills to s
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `goal` | Yes | string | The debugging objective (e.g., "identify why tests fail after refactor") |
-| `scope` | Yes | string\|array | Files, directories, or components to investigate |
-| `constraints` | No | object | Hard limits (e.g., time budget, files to exclude, severity threshold) |
-| `prior_context` | No | object | Previous debugging attempts or known information |
+| `bug` | Yes | object | The failure to diagnose and fix: `component` (where it is), `symptom` (what goes wrong), `fix_command` (the command that applies and tests the fix) |
+| `user_input` | No | object | `domain` and `constraints` (e.g. time budget, files to exclude) |
 
 ## Procedure
 
 0) **Create checkpoint marker** if mutation might occur:
    - Create `.claude/checkpoint.ok` after confirming rollback strategy
 
-1) **Invoke `/inspect`** and store output as `inspect_out`
-   - Examine the scope for symptoms, error patterns, recent changes
+1) **Invoke `/observe`** on `bug.component` and store output as `observe_out`
+   - Observe failing behavior, logs, and relevant code paths
 
-2) **Invoke `/search`** and store output as `search_out`
-   - Find related code, error messages, similar patterns
+2) **Invoke `/search`** for `bug.symptom` and store output as `search_out`
+   - Find related code, configs, and error patterns
 
-3) **Invoke `/map-relationships`** and store output as `map-relationships_out`
-   - Map dependencies, call graphs, data flows
+3) **Invoke `/attribute`** with `bug.symptom` as the effect and store output as `attribute_out`
+   - Build the dependency graph and identify causal relationships around the failing component
 
-4) **Invoke `/model-schema`** and store output as `model-schema_out`
-   - Model the expected vs actual behavior
+4) **Invoke `/constrain`** on `bug.component` and store output as `constrain_out`
+   - Define the invariants the fix must keep (existing tests pass, public interfaces unchanged)
 
-5) **Invoke `/critique`** and store output as `critique_out`
-   - Critically analyze hypotheses, identify weak points
+5) **Invoke `/critique`** on `attribute_out.causes` and store output as `critique_out`
+   - List likely failure modes and edge cases
 
 6) **Invoke `/plan`** and store output as `plan_out`
-   - Create remediation plan with verification criteria
+   - Produce a minimal fix plan with checkpoints
 
-7) **Invoke `/act-plan`** and store output as `act-plan_out`
-   - Execute the fix with checkpoint protection
+7) **Invoke `/checkpoint`** on `bug.component` and store output as `checkpoint_out`
+   - Save a restore point before mutation
 
-8) **Invoke `/verify`** and store output as `verify_out`
-   - Confirm fix addresses root cause
+8) **Invoke `/execute`** with `bug.fix_command` and store output as `execute_out`
+   - Apply the fix, run tests, and produce a diff summary
 
-9) **Invoke `/audit`** and store output as `audit_out`
-   - Record all actions and evidence for audit trail
+9) **Invoke `/verify`** and store output as `verify_out`
+   - Run targeted verification: tests pass and the symptom is resolved
 
-10) **Invoke `/rollback`** if needed and store output as `rollback_out`
-    - Restore previous state if verification fails
+10) **Invoke `/audit`** and store output as `audit_out`
+    - Record what changed and why: the component, the plan, the verdict
+
+11) **Invoke `/rollback`** to `checkpoint_out.checkpoint_id` if `verify_out.passed` is false, and store output as `rollback_out`
+    - The step is skipped when verification passes
 
 ## Output Contract
 
@@ -73,46 +74,45 @@ Return a structured object:
 
 ```yaml
 workflow_id: string  # Unique workflow execution ID
-goal: string  # The debugging objective
+bug: object  # The bug as given
 status: completed | failed | rolled_back
 steps:
-  inspect_out:
-    summary: string
-    findings: array[string]
+  observe_out:
+    observation: object
     evidence_anchors: array[string]
   search_out:
-    summary: string
-    matches: array[string]
+    results: array[object]
     evidence_anchors: array[string]
-  map_relationships_out:
-    summary: string
-    dependencies: array[string]
+  attribute_out:
+    causes: array[object]
+    strengths: object  # Causal strength per cause
     evidence_anchors: array[string]
-  model_schema_out:
-    summary: string
+  constrain_out:
+    compliant: boolean
+    violations: array[object]
     evidence_anchors: array[string]
   critique_out:
-    summary: string
-    weaknesses: array[string]
+    issues: array[object]
     evidence_anchors: array[string]
   plan_out:
-    summary: string
-    actions: array[string]
-    verification_criteria: array[string]
+    steps: array[object]
+    risks: array[object]
     evidence_anchors: array[string]
-  act_plan_out:
-    summary: string
-    changes_made: array[string]
+  checkpoint_out:
+    checkpoint_id: string
+    evidence_anchors: array[string]
+  execute_out:
+    result: any
     evidence_anchors: array[string]
   verify_out:
-    result: PASS | FAIL
+    passed: boolean
+    violations: array[object]
     evidence_anchors: array[string]
   audit_out:
-    log_path: string
+    audit_id: string
     evidence_anchors: array[string]
-  rollback_out:
-    executed: boolean
-    restore_point: string | null
+  rollback_out:  # null when verification passed and the step was skipped
+    restored: boolean
     evidence_anchors: array[string]
 root_cause:
   description: string
@@ -122,8 +122,6 @@ resolution:
   files_changed: array[string]
 verification: PASS | FAIL
 audit_log_pointer: string  # Path to .claude/audit.log
-rollback_available: boolean
-rollback_command: string | null
 confidence: number  # 0.0-1.0
 evidence_anchors: array[string]
 assumptions: array[string]
@@ -135,7 +133,7 @@ assumptions: array[string]
 |-------|------|-------------|
 | `workflow_id` | string | Unique identifier for this workflow execution |
 | `status` | enum | Final workflow status |
-| `steps` | object | Summary and evidence from each workflow step |
+| `steps` | object | Each step's output, keyed by its `store_as` |
 | `root_cause` | object | Identified root cause with evidence |
 | `resolution` | object | What was done to fix the issue |
 | `verification` | enum | Final PASS/FAIL after fix applied |
@@ -149,76 +147,81 @@ assumptions: array[string]
 
 **Input:**
 ```yaml
-goal: "Identify why user authentication tests fail after handler refactor"
-scope:
-  - "src/api/handlers/auth.py"
-  - "tests/test_auth.py"
-constraints:
-  max_time: "30m"
-  severity: "high"
+bug:
+  component: "src/api/handlers/auth.py"
+  symptom: "test_login_success fails with 401 after the handler refactor"
+  fix_command: "git apply fix.patch && pytest tests/test_auth.py"
+user_input:
+  constraints:
+    max_time: "30m"
 ```
 
 **Output:**
 ```yaml
 workflow_id: "debug_20240115_143022"
-goal: "Identify why user authentication tests fail after handler refactor"
+bug:
+  component: "src/api/handlers/auth.py"
+  symptom: "test_login_success fails with 401 after the handler refactor"
+  fix_command: "git apply fix.patch && pytest tests/test_auth.py"
 status: completed
 steps:
-  inspect_out:
-    summary: "Test failure in test_login_success, line 45"
-    findings:
-      - "Expected status 200, got 401"
-      - "Token validation logic changed in refactor"
+  observe_out:
+    observation:
+      failing_test: "tests/test_auth.py::test_login_success"
+      expected_status: 200
+      actual_status: 401
     evidence_anchors:
       - "file:tests/test_auth.py:45"
       - "file:src/api/handlers/auth.py:78"
   search_out:
-    summary: "Found 3 related token validation patterns"
-    matches:
-      - "src/api/handlers/auth.py:validate_token"
-      - "src/utils/jwt.py:decode_token"
+    results:
+      - location: "src/api/handlers/auth.py:validate_token"
+      - location: "src/utils/jwt.py:decode_token"
     evidence_anchors:
       - "tool:grep:validate_token"
-  map_relationships_out:
-    summary: "auth.py depends on jwt.py for token validation"
-    dependencies:
-      - "auth.py -> jwt.py"
-      - "auth.py -> user_model.py"
+  attribute_out:
+    causes:
+      - id: signature_after_expiry
+        cause: "Signature check moved after the expiry check"
+    strengths:
+      signature_after_expiry: 0.9
     evidence_anchors:
-      - "tool:ast:import_analysis"
+      - "tool:git:blame"
+  constrain_out:
+    compliant: true
+    violations: []
+    evidence_anchors: []
   critique_out:
-    summary: "Token validation order changed - signature check now after expiry"
-    weaknesses:
-      - "Signature validation moved after expiry check, causing premature rejection"
+    issues:
+      - issue: "Signature validation after the expiry check rejects valid tokens"
+        location: "src/api/handlers/auth.py:78-85"
     evidence_anchors:
       - "file:src/api/handlers/auth.py:78-85"
   plan_out:
-    summary: "Restore original validation order"
-    actions:
-      - "Move signature check before expiry check"
-    verification_criteria:
-      - "test_login_success passes"
-      - "No regression in other auth tests"
+    steps:
+      - action: "Move the signature check before the expiry check"
+        verification: "test_login_success passes; no other auth test regresses"
+    risks: []
     evidence_anchors:
       - "file:src/api/handlers/auth.py:78"
-  act_plan_out:
-    summary: "Reordered validation steps"
-    changes_made:
-      - "src/api/handlers/auth.py:78-85"
+  checkpoint_out:
+    checkpoint_id: "chk_20240115_143000"
     evidence_anchors:
-      - "tool:git:diff"
+      - "tool:git:stash"
+  execute_out:
+    result: "patch applied; 12 passed"
+    evidence_anchors:
+      - "tool:bash:git apply fix.patch && pytest tests/test_auth.py"
   verify_out:
-    result: PASS
+    passed: true
+    violations: []
     evidence_anchors:
       - "tool:bash:pytest tests/test_auth.py"
   audit_out:
-    log_path: ".claude/audit.log"
+    audit_id: "audit_20240115_143500"
     evidence_anchors:
       - "file:.claude/audit.log"
-  rollback_out:
-    executed: false
-    restore_point: "chk_20240115_143000"
-    evidence_anchors: []
+  rollback_out: null  # skipped: verification passed
 root_cause:
   description: "Token signature validation was moved after expiry check during refactor, causing valid tokens to be rejected before signature verification"
   evidence_anchors:
@@ -230,8 +233,6 @@ resolution:
     - "src/api/handlers/auth.py"
 verification: PASS
 audit_log_pointer: ".claude/audit.log"
-rollback_available: true
-rollback_command: "git stash pop"
 confidence: 0.95
 evidence_anchors:
   - "file:tests/test_auth.py:45"
@@ -247,13 +248,13 @@ assumptions:
 
 ## Verification
 
-- [ ] **Step Completeness**: All 10 workflow steps executed with output
+- [ ] **Step Completeness**: All 11 workflow steps executed with output (rollback skipped when verification passed)
 - [ ] **Evidence Grounding**: Every step output includes evidence_anchors
 - [ ] **Checkpoint Created**: Mutation steps preceded by checkpoint
 - [ ] **Root Cause Identified**: root_cause has specific description and evidence
-- [ ] **Verification Passed**: verify_out.result is PASS before completion
+- [ ] **Verification Passed**: verify_out.passed is true before completion
 - [ ] **Audit Trail**: audit_log_pointer points to valid log file
-- [ ] **Rollback Ready**: rollback_command documented if changes made
+- [ ] **Rollback Ready**: checkpoint_out.checkpoint_id recorded before the fix ran
 
 **Verification tools:** Bash (for test execution), Git (for change verification), Read (for audit log)
 
@@ -261,14 +262,14 @@ assumptions:
 
 - `mutation`: true
 - `requires_checkpoint`: true
-- `requires_approval`: false
+- `requires_approval`: true (the `execute` step that applies the fix)
 - `risk`: high
 
 **Capability-specific rules:**
-- NEVER proceed to `act-plan` without checkpoint and explicit plan
+- NEVER proceed to `execute` without checkpoint and explicit plan
 - STOP and request clarification if any step produces confidence < 0.3
 - ALWAYS verify fix before marking workflow complete
-- Document rollback command before any mutation
+- Record the checkpoint before any mutation
 - Preserve original error state for comparison
 
 ## Composition Patterns
@@ -278,15 +279,15 @@ assumptions:
 - `retrieve` - After fetching relevant context or logs
 
 **Commonly precedes:**
-- `summarize` - To create debug report for stakeholders
+- `explain` - To create debug report for stakeholders
 - `send` - To notify team of resolution
 
 **Anti-patterns:**
-- Never skip `/inspect` to jump directly to `/plan`
+- Never skip `/observe` to jump directly to `/plan`
 - Never proceed past `/critique` without addressing identified weaknesses
-- Never execute `/act-plan` without prior `/checkpoint`
+- Never run `/execute` without prior `/checkpoint`
 - Never mark complete without `/verify` confirmation
 
 **Workflow references:**
-- See `reference/workflow_catalog.yaml#debug-workflow` for step definitions
+- See `reference/workflow_catalog.yaml#debug_code_change` for step definitions
 - See `reference/composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern

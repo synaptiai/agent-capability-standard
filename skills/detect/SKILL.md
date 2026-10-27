@@ -1,7 +1,7 @@
 ---
 name: detect
 description: Determine whether a specific pattern, entity, or condition exists in the given data. Use when searching for patterns, checking existence, validating presence, or finding signals.
-argument-hint: "[target] [pattern-type] [threshold]"
+argument-hint: "[data] [pattern] [threshold]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -94,10 +94,9 @@ next_actions: array[string]  # 0-3 suggested follow-ups if uncertain
 
 **Input:**
 ```yaml
-target: src/api/user_controller.py
+data: src/api/user_controller.py
 pattern: "SQL injection pattern"
-threshold:
-  min_matches: 1
+threshold: 0.5  # report matches with at least this confidence
 ```
 
 **Output:**
@@ -132,9 +131,8 @@ next_actions:
 
 **Input:**
 ```yaml
-target: src/
+data: "src/**/*.{jsx,tsx}"
 pattern: "componentWillMount|componentWillReceiveProps"
-scope: "*.jsx,*.tsx"
 ```
 
 **Output:**

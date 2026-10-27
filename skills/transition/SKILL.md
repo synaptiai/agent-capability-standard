@@ -110,7 +110,6 @@ assumptions: []
 from_state:
   entity: "order"
   status: "*"
-scope: "order lifecycle"
 ```
 
 **Output:**
@@ -186,7 +185,6 @@ assumptions:
 from_state:
   entity: "user_session"
   status: "unauthenticated"
-scope: "authentication flow"
 ```
 
 **Output:**

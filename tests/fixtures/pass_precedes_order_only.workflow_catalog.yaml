@@ -8,6 +8,8 @@ classify_without_detect:
   - capability: classify
     purpose: Classify supplied findings.
     store_as: classify_out
+    input_bindings:
+      item: "sample"
   - capability: verify
     purpose: Verify the classification; no execute step precedes it.
     store_as: verify_out
@@ -22,9 +24,17 @@ detect_classify_detect:
   - capability: detect
     purpose: Detect findings.
     store_as: first_detect_out
+    input_bindings:
+      data: "sample"
+      pattern: "anomaly"
   - capability: classify
     purpose: Classify the findings.
     store_as: classify_out
+    input_bindings:
+      item: "sample"
   - capability: detect
     purpose: Detect again with the labels in hand.
     store_as: second_detect_out
+    input_bindings:
+      data: "sample"
+      pattern: "anomaly"

@@ -454,6 +454,7 @@ impl WorkflowCheck<'_> {
             };
             semantics::flag_downgrades(&loc, step, node, self.report);
             semantics::unknown_inputs(&loc, step, node, self.report);
+            semantics::missing_inputs(&loc, step, node, self.report);
             // A handler step runs only on escalation, after the step that
             // escalated (which may have failed before producing output),
             // and ends the run: it is outside the normal sequence, and its
@@ -746,6 +747,26 @@ impl WorkflowCheck<'_> {
                 }
             }
         }
+        // The executor reads retry.backoff as one of three strategies:
+        // anything else would silently mean no backoff. Null means none.
+        if let Some(backoff) = step
+            .get("retry")
+            .and_then(|r| r.get("backoff"))
+            .filter(|b| !b.is_null())
+        {
+            if !matches!(backoff.as_str(), Some("none" | "linear" | "exponential")) {
+                self.report.push(
+                    loc.diag(
+                        Code::SchemaValidationFailed,
+                        format!(
+                            "retry.backoff must be none, linear or exponential, found {}",
+                            backoff
+                        ),
+                    )
+                    .at("field", "retry.backoff"),
+                );
+            }
+        }
         // The executor reads retry.max as a count: anything else would
         // silently mean no retries.
         if let Some(max) = step.get("retry").and_then(|r| r.get("max")) {
@@ -965,10 +986,14 @@ pub(crate) mod tests {
         Context::load(&root.join("schemas/capability_ontology.yaml"), &root).unwrap()
     }
 
+    /// The codes a catalog produces, without W615: test steps bind only
+    /// what their test is about, and W615 has tests of its own
+    /// (`missing_required_inputs_warn`).
     pub(crate) fn codes(catalog: Value) -> Vec<&'static str> {
         validate_catalog(&ctx(), &catalog, None)
             .diagnostics
             .iter()
+            .filter(|d| d.code != Code::MissingInput)
             .map(|d| d.code.as_str())
             .collect()
     }
@@ -1417,6 +1442,79 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn missing_required_inputs_warn() {
+        let missing = |step: Value| {
+            validate_catalog(&ctx(), &wf(json!([step])), Some("1.1.0"))
+                .diagnostics
+                .into_iter()
+                .filter(|d| d.code == Code::MissingInput)
+                .map(|d| d.location["field"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        // detect requires data and pattern.
+        assert_eq!(
+            missing(json!({"capability": "detect", "purpose": "p", "store_as": "d"})),
+            ["input_bindings.data", "input_bindings.pattern"]
+        );
+        assert_eq!(
+            missing(
+                json!({"capability": "detect", "purpose": "p", "store_as": "d",
+                           "input_bindings": {"data": "x"}})
+            ),
+            ["input_bindings.pattern"]
+        );
+        assert!(
+            missing(
+                json!({"capability": "detect", "purpose": "p", "store_as": "d",
+                           "input_bindings": {"data": "x", "pattern": "y"}})
+            )
+            .is_empty()
+        );
+        // An invoke step's workflow_id gives its workflow.
+        assert!(
+            missing(
+                json!({"capability": "invoke", "purpose": "p", "store_as": "i",
+                           "workflow_id": "elsewhere"})
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            missing(json!({"capability": "invoke", "purpose": "p", "store_as": "i"})),
+            ["input_bindings.workflow"]
+        );
+        // The executor runs waits and quorums itself; no host gets inputs.
+        assert!(
+            missing(
+                json!({"capability": "synchronize", "purpose": "p", "store_as": "s",
+                           "wait": {"event_type": "done"}})
+            )
+            .is_empty()
+        );
+        assert!(
+            missing(
+                json!({"capability": "constrain", "purpose": "p", "store_as": "q",
+                           "quorum": {"min_pass": 1}})
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            missing(json!({"capability": "synchronize", "purpose": "p", "store_as": "s"})),
+            ["input_bindings.agents", "input_bindings.state"]
+        );
+        // A malformed input_bindings, null included, is S303, not W615 for
+        // every input.
+        for malformed in [json!(["data"]), Value::Null] {
+            assert!(
+                missing(
+                    json!({"capability": "detect", "purpose": "p", "store_as": "d",
+                               "input_bindings": malformed})
+                )
+                .is_empty()
+            );
+        }
+    }
+
+    #[test]
     fn retry_max_is_a_count() {
         let with = |max: Value| {
             codes(
@@ -1430,6 +1528,23 @@ pub(crate) mod tests {
         for bad in [json!("3"), json!(2.5), json!(-1)] {
             assert_eq!(with(bad), ["S303"]);
         }
+        let backoff = |b: Value| {
+            codes(
+                json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1", "steps": [
+                {"capability": "observe", "purpose": "p", "store_as": "o",
+                 "input_bindings": {"target": "x"}, "retry": {"max": 1, "backoff": b}}]}}),
+            )
+        };
+        for ok in [
+            json!("none"),
+            json!("linear"),
+            json!("exponential"),
+            Value::Null,
+        ] {
+            assert!(backoff(ok).is_empty());
+        }
+        assert_eq!(backoff(json!("exponentail")), ["S303"]);
+        assert_eq!(backoff(json!(2)), ["S303"]);
     }
 
     #[test]

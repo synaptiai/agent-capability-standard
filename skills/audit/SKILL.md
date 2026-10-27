@@ -1,7 +1,7 @@
 ---
 name: audit
 description: Produce a comprehensive audit trail of actions, tools used, changes made, and decision rationale. Use when recording compliance evidence, tracking changes, or documenting decision lineage.
-argument-hint: "[scope] [time_window] [actor] [detail_level]"
+argument-hint: "[event] [context] [retention]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -62,8 +62,9 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 ## Procedure
 
 1) **Define audit scope**: Determine what to include in the audit
-   - Parse scope parameter to identify targets
-   - Apply time_window filter if provided
+   - Record the `event` itself: what happened, by whom, when
+   - Read the report scope from `context.scope` to identify targets
+   - Apply the time window in `context.time_window` if provided
    - Identify relevant log sources (git log, tool invocations, file changes)
 
 2) **Collect action records**: Gather all actions within scope
@@ -142,12 +143,17 @@ assumptions: []
 
 **Input:**
 ```yaml
-scope: "session"
-time_window:
-  start: "2024-01-15T14:00:00Z"
-  end: "2024-01-15T16:00:00Z"
-detail_level: standard
-include_diffs: false
+event:
+  type: session_completed
+  actor: "claude-agent"
+  timestamp: "2024-01-15T16:00:00Z"
+context:
+  scope: "session"
+  time_window:
+    start: "2024-01-15T14:00:00Z"
+    end: "2024-01-15T16:00:00Z"
+  detail_level: standard
+  include_diffs: false
 ```
 
 **Output:**
@@ -213,9 +219,14 @@ assumptions:
 
 **Input:**
 ```yaml
-scope: "config/production.yaml"
-detail_level: verbose
-include_diffs: true
+event:
+  type: configuration_changed
+  actor: "claude-agent"
+  target: "config/production.yaml"
+context:
+  scope: "config/production.yaml"
+  detail_level: verbose
+  include_diffs: true
 ```
 
 **Output:**
@@ -270,7 +281,7 @@ Apply the following verification patterns:
 
 - [ ] **Evidence Grounding**: All changes linked to evidence_anchors
 - [ ] **Contract Validation**: Output matches audit_record schema
-- [ ] **Completeness Check**: No gaps in timeline for specified time_window
+- [ ] **Completeness Check**: No gaps in timeline for the specified time window
 - [ ] **Provenance Valid**: All inputs and outputs are verifiable
 
 **Verification tools:** Read (for log files), Grep (for searching history)
@@ -293,15 +304,15 @@ Apply the following verification patterns:
 
 **Commonly follows:**
 - `verify` - After verify PASS, audit the successful changes (CAVR pattern)
-- `act-plan` - Audit what was executed
+- `execute` / `mutate` - Audit what was executed
 - `rollback` - Audit the rollback event itself
 
 **Commonly precedes:**
-- `summarize` - Summarize audit for stakeholder reporting
+- `explain` - Summarize audit for stakeholder reporting
 - `persist` - Store audit record for compliance
 
 **Anti-patterns:**
-- Never skip audit after act-plan (breaks accountability)
+- Never skip audit after `execute` or `mutate` (breaks accountability)
 - Never modify artifacts during audit (breaks integrity)
 - Never omit failed actions from audit trail
 

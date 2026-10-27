@@ -1,7 +1,7 @@
 ---
 name: verify
 description: Check correctness against tests, specs, or invariants; produce pass/fail evidence. Use when validating changes, testing hypotheses, checking invariants, or confirming behavior matches expectations.
-argument-hint: "[spec|tests] [artifact|target] [constraints]"
+argument-hint: "[conditions] [target] [strict]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep
@@ -43,12 +43,12 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 
 ## Procedure
 
-1) **Load specification**: Read the spec/test/invariant definition
-   - Identify testable assertions from the spec
+1) **Load conditions**: Read the test/invariant definitions in `conditions`
+   - Identify testable assertions from the conditions
    - Parse test commands or invariant expressions
    - Note any preconditions required for verification
 
-2) **Examine artifact**: Inspect the target being verified
+2) **Examine target**: Inspect the target being verified
    - Read relevant code, config, or state
    - Identify the specific behavior/properties to check
    - Check preconditions are met before running tests
@@ -121,11 +121,9 @@ assumptions: []  # Explicit assumptions made
 
 **Input:**
 ```yaml
-spec: "pytest tests/test_calculator.py -v"
-artifact: "src/calculator.py"
-constraints:
-  timeout: "60s"
-  check_types: ["regression", "assertion"]
+target: "src/calculator.py"
+conditions:
+  - "pytest tests/test_calculator.py -v passes"
 ```
 
 **Output:**
@@ -172,10 +170,10 @@ assumptions:
 
 **Input:**
 ```yaml
-spec:
-  type: schema
-  schema_path: "schemas/config.json"
-artifact: "config/production.yaml"
+target: "config/production.yaml"
+conditions:
+  - type: schema
+    schema_path: "schemas/config.json"
 ```
 
 **Output:**
@@ -222,7 +220,7 @@ Apply the following verification patterns:
 **Capability-specific rules:**
 - Do not modify the artifact being verified
 - Do not skip failing tests or mask errors
-- Stop and clarify if spec is ambiguous or missing
+- Stop and clarify if conditions are ambiguous or missing
 - Timeout all external test execution (default 5 minutes)
 - Do not access paths outside the workspace for verification
 
@@ -261,8 +259,8 @@ Located at: `scripts/verify-state.sh`
 ## Composition Patterns
 
 **Commonly follows:**
-- `model-schema` - Provides the invariants/spec to verify against (REQUIRED)
-- `act-plan` - Verify the outcome of executed changes
+- `constrain` - Provides the invariants/spec to verify against
+- `execute` / `mutate` - Verify the outcome of executed changes (they must precede verify)
 - `plan` - Provides expected postconditions to verify
 
 **Commonly precedes:**
@@ -271,7 +269,7 @@ Located at: `scripts/verify-state.sh`
 - `critique` - Analyze root cause of failures
 
 **Anti-patterns:**
-- Never verify without a spec (model-schema is required dependency)
+- Never verify without a spec (`constrain` invariants or explicit `conditions`)
 - Never modify artifact during verification (breaks idempotency)
 - Never ignore FAIL verdicts and proceed with mutations
 

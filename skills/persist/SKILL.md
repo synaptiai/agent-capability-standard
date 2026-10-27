@@ -1,7 +1,7 @@
 ---
 name: persist
 description: Write stable learnings, decisions, and patterns to durable storage like CLAUDE.md or knowledge files. Use when saving project decisions, recording patterns, or updating long-term memory.
-argument-hint: "[content] [destination CLAUDE.md|file] [section]"
+argument-hint: "[data] [key] [ttl]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Edit
@@ -87,7 +87,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Ensure no sensitive data (credentials, PII) is being persisted
    - Validate content structure if object
 
-2) **Determine destination**: Select where to write
+2) **Determine destination**: Select where to write (from `key`, if given)
    - `CLAUDE.md`: Project-level decisions and patterns
    - Specific file: Domain or feature-specific knowledge
    - `auto`: Choose based on content type and scope
@@ -172,16 +172,15 @@ assumptions: array[string]  # Explicit assumptions
 
 **Input:**
 ```yaml
-content:
+data:
+  content_type: decision
   decision: "Use PostgreSQL for all persistent storage"
   rationale: "Strong ACID guarantees, mature ecosystem, team familiarity"
   context: "Evaluated PostgreSQL, MySQL, and MongoDB for new backend service"
   constraints:
     - "Must support complex queries"
     - "Team has PostgreSQL experience"
-destination: CLAUDE.md
-section: "Architecture Decisions"
-content_type: decision
+key: "CLAUDE.md#Architecture Decisions"
 ```
 
 **Output:**
@@ -238,12 +237,11 @@ assumptions:
 
 **Input:**
 ```yaml
-content:
+data:
+  content_type: pattern
   pattern: "Wrap external API errors with domain-specific error types"
   rationale: "Prevents leaking implementation details"
-destination: CLAUDE.md
-section: "Patterns"
-content_type: pattern
+key: "CLAUDE.md#Patterns"
 ```
 
 **Output:**
@@ -287,14 +285,14 @@ next_actions:
 
 **Input:**
 ```yaml
-content:
+data:
+  content_type: fact
   fact: "API rate limit is 1000 requests per minute"
   source: "API documentation v2.3"
-destination: "docs/api-notes.md"
-section: "Rate Limits"
-content_type: fact
-merge_strategy: merge
+key: "docs/api-notes.md#Rate Limits"
 ```
+
+Merge with the existing entry rather than appending a duplicate.
 
 **Output:**
 ```yaml

@@ -14,6 +14,8 @@ undeclared:
   - capability: checkpoint
     purpose: Save a restore point.
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
   - capability: mutate
     purpose: Apply the change.
     store_as: mutate_out

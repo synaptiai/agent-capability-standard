@@ -1,7 +1,7 @@
 ---
 name: explain
 description: Produce clear reasoning with assumptions, causal chains, and evidence. Use when clarifying decisions, teaching concepts, justifying recommendations, or documenting rationale.
-argument-hint: "[topic] [audience_level] [format]"
+argument-hint: "[conclusion] [audience] [depth]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -124,9 +124,10 @@ evidence_anchors: ["file:line", "url", "doc:section"]
 
 **Input:**
 ```yaml
-topic: "Why we chose PostgreSQL over MongoDB for the user service"
-audience_level: intermediate
-format: structured
+conclusion: "Why we chose PostgreSQL over MongoDB for the user service"
+audience: intermediate
+constraints:
+  format: structured
 ```
 
 **Output:**
@@ -212,9 +213,10 @@ evidence_anchors:
 
 **Input:**
 ```yaml
-topic: "What is a database index and why does it matter?"
-audience_level: beginner
-format: structured
+conclusion: "What is a database index and why does it matter?"
+audience: beginner
+constraints:
+  format: structured
 ```
 
 **Output:**

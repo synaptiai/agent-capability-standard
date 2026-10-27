@@ -1,7 +1,7 @@
 ---
-name: world-model-workflow
-description: Build a rigorous world model with state, dynamics, uncertainty, and provenance. Use when creating digital twins, constructing system representations, building simulation foundations, or establishing baseline world state.
-argument-hint: "[goal] [scope] [constraints]"
+name: digital-twin-bootstrap
+description: Initialize a digital twin from scratch, building a grounded world model with state, dynamics, uncertainty and provenance, then run a first sync loop. Use when creating digital twins, constructing system representations, building simulation foundations, or establishing a baseline world state.
+argument-hint: "[user_input] [world_state_out]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Bash, Edit, Git, Web
@@ -11,7 +11,7 @@ agent: general-purpose
 
 ## Intent
 
-Run the composed workflow **world-model-workflow** using atomic capability skills to construct a comprehensive, grounded representation of a system or domain.
+Run the composed workflow **digital_twin_bootstrap** (`reference/workflow_catalog.yaml`) to initialize a digital twin from scratch and then run a first sync loop. When no world state is passed in, it invokes **world_model_build** to construct a grounded baseline and then **digital_twin_sync_loop** from that baseline; when a world state is passed in, it skips the build and syncs from it.
 
 A world model captures:
 - **State**: Current entity states and attributes
@@ -20,116 +20,101 @@ A world model captures:
 - **Provenance**: Source and lineage of all facts
 
 **Success criteria:**
-- Complete entity inventory with identity resolution
-- State representation follows canonical schema
-- Causal relationships and dynamics modeled
-- Uncertainty quantified for all assertions
-- Full provenance chain for every fact
-- Simulation capability established
+- World model built (or the given world state used as the baseline)
+- First sync completed
+- Audit produced
+- Every claim in the model is grounded with evidence anchors
 
 **Compatible schemas:**
 - `reference/world_state_schema.yaml`
 - `reference/event_schema.yaml`
+- `reference/workflow_catalog.yaml`
 
 ## Inputs
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `goal` | Yes | string | The modeling objective (e.g., "model supply chain for disruption analysis") |
-| `scope` | Yes | string\|array | Domain, system, or entities to model |
-| `constraints` | No | object | Limits (e.g., time horizon, resolution, confidence threshold) |
-| `sources` | No | array | Data sources for world state extraction |
-| `prior_model` | No | object | Existing model to extend or refine |
+| `user_input` | No | object | `domain` (the system to model), passed to both invoked workflows; `world_model_build` binds it. `constraints` is accepted but no step binds it |
+| `world_state_out` | No | object | An existing world state (`reference/world_state_schema.yaml#/world_state`). When given, the build is skipped and the first sync starts from it |
 
 ## Procedure
 
 0) **Create checkpoint marker** if mutation might occur:
-   - Create `.claude/checkpoint.ok` after confirming rollback strategy
+   - Create `.claude/checkpoint.ok` after confirming rollback strategy (the sync loop mutates the twin)
 
-1) **Invoke `/retrieve`** and store output as `retrieve_out`
-   - Gather raw data from configured sources
+1) **Invoke `/invoke`** with workflow `world_model_build` and input `user_input`, if `world_state_out` is null, and store output as `world_model_out`
+   - Build the initial world model baseline. The invoked workflow's stores land in `world_model_out.result`:
+     `retrieve_out` → `observe_out` → `detect_out` (domain: entity) → `classify_out` → `integrate_out` → `state_out` → `transition_out` → `attribute_out` (domain: causation) → `measure_out` (domain: uncertainty) → `audit_out` → `ground_out` → `simulate_out` → `explain_out`
 
-2) **Invoke `/inspect`** and store output as `inspect_out`
-   - Examine retrieved data for structure and quality
+2) **Invoke `/invoke`** with workflow `digital_twin_sync_loop`, if `world_state_out` is null, and store output as `sync_out`
+   - Input: `user_input`, and `world_model_out.result.state_out` as `previous_world_state`
+   - Run the initial sync loop using the baseline just built
 
-3) **Invoke `/identity-resolution`** and store output as `identity-resolution_out`
-   - Resolve entity references and establish canonical IDs
+3) **Invoke `/invoke`** with workflow `digital_twin_sync_loop`, if `world_state_out` is not null, and store output as `sync_existing_out`
+   - Input: `user_input`, and `world_state_out` as `previous_world_state`
+   - Run the initial sync loop from the world state passed in
 
-4) **Invoke `/world-state`** and store output as `world-state_out`
-   - Construct canonical state representation
-
-5) **Invoke `/state-transition`** and store output as `state-transition_out`
-   - Define rules for state evolution
-
-6) **Invoke `/causal-model`** and store output as `causal-model_out`
-   - Map cause-effect relationships
-
-7) **Invoke `/uncertainty-model`** and store output as `uncertainty-model_out`
-   - Quantify confidence and unknowns
-
-8) **Invoke `/provenance`** and store output as `provenance_out`
-   - Document source and lineage of all facts
-
-9) **Invoke `/grounding`** and store output as `grounding_out`
-   - Attach evidence anchors to assertions
-
-10) **Invoke `/simulation`** and store output as `simulation_out`
-    - Validate model through simulation runs
-
-11) **Invoke `/summarize`** and store output as `summarize_out`
-    - Generate human-readable model summary
+Every step has `skip_if_false: true`, so exactly one branch runs: steps 1-2, or step 3.
 
 ## Output Contract
 
 Return a structured object:
 
 ```yaml
-workflow_id: string  # Unique model construction ID
-goal: string  # Modeling objective
-status: completed | partial | failed
-world_model:
-  version: string
-  created_at: string  # ISO timestamp
-  schema_version: string
-  entities:
-    count: integer
-    by_type: object  # type -> count
-    sample: array[object]  # representative entities
-  relationships:
-    count: integer
-    types: array[string]
-    sample: array[object]
-  evidence_anchors: array[string]
-state:
-  snapshot: object  # Canonical world state
-  hash: string  # Integrity hash
-  timestamp: string
-  evidence_anchors: array[string]
-dynamics:
-  transition_rules: integer
-  causal_links: integer
-  temporal_scope: string  # e.g., "real-time", "daily", "event-driven"
-  evidence_anchors: array[string]
-uncertainty:
-  overall_confidence: number  # 0.0-1.0
-  high_uncertainty_areas: array[string]
-  unknown_factors: array[string]
-  evidence_anchors: array[string]
-provenance:
-  sources: array[string]
-  lineage_depth: integer
-  coverage: number  # 0.0-1.0 (% of facts with provenance)
-  evidence_anchors: array[string]
-simulation:
-  validated: boolean
-  scenarios_tested: integer
-  anomalies_found: array[string]
-  evidence_anchors: array[string]
-summary:
-  description: string
-  key_insights: array[string]
-  recommended_actions: array[string]
-  evidence_anchors: array[string]
+workflow_id: string  # Unique bootstrap execution ID
+user_input: object  # The input as given
+status: completed | partial | failed | rolled_back
+steps:
+  world_model_out:  # null when world_state_out was given and the step was skipped
+    result:  # world_model_build's stores, keyed by store_as
+      state_out:
+        state: object  # The baseline world state
+        entities: array[object]
+        relationships: array[object]
+        evidence_anchors: array[string]
+      transition_out:
+        rules: array[object]
+        evidence_anchors: array[string]
+      attribute_out:
+        causes: array[object]
+        strengths: object  # Causal strength per cause
+        evidence_anchors: array[string]
+      measure_out:
+        value: number
+        uncertainty: object  # lower, upper
+        evidence_anchors: array[string]
+      ground_out:
+        grounded: boolean
+        gaps: array[string]
+        evidence_anchors: array[string]
+      simulate_out:
+        outcomes: array[object]
+        evidence_anchors: array[string]
+      explain_out:
+        explanation: string
+        evidence_anchors: array[string]
+    steps_executed: integer
+    evidence_anchors: array[string]
+  sync_out:  # null when world_state_out was given and the step was skipped
+    result:  # digital_twin_sync_loop's stores, keyed by store_as
+      state_out:
+        state: object  # The synced twin snapshot
+        evidence_anchors: array[string]
+      verify_out:
+        passed: boolean
+        evidence_anchors: array[string]
+      audit_out:
+        audit_id: string
+        evidence_anchors: array[string]
+      explain_out:
+        explanation: string
+        evidence_anchors: array[string]
+    steps_executed: integer
+    evidence_anchors: array[string]
+  sync_existing_out:  # null when the baseline was built (steps 1-2 ran)
+    result: object  # digital_twin_sync_loop's stores, as in sync_out
+    steps_executed: integer
+    evidence_anchors: array[string]
 confidence: number  # 0.0-1.0
 evidence_anchors: array[string]
 assumptions: array[string]
@@ -139,184 +124,160 @@ assumptions: array[string]
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `workflow_id` | string | Unique identifier for this model construction |
-| `world_model` | object | Metadata about entities and relationships |
-| `state` | object | Canonical world state snapshot with integrity hash |
-| `dynamics` | object | Transition rules and causal structure |
-| `uncertainty` | object | Confidence levels and unknown factors |
-| `provenance` | object | Source tracking and lineage |
-| `simulation` | object | Model validation results |
-| `summary` | object | Human-readable insights |
+| `workflow_id` | string | Unique identifier for this bootstrap |
+| `status` | enum | Final workflow status |
+| `steps` | object | Each step's output, keyed by its `store_as`; a skipped step is null |
+| `steps.*.result` | object | The invoked workflow's stores, keyed by their `store_as` |
 | `confidence` | number | 0.0-1.0 based on evidence completeness |
 | `evidence_anchors` | array | All evidence references collected |
 | `assumptions` | array | Explicit assumptions made during modeling |
 
 ## Examples
 
-### Example 1: Build Supply Chain World Model
+### Example 1: Bootstrap a Supply Chain Twin
 
 **Input:**
 ```yaml
-goal: "Model electronics supply chain for disruption risk analysis"
-scope:
-  - "suppliers"
-  - "manufacturers"
-  - "logistics"
-  - "inventory"
-constraints:
-  time_horizon: "6 months"
-  geographic_scope: "Asia-Pacific"
-  confidence_threshold: 0.7
-sources:
-  - type: database
-    connection: "postgres://supply-chain-db"
-  - type: api
-    endpoint: "https://logistics.api/shipments"
+user_input:
+  domain: "electronics supply chain, Asia-Pacific"
+world_state_out: null
 ```
 
 **Output:**
 ```yaml
-workflow_id: "world_20240115_100000_supplychain"
-goal: "Model electronics supply chain for disruption risk analysis"
+workflow_id: "bootstrap_20240115_100000_supplychain"
+user_input:
+  domain: "electronics supply chain, Asia-Pacific"
 status: completed
-world_model:
-  version: "v1.0.0"
-  created_at: "2024-01-15T10:00:00Z"
-  schema_version: "world_state_schema_v2"
-  entities:
-    count: 1247
-    by_type:
-      supplier: 156
-      manufacturer: 23
-      warehouse: 45
-      distribution_center: 12
-      product: 892
-      shipment: 119
-    sample:
-      - id: "supplier-taiwan-001"
-        type: "supplier"
-        name: "Taiwan Semiconductor Co"
-        location: "Hsinchu, Taiwan"
-        capacity: 50000
-        lead_time_days: 45
-      - id: "mfg-shenzhen-005"
-        type: "manufacturer"
-        name: "Shenzhen Electronics Assembly"
-        location: "Shenzhen, China"
-        capacity: 100000
-  relationships:
-    count: 3456
-    types:
-      - "supplies_to"
-      - "located_in"
-      - "transports_via"
-      - "stores_at"
-      - "depends_on"
-    sample:
-      - subject: "supplier-taiwan-001"
-        predicate: "supplies_to"
-        object: "mfg-shenzhen-005"
-        attributes:
-          volume: 25000
-          frequency: "weekly"
-  evidence_anchors:
-    - "tool:database:supply-chain-db/entities"
-    - "tool:api:logistics.api/shipments"
-state:
-  snapshot:
-    timestamp: "2024-01-15T10:00:00Z"
-    entities: "[1247 entities - see world_state.yaml]"
-    relationships: "[3456 relationships - see world_state.yaml]"
-  hash: "sha256:def456abc789..."
-  timestamp: "2024-01-15T10:00:00Z"
-  evidence_anchors:
-    - "file:state/supply_chain_world.yaml"
-dynamics:
-  transition_rules: 34
-  causal_links: 89
-  temporal_scope: "daily"
-  evidence_anchors:
-    - "tool:state-transition:rule_extraction"
-    - "tool:causal-model:dependency_graph"
-uncertainty:
-  overall_confidence: 0.82
-  high_uncertainty_areas:
-    - "Supplier capacity utilization (estimated from public data)"
-    - "Shipping delays (historical average, not real-time)"
-  unknown_factors:
-    - "Competitor orders affecting supplier allocation"
-    - "Regulatory changes in transit countries"
-  evidence_anchors:
-    - "tool:uncertainty-model:confidence_analysis"
-provenance:
-  sources:
-    - "postgres://supply-chain-db (primary)"
-    - "https://logistics.api (secondary)"
-    - "public filings (supplementary)"
-  lineage_depth: 3
-  coverage: 0.94
-  evidence_anchors:
-    - "tool:provenance:lineage_trace"
-simulation:
-  validated: true
-  scenarios_tested: 5
-  anomalies_found:
-    - "Taiwan supplier shutdown causes 67% production halt within 2 weeks"
-    - "Shipping route disruption adds 12-day average delay"
-  evidence_anchors:
-    - "tool:simulation:scenario_results"
-summary:
-  description: "Electronics supply chain model covering 156 suppliers, 23 manufacturers, and supporting logistics infrastructure in Asia-Pacific region"
-  key_insights:
-    - "Single-source dependency on Taiwan for 45% of semiconductor supply"
-    - "Shenzhen manufacturing hub handles 60% of assembly volume"
-    - "Average supply chain depth of 3 tiers with limited visibility beyond tier 1"
-  recommended_actions:
-    - "Diversify semiconductor sourcing to reduce Taiwan concentration risk"
-    - "Establish buffer inventory for critical components"
-    - "Develop secondary logistics routes for key shipping lanes"
-  evidence_anchors:
-    - "tool:summarize:executive_summary"
+steps:
+  world_model_out:
+    result:
+      state_out:
+        state:
+          timestamp: "2024-01-15T10:00:00Z"
+          entities: "[1247 entities - see state/supply_chain_world.yaml]"
+        entities:
+          - id: "supplier-taiwan-001"
+            type: "supplier"
+            location: "Hsinchu, Taiwan"
+            lead_time_days: 45
+          - id: "mfg-shenzhen-005"
+            type: "manufacturer"
+            location: "Shenzhen, China"
+        relationships:
+          - subject: "supplier-taiwan-001"
+            predicate: "supplies_to"
+            object: "mfg-shenzhen-005"
+        evidence_anchors:
+          - "tool:database:supply-chain-db/entities"
+          - "tool:api:logistics.api/shipments"
+      transition_out:
+        rules:
+          - trigger: "supplier shutdown"
+            effect: "downstream inventory drawdown"
+        evidence_anchors:
+          - "tool:database:supply-chain-db/orders"
+      attribute_out:
+        causes:
+          - id: single_source_taiwan
+            cause: "Single-source dependency on Taiwan for 45% of semiconductor supply"
+        strengths:
+          single_source_taiwan: 0.8
+        evidence_anchors:
+          - "tool:database:supply-chain-db/suppliers"
+      measure_out:
+        value: 0.82  # overall confidence in the model
+        uncertainty: {lower: 0.75, upper: 0.88}
+        evidence_anchors:
+          - "tool:api:logistics.api/shipments"
+      ground_out:
+        grounded: true
+        gaps:
+          - "Supplier capacity utilization (estimated from public data)"
+          - "Shipping delays (historical average, not real-time)"
+          - "Competitor orders affecting supplier allocation"
+        evidence_anchors:
+          - "file:state/supply_chain_world.yaml"
+      simulate_out:
+        outcomes:
+          - scenario: "Taiwan supplier shutdown"
+            outcome: "67% production halt within 2 weeks"
+          - scenario: "Shipping route disruption"
+            outcome: "12-day average delay added"
+        evidence_anchors:
+          - "file:state/supply_chain_world.yaml"
+      explain_out:
+        explanation: "Baseline covers 156 suppliers and 23 manufacturers; the largest risk is semiconductor source concentration"
+        evidence_anchors:
+          - "file:state/supply_chain_world.yaml"
+    steps_executed: 13
+    evidence_anchors:
+      - "file:state/supply_chain_world.yaml"
+  sync_out:
+    result:
+      state_out:
+        state:
+          timestamp: "2024-01-15T10:20:00Z"
+          entities: "[1251 entities - 4 new shipments]"
+        evidence_anchors:
+          - "tool:api:logistics.api/shipments"
+      verify_out:
+        passed: true
+        evidence_anchors:
+          - "tool:bash:run_verification_suite"
+      audit_out:
+        audit_id: "audit_20240115_102000"
+        evidence_anchors:
+          - "file:.claude/audit.log"
+      explain_out:
+        explanation: "First sync ingested 4 shipments; lead-time drift on supplier-taiwan-001 was planned for, passed the policy check and was applied after a checkpoint; verification passed, so rollback was skipped"
+        evidence_anchors:
+          - "file:.claude/audit.log"
+    steps_executed: 20  # 21 steps; rollback skipped because verify_out.passed was true
+    evidence_anchors:
+      - "file:.claude/audit.log"
+  sync_existing_out: null  # skipped: no world state was passed in
 confidence: 0.82
 evidence_anchors:
   - "tool:database:supply-chain-db"
   - "tool:api:logistics.api"
-  - "tool:simulation:scenario_results"
   - "file:state/supply_chain_world.yaml"
+  - "file:.claude/audit.log"
 assumptions:
   - "Database reflects current operational state"
   - "API provides accurate shipment tracking"
   - "Public capacity data is within 20% of actual"
-  - "Lead times based on historical 90-day average"
 ```
 
-**Evidence pattern:** Multi-source data integration, entity resolution across databases, causal analysis from transaction patterns, uncertainty from data freshness and coverage.
+**Evidence pattern:** Multi-source data integration, entity resolution across databases, causal analysis from transaction patterns, uncertainty from data freshness and coverage, then a first verified and audited sync.
 
 ## Verification
 
-- [ ] **Entity Coverage**: All entities in scope identified with canonical IDs
-- [ ] **Relationship Completeness**: Key relationships mapped with evidence
-- [ ] **State Validity**: World state conforms to schema
-- [ ] **Dynamics Defined**: Transition rules and causal links documented
-- [ ] **Uncertainty Quantified**: Confidence scores for all major assertions
-- [ ] **Provenance Complete**: Source documented for >90% of facts
-- [ ] **Simulation Validated**: At least 1 scenario successfully executed
+- [ ] **One Branch Ran**: Either `world_model_out` and `sync_out` are set, or `sync_existing_out` is
+- [ ] **Entity Coverage**: All entities in scope identified (`detect_out` → `classify_out` → `integrate_out`)
+- [ ] **State Validity**: The baseline `state_out` conforms to the world state schema
+- [ ] **Dynamics Defined**: `transition_out.rules` and `attribute_out.causes` documented
+- [ ] **Uncertainty Quantified**: `measure_out.uncertainty` present
+- [ ] **Grounded**: `ground_out.grounded` is true, gaps listed
+- [ ] **Simulation Run**: `simulate_out.outcomes` has at least one scenario
+- [ ] **First Sync Verified**: The sync's `verify_out.passed` is true, or its rollback ran
+- [ ] **Audit Trail**: The sync's `audit_out` was recorded
 
 **Verification tools:** Read (for state files), Bash (for simulation), Web (for API validation)
 
 ## Safety Constraints
 
-- `mutation`: false
-- `requires_checkpoint`: false
-- `requires_approval`: false
-- `risk`: medium
+- `mutation`: true (the first sync may mutate the twin)
+- `requires_checkpoint`: true
+- `requires_approval`: true (for mutations in the sync loop)
+- `risk`: high
 
 **Capability-specific rules:**
 - Do not modify source data during modeling
 - Flag entities with confidence < threshold
 - Document all assumptions explicitly
 - Preserve raw data alongside derived state
-- Validate schema conformance before completion
+- Validate schema conformance before the first sync
 - Rate-limit API calls to respect source limits
 
 ## Composition Patterns
@@ -324,20 +285,21 @@ assumptions:
 **Commonly follows:**
 - `retrieve` - After gathering raw data
 - `receive` - After ingesting real-time signals
-- `inspect` - After initial data quality assessment
+- `observe` - After initial data quality assessment
 
 **Commonly precedes:**
-- `digital-twin-sync-workflow` - World model is prerequisite for sync
+- `digital-twin-sync-workflow` - Later sync iterations start from the bootstrapped twin
 - `simulate` - To run what-if scenarios
-- `forecast-risk` - To predict future states
-- `summarize` - To generate executive reports
+- `predict` (domain: risk) - To predict future states
+- `explain` - To generate executive reports
 
 **Anti-patterns:**
-- Never skip identity resolution before state construction
+- Never skip identity resolution (`detect` → `classify` → `integrate`) before state construction
 - Never omit uncertainty modeling for production use
-- Never finalize without provenance documentation
-- Never deploy model without simulation validation
+- Never finalize without grounding and audit
+- Never run the first sync from an empty baseline
 
 **Workflow references:**
-- See `reference/workflow_catalog.yaml#world-model-workflow` for step definitions
+- See `reference/workflow_catalog.yaml#digital_twin_bootstrap` for step definitions
+- See `reference/workflow_catalog.yaml#world_model_build` for the baseline build
 - See `reference/world_state_schema.yaml` for canonical state format

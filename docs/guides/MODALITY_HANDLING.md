@@ -701,6 +701,8 @@ content_moderation:
     - capability: retrieve
       purpose: Fetch the user submission containing text, images, and audio.
       store_as: content_out
+      input_bindings:
+        target: ${submission.id}
 
     # 2. Analyze audio content
     # The ontology orders detect before classify (`detect precedes classify`),
@@ -754,6 +756,7 @@ content_moderation:
           text: "${content_out.data.text: string}"
           images: "${content_out.data.images: array<object>}"
           audio_transcript: ${transcript_out.output}
+        pattern: "cross_modal_evasion"
 
     # 7. Integrate all moderation signals
     - capability: integrate
@@ -797,7 +800,7 @@ content_moderation:
           verdict: "${verdict_out.labels: array<string>}"
           explanation: ${explanation_out.explanation}
         context:
-          content_id: "${content_out.data.id: string}"
+          content_id: ${submission.id}
           all_signals: ${integrated_out}
 
   success:
@@ -805,6 +808,14 @@ content_moderation:
     - Cross-modal evasion checked
     - Moderation verdict produced with explanation
     - Decision audited with full evidence trail
+
+  inputs:
+    submission:
+      type: object
+      required: true
+      properties:
+        id:
+          type: string
 ```
 
 ---

@@ -12,6 +12,8 @@ chained:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: detect
     purpose: Detect from observation.
@@ -24,6 +26,7 @@ chained:
     store_as: detect_out
     input_bindings:
       data: ${observe_out}
+      pattern: "anomaly"
     failure_modes: []
   - capability: classify
     purpose: Classify detected items.

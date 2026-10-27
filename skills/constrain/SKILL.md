@@ -1,7 +1,7 @@
 ---
 name: constrain
 description: Enforce policies, guardrails, and permission boundaries; refuse unsafe actions and apply least privilege. Use when evaluating actions against policies, checking permissions, or reducing scope to safe boundaries.
-argument-hint: "[action] [policy_id] [scope] [enforcement_level]"
+argument-hint: "[target] [constraints] [action_on_violation]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -53,7 +53,7 @@ abstentions, full-sweep passes and voters. See
 
 3) **Apply policy rules**: Evaluate each policy condition
    - Parse policy conditions (AND/OR/NOT expressions)
-   - Check each condition against action parameters
+   - Check each condition against the target action's parameters
    - Record which conditions pass and which fail
    - Determine overall policy verdict (allow/deny/conditional)
 
@@ -117,12 +117,13 @@ assumptions: []
 
 **Input:**
 ```yaml
-action:
-  capability: "edit"
+target:
+  capability: "mutate"
   target: "/etc/passwd"
   parameters:
     content: "..."
-enforcement_level: strict
+constraints: ["workspace_boundary", "sensitive_file_protection"]
+action_on_violation: block
 ```
 
 **Output:**
@@ -169,17 +170,17 @@ assumptions: []
 
 **Input:**
 ```yaml
-action:
+target:
   capability: "send"
   target: "https://api.external.com/data"
   parameters:
     method: "POST"
     payload: {...}
-context:
-  session_id: "abc123"
-  requests_this_hour: 95
-enforcement_level: advisory
+constraints: ["external_api_rate_limit", "checkpoint_before_send"]
+action_on_violation: warn
 ```
+
+Session `abc123` has already made 95 requests this hour.
 
 **Output:**
 ```yaml
@@ -224,16 +225,17 @@ assumptions:
 
 ---
 
-### Example 3: Constrain Before Act-Plan
+### Example 3: Constrain Before Execute
 
 **Input:**
 ```yaml
-action:
-  capability: "act-plan"
+target:
+  capability: "execute"
   target: "refactor_handlers_plan"
   parameters:
     plan_id: "plan_20240115_refactor"
-enforcement_level: strict
+constraints: ["checkpoint_required"]
+action_on_violation: block
 ```
 
 **Output:**
@@ -241,7 +243,7 @@ enforcement_level: strict
 constraints_applied:
   - name: "checkpoint_required"
     type: policy
-    target: "act-plan"
+    target: "execute"
     enforced: true
     violation_action: block
 policy_evaluation:
@@ -260,7 +262,7 @@ scope_reduction:
   removed_permissions:
     - "file mutation (pending checkpoint)"
 safe_to_proceed: false
-blocked_reason: "act-plan requires checkpoint. Call 'checkpoint' first with scope matching the plan."
+blocked_reason: "This execute step mutates files (requires_checkpoint: true). Call 'checkpoint' first with scope matching the plan."
 confidence: 1.0
 evidence_anchors:
   - "policy:mutation_safety:checkpoint_gate"
@@ -302,7 +304,7 @@ Apply the following verification patterns:
 **Commonly precedes:**
 - `checkpoint` - After constrain approves, create checkpoint
 - `send` - REQUIRED: constrain before any external communication
-- `act-plan` - Constrain as part of pre-execution checks
+- `execute` / `mutate` - Constrain as part of pre-execution checks (constrain must precede them)
 
 **Anti-patterns:**
 - CRITICAL: Never skip constrain before send (no unchecked external comms)
@@ -313,4 +315,4 @@ Apply the following verification patterns:
 **Workflow references:**
 - See `reference/composition_patterns.md#digital-twin-sync-loop` for constrain-before-act
 - See `reference/composition_patterns.md#risk-assessment` for constrain placement
-- See `reference/verification_patterns.md#safety-boundary` for boundary checks
+- See `reference/verification_patterns.md#pattern-6-safety-boundary-check` for boundary checks

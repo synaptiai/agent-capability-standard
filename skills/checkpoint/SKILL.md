@@ -1,7 +1,7 @@
 ---
 name: checkpoint
 description: Create a safety checkpoint marker before mutation or execution steps. Use when about to modify files, execute plans, or perform any irreversible action. Essential for the CAVR pattern.
-argument-hint: "[scope] [reason] [checkpoint_type]"
+argument-hint: "[scope] [label] [metadata]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Edit
@@ -146,11 +146,10 @@ assumptions: []
 
 **Input:**
 ```yaml
-scope:
-  - "src/api/handlers/*.py"
-  - "tests/test_handlers.py"
-reason: "Before refactoring API handlers"
-checkpoint_type: git_stash
+scope: "src/api/handlers/*.py tests/test_handlers.py"
+metadata:
+  reason: "Before refactoring API handlers"
+  checkpoint_type: git_stash
 ```
 
 **Output:**
@@ -172,8 +171,8 @@ pre_mutation_state:
   hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   summary: "3 files, 342 lines total, last modified 2024-01-15"
 next_safe_actions:
-  - "act-plan: Proceed with handler refactoring"
-  - "edit: Modify files in scope"
+  - "execute: Proceed with handler refactoring"
+  - "mutate: Modify files in scope"
 confidence: 1.0
 evidence_anchors:
   - "tool:bash:git stash push -m 'checkpoint:chk_20240115_143022_a7b3c9:Before refactoring API handlers'"
@@ -192,9 +191,10 @@ assumptions:
 **Input:**
 ```yaml
 scope: "config/production.yaml"
-reason: "Before config migration"
-checkpoint_type: file_backup
-expiry: "24h"
+metadata:
+  reason: "Before config migration"
+  checkpoint_type: file_backup
+  expiry: "24h"
 ```
 
 **Output:**
@@ -214,7 +214,7 @@ pre_mutation_state:
   hash: "sha256:abc123..."
   summary: "1 file, 89 lines, production database config"
 next_safe_actions:
-  - "act-plan: Apply config migration"
+  - "mutate: Apply config migration"
 confidence: 0.95
 evidence_anchors:
   - "file:.checkpoints/chk_20240115_150000_config/manifest.json"
@@ -242,7 +242,7 @@ Apply the following verification patterns:
 - `risk`: medium
 
 **Capability-specific rules:**
-- NEVER skip checkpoint before act-plan (CRITICAL)
+- NEVER skip checkpoint before mutate or send (CRITICAL)
 - NEVER delete checkpoints until explicitly requested
 - ALWAYS verify checkpoint integrity immediately after creation
 - Do not checkpoint sensitive files (.env, credentials) - warn and exclude
@@ -257,12 +257,13 @@ Apply the following verification patterns:
 - `constrain` - After policy check passes, checkpoint before mutation
 
 **Commonly precedes:**
-- `act-plan` - REQUIRED: Never act-plan without prior checkpoint (CAVR pattern)
-- `improve` - Checkpoint before iterative improvement cycles
-- `send` - Checkpoint before external communications
+- `mutate` - REQUIRED: Never mutate without prior checkpoint (CAVR pattern)
+- `execute` - Checkpoint before a step that raises `requires_checkpoint`
+- `send` - REQUIRED: Checkpoint before external communications
+- `rollback` - REQUIRED: Rollback restores to a checkpoint
 
 **Anti-patterns:**
-- CRITICAL: Never call `act-plan` without prior `checkpoint`
+- CRITICAL: Never call `mutate` or `send` without prior `checkpoint`
 - CRITICAL: Never call `rollback` without valid checkpoint reference
 - Never checkpoint after mutation has started
 - Never delete checkpoint before verify confirms success

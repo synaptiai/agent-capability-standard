@@ -208,6 +208,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- **Unbound required inputs were silent (#114).** A step that does not
+  bind an input its capability requires is W615. The reference catalog
+  left 60 required inputs unbound across eight workflows; they are bound
+  now, and `debug_code_change` gains a `bug` input to bind them from.
+  Binding `checkpoint_id` exposed that the rollback steps of
+  `debug_code_change` and `digital_twin_sync_loop` ran even when
+  verification passed; they are skipped then, as in the other workflows.
+  `digital_twin_bootstrap` read a skipped step's output when a world state
+  was passed in; it now syncs from that state instead. `retry.max` and
+  `retry.backoff` are validated (S303)
+- **The example catalog used the v1 capability names (#114).**
+  `examples/digital_twin_sync_loop.workflow_catalog.yaml` now holds the
+  digital twin workflows of the reference catalog verbatim (a test keeps
+  them identical) and is validated in CI with `--strict`
+- **Runtime fixtures are generated in the repository.**
+  `scripts/gen_runtime_fixtures.py` writes `tests/conformance/runtime/*.json`,
+  and CI checks they are up to date
+- **Skill docs named inputs the capabilities do not have.** The procedure
+  text, examples and `argument-hint` lines of the capability skills now use
+  the ontology's input names
 - **Mistyped `input_bindings` keys were silent (#114).** A key the
   capability does not define is now W604 with a did-you-mean hint, and an
   `invoke` step's literal `input` is checked against the invoked workflow's

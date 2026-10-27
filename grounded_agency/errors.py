@@ -91,6 +91,7 @@ class ErrorCode(Enum):
     MANGLED_REFERENCE = "W612"
     UNREACHABLE_HANDLER = "W613"
     INVALID_DURATION = "W614"
+    MISSING_INPUT = "W615"
 
     @property
     def severity(self) -> Severity:

@@ -1349,7 +1349,7 @@ This matrix tracks the implementation status of every major feature across all s
 
 | Feature | Status | Component | Notes |
 |---------|--------|-----------|-------|
-| Workflow validator | Implemented | Rust core + `validate_workflows.py` CLI | Errors and warnings (W601–W614); `--strict` treats warnings as errors |
+| Workflow validator | Implemented | Rust core + `validate_workflows.py` CLI | Errors and warnings (W601–W615); `--strict` treats warnings as errors |
 | Structural validation | Implemented | Rust core (`validate/semantics.rs`) | Capability existence, prerequisites, edge semantics |
 | Reference validation | Implemented | Rust core (`refs.rs`, `validate/bindings.rs`) | ${store_as} resolution |
 | Type system validation | Implemented | Rust core (`types.rs`, `schema.rs`) | Inferred and annotated types |

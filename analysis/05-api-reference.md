@@ -56,7 +56,7 @@ from grounded_agency import (
     WorkflowDefinition,
     WorkflowStep,
     # Error model
-    ErrorCode,          # Enum of diagnostic codes (V1xx, B2xx, S3xx, R4xx, F5xx, W601-W614)
+    ErrorCode,          # Enum of diagnostic codes (V1xx, B2xx, S3xx, R4xx, F5xx, W601-W615)
     Severity,           # str Enum: "error" | "warning"
     ValidationError,
     format_error,
@@ -70,7 +70,7 @@ from grounded_agency import (
 
 This is a selection: `__all__` also exports the query/client helpers (`grounded_query`, `GroundedClient`, `CostSummary`), rate limiting, workflow tracing, coordination and discovery types.
 
-`ErrorCode` mirrors the Rust core's code list (`_core.CODES`). Every diagnostic carries a `Severity`; warnings (`W601`-`W614`) never fail validation unless the caller treats them as errors (e.g. `validate_workflows.py --strict`). `ValidationError.from_core()` builds one from a diagnostic of a `_core` validation report.
+`ErrorCode` mirrors the Rust core's code list (`_core.CODES`). Every diagnostic carries a `Severity`; warnings (`W601`-`W615`) never fail validation unless the caller treats them as errors (e.g. `validate_workflows.py --strict`). `ValidationError.from_core()` builds one from a diagnostic of a `_core` validation report.
 
 `WorkflowEngine` (`grounded_agency/workflows/engine.py`) loads catalogs through the Rust core (`_core.load_catalog`) and validates them with `_core.Validator`. Recent additions:
 
@@ -1587,7 +1587,7 @@ python tools/validate_workflows.py --emit-patch
 6. **Safety flags**: Step flags inherit from the ontology; a weaker declaration is ignored with W602.
 7. **Patch suggestions**: Transform insertion suggestions with coercion registry lookup.
 
-Diagnostics have severity `error` or `warning` (W601-W614).
+Diagnostics have severity `error` or `warning` (W601-W615).
 
 **Output format**: a `WARNINGS:` block (if any), then `VALIDATION PASS` or `VALIDATION FAIL:` followed by the errors, one per line as `[workflow] step N (capability): CODE message — hint` (the hint only when the diagnostic carries one).
 

@@ -92,6 +92,7 @@ meaning. New codes:
 | W612 | MANGLED_REFERENCE | YAML parsed `- ${a: t}` as a mapping; quote it |
 | W613 | UNREACHABLE_HANDLER | `handler: true` step that no escalation targets |
 | W614 | INVALID_DURATION | legacy `timeout` value outside the duration grammar |
+| W615 | MISSING_INPUT | a required capability input the step does not bind (added with the remaining open items) |
 
 ## 4. Catalog and workflow model
 

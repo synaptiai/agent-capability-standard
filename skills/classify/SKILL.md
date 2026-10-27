@@ -1,7 +1,7 @@
 ---
 name: classify
 description: Assign labels or categories to items based on characteristics. Use when categorizing entities, tagging content, identifying types, or labeling data according to a taxonomy.
-argument-hint: "[item] [taxonomy] [multi-label]"
+argument-hint: "[item] [taxonomy] [multi_label]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep

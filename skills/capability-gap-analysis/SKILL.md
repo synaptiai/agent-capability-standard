@@ -1,7 +1,7 @@
 ---
 name: gap-analysis-workflow
 description: Identify capability gaps and propose new skills with prioritization. Use when analyzing missing capabilities, planning skill development, performing ontology expansion, or assessing coverage.
-argument-hint: "[goal] [scope] [constraints]"
+argument-hint: "[user_input]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Bash, Edit, Git, Web
@@ -11,13 +11,13 @@ agent: general-purpose
 
 ## Intent
 
-Run the composed workflow **gap-analysis-workflow** using atomic capability skills to systematically identify what capabilities are missing and prioritize their development.
+Run the composed workflow **capability_gap_analysis** (`reference/workflow_catalog.yaml`) using atomic capability skills to systematically identify what capabilities are missing and prioritize their development.
 
 **Success criteria:**
-- Current capability coverage mapped with evidence
-- Gaps identified with clear justification
-- Relationships between existing and missing capabilities documented
-- Prioritized roadmap for new skill development
+- Missing capability list
+- Prioritized backlog
+- Proposed skill specs
+- Every step output is grounded with evidence anchors
 - Audit trail of analysis process
 
 **Compatible schemas:**
@@ -28,37 +28,33 @@ Run the composed workflow **gap-analysis-workflow** using atomic capability skil
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `goal` | Yes | string | The analysis objective (e.g., "identify gaps for autonomous deployment") |
-| `scope` | Yes | string\|array | Domain, layer, or capability set to analyze |
-| `constraints` | No | object | Limits (e.g., max new skills, priority criteria, timeline) |
-| `reference_ontology` | No | string | Path to reference ontology for comparison |
-| `existing_capabilities` | No | array | List of already-implemented capabilities |
+| `user_input` | No | object | `domain` (the project/system to assess; step 1 observes it, so set it in practice). The catalog also accepts `constraints`, but no step binds it: the priority compare always ranks by the fixed criteria `leverage` and `risk_reduction` |
 
 ## Procedure
 
 0) **Create checkpoint marker** if mutation might occur:
    - Create `.claude/checkpoint.ok` after confirming rollback strategy
 
-1) **Invoke `/inspect`** and store output as `inspect_out`
-   - Examine current capability landscape and documentation
+1) **Invoke `/observe`** on `user_input.domain` and store output as `observe_out`
+   - Read project docs and current skill coverage
 
-2) **Invoke `/map-relationships`** and store output as `map-relationships_out`
-   - Map dependencies and connections between existing capabilities
+2) **Invoke `/attribute`** (domain: dependencies) with `observe_out.observation` as the effect and store output as `attribute_out`
+   - Map existing workflows vs capabilities
 
-3) **Invoke `/discover-relationship`** and store output as `discover-relationship_out`
-   - Identify implicit relationships and missing links
+3) **Invoke `/discover`** on `attribute_out.causes` and store output as `discover_out`
+   - Find hidden dependencies or unmodeled interactions
 
-4) **Invoke `/compare-plans`** and store output as `compare-plans_out`
-   - Compare current state against ideal or reference ontology
+4) **Invoke `/compare`** (domain: architecture) on `discover_out.patterns` and store output as `compare_architecture_out`
+   - Compare alternative skill architectures
 
-5) **Invoke `/prioritize`** and store output as `prioritize_out`
-   - Rank gaps by impact, effort, and strategic value
+5) **Invoke `/compare`** (domain: priority) on `compare_architecture_out.ranking` with criteria `leverage` and `risk_reduction`, and store output as `compare_priority_out`
+   - Rank missing capabilities by leverage and risk reduction
 
-6) **Invoke `/generate-plan`** and store output as `generate-plan_out`
-   - Create development roadmap for new capabilities
+6) **Invoke `/generate`** (domain: plan) from `compare_priority_out.ranking` and `compare_architecture_out.recommendation`, and store output as `generate_out`
+   - Generate an implementation plan for new skills
 
 7) **Invoke `/audit`** and store output as `audit_out`
-   - Record analysis process and evidence
+   - Record rationale + decision lineage: the ranking and the plan
 
 ## Output Contract
 
@@ -66,48 +62,43 @@ Return a structured object:
 
 ```yaml
 workflow_id: string  # Unique analysis execution ID
-goal: string  # Analysis objective
+user_input: object  # The input as given
 status: completed | partial | failed
-current_state:
-  capabilities_analyzed: integer
-  coverage_percentage: number  # 0.0-1.0
-  layers_covered: array[string]
-  evidence_anchors: array[string]
+steps:
+  observe_out:
+    observation: object
+    evidence_anchors: array[string]
+  attribute_out:
+    causes: array[object]
+    strengths: object  # Causal strength per cause
+    evidence_anchors: array[string]
+  discover_out:
+    patterns: array[object]
+    relationships: array[object]
+    evidence_anchors: array[string]
+  compare_architecture_out:
+    ranking: array[object]
+    recommendation: string  # The top choice
+    evidence_anchors: array[string]
+  compare_priority_out:
+    ranking: array[object]
+    evidence_anchors: array[string]
+  generate_out:
+    content: object  # The implementation plan
+    evidence_anchors: array[string]
+  audit_out:
+    recorded: boolean
+    audit_id: string
+    evidence_anchors: array[string]
 gaps_identified:
   total: integer
-  by_layer:
-    perception: array[string]
-    modeling: array[string]
-    reasoning: array[string]
-    action: array[string]
-    safety: array[string]
-    meta: array[string]
   by_priority:
     critical: array[string]
     high: array[string]
     medium: array[string]
     low: array[string]
   evidence_anchors: array[string]
-relationships:
-  existing_dependencies: array[object]
-  missing_connections: array[object]
-  orphan_capabilities: array[string]
-  evidence_anchors: array[string]
-comparison:
-  reference_ontology: string
-  alignment_score: number  # 0.0-1.0
-  divergences: array[string]
-  evidence_anchors: array[string]
-roadmap:
-  phases: array[object]
-  total_new_skills: integer
-  estimated_effort: string
-  dependencies: array[object]
-  evidence_anchors: array[string]
-audit:
-  log_path: string
-  methodology: string
-  evidence_anchors: array[string]
+audit_log_pointer: string  # Path to the audit record
 confidence: number  # 0.0-1.0
 evidence_anchors: array[string]
 assumptions: array[string]
@@ -118,12 +109,10 @@ assumptions: array[string]
 | Field | Type | Description |
 |-------|------|-------------|
 | `workflow_id` | string | Unique identifier for this analysis |
-| `current_state` | object | Summary of existing capability coverage |
-| `gaps_identified` | object | Missing capabilities organized by layer and priority |
-| `relationships` | object | Dependency mapping including missing connections |
-| `comparison` | object | Alignment with reference ontology |
-| `roadmap` | object | Phased development plan for new skills |
-| `audit` | object | Analysis methodology and evidence trail |
+| `status` | enum | Final workflow status |
+| `steps` | object | Each step's output, keyed by its `store_as` |
+| `gaps_identified` | object | Missing capabilities organized by priority (from `compare_priority_out`) |
+| `audit_log_pointer` | string | Where the audit record was written |
 | `confidence` | number | 0.0-1.0 based on evidence completeness |
 | `evidence_anchors` | array | All evidence references collected |
 | `assumptions` | array | Explicit assumptions made during analysis |
@@ -134,154 +123,126 @@ assumptions: array[string]
 
 **Input:**
 ```yaml
-goal: "Identify gaps for fully autonomous code review capability"
-scope:
-  - "reasoning"
-  - "safety"
-  - "action"
-constraints:
-  max_new_skills: 10
-  priority_criteria:
-    - "security_impact"
-    - "automation_potential"
-reference_ontology: "schemas/capability_ontology.yaml"
+user_input:
+  domain: "autonomous code review"
 ```
 
 **Output:**
 ```yaml
 workflow_id: "gap_20240115_120000_codereview"
-goal: "Identify gaps for fully autonomous code review capability"
+user_input:
+  domain: "autonomous code review"
 status: completed
-current_state:
-  capabilities_analyzed: 45
-  coverage_percentage: 0.72
-  layers_covered:
-    - "reasoning"
-    - "safety"
-    - "action"
-  evidence_anchors:
-    - "file:schemas/capability_ontology.yaml"
-    - "file:skills/critique/SKILL.md"
+steps:
+  observe_out:
+    observation:
+      capabilities: 36
+      workflows: 12
+      review_related_skills: ["critique", "verify", "detect"]
+    evidence_anchors:
+      - "file:schemas/capability_ontology.yaml"
+      - "file:skills/critique/SKILL.md"
+  attribute_out:
+    causes:
+      - id: no_merge_gate
+        cause: "No workflow composes critique with an automated merge gate"
+      - id: no_regression_domain
+        cause: "verify has no regression domain"
+    strengths:
+      no_merge_gate: 0.8
+      no_regression_domain: 0.7
+    evidence_anchors:
+      - "file:schemas/workflow_catalog.yaml"
+  discover_out:
+    patterns:
+      - pattern: "Review loops repeat critique → plan without verify"
+      - pattern: "Security findings are detected but never classified"
+    relationships:
+      - from: "detect"
+        to: "critique"
+        note: "Code smells inform critique priorities"
+    evidence_anchors:
+      - "file:schemas/capability_ontology.yaml:edges"
+  compare_architecture_out:
+    ranking:
+      - option: "Domain profiles on existing capabilities"
+        score: 0.85
+      - option: "New atomic capabilities"
+        score: 0.4
+    recommendation: "Domain profiles on existing capabilities"
+    evidence_anchors:
+      - "file:schemas/profiles/profile_schema.yaml"
+  compare_priority_out:
+    ranking:
+      - gap: "verify (domain: regression)"
+        priority: critical
+      - gap: "classify (domain: security_pattern)"
+        priority: critical
+      - gap: "detect (domain: code_smell)"
+        priority: high
+      - gap: "constrain (domain: auto_merge)"
+        priority: high
+      - gap: "generate (domain: review_comment)"
+        priority: medium
+    evidence_anchors:
+      - "file:schemas/capability_ontology.yaml:nodes"
+  generate_out:
+    content:
+      phases:
+        - phase: 1
+          name: "Security Foundation"
+          items: ["classify (domain: security_pattern)", "verify (domain: regression)"]
+        - phase: 2
+          name: "Detection Enhancement"
+          items: ["detect (domain: code_smell)", "constrain (domain: auto_merge)"]
+        - phase: 3
+          name: "Automation Expansion"
+          items: ["generate (domain: review_comment)"]
+      estimated_effort: "2-3 sprints"
+    evidence_anchors:
+      - "file:templates/SKILL_TEMPLATE_ENHANCED.md"
+  audit_out:
+    recorded: true
+    audit_id: "audit_20240115_121500"
+    evidence_anchors:
+      - "file:.claude/audit/gap_20240115_120000_codereview.log"
 gaps_identified:
-  total: 8
-  by_layer:
-    perception: []
-    modeling:
-      - "detect-code-smell"
-      - "identify-security-pattern"
-    reasoning:
-      - "compare-implementations"
-      - "evaluate-test-coverage"
-    action:
-      - "generate-review-comment"
-      - "apply-suggested-fix"
-    safety:
-      - "verify-no-regression"
-      - "constrain-auto-merge"
-    meta: []
+  total: 5
   by_priority:
     critical:
-      - "verify-no-regression"
-      - "identify-security-pattern"
+      - "verify (domain: regression)"
+      - "classify (domain: security_pattern)"
     high:
-      - "detect-code-smell"
-      - "constrain-auto-merge"
+      - "detect (domain: code_smell)"
+      - "constrain (domain: auto_merge)"
     medium:
-      - "compare-implementations"
-      - "generate-review-comment"
-    low:
-      - "evaluate-test-coverage"
-      - "apply-suggested-fix"
+      - "generate (domain: review_comment)"
+    low: []
   evidence_anchors:
     - "file:schemas/capability_ontology.yaml:nodes"
-    - "tool:compare-plans:coverage_analysis"
-relationships:
-  existing_dependencies:
-    - from: "critique"
-      to: "evaluate"
-      type: "requires"
-    - from: "plan"
-      to: "critique"
-      type: "soft_requires"
-  missing_connections:
-    - from: "detect-code-smell"
-      to: "critique"
-      type: "should_precede"
-      reason: "Code smells inform critique priorities"
-    - from: "verify-no-regression"
-      to: "act-plan"
-      type: "must_follow"
-      reason: "Regression check required after any code change"
-  orphan_capabilities: []
-  evidence_anchors:
-    - "tool:map-relationships:dependency_graph"
-    - "tool:discover-relationship:implicit_links"
-comparison:
-  reference_ontology: "schemas/capability_ontology.yaml"
-  alignment_score: 0.72
-  divergences:
-    - "Missing specialized detection capabilities for code patterns"
-    - "No automated fix application in action layer"
-    - "Regression verification not formalized"
-  evidence_anchors:
-    - "tool:compare-plans:ontology_diff"
-roadmap:
-  phases:
-    - phase: 1
-      name: "Security Foundation"
-      skills:
-        - "identify-security-pattern"
-        - "verify-no-regression"
-      rationale: "Critical for safe autonomous operation"
-    - phase: 2
-      name: "Detection Enhancement"
-      skills:
-        - "detect-code-smell"
-        - "constrain-auto-merge"
-      rationale: "Improves review quality and safety"
-    - phase: 3
-      name: "Automation Expansion"
-      skills:
-        - "compare-implementations"
-        - "generate-review-comment"
-        - "evaluate-test-coverage"
-        - "apply-suggested-fix"
-      rationale: "Full autonomous review capability"
-  total_new_skills: 8
-  estimated_effort: "2-3 sprints"
-  dependencies:
-    - skill: "apply-suggested-fix"
-      requires: ["verify-no-regression", "constrain-auto-merge"]
-  evidence_anchors:
-    - "tool:prioritize:impact_matrix"
-    - "tool:generate-plan:roadmap"
-audit:
-  log_path: ".claude/audit/gap_20240115_120000_codereview.log"
-  methodology: "Systematic comparison against reference ontology with layer-by-layer analysis"
-  evidence_anchors:
-    - "file:.claude/audit/gap_20240115_120000_codereview.log"
+audit_log_pointer: ".claude/audit/gap_20240115_120000_codereview.log"
 confidence: 0.85
 evidence_anchors:
   - "file:schemas/capability_ontology.yaml"
-  - "tool:map-relationships:dependency_graph"
-  - "tool:compare-plans:ontology_diff"
-  - "tool:prioritize:impact_matrix"
+  - "file:schemas/workflow_catalog.yaml"
+  - "file:.claude/audit/gap_20240115_120000_codereview.log"
 assumptions:
   - "Reference ontology is current and complete"
   - "Existing skills are correctly implemented"
-  - "Priority criteria reflect actual business needs"
+  - "Leverage and risk reduction reflect actual business needs"
 ```
 
 **Evidence pattern:** Ontology comparison, dependency graph analysis, impact-based prioritization.
 
 ## Verification
 
-- [ ] **Coverage Analyzed**: All capabilities in scope examined
-- [ ] **Gaps Documented**: Each gap has layer classification and priority
-- [ ] **Relationships Mapped**: Dependencies and missing connections identified
-- [ ] **Comparison Complete**: Alignment score computed against reference
-- [ ] **Roadmap Generated**: Phased plan with dependencies
-- [ ] **Audit Trail**: Analysis methodology documented
+- [ ] **Step Completeness**: All 7 workflow steps executed with output
+- [ ] **Evidence Grounding**: Every step output includes evidence_anchors
+- [ ] **Relationships Mapped**: attribute_out and discover_out document dependencies and missing connections
+- [ ] **Architecture Compared**: compare_architecture_out has a recommendation
+- [ ] **Gaps Prioritized**: compare_priority_out ranks every gap
+- [ ] **Plan Generated**: generate_out.content is a phased plan
+- [ ] **Audit Trail**: audit_out.recorded is true
 
 **Verification tools:** Read (for ontology files), Grep (for capability search), Bash (for validation)
 
@@ -290,11 +251,12 @@ assumptions:
 - `mutation`: false
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: low
+- `risk`: low (the catalog declares low; `max_step_risk` computes medium from the `audit` step)
 
 **Capability-specific rules:**
 - Do not create new skills during analysis (discovery only)
 - Validate all capability references against ontology
+- Prefer a domain parameter on an existing capability over a new capability
 - Document assumptions about missing capabilities
 - Flag potential security implications of gaps
 - Preserve existing ontology structure
@@ -302,13 +264,13 @@ assumptions:
 ## Composition Patterns
 
 **Commonly follows:**
-- `inspect` - After initial codebase exploration
+- `observe` - After initial codebase exploration
 - `retrieve` - After fetching reference documentation
 
 **Commonly precedes:**
-- `generate-plan` - To create detailed skill specifications
-- `prioritize` - To refine gap prioritization
-- `summarize` - To create executive summary
+- `generate` (domain: plan) - To create detailed skill specifications
+- `compare` (domain: priority) - To refine gap prioritization
+- `explain` - To create executive summary
 
 **Anti-patterns:**
 - Never skip relationship mapping before prioritization
@@ -317,5 +279,5 @@ assumptions:
 - Never generate roadmap without dependency analysis
 
 **Workflow references:**
-- See `reference/workflow_catalog.yaml#gap-analysis-workflow` for step definitions
+- See `reference/workflow_catalog.yaml#capability_gap_analysis` for step definitions
 - See `reference/capability_ontology.yaml` for reference structure

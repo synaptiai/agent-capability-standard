@@ -8,9 +8,13 @@ downgraded_mutate:
   - capability: plan
     purpose: Plan the change.
     store_as: plan_out
+    input_bindings:
+      goal: "resolve the request"
   - capability: checkpoint
     purpose: Save a restore point.
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
   - capability: mutate
     purpose: Apply the change.
     risk: low
@@ -18,3 +22,6 @@ downgraded_mutate:
     requires_checkpoint: false
     requires_approval: false
     store_as: mutate_out
+    input_bindings:
+      target: "system"
+      operation: {"set": true}

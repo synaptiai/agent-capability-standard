@@ -208,7 +208,7 @@ Followed by markdown sections: Intent, Success Criteria, Input Contract, Procedu
 - `refs.rs` / `schema.rs` — `$ref` resolution and schema-based type inference: resolves `${step_out.field}` bindings to the producer capability's output schema
 - `expr/` — gate/condition expression lexer, parser, type checker and evaluator (a CEL-compatible profile)
 - `validate/{mod,bindings,exprs,semantics,extensions}.rs` — capability existence and prerequisites, binding and consumer-contract checks, expression checks, edge semantics (`precedes`, `conflicts_with`, `soft_requires`), safety-flag inheritance, extension handling, coercion-based patch suggestions
-- Diagnostics carry a severity (`error` | `warning`); warnings are W601–W614
+- Diagnostics carry a severity (`error` | `warning`); warnings are W601–W615
 
 **Conformance Testing** (`scripts/run_conformance.py`):
 - 55 fixture files in `tests/fixtures/` covering all 4 conformance levels (L1–L4)

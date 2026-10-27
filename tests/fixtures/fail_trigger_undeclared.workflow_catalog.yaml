@@ -11,3 +11,5 @@ undeclared_trigger:
   - capability: observe
     purpose: Observe.
     store_as: observe_out
+    input_bindings:
+      target: "system"

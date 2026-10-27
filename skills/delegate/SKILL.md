@@ -1,7 +1,7 @@
 ---
 name: delegate
 description: Split work across subagents with explicit contracts, interfaces, and merge strategies. Use when parallelizing tasks, distributing workload, or orchestrating multi-agent workflows.
-argument-hint: "[task] [agents] [contracts]"
+argument-hint: "[task] [agent] [constraints]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -142,16 +142,21 @@ assumptions: []
 
 ### Example 1: Parallel Code Review
 
+`agent` names who receives the task: here a review pool that fans it out to
+the agents the task lists.
+
 **Input:**
 ```yaml
-task: "Review pull request #123 for security, performance, and style"
-agents:
-  - id: "security-agent"
-    capabilities: ["security-analysis", "vulnerability-detection"]
-  - id: "perf-agent"
-    capabilities: ["performance-analysis", "profiling"]
-  - id: "style-agent"
-    capabilities: ["lint", "style-check"]
+agent: "review-pool"
+task:
+  description: "Review pull request #123 for security, performance, and style"
+  agents:
+    - id: "security-agent"
+      capabilities: ["security-analysis", "vulnerability-detection"]
+    - id: "perf-agent"
+      capabilities: ["performance-analysis", "profiling"]
+    - id: "style-agent"
+      capabilities: ["lint", "style-check"]
 constraints:
   timeout: "10m"
   max_issues_per_category: 20
@@ -257,12 +262,14 @@ assumptions:
 
 **Input:**
 ```yaml
-task: "Process customer data: validate, enrich, and store"
-agents:
-  - id: "validator"
-  - id: "enricher"
-  - id: "persister"
-merge_strategy: "sequential"
+agent: "pipeline-runner"
+task:
+  description: "Process customer data: validate, enrich, and store"
+  agents:
+    - id: "validator"
+    - id: "enricher"
+    - id: "persister"
+  merge_strategy: "sequential"
 ```
 
 **Output:**

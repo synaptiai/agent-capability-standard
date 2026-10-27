@@ -24,6 +24,8 @@ forward_ref:
     timeout: null
     retry: null
     store_as: future_out
+    input_bindings:
+      query: "status"
     failure_modes: []
   success:
   - Should fail

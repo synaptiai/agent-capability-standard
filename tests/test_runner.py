@@ -446,3 +446,17 @@ def test_hosts_without_mandates_defer(mandate_runner: WorkflowRunner) -> None:
     assert [r["status"] for r in result.action_records] == ["planned"]
     assert result.action_records[0]["approval"]["decision"] == "unavailable"
     assert result.deferred[0]["action_id"] == result.action_records[0]["action_id"]
+
+
+def test_runtime_fixtures_are_generated() -> None:
+    """The JSON fixtures are the output of scripts/gen_runtime_fixtures.py."""
+    import subprocess
+    import sys
+
+    done = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "gen_runtime_fixtures.py"), "--check"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr

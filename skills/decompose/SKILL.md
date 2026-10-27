@@ -1,7 +1,7 @@
 ---
 name: decompose
 description: Break a goal into subgoals, constraints, and acceptance criteria. Use when planning complex work, creating work breakdown structures, or defining requirements.
-argument-hint: "[goal] [depth] [constraints]"
+argument-hint: "[problem] [max_depth] [strategy]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -36,7 +36,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 ## Procedure
 
 1) **Understand the goal**: Clarify what needs to be achieved
-   - Parse the goal statement
+   - Parse the problem statement
    - Identify success criteria
    - Note implicit requirements
    - Determine scope boundaries
@@ -138,12 +138,11 @@ assumptions: []
 
 **Input:**
 ```yaml
-goal: "Implement user authentication system"
-granularity: story
-constraints:
-  scope: "Web application only"
-  timeline: "4 weeks"
+problem: "Implement user authentication system"
+strategy: "by user story"
 ```
+
+The work is scoped to the web application only, on a 4-week timeline.
 
 **Output:**
 ```yaml

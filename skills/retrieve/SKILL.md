@@ -1,7 +1,7 @@
 ---
 name: retrieve
 description: Fetch known facts or data from specified sources with citations and evidence pointers. Use when you know what you need and where to find it. Emphasizes provenance and verifiable references.
-argument-hint: "[target] [source] [format]"
+argument-hint: "[target] [format] [filter]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Web
@@ -62,7 +62,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Validate against schema if available
    - Compute hash for integrity tracking
 
-5) **Extract relevant portions**: If constraints specified
+5) **Extract relevant portions**: If a `filter` is specified
    - Apply filters to reduce data
    - Project specific fields
    - Slice by line numbers or sections
@@ -131,7 +131,6 @@ assumptions: array[string]
 **Input:**
 ```yaml
 target: "config/database.yml"
-source: file
 ```
 
 **Output:**
@@ -183,7 +182,6 @@ assumptions:
 **Input:**
 ```yaml
 target: "https://api.example.com/docs/v2/endpoints"
-source: web
 format: json
 ```
 
@@ -233,8 +231,7 @@ assumptions:
 **Input:**
 ```yaml
 target: "src/models/user.ts"
-source: file
-constraints:
+filter:
   lines: "1-50"
   sections: ["interface", "class"]
 ```

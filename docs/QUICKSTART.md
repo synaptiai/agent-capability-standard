@@ -112,43 +112,94 @@ debug_code_change:
   - capability: observe
     purpose: Observe failing behavior, logs, and relevant code paths.
     store_as: observe_out
+    input_bindings:
+      target: "${bug.component}"
   - capability: search
     purpose: Find related code, configs, and error patterns.
     store_as: search_out
+    input_bindings:
+      query: "${bug.symptom}"
   - capability: attribute
     purpose: Build dependency graph and identify causal relationships.
     store_as: attribute_out
+    input_bindings:
+      effect: "${bug.symptom}"
   - capability: constrain
     purpose: Define invariants/spec expectations for the component.
     store_as: constrain_out
+    input_bindings:
+      target: "${bug.component}"
+      constraints: ["existing_tests_pass", "public_interfaces_unchanged"]
   - capability: critique
     purpose: List likely failure modes + edge cases.
     store_as: critique_out
+    input_bindings:
+      target: "${attribute_out.causes: array<object>}"
   - capability: plan
     purpose: Produce minimal fix plan with checkpoints.
     store_as: plan_out
+    input_bindings:
+      goal: "Fix ${bug.symptom} in ${bug.component}"
+      constraints: "${user_input.constraints}"
   - capability: checkpoint           # <-- Safety: checkpoint before mutation
     purpose: Create checkpoint before mutation.
     store_as: checkpoint_out
+    input_bindings:
+      scope: "${bug.component}"
   - capability: execute              # <-- Runs after the checkpoint
     purpose: Apply fix, run tests, and produce diff summary.
     requires_checkpoint: true
     store_as: execute_out
+    input_bindings:
+      code: "${bug.fix_command}"
   - capability: verify
     purpose: Run targeted verification and return PASS/FAIL.
     store_as: verify_out
+    input_bindings:
+      target: "${bug.component}"
+      conditions: ["tests_pass", "symptom_resolved"]
   - capability: audit
     purpose: Record what changed and why.
     store_as: audit_out
+    input_bindings:
+      event:
+        type: "debug_code_change"
+        component: "${bug.component}"
+        plan: "${plan_out.steps: array<object>}"
+        verified: "${verify_out.passed}"
   - capability: rollback
     purpose: If verify FAIL, revert safely.
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    gates:
+    - when: ${verify_out.passed} == true   # <-- Roll back only on failure
+      action: skip
+  inputs:
+    bug:                             # <-- The workflow's input: what to fix
+      type: object
+      required: true
+      properties:
+        component:
+          type: string
+        symptom:
+          type: string
+        fix_command:
+          type: string
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+        constraints:
+          type: object
 ```
 
 Key observations:
 - **Capabilities are atomic**: Each step does one thing
 - **Safety by construction**: a `checkpoint` runs before `execute`; the validator requires one before `mutate`, `send` and `rollback`
 - **Outputs are named**: `store_as` enables later steps to reference outputs
+- **Inputs are bound**: `input_bindings` feed each step the inputs its capability requires, from the workflow's `bug` input or an earlier step's output (`${attribute_out.causes}`)
 
 ## Step 5: Explore the Capability Ontology (2 min)
 

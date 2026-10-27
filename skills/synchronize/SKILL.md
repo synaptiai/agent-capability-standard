@@ -1,7 +1,7 @@
 ---
 name: synchronize
 description: Merge outputs from multiple sources, resolve conflicts, and reconcile constraints into a unified result. Use when combining parallel agent outputs, merging data from different systems, or reconciling conflicting information.
-argument-hint: "[sources] [strategy merge|replace|conflict_resolve] [conflict_rules]"
+argument-hint: "[agents] [state] [timeout]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -51,7 +51,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Missing in one source: record as addition/deletion
 
 4) **Apply resolution strategy**:
-   - `merge`: Combine non-conflicting data; use conflict_rules for overlaps
+   - `merge`: Combine non-conflicting data; use the conflict rules for overlaps
    - `replace`: Use most recent or highest-priority source
    - `conflict_resolve`: Apply explicit rules; flag unresolvable for human review
 
@@ -59,7 +59,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Format: `source:<source_id>:<path>` or `conflict:<resolution_method>`
    - Track which source contributed each field
 
-6) **Validate output**: Check merged result against target schema if provided
+6) **Validate output**: Check merged result against the target schema, if one applies
 
 7) **Format output**: Structure results according to the output contract below
 
@@ -111,22 +111,21 @@ assumptions: array[string]  # Explicit assumptions made during sync
 
 **Input:**
 ```yaml
-sources:
-  - agent_output_1:
-      entity: "user_123"
-      name: "Alice"
-      role: "admin"
-      last_seen: "2024-01-15"
-  - agent_output_2:
-      entity: "user_123"
-      name: "Alice Smith"
-      department: "Engineering"
-      last_seen: "2024-01-16"
-strategy: merge
-conflict_rules:
-  name: prefer_longer
-  last_seen: prefer_newer
+agents: ["agent_output_1", "agent_output_2"]
+state:
+  agent_output_1:
+    entity: "user_123"
+    name: "Alice"
+    role: "admin"
+    last_seen: "2024-01-15"
+  agent_output_2:
+    entity: "user_123"
+    name: "Alice Smith"
+    department: "Engineering"
+    last_seen: "2024-01-16"
 ```
+
+Resolution strategy: `merge`, preferring the longer `name` and the newer `last_seen`.
 
 **Output:**
 ```yaml
@@ -195,13 +194,13 @@ assumptions:
 
 **Input:**
 ```yaml
-sources:
-  - system_a: { price: 100, currency: "USD" }
-  - system_b: { price: 150, currency: "USD" }
-strategy: conflict_resolve
-conflict_rules:
-  price: require_human_review
+agents: ["system_a", "system_b"]
+state:
+  system_a: { price: 100, currency: "USD" }
+  system_b: { price: 150, currency: "USD" }
 ```
+
+Resolution strategy: `conflict_resolve`; a `price` conflict requires human review.
 
 **Output:**
 ```yaml
@@ -234,7 +233,7 @@ assumptions:
 
 - [ ] All source data accounted for in changes or conflicts
 - [ ] Every conflict has resolution or is flagged unresolved
-- [ ] merged_data passes target_schema validation (if provided)
+- [ ] merged_data passes target schema validation (if one applies)
 - [ ] confidence reflects conflict severity and resolution quality
 - [ ] evidence_anchors trace every merged field to source
 

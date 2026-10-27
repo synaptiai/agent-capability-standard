@@ -1,7 +1,7 @@
 ---
 name: send
 description: Emit a message or event to an external system with policy enforcement and approval gates. Use when publishing messages, calling APIs, sending notifications, or triggering external workflows. REQUIRES EXPLICIT APPROVAL.
-argument-hint: "[destination] [message] [protocol] [--approved]"
+argument-hint: "[destination] [payload] [protocol]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Bash
@@ -75,12 +75,12 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 ## Procedure
 
 1) **Verify approval**: Confirm explicit user approval exists
-   - Check `approval_token` is valid and recent
+   - Check the approval is valid and recent
    - BLOCK send if approval is missing or expired
    - Log approval verification for audit
 
 2) **Verify checkpoint**: Confirm recovery point exists
-   - Validate `checkpoint_ref` references valid checkpoint
+   - Validate that a checkpoint was created before this send
    - BLOCK send if checkpoint is missing
    - External sends are irreversible - checkpoint is for state recovery
 
@@ -168,18 +168,15 @@ assumptions: []  # Explicit assumptions
 **Input:**
 ```yaml
 destination: "https://api.partner.com/webhooks/order-updates"
-message:
+payload:
   event: "order.completed"
   order_id: "ORD-12345"
   timestamp: "2024-01-15T10:30:00Z"
   customer_notified: true
 protocol: "http"
-approval_token: "approve-send-2024-01-15-001"
-checkpoint_ref: "checkpoint-2024-01-15-001"
-constraints:
-  rate_limit: "100/hour"
-  allowed_domains: ["api.partner.com"]
 ```
+
+Approval and the checkpoint come from the workflow (an approved step after a `checkpoint` step), not from inputs. A preceding `constrain` step enforces the policy: at most 100 sends per hour, to `api.partner.com` only.
 
 **Output:**
 ```yaml
@@ -223,14 +220,11 @@ assumptions:
 **Input:**
 ```yaml
 destination: "smtp://mail.company.com:587"
-message:
+payload:
   to: "user@example.com"
   subject: "Action Required: Review pending"
   body: "You have 3 items awaiting review..."
 protocol: "smtp"
-approval_token: "approve-email-2024-01-15-002"
-checkpoint_ref: "checkpoint-2024-01-15-002"
-timeout: 30000
 ```
 
 **Output:**
@@ -301,7 +295,7 @@ Before any send operation, the user must explicitly approve:
 2. Where it will be sent (destination)
 3. Why it is being sent (context)
 
-The approval must be captured with a token that is referenced in this operation.
+The approval must be captured with a token that is recorded in this operation's audit trail.
 
 ## Composition Patterns
 

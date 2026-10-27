@@ -240,7 +240,7 @@ Each step MAY define:
 | `gates` | array | Checks that can halt or redirect execution (§5.6) |
 | `failure_modes` | array | Failure scenarios with recovery (§5.7) |
 | `timeout` | string | Maximum execution time, a duration (§5.10.1) |
-| `retry` | object | `{max, backoff}`: up to `max` further attempts after R401, R402 or R406 |
+| `retry` | object | `{max, backoff}`: up to `max` further attempts after R401, R402 or R406; `max` a non-negative integer and `backoff` one of `none` (also when absent or null), `linear`, `exponential` (else S303) |
 | `parallel_group` | string | Group ID; steps of one group run concurrently |
 | `join` | string | How to wait for parallel completion |
 | `mapping_ref` | string | Transform mapping file (missing file: S301) |
@@ -331,6 +331,11 @@ is W604, unless the schema sets `additionalProperties: true` or the key
 starts with `x-`. The host still receives it, but it is outside the
 capability's contract, so it is usually a typo or a parameter that belongs
 in another input.
+
+An input the schema requires that the step does not bind is W615: the host
+would get no value for it. An `invoke` step's `workflow_id` gives its
+`workflow`. A wait (§5.13) and a quorum (§5.16) are exempt, since the
+executor runs them itself and no host receives their inputs.
 
 ### 5.6 Gate Semantics
 
@@ -1066,6 +1071,7 @@ NOT change any code's severity otherwise.
 | W612 | MANGLED_REFERENCE | YAML read a typed reference as a mapping; quote it |
 | W613 | UNREACHABLE_HANDLER | A handler step no escalation targets |
 | W614 | INVALID_DURATION | Legacy `timeout` outside the duration grammar |
+| W615 | MISSING_INPUT | A required capability input the step does not bind (§5.5) |
 
 ### 9.8 Diagnostic Format
 
@@ -1290,20 +1296,27 @@ Safety flags are omitted below: they inherit from the ontology (§5.2.1).
 ```yaml
 - capability: plan
   purpose: Plan the change.
+  input_bindings:
+    goal: Rotate the service certificate
   store_as: plan_out
 - capability: constrain
   purpose: Check the plan against policy.
   input_bindings:
-    target: ${plan_out}
+    target: "${plan_out.steps: array<object>}"
     constraints: [change_policy]
   store_as: policy_out
 - capability: checkpoint
   purpose: Save a restore point.
+  input_bindings:
+    scope: service_config
   store_as: checkpoint_out
 - capability: mutate
   purpose: Apply the change.
   input_bindings:
-    target: ${plan_out}
+    target: service_config
+    operation:
+      apply: "${plan_out.steps: array<object>}"
+    checkpoint_id: ${checkpoint_out.checkpoint_id}
   gates:
     - when: ${policy_out.compliant} == false
       action: stop
@@ -1311,13 +1324,16 @@ Safety flags are omitted below: they inherit from the ontology (§5.2.1).
 - capability: verify
   purpose: Check the result.
   input_bindings:
-    target: ${mutate_out}
+    target: "${mutate_out.new_state: object}"
     conditions: [change_applied]
   store_as: verify_out
 - capability: audit
   purpose: Record what happened.
   input_bindings:
-    event: ${verify_out}
+    event:
+      type: safe_mutation
+      plan: "${plan_out.steps: array<object>}"
+      verified: ${verify_out.passed}
   store_as: audit_out
 ```
 
@@ -1325,14 +1341,18 @@ Safety flags are omitted below: they inherit from the ontology (§5.2.1).
 ```yaml
 - capability: retrieve
   purpose: Fetch source A.
+  input_bindings:
+    target: https://example.com/a
   store_as: source_a
 - capability: retrieve
   purpose: Fetch source B.
+  input_bindings:
+    target: https://example.com/b
   store_as: source_b
 - capability: integrate
   purpose: Merge both sources.
   input_bindings:
-    sources: ["${source_a}", "${source_b}"]
+    sources: ["${source_a.data: object}", "${source_b.data: object}"]
   store_as: integrated
 ```
 
@@ -1340,6 +1360,8 @@ Safety flags are omitted below: they inherit from the ontology (§5.2.1).
 ```yaml
 - capability: verify
   purpose: Check the result.
+  input_bindings:
+    conditions: [change_applied]
   store_as: verify_out
   failure_modes:
     - condition: Verdict == FAIL
@@ -1420,7 +1442,7 @@ Field names starting with `x-` are reserved for vendor extensions.
 **New in 1.1.0:**
 - Condition expression language with CEL compatibility (§5.8), gate `phase`
   (§5.6) and failure-mode `when` (§5.7)
-- Diagnostic severities and warning codes W601–W614 (§9.1, §9.7); codes
+- Diagnostic severities and warning codes W601–W615 (§9.1, §9.7); codes
   V106–V109, B206, R405, R406
 - `mutation_overridable` (§4.4)
 - Orchestration extensions and their declaration: triggers, handler steps,

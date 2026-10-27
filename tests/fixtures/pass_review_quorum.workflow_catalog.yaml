@@ -68,6 +68,8 @@ review_change:
   - capability: checkpoint
     purpose: Save a restore point before merging.
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
   - capability: mutate
     purpose: Merge the change.
     store_as: merge_out

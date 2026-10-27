@@ -21,3 +21,5 @@ bad_targets:
   - capability: plan
     purpose: Plan.
     store_as: plan_out
+    input_bindings:
+      goal: "resolve the request"

@@ -111,7 +111,6 @@ assumptions: []
 **Input:**
 ```yaml
 scope: "user authentication system"
-depth: "detailed"
 ```
 
 **Output:**

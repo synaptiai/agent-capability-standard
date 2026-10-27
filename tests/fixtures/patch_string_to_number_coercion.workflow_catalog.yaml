@@ -12,6 +12,9 @@ coercion_test_workflow:
   - capability: detect
     purpose: Detect a condition.
     store_as: detect_out
+    input_bindings:
+      data: "sample"
+      pattern: "anomaly"
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -30,4 +33,5 @@ coercion_test_workflow:
     retry: null
     input_bindings:
       target: "${detect_out.detected: number}"
+      metric: "quality"
     failure_modes: []

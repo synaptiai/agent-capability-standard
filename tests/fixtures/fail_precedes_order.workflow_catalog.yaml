@@ -8,6 +8,11 @@ classify_before_detect:
   - capability: classify
     purpose: Classify findings too early.
     store_as: classify_out
+    input_bindings:
+      item: "sample"
   - capability: detect
     purpose: Detect findings.
     store_as: detect_out
+    input_bindings:
+      data: "sample"
+      pattern: "anomaly"

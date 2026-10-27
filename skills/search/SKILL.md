@@ -1,7 +1,7 @@
 ---
 name: search
 description: Find relevant items under uncertainty across repositories, databases, web sources, or any searchable corpus. Use when exploring unknown territory, finding related information, or discovering relevant resources.
-argument-hint: "[query] [sources: repo|web|docs] [constraints]"
+argument-hint: "[query] [scope] [limit]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Web
@@ -54,7 +54,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Determine search intent (existence, discovery, comparison)
    - Expand with synonyms or related terms if appropriate
 
-2) **Select search strategy**: Based on sources and query type
+2) **Select search strategy**: Based on scope and query type
    - **Code/repo search**: Use Grep patterns, file globs
    - **Web search**: Use web search tools with keywords
    - **Documentation**: Search docs directories, README files
@@ -147,10 +147,7 @@ next_searches: array[string]  # Suggested follow-up searches
 **Input:**
 ```yaml
 query: "JWT token validation"
-sources: ["repo"]
-constraints:
-  file_types: [".ts", ".js"]
-  exclude_paths: ["node_modules", "test"]
+scope: "repo: *.ts and *.js files, excluding node_modules/ and test/"
 ```
 
 **Output:**
@@ -242,8 +239,7 @@ next_searches:
 **Input:**
 ```yaml
 query: "OpenAI API rate limits 2025"
-sources: ["web"]
-ranking_criteria: recency
+scope: web
 ```
 
 **Output:**

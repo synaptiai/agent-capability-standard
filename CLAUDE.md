@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-### Validate workflows against the ontology
+### Validate workflows against the ontology (CI runs this in strict mode)
 ```bash
-python tools/validate_workflows.py
+python tools/validate_workflows.py --strict
 ```
 
-### Validate the domain workflow catalogs (CI runs these in strict mode)
+### Validate the domain workflow catalogs and examples (CI runs these in strict mode)
 ```bash
-for c in schemas/workflows/*.yaml; do python tools/validate_workflows.py --catalog "$c" --strict; done
+for c in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do python tools/validate_workflows.py --catalog "$c" --strict; done
 ```
 
 ### Validate domain profiles against schema
@@ -68,6 +68,12 @@ python tools/validate_benchmark_deps.py
 ```bash
 python tools/sync_skill_schemas.py          # write what changed
 python tools/sync_skill_schemas.py --check  # CI: fail on drift
+```
+
+### Regenerate the runtime conformance fixtures
+```bash
+python scripts/gen_runtime_fixtures.py          # after editing the fixtures there
+python scripts/gen_runtime_fixtures.py --check  # CI: fail on drift
 ```
 
 ### Run conformance tests (optional, local only)

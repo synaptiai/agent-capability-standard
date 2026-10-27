@@ -207,6 +207,41 @@ def test_patch_application_handles_two_transforms_for_one_step() -> None:
 # ─── Profile Validator ───
 
 
+def test_example_catalog_matches_the_reference_catalog() -> None:
+    """examples/digital_twin_sync_loop copies its workflows verbatim from the
+    reference catalog; an edit to one must be made to both."""
+    import yaml
+
+    example = yaml.safe_load(
+        (ROOT / "examples" / "digital_twin_sync_loop.workflow_catalog.yaml").read_text()
+    )
+    reference = yaml.safe_load((ROOT / "schemas" / "workflow_catalog.yaml").read_text())
+    assert set(example) == {
+        "world_model_build",
+        "digital_twin_sync_loop",
+        "digital_twin_bootstrap",
+    }
+    for name, workflow in example.items():
+        assert workflow == reference[name], name
+
+
+def test_w615_only_where_expected() -> None:
+    """The fixtures bind every required input, so W615 appears only in those
+    that expect it. The core's unit tests filter W615 out of their code
+    lists; this catches a W615 raised where it should not be."""
+    from grounded_agency import _core
+
+    validator = _core.Validator(ROOT / "schemas" / "capability_ontology.yaml", ROOT)
+    expectations = json.loads(
+        (ROOT / "tests" / "fixtures" / "EXPECTATIONS.json").read_text()
+    )
+    for name, meta in expectations.items():
+        path = ROOT / "tests" / "fixtures" / f"{name}.workflow_catalog.yaml"
+        emitted = {d["code"] for d in validator.validate_file(path)["diagnostics"]}
+        expected = "W615" in meta.get("expected_warning_codes", [])
+        assert ("W615" in emitted) == expected, name
+
+
 class TestValidateProfiles:
     """Tests for tools/validate_profiles.py."""
 

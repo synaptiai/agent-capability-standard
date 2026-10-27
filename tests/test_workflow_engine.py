@@ -944,6 +944,7 @@ class TestCatalogData:
             "# Standard version: 1.1.0\n"
             "w:\n  goal: g\n  risk: low\n  steps:\n"
             "  - capability: observe\n    purpose: p\n    store_as: o\n"
+            "    input_bindings: {target: t}\n"
         )
         eng = WorkflowEngine(ONTOLOGY_PATH)
         assert eng.load_catalog(catalog) == 1
@@ -959,6 +960,7 @@ class TestCatalogData:
             "# Standard version: 9.0.0\n"
             "w:\n  goal: g\n  risk: low\n  steps:\n"
             "  - capability: observe\n    purpose: p\n    store_as: o\n"
+            "    input_bindings: {target: t}\n"
         )
         eng = WorkflowEngine(ONTOLOGY_PATH)
         eng.load_catalog(catalog)
@@ -986,6 +988,7 @@ class TestCatalogData:
         catalog.write_text(
             "w:\n  goal: g\n  risk: low\n  spec_version: '1.1'\n  steps:\n"
             "  - capability: observe\n    purpose: p\n    store_as: o\n"
+            "    input_bindings: {target: t}\n"
             "    gates: [not-a-mapping]\n"
             "  - just a string\n"
         )
@@ -1060,16 +1063,19 @@ class TestMalformedCatalogs:
             ("  - capability: {a: 1}\n    purpose: p\n", "V103"),
             (
                 "  - capability: observe\n    purpose: p\n    store_as: o\n"
+                "    input_bindings: {target: t}\n"
                 "    gates: 5\n",
                 "S303",
             ),
             (
                 "  - capability: observe\n    purpose: p\n    store_as: o\n"
+                "    input_bindings: {target: t}\n"
                 "    failure_modes: 5\n",
                 "S303",
             ),
             (
                 "  - capability: observe\n    purpose: p\n    store_as: o\n"
+                "    input_bindings: {target: t}\n"
                 "    gates:\n    - when: null\n      action: stop\n",
                 "S303",
             ),
@@ -1141,12 +1147,14 @@ class TestMalformedCatalogs:
             "# Standard version: 1.0.0\n"
             "a:\n  goal: g\n  risk: low\n  steps:\n"
             "  - capability: observe\n    purpose: p\n    store_as: o\n"
+            "    input_bindings: {target: t}\n"
         )
         future = tmp_path / "future.yaml"
         future.write_text(
             "# Standard version: 3.0.0\n"
             "b:\n  goal: g\n  risk: low\n  steps:\n"
             "  - capability: observe\n    purpose: p\n    store_as: o\n"
+            "    input_bindings: {target: t}\n"
         )
         eng = WorkflowEngine(ONTOLOGY_PATH)
         eng.load_catalog(old)
@@ -1285,10 +1293,30 @@ class TestSafetyFlagValidation:
                 risk="high",
                 spec_version="1.1",
                 steps=[
-                    WorkflowStep(capability="plan", purpose="p", store_as="p"),
-                    WorkflowStep(capability="constrain", purpose="c", store_as="c"),
-                    WorkflowStep(capability="checkpoint", purpose="k", store_as="k"),
-                    WorkflowStep(capability="mutate", purpose="m", store_as="m"),
+                    WorkflowStep(
+                        capability="plan",
+                        purpose="p",
+                        store_as="p",
+                        input_bindings={"goal": "g"},
+                    ),
+                    WorkflowStep(
+                        capability="constrain",
+                        purpose="c",
+                        store_as="c",
+                        input_bindings={"target": "t", "constraints": ["policy"]},
+                    ),
+                    WorkflowStep(
+                        capability="checkpoint",
+                        purpose="k",
+                        store_as="k",
+                        input_bindings={"scope": "s"},
+                    ),
+                    WorkflowStep(
+                        capability="mutate",
+                        purpose="m",
+                        store_as="m",
+                        input_bindings={"target": "t", "operation": {"set": 1}},
+                    ),
                 ],
             )
         )
@@ -1353,12 +1381,18 @@ class TestSafetyFlagValidation:
                 capability="observe",  # Ontology: mutation=false
                 purpose="cautious observe",
                 store_as="o",
+                input_bindings={"target": "t"},
                 mutation=True,  # Step upgrades to true — fine
                 requires_checkpoint=True,
             )
 
         assert report([cautious()]) == [ErrorCode.CHECKPOINT_REQUIRED]
-        checkpoint = WorkflowStep(capability="checkpoint", purpose="save", store_as="c")
+        checkpoint = WorkflowStep(
+            capability="checkpoint",
+            purpose="save",
+            store_as="c",
+            input_bindings={"scope": "s"},
+        )
         assert report([checkpoint, cautious()]) == []
 
     def test_omitted_flags_inherit_from_ontology(self) -> None:

@@ -1,7 +1,7 @@
 ---
 name: rollback
 description: Safely undo changes by restoring to a checkpoint. Use when verify fails, errors occur, or explicit undo is requested. Essential for the CAVR pattern recovery.
-argument-hint: "[checkpoint_id] [scope] [verify_restore]"
+argument-hint: "[checkpoint_id] [scope]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Git
@@ -155,9 +155,9 @@ assumptions: []
 **Input:**
 ```yaml
 checkpoint_id: "chk_20240115_143022_a7b3c9"
-verify_restore: true
-reason: "Tests failed after refactoring"
 ```
+
+Reason for the rollback: tests failed after refactoring.
 
 **Output:**
 ```yaml
@@ -200,9 +200,9 @@ assumptions:
 **Input:**
 ```yaml
 checkpoint_id: "chk_20240115_150000_config"
-verify_restore: true
-reason: "Config migration caused service failure"
 ```
+
+Reason for the rollback: the config migration caused a service failure.
 
 **Output:**
 ```yaml
@@ -264,7 +264,7 @@ Apply the following verification patterns:
 
 **Commonly follows:**
 - `verify` - When verify returns FAIL, trigger rollback (CAVR pattern)
-- `act-plan` - If act-plan encounters error, rollback
+- `mutate` / `execute` - If the side effect fails or verify returns FAIL, rollback
 - `checkpoint` - Rollback requires prior checkpoint (dependency)
 
 **Commonly precedes:**
@@ -280,5 +280,5 @@ Apply the following verification patterns:
 
 **Workflow references:**
 - See `reference/composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
-- See `reference/composition_patterns.md#rollback-verification` in verification_patterns.md
+- See `reference/verification_patterns.md#pattern-4-rollback-verification` for rollback verification
 - See `reference/composition_patterns.md#debug-code-change` for rollback-then-critique flow

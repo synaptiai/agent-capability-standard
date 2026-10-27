@@ -93,6 +93,7 @@ codes! {
     MangledReference = "W612", "MANGLED_REFERENCE", Warning;
     UnreachableHandler = "W613", "UNREACHABLE_HANDLER", Warning;
     InvalidDuration = "W614", "INVALID_DURATION", Warning;
+    MissingInput = "W615", "MISSING_INPUT", Warning;
 }
 
 impl Serialize for Code {

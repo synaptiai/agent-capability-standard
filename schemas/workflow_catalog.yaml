@@ -60,6 +60,8 @@ monitor_and_replan:
     timeout: null
     retry: null
     store_as: current_state_out
+    input_bindings:
+      target: "${plan.scope}"
     failure_modes:
     - condition: Unable to observe relevant state
       action: request_more_context
@@ -303,6 +305,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "${bug.component}"
     failure_modes:
     - condition: No relevant signals found
       action: request_more_context
@@ -316,6 +320,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: search_out
+    input_bindings:
+      query: "${bug.symptom}"
     failure_modes: []
   - capability: attribute
     purpose: Build dependency graph and identify causal relationships around failing component.
@@ -327,6 +333,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "${bug.symptom}"
     failure_modes: []
   - capability: constrain
     purpose: Define invariants/spec expectations for the component.
@@ -337,6 +345,9 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: constrain_out
+    input_bindings:
+      target: "${bug.component}"
+      constraints: ["existing_tests_pass", "public_interfaces_unchanged"]
     failure_modes: []
   - capability: critique
     purpose: List likely failure modes + edge cases.
@@ -347,6 +358,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: critique_out
+    input_bindings:
+      target: "${attribute_out.causes: array<object>}"
     failure_modes: []
   - capability: plan
     purpose: Produce minimal fix plan with checkpoints.
@@ -357,6 +370,9 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: plan_out
+    input_bindings:
+      goal: "Fix ${bug.symptom} in ${bug.component}"
+      constraints: "${user_input.constraints}"
     failure_modes: []
   - capability: checkpoint
     purpose: Create checkpoint before mutation.
@@ -367,6 +383,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "${bug.component}"
     failure_modes: []
   - capability: execute
     purpose: Apply fix, run tests, and produce diff summary.
@@ -377,6 +395,8 @@ debug_code_change:
     timeout: 5m
     retry: null
     store_as: execute_out
+    input_bindings:
+      code: "${bug.fix_command}"
     failure_modes:
     - condition: Unexpected side effects
       action: pause_and_checkpoint
@@ -392,6 +412,9 @@ debug_code_change:
       max: 3
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      target: "${bug.component}"
+      conditions: ["tests_pass", "symptom_resolved"]
     failure_modes:
     - condition: Verdict == FAIL
       action: rollback
@@ -405,6 +428,12 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event:
+        type: "debug_code_change"
+        component: "${bug.component}"
+        plan: "${plan_out.steps: array<object>}"
+        verified: "${verify_out.passed}"
     failure_modes: []
   - capability: rollback
     purpose: If verify FAIL, revert safely.
@@ -415,7 +444,13 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
     failure_modes: []
+    gates:
+    - when: ${verify_out.passed} == true
+      action: skip
+      message: The fix passed verification. No rollback needed.
   success:
   - Bug fixed or root cause isolated
   - Verification PASS
@@ -427,6 +462,17 @@ debug_code_change:
     pattern: step_outputs_are_addressable
     rule: Each step output is stored under store_as and may be referenced by later steps.
   inputs:
+    bug:
+      type: object
+      required: true
+      description: The failure to diagnose and fix
+      properties:
+        component:
+          type: string
+        symptom:
+          type: string
+        fix_command:
+          type: string
     user_input:
       type: object
       properties:
@@ -454,6 +500,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: retrieve_out
+    input_bindings:
+      target: "${user_input.domain}"
     failure_modes: []
   - capability: observe
     purpose: Observe current system/world artifacts (docs, logs, sensors).
@@ -464,6 +512,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "${user_input.domain}"
     failure_modes:
     - condition: No relevant signals found
       action: request_more_context
@@ -478,6 +528,9 @@ world_model_build:
     timeout: null
     retry: null
     store_as: detect_out
+    input_bindings:
+      data: "${retrieve_out.data: object}"
+      pattern: "entity"
     failure_modes: []
   - capability: classify
     purpose: Classify detected entities and resolve types.
@@ -488,6 +541,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: classify_out
+    input_bindings:
+      item: "${detect_out.matches: array<object>}"
     failure_modes: []
   - capability: integrate
     purpose: Merge entity data and resolve identity across sources.
@@ -498,6 +553,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: integrate_out
+    input_bindings:
+      sources: ["${detect_out.matches: array<object>}", "${classify_out.labels: array<object>}"]
     failure_modes: []
   - capability: state
     purpose: Define state variables and current estimates.
@@ -508,6 +565,9 @@ world_model_build:
     timeout: null
     retry: null
     store_as: state_out
+    input_bindings:
+      scope: "${user_input.domain}"
+      observations: "${integrate_out.merged: object}"
     failure_modes: []
   - capability: transition
     purpose: 'Define dynamics: transitions, triggers, guards.'
@@ -518,6 +578,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: transition_out
+    input_bindings:
+      from_state: "${state_out.state: object}"
     failure_modes: []
   - capability: attribute
     purpose: Define causal assumptions and intervention effects.
@@ -529,6 +591,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "${transition_out.effects: array<object>}"
     failure_modes: []
   - capability: measure
     purpose: Attach uncertainty types and confidence.
@@ -540,6 +604,9 @@ world_model_build:
     timeout: null
     retry: null
     store_as: measure_out
+    input_bindings:
+      target: "${state_out.state: object}"
+      metric: "uncertainty"
     failure_modes: []
   - capability: audit
     purpose: Establish lineage for claims and transformations.
@@ -550,6 +617,11 @@ world_model_build:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event:
+        type: "world_model_build"
+        domain: "${user_input.domain}"
+        entities: "${state_out.entities: array<object>}"
     failure_modes: []
   - capability: ground
     purpose: Anchor each model element to evidence references.
@@ -560,6 +632,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: ground_out
+    input_bindings:
+      claim: "The states, transitions and causes of the ${user_input.domain} model are supported by the retrieved sources"
     failure_modes: []
   - capability: simulate
     purpose: Run scenarios to stress-test model and identify fragility.
@@ -570,6 +644,10 @@ world_model_build:
     timeout: null
     retry: null
     store_as: simulate_out
+    input_bindings:
+      scenario:
+        state: "${state_out.state: object}"
+        rules: "${transition_out.rules: array<object>}"
     failure_modes: []
   - capability: explain
     purpose: Produce a decision-ready world model brief.
@@ -580,6 +658,11 @@ world_model_build:
     timeout: null
     retry: null
     store_as: explain_out
+    input_bindings:
+      conclusion:
+        model: "${state_out.state: object}"
+        grounded: "${ground_out.grounded}"
+        scenarios: "${simulate_out.outcomes: array<object>}"
     failure_modes: []
   success:
   - Model is structured (YAML/JSON)
@@ -620,6 +703,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "${user_input.domain}"
     failure_modes:
     - condition: No relevant signals found
       action: request_more_context
@@ -634,6 +719,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "${observe_out.observation: object}"
     failure_modes: []
   - capability: discover
     purpose: Find hidden dependencies or unmodeled interactions.
@@ -644,6 +731,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: discover_out
+    input_bindings:
+      data: "${attribute_out.causes: array<object>}"
     failure_modes: []
   - capability: compare
     purpose: Compare alternative skill architectures.
@@ -655,6 +744,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: compare_architecture_out
+    input_bindings:
+      options: "${discover_out.patterns: array<object>}"
     failure_modes: []
   - capability: compare
     purpose: Rank missing capabilities by leverage and risk reduction.
@@ -666,6 +757,9 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: compare_priority_out
+    input_bindings:
+      options: "${compare_architecture_out.ranking: array<object>}"
+      criteria: ["leverage", "risk_reduction"]
     failure_modes: []
   - capability: generate
     purpose: Generate an implementation plan for new skills.
@@ -677,6 +771,10 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: generate_out
+    input_bindings:
+      specification:
+        gaps: "${compare_priority_out.ranking: array<object>}"
+        architecture: "${compare_architecture_out.recommendation}"
     failure_modes: []
   - capability: audit
     purpose: Record rationale + decision lineage.
@@ -687,6 +785,11 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event:
+        type: "capability_gap_analysis"
+        ranking: "${compare_priority_out.ranking: array<object>}"
+        plan: "${generate_out.content: object}"
     failure_modes: []
   success:
   - Missing capability list
@@ -809,7 +912,9 @@ digital_twin_sync_loop:
     retry: null
     store_as: detect_entity_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      data: "${integrate_out.merged: object}"
+      pattern: "entity"
     gates: []
   - capability: classify
     purpose: Classify and resolve entity identities.
@@ -821,7 +926,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: classify_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      item: "${detect_entity_out.matches: array<object>}"
     gates: []
   - capability: state
     purpose: Produce updated canonical world-state snapshot with uncertainty + provenance.
@@ -863,7 +969,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: transition_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      from_state: "${state_out.state: object}"
     gates: []
   - capability: detect
     purpose: Detect drift/anomalies between expected and observed state.
@@ -878,6 +985,7 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       data: ${state_out}
+      pattern: "drift"
     gates: []
   - capability: measure
     purpose: Estimate risk impact/probability from drift and transitions.
@@ -892,6 +1000,7 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       target: ${detect_anomaly_out}
+      metric: "risk"
     gates: []
   - capability: predict
     purpose: Forecast near-term risk trajectory and triggers.
@@ -904,7 +1013,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: predict_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      target: "near_term_risk"
     gates: []
   - capability: plan
     purpose: Plan safe action(s) to reduce risk, with verification criteria and rollback plan.
@@ -918,6 +1028,7 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       context: ${predict_out}
+      goal: "Reduce the detected drift and risk"
     gates: []
   - capability: constrain
     purpose: Enforce policy and least privilege for planned actions.
@@ -929,7 +1040,9 @@ digital_twin_sync_loop:
     retry: null
     store_as: constrain_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      target: "${plan_out.steps: array<object>}"
+      constraints: ["least_privilege", "change_policy"]
     gates: []
   - capability: checkpoint
     purpose: Create checkpoint marker before any mutation/side-effect step.
@@ -941,7 +1054,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: checkpoint_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      scope: "twin_state"
     gates: []
   - capability: mutate
     purpose: Execute mutations from action plan (if approved).
@@ -956,7 +1070,10 @@ digital_twin_sync_loop:
     - condition: Unexpected side effects
       action: pause_and_checkpoint
       recovery: Require human approval to proceed.
-    input_bindings: {}
+    input_bindings:
+      target: "twin_state"
+      operation:
+        apply: "${plan_out.steps: array<object>}"
     gates:
     - when: ${checkpoint_out.checkpoint_id} == null
       action: stop
@@ -973,7 +1090,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: execute_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      code: "run_verification_suite"
     gates: []
   - capability: verify
     purpose: 'Verify outcome: PASS/FAIL with evidence.'
@@ -995,7 +1113,8 @@ digital_twin_sync_loop:
         inject_context:
           failure_evidence: ${verify_out.violations}
         max_loops: 3
-    input_bindings: {}
+    input_bindings:
+      conditions: ["drift_resolved", "no_policy_violation"]
     gates:
     - when: ${verify_out.passed} == false
       phase: after
@@ -1011,7 +1130,11 @@ digital_twin_sync_loop:
     retry: null
     store_as: audit_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      event:
+        type: "digital_twin_sync"
+        mutated: "${mutate_out.success}"
+        verified: "${verify_out.passed}"
     gates: []
   - capability: rollback
     purpose: If verify FAIL or side effects detected, rollback to checkpoint.
@@ -1023,8 +1146,12 @@ digital_twin_sync_loop:
     retry: null
     store_as: rollback_out
     failure_modes: []
-    input_bindings: {}
-    gates: []
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    gates:
+    - when: ${verify_out.passed} == true
+      action: skip
+      message: The twin passed verification. No rollback needed.
   - capability: explain
     purpose: 'Produce decision-ready sync report: drift, actions, verification, next steps.'
     risk: low
@@ -1035,7 +1162,10 @@ digital_twin_sync_loop:
     retry: null
     store_as: explain_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      conclusion:
+        verified: "${verify_out.passed}"
+        rolled_back: "${rollback_out.restored}"
     gates: []
   workflow_extensions:
     supports_input_bindings: true
@@ -1082,15 +1212,37 @@ digital_twin_bootstrap:
     timeout: null
     retry: null
     failure_modes: []
+  # The first sync starts from the baseline just built, or from the world
+  # state passed in (in which case the build step was skipped and has no
+  # output to read).
   - capability: invoke
-    purpose: Run initial sync loop using baseline
+    purpose: Run initial sync loop using the baseline just built
     workflow_id: digital_twin_sync_loop
     store_as: sync_out
+    condition: ${world_state_out} == null
+    skip_if_false: true
     input_bindings:
       input:
         user_input: ${user_input}
         # result holds the invoked workflow's stores; its state_out is the baseline
         previous_world_state: '${world_model_out.result.state_out: object}'
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    failure_modes: []
+  - capability: invoke
+    purpose: Run initial sync loop from the world state passed in
+    workflow_id: digital_twin_sync_loop
+    store_as: sync_existing_out
+    condition: ${world_state_out} != null
+    skip_if_false: true
+    input_bindings:
+      input:
+        user_input: ${user_input}
+        previous_world_state: '${world_state_out: object}'
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1455,6 +1607,7 @@ multi_agent_orchestration:
     store_as: delegate_out
     input_bindings:
       task: "${plan_out.dependencies: object}"
+      agent: "${task.agent_pool[0]: string}"
     failure_modes:
     - condition: No suitable agent available for subtask
       action: request_more_context
@@ -1632,6 +1785,8 @@ data_quality_pipeline:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "raw_data"
     failure_modes: []
   - capability: transform
     purpose: Apply cleaning operations to fix detected quality issues.
@@ -1660,6 +1815,9 @@ data_quality_pipeline:
       max: 2
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      conditions: ["quality_thresholds_met"]
+      target: "${transform_out.output: object}"
     failure_modes:
     - condition: Cleaned data fails quality threshold
       action: rollback
@@ -1690,6 +1848,8 @@ data_quality_pipeline:
     timeout: null
     retry: null
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
     gates:
     - when: ${verify_out.passed} == true
       action: skip
@@ -1779,6 +1939,8 @@ model_deployment:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "${deployment_config.environment}"
     failure_modes: []
   - capability: execute
     purpose: Run deployment scripts to push model to production.
@@ -1816,6 +1978,8 @@ model_deployment:
       max: 3
       backoff: exponential
     store_as: verify_deploy_out
+    input_bindings:
+      conditions: ["health_checks_pass", "endpoint_available"]
     failure_modes:
     - condition: Deployment health check fails
       action: rollback
@@ -1865,6 +2029,8 @@ model_deployment:
     timeout: null
     retry: null
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
     gates:
     - when: ${verify_deploy_out.passed} == true
       action: skip

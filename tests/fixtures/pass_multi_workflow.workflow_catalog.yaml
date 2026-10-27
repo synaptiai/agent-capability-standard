@@ -12,6 +12,8 @@ workflow_a:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: detect
     purpose: Detect in workflow A.
@@ -22,6 +24,9 @@ workflow_a:
     timeout: null
     retry: null
     store_as: detect_out
+    input_bindings:
+      data: "sample"
+      pattern: "anomaly"
     failure_modes: []
   success:
   - Workflow A completed
@@ -39,6 +44,8 @@ workflow_b:
     timeout: null
     retry: null
     store_as: search_out
+    input_bindings:
+      query: "status"
     failure_modes: []
   - capability: classify
     purpose: Classify in workflow B.
@@ -49,6 +56,8 @@ workflow_b:
     timeout: null
     retry: null
     store_as: classify_out
+    input_bindings:
+      item: "sample"
     failure_modes: []
   success:
   - Workflow B completed
@@ -66,6 +75,8 @@ workflow_c:
     timeout: null
     retry: null
     store_as: retrieve_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: generate
     purpose: Generate in workflow C.
@@ -76,6 +87,8 @@ workflow_c:
     timeout: null
     retry: null
     store_as: generate_out
+    input_bindings:
+      specification: "summary"
     failure_modes: []
   success:
   - Workflow C completed

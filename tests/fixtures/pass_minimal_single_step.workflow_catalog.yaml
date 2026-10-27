@@ -12,6 +12,8 @@ minimal_workflow:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   success:
   - Observation completed

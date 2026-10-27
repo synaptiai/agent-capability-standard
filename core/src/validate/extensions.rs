@@ -769,7 +769,7 @@ mod tests {
         let step = |timeout: serde_json::Value| {
             let catalog = json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",
                 "steps": [{"capability": "observe", "purpose": "p", "store_as": "o",
-                    "timeout": timeout}]}});
+                    "input_bindings": {"target": "t"}, "timeout": timeout}]}});
             validate_catalog(&ctx(), &catalog, None)
                 .diagnostics
                 .iter()

@@ -42,7 +42,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 2) **Define criteria**: Establish evaluation dimensions
    - Quantitative criteria: measurable (cost, time, size)
    - Qualitative criteria: assessed (quality, maintainability, risk)
-   - Apply must_have filters to eliminate non-viable options
+   - Apply hard requirements (must-haves) as filters to eliminate non-viable options
 
 3) **Assign weights**: Determine relative importance of each criterion
    - Weights should sum to 1.0
@@ -125,20 +125,15 @@ options:
     summary: "MongoDB document database"
   - id: "dynamodb"
     summary: "AWS DynamoDB managed service"
-criteria:
-  - name: "query_flexibility"
-    weight: 0.3
-  - name: "operational_overhead"
-    weight: 0.25
-  - name: "cost_at_scale"
-    weight: 0.25
-  - name: "team_familiarity"
-    weight: 0.2
-context:
-  workload: "mixed read/write"
-  scale: "10M records"
-  team_size: 3
+criteria: ["query_flexibility", "operational_overhead", "cost_at_scale", "team_familiarity"]
+weights:
+  query_flexibility: 0.3
+  operational_overhead: 0.25
+  cost_at_scale: 0.25
+  team_familiarity: 0.2
 ```
+
+The workload is mixed read/write at 10M records, run by a team of 3; the scores below assume that context.
 
 **Output:**
 ```yaml
@@ -255,16 +250,14 @@ options:
   - "incremental refactoring"
   - "complete rewrite"
   - "strangler fig pattern"
-criteria:
-  - name: "risk"
-    weight: 0.4
-  - name: "time_to_value"
-    weight: 0.35
-  - name: "final_quality"
-    weight: 0.25
-must_have:
-  - "maintains production uptime"
+criteria: ["risk", "time_to_value", "final_quality"]
+weights:
+  risk: 0.4
+  time_to_value: 0.35
+  final_quality: 0.25
 ```
+
+Hard requirement: any option must maintain production uptime.
 
 **Output:**
 ```yaml
@@ -347,7 +340,7 @@ assumptions:
 - [ ] All scores are in 0.0-1.0 range with rationale
 - [ ] Recommendation aligns with highest weighted score
 - [ ] Tradeoffs identify criteria where recommendation is not best
-- [ ] must_have criteria properly filtered options
+- [ ] Hard requirements (must-haves) properly filtered options
 
 **Verification tools:** Manual review of scoring rationale, stakeholder validation
 

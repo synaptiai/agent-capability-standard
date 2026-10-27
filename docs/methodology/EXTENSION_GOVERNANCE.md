@@ -235,6 +235,8 @@ search_and_replace:
   steps:
     - capability: search
       store_as: matches
+      input_bindings:
+        query: old_function_name
     - capability: transform
       input_bindings:
         input: ${matches}

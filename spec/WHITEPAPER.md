@@ -235,10 +235,16 @@ Rather than creating separate capabilities for each domain (detect-anomaly, dete
 ```yaml
 # Old approach (99 capabilities)
 - capability: detect-anomaly
+  input_bindings:
+    data: ${observe_out.observation}
+    pattern: error_rate_spike
 
 # New approach (36 capabilities)
 - capability: detect
   domain: anomaly
+  input_bindings:
+    data: ${observe_out.observation}
+    pattern: error_rate_spike
 ```
 
 This preserves expressiveness while maintaining a minimal, learnable ontology.
@@ -340,6 +346,10 @@ Conditions enable step-level branching:
 - capability: mutate
   condition: ${approval_out.approved} == true
   skip_if_false: true
+  input_bindings:
+    target: ${user_input.target}
+    operation:
+      apply: "${plan_out.steps: array<object>}"
 ```
 
 ### 4.5 Failure Modes and Recovery
@@ -367,10 +377,16 @@ Steps can execute concurrently:
 ```yaml
 - capability: search
   parallel_group: gather
+  store_as: search_out
+  input_bindings:
+    query: checkpoint timeout errors
 
 - capability: retrieve
   parallel_group: gather
   join: all_complete
+  store_as: retrieve_out
+  input_bindings:
+    target: docs/runbooks/checkpoints.md
 
 - capability: integrate
   input_bindings:

@@ -1,7 +1,7 @@
 ---
 name: critique
 description: Find failure modes, edge cases, ambiguities, and exploit paths in plans, code, or designs. Use when reviewing proposals, auditing security, stress-testing logic, or validating assumptions.
-argument-hint: "[target] [focus_areas] [severity_threshold]"
+argument-hint: "[target] [criteria] [severity_threshold]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -142,7 +142,7 @@ target:
       action: "Deploy new auth service"
     - id: "step-3"
       action: "Run smoke tests"
-focus_areas: ["availability", "rollback", "security"]
+criteria: ["availability", "rollback", "security"]
 ```
 
 **Output:**
@@ -235,9 +235,10 @@ target:
         if user and user.password == password:
             return create_token(user.id)
         return None
-focus_areas: ["security"]
-adversarial: true
+criteria: ["security"]
 ```
+
+Review adversarially: probe the code as an attacker would.
 
 **Output:**
 ```yaml
@@ -315,7 +316,7 @@ assumptions:
 
 ## Verification
 
-- [ ] All focus areas were examined
+- [ ] All criteria were examined
 - [ ] Severity ratings are justified
 - [ ] Each finding has a recommendation
 - [ ] Critical issues are highlighted

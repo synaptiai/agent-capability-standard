@@ -306,31 +306,31 @@ assumptions:
 - Never generate plans that bypass safety constraints
 - Plans with confidence < 0.5 should request clarification
 
-**CRITICAL: Plan is the gateway to act-plan**
-- No `act-plan` execution should occur without a validated plan
+**CRITICAL: Plan is the gateway to execute and mutate**
+- No `execute` or `mutate` step should occur without a validated plan
 - Plans must be complete before execution begins
 - Incomplete plans should be marked as draft
 
 ## Composition Patterns
 
 **Commonly follows:**
-- `inspect` - Understand current state before planning
+- `observe` - Understand current state before planning
 - `decompose` - Break complex goals into subgoals
 - `critique` - Identify potential issues before finalizing
 - `search` - Find relevant code/config to inform plan
 
 **Commonly precedes:**
 - `checkpoint` - Create safety checkpoint before execution
-- `act-plan` - Execute the plan (REQUIRES this capability)
+- `execute` / `mutate` - Carry out the plan (`plan` precedes both)
 - `verify` - Validate plan structure before execution
 - `constrain` - Apply policy limits to plan
 
 **Anti-patterns:**
-- Never call `act-plan` without a validated plan
+- Never call `execute` or `mutate` without a validated plan
 - Never skip `critique` for high-risk plans
 - Never execute plans with unresolved ambiguity
 
 **Workflow references:**
 - See `reference/composition_patterns.md#debug-code-change` for bug fix workflow
 - See `reference/composition_patterns.md#capability-gap-analysis` for planning context
-- See `reference/composition_patterns.md#oma-pattern` for Observe-Model-Act flow
+- See `reference/composition_patterns.md#observe-model-act` for Observe-Model-Act flow

@@ -224,6 +224,8 @@ fix_and_verify:
     - capability: observe
       purpose: Examine current state.
       store_as: observe_out
+      input_bindings:
+        target: ${user_input.target}
 
     - capability: detect
       purpose: Identify the issue.
@@ -237,18 +239,24 @@ fix_and_verify:
       purpose: Create a fix plan.
       store_as: plan_out
       input_bindings:
+        goal: Fix the defect found in ${user_input.target}
         context: ${anomaly_out}
 
     # 3. Define what success looks like
     - capability: constrain
       purpose: Define invariants the fix must satisfy.
       store_as: schema_out
+      input_bindings:
+        target: "${plan_out.steps: array<object>}"
+        constraints: [tests_pass, public_interfaces_unchanged]
 
     # 4. Save state before mutation (REQUIRED)
     - capability: checkpoint
       purpose: Save state for potential rollback.
       store_as: checkpoint_out
       mutation: true
+      input_bindings:
+        scope: ${user_input.target}
 
     # 5. Execute the fix (REQUIRES checkpoint)
     - capability: mutate
@@ -269,6 +277,9 @@ fix_and_verify:
     - capability: verify
       purpose: Check that fix satisfies invariants.
       store_as: verify_out
+      input_bindings:
+        target: ${user_input.target}
+        conditions: [tests_pass, public_interfaces_unchanged, defect_absent]
       failure_modes:
         - condition: The fix does not satisfy the invariants.
           when: ${verify_out.passed} == false
@@ -281,6 +292,11 @@ fix_and_verify:
     - capability: audit
       purpose: Log the change for accountability.
       store_as: audit_out
+      input_bindings:
+        event:
+          type: fix_applied
+          target: ${user_input.target}
+          verified: ${verify_out.passed}
 
   success:
     - Issue fixed
@@ -303,6 +319,8 @@ fix_and_verify:
   purpose: Save state for potential rollback.
   store_as: checkpoint_out
   mutation: true
+  input_bindings:
+    scope: src/parser.py
 ```
 
 **Gate that blocks without checkpoint:**
@@ -368,12 +386,18 @@ steps:
     purpose: Search logs
     store_as: log_search
     parallel_group: gather_context
+    input_bindings:
+      query: ${user_input.error_message}
+      scope: logs
 
   - capability: search
     purpose: Search code
     store_as: code_search
     parallel_group: gather_context
     join: all_complete
+    input_bindings:
+      query: ${user_input.error_message}
+      scope: src
 
   - capability: integrate
     purpose: Combine search results
@@ -394,6 +418,10 @@ Skip steps based on conditions:
   store_as: action_out
   condition: ${approval_out.approved} == true
   skip_if_false: true
+  input_bindings:
+    target: ${user_input.target}
+    operation:
+      apply: "${plan_out.steps: array<object>}"
 ```
 
 ### 4.3 Typed Bindings
@@ -414,6 +442,9 @@ Reference external transform definitions:
 - capability: transform
   purpose: Normalize data format.
   store_as: transform_out
+  input_bindings:
+    input: ${retrieve_out.data}
+    target_format: event
   mapping_ref: schemas/transforms/my_transform.yaml
   output_conforms_to: schemas/event_schema.yaml#/event
 ```

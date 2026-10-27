@@ -10,5 +10,7 @@ typo_workflow:
   - capability: observe
     purpose: Observe something.
     store_as: observe_out
+    input_bindings:
+      target: "system"
     requires_aproval: true
     x-trace: true

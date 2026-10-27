@@ -242,3 +242,67 @@ the candidate (no new extension versions). Decisions (user, 2026-10-27):
 - [x] Code and test review of every stage, all findings fixed; reply on
   #114 posted at the user's request:
   [comment](https://github.com/synaptiai/agent-capability-standard/issues/114#issuecomment-6454258786)
+
+# Follow-up 2: remaining open items, agent identity, full review
+
+Decisions (user, 2026-10-27):
+- **Identity (RFC-0002 prerequisite):** a minimal agent identity object as a
+  canonical schema (`agent_identity_schema.yaml`): `principal` (§5.15),
+  `kind` (agent | human | service), optional `role`, `model_family`,
+  `owner`, `authenticated_by`, `trust_class`. ActionRecord and
+  ProvenanceRecord gain optional structured identities beside the strings
+  (staged deprecation per RFC-0002). `AgentDescriptor.identity()` view. No
+  reliability scores.
+- **Senders:** the host reports the sender's identity with each event;
+  `receive`/`synchronize` gain `sender_check` (accepted authentication
+  mechanisms); other items are dropped and counted; kept items carry
+  `sender_identity`. `accept_from` stays (covers `also_accept`).
+- **trust_class:** reported on the identity; `accept_trust_classes` filters;
+  kept items carry it; §8 maps classes to default source ranks.
+- **Versioning:** must-understand extension `identity@1` in the v1.1
+  candidate; new RFC-0004 (Accepted); RFC-0002 stays Draft for the
+  reliability profile and records its prerequisite as met.
+- **Missing required inputs:** W615 `MISSING_INPUT`; bind real values in the
+  56 catalog steps that omit them.
+- **v1 example catalog:** migrate `examples/digital_twin_sync_loop` to the
+  36-capability names; validate it in CI.
+- Defaults (no question needed): fix `digital_twin_bootstrap` reading a
+  skipped step; validate `retry.backoff`; commit the runtime fixture
+  generator with a CI drift check; reconcile skill procedure text with the
+  ontology's input names.
+
+## Stages
+- [x] **H1** cleanup: W615 + catalog bindings, v1 example, bootstrap, backoff,
+  fixture generator, skill procedure drift; docs; review
+- [ ] **H2** `identity@1`: RFC-0004, schema, ontology, validator, executor,
+  Python, spec §5.17/§8/Appendix C, guides, fixtures; plus an "always ask"
+  trust class (an item from it needs approval even under a mandate); review
+- [ ] **H2b** CEL membership `in` in the expression grammar, with cel-go
+  differential fixtures; V108 on `and` hints `&&`
+- [ ] **H2c** the commenter's orchestrator fixtures (nine workflows, scripted
+  runs) as static and runtime conformance fixtures
+- [ ] **H2d** reviewer items. Decisions:
+  - read-only reviewer: `delegate` input `read_only` (delegation@1),
+    attested in `effective`; `quorum.require_read_only` makes every reviewer
+    bind it (F504) and refuses at run time a verdict whose delegate did not
+    attest it;
+  - replace only the hung reviewer: `wait` allowed on `delegate`, so each
+    reviewer is one step and `retry` re-delegates only the one that hung;
+    the quorum gathers verdicts from the reviewer steps;
+  - host/device placement: an RFC-0003 open question (deployment stays
+    outside the standard, as for E6's `host`)
+- [ ] **H3** thorough review of the whole branch (parallel reviewers by
+  area); fix every finding
+
+### H1 review
+The review found, and H1 fixed before committing: rollback steps of
+`debug_code_change` and `digital_twin_sync_loop` ran even when verification
+passed (now gated); the §12.5 patterns and the guide, FAQ, tutorial,
+quickstart and whitepaper snippets left required inputs unbound; the audit
+skill put report parameters in `event`; `input_bindings: null` added W615s on
+top of S303; waits and quorums, which the executor runs itself, raised W615;
+`retry.backoff: null` was S303 though the executor reads it as `none`.
+`debug-workflow` and the other workflow skills and the composition patterns
+still used v1 capability names; they follow the catalog now. A corpus test
+keeps W615 to the fixtures that expect it, since the core's unit tests
+filter it out.

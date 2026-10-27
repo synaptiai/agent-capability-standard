@@ -12,7 +12,7 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   `failure_modes[].when`: a small grammar that is a strict subset of CEL, with
   fixed limits, fail-safe error handling per site, static type checks and null
   narrowing. Gates gain `phase: before|after` (§5.6).
-- **Diagnostic severities (§9.1)** and warning codes W601–W614 (§9.7); new
+- **Diagnostic severities (§9.1)** and warning codes W601–W615 (§9.7); new
   error codes V106–V109, B206, R405, R406.
 - **`mutation_overridable` (§4.4)** for append-only capabilities (`audit`).
 - **Orchestration extensions (§5.9–§5.16)** — triggers, handler steps,
@@ -63,6 +63,15 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   → W605, unsupported → V109.
 - **B205** means "annotation names no type"; an annotation that contradicts
   the schema is B203 (§9.3).
+
+### Changed — remaining open items (#114)
+- **Missing required inputs (§5.5)** are W615 `MISSING_INPUT`: a step that
+  does not bind an input its capability requires. Waits and quorums are
+  exempt: the executor runs them itself. The reference catalog now binds
+  every required input, and the §12.5 patterns do too.
+- **`retry` (§5.2):** `max` must be a non-negative integer and `backoff` one
+  of `none`, `linear`, `exponential`, or null for `none` (S303); both were
+  silently ignored otherwise.
 
 ### Changed — gaps found by porting workflows to the candidate (#114)
 The issue author ported nine production workflows to the v1.1.0 candidate

@@ -135,7 +135,6 @@ assumptions:
 ```yaml
 target: "database migration: add user_preferences column"
 metric: "risk"
-method: "probability_impact"
 ```
 
 **Output:**

@@ -1,7 +1,7 @@
 ---
 name: discover
 description: Find latent patterns, relationships, anomalies, or insights not explicitly specified. Use when exploring unknown structure, finding hidden connections, or uncovering emergent phenomena.
-argument-hint: "[search-space] [discovery-type] [constraints]"
+argument-hint: "[data] [constraints] [method]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -105,8 +105,8 @@ assumptions: array[string]  # Conditions that affect findings
 
 **Input:**
 ```yaml
-search_space: "src/"
-discovery_type: "relationship"
+data: "src/"
+method: "relationship"
 constraints:
   max_depth: 3
   focus: "imports and function calls"
@@ -166,11 +166,11 @@ assumptions:
 
 **Input:**
 ```yaml
-search_space: "entire codebase"
-discovery_type: "pattern"
-seed_observations:
-  - "Some endpoints seem to share similar structure"
+data: "entire codebase"
+method: "pattern"
 ```
+
+Seed observation: some endpoints seem to share similar structure.
 
 **Output:**
 ```yaml
@@ -229,7 +229,7 @@ assumptions:
 
 **Capability-specific rules:**
 - Do not modify any files during discovery
-- Respect scope boundaries - do not explore outside search_space
+- Respect scope boundaries - do not explore outside the bounds set by `data` and `constraints`
 - Flag discoveries that may reveal sensitive information
 - Report uncertainty when findings could be coincidental
 

@@ -31,4 +31,6 @@ nightly_report:
   - capability: observe
     purpose: Observe the deployment state.
     store_as: observe_out
+    input_bindings:
+      target: "system"
     timeout: 5m

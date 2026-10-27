@@ -1,7 +1,7 @@
 ---
 name: generate
 description: Create a new artifact (text, code, plan, data) under specified constraints. Use when producing content, writing code, designing solutions, or synthesizing outputs.
-argument-hint: "[artifact-type] [constraints] [context]"
+argument-hint: "[specification] [format] [constraints]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -117,15 +117,16 @@ next_actions: array[string]  # Suggested follow-ups
 
 **Input:**
 ```yaml
-artifact_type: "code"
-constraints:
-  - "TypeScript with strict mode"
-  - "Express.js middleware pattern"
-  - "Input validation with Zod"
-  - "Return 200 on success, 400 on validation error, 500 on server error"
-context:
+specification:
+  artifact_type: "code"
   endpoint: "POST /api/users"
   schema: "{ name: string, email: string, role: 'admin' | 'user' }"
+constraints:
+  must_have:
+    - "TypeScript with strict mode"
+    - "Express.js middleware pattern"
+    - "Input validation with Zod"
+    - "Return 200 on success, 400 on validation error, 500 on server error"
 format: "typescript"
 ```
 
@@ -220,13 +221,16 @@ next_actions:
 
 **Input:**
 ```yaml
-artifact_type: "schema"
+specification:
+  artifact_type: "schema"
+  description: "Database connection configuration"
 constraints:
-  - "JSON Schema draft-07"
-  - "Required fields: host, port, database"
-  - "Optional: ssl, poolSize, timeout"
-  - "Sensible defaults where appropriate"
-context: "Database connection configuration"
+  must_have:
+    - "JSON Schema draft-07"
+    - "Required fields: host, port, database"
+    - "Optional: ssl, poolSize, timeout"
+  should_have:
+    - "Sensible defaults where appropriate"
 format: "json"
 ```
 

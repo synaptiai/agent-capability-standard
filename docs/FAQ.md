@@ -165,11 +165,17 @@ Instead of many domain-specific capabilities, use the atomic capability with a d
 # Old approach (99 capabilities)
 - capability: detect-anomaly
   store_as: anomaly_out
+  input_bindings:
+    data: ${observe_out.observation}
+    pattern: error_rate_spike
 
 # New approach (36 capabilities)
 - capability: detect
   domain: anomaly
   store_as: anomaly_out
+  input_bindings:
+    data: ${observe_out.observation}
+    pattern: error_rate_spike
 ```
 
 This keeps the ontology small while preserving expressiveness.
@@ -242,11 +248,14 @@ Bindings reference outputs from earlier steps:
 ```yaml
 - capability: observe
   store_as: observe_out
+  input_bindings:
+    target: logs/app.log
 
 - capability: detect
   domain: anomaly
   input_bindings:
     data: ${observe_out.observation}  # References observe's output
+    pattern: error_rate_spike
 ```
 
 Typed bindings add explicit type annotations:
@@ -309,6 +318,8 @@ my_workflow:
     user_input:
       type: object
       properties:
+        target:
+          type: string
         limits:
           type: array
           items: {type: string}
@@ -316,9 +327,14 @@ my_workflow:
     - capability: observe
       purpose: First step
       store_as: observe_out
+      input_bindings:
+        target: ${user_input.target}
     - capability: plan
       purpose: Create a plan
       store_as: plan_out
+      input_bindings:
+        goal: Update ${user_input.target} within the limits
+        context: ${observe_out.observation}
     - capability: constrain
       purpose: Check the plan against the limits before changing anything
       store_as: constrain_out
@@ -328,9 +344,15 @@ my_workflow:
     - capability: checkpoint
       purpose: Save state
       store_as: checkpoint_out
+      input_bindings:
+        scope: ${user_input.target}
     - capability: mutate
       purpose: Execute changes
       store_as: result
+      input_bindings:
+        target: ${user_input.target}
+        operation:
+          apply: "${plan_out.steps: array<object>}"
 ```
 
 `checkpoint` must run before `mutate` (error V102 otherwise); `constrain` is recommended before it (warning W601 otherwise).

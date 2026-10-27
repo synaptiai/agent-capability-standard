@@ -12,6 +12,8 @@ dupe_store:
     timeout: null
     retry: null
     store_as: same_name
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: search
     purpose: Search for things.
@@ -22,6 +24,8 @@ dupe_store:
     timeout: null
     retry: null
     store_as: same_name
+    input_bindings:
+      query: "status"
     failure_modes: []
   success:
   - Steps completed

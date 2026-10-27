@@ -507,6 +507,8 @@ The `${ref}` syntax enables referencing outputs from earlier steps:
   parallel_group: context_gathering
   join: all_complete
   store_as: search_out
+  input_bindings:
+    query: checkpoint timeout errors
 ```
 
 **Gates**: Runtime conditions that can halt or redirect execution. `when` is an expression in the grammar of [STANDARD v1.1.0 §5.8](../spec/STANDARD-v1.1.0.md#58-condition-expressions) (comparisons, `&&`, `||`, `!`, literals and `${ref}` references); `action` is `stop`, `rollback`, `skip` or `warn`; `message` is optional. A gate runs before its step unless it declares `phase: after`, which a gate that reads its own step's output needs:
@@ -536,7 +538,7 @@ failure_modes:
 
 The reference validator (the Rust core in `core/`, compiled into `grounded_agency._core` and run by `tools/validate_workflows.py`) performs these checks:
 
-1. **Structural**: Required fields present and well-typed; unknown fields and binding keys outside the capability's inputs reported as warnings (W604); an `invoke` step's literal `input` checked against the target's declared inputs (S303, S304)
+1. **Structural**: Required fields present and well-typed; unknown fields and binding keys outside the capability's inputs reported as warnings (W604), and required inputs a step does not bind (W615); an `invoke` step's literal `input` checked against the target's declared inputs (S303, S304)
 2. **Capability**: Capability exists in ontology (V101)
 3. **Prerequisite**: `requires` and `precedes` edges satisfied (V102); no `conflicts_with` pair in one parallel group (F504); `soft_requires` met, else a warning (W601)
 4. **Safety flags**: Step flags inherit from the ontology; a weaker declaration is ignored (W602)

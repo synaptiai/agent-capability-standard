@@ -25,6 +25,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: search_out
+    input_bindings:
+      query: "status"
     failure_modes: []
   - capability: map-relationships
     purpose: Build dependency graph around failing component.
@@ -55,6 +57,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: critique_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: plan
     purpose: Produce minimal fix plan with checkpoints.
@@ -65,6 +69,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: plan_out
+    input_bindings:
+      goal: "resolve the request"
     failure_modes: []
   - capability: act-plan
     purpose: Apply fix, run tests, and produce diff summary.
@@ -90,6 +96,8 @@ debug_code_change:
       max: 3
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      conditions: ["checks_pass"]
     failure_modes:
     - condition: Verdict == FAIL
       action: rollback
@@ -103,6 +111,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event: {"type": "fixture_event"}
     failure_modes: []
   - capability: rollback
     purpose: If verify FAIL, revert safely.
@@ -113,6 +123,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "cp-1"
     failure_modes: []
   success:
   - Bug fixed or root cause isolated
@@ -153,6 +165,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: retrieve_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: inspect
     purpose: Observe current system/world artifacts (docs, logs, sensors).
@@ -359,6 +373,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event: {"type": "fixture_event"}
     failure_modes: []
   success:
   - Missing capability list
@@ -576,6 +592,7 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       context: ${forecast_risk_out}
+      goal: "resolve the request"
     gates: []
   - capability: constrain
     purpose: Enforce policy and least privilege for planned actions.
@@ -587,7 +604,9 @@ digital_twin_sync_loop:
     retry: null
     store_as: constrain_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      target: "system"
+      constraints: ["policy"]
     gates: []
   - capability: checkpoint
     purpose: Create checkpoint marker before any mutation/side-effect step.
@@ -599,7 +618,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: checkpoint_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      scope: "workspace"
     gates: []
   - capability: act-plan
     purpose: Execute action plan (if approved), then run verification.
@@ -640,7 +660,8 @@ digital_twin_sync_loop:
         inject_context:
           failure_evidence: ${verify_out.violations}
         max_loops: 3
-    input_bindings: {}
+    input_bindings:
+      conditions: ["checks_pass"]
     gates:
     - when: ${verify_out.passed} == false
       action: rollback
@@ -655,7 +676,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: audit_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      event: {"type": "fixture_event"}
     gates: []
   - capability: rollback
     purpose: If verify FAIL or side effects detected, rollback to checkpoint.
@@ -667,7 +689,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: rollback_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
     gates: []
   - capability: summarize
     purpose: 'Produce decision-ready sync report: drift, actions, verification, next

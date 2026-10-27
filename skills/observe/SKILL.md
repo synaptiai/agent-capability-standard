@@ -1,7 +1,7 @@
 ---
 name: observe
 description: Watch and report current state of a target system, process, or entity. Use when monitoring status, inspecting live systems, checking current conditions, or observing runtime behavior.
-argument-hint: "[target] [aspects] [duration]"
+argument-hint: "[target] [aspects]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Bash

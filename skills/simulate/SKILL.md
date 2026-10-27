@@ -212,7 +212,6 @@ initial_state:
   cache: "warm"
   queue_depth: 0
 steps: 10
-explore: "branches"
 ```
 
 **Output:**

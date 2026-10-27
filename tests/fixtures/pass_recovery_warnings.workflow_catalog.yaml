@@ -11,6 +11,8 @@ dormant_recovery:
   - capability: plan
     purpose: Plan.
     store_as: plan_out
+    input_bindings:
+      goal: "resolve the request"
   - capability: verify
     purpose: Verify.
     store_as: verify_out
@@ -31,3 +33,5 @@ dormant_recovery_handler:
   - capability: observe
     purpose: Observe.
     store_as: observe_out
+    input_bindings:
+      target: "system"

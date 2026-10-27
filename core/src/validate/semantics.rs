@@ -192,6 +192,51 @@ pub(crate) fn unknown_inputs(
     }
 }
 
+/// W615 for every input the capability requires that the step does not
+/// bind (§5.5): the host would get no value for it. An invoke step's
+/// `workflow_id` names its workflow, so it gives `workflow`. A malformed
+/// `input_bindings` is reported elsewhere (S303).
+pub(crate) fn missing_inputs(
+    loc: &StepLoc<'_>,
+    step: &Map<String, Value>,
+    cap: &Capability,
+    report: &mut Report,
+) {
+    let empty = Map::new();
+    // The executor runs a wait (§5.13) or a quorum (§5.16) itself: no host
+    // receives the step's inputs, so none is missing.
+    if step.get("wait").is_some_and(Value::is_object)
+        || (cap.id == "constrain" && step.get("quorum").is_some_and(Value::is_object))
+    {
+        return;
+    }
+    let bindings = match step.get("input_bindings") {
+        None => &empty,
+        Some(Value::Object(b)) => b,
+        // Malformed (null included): S303 already reports it.
+        Some(_) => return,
+    };
+    let Some(required) = cap.input_schema.get("required").and_then(Value::as_array) else {
+        return;
+    };
+    for key in required.iter().filter_map(Value::as_str) {
+        let given = bindings.contains_key(key)
+            || (key == "workflow" && cap.id == "invoke" && step.contains_key("workflow_id"));
+        if !given {
+            report.push(
+                loc.diag(
+                    Code::MissingInput,
+                    format!(
+                        "'{}' requires input '{key}', which the step does not bind",
+                        cap.id
+                    ),
+                )
+                .at("field", format!("input_bindings.{key}")),
+            );
+        }
+    }
+}
+
 /// W602: a step declares a safety flag less safe than the ontology. The
 /// declaration has no effect — the ontology value applies — but it misleads.
 pub(crate) fn flag_downgrades(

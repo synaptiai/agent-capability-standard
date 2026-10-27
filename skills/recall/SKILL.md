@@ -1,7 +1,7 @@
 ---
 name: recall
 description: Retrieve prior decisions, rationale, and learned patterns from memory to apply consistently. Use when needing context from previous interactions, looking up past decisions, or ensuring consistency with prior reasoning.
-argument-hint: "[query] [memory_scope session|project|global] [time_range]"
+argument-hint: "[key] [default]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -33,8 +33,8 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 
 ## Procedure
 
-1) **Parse query intent**: Understand what is being recalled
-   - Identify if query is about a decision, pattern, fact, or context
+1) **Parse query intent**: Understand what the `key` asks to recall
+   - Identify if it is about a decision, pattern, fact, or context
    - Extract key terms for memory search
    - Determine if exact match or semantic similarity needed
 
@@ -53,7 +53,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Relevance to query terms
    - Recency (more recent = higher weight unless historical needed)
    - Authority (explicit decisions > implicit patterns)
-   - Filter below similarity_threshold
+   - Filter out matches below a similarity threshold
 
 5) **Extract rationale**: For each recalled item, capture reasoning
    - Original decision context
@@ -114,9 +114,7 @@ assumptions: array[string]  # Assumptions about memory validity
 
 **Input:**
 ```yaml
-query: "error handling approach"
-memory_scope: project
-include_rationale: true
+key: "error handling approach"
 ```
 
 **Output:**
@@ -170,11 +168,10 @@ assumptions:
 
 **Input:**
 ```yaml
-query: "user's preferred output format"
-memory_scope: session
-time_range:
-  after: "2024-01-16T00:00:00Z"
+key: "user's preferred output format"
 ```
+
+Search session memory only, from 2024-01-16 onward.
 
 **Output:**
 ```yaml
@@ -215,9 +212,7 @@ assumptions:
 
 **Input:**
 ```yaml
-query: "database choice"
-memory_scope: project
-include_rationale: true
+key: "database choice"
 ```
 
 **Output:**

@@ -1,7 +1,7 @@
 ---
 name: receive
 description: Ingest and parse incoming messages, events, or signals into structured form. Use when processing external inputs, handling API responses, parsing webhook payloads, or ingesting sensor data.
-argument-hint: "[input_source] [expected_format json|xml|text|binary] [validation_schema]"
+argument-hint: "[channel] [filter] [timeout]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -16,7 +16,7 @@ Execute **receive** to ingest incoming data from external sources and parse it i
 **Success criteria:**
 - Input data is successfully ingested from the source
 - Data is parsed according to expected format
-- Validation against schema (if provided) passes or errors are captured
+- Validation against schema (if one applies) passes or errors are captured
 - Structured output is ready for downstream capabilities
 - Malformed or unexpected data is handled gracefully
 
@@ -51,7 +51,7 @@ timeout (Standard v1.1 `wait@1`); see
    - Check file exists and is readable
    - Verify URL is reachable
    - Confirm stream is connected
-   - Check size does not exceed max_size
+   - Check size does not exceed the size limit
 
 3) **Detect format**: Identify data format if not specified
    - Check content-type headers or file extension
@@ -67,7 +67,7 @@ timeout (Standard v1.1 `wait@1`); see
    - Binary: Extract structured fields per schema
 
 5) **Validate structure**: Check parsed data against schema
-   - If validation_schema provided: validate and collect errors
+   - If a schema applies to the channel (e.g. `schemas/event_v2.yaml`): validate and collect errors
    - If no schema: perform basic sanity checks
    - Flag missing required fields
    - Flag type mismatches
@@ -137,9 +137,7 @@ assumptions: array[string]  # Explicit assumptions
 
 **Input:**
 ```yaml
-input_source: "https://api.example.com/events"
-expected_format: json
-validation_schema: "schemas/event_v2.yaml"
+channel: "https://api.example.com/events"
 ```
 
 **Output:**
@@ -196,9 +194,7 @@ assumptions:
 
 **Input:**
 ```yaml
-input_source: "/var/log/sensor_data.json"
-expected_format: json
-validation_schema: "schemas/sensor_reading.yaml"
+channel: "/var/log/sensor_data.json"
 ```
 
 **Output:**
@@ -268,15 +264,17 @@ next_actions:
 
 **Input:**
 ```yaml
-input_source:
-  inline: |
-    <?xml version="1.0"?>
-    <notification type="alert">
-      <severity>high</severity>
-      <message>CPU usage exceeded threshold</message>
-      <host>server-01</host>
-    </notification>
-expected_format: xml
+channel: inline  # payload delivered with the request
+```
+
+**Payload received:**
+```xml
+<?xml version="1.0"?>
+<notification type="alert">
+  <severity>high</severity>
+  <message>CPU usage exceeded threshold</message>
+  <host>server-01</host>
+</notification>
 ```
 
 **Output:**
@@ -334,7 +332,7 @@ assumptions:
 **Capability-specific rules:**
 - Do not execute or run arbitrary code from received data
 - Use safe parsing methods (JSON.parse, safe YAML loader)
-- Validate max_size before loading large files into memory
+- Validate size limits before loading large files into memory
 - Sanitize file paths to prevent directory traversal
 - Do not store credentials or secrets found in payloads
 - Log but do not propagate malformed/suspicious data without flagging

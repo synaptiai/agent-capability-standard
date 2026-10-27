@@ -12,6 +12,8 @@ type_mismatch_workflow:
   - capability: retrieve
     purpose: Fetch source data.
     store_as: retrieve_out
+    input_bindings:
+      target: "system"
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -30,4 +32,5 @@ type_mismatch_workflow:
     retry: null
     input_bindings:
       target: "${retrieve_out.evidence_anchors: number}"
+      metric: "quality"
     failure_modes: []

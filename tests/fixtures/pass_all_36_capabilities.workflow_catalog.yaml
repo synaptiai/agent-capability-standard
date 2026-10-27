@@ -12,6 +12,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: retrieve_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: search
     purpose: Search for patterns.
@@ -22,6 +24,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: search_out
+    input_bindings:
+      query: "status"
     failure_modes: []
   - capability: observe
     purpose: Observe state.
@@ -32,6 +36,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: receive
     purpose: Receive messages.
@@ -52,6 +58,9 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: detect_out
+    input_bindings:
+      data: "sample"
+      pattern: "anomaly"
     failure_modes: []
   - capability: classify
     purpose: Classify findings.
@@ -62,6 +71,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: classify_out
+    input_bindings:
+      item: "sample"
     failure_modes: []
   - capability: measure
     purpose: Measure metrics.
@@ -72,6 +83,9 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: measure_out
+    input_bindings:
+      target: "system"
+      metric: "quality"
     failure_modes: []
   - capability: predict
     purpose: Predict outcomes.
@@ -82,6 +96,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: predict_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: compare
     purpose: Compare options.
@@ -92,6 +108,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: compare_out
+    input_bindings:
+      options: ["a", "b"]
     failure_modes: []
   - capability: discover
     purpose: Discover relationships.
@@ -102,6 +120,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: discover_out
+    input_bindings:
+      data: "sample"
     failure_modes: []
   - capability: plan
     purpose: Plan actions.
@@ -112,6 +132,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: plan_out
+    input_bindings:
+      goal: "resolve the request"
     failure_modes: []
   - capability: decompose
     purpose: Decompose problem.
@@ -122,6 +144,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: decompose_out
+    input_bindings:
+      problem: "split the task"
     failure_modes: []
   - capability: critique
     purpose: Critique plan.
@@ -132,6 +156,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: critique_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: explain
     purpose: Explain reasoning.
@@ -142,6 +168,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: explain_out
+    input_bindings:
+      conclusion: "result"
     failure_modes: []
   - capability: state
     purpose: Model state.
@@ -152,6 +180,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: state_out
+    input_bindings:
+      scope: "workspace"
     failure_modes: []
   - capability: transition
     purpose: Define transitions.
@@ -162,6 +192,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: transition_out
+    input_bindings:
+      from_state: {"status": "initial"}
     failure_modes: []
   - capability: attribute
     purpose: Attribute causes.
@@ -172,6 +204,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "observed failure"
     failure_modes: []
   - capability: ground
     purpose: Ground in evidence.
@@ -182,6 +216,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: ground_out
+    input_bindings:
+      claim: "the result holds"
     failure_modes: []
   - capability: simulate
     purpose: Run simulation.
@@ -192,6 +228,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: simulate_out
+    input_bindings:
+      scenario: {"change": "baseline"}
     failure_modes: []
   - capability: generate
     purpose: Generate content.
@@ -202,6 +240,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: generate_out
+    input_bindings:
+      specification: "summary"
     failure_modes: []
   - capability: transform
     purpose: Transform data.
@@ -212,6 +252,9 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: transform_out
+    input_bindings:
+      input: "sample"
+      target_format: "summary"
     failure_modes: []
   - capability: integrate
     purpose: Integrate data.
@@ -222,6 +265,8 @@ all_caps_part1:
     timeout: null
     retry: null
     store_as: integrate_out
+    input_bindings:
+      sources: ["a", "b"]
     failure_modes: []
   success:
   - All PERCEIVE+UNDERSTAND+REASON+MODEL+SYNTHESIZE capabilities exercised
@@ -239,6 +284,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
     failure_modes: []
   - capability: constrain
     purpose: Apply constraints.
@@ -249,6 +296,9 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: constrain_out
+    input_bindings:
+      target: "system"
+      constraints: ["policy"]
     failure_modes: []
   - capability: execute
     purpose: Execute command.
@@ -259,6 +309,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: execute_out
+    input_bindings:
+      code: "make test"
     failure_modes: []
   - capability: mutate
     purpose: Mutate state.
@@ -269,6 +321,9 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: mutate_out
+    input_bindings:
+      target: "system"
+      operation: {"set": true}
     failure_modes: []
   - capability: send
     purpose: Send message.
@@ -279,6 +334,9 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: send_out
+    input_bindings:
+      destination: "ops-channel"
+      payload: {"text": "done"}
     failure_modes: []
   - capability: verify
     purpose: Verify result.
@@ -289,6 +347,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: verify_out
+    input_bindings:
+      conditions: ["checks_pass"]
     failure_modes: []
   - capability: rollback
     purpose: Rollback changes.
@@ -299,6 +359,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
     failure_modes: []
   - capability: audit
     purpose: Audit trail.
@@ -309,6 +371,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event: {"type": "fixture_event"}
     failure_modes: []
   - capability: persist
     purpose: Persist state.
@@ -319,6 +383,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: persist_out
+    input_bindings:
+      data: "sample"
     failure_modes: []
   - capability: recall
     purpose: Recall state.
@@ -329,6 +395,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: recall_out
+    input_bindings:
+      key: "notes"
     failure_modes: []
   - capability: delegate
     purpose: Delegate task.
@@ -339,6 +407,9 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: delegate_out
+    input_bindings:
+      task: {"goal": "review"}
+      agent: "worker"
     failure_modes: []
   - capability: synchronize
     purpose: Synchronize agents.
@@ -349,6 +420,9 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: synchronize_out
+    input_bindings:
+      agents: ["a1", "a2"]
+      state: {"status": "open"}
     failure_modes: []
   - capability: invoke
     purpose: Invoke sub-workflow.
@@ -359,6 +433,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: invoke_out
+    input_bindings:
+      workflow: all_caps_part1
     failure_modes: []
   - capability: inquire
     purpose: Ask user question.
@@ -369,6 +445,8 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: inquire_out
+    input_bindings:
+      ambiguous_input: "which one?"
     failure_modes: []
   success:
   - All EXECUTE+VERIFY+REMEMBER+COORDINATE capabilities exercised

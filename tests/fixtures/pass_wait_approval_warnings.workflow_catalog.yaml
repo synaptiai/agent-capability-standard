@@ -30,6 +30,8 @@ risky_change:
   - capability: checkpoint
     purpose: Save a restore point.
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
   - capability: receive
     purpose: Wait until the incident is resolved.
     store_as: resolved_out

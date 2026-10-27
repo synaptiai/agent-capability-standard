@@ -1,7 +1,7 @@
 ---
 name: transform
 description: Convert data between formats, schemas, or representations with explicit loss accounting and validation. Use when reformatting data, mapping between schemas, normalizing inputs, or translating structures.
-argument-hint: "[source] [target_schema] [mapping]"
+argument-hint: "[input] [target_format] [source_format]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -72,13 +72,13 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Record source structure for provenance
 
 2) **Analyze target schema**: Understand destination requirements
-   - Load target schema specification
+   - Load target schema specification (`options.schema`, if given)
    - Identify required vs optional fields
    - Note type constraints and validations
    - Map nested structures
 
 3) **Build transformation map**: Match source to target
-   - Apply explicit mappings if provided
+   - Apply explicit mappings if provided (`options.mapping`)
    - Infer mappings for matching field names
    - Identify fields requiring type conversion
    - Flag unmappable source fields
@@ -153,7 +153,7 @@ assumptions: []  # Explicit assumptions
 
 **Input:**
 ```yaml
-source:
+input:
   user_id: 12345
   user_name: "john_doe"
   email_address: "john@example.com"
@@ -161,20 +161,23 @@ source:
   metadata:
     source: "api"
     version: "2.1"
-target_schema:
-  type: object
-  required: [id, name, email, created_at]
-  properties:
-    id: { type: integer }
-    name: { type: string }
-    email: { type: string, format: email }
-    created_at: { type: string, format: date-time }
-    tags: { type: array, items: { type: string } }
-mapping:
-  user_id: id
-  user_name: name
-  email_address: email
-  created_timestamp: created_at
+source_format: json
+target_format: yaml
+options:
+  schema:
+    type: object
+    required: [id, name, email, created_at]
+    properties:
+      id: { type: integer }
+      name: { type: string }
+      email: { type: string, format: email }
+      created_at: { type: string, format: date-time }
+      tags: { type: array, items: { type: string } }
+  mapping:
+    user_id: id
+    user_name: name
+    email_address: email
+    created_timestamp: created_at
 ```
 
 **Output:**
@@ -228,19 +231,22 @@ assumptions:
 
 **Input:**
 ```yaml
-source: "name,age,city\nAlice,30,NYC\nBob,25,LA"
-target_schema:
-  type: array
-  items:
-    type: object
-    properties:
-      full_name: { type: string }
-      age_years: { type: integer }
-      location: { type: string }
-mapping:
-  name: full_name
-  age: age_years
-  city: location
+input: "name,age,city\nAlice,30,NYC\nBob,25,LA"
+source_format: csv
+target_format: json
+options:
+  schema:
+    type: array
+    items:
+      type: object
+      properties:
+        full_name: { type: string }
+        age_years: { type: integer }
+        location: { type: string }
+  mapping:
+    name: full_name
+    age: age_years
+    city: location
 ```
 
 **Output:**

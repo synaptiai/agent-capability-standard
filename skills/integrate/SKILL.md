@@ -1,7 +1,7 @@
 ---
 name: integrate
 description: Combine heterogeneous data sources into a unified model with conflict resolution, schema alignment, and provenance tracking. Use when merging data from multiple systems, consolidating information, or building comprehensive views.
-argument-hint: "[sources] [target_schema] [conflict_strategy]"
+argument-hint: "[sources] [strategy] [conflict_resolution]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -63,7 +63,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Overlapping, matching: Confirm consistency
    - Overlapping, conflicting: Apply conflict strategy
 
-5) **Apply conflict strategy**:
+5) **Apply conflict strategy** (`conflict_resolution`):
 
    For `prefer_recent`:
    - Use the most recently updated value
@@ -193,9 +193,10 @@ sources:
       - name: "api-gateway"
         version: "2.3.1"
         dependencies: ["express", "cors"]
-target_schema: "microservices_v1"
-conflict_strategy: prefer_recent
+conflict_resolution: prefer_recent
 ```
+
+Target schema: `microservices_v1`.
 
 **Output:**
 ```yaml
@@ -319,9 +320,10 @@ sources:
           parameters:
             - name: "order_id"
               required: true
-target_schema: "api_documentation"
-conflict_strategy: merge
+conflict_resolution: merge
 ```
+
+Target schema: `api_documentation`.
 
 **Output:**
 ```yaml
