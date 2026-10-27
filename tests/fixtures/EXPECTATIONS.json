@@ -409,5 +409,46 @@
     "expected_error_codes": [
       "F501"
     ]
+  },
+  "pass_wait_approval": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "pass_wait_approval_warnings": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": [
+      "W606",
+      "W608"
+    ]
+  },
+  "fail_wait_shape": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S303",
+      "S304"
+    ]
+  },
+  "fail_approval_shape": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S303",
+      "S304"
+    ]
+  },
+  "fail_wait_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
   }
 }

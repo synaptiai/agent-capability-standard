@@ -84,7 +84,7 @@ meaning. New codes:
 | W605 | MISSING_SPEC_VERSION | no `spec_version` and no `# Standard version:` header |
 | W606 | UNATTENDED_APPROVAL | an unattended trigger reaches an approval step with no `approval.when_unattended` |
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
-| W608 | WAIT_SPANS_CHECKPOINT | a `wait` sits between a checkpoint and a later mutate/send with no new checkpoint |
+| W608 | WAIT_SPANS_CHECKPOINT | a `wait` sits between a checkpoint and a later step that requires one (mutate, send, raised flag), with no new checkpoint |
 | W609 | UNTRIGGERED_FAILURE_MODE | structured recovery with neither `on_error` nor `when` |
 | W610 | NULLABLE_OPERAND | ordering operand may be null (optional field or skippable producer) |
 | W611 | CONSTANT_COMPARISON | equality between kinds that can never be equal |
@@ -325,8 +325,11 @@ step `timeout`: invalid → W614.
 * attendance: attended | unattended. Default: manual → attended, invoke →
   inherited, schedule/event → unattended.
 * An invoke step whose target declares triggers without kind invoke → V107.
-* Effective attendance unattended + approval step without
-  `approval.when_unattended` → W606.
+* A trigger whose attendance is unattended (explicit, or the
+  schedule/event default; `invoke` inherits and is not counted statically)
+  + a step whose effective `requires_approval` is true without
+  `approval.when_unattended` → W606 (validate/approval.rs; also without
+  approval@1 declared, since the step will still fail with F502).
 
 ## 12. Wait (E1)
 
@@ -335,10 +338,29 @@ push|probe, interval, failure_threshold (default 3)}}`
 
 * Only on `receive`, or `synchronize` whose literal `agents` list has ≥ 2
   entries (else S303).
-* Step `timeout` required (S304) and must parse; `interval ×
-  failure_threshold < timeout` (S303).
-* W608 as in §3.
-* Runtime: AwaitEvent; the matching Event becomes the receive output; a lapse
+* `event_type` required (S304); `source_kind` checked against the event
+  schema's `source.kind` enum (S301 if it cannot be loaded); `correlate`
+  is a mapping whose references are checked for existence; unknown fields
+  W604.
+* Step `timeout` required (S304) and must parse (S303 — the W614 leniency
+  for legacy timeouts is skipped for a declared wait); liveness `mode` and
+  `interval` required (S304), `interval` > 0, `failure_threshold` ≥ 1;
+  `interval × failure_threshold < timeout` (S303, overflow-safe).
+* `correlate` values, `approval.shows` items and `approval.recheck.source`
+  must be `${...}` references (S303), then are existence-checked. A wait
+  that is not a mapping still gets its timeout checked, and does not count
+  as a wait for W608.
+* W608 (validate/wait.rs `spans_checkpoint`): for each placed step with
+  effective `requires_checkpoint`, the latest checkpoint and the latest
+  wait that run before it (§3 "runs before") are found in O(1) — each kind
+  keeps its latest occurrence and the latest one not concurrent with it.
+  W608 fires when that wait comes after that checkpoint in the list, or
+  when a wait was recorded in the checkpoint's parallel group (it may
+  outlast the checkpoint, whichever is listed first), or when the step
+  waits itself. Handlers are judged at their earliest targeter's position,
+  counting the targeter's own wait.
+* Runtime: AwaitEvent; the matching Event is delivered in the step's
+  output (`data`); a lapse
   raises R401 (cause timeout|liveness). After a resume, pre-wait checkpoints
   no longer authorise mutations.
 
@@ -351,7 +373,11 @@ version|digest (default digest), on_change: reask|replan|stop (default
 reask)}, expires?, when_unattended: defer_to_queue|skip|fail (default fail)}`
 
 * Allowed only where effective `requires_approval` is true (else S303).
-  `mandate_ref` required iff standing_mandate (S304 / S303).
+  `approver` and `approver.kind` required (S304); `mandate_ref` required iff
+  standing_mandate (S304 / S303); `min_approvers` ≥ 1; `shows` a list of
+  references and `recheck.source` a reference (existence-checked);
+  `expires` a duration > 0; enums S303; unknown fields W604
+  (validate/approval.rs).
 * Runtime: RequestApproval carries the shown values and their SHA-256 digest
   (canonical JSON). A decision is valid only if the digest matches, distinct
   approver ids ≥ min_approvers, not expired, and unused (single use).

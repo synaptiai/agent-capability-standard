@@ -45,7 +45,8 @@ the Rust core in `core/`).
 ## Test suite requirements
 - Positive fixtures: valid workflows (`tests/fixtures/pass_*`)
 - Negative fixtures: invalid references, type mismatches, ambiguous nodes,
-  edge and version violations (`tests/fixtures/fail_*`)
+  edge and version violations, and malformed or undeclared extensions
+  (`tests/fixtures/fail_*`)
 - Patch fixtures: expected patch suggestions and diff output
 - Expectations in `tests/fixtures/EXPECTATIONS.json`: `should_pass`,
   `expected_error_codes`, and `expected_warning_codes` (an empty list means

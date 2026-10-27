@@ -80,7 +80,14 @@ Re-planned after D-lang (Rust core): the validator and executor move into
         take no loop fields, recovery/inject_context shapes, V104 in list
         order, handler prerequisites checked at the targeter, group mates
         maybe-absent in handlers; JSON schema tightened to match.
-  - [ ] S5c wait@1 and approval@1 (W606, W608, ActionRecord statuses).
+  - [x] S5c wait@1 and approval@1: hosts, strict timeouts, liveness
+        windows, W608 (checkpoint before a wait, concurrency-aware, own
+        waits, handlers), approval structure, W606, world_state 1.1.0
+        ActionRecord statuses and approval record. Review (11 findings):
+        W608 for waits sharing the checkpoint's group, timeout checked for
+        malformed waits, no duplicate timeout diagnostics, saturating
+        liveness window, references required in correlate/shows/recheck,
+        W606 not repeated for malformed approvals, doc fixes.
   - [ ] S5d delegation@1 and quorum@1 (ontology inputs, review verdicts).
 - [ ] S6 Sans-IO executor in the core + Python driver + runtime fixtures.
 - [ ] S7 RFC-0003, STANDARD v1.1.0, EDGE_TYPES errata, docs, changelogs;

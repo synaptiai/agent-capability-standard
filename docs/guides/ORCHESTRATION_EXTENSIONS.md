@@ -12,8 +12,8 @@ the rationale is in [RFC-0003](../../spec/RFC-0003-orchestration-extensions.md).
 |-----------|--------------|-----------------|
 | `triggers@1` | How runs start | Yes |
 | `recovery@1` | Escalation to handler steps | Yes |
-| `wait@1` | Waiting for an event | Not yet |
-| `approval@1` | Structured, bound approval | Not yet |
+| `wait@1` | Waiting for an event | Yes |
+| `approval@1` | Structured, bound approval | Yes |
 | `delegation@1` | Delegation hints and sender filtering | Not yet |
 | `quorum@1` | Independent review quorums | Not yet |
 
@@ -80,11 +80,12 @@ approval steps: an unattended run cannot wait for a person in the session.
 ### Events
 
 ```yaml
-- kind: event
-  event:
-    event_type: deploy.finished
-    source_kind: agent           # log | api | sensor | message_bus | human | agent
-    delivers_to: deploy_event
+triggers:
+  - kind: event
+    event:
+      event_type: deploy.finished
+      source_kind: agent         # log | api | sensor | message_bus | human | agent
+      delivers_to: deploy_event
 inputs:
   deploy_event:
     type: object
@@ -163,9 +164,74 @@ deploy_with_escalation:
 - **Invocations.** An `invoke` target outside the catalog is W607; workflows
   that invoke each other are V105.
 
+## Waiting for an event (`wait@1`)
+
+A `receive` step with `wait` pauses the run until a matching event arrives
+or the step's `timeout` lapses (R401); the event arrives in the step's
+output (`data`). A `synchronize` step can wait too, when its `agents` input
+is a literal list of at least two agents.
+
+```yaml
+- capability: receive
+  purpose: Wait for the change window to open.
+  store_as: window_out
+  timeout: 2h                        # required, and must be a duration
+  wait:
+    event_type: change.window_opened # required
+    source_kind: api                 # optional: log | api | sensor | message_bus | human | agent
+    correlate:                       # each value must be a ${...} reference
+      request: ${request_out.data}   # the event must carry this value
+    liveness: {mode: probe, interval: 10m, failure_threshold: 3}
+```
+
+- `liveness` gives up early when the source goes quiet: after
+  `failure_threshold` missed heartbeats (`push`) or failed probes (`probe`)
+  one `interval` apart. That window must be shorter than the timeout, or
+  it would never fire first.
+- A wait can last hours, and the run may resume in another process, so a
+  checkpoint taken before the wait no longer covers a later `mutate`,
+  `send` or other step that requires a checkpoint (W608). Take the
+  checkpoint after the wait, not alongside it in a parallel group.
+
+## Approval (`approval@1`)
+
+A step that requires approval (`mutate`, `send` and `execute` do, and any
+step can raise `requires_approval`) can say who approves, what they see,
+and what the decision binds to:
+
+```yaml
+- capability: mutate
+  # purpose, store_as, input_bindings ...
+  approval:
+    approver: {kind: human, role: release-manager, min_approvers: 2}
+    mode: out_of_band                # or in_session (the default)
+    shows: ["${plan_out.steps}"]     # references; quote them inside [ ] and { }
+    binds_to: digest
+    recheck: {source: "${plan_out}", compare: digest, on_change: reask}
+    expires: 24h
+    when_unattended: defer_to_queue  # or skip, or fail (the default)
+```
+
+- The decision is bound to the SHA-256 digest of the shown values: if they
+  change before the step runs, the approval no longer applies. `recheck`
+  re-reads a source just before acting and asks again (`reask`), replans or
+  stops when it changed.
+- A `standing_mandate` approver names its mandate in `mandate_ref`, for
+  pre-approved routine actions.
+- `approval` on a step that does not require approval is an error (S303);
+  raise `requires_approval: true` if you mean it.
+- If a schedule or event trigger can start the run unattended (or a
+  trigger says `attendance: unattended`), say what to do when nobody is
+  there to approve: without `when_unattended` the step warns (W606) and an
+  unattended run fails there.
+- Decisions are recorded on the world state's action record
+  (`world_state_schema.yaml` 1.1.0): status `approved`, `rejected` or
+  `expired`, with an `approval` entry holding the digest and approvers.
+
 ## Durations
 
-Durations appear in schedules (`every`) and in later extensions. Write
+Durations appear in schedules (`every`), waits (`timeout`, liveness
+`interval`) and approvals (`expires`). Write
 `250ms`, `30s`, `5m`, `2h`, `1d`, or an ISO-8601 day-time duration such as
 `PT1H30M`, `P1DT12H` or `PT0.5S`. Years, months and weeks are not allowed,
 because their length varies. A step's `timeout` should use the same

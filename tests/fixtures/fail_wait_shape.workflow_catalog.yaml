@@ -1,0 +1,42 @@
+# Standard version: 1.1.0
+# Malformed waits (STANDARD v1.1 §5.13): a wait on a capability that cannot
+# wait, a wait with no timeout, a liveness window as long as the timeout, a
+# synchronize over one agent, and a source kind the event schema does not
+# define. S303 and S304.
+bad_waits:
+  goal: Wait badly.
+  risk: low
+  workflow_extensions:
+    requires: [wait@1]
+  steps:
+  - capability: retrieve
+    purpose: Retrieval cannot wait.
+    store_as: retrieve_out
+    timeout: 1h
+    input_bindings:
+      source: inbox
+    wait: {event_type: mail.arrived}
+  - capability: receive
+    purpose: A wait must end.
+    store_as: no_timeout_out
+    wait: {event_type: job.done}
+  - capability: receive
+    purpose: Liveness that cannot fail before the timeout.
+    store_as: liveness_out
+    timeout: 30m
+    wait:
+      event_type: job.done
+      liveness: {mode: push, interval: 10m, failure_threshold: 3}
+  - capability: synchronize
+    purpose: One agent is not a rendezvous.
+    store_as: sync_out
+    timeout: 1h
+    input_bindings:
+      agents: [replica-a]
+      state: {}
+    wait: {event_type: config.applied}
+  - capability: receive
+    purpose: Not an event source kind.
+    store_as: kind_out
+    timeout: 1h
+    wait: {event_type: job.done, source_kind: carrier_pigeon}

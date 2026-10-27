@@ -5,12 +5,14 @@
 //! coercion registry. [`validate_catalog`] returns a [`Report`] of diagnostics
 //! and machine-usable fix suggestions.
 
+mod approval;
 mod bindings;
 mod exprs;
 mod extensions;
 mod invoke;
 mod recovery;
 mod semantics;
+mod wait;
 
 pub use semantics::header_version;
 
@@ -373,6 +375,7 @@ impl WorkflowCheck<'_> {
             None => return Vec::new(),
         };
         let plan = recovery::plan(self.name, steps, &declared, self.report);
+        let unattended = approval::has_unattended_trigger(self.wf, &declared);
         let mut injected = recovery::Injected::new(&plan);
         // Duplicates (V104) are judged in list order, whatever the checking
         // order; the first step to use a name owns it.
@@ -427,7 +430,12 @@ impl WorkflowCheck<'_> {
             // Shape and unknown-key checks do not depend on the capability.
             self.check_step_fields(&loc, step);
             self.check_step_keys(&loc, step);
-            extensions::legacy_timeout(step, &|d| loc.locate(d), self.report);
+            // A waiting step's timeout is checked strictly (§5.13).
+            let waits = declared.has("wait@1") && step.contains_key("wait");
+            let waits_well = waits && step.get("wait").is_some_and(Value::is_object);
+            if !waits {
+                extensions::legacy_timeout(step, &|d| loc.locate(d), self.report);
+            }
             let (Some(node), Some(contracts)) =
                 (self.ctx.ontology.get(cap), self.ctx.contracts.get(cap))
             else {
@@ -451,6 +459,7 @@ impl WorkflowCheck<'_> {
                 parallel_group: step.get("parallel_group").and_then(Value::as_str),
                 requires_checkpoint: node.requires_checkpoint
                     || step.get("requires_checkpoint") == Some(&Value::Bool(true)),
+                waits: waits_well,
             };
             let store = step.get("store_as").and_then(Value::as_str);
             let view = if plan.handlers.contains(&i) {
@@ -526,6 +535,36 @@ impl WorkflowCheck<'_> {
                 }
             }
             checker.consumer_check(step, &contracts.input, scope, self.report);
+            wait::check(
+                self.ctx,
+                &loc,
+                step,
+                &declared,
+                &checker,
+                scope,
+                self.report,
+            );
+            let requires_approval =
+                node.requires_approval || step.get("requires_approval") == Some(&Value::Bool(true));
+            approval::check(
+                &loc,
+                step,
+                requires_approval,
+                &declared,
+                &checker,
+                scope,
+                self.report,
+            );
+            // A malformed approval block is reported as such; W606 would
+            // only repeat it.
+            let plan_for_unattended = match step.get("approval") {
+                None => false,
+                Some(Value::Object(a)) => a.contains_key("when_unattended"),
+                Some(_) => true,
+            };
+            if requires_approval && unattended && !plan_for_unattended {
+                approval::unattended(&loc, self.report);
+            }
 
             // ...but after-gates and failure modes run once the step has run,
             // so there its output is present; later steps see it as absent
@@ -576,6 +615,7 @@ impl WorkflowCheck<'_> {
             }
         }
         semantics::check_edges(self.ctx, self.name, &placed, &handlers, self.report);
+        wait::spans_checkpoint(self.name, &placed, &handlers, self.report);
         invocations
     }
 

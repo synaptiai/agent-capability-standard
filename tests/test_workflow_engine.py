@@ -1528,3 +1528,51 @@ class TestCheckpointEnforcementWithDowngrade:
         # Checkpoint MUST be created despite the YAML downgrade
         assert cp_id is not None
         assert tracker.has_valid_checkpoint()
+
+
+# ---------------------------------------------------------------------------
+# Orchestration extensions survive the engine's model (STANDARD v1.1 §5.9)
+# ---------------------------------------------------------------------------
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+class TestExtensionsThroughEngine:
+    """Extension fields are carried by the engine's step and workflow
+    models, so validating through the engine matches the file validator."""
+
+    @pytest.mark.parametrize(
+        ("fixture", "warnings"),
+        [
+            ("pass_triggers", []),
+            ("pass_escalation", []),
+            ("pass_wait_approval", []),
+            ("pass_wait_approval_warnings", ["W606", "W608"]),
+        ],
+    )
+    def test_engine_matches_fixture(self, fixture: str, warnings: list[str]) -> None:
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        eng.load_catalog(FIXTURES / f"{fixture}.workflow_catalog.yaml")
+        report = eng.validate_report()
+        assert [e.code.value for e in report if e.severity is Severity.ERROR] == []
+        assert (
+            sorted(e.code.value for e in report if e.severity is Severity.WARNING)
+            == warnings
+        )
+
+    def test_wait_and_approval_round_trip(self) -> None:
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        eng.load_catalog(FIXTURES / "pass_wait_approval.workflow_catalog.yaml")
+        wf = eng.get_workflow("nightly_change")
+        assert wf is not None
+        by_store = {s.store_as: s for s in wf.steps}
+        assert by_store["window_out"].to_dict()["wait"]["event_type"] == (
+            "change.window_opened"
+        )
+        approval = by_store["mutate_out"].to_dict()["approval"]
+        assert approval["when_unattended"] == "defer_to_queue"
+        assert wf.to_dict()["workflow_extensions"]["requires"] == [
+            "triggers@1",
+            "wait@1",
+            "approval@1",
+        ]

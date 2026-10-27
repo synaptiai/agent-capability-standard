@@ -26,11 +26,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `handler: true` invoke steps through `action: escalate` and
   `on_exhausted`, injected `${_recovery.*}` context, untriggered recoveries
   (W609), unreachable handlers (W613), unknown invoke targets (W607) and
-  invoke cycles (V105). Declaring an extension the validator cannot check
+  invoke cycles (V105). `wait@1` validates waits on `receive` and
+  `synchronize` (required duration timeout, liveness that can fire before
+  it, W608 for a checkpoint taken before a wait), and `approval@1`
+  validates structured approvals (approver, digest binding, recheck,
+  expiry, unattended behaviour; W606 when an unattended run would reach an
+  approval with no plan). Declaring an extension the validator cannot check
   yet is refused (V106). New guide:
   [docs/guides/ORCHESTRATION_EXTENSIONS.md](docs/guides/ORCHESTRATION_EXTENSIONS.md)
 - A step that raises `requires_checkpoint` above the ontology is now held to
   it: F501 when no checkpoint runs before it
+- `world_state_schema.yaml` 1.1.0: action records gain status `rejected`
+  and `expired` and an optional `approval` record (digest, decision,
+  approvers)
 - `spec/STANDARD-v1.1.0.md` (draft) and `spec/RFC-0003-orchestration-extensions.md`
   (Accepted) answering #114; see the [specification changelog](spec/CHANGELOG.md)
 - Validator warnings: `tools/validate_workflows.py` reports warnings (W6xx)

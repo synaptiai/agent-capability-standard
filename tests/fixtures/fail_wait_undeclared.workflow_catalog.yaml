@@ -1,0 +1,24 @@
+# Standard version: 1.1.0
+# A wait and an approval used without declaring wait@1 and approval@1 in
+# workflow_extensions.requires (STANDARD v1.1 §5.9). V106: a 1.0 consumer
+# would ignore them and run the workflow without waiting or asking.
+undeclared:
+  goal: Wait and approve without declaring it.
+  risk: high
+  steps:
+  - capability: receive
+    purpose: Wait for the window.
+    store_as: window_out
+    timeout: 1h
+    wait: {event_type: change.window_opened}
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: checkpoint_out
+  - capability: mutate
+    purpose: Apply the change.
+    store_as: mutate_out
+    input_bindings:
+      target: config/service.yaml
+      operation: {}
+    approval:
+      approver: {kind: human}

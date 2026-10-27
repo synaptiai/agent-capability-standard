@@ -506,6 +506,17 @@ class TestJsonSchemaValidation:
                 ]
             },
             {"store_as": "_recovery"},
+            {"wait": {"source_kind": "api"}},
+            {"wait": {"event_type": "e"}},
+            {
+                "wait": {
+                    "event_type": "e",
+                    "liveness": {"mode": "push", "interval": "0s"},
+                }
+            },
+            {"approval": {"approver": {"kind": "standing_mandate"}}},
+            {"approval": {"approver": {"kind": "human", "mandate_ref": "m"}}},
+            {"approval": {"approver": {"kind": "human"}, "expires": "PT0S"}},
         ],
         ids=[
             "missing-purpose",
@@ -517,6 +528,12 @@ class TestJsonSchemaValidation:
             "escalate-without-target",
             "escalate-with-loop-fields",
             "reserved-store-as",
+            "wait-without-event-type",
+            "wait-without-timeout",
+            "zero-liveness-interval",
+            "mandate-without-ref",
+            "human-with-mandate-ref",
+            "zero-expiry",
         ],
     )
     def test_workflow_schema_rejects_bad_steps(

@@ -22,12 +22,16 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   with `workflow_extensions.requires`.
   Extension fields are must-understand (V106 when used undeclared).
   Enforced so far: declarations, `triggers@1` (§5.10, with the duration
-  grammar of §5.10.1) and `recovery@1` (§5.11, §5.12). A validator must
+  grammar of §5.10.1), `recovery@1` (§5.11, §5.12), `wait@1` (§5.13) and
+  `approval@1` (§5.14). A validator must
   refuse a declared extension it does not check (V106).
 - **Effective `requires_checkpoint` (§5.2.1)** raised by a step is enforced:
   F501 when no checkpoint runs before it.
 - **`event_schema.yaml` 1.1.0:** `source.kind` gains `agent`, so events from
   other agents can trigger workflows (§5.10).
+- **`world_state_schema.yaml` 1.1.0:** `ActionRecord.status` gains
+  `rejected` and `expired`, and an optional `approval` record binds the
+  action to the decision (§5.14).
 
 ### Changed — clarifications of 1.0 semantics (#114)
 - **Edges (§4.3, [EDGE_TYPES](EDGE_TYPES.md)).** `precedes` orders two

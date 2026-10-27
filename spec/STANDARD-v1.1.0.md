@@ -249,7 +249,9 @@ Each step MAY define:
 | `workflow_id` | string | For `invoke`: the workflow to run |
 | `risk`, `mutation`, `requires_checkpoint`, `requires_approval` | — | Safety flags (§5.2.1) |
 | `handler` | boolean | Escalation target only (§5.11) |
-| `wait`, `approval`, `quorum` | — | Extension fields (§5.13–§5.16) *(pending reference implementation)* |
+| `wait` | object | Wait for an event (§5.13) |
+| `approval` | object | How approval is obtained and bound (§5.14) |
+| `quorum` | object | Review quorum (§5.16) *(pending reference implementation)* |
 
 Unrecognised step, gate, failure-mode, recovery and retry fields are W604.
 
@@ -492,7 +494,8 @@ extension: a consumer that ignores them only loses an optional trigger.
 
 A validator MUST NOT accept a declaration of an extension it does not
 check: listing one is V106, as for an unknown extension. *(The reference
-validator currently implements `triggers@1` and `recovery@1`.)*
+validator currently implements `triggers@1`, `recovery@1`, `wait@1` and
+`approval@1`.)*
 
 ### 5.10 Triggers
 
@@ -522,8 +525,9 @@ kind, a malformed cron, duration or time zone, and an unknown `overlap` or
 `attendance` are S303 or S304 (missing). Unknown trigger fields are W604.
 
 An `invoke` step whose target declares triggers but none of kind `invoke`
-is V107. An unattended run reaching an approval step with no
-`approval.when_unattended` is W606 *(pending reference implementation)*.
+is V107. A step whose effective `requires_approval` is true, in a workflow
+with an unattended trigger, and with no `approval.when_unattended` is W606:
+an unattended run fails there (F502).
 
 #### 5.10.1 Durations
 
@@ -589,46 +593,78 @@ whether or not the failure mode's action is allowed.
   (it cannot be checked); invoke cycles among catalog workflows, including a
   workflow invoking itself, are V105.
 
-### 5.13 Waiting for Events *(pending reference implementation)*
+### 5.13 Waiting for Events
 
 ```yaml
 - capability: receive
+  store_as: approval_event
   timeout: 2h
   wait:
     event_type: approval.granted
-    correlate: {request_id: ${request_out.id}}
+    source_kind: human
+    correlate: {request_id: "${request_out.id}"}
     liveness: {mode: probe, interval: 10m, failure_threshold: 3}
 ```
 
+| Field | Description |
+|-------|-------------|
+| `event_type` | Required (S304): the event type to wait for |
+| `source_kind` | Only events from this kind of source match: an `event_schema.yaml` `source.kind` (else S303) |
+| `correlate` | A mapping of event keys to references (each a `${...}` reference, else S303); the event's values must equal theirs |
+| `liveness` | `mode` (`push`: the source sends heartbeats; `probe`: the runtime polls it) and `interval` (a duration longer than zero), both required (S304); `failure_threshold` (integer ≥ 1, default 3) |
+
 `wait` is allowed only on `receive`, or on `synchronize` whose literal
 `agents` list has at least two entries (else S303). The step MUST declare a
-`timeout` (S304) that parses as a duration, and `interval ×
-failure_threshold` MUST be less than it (S303). A lapse raises R401. A
-`wait` between a checkpoint and a later `mutate`/`send` with no new
-checkpoint is W608: after resuming, checkpoints taken before the wait no
-longer authorise mutations.
+`timeout` (S304) that parses as a duration (S303; the W614 leniency for
+legacy timeouts does not apply to a wait, which must end). Liveness MUST
+be able to fail before the timeout: `interval × failure_threshold` less than
+the timeout, else S303. The matching event is delivered in the step's
+output (`data`, under the capability's output contract); a lapse raises
+R401.
 
-### 5.14 Approval *(pending reference implementation)*
+A step that requires a checkpoint (`mutate`, `send`, or a raised
+`requires_checkpoint`) whose latest checkpoint runs before a `wait` is
+W608: a wait can last hours and the run may resume elsewhere, so a
+checkpoint taken before it no longer authorises the step. Take a new
+checkpoint after the wait. "Runs before" is as in §4.3: a wait in the
+checkpoint's parallel group counts (the checkpoint may finish first), one
+in the step's own group does not. A step that waits itself acts after its
+wait, so any earlier checkpoint is stale for it; a handler (§5.11) is
+judged at its earliest targeting step, including that step's own wait.
+
+### 5.14 Approval
 
 ```yaml
 approval:
   approver: {kind: human, role: release-manager, min_approvers: 2}
   mode: out_of_band
-  shows: [${plan_out.steps}]
+  shows: ["${plan_out.steps}"]
   binds_to: digest
-  recheck: {source: ${plan_out}, compare: digest, on_change: reask}
+  recheck: {source: "${plan_out}", compare: digest, on_change: reask}
   expires: 24h
   when_unattended: defer_to_queue
 ```
 
+| Field | Description |
+|-------|-------------|
+| `approver` | Required (S304). `kind` (required): `human` or `standing_mandate`; `role`; `min_approvers` (integer ≥ 1, default 1); `mandate_ref`, required for and only for a standing mandate (S304 / S303) |
+| `mode` | `in_session` (default) or `out_of_band` |
+| `shows` | References whose values the approvers see (each a `${...}` reference, else S303) |
+| `binds_to` | `digest` (default): the decision binds to the shown values |
+| `recheck` | `source` (required, a `${...}` reference re-read before acting, else S303), `compare`: `version` or `digest` (default), `on_change`: `reask` (default), `replan` or `stop` |
+| `expires` | How long a decision stays valid: a duration longer than zero |
+| `when_unattended` | `fail` (default), `skip` or `defer_to_queue` |
+
 `approval` is allowed only where the effective `requires_approval` is true
-(S303). `approver.kind` is `human` or `standing_mandate` (which needs
-`mandate_ref` and `approval@1` in `workflow_extensions.requires`). A
-decision is valid only if the SHA-256 digest of the canonical JSON of the
+(S303); other values above are S303 when malformed, and unknown fields W604.
+A decision is valid only if the SHA-256 digest of the canonical JSON of the
 shown values matches, at least `min_approvers` distinct approvers agree, it
 has not expired, and it has not been used before. Unattended runs follow
-`when_unattended`: `fail` (default) → F502, `skip` → the step is skipped,
-`defer_to_queue` → the run ends `deferred` with a planned action record.
+`when_unattended`: `fail` → F502, `skip` → the step is skipped,
+`defer_to_queue` → the run ends `deferred` with a `planned` action record.
+The decision is recorded on the action record (`world_state_schema.yaml`
+1.1.0: `approval` with the digest, decision and approvers; status
+`rejected` or `expired` when it was refused or lapsed).
 
 ### 5.15 Delegation *(pending reference implementation)*
 
@@ -874,7 +910,7 @@ NOT change any code's severity otherwise.
 | W605 | MISSING_SPEC_VERSION | No `spec_version` and no version header |
 | W606 | UNATTENDED_APPROVAL | An unattended trigger reaches an approval step without `when_unattended` |
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
-| W608 | WAIT_SPANS_CHECKPOINT | A wait sits between a checkpoint and a later mutate/send |
+| W608 | WAIT_SPANS_CHECKPOINT | A wait sits between a checkpoint and a later step that requires one (§5.13) |
 | W609 | UNTRIGGERED_FAILURE_MODE | Structured recovery with neither `on_error` nor `when` |
 | W610 | NULLABLE_OPERAND | An ordering operand may be null |
 | W611 | CONSTANT_COMPARISON | Equality between kinds that can never be equal |
@@ -1232,6 +1268,9 @@ Field names starting with `x-` are reserved for vendor extensions.
 - `mutation_overridable` (§4.4)
 - Orchestration extensions and their declaration: triggers, handler steps,
   recovery and escalation, wait, approval, delegation, quorum (§5.9–§5.16)
+- Canonical schemas: `event_schema.yaml` 1.1.0 (`source.kind` gains
+  `agent`); `world_state_schema.yaml` 1.1.0 (action status `rejected` and
+  `expired`, and the `approval` record of §5.14)
 
 ---
 

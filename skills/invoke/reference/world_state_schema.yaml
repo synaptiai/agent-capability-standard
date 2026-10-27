@@ -1,6 +1,6 @@
 schema:
   name: canonical_world_state
-  version: 1.0.0
+  version: 1.1.0
   description: Canonical, composition-safe world-state representation for real+digital
     modeling. Designed for agent workflows (evidence, uncertainty, provenance, transitions).
   generated_at: '2026-01-24T02:33:26.585814Z'
@@ -297,9 +297,50 @@ types:
         enum:
         - planned
         - approved
+        - rejected
+        - expired
         - executed
         - failed
         - rolled_back
+        description: rejected and expired (Standard v1.1 §5.14) record an approval
+          that was refused or lapsed; an action deferred to a queue stays planned.
+      approval:
+        type: object
+        nullable: true
+        description: The approval decision bound to this action (Standard v1.1 §5.14).
+        required:
+        - digest
+        - decision
+        properties:
+          digest:
+            type: string
+            description: SHA-256 of the canonical JSON of the values shown to the approvers.
+          decision:
+            type: string
+            enum:
+            - approved
+            - rejected
+            - expired
+          approvers:
+            type: array
+            items:
+              type: string
+            description: Distinct approver identities.
+          mode:
+            type: string
+            enum:
+            - in_session
+            - out_of_band
+          mandate_ref:
+            type: string
+            nullable: true
+            description: The standing mandate that approved, if not a person.
+          decided_at:
+            type: string
+            nullable: true
+          expires_at:
+            type: string
+            nullable: true
       plan_ref:
         type: string
         nullable: true

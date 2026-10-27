@@ -23,7 +23,7 @@ pub(crate) const SPECIFIED: &[&str] = &[
 /// The extensions this validator implements. A workflow that requires any
 /// other is refused (V106): must-understand only works if a consumer never
 /// claims an extension it does not check.
-pub(crate) const IMPLEMENTED: &[&str] = &["triggers@1", "recovery@1"];
+pub(crate) const IMPLEMENTED: &[&str] = &["triggers@1", "recovery@1", "wait@1", "approval@1"];
 
 const TRIGGER_KEYS: &[&str] = &["kind", "schedule", "event", "attendance"];
 const SCHEDULE_KEYS: &[&str] = &["cron", "every", "timezone", "overlap"];

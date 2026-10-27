@@ -1,0 +1,69 @@
+# Standard version: 1.1.0
+# Waiting and structured approval (STANDARD v1.1 §5.13, §5.14): a nightly run
+# asks for a change request, waits for the matching event with a liveness
+# probe, and applies the change only with an approval bound to what was
+# shown. The schedule starts runs unattended, so the approval says what to do
+# then (defer the action to a queue).
+nightly_change:
+  goal: Apply the night's approved configuration change.
+  risk: high
+  workflow_extensions:
+    requires: [triggers@1, wait@1, approval@1]
+  triggers:
+  - kind: schedule
+    schedule: {cron: "0 2 * * *", timezone: Europe/Lisbon}
+  - kind: manual
+  steps:
+  - capability: retrieve
+    purpose: Fetch the pending change request.
+    store_as: request_out
+    input_bindings:
+      target: changes/pending
+  - capability: plan
+    purpose: Plan the change.
+    store_as: plan_out
+    input_bindings:
+      goal: Apply the pending configuration change.
+  - capability: constrain
+    purpose: Check the plan against change policy.
+    store_as: policy_out
+    input_bindings:
+      target: ${plan_out}
+      constraints: [change_policy]
+  - capability: receive
+    purpose: Wait for the change service to confirm the window is open.
+    store_as: window_out
+    timeout: 2h
+    wait:
+      event_type: change.window_opened
+      source_kind: api
+      correlate:
+        request: ${request_out.data}
+      liveness: {mode: probe, interval: 10m, failure_threshold: 3}
+  - capability: checkpoint
+    purpose: Save a restore point after the wait.
+    store_as: checkpoint_out
+  - capability: mutate
+    purpose: Apply the configuration change.
+    store_as: mutate_out
+    input_bindings:
+      target: config/service.yaml
+      operation: ${plan_out}
+    approval:
+      approver: {kind: human, role: release-manager, min_approvers: 2}
+      mode: out_of_band
+      shows: ["${plan_out.steps}"]
+      binds_to: digest
+      recheck: {source: "${plan_out}", compare: digest, on_change: reask}
+      expires: 24h
+      when_unattended: defer_to_queue
+  - capability: synchronize
+    purpose: Wait until both replicas report the new configuration.
+    store_as: sync_out
+    timeout: PT30M
+    input_bindings:
+      agents: [replica-a, replica-b]
+      state: ${mutate_out}
+    wait:
+      event_type: config.applied
+      source_kind: agent

@@ -50,6 +50,8 @@ pub(crate) const STEP_KEYS: &[&str] = &[
     "domain",
     "workflow_id",
     "handler",
+    "wait",
+    "approval",
     "resolution_strategy",
     "conflict_resolution_strategies",
 ];
@@ -207,12 +209,14 @@ pub(crate) struct Placed<'a> {
     /// Effective `requires_checkpoint` (§5.2.1): the ontology's, or true
     /// when the step raises it.
     pub requires_checkpoint: bool,
+    /// Whether the step waits for an event (`wait`, §5.13).
+    pub waits: bool,
 }
 
 impl Placed<'_> {
     /// Steps of one parallel group run at the same time, so neither
     /// completes before the other starts.
-    fn concurrent_with(&self, other: &Placed<'_>) -> bool {
+    pub(crate) fn concurrent_with(&self, other: &Placed<'_>) -> bool {
         self.parallel_group.is_some() && self.parallel_group == other.parallel_group
     }
 }

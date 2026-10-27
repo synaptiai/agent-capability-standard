@@ -1,0 +1,40 @@
+# Standard version: 1.1.0
+# Malformed approvals (STANDARD v1.1 §5.14): an approval on a step that does
+# not require approval, a standing mandate that names no mandate, and an
+# approver with no kind. S303 and S304.
+bad_approvals:
+  goal: Approve badly.
+  risk: high
+  workflow_extensions:
+    requires: [approval@1]
+  steps:
+  - capability: plan
+    purpose: Plan does not require approval.
+    store_as: plan_out
+    input_bindings:
+      goal: Plan.
+    approval:
+      approver: {kind: human}
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: checkpoint_out
+  - capability: mutate
+    purpose: A standing mandate must name its mandate.
+    store_as: mutate_out
+    input_bindings:
+      target: config/service.yaml
+      operation: ${plan_out}
+    approval:
+      approver: {kind: standing_mandate}
+  - capability: checkpoint
+    purpose: Save another restore point.
+    store_as: checkpoint2_out
+  - capability: send
+    purpose: An approver needs a kind.
+    store_as: send_out
+    input_bindings:
+      destination: ops-channel
+      payload: ${mutate_out}
+    approval:
+      approver: {role: on-call}
+      expires: 0s

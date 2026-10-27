@@ -135,6 +135,13 @@
       "pattern": "^([0-9]+(ms|s|m|h|d)|P(?=[0-9]|T[0-9])([0-9]+D)?(T(?=[0-9])([0-9]+H)?([0-9]+M)?([0-9]+(\\.[0-9]{1,9})?S)?)?)$(?!\\n)",
       "description": "A duration: <digits>(ms|s|m|h|d) or an ISO-8601 day-time duration (STANDARD v1.1 §5.10.1)."
     },
+    "positive_duration": {
+      "allOf": [
+        { "$ref": "#/$defs/duration" },
+        { "not": { "pattern": "^(0+(ms|s|m|h|d)|P(0+D)?(T(0+H)?(0+M)?(0+(\\.0+)?S)?)?)$" } }
+      ],
+      "description": "A duration longer than zero."
+    },
     "fireable_code": {
       "type": "string",
       "enum": ["R401", "R402", "R403", "R405", "F502"]
@@ -169,10 +176,7 @@
       "properties": {
         "cron": { "type": "string", "description": "Five-field cron expression; no CRON_TZ= prefix." },
         "every": {
-          "allOf": [
-            { "$ref": "#/$defs/duration" },
-            { "not": { "pattern": "^(0+(ms|s|m|h|d)|P(0+D)?(T(0+H)?(0+M)?(0+(\\.0+)?S)?)?)$" } }
-          ],
+          "$ref": "#/$defs/positive_duration",
           "description": "An interval longer than zero."
         },
         "timezone": { "type": "string", "description": "IANA time zone name (default UTC)." },
@@ -224,13 +228,24 @@
       "type": "object",
       "required": ["capability", "purpose", "store_as"],
       "additionalProperties": true,
-      "if": {
-        "properties": { "handler": { "const": true } },
-        "required": ["handler"]
-      },
-      "then": {
-        "properties": { "capability": { "const": "invoke" } }
-      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "handler": { "const": true } },
+            "required": ["handler"]
+          },
+          "then": {
+            "properties": { "capability": { "const": "invoke" } }
+          }
+        },
+        {
+          "if": { "required": ["wait"] },
+          "then": {
+            "required": ["timeout"],
+            "properties": { "timeout": { "$ref": "#/$defs/duration" } }
+          }
+        }
+      ],
       "properties": {
         "capability": {
           "type": "string",
@@ -326,6 +341,14 @@
           "type": "boolean",
           "description": "Whether to skip this step if its condition evaluates to false."
         },
+        "wait": {
+          "$ref": "#/$defs/wait",
+          "description": "Wait for a matching event (STANDARD v1.1 §5.13; needs wait@1). Only on receive, or synchronize over at least two agents; the step needs a duration timeout."
+        },
+        "approval": {
+          "$ref": "#/$defs/approval",
+          "description": "How the step's approval is obtained and bound (STANDARD v1.1 §5.14; needs approval@1). Only where approval is required."
+        },
         "handler": {
           "type": "boolean",
           "description": "An invoke step that runs only as an escalation target (STANDARD v1.1 §5.11; needs recovery@1)."
@@ -341,6 +364,86 @@
         "output_conforms_to": {
           "type": "string",
           "description": "Schema reference that the step output must conform to."
+        }
+      }
+    },
+    "wait": {
+      "type": "object",
+      "required": ["event_type"],
+      "additionalProperties": true,
+      "properties": {
+        "event_type": { "type": "string", "description": "The event_type to wait for." },
+        "source_kind": {
+          "type": "string",
+          "enum": ["log", "api", "sensor", "message_bus", "human", "agent"],
+          "description": "Only events from this kind of source match (event_schema.yaml source.kind)."
+        },
+        "correlate": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Keys the event must carry, mapped to the references whose values they must equal."
+        },
+        "liveness": {
+          "type": "object",
+          "required": ["mode", "interval"],
+          "additionalProperties": true,
+          "properties": {
+            "mode": { "type": "string", "enum": ["push", "probe"] },
+            "interval": { "$ref": "#/$defs/positive_duration" },
+            "failure_threshold": { "type": "integer", "minimum": 1, "default": 3 }
+          },
+          "description": "Give up early when the source stops answering: interval × failure_threshold must be shorter than the step's timeout."
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": ["approver"],
+      "additionalProperties": true,
+      "properties": {
+        "approver": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": true,
+          "if": {
+            "properties": { "kind": { "const": "standing_mandate" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["mandate_ref"] },
+          "else": { "not": { "required": ["mandate_ref"] } },
+          "properties": {
+            "kind": { "type": "string", "enum": ["human", "standing_mandate"] },
+            "role": { "type": "string" },
+            "min_approvers": { "type": "integer", "minimum": 1, "default": 1 },
+            "mandate_ref": { "type": "string", "description": "The standing mandate that approves (kind standing_mandate only)." }
+          }
+        },
+        "mode": { "type": "string", "enum": ["in_session", "out_of_band"], "default": "in_session" },
+        "shows": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "References whose values the approvers see; the decision binds to their digest."
+        },
+        "binds_to": { "type": "string", "enum": ["digest"], "default": "digest" },
+        "recheck": {
+          "type": "object",
+          "required": ["source"],
+          "additionalProperties": true,
+          "properties": {
+            "source": { "type": "string", "description": "Reference re-read before acting." },
+            "compare": { "type": "string", "enum": ["version", "digest"], "default": "digest" },
+            "on_change": { "type": "string", "enum": ["reask", "replan", "stop"], "default": "reask" }
+          }
+        },
+        "expires": {
+          "$ref": "#/$defs/positive_duration",
+          "description": "How long a decision stays valid; longer than zero."
+        },
+        "when_unattended": {
+          "type": "string",
+          "enum": ["defer_to_queue", "skip", "fail"],
+          "default": "fail",
+          "description": "What an unattended run does here: queue the action and end deferred, skip the step, or fail with F502."
         }
       }
     },
