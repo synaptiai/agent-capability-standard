@@ -26,11 +26,11 @@ Produce a new artifact that satisfies specified constraints and serves a defined
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `artifact_type` | Yes | string | Type of output: text, code, plan, config, schema, etc. |
-| `constraints` | Yes | object\|array | Requirements the artifact must satisfy |
-| `context` | No | string\|object | Background information, examples, or references |
+| `specification` | Yes | string\|object | What to generate |
 | `format` | No | string | Output format: markdown, json, yaml, typescript, etc. |
-| `alternatives_requested` | No | boolean | Whether to provide alternative designs |
+| `constraints` | No | object | Requirements the artifact must satisfy |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

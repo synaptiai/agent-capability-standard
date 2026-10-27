@@ -27,11 +27,12 @@ Systematically analyze a target (plan, code, design, document) to identify failu
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `target` | Yes | string or object | Plan, code, design, or document to critique |
-| `focus_areas` | No | array | Specific areas to examine (security, performance, logic, etc.) |
+| `target` | Yes | any | Plan, code, design, or document to critique |
+| `criteria` | No | array | Evaluation criteria |
 | `severity_threshold` | No | string | Minimum severity to report: low, medium, high, critical |
-| `context` | No | object | Additional context about the target |
-| `adversarial` | No | boolean | Enable adversarial/red-team thinking (default: true) |
+| `context` | No | any | Additional context about the target |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

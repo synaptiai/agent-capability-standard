@@ -13,7 +13,7 @@ forward_ref:
     retry: null
     store_as: observe_out
     input_bindings:
-      data: ${future_out}
+      target: ${future_out}
     failure_modes: []
   - capability: search
     purpose: Produces future_out.

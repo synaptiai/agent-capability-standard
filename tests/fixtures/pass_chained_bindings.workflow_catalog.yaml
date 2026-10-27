@@ -23,7 +23,7 @@ chained:
     retry: null
     store_as: detect_out
     input_bindings:
-      context: ${observe_out}
+      data: ${observe_out}
     failure_modes: []
   - capability: classify
     purpose: Classify detected items.
@@ -35,7 +35,7 @@ chained:
     retry: null
     store_as: classify_out
     input_bindings:
-      items: ${detect_out}
+      item: ${detect_out}
     failure_modes: []
   success:
   - Classification completed

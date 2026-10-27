@@ -64,6 +64,21 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 - **B205** means "annotation names no type"; an annotation that contradicts
   the schema is B203 (§9.3).
 
+### Changed — gaps found by porting workflows to the candidate (#114)
+The issue author ported nine production workflows to the v1.1.0 candidate
+and reported five gaps; these close them.
+- **Binding keys (§5.5).** An `input_bindings` key the capability's input
+  schema does not define is W604, so a mistyped input is visible. The
+  ontology gains the optional inputs catalogs were already binding:
+  `retrieve.filter` and `retrieve.references`, `state.observations`,
+  `plan.context`, `critique.context`, `explain.constraints`.
+- **Invoke inputs (§5.12).** A literal `input_bindings.input` is checked
+  against the invoked workflow's `inputs`: an undeclared name is S303 and a
+  missing required input S304, as the executor refuses both (R402).
+- **Principals (§5.15)** are opaque strings compared exactly; the host
+  reports the authenticated party that delivered an item, not a sender the
+  item claims.
+
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`
   is `0.5 ** (age/half_life)`, which returns exactly 0.5 at `age == half_life`. The published

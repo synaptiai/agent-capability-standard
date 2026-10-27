@@ -13,7 +13,7 @@ missing_store:
     retry: null
     store_as: observe_out
     input_bindings:
-      data: ${nonexistent_store}
+      target: ${nonexistent_store}
     failure_modes: []
   success:
   - Should fail

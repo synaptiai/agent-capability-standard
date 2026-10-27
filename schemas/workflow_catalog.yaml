@@ -754,7 +754,7 @@ digital_twin_sync_loop:
     retry: null
     store_as: search_out
     input_bindings:
-      target: ${receive_out.source}
+      query: ${receive_out.source}
     failure_modes: []
   - capability: transform
     purpose: Normalize raw signals into canonical events compatible with state.observations.
@@ -767,8 +767,8 @@ digital_twin_sync_loop:
     store_as: transform_out
     failure_modes: []
     input_bindings:
-      source: '${receive_out.data}'
-      target_schema: canonical_event
+      input: '${receive_out.data}'
+      target_format: canonical_event
     gates: []
     mapping_ref: schemas/transforms/transform_mapping_rawlog_to_observation.yaml
     output_conforms_to: schemas/event_schema.yaml#/event
@@ -789,7 +789,7 @@ digital_twin_sync_loop:
       sources:
       - '${transform_out.output}'
       - '${previous_world_state}'
-      resolution_strategy: prefer_authoritative_sources
+      conflict_resolution: prefer_authoritative_sources
     gates: []
     resolution_strategy: prefer_authoritative_sources
     conflict_resolution_strategies:
@@ -835,7 +835,7 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       observations: '${integrate_out.merged.observations: array<object>}'
-      domain: ${integrate_out.merged.meta.world_id}
+      scope: ${integrate_out.merged.meta.world_id}
     gates: []
     output_conforms_to: schemas/world_state_schema.yaml#/world_state
   - capability: compare
@@ -843,8 +843,9 @@ digital_twin_sync_loop:
     domain: state_diff
     store_as: compare_state_out
     input_bindings:
-      state_a: '${previous_world_state: object}'
-      state_b: '${state_out: object}'
+      options:
+      - '${previous_world_state: object}'
+      - '${state_out: object}'
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -876,7 +877,7 @@ digital_twin_sync_loop:
     store_as: detect_anomaly_out
     failure_modes: []
     input_bindings:
-      context: ${state_out}
+      data: ${state_out}
     gates: []
   - capability: measure
     purpose: Estimate risk impact/probability from drift and transitions.
@@ -890,7 +891,7 @@ digital_twin_sync_loop:
     store_as: measure_risk_out
     failure_modes: []
     input_bindings:
-      context: ${detect_anomaly_out}
+      target: ${detect_anomaly_out}
     gates: []
   - capability: predict
     purpose: Forecast near-term risk trajectory and triggers.
@@ -1072,9 +1073,8 @@ digital_twin_bootstrap:
     condition: ${world_state_out} == null
     skip_if_false: true
     input_bindings:
-      inputs:
-        domain: ${user_input.domain}
-        constraints: ${user_input.constraints}
+      input:
+        user_input: ${user_input}
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1087,9 +1087,10 @@ digital_twin_bootstrap:
     workflow_id: digital_twin_sync_loop
     store_as: sync_out
     input_bindings:
-      inputs:
-        # Note: result contains nested workflow output where state_out was stored
-        world_state: ${world_model_out.result}
+      input:
+        user_input: ${user_input}
+        # result holds the invoked workflow's stores; its state_out is the baseline
+        previous_world_state: '${world_model_out.result.state_out: object}'
     risk: medium
     mutation: false
     requires_checkpoint: false

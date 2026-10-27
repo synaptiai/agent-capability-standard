@@ -32,6 +32,8 @@ Invoke a predefined workflow by name, passing input parameters and receiving agg
 | `input` | No | object | Input parameters for workflow |
 | `options` | No | object | Execution options (timeout, retry, etc.) |
 
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
+
 ## Procedure
 
 1) **Resolve workflow**: Find workflow definition

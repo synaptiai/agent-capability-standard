@@ -402,7 +402,8 @@ care_plan_review:
       input_bindings:
         target: ${patient.id}
         format: lab_results
-        range: ${review_window}
+        filter:
+          time_range: ${review_window}
 
     - capability: retrieve
       purpose: Get current medications.
@@ -590,7 +591,8 @@ handoff_preparation:
       input_bindings:
         target: ${patient.id}
         format: vital_signs_summary
-        range: ${shift_window}
+        filter:
+          time_range: ${shift_window}
 
     - capability: retrieve
       purpose: Get pending orders and tasks.

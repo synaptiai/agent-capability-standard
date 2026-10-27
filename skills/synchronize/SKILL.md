@@ -26,11 +26,12 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `sources` | Yes | array[string\|object] | List of data sources to synchronize (URIs, agent outputs, or inline data) |
-| `strategy` | No | enum | Merge strategy: `merge` (combine), `replace` (latest wins), `conflict_resolve` (manual rules). Default: `merge` |
-| `conflict_rules` | No | object | Rules for conflict resolution: priority order, field-level policies, or custom handlers |
-| `target_schema` | No | string | Schema to validate merged output against |
+| `agents` | Yes | array | Agents to synchronize |
+| `state` | Yes | object | State to agree on |
+| `timeout` | No | string | Sync timeout |
 | `accept_from` | No | array[string] | Principals to accept state from (Standard v1.1 `delegation@1`) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

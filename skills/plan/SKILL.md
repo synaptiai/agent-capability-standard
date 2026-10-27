@@ -30,10 +30,11 @@ Create a structured, executable plan that decomposes a goal into ordered steps w
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `goal` | Yes | string | Clear statement of what the plan should achieve |
-| `context` | No | object | Current state, available resources, constraints |
 | `constraints` | No | object | Time limits, resource bounds, policy restrictions |
-| `risk_tolerance` | No | string | low, medium, high - affects checkpoint frequency |
-| `max_steps` | No | integer | Maximum number of steps to generate |
+| `resources` | No | array | Available resources |
+| `context` | No | any | Current state, available resources, constraints |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

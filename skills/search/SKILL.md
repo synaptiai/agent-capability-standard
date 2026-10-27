@@ -40,10 +40,11 @@ Search feeds into the **State Layer** by discovering entities and observations t
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `query` | Yes | string | What to search for (natural language or structured) |
-| `sources` | No | array | Where to search: `repo`, `web`, `docs`, `database` (default: infer) |
-| `constraints` | No | object | Time bounds, file types, domains, result limits |
-| `ranking_criteria` | No | string | `relevance`, `recency`, `authority` (default: relevance) |
+| `query` | Yes | string\|object | What to search for (natural language or structured) |
+| `scope` | No | string | Search scope/domain |
+| `limit` | No | integer | Maximum results |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

@@ -26,10 +26,11 @@ Explore data or systems to find patterns, relationships, or anomalies that were 
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `search_space` | Yes | string\|object | Where to look (files, data, systems, domains) |
-| `discovery_type` | No | string | What kind of discovery: relationship, pattern, anomaly, gap, opportunity |
+| `data` | Yes | any | Data to explore |
 | `constraints` | No | object | Bounds on exploration (time, scope, depth) |
-| `seed_observations` | No | array | Initial observations that may hint at discoveries |
+| `method` | No | string | Discovery approach |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

@@ -103,7 +103,7 @@ fn distance(a: &[char], b: &[char]) -> usize {
 }
 
 /// The known key closest to `key`, if it is close enough to be a typo.
-fn closest<'k>(key: &str, known: &[&'k str]) -> Option<&'k str> {
+pub(crate) fn closest<'k>(key: &str, known: &[&'k str]) -> Option<&'k str> {
     let key: Vec<char> = key.chars().collect();
     if key.len() > MAX_HINT_KEY_CHARS {
         return None;
@@ -149,6 +149,46 @@ pub(crate) fn unknown_fields(
             d = d.suggest(format!("did you mean '{k}'?"));
         }
         report.push(at(d).at("field", path));
+    }
+}
+
+/// W604 for every `input_bindings` key the capability's input schema does
+/// not define (§5.2): the host receives it, but it is outside the contract,
+/// so it is usually a typo or a parameter that belongs elsewhere. `x-` keys
+/// are vendor data; a schema with `additionalProperties: true` accepts any.
+pub(crate) fn unknown_inputs(
+    loc: &StepLoc<'_>,
+    step: &Map<String, Value>,
+    cap: &Capability,
+    report: &mut Report,
+) {
+    let Some(Value::Object(bindings)) = step.get("input_bindings") else {
+        return;
+    };
+    let schema = &cap.input_schema;
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return;
+    };
+    if schema.get("additionalProperties") == Some(&Value::Bool(true)) {
+        return;
+    }
+    let known: Vec<&str> = properties.keys().map(String::as_str).collect();
+    for key in bindings.keys() {
+        if properties.contains_key(key) || key.starts_with("x-") {
+            continue;
+        }
+        let mut d = loc.diag(
+            Code::UnknownField,
+            format!(
+                "'{}' has no input '{key}'; the binding is outside its contract",
+                cap.id
+            ),
+        );
+        d = match closest(key, &known) {
+            Some(k) => d.suggest(format!("did you mean '{k}'?")),
+            None => d.suggest(format!("its inputs are: {}", known.join(", "))),
+        };
+        report.push(d.at("field", format!("input_bindings.{key}")));
     }
 }
 
@@ -523,6 +563,44 @@ pub fn header_version(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_inputs_respect_the_schema() {
+        let cap = |input_schema: Value| Capability {
+            id: "c".into(),
+            layer: "PERCEIVE".into(),
+            risk: Risk::Low,
+            mutation: false,
+            requires_checkpoint: false,
+            requires_approval: false,
+            mutation_overridable: false,
+            input_schema,
+            output_schema: serde_json::json!({}),
+        };
+        let loc = StepLoc {
+            workflow: "w",
+            step: 0,
+            capability: "c",
+        };
+        let run = |schema: Value, step: Value| {
+            let mut report = Report::default();
+            unknown_inputs(&loc, step.as_object().unwrap(), &cap(schema), &mut report);
+            report
+                .diagnostics
+                .iter()
+                .map(|d| d.location["field"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        let closed = serde_json::json!({"properties": {"a": {}}});
+        let bound = serde_json::json!({"input_bindings": {"a": 1, "b": 2, "x-c": 3}});
+        assert_eq!(run(closed.clone(), bound.clone()), ["input_bindings.b"]);
+        // An open schema, or one without properties, accepts any key.
+        let open = serde_json::json!({"properties": {"a": {}}, "additionalProperties": true});
+        assert!(run(open, bound.clone()).is_empty());
+        assert!(run(serde_json::json!({"type": "object"}), bound).is_empty());
+        // Malformed bindings are reported elsewhere (S303), not here.
+        assert!(run(closed, serde_json::json!({"input_bindings": ["b"]})).is_empty());
+    }
 
     #[test]
     fn did_you_mean() {

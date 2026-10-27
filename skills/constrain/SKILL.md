@@ -26,11 +26,11 @@ Execute **constrain** to evaluate proposed actions against defined policies, enf
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `action` | Yes | object | The proposed action to evaluate (capability, target, parameters) |
-| `policy_id` | No | string | Specific policy to evaluate against (default: all applicable) |
-| `scope` | No | object | Current permission scope to constrain |
-| `enforcement_level` | No | enum | strict (block), advisory (warn), audit (log only) |
-| `context` | No | object | Additional context for policy evaluation (user, session, etc.) |
+| `target` | Yes | any | What to constrain |
+| `constraints` | Yes | array | Constraints to enforce |
+| `action_on_violation` | No | string | What to do on a violation: `block`, `warn`, or `log` |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 In a workflow, a constrain step that blocks can count independent reviews
 with a `quorum` (Standard v1.1 `quorum@1`): earlier `delegate` steps are

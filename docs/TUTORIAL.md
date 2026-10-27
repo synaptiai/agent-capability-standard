@@ -106,18 +106,21 @@ analyze_file:
     - capability: observe
       purpose: Examine the file structure and content.
       store_as: observe_out
+      input_bindings:
+        target: ${user_input.file_path}
 
     - capability: detect
       purpose: Find unusual patterns in the file.
       store_as: anomaly_out
       input_bindings:
-        context: ${observe_out}
+        data: ${observe_out}
+        pattern: anomaly
 
     - capability: explain
       purpose: Create a readable report of findings.
       store_as: summary_out
       input_bindings:
-        content: ${anomaly_out}
+        conclusion: ${anomaly_out}
 
   success:
     - File analyzed
@@ -148,12 +151,13 @@ The `# Standard version: 1.1.0` header declares which version of the standard th
 
 ```yaml
 input_bindings:
-  context: ${observe_out}
+  data: ${observe_out}
 ```
 
-This tells `detect` to use the output from `observe` as its context. The validator checks:
-1. `observe_out` exists (from a prior step)
-2. The type is compatible with what `detect` expects
+This tells `detect` to analyse the output of `observe` (its `data` input). The validator checks:
+1. `data` is one of `detect`'s inputs in the ontology (else W604)
+2. `observe_out` exists (from a prior step)
+3. The type is compatible with what `detect` expects
 
 ### 2.4 Validate Your Workflow
 
@@ -225,7 +229,8 @@ fix_and_verify:
       purpose: Identify the issue.
       store_as: anomaly_out
       input_bindings:
-        context: ${observe_out}
+        data: ${observe_out}
+        pattern: defect
 
     # 2. Plan the fix
     - capability: plan
@@ -252,7 +257,9 @@ fix_and_verify:
       mutation: true
       requires_checkpoint: true
       input_bindings:
-        plan: ${plan_out}
+        target: ${user_input.target}
+        operation:
+          apply: "${plan_out.steps: array<object>}"
       gates:
         - when: ${checkpoint_out.checkpoint_id} == null
           action: stop
@@ -263,10 +270,11 @@ fix_and_verify:
       purpose: Check that fix satisfies invariants.
       store_as: verify_out
       failure_modes:
-        - condition: verdict == FAIL
+        - condition: The fix does not satisfy the invariants.
+          when: ${verify_out.passed} == false
           action: rollback
           recovery:
-            goto_step: plan
+            goto_step: plan_out
             max_loops: 3
 
     # 7. Record what happened
@@ -308,10 +316,11 @@ gates:
 **Recovery on failure:**
 ```yaml
 failure_modes:
-  - condition: verdict == FAIL
+  - condition: The fix does not satisfy the invariants.
+    when: ${verify_out.passed} == false   # fires after verify, on its output
     action: rollback
     recovery:
-      goto_step: plan
+      goto_step: plan_out                 # loop back to the plan step
       max_loops: 3
 ```
 

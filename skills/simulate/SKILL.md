@@ -30,7 +30,8 @@ Execute mental simulations of scenarios to explore outcomes without making real 
 | `scenario` | Yes | object | Scenario to simulate (intervention, change, event) |
 | `initial_state` | No | object | Starting state for simulation |
 | `steps` | No | integer | Number of simulation steps/iterations |
-| `explore` | No | string | What to explore: single_path, branches, exhaustive |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

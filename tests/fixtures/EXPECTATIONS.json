@@ -301,6 +301,14 @@
       "W604"
     ]
   },
+  "pass_unknown_binding_keys_warn": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "bindings",
+    "expected_warning_codes": [
+      "W604"
+    ]
+  },
   "fail_unsupported_spec_version": {
     "should_pass": false,
     "level": "L1",
@@ -391,6 +399,15 @@
     "category": "extensions",
     "expected_error_codes": [
       "V105"
+    ]
+  },
+  "fail_invoke_inputs": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "bindings",
+    "expected_error_codes": [
+      "S303",
+      "S304"
     ]
   },
   "pass_recovery_warnings": {

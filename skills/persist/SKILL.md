@@ -73,11 +73,11 @@ Execute **persist** to write stable learnings, decisions, and patterns to durabl
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `content` | Yes | string\|object | What to persist: decision, pattern, fact, or structured knowledge |
-| `destination` | No | string | Where to write: `CLAUDE.md`, file path, or `auto` (determine best location). Default: `CLAUDE.md` |
-| `section` | No | string | Section within destination to write to (e.g., "Decisions", "Patterns", "Facts") |
-| `content_type` | No | enum | Type of content: `decision`, `pattern`, `fact`, `context`. Default: auto-detect |
-| `merge_strategy` | No | enum | How to handle existing content: `append`, `replace`, `merge`. Default: `append` |
+| `data` | Yes | any | Data to store |
+| `key` | No | string | Storage key |
+| `ttl` | No | string | Time to live |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

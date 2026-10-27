@@ -73,9 +73,9 @@ Execute **rollback** to restore system state to a previously created checkpoint.
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `checkpoint_id` | Yes | string | ID of checkpoint to restore to |
-| `scope` | No | array | Specific files/keys to rollback (default: all in checkpoint) |
-| `verify_restore` | No | boolean | Whether to verify state matches checkpoint after restore (default: true) |
-| `reason` | No | string | Why rollback is being performed (for audit) |
+| `scope` | No | string | Specific files/keys to rollback (default: all in checkpoint) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

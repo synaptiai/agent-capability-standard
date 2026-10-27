@@ -34,9 +34,10 @@ Integrate is essential for building comprehensive `world-state` from multiple ob
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `sources` | Yes | array | Data sources to integrate (files, API outputs, retrieved data) |
-| `target_schema` | No | object | Schema the integrated data should conform to |
-| `conflict_strategy` | No | string | `prefer_recent`, `prefer_authoritative`, `merge`, `manual` (default: prefer_authoritative) |
-| `constraints` | No | object | Required fields, validation rules |
+| `strategy` | No | string | Merge strategy |
+| `conflict_resolution` | No | string | How to handle conflicts |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

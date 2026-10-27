@@ -163,7 +163,9 @@ deploy_with_escalation:
   missing; guard such references with `!= null`. A checkpoint it needs must
   run before that step. A handler nothing escalates to is W613.
 - **Invocations.** An `invoke` target outside the catalog is W607; workflows
-  that invoke each other are V105.
+  that invoke each other are V105. A literal `input_bindings.input` must
+  give the target's required inputs (S304) and nothing it does not declare
+  (S303); a `${...}` reference is checked when the step runs (R402).
 
 ## Waiting for an event (`wait@1`)
 
@@ -258,6 +260,12 @@ carries the host-authenticated `sender`.
   input_bindings:
     accept_from: [reviewer-a, reviewer-b]
 ```
+
+A principal is an opaque string, matched exactly. Your host decides how its
+identities (accounts, keys, agent sessions) map to principals, and reports
+as an item's principal whoever authenticated delivering it, not a sender
+named in the item. So when a peer relays the owner's answer, the principal
+is the peer, and `accept_from: [owner]` drops it.
 
 ## Review quorums (`quorum@1`)
 

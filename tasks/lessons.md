@@ -51,3 +51,13 @@ fix commit.
 **Rule.** When the user asks for review before commit, wait for the reviews.
 If the work must be saved first, say so explicitly and name the follow-up
 commit that will carry the review fixes.
+
+## Read back what you post to GitHub (#114 follow-up)
+
+**What happened.** The #114 reply was posted with a markdown link followed
+directly by a period; the stored comment had the link wrapped in backticks,
+so it rendered broken. I only noticed while reading the next reply.
+
+**Rule.** After posting or editing a GitHub comment or issue, read it back
+and check the stored body (links, tables, code spans). Avoid ending a
+sentence with a bare `](url).`; put text after the link instead.

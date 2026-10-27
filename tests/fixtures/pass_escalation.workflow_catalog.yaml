@@ -65,6 +65,8 @@ deploy_with_escalation:
 page_oncall:
   goal: Page the on-call engineer.
   risk: medium
+  inputs:
+    plan: {type: object}
   steps:
   - capability: inquire
     purpose: Ask the on-call engineer to take over.

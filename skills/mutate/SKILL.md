@@ -31,7 +31,9 @@ Make controlled changes to persistent state with safety guarantees. This is the 
 |-----------|----------|------|-------------|
 | `target` | Yes | string | What to modify (file path, resource identifier) |
 | `operation` | Yes | object | The modification to apply |
-| `checkpoint_id` | Yes | string | Checkpoint ID for rollback (from `checkpoint` capability) |
+| `checkpoint_id` | No | string | Checkpoint ID for rollback (from `checkpoint` capability) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

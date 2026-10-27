@@ -188,6 +188,19 @@ Python package; `tools/validate_workflows.py` and the Python
 - **Keep two validators and test them against each other**: rejected; a
   single core removes the class of disagreement instead of detecting it.
 
+## Amendments from porting feedback
+
+The issue author ported nine production workflows to the candidate; all
+validated, and the validator found two real defects in them (an invoke
+cycle, and a checkpoint taken before a wait that authorised a mutation).
+They reported five gaps, closed in the candidate before it is final:
+
+- **Mistyped binding keys** were silent. An `input_bindings` key outside
+  the capability's input schema is now W604 (§5.5), and a literal invoke
+  `input` is checked against the target's `inputs` (S303 / S304, §5.12).
+- **Principals** had no defined form. They are opaque strings compared
+  exactly, naming the authenticated deliverer of an item (§5.15).
+
 ## Open questions
 
 - How agent identity (RFC-0002) will extend E2 with a named agent and

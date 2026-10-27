@@ -1,5 +1,5 @@
 {
-  "description": "A nested run missing a required input fails the invoke step (R402).",
+  "description": "A nested run missing a required input fails the invoke step (R402). The input is computed, so only the executor can check it.",
   "catalog": {
     "w": {
       "goal": "g",
@@ -13,10 +13,16 @@
           "workflow_id": "child",
           "input_bindings": {
             "workflow": "child",
-            "input": {}
+            "input": "${payload}"
           }
         }
-      ]
+      ],
+      "inputs": {
+        "payload": {
+          "type": "object",
+          "required": true
+        }
+      }
     },
     "child": {
       "goal": "g",
@@ -41,7 +47,9 @@
     }
   },
   "workflow": "w",
-  "inputs": {},
+  "inputs": {
+    "payload": {}
+  },
   "attendance": "attended",
   "start": 0,
   "script": [],

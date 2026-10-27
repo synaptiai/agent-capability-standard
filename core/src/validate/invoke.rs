@@ -1,6 +1,7 @@
 //! Invocations between catalog workflows (STANDARD v1.1 §5.10, §5.12):
-//! unknown targets (W607), invoke cycles (V105), and targets whose triggers
-//! do not allow being invoked (V107).
+//! unknown targets (W607), invoke cycles (V105), targets whose triggers
+//! do not allow being invoked (V107), and literal inputs the target does
+//! not declare (S303) or that miss a required one (S304).
 
 use std::collections::{HashMap, HashSet};
 
@@ -17,6 +18,29 @@ pub(crate) struct Invocation {
     /// Where the target was named: `workflow_id` or
     /// `input_bindings.workflow`.
     pub field: &'static str,
+    /// What the step passes as the workflow's inputs.
+    pub input: Input,
+}
+
+/// An invoke step's `input_bindings.input`, as the validator can see it.
+pub(crate) enum Input {
+    /// The names of a literal mapping; none when `input` is absent or null
+    /// (the executor then passes no inputs).
+    Literal(Vec<String>),
+    /// A `${...}` reference: only the executor can check it.
+    Computed,
+    /// Any other value; the executor would pass no inputs. Holds its kind.
+    Malformed(&'static str),
+}
+
+/// What an invoke step passes to its workflow.
+pub(crate) fn input(step: &Map<String, Value>) -> Input {
+    match step.get("input_bindings").and_then(|b| b.get("input")) {
+        None | Some(Value::Null) => Input::Literal(Vec::new()),
+        Some(Value::Object(m)) => Input::Literal(m.keys().cloned().collect()),
+        Some(Value::String(s)) if s.contains("${") => Input::Computed,
+        Some(other) => Input::Malformed(crate::yaml::kind_of(other)),
+    }
 }
 
 /// The workflow an invoke step names, and where: `workflow_id`, else a
@@ -77,6 +101,7 @@ pub(crate) fn check(
                 ));
             }
         }
+        check_input(inv, target, report);
         edges.entry(inv.workflow.as_str()).or_default().push(inv);
         resolved.push(inv);
     }
@@ -93,6 +118,71 @@ pub(crate) fn check(
                     "invoking '{}' forms a cycle back to '{}'; invoked workflows must not invoke their callers",
                     inv.target, inv.workflow
                 ),
+            ));
+        }
+    }
+}
+
+/// A literal invocation input against the target's declared inputs. The
+/// executor refuses undeclared names and missing required ones (R402), so
+/// both are errors here. Workflow inputs have no `x-` exemption: they are
+/// names the target declares, not fields of the step.
+fn check_input(inv: &Invocation, target: &Value, report: &mut Report) {
+    let given: &[String] = match &inv.input {
+        Input::Computed => return,
+        Input::Literal(names) => names,
+        Input::Malformed(kind) => {
+            report.push(
+                Diagnostic::new(
+                    Code::SchemaValidationFailed,
+                    format!(
+                        "input_bindings.input must be a mapping of the target's inputs or a ${{...}} reference, found {kind}"
+                    ),
+                )
+                .at("workflow", inv.workflow.as_str())
+                .at("step", inv.step)
+                .at("capability", "invoke")
+                .at("field", "input_bindings.input"),
+            );
+            &[]
+        }
+    };
+    let empty = Map::new();
+    let declared = target
+        .get("inputs")
+        .and_then(Value::as_object)
+        .unwrap_or(&empty);
+    let names: Vec<&str> = declared.keys().map(String::as_str).collect();
+    let at = |code: Code, message: String, field: String| {
+        Diagnostic::new(code, message)
+            .at("workflow", inv.workflow.as_str())
+            .at("step", inv.step)
+            .at("capability", "invoke")
+            .at("field", field)
+    };
+    for name in given.iter().filter(|n| !declared.contains_key(*n)) {
+        let mut d = at(
+            Code::SchemaValidationFailed,
+            format!(
+                "'{}' has no input '{name}'; the executor refuses undeclared inputs (R402)",
+                inv.target
+            ),
+            format!("input_bindings.input.{name}"),
+        );
+        if let Some(k) = super::semantics::closest(name, &names) {
+            d = d.suggest(format!("did you mean '{k}'?"));
+        }
+        report.push(d);
+    }
+    for (name, spec) in declared {
+        if spec.get("required") == Some(&Value::Bool(true)) && !given.contains(name) {
+            report.push(at(
+                Code::MissingRequiredField,
+                format!(
+                    "'{}' needs input '{name}', which input_bindings.input does not give",
+                    inv.target
+                ),
+                "input_bindings.input".to_string(),
             ));
         }
     }
@@ -194,6 +284,65 @@ mod tests {
         let literal = json!({"capability": "invoke", "purpose": "p", "store_as": "i",
                              "input_bindings": {"workflow": "elsewhere"}});
         assert_eq!(codes(json!({"a": wf(json!([literal]))})), ["W607"]);
+    }
+
+    #[test]
+    fn literal_inputs_match_the_target() {
+        let catalog = |step: Value| {
+            let mut caller = wf(json!([step]));
+            caller["inputs"] = json!({"given": {"type": "object"}, "name": {"type": "string"}});
+            let mut target = wf(json!([]));
+            target["inputs"] = json!({"user_input": {"type": "object", "required": true},
+                                      "previous": {"type": "object"}});
+            json!({"a": caller, "t": target})
+        };
+        let call = |input: Option<Value>| {
+            let mut step = invoke("t", "i");
+            if let Some(input) = input {
+                step["input_bindings"] = json!({"input": input});
+            }
+            codes(catalog(step))
+        };
+        assert!(call(Some(json!({"user_input": {}, "previous": {}}))).is_empty());
+        assert!(call(Some(json!({"user_input": {}}))).is_empty());
+        // Computed inputs are checked at runtime only.
+        assert!(call(Some(json!("${given}"))).is_empty());
+        assert_eq!(call(Some(json!({"user_inptu": {}}))), ["S303", "S304"]);
+        // Workflow inputs have no x- exemption: the executor refuses them.
+        assert_eq!(
+            call(Some(json!({"user_input": {}, "x-trace": 1}))),
+            ["S303"]
+        );
+        // No input, an empty one or null all pass nothing.
+        assert_eq!(call(None), ["S304"]);
+        assert_eq!(call(Some(json!({}))), ["S304"]);
+        assert_eq!(call(Some(Value::Null)), ["S304"]);
+        // Anything else is malformed: the executor would pass nothing.
+        assert_eq!(call(Some(json!([]))), ["S303", "S304"]);
+        assert_eq!(call(Some(json!("user_input"))), ["S303", "S304"]);
+
+        // The suggestion names the closest declared input.
+        let mut step = invoke("t", "i");
+        step["input_bindings"] = json!({"input": {"user_inptu": {}}});
+        let report =
+            super::super::validate_catalog(&super::super::tests::ctx(), &catalog(step), None);
+        let d = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code.as_str() == "S303")
+            .unwrap();
+        assert_eq!(d.suggestion.as_deref(), Some("did you mean 'user_input'?"));
+        assert_eq!(d.location["field"], "input_bindings.input.user_inptu");
+
+        // A target named by input_bindings.workflow is checked too; a
+        // computed or unknown target is not.
+        let named = |workflow: &str| {
+            json!({"capability": "invoke", "purpose": "p", "store_as": "i",
+                   "input_bindings": {"workflow": workflow, "input": {"nope": 1}}})
+        };
+        assert_eq!(codes(catalog(named("t"))), ["S303", "S304"]);
+        assert!(codes(catalog(named("${name}"))).is_empty());
+        assert_eq!(codes(catalog(named("elsewhere"))), ["W607"]);
     }
 
     #[test]

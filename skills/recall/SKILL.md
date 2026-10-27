@@ -26,11 +26,10 @@ Execute **recall** to retrieve relevant prior decisions, rationale, and patterns
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `query` | Yes | string | What to recall: topic, decision type, or pattern name |
-| `memory_scope` | No | enum | Where to search: `session` (current), `project` (CLAUDE.md), `global` (all). Default: `project` |
-| `time_range` | No | object | Filter by time: `{ after: "2024-01-01", before: "2024-01-31" }` |
-| `include_rationale` | No | boolean | Whether to include decision rationale. Default: true |
-| `similarity_threshold` | No | number | Minimum relevance score (0.0-1.0). Default: 0.5 |
+| `key` | Yes | string | Storage key |
+| `default` | No | any | Default if not found |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

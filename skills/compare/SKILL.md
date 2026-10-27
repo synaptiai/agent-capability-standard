@@ -26,10 +26,11 @@ Systematically evaluate multiple alternatives against defined criteria to produc
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `options` | Yes | array[string\|object] | Alternatives to compare (2+ items) |
-| `criteria` | Yes | array[string\|object] | Evaluation dimensions with optional weights |
-| `context` | No | object | Constraints, priorities, or decision context |
-| `must_have` | No | array[string] | Required criteria (eliminates options that fail) |
+| `options` | Yes | array | Alternatives to compare (2+ items) |
+| `criteria` | No | array | Evaluation dimensions (weight them with `weights`) |
+| `weights` | No | object | Criteria weights |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

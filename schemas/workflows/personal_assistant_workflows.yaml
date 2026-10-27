@@ -26,7 +26,8 @@ schedule_management:
       input_bindings:
         target: user_calendar
         format: calendar_events
-        range: ${request.date_range}
+        filter:
+          time_range: ${request.date_range}
 
     - capability: critique
       purpose: Analyze request for ambiguity or missing information.

@@ -35,10 +35,11 @@ Execute **verify** to determine whether an artifact (code, configuration, state,
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `spec` | Yes | string\|object | The specification, test suite, or invariants to check against |
-| `artifact` | Yes | string\|object | The target being verified (file path, function, API endpoint, state) |
-| `constraints` | No | object | Verification constraints: timeout, test filter, coverage threshold |
-| `check_types` | No | array | Types of checks: assertion, invariant, regression, schema |
+| `target` | No | any | What to verify |
+| `conditions` | Yes | array | Conditions to check |
+| `strict` | No | boolean | Fail on first violation |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

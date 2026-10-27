@@ -32,6 +32,8 @@ Execute code or commands in a controlled manner, capturing output for verificati
 | `timeout` | No | string | Maximum execution time (default: "60s") |
 | `environment` | No | object | Environment variables to set |
 
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
+
 ## Procedure
 
 1) **Validate execution request**: Ensure code is safe to run

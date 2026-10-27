@@ -56,12 +56,12 @@ Transform data from one format or schema to another while tracking what informat
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `source` | Yes | string or object | Input data to transform |
-| `target_schema` | Yes | string or object | Schema or format specification for output |
-| `mapping` | No | object | Explicit field mappings (source -> target) |
-| `preserve_unknown` | No | boolean | Keep fields not in mapping (default: false) |
-| `strict` | No | boolean | Fail on any mapping ambiguity (default: false) |
-| `default_values` | No | object | Defaults for missing required fields |
+| `input` | Yes | any | Data to transform |
+| `source_format` | No | string | Input format |
+| `target_format` | Yes | string | Output format |
+| `options` | No | object | Transformation options |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

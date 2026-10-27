@@ -475,8 +475,8 @@ Each workflow step specifies:
   requires_checkpoint: false
   store_as: transform_out
   input_bindings:
-    source: ${receive_out.data}
-    target_schema: canonical_event
+    input: ${receive_out.data}
+    target_format: canonical_event
   mapping_ref: docs/schemas/transform_mapping.yaml
   output_conforms_to: docs/schemas/event_schema.yaml#/event
   gates:
@@ -536,7 +536,7 @@ failure_modes:
 
 The reference validator (the Rust core in `core/`, compiled into `grounded_agency._core` and run by `tools/validate_workflows.py`) performs these checks:
 
-1. **Structural**: Required fields present and well-typed; unknown fields reported as warnings (W604)
+1. **Structural**: Required fields present and well-typed; unknown fields and binding keys outside the capability's inputs reported as warnings (W604); an `invoke` step's literal `input` checked against the target's declared inputs (S303, S304)
 2. **Capability**: Capability exists in ontology (V101)
 3. **Prerequisite**: `requires` and `precedes` edges satisfied (V102); no `conflicts_with` pair in one parallel group (F504); `soft_requires` met, else a warning (W601)
 4. **Safety flags**: Step flags inherit from the ontology; a weaker declaration is ignored (W602)

@@ -428,7 +428,7 @@ digital_twin_sync_loop:
     retry: null
     store_as: search_out
     input_bindings:
-      target: ${receive_out.source}
+      query: ${receive_out.source}
     failure_modes: []
   - capability: transform
     purpose: Normalize raw signals into canonical events compatible with world_state.observations.
@@ -441,8 +441,8 @@ digital_twin_sync_loop:
     store_as: transform_out
     failure_modes: []
     input_bindings:
-      source: '${receive_out.data: array<object>}'
-      target_schema: canonical_event
+      input: '${receive_out.data: array<object>}'
+      target_format: canonical_event
     gates: []
     mapping_ref: docs/schemas/transform_mapping_rawlog_to_observation.yaml
     output_conforms_to: docs/schemas/event_schema.yaml#/event
@@ -464,7 +464,7 @@ digital_twin_sync_loop:
       sources:
       - '${transform_out.output: object}'
       - '${previous_world_state: object}'
-      resolution_strategy: prefer_authoritative_sources
+      conflict_resolution: prefer_authoritative_sources
     gates: []
     resolution_strategy: prefer_authoritative_sources
     conflict_resolution_strategies:

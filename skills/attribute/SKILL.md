@@ -30,7 +30,8 @@ Establish causal relationships between observed effects and potential causes. Th
 | `effect` | Yes | any | The observed effect to attribute |
 | `candidates` | No | array | Potential causes to evaluate |
 | `context` | No | object | Situational context for attribution |
-| `depth` | No | string | Analysis depth: immediate, chain, comprehensive |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

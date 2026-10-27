@@ -27,11 +27,12 @@ Generate a clear, structured explanation of a topic, decision, or concept tailor
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `topic` | Yes | string or object | What to explain (concept, decision, code, etc.) |
-| `audience_level` | No | string | beginner, intermediate, expert (default: intermediate) |
-| `format` | No | string | prose, bullets, structured, diagram (default: structured) |
-| `focus` | No | string | Specific aspect to emphasize |
-| `max_length` | No | string | Length constraint (brief, standard, detailed) |
+| `conclusion` | Yes | any | What to explain |
+| `audience` | No | string | Target audience |
+| `depth` | No | string | Level of detail for the explanation (e.g. brief, standard, detailed) |
+| `constraints` | No | object | Requirements the explanation must meet (e.g. include a disclaimer) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

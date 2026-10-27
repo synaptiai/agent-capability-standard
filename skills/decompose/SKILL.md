@@ -27,11 +27,11 @@ Break down a complex goal into smaller, manageable subgoals with clear boundarie
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `goal` | Yes | string or object | The goal to decompose |
-| `depth` | No | integer | Maximum decomposition depth (default: 3) |
-| `constraints` | No | object | Boundaries, limitations, scope |
-| `granularity` | No | string | Target size: epic, story, task (default: story) |
-| `context` | No | object | Background information |
+| `problem` | Yes | string | Problem to decompose |
+| `max_depth` | No | integer | Maximum decomposition depth |
+| `strategy` | No | string | Decomposition strategy |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

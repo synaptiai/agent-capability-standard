@@ -111,6 +111,15 @@ nodes:
       format:
         type: string
         description: Expected format of retrieved data
+      filter:
+        type: object
+        description: Criteria the retrieved data must meet (e.g. a time range)
+      references:
+        type: array
+        items:
+          type: object
+        description: Further references to retrieve along with the target (e.g.
+          search results)
   output_schema:
     type: object
     required:
@@ -517,6 +526,10 @@ nodes:
       resources:
         type: array
         description: Available resources
+      context:
+        type: any
+        description: Background the plan must take into account (e.g. forecasts,
+          current state)
   output_schema:
     type: object
     required:
@@ -599,6 +612,9 @@ nodes:
       severity_threshold:
         type: string
         description: Minimum severity to report
+      context:
+        type: any
+        description: Background the critique must take into account
   output_schema:
     type: object
     required:
@@ -643,6 +659,9 @@ nodes:
         - brief
         - detailed
         - comprehensive
+      constraints:
+        type: object
+        description: Requirements the explanation must meet (e.g. include a disclaimer)
   output_schema:
     type: object
     required:
@@ -684,6 +703,9 @@ nodes:
       timestamp:
         type: string
         format: date-time
+      observations:
+        type: object|array
+        description: The observation, or list of observations, to build the state from
   output_schema:
     type: object
     required:

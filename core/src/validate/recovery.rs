@@ -667,6 +667,7 @@ mod tests {
                   "workflow_extensions": {"requires": requires},
                   "steps": steps},
             "h": {"goal": "handle", "risk": "low", "spec_version": "1.1",
+                  "inputs": {"seen": {"type": "object"}, "later": {"type": "object"}},
                   "steps": [{"capability": "observe", "purpose": "p", "store_as": "o"}]}
         })
     }

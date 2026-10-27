@@ -65,10 +65,11 @@ Execute **checkpoint** to create a restorable state marker before any mutating o
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `scope` | Yes | string\|array | Files, directories, or state keys to checkpoint |
-| `reason` | No | string | Why this checkpoint is being created (for audit trail) |
-| `checkpoint_type` | No | enum | Type: git_stash, file_backup, state_snapshot, database_savepoint |
-| `expiry` | No | string | When checkpoint can be garbage collected (e.g., "24h", "never") |
+| `scope` | Yes | string | Files, directories, or state keys to checkpoint |
+| `label` | No | string | Checkpoint name |
+| `metadata` | No | object | Additional metadata |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

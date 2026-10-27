@@ -14,7 +14,7 @@ bad_waits:
     store_as: retrieve_out
     timeout: 1h
     input_bindings:
-      source: inbox
+      target: inbox
     wait: {event_type: mail.arrived}
   - capability: receive
     purpose: A wait must end.

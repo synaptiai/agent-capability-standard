@@ -30,10 +30,12 @@ Retrieve feeds into all world modeling layers by providing grounded observations
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `target` | Yes | string\|object | What to retrieve (path, URL, query, or identifier) |
-| `source` | No | string | Where to retrieve from (file, api, database); default: infer |
+| `target` | Yes | string | What to retrieve (path, URL, query, or identifier) |
 | `format` | No | string | Expected format (json, text, binary); default: auto-detect |
-| `constraints` | No | object | Filters, projections, version specifications |
+| `filter` | No | object | Criteria the retrieved data must meet (e.g. `time_range`) |
+| `references` | No | array | Further references to retrieve along with `target` (e.g. search results) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

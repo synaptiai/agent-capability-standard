@@ -237,8 +237,9 @@ search_and_replace:
       store_as: matches
     - capability: transform
       input_bindings:
-        source: ${matches}
-        operation: replace
+        input: ${matches}
+        target_format: replaced_text
+        options: {operation: replace}
 ```
 
 If it works as a pattern, don't propose it as a capability.

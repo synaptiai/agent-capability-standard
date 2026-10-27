@@ -53,11 +53,11 @@ Execute **audit** to create a structured record of actions taken, tools invoked,
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `scope` | Yes | string\|array | What to audit: file paths, action types, or "session" for all |
-| `time_window` | No | object | Start/end timestamps to bound the audit |
-| `actor` | No | string | Filter by specific actor (agent, user, tool) |
-| `detail_level` | No | enum | summary, standard, verbose (default: standard) |
-| `include_diffs` | No | boolean | Whether to include actual change diffs (default: false) |
+| `event` | Yes | object | Event to record |
+| `context` | No | object | Event context |
+| `retention` | No | string | How long to retain |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

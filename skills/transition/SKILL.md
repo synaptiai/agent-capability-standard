@@ -30,7 +30,8 @@ Define the rules governing how a system's state changes over time. This capabili
 | `from_state` | Yes | object | Initial state or state pattern |
 | `to_state` | No | object | Target state (optional for discovery mode) |
 | `triggers` | No | array | Events or conditions that cause transition |
-| `scope` | No | string | Domain to analyze for transitions |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

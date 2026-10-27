@@ -21,7 +21,7 @@ external_refs:
     retry: null
     store_as: observe_out
     input_bindings:
-      scope: ${user_input.domain}
+      target: ${user_input.domain}
     failure_modes: []
   success:
   - External ref resolved

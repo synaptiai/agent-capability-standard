@@ -172,4 +172,51 @@ ruff, ruff format, mypy, full pytest.
 - Agent identity for E2 (named agent, attested fresh context) waits for
   RFC-0002.
 - The #114 reply and the Q3 issue (22 reproduced disagreements between
-  the 1.0 validator and engine) are drafts, not posted (D-del).
+  the 1.0 validator and engine) were posted at the user's request:
+  [#114 comment](https://github.com/synaptiai/agent-capability-standard/issues/114#issuecomment-6449305262),
+  [#115](https://github.com/synaptiai/agent-capability-standard/issues/115).
+
+# Follow-up: the five gaps from the #114 port (comment 6450307659)
+
+The issue author ported their nine workflows to v1.1.0 (all validate) and
+reported five gaps. v1.1.0 is still a Candidate Standard, so these change
+the candidate (no new extension versions). Decisions (user, 2026-10-27):
+
+- **G1 Unattended mandates and deferral.** In an unattended run a
+  `standing_mandate` approver is still asked; the host answers a decision,
+  or `unavailable` (no mandate covers the action), and only then does
+  `when_unattended` apply. `defer_to_queue` records a `planned` action and
+  defers that step and every step that reads its output, directly or
+  transitively; everything else runs, and the run ends `deferred`.
+- **G2 Per-reviewer independence and full sweeps.** `forbidden_inputs` is
+  a list (every reviewer) or a map reviewer → list. Verdicts gain optional
+  `scope: full | delta` (absent = delta); `quorum.min_full` is the number of
+  *passing* verdicts with scope `full`.
+- **G3 Lost liveness.** New R406 `LIVENESS_LOST`, separate from the R401
+  timeout; failure modes fire on it and `retry` covers it. A re-check is a
+  recovery loop to the wait step itself (already allowed). No `continue`
+  action.
+- **G4 Unknown binding keys.** W604 for `input_bindings` keys the
+  capability's input schema does not define (`x-` keys exempt). Fix the
+  shipped and domain catalogs: rename to an ontology input with the same
+  meaning, else add an optional ontology input; regenerate skill schemas.
+- **G5 Principals.** Spec text: a principal is an opaque string compared
+  by exact match; the host maps its identities to principals and reports
+  the authenticated sender of the delivered item, never a sender claimed
+  in the payload.
+
+## Stages (one commit each, validated and reviewed before commit)
+
+- [x] **G4+G5** W604 for binding keys; catalog and ontology fixes;
+  principal text (§5.15); docs. Review: 6 findings, all fixed (undeclared
+  invoke inputs are S303, not W604, as the executor refuses them; non-mapping
+  `input`; Appendix C; stale doc examples; skill input tables reconciled
+  with the ontology). Found `digital_twin_bootstrap` passing `inputs:`.
+- [ ] **G3** R406: diag code, `on_error`, retry, executor, §5.13/§9.5,
+  fixtures, docs
+- [ ] **G2** quorum `forbidden_inputs` map, verdict `scope` (schema 1.1.0),
+  `min_full` (validator + executor), §5.16, fixtures, docs
+- [ ] **G1** mandates in unattended runs, `unavailable` decision,
+  dependent deferral (executor state, snapshot), §5.14, fixtures, docs
+- [ ] Spec changelog, RFC-0003, CHANGELOG, design-114 §16, guides
+- [ ] Code and test review; fix all findings; reply on #114 (ask first)

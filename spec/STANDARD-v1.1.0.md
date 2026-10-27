@@ -326,6 +326,12 @@ For each binding, the validator MUST check:
 3. The inferred or annotated type is compatible with the consumer's input
    schema, else B203 (with a coercion suggestion at L4)
 
+An `input_bindings` key that the capability's input schema does not define
+is W604, unless the schema sets `additionalProperties: true` or the key
+starts with `x-`. The host still receives it, but it is outside the
+capability's contract, so it is usually a typo or a parameter that belongs
+in another input.
+
 ### 5.6 Gate Semantics
 
 ```yaml
@@ -592,7 +598,14 @@ whether or not the failure mode's action is allowed.
 - `invoke` steps name their target with `workflow_id` (or a literal
   `input_bindings.workflow`). A target that is not in the catalog is W607
   (it cannot be checked); invoke cycles among catalog workflows, including a
-  workflow invoking itself, are V105.
+  workflow invoking itself, are V105. The step passes the target's inputs
+  as `input_bindings.input`: a mapping, or a `${...}` reference whose value
+  is one. Absent or null, it passes no inputs; any other value is S303.
+  When the target is in the catalog and the input is not a reference, a
+  name the target does not declare is S303 (with no `x-` exemption: these
+  are the target's inputs, not fields of the step) and a required input it
+  does not give is S304. The executor refuses both when the step runs
+  (R402), so a reference is checked then.
 
 ### 5.13 Waiting for Events
 
@@ -688,7 +701,16 @@ delegator's context), `model_family` and `role`, and reports the values the
 host actually used as `effective`. `receive` and `synchronize` accept
 `accept_from` (a list of principals): received items from other principals
 are dropped and counted, and each kept item's `sender` is the
-host-authenticated principal. Binding any of these inputs needs
+host-authenticated principal.
+
+A **principal** is an opaque string, compared by exact (code-point)
+equality; the standard gives it no structure. The host maps its own
+identities (accounts, keys, agent sessions) to principals, and reports as
+the principal of an item the authenticated party that delivered it to the
+run, never a sender the item's content claims. So an item a peer relays on
+behalf of the owner has the peer as its principal, and `accept_from: [owner]`
+drops it. Naming agents beyond this (identity objects, attestation) awaits
+RFC-0002. Binding any of these inputs needs
 `delegation@1` (V106); they are typed by the ontology like any other input.
 
 ### 5.16 Quorum
@@ -951,7 +973,7 @@ NOT change any code's severity otherwise.
 | W601 | SOFT_REQUIREMENT_UNMET | No `soft_requires` source runs before the step |
 | W602 | SAFETY_FLAG_DOWNGRADE | Step declares a flag weaker than the ontology; the ontology value applies |
 | W603 | DEPRECATED_FORM | Accepted legacy form (self-reading gate without `phase`, goto_step by capability id) |
-| W604 | UNKNOWN_FIELD | Unrecognised field, ignored; with a closest-match hint |
+| W604 | UNKNOWN_FIELD | Unrecognised field, ignored; or a binding key outside the capability's inputs (§5.5); with a closest-match hint |
 | W605 | MISSING_SPEC_VERSION | No `spec_version` and no version header |
 | W606 | UNATTENDED_APPROVAL | An unattended trigger reaches an approval step without `when_unattended` |
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
@@ -1307,7 +1329,8 @@ Field names starting with `x-` are reserved for vendor extensions.
 | `soft_requires` | "SHOULD be satisfied when available" | Any-of presence per target, W601 (§4.3) |
 | Concurrency | Unspecified | A step in the same parallel group does not run before another (§4.3) |
 | Safety flags | Listed as optional step fields | Inherit from the ontology; downgrades ineffective, W602 (§5.2.1) |
-| Unknown fields | "SHOULD ignore" | Ignored and reported, W604; `x-` exempt (§11.3) |
+| Unknown fields | "SHOULD ignore" | Ignored and reported, W604; `x-` exempt (§11.3). Binding keys outside the capability's inputs are W604 too (§5.5) |
+| `invoke` inputs | Unchecked | A literal `input` is checked against the target's `inputs`: undeclared name S303, missing required S304; the executor refuses both (R402) (§5.12) |
 | Version header | "SHOULD warn if missing" | `spec_version` or header; W605 / V109 (§11.5) |
 | B205 | "Type annotation does not match schema" | Annotation names no type; a mismatch is B203 (§9.3) |
 | `inputs` | Required | Optional, default `{}` (§5.1) |
@@ -1326,7 +1349,10 @@ Field names starting with `x-` are reserved for vendor extensions.
 - `review_verdict_schema.yaml` 1.0.0 for quorum verdicts (§5.16)
 - Ontology: `delegate` inputs `fresh_context`, `model_family`, `role` and
   output `effective`; `receive`/`synchronize` input `accept_from`; received
-  items' `sender`; `constrain` output `tally` (§5.15, §5.16)
+  items' `sender`; `constrain` output `tally` (§5.15, §5.16); optional
+  inputs `retrieve.filter` and `retrieve.references`, `state.observations`,
+  `plan.context`, `critique.context` and `explain.constraints`, which
+  catalogs already bound
 
 ---
 

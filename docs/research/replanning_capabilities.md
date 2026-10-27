@@ -346,7 +346,7 @@ monitor-and-replan:
       input_bindings:
         data: ${comparison}
         pattern: assumption_violation
-        domain: plan-invalidation
+      domain: plan-invalidation
       store_as: violations
 
     - capability: critique

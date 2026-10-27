@@ -246,7 +246,7 @@ Bindings reference outputs from earlier steps:
 - capability: detect
   domain: anomaly
   input_bindings:
-    context: ${observe_out.observation}  # References observe's output
+    data: ${observe_out.observation}  # References observe's output
 ```
 
 Typed bindings add explicit type annotations:

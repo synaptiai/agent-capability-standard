@@ -190,6 +190,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- **Mistyped `input_bindings` keys were silent (#114).** A key the
+  capability does not define is now W604 with a did-you-mean hint, and an
+  `invoke` step's literal `input` is checked against the invoked workflow's
+  inputs (S303 undeclared, S304 missing required). This found
+  `digital_twin_bootstrap` passing `inputs:` (which the executor ignores) with
+  names its targets do not declare; it now passes `input` with
+  `user_input` and `previous_world_state`. Catalog bindings outside the
+  ontology were renamed to its inputs, and the ontology gained six optional
+  inputs that catalogs relied on. The skill docs' input tables now match the
+  ontology, and the tutorial and doc examples validate cleanly
 - **Domain workflow catalogs.** The four catalogs under `schemas/workflows/`
   failed validation before this release (mostly untyped references, plus
   ordering and binding errors) and nothing checked them. They now pass in

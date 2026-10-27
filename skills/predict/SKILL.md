@@ -30,7 +30,8 @@ Forecast future states or outcomes for a target based on current state, historic
 | `target` | Yes | string | What to predict (metric, state, outcome, event) |
 | `horizon` | No | string | Prediction timeframe (e.g., "1 week", "next release", "end of sprint") |
 | `conditions` | No | object | Assumed conditions for prediction |
-| `method` | No | string | Prediction approach (trend, model, heuristic) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

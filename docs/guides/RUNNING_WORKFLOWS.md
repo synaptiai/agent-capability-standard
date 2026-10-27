@@ -63,7 +63,7 @@ a run.
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}` |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
-| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ...}` or `{"kind": "LivenessLost"}` |
+| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ...}` (the authenticated party that delivered it, §5.15) or `{"kind": "LivenessLost"}` |
 | `Sleep` | waits until `until` (retry backoff) | — (the runner calls `tick`) |
 | `Completed` / `Failed` | — | the run is over |
 
@@ -115,7 +115,10 @@ ontology contract requires, or the step fails (R402).
   then `on_exhausted` or R404), escalate to a handler (the run ends
   `escalated`), or end the run.
 - **Invocations.** An `invoke` step runs its workflow as a nested run, at
-  most four deep.
+  most four deep, with `input_bindings.input` as its inputs; inputs the
+  workflow does not declare, or a missing required one, fail the step
+  (R402). The validator catches this before the run when `input` is
+  literal.
 - **Quorums.** A `constrain` step with a `quorum` counts the verdicts
   itself: one per reviewer whose delegate step ran, pinned to `pinned_to`,
   using the vocabulary, from fresh-context reviewers when required. Any blocking verdict, or too

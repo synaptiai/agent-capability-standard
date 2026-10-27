@@ -26,10 +26,11 @@ Scan data sources to determine whether a specified pattern, entity, or condition
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `target` | Yes | string\|object | The data source to scan (file path, URL, or structured data) |
-| `pattern` | Yes | string\|regex | The pattern, entity type, or condition to detect |
-| `threshold` | No | object | Detection sensitivity settings (e.g., min_matches, confidence_floor) |
-| `scope` | No | string | Limit search to specific regions (e.g., "functions", "imports", "comments") |
+| `data` | Yes | any | Data to analyze |
+| `pattern` | Yes | string\|object | The pattern, entity type, or condition to detect |
+| `threshold` | No | number | Detection threshold (e.g. minimum confidence for a match) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

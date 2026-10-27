@@ -30,7 +30,8 @@ Assign one or more labels from a defined taxonomy to items based on their observ
 | `item` | Yes | any | The item to classify (entity, document, code, data) |
 | `taxonomy` | No | string\|array | Classification scheme or list of valid labels |
 | `multi_label` | No | boolean | Whether multiple labels can be assigned (default: false) |
-| `context` | No | object | Additional context to inform classification |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

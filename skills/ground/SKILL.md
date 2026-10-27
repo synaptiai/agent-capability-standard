@@ -31,6 +31,8 @@ Verify that claims are supported by evidence from reliable sources. This is the 
 | `sources` | No | array | Evidence sources to check (files, URLs, commands) |
 | `required_strength` | No | string | Minimum grounding level: weak, moderate, strong |
 
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
+
 ## Procedure
 
 1) **Parse the claim**: Understand what is being asserted

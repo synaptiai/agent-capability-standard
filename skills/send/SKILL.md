@@ -67,13 +67,10 @@ Send a message, event, or payload to an external destination with full policy en
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `destination` | Yes | string | Target endpoint, queue, API, or address |
-| `message` | Yes | object | Payload to send |
-| `protocol` | Yes | string | Communication protocol (http, grpc, smtp, amqp, etc.) |
-| `approval_token` | Yes | string | Token confirming user approved this send (MANDATORY) |
-| `checkpoint_ref` | Yes | string | Reference to checkpoint before send (MANDATORY) |
-| `constraints` | No | object | Rate limits, size limits, allowed destinations |
-| `timeout` | No | integer | Send timeout in milliseconds |
-| `retry_policy` | No | object | Retry configuration on failure |
+| `payload` | Yes | any | Data to send |
+| `protocol` | No | string | Communication protocol (http, grpc, smtp, amqp, etc.) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

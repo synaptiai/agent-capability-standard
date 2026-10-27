@@ -468,7 +468,7 @@ confidence: 0.89
     query:
       text: "solar panel installation on residential rooftop"
       visual_reference: ${reference_image_out.data}
-    collection: "asset_library"
+    scope: asset_library
     limit: 20
 ```
 

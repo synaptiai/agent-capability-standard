@@ -452,6 +452,7 @@ impl WorkflowCheck<'_> {
                 continue;
             };
             semantics::flag_downgrades(&loc, step, node, self.report);
+            semantics::unknown_inputs(&loc, step, node, self.report);
             // A handler step runs only on escalation, after the step that
             // escalated (which may have failed before producing output),
             // and ends the run: it is outside the normal sequence, and its
@@ -501,6 +502,7 @@ impl WorkflowCheck<'_> {
                         step: i,
                         target: target.to_string(),
                         field,
+                        input: invoke::input(step),
                     });
                 }
             }
@@ -1390,6 +1392,30 @@ pub(crate) mod tests {
             Some("did you mean 'requires_approval'?")
         );
         assert_eq!(w[2].location["field"], "gates[0].mesage");
+    }
+
+    #[test]
+    fn unknown_binding_keys_warn() {
+        let step = |bindings: Value| {
+            let catalog = json!({"w": {"goal": "g", "risk": "low", "steps": [
+                {"capability": "search", "purpose": "p", "store_as": "s", "input_bindings": bindings}]}});
+            validate_catalog(&ctx(), &catalog, Some("1.1.0"))
+                .diagnostics
+                .into_iter()
+                .filter(|d| d.code == Code::UnknownField)
+                .collect::<Vec<_>>()
+        };
+        assert!(step(json!({"query": "q", "scope": "s", "x-trace": 1})).is_empty());
+        let w = step(json!({"query": "q", "limt": 3, "sender_check": true}));
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert_eq!(w[0].location["field"], "input_bindings.limt");
+        assert_eq!(w[0].suggestion.as_deref(), Some("did you mean 'limit'?"));
+        assert!(w[0].message.contains("'search' has no input 'limt'"));
+        assert_eq!(w[1].location["field"], "input_bindings.sender_check");
+        assert_eq!(
+            w[1].suggestion.as_deref(),
+            Some("its inputs are: query, scope, limit")
+        );
     }
 
     #[test]

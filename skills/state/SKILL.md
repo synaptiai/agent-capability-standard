@@ -31,7 +31,9 @@ Create a structured representation of the current state of a domain, system, or 
 | `scope` | Yes | string | What domain/system to model (e.g., "user authentication", "payment processing") |
 | `schema` | No | object | State schema defining expected structure |
 | `timestamp` | No | string | Point in time for state (default: now) |
-| `depth` | No | string | Modeling depth: surface, detailed, comprehensive |
+| `observations` | No | object\|array | The observation, or list of observations, to build the state from |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

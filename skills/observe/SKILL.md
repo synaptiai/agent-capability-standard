@@ -28,8 +28,9 @@ Observe and report the current state of a specified target without modifying it.
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `target` | Yes | string | What to observe (file path, URL, process, system) |
-| `aspects` | No | array[string] | Specific aspects to focus on (e.g., ["status", "errors", "metrics"]) |
-| `depth` | No | string | Observation depth: surface, detailed, exhaustive |
+| `aspects` | No | array | Specific aspects to focus on (e.g., ["status", "errors", "metrics"]) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
