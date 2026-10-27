@@ -191,9 +191,10 @@ Example: `${observe_out.observation}`, `${state_out.entities: array<object>}`
 
 ### Gate
 A conditional check that can halt or redirect workflow execution. Gates define:
-- `when`: Condition expression
-- `action`: What to do if condition matches (stop, rollback, skip)
-- `message`: Explanation for the action
+- `when`: Condition expression (STANDARD v1.1 §5.8: comparisons `==` `!=` `<` `<=` `>` `>=`, `!`, `&&`, `||`, literals and `${refs}`)
+- `action`: What to do if condition matches (stop, rollback, skip, warn)
+- `message` (optional): Explanation for the action
+- `phase` (optional): `before` (default) or `after` the step; a gate that reads its own step's output needs `phase: after`, and an after-gate cannot skip
 
 Example: Stop if no checkpoint exists before mutation.
 
@@ -206,9 +207,10 @@ Logic for handling failures and retrying. Recovery loops define:
 
 ### Failure Mode
 A documented way a step can fail, with recovery instructions:
-- `condition`: What triggers the failure mode
-- `action`: Immediate response (stop, rollback, request_more_context)
-- `recovery`: How to recover
+- `condition`: Prose description of the failure
+- `action`: Immediate response (stop, rollback, request_more_context, ...)
+- `when` (optional): Expression that fires the failure mode; evaluated after the step, so it can read the step's own output
+- `recovery` (optional): How to recover — prose, or a recovery loop
 
 ### Store As
 The identifier used to store a step's output for later reference. Other steps can use this identifier in their bindings.
@@ -225,9 +227,7 @@ Steps that can execute concurrently. Parallel groups define:
 ## Safety Concepts
 
 ### Checkpoint
-A saved state that enables rollback. Checkpoints are required before:
-- Any step with `mutation: true`
-- Any step that may cause side effects
+A saved state that enables rollback. A checkpoint step is required before any capability with `requires_checkpoint` or an incoming `requires` edge from `checkpoint` — `mutate`, `send` and `rollback`. Not every mutation needs one: `checkpoint`, `audit` and `persist` are `mutation: true` but need no checkpoint.
 
 **Why it matters:** Checkpoints are your safety net. When step 7 fails after steps 1-6 modified state, a checkpoint lets you restore to a known-good state in seconds instead of hours of manual cleanup.
 
@@ -244,12 +244,12 @@ Reverting to a previous checkpoint. Rollback is triggered when:
 **What it prevents:** Permanent damage from failed mutations, manual recovery procedures that introduce new errors, and downtime while you figure out what state things are in
 
 ### Mutation
-A change to external state (files, databases, APIs). Steps with `mutation: true`:
-- Require a prior checkpoint
+A change to external state (files, databases, APIs). Steps inherit `mutation`, `requires_checkpoint`, `requires_approval` and `risk` from the ontology; a step that declares a weaker value is ignored with warning W602 (`audit` alone is `mutation_overridable` and may declare `mutation: false`). Mutating steps:
+- Require a prior checkpoint where the capability calls for one (`mutate`, `send`, `rollback`)
 - May require approval
 - Should have rollback plans
 
-**Why it matters:** Explicitly marking mutations makes dangerous operations visible. The validator enforces checkpoints before mutations—you can't accidentally skip safety.
+**Why it matters:** Explicitly marking mutations makes dangerous operations visible. The validator enforces checkpoints before the capabilities that require them—you can't accidentally skip safety.
 
 **What it prevents:** "Oops, I didn't realize that step modified the database" surprises, and the false confidence of thinking a workflow is read-only when it isn't
 
@@ -357,8 +357,11 @@ The degree to which an implementation satisfies the standard:
 
 ### Prerequisite
 A capability that must be executed before another. Prerequisites are defined in the capability ontology:
-- `requires`: Hard prerequisite (must be satisfied)
-- `soft_requires`: Recommended but not mandatory
+- `requires`: Hard prerequisite — a source step must run before the target (error V102)
+- `soft_requires`: Recommended — any one of the incoming sources must run before the target, else warning W601
+- `precedes`: Ordering only — when both capabilities appear, the source must run first (error V102)
+
+A step in the same `parallel_group` does not count as running before another.
 
 ---
 
@@ -404,4 +407,4 @@ A synchronized model of a real-world system. The standard includes workflows for
 
 ---
 
-See also: [STANDARD-v1.0.0.md](../spec/STANDARD-v1.0.0.md) for formal definitions.
+See also: [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) for formal definitions.

@@ -68,6 +68,20 @@ Re-planned after D-lang (Rust core): the validator and executor move into
 - [ ] S5 Extensions E1–E6 static validation (durations, cron/tz, triggers,
       recovery/handlers, wait, approval, delegation, quorum,
       `workflow_extensions.requires`/V106).
+  - [x] S5a Declarations (SPECIFIED vs IMPLEMENTED, V106, malformed
+        cascades), durations, 5-field cron (Vixie day semantics), IANA time
+        zones, triggers@1, W614. Review: overflow-safe durations and cron
+        steps, `*/n` semantics, source kinds resolved from the event schema.
+  - [x] S5b recovery@1: `on_error`, store_as targets (W603 legacy), loops,
+        escalation, handlers, `_recovery` context, W609/W613, invoke W607 /
+        V105 / V107, F501. Review (11 findings): handlers only on valid
+        flags and never targeted by handlers (V107), no scope copies per
+        handler, linear injected context and SCC cycle check, escalations
+        take no loop fields, recovery/inject_context shapes, V104 in list
+        order, handler prerequisites checked at the targeter, group mates
+        maybe-absent in handlers; JSON schema tightened to match.
+  - [ ] S5c wait@1 and approval@1 (W606, W608, ActionRecord statuses).
+  - [ ] S5d delegation@1 and quorum@1 (ontology inputs, review verdicts).
 - [ ] S6 Sans-IO executor in the core + Python driver + runtime fixtures.
 - [ ] S7 RFC-0003, STANDARD v1.1.0, EDGE_TYPES errata, docs, changelogs;
       Q3 issue + #114 reply drafts (not posted).
@@ -78,7 +92,8 @@ Re-planned after D-lang (Rust core): the validator and executor move into
   policy check).
 - `precedes` stays strict: a pre-flight check is `constrain`; an early
   `verify` is V102. Document in STANDARD v1.1 and EDGE_TYPES (S7).
-- v1.1 extension fields stay W604 until S5 validates each one.
+- v1.1 extension fields stay W604 until S5 validates each one. (Done for
+  triggers, recovery and handlers; the rest follow in S5c/S5d.)
 
 ## Follow-ups found along the way (outside this issue's scope)
 

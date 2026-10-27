@@ -90,11 +90,12 @@ async with ClaudeSDKClient(options) as client:
 │  └───────────────┘  └────────────────┘  └────────────────────┘  │
 │                                                                  │
 │  ┌───────────────┐  ┌────────────────┐  ┌────────────────────┐  │
-│  │Checkpoint-    │  │EvidenceStore   │  │ Pre/Post ToolUse   │  │
-│  │Tracker        │  │                │  │ Hooks              │  │
-│  │               │  │ Evidence       │  │                    │  │
-│  │ Checkpoint    │  │ anchors        │  │ PreToolUse: block  │  │
-│  │ lifecycle     │  │ storage        │  │ PostToolUse: audit │  │
+│  │Checkpoint-    │  │EvidenceStore   │  │ ToolUse Hooks      │  │
+│  │Tracker        │  │                │  │                    │  │
+│  │               │  │ Evidence       │  │ Pre: reserve/block │  │
+│  │ Checkpoint    │  │ anchors        │  │ Post: consume,audit│  │
+│  │ lifecycle,    │  │ storage        │  │ PostToolUseFailure:│  │
+│  │ reservations  │  │                │  │   release          │  │
 │  └───────────────┘  └────────────────┘  └────────────────────┘  │
 │                                                                  │
 │  ┌───────────────┐  ┌────────────────┐                          │
@@ -198,11 +199,20 @@ Checkpoints are the core safety mechanism. They must exist before mutations:
             │                                       │
             ▼                                       ▼
   ┌─────────────────┐                   ┌─────────────────┐
-  │  Mutation       │                   │  Mutation       │
-  │  ALLOWED        │                   │  BLOCKED        │
+  │  Reserve for    │  reserved by      │  Mutation       │
+  │  this call      │──another in-─────▶│  BLOCKED        │
+  │  (tool_use_id)  │  flight call      │                 │
   └────────┬────────┘                   └─────────────────┘
            │
            ▼
+  ┌─────────────────┐
+  │  Mutation       │
+  │  ALLOWED        │
+  └────────┬────────┘
+           │
+           ├──── error, interrupt or no change ──▶ Release reservation
+           │                                       (checkpoint stays valid
+           ▼                                        for a retry)
   ┌─────────────────┐
   │  Consume        │
   │  Checkpoint     │
@@ -253,18 +263,23 @@ assert not adapter.has_valid_checkpoint()
 
 ## PreToolUse Hook Enforcement
 
-The adapter injects both PreToolUse and PostToolUse hooks:
+The adapter injects PreToolUse, PostToolUse and PostToolUseFailure hooks:
 
-- **PreToolUse**: Blocks mutation tools (Write, Edit, Bash with destructive commands) when no valid checkpoint exists. Returns `{"permissionDecision": "deny"}` in strict mode.
-- **PostToolUse**: Collects evidence anchors and auto-consumes checkpoints after successful mutations.
+- **PreToolUse**: For tools whose capability requires a checkpoint (Write, Edit, Bash with destructive commands), reserves the active checkpoint for the call, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`). It runs for every tool call, including pre-approved ones that never reach `can_use_tool`. When there is no valid checkpoint, or another in-flight call holds the reservation, strict mode denies the call with `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "..."}}`; non-strict mode logs a warning.
+- **PostToolUse**: Collects evidence anchors. After a successful mutation it consumes the checkpoint the call reserved; if the tool reported an error, or the checkpoint-gated tool does not mutate, it releases the reservation instead and the checkpoint stays valid.
+- **PostToolUseFailure**: Releases the reservation of a call that failed or was interrupted, so the checkpoint can cover a retry.
+
+A reservation that is never consumed or released lapses after `checkpoint_reservation_seconds` (default 600).
 
 This provides defense-in-depth alongside the `can_use_tool` permission callback:
 
 ```python
 # Both enforcement layers are active:
-# 1. PreToolUse hook checks checkpoint before tool runs
-# 2. can_use_tool callback provides fine-grained permission control
-# 3. PostToolUse hook collects evidence after tool runs
+# 1. PreToolUse hook reserves the checkpoint before the tool runs
+# 2. can_use_tool callback repeats the reservation for the same tool_use_id
+#    (idempotent) and enforces rate limits
+# 3. PostToolUse hook collects evidence and consumes (or releases) the reservation
+# 4. PostToolUseFailure hook releases the reservation of a failed or interrupted call
 ```
 
 ## Structured Output
@@ -409,6 +424,10 @@ class GroundedAgentConfig:
     max_budget_usd: float | None = None # Cost budget cap
     model: str | None = None            # Default model
     max_turns: int | None = None        # Turn limit
+
+    # How long a tool call holds the checkpoint it reserved if it never
+    # reports back (None: the tracker default, 600 seconds)
+    checkpoint_reservation_seconds: float | None = None
 ```
 
 ## Using with Capability Skills
@@ -591,15 +610,37 @@ def create_grounded_mcp_server(
 
 ```python
 class CheckpointTracker:
+    DEFAULT_RESERVATION_SECONDS: float = 600.0
+
+    def __init__(
+        self,
+        checkpoint_dir: str | Path = ".checkpoints",
+        max_history: int | None = None,
+        marker_dir: str | Path | None = None,
+        reservation_seconds: float | None = None,  # None: 600
+    ) -> None: ...
+
     def create_checkpoint(
         self,
         scope: list[str],
         reason: str,
         expiry_minutes: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str: ...
 
     def has_valid_checkpoint(self) -> bool: ...
-    def consume_checkpoint(self) -> str | None: ...
+
+    # Atomically check the active checkpoint and reserve it for one mutation.
+    # (True, id): reserved for holder (idempotent for the same holder)
+    # (False, id): valid, but reserved by another holder
+    # (False, None): no valid checkpoint
+    def validate_and_reserve(self, holder: str | None = None) -> tuple[bool, str | None]: ...
+
+    # End a reservation without consuming the checkpoint; True if one was released
+    def release_reservation(self, holder: str | None = None) -> bool: ...
+
+    # With holder: consume only the checkpoint that holder reserved
+    def consume_checkpoint(self, holder: str | None = None) -> str | None: ...
     def get_active_checkpoint_id(self) -> str | None: ...
     def get_checkpoint_by_id(self, checkpoint_id: str) -> Checkpoint | None: ...
 ```

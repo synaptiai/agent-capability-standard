@@ -90,7 +90,8 @@
           "additionalProperties": {
             "$ref": "#/$defs/workflow_input"
           },
-          "description": "Workflow-level input declarations."
+          "propertyNames": { "not": { "const": "_recovery" } },
+          "description": "Workflow-level input declarations (_recovery is reserved)."
         },
         "workflow_extensions": {
           "type": "object",
@@ -110,9 +111,86 @@
             },
             "supports_gates": {
               "type": "boolean"
+            },
+            "requires": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": ["triggers@1", "recovery@1", "wait@1", "approval@1", "delegation@1", "quorum@1"]
+              },
+              "description": "Extensions the workflow depends on (STANDARD v1.1 §5.9). A consumer that does not implement one must refuse the workflow."
             }
           }
+        },
+        "triggers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/trigger" },
+          "description": "How runs of this workflow start (STANDARD v1.1 §5.10; needs triggers@1)."
         }
+      }
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^([0-9]+(ms|s|m|h|d)|P(?=[0-9]|T[0-9])([0-9]+D)?(T(?=[0-9])([0-9]+H)?([0-9]+M)?([0-9]+(\\.[0-9]{1,9})?S)?)?)$(?!\\n)",
+      "description": "A duration: <digits>(ms|s|m|h|d) or an ISO-8601 day-time duration (STANDARD v1.1 §5.10.1)."
+    },
+    "fireable_code": {
+      "type": "string",
+      "enum": ["R401", "R402", "R403", "R405", "F502"]
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string", "enum": ["schedule", "event", "manual", "invoke"] },
+        "attendance": { "type": "string", "enum": ["attended", "unattended"] },
+        "schedule": { "$ref": "#/$defs/schedule" },
+        "event": { "$ref": "#/$defs/event_trigger" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "schedule" } }, "required": ["kind"] },
+          "then": { "required": ["schedule"] },
+          "else": { "not": { "required": ["schedule"] } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "event" } }, "required": ["kind"] },
+          "then": { "required": ["event"] },
+          "else": { "not": { "required": ["event"] } }
+        }
+      ]
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": true,
+      "oneOf": [{ "required": ["cron"] }, { "required": ["every"] }],
+      "properties": {
+        "cron": { "type": "string", "description": "Five-field cron expression; no CRON_TZ= prefix." },
+        "every": {
+          "allOf": [
+            { "$ref": "#/$defs/duration" },
+            { "not": { "pattern": "^(0+(ms|s|m|h|d)|P(0+D)?(T(0+H)?(0+M)?(0+(\\.0+)?S)?)?)$" } }
+          ],
+          "description": "An interval longer than zero."
+        },
+        "timezone": { "type": "string", "description": "IANA time zone name (default UTC)." },
+        "overlap": { "type": "string", "enum": ["skip", "buffer_one", "allow_all"] }
+      }
+    },
+    "event_trigger": {
+      "type": "object",
+      "required": ["event_type", "delivers_to"],
+      "additionalProperties": true,
+      "properties": {
+        "event_type": { "type": "string" },
+        "source_kind": {
+          "type": "string",
+          "enum": ["log", "api", "sensor", "message_bus", "human", "agent"],
+          "description": "An event_schema source kind."
+        },
+        "delivers_to": { "type": "string", "description": "Workflow input whose ref is the canonical event." }
       }
     },
     "workflow_input": {
@@ -146,6 +224,13 @@
       "type": "object",
       "required": ["capability", "purpose", "store_as"],
       "additionalProperties": true,
+      "if": {
+        "properties": { "handler": { "const": true } },
+        "required": ["handler"]
+      },
+      "then": {
+        "properties": { "capability": { "const": "invoke" } }
+      },
       "properties": {
         "capability": {
           "type": "string",
@@ -199,7 +284,8 @@
         },
         "store_as": {
           "type": "string",
-          "description": "Key under which this step's output is stored."
+          "not": { "const": "_recovery" },
+          "description": "Key under which this step's output is stored (_recovery is reserved)."
         },
         "failure_modes": {
           "type": "array",
@@ -240,6 +326,10 @@
           "type": "boolean",
           "description": "Whether to skip this step if its condition evaluates to false."
         },
+        "handler": {
+          "type": "boolean",
+          "description": "An invoke step that runs only as an escalation target (STANDARD v1.1 §5.11; needs recovery@1)."
+        },
         "workflow_id": {
           "type": "string",
           "description": "For invoke steps, the ID of the sub-workflow to execute."
@@ -258,6 +348,26 @@
       "type": "object",
       "required": ["condition", "action"],
       "additionalProperties": true,
+      "if": {
+        "properties": { "action": { "const": "escalate" } },
+        "required": ["action"]
+      },
+      "then": {
+        "required": ["recovery"],
+        "properties": {
+          "recovery": {
+            "type": "object",
+            "required": ["goto_step"],
+            "not": {
+              "anyOf": [
+                { "required": ["max_loops"] },
+                { "required": ["on_exhausted"] },
+                { "required": ["inject_context"] }
+              ]
+            }
+          }
+        }
+      },
       "properties": {
         "condition": {
           "type": "string",
@@ -269,14 +379,33 @@
         },
         "action": {
           "type": "string",
-          "description": "Action to take when the condition is met."
+          "enum": ["stop", "rollback", "request_more_context", "pause_and_checkpoint", "escalate"],
+          "description": "Action to take when the failure mode fires (escalate needs recovery@1)."
+        },
+        "on_error": {
+          "oneOf": [
+            { "$ref": "#/$defs/fireable_code" },
+            { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/fireable_code" } }
+          ],
+          "description": "Runtime code(s) that fire this failure mode (STANDARD v1.1 §5.12)."
         },
         "recovery": {
           "oneOf": [
             { "type": "string" },
             {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": true,
+              "properties": {
+                "goto_step": { "type": "string", "description": "store_as of the loop target or handler step." },
+                "inject_context": { "type": "object", "description": "Values readable as ${_recovery.<key>} from the loop target onward." },
+                "max_loops": { "type": "integer", "minimum": 1 },
+                "on_exhausted": {
+                  "type": "object",
+                  "required": ["goto_step"],
+                  "properties": { "goto_step": { "type": "string" } },
+                  "description": "Handler step to escalate to when max_loops is exhausted (needs recovery@1)."
+                }
+              }
             }
           ],
           "description": "Recovery strategy — a human-readable string or a structured object (e.g. goto_step with context injection)."

@@ -10,7 +10,7 @@ SemVer:
 - PATCH: clarifications + tooling fixes
 
 ## Compatibility rules
-- Workflows MUST declare spec version.
+- Workflows MUST declare spec version (`spec_version`, or a `# Standard version:` header for a whole catalog file). Validators report a missing declaration as a warning (W605) and an unsupported version as an error (V109).
 - Validator MUST support at least last 2 minor versions.
 - Deprecated fields must remain accepted for 1 minor release before removal.
 

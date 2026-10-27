@@ -7,6 +7,9 @@
 
 mod bindings;
 mod exprs;
+mod extensions;
+mod invoke;
+mod recovery;
 mod semantics;
 
 pub use semantics::header_version;
@@ -193,20 +196,23 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
             return report;
         }
     };
+    let mut invocations = Vec::new();
     for (name, wf) in workflows {
         // `x-` keys are reserved for vendor data and never validated.
         if name.starts_with("x-") {
             continue;
         }
         match wf {
-            Value::Object(wf) => WorkflowCheck {
-                ctx,
-                name,
-                wf,
-                header,
-                report: &mut report,
-            }
-            .run(),
+            Value::Object(wf) => invocations.extend(
+                WorkflowCheck {
+                    ctx,
+                    name,
+                    wf,
+                    header,
+                    report: &mut report,
+                }
+                .run(),
+            ),
             other => report.push(
                 Diagnostic::new(
                     Code::SchemaValidationFailed,
@@ -219,12 +225,13 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
             ),
         }
     }
+    invoke::check(workflows, &invocations, &mut report);
     report
 }
 
 /// Names and schemas visible to a binding: earlier steps' outputs and the
 /// workflow's declared inputs.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct Scope {
     /// store_as → resolved producer output schema.
     pub stores: IndexMap<String, Value>,
@@ -244,8 +251,12 @@ pub(crate) struct StepLoc<'a> {
 
 impl StepLoc<'_> {
     pub fn diag(&self, code: Code, message: impl Into<String>) -> Diagnostic {
-        Diagnostic::new(code, message)
-            .at("workflow", self.workflow)
+        self.locate(Diagnostic::new(code, message))
+    }
+
+    /// Add this step's location to a diagnostic.
+    pub fn locate(&self, d: Diagnostic) -> Diagnostic {
+        d.at("workflow", self.workflow)
             .at("step", self.step)
             .at("capability", self.capability)
     }
@@ -323,7 +334,9 @@ impl WorkflowCheck<'_> {
         Diagnostic::new(code, message).at("workflow", self.name)
     }
 
-    fn run(mut self) {
+    /// Validate the workflow; returns its invoke steps for the catalog-level
+    /// checks.
+    fn run(mut self) -> Vec<invoke::Invocation> {
         self.check_header();
         let name = self.name;
         let at_wf = |d: Diagnostic| d.at("workflow", name);
@@ -338,12 +351,15 @@ impl WorkflowCheck<'_> {
                 self.report,
             );
         }
+        let declared = extensions::Declared::read(self.wf, &at_wf, self.report);
+        extensions::triggers(self.ctx, self.wf, &declared, &at_wf, self.report);
         let (inputs, maybe_absent) = self.resolve_inputs();
-        let mut scope = Scope {
+        let mut state = Scope {
             inputs,
             maybe_absent,
             ..Scope::default()
         };
+        let scope = &mut state;
         let steps: &[Value] = match self.wf.get("steps") {
             Some(Value::Array(a)) => a,
             Some(other) => {
@@ -352,13 +368,33 @@ impl WorkflowCheck<'_> {
                     format!("'steps' must be a list, found {}", yaml::kind_of(other)),
                 );
                 self.report.push(d.at("field", "steps"));
-                return;
+                return Vec::new();
             }
-            None => return,
+            None => return Vec::new(),
         };
-        let mut placed: Vec<semantics::Placed<'_>> = Vec::new();
-        let mut first_use: HashMap<&str, usize> = HashMap::new();
+        let plan = recovery::plan(self.name, steps, &declared, self.report);
+        let mut injected = recovery::Injected::new(&plan);
+        // Duplicates (V104) are judged in list order, whatever the checking
+        // order; the first step to use a name owns it.
+        let mut owners: HashMap<&str, usize> = HashMap::new();
+        // Normal steps by parallel group, in list order.
+        let mut groups: HashMap<&str, Vec<usize>> = HashMap::new();
         for (i, step) in steps.iter().enumerate() {
+            if let Some(store) = step.get("store_as").and_then(Value::as_str) {
+                owners.entry(store).or_insert(i);
+            }
+            if let Some(g) = step.get("parallel_group").and_then(Value::as_str) {
+                if !plan.handlers.contains(&i) {
+                    groups.entry(g).or_default().push(i);
+                }
+            }
+        }
+        let mut invocations = Vec::new();
+        let mut placed: Vec<semantics::Placed<'_>> = Vec::new();
+        let mut placed_at: HashMap<usize, usize> = HashMap::new();
+        let mut handlers: Vec<(semantics::Placed<'_>, usize)> = Vec::new();
+        for &i in &plan.order {
+            let step = &steps[i];
             let Some(step) = step.as_object() else {
                 let d = self.wdiag(Code::InvalidStep, format!("step {i} is not a mapping"));
                 self.report.push(d.at("step", i));
@@ -391,6 +427,7 @@ impl WorkflowCheck<'_> {
             // Shape and unknown-key checks do not depend on the capability.
             self.check_step_fields(&loc, step);
             self.check_step_keys(&loc, step);
+            extensions::legacy_timeout(step, &|d| loc.locate(d), self.report);
             let (Some(node), Some(contracts)) =
                 (self.ctx.ontology.get(cap), self.ctx.contracts.get(cap))
             else {
@@ -404,26 +441,69 @@ impl WorkflowCheck<'_> {
                 continue;
             };
             semantics::flag_downgrades(&loc, step, node, self.report);
-            placed.push(semantics::Placed {
+            // A handler step runs only on escalation, after the step that
+            // escalated (which may have failed before producing output),
+            // and ends the run: it is outside the normal sequence, and its
+            // output is never visible to other steps.
+            let here = semantics::Placed {
                 index: i,
                 capability: cap,
                 parallel_group: step.get("parallel_group").and_then(Value::as_str),
-            });
+                requires_checkpoint: node.requires_checkpoint
+                    || step.get("requires_checkpoint") == Some(&Value::Bool(true)),
+            };
+            let store = step.get("store_as").and_then(Value::as_str);
+            let view = if plan.handlers.contains(&i) {
+                // Edges are checked against what ran before the targeter.
+                let targeter = plan.targeted_by.get(&i).copied();
+                if let Some(&pos) = targeter.and_then(|t| placed_at.get(&t)) {
+                    handlers.push((here, pos));
+                }
+                let concurrent = targeter
+                    .into_iter()
+                    .flat_map(|t| {
+                        let mates = steps[t]
+                            .get("parallel_group")
+                            .and_then(Value::as_str)
+                            .and_then(|g| groups.get(g))
+                            .map(Vec::as_slice)
+                            .unwrap_or_default();
+                        mates
+                            .iter()
+                            .copied()
+                            .take_while(move |&j| j < t)
+                            .chain(std::iter::once(t))
+                    })
+                    .filter_map(|j| steps[j].get("store_as").and_then(Value::as_str));
+                Some(recovery::HandlerView::enter(scope, concurrent, store))
+            } else {
+                injected.advance(i, scope);
+                placed_at.insert(i, placed.len());
+                placed.push(here);
+                None
+            };
+            if cap == "invoke" {
+                if let Some((target, field)) = invoke::target(step) {
+                    invocations.push(invoke::Invocation {
+                        workflow: self.name.to_string(),
+                        step: i,
+                        target: target.to_string(),
+                        field,
+                    });
+                }
+            }
             self.check_files(&loc, step);
 
-            let store = step.get("store_as").and_then(Value::as_str);
             if let Some(store) = store {
-                if let Some(first) = first_use.get(store) {
+                if let Some(&first) = owners.get(store).filter(|&&first| first != i) {
                     self.report.push(
                         loc.diag(
                             Code::DuplicateStoreAs,
                             format!("duplicate store_as '{store}' (first used at step {first})"),
                         )
                         .at("store_as", store)
-                        .at("first_step", *first),
+                        .at("first_step", first),
                     );
-                } else {
-                    first_use.insert(store, i);
                 }
             }
 
@@ -435,17 +515,17 @@ impl WorkflowCheck<'_> {
             // A step's own output is not visible to its inputs, condition or
             // before-gates...
             if let Some(b) = step.get("input_bindings") {
-                checker.scan(b, &scope, Mode::Full, "input_bindings", self.report);
+                checker.scan(b, scope, Mode::Full, "input_bindings", self.report);
             }
             if let Some(Value::String(c)) = step.get("condition") {
-                exprs::check_expression(c, &scope, &loc, "condition", self.report);
+                exprs::check_expression(c, scope, &loc, "condition", self.report);
             }
             for g in gates.iter().filter(|g| g.phase == exprs::Phase::Before) {
                 if let Some(when) = &g.when {
-                    exprs::check_parsed(when, &scope, &loc, &g.field, self.report);
+                    exprs::check_parsed(when, scope, &loc, &g.field, self.report);
                 }
             }
-            checker.consumer_check(step, &contracts.input, &scope, self.report);
+            checker.consumer_check(step, &contracts.input, scope, self.report);
 
             // ...but after-gates and failure modes run once the step has run,
             // so there its output is present; later steps see it as absent
@@ -458,7 +538,7 @@ impl WorkflowCheck<'_> {
             }
             for g in gates.iter().filter(|g| g.phase == exprs::Phase::After) {
                 if let Some(when) = &g.when {
-                    exprs::check_parsed(when, &scope, &loc, &g.field, self.report);
+                    exprs::check_parsed(when, scope, &loc, &g.field, self.report);
                 }
             }
             if let Some(Value::Array(fms)) = step.get("failure_modes") {
@@ -466,7 +546,7 @@ impl WorkflowCheck<'_> {
                     match fm.get("when") {
                         Some(Value::String(w)) => {
                             let field = format!("failure_modes[{f}].when");
-                            exprs::check_expression(w, &scope, &loc, &field, self.report);
+                            exprs::check_expression(w, scope, &loc, &field, self.report);
                         }
                         Some(other) => self.report.push(
                             loc.diag(
@@ -482,7 +562,7 @@ impl WorkflowCheck<'_> {
                     }
                     if let Some(inject) = fm.get("recovery").and_then(|r| r.get("inject_context")) {
                         let field = format!("failure_modes[{f}].recovery.inject_context");
-                        checker.scan(inject, &scope, Mode::Existence, &field, self.report);
+                        checker.scan(inject, scope, Mode::Existence, &field, self.report);
                     }
                 }
             }
@@ -491,8 +571,12 @@ impl WorkflowCheck<'_> {
                     scope.maybe_absent.insert(store.to_string());
                 }
             }
+            if let Some(view) = view {
+                view.leave(scope);
+            }
         }
-        semantics::check_edges(self.ctx, self.name, &placed, self.report);
+        semantics::check_edges(self.ctx, self.name, &placed, &handlers, self.report);
+        invocations
     }
 
     /// W604 for unknown keys in a step and its gates, failure modes,
@@ -611,6 +695,14 @@ impl WorkflowCheck<'_> {
                     )
                     .at("field", "store_as"),
                 );
+            } else if recovery::reserved_name(s) {
+                self.report.push(
+                    loc.diag(
+                        Code::SchemaValidationFailed,
+                        format!("store_as '{s}' is reserved for injected recovery context"),
+                    )
+                    .at("field", "store_as"),
+                );
             }
         }
         if let Some(Value::String(r)) = step.get("risk") {
@@ -726,6 +818,14 @@ impl WorkflowCheck<'_> {
         };
         for (key, spec) in inputs {
             let field = format!("inputs.{key}");
+            if recovery::reserved_name(key) {
+                let d = self.wdiag(
+                    Code::SchemaValidationFailed,
+                    format!("input '{key}' is reserved for injected recovery context"),
+                );
+                self.report.push(d.at("field", field));
+                continue;
+            }
             let schema = match spec {
                 Value::Object(m) => match m.get("ref") {
                     None => self.ctx.schemas.resolve_node(spec),
@@ -777,17 +877,17 @@ impl WorkflowCheck<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::diag::Code;
     use serde_json::json;
 
-    fn ctx() -> Context {
+    pub(crate) fn ctx() -> Context {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         Context::load(&root.join("schemas/capability_ontology.yaml"), &root).unwrap()
     }
 
-    fn codes(catalog: Value) -> Vec<&'static str> {
+    pub(crate) fn codes(catalog: Value) -> Vec<&'static str> {
         validate_catalog(&ctx(), &catalog, None)
             .diagnostics
             .iter()
@@ -1122,6 +1222,33 @@ mod tests {
             grouped("ground", "x", "g")
         ])));
         assert_eq!(count(&c, "W601"), 1, "{c:?}");
+    }
+
+    #[test]
+    fn a_raised_requires_checkpoint_is_enforced() {
+        let mut raised = st("execute", "e");
+        raised["requires_checkpoint"] = json!(true);
+        raised["input_bindings"] = json!({"code": "make"});
+        let c = codes(wf(json!([
+            st("plan", "p"),
+            st("constrain", "k"),
+            raised.clone()
+        ])));
+        assert_eq!(count(&c, "F501"), 1, "{c:?}");
+        let c = codes(wf(json!([
+            st("plan", "p"),
+            st("constrain", "k"),
+            st("checkpoint", "c"),
+            raised
+        ])));
+        assert_eq!(count(&c, "F501"), 0, "{c:?}");
+        // mutate's own requirement is the requires edge: V102, not also F501.
+        let c = codes(wf(json!([
+            st("plan", "p"),
+            st("constrain", "k"),
+            st("mutate", "m")
+        ])));
+        assert_eq!((count(&c, "V102"), count(&c, "F501")), (1, 0), "{c:?}");
     }
 
     #[test]

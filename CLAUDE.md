@@ -76,10 +76,11 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
 ```
 
-The package is built with maturin: the validator and executor live in the Rust
-crate under `core/` and compile into `grounded_agency._core`, so a Rust
-toolchain (rustc >= 1.86) is required. After changing Rust code, re-run the
-`pip install -e` line to rebuild the extension.
+The package is built with maturin: the validator (and, from stage S6 in
+`tasks/todo.md`, the executor) lives in the Rust crate under `core/` and
+compiles into `grounded_agency._core`, so a Rust toolchain (rustc >= 1.86) is
+required. After changing Rust code, re-run the `pip install -e` line to rebuild
+the extension.
 
 ### Rust core checks
 ```bash
@@ -179,11 +180,11 @@ The plugin enforces safety through Claude Code hooks:
 ### Ontology Edge Types
 
 Relationships between capabilities (in `capability_ontology.yaml`):
-- `requires`: Hard dependency (must be satisfied)
-- `soft_requires`: Recommended but not mandatory
+- `requires`: Hard dependency — a `from` step must run before the target (e.g. `checkpoint` → `mutate`/`send`/`rollback`), else V102
+- `soft_requires`: Recommended — any one incoming source must run before the target, else warning W601
 - `enables`: Unlocks other capabilities
-- `precedes`: Temporal ordering (must complete before target)
-- `conflicts_with`: Mutual exclusivity (cannot coexist in workflow)
+- `precedes`: Ordering only — when both capabilities are present, the source must come first (V102)
+- `conflicts_with`: May not share a `parallel_group` (F504); running them in sequence is allowed
 - `alternative_to`: Substitutable capabilities
 - `specializes`: Parent-child inheritance
 
@@ -234,7 +235,12 @@ python -c "import yaml; yaml.safe_load(open('schemas/capability_ontology.yaml'))
 ```bash
 python tools/sync_skill_schemas.py
 ```
-This generates `skills/<name>/schemas/output_schema.yaml` from the ontology.
+This regenerates `skills/<name>/schemas/output_schema.yaml` from the ontology
+(removing orphaned generated ones), regenerates the skill-bundled
+`skills/*/reference/workflow_catalog.yaml` copies from
+`schemas/workflow_catalog.yaml` with their schema paths rewritten, and keeps the
+vendored schema copies in sync. `--check` fails on drift (CI); `--dry-run` lists
+what would change.
 
 ## Releasing
 
@@ -296,8 +302,15 @@ Medium-risk capabilities (`execute`, `rollback`, `delegate`, `synchronize`, `inv
 - `execute` also has `requires_approval: true`
 
 Other mutation capabilities (`checkpoint`, `audit`, `persist`) have:
-- `mutation: true`
+- `mutation: true`, but need no checkpoint
 - Lower risk levels (low or medium)
+- `audit` also has `mutation_overridable: true`, so a step may declare `mutation: false`
+
+A checkpoint must run before `mutate`, `send` and `rollback` (`requires_checkpoint`
+or a `checkpoint` `requires` edge). Safety flags on workflow steps are optional and
+inherit from the ontology; a step value weaker than the ontology's is ignored with
+warning W602, and a stricter one takes effect (a step that raises
+`requires_checkpoint` with no checkpoint before it is F501).
 
 These are enforced structurally—not by convention.
 

@@ -9,7 +9,11 @@ This script validates the capability ontology by:
 2. Validating symmetric edge types have bidirectional edges
 3. Detecting cycles in hard dependency edges (requires, precedes)
 4. Validating all edge references point to valid capabilities
-5. Optionally checking for multiple edge types between capability pairs
+5. Checking ``mutation_overridable`` appears only on nodes with
+   ``mutation: true``, ``risk: low`` and neither ``requires_checkpoint`` nor
+   ``requires_approval``
+6. Detecting the same (from, to, type) edge listed twice
+7. Optionally checking for multiple edge types between capability pairs
 """
 
 import argparse

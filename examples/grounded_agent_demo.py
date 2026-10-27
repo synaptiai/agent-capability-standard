@@ -9,7 +9,10 @@ Demonstrates all safety features of the Grounded Agency SDK integration:
 4. Audit logging
 
 Prerequisites:
-    pip install claude-agent-sdk
+    The grounded_agency package must be built and installed: it includes a
+    Rust extension (grounded_agency._core), so a Rust toolchain (rustc >= 1.86)
+    is required. From the repository root:
+        pip install -e ".[sdk]"    # or ".[dev]", which includes the SDK
 
 Usage:
     python examples/grounded_agent_demo.py
@@ -246,7 +249,7 @@ async def demo_with_sdk():
 
     except ImportError:
         print("Claude Agent SDK not installed.")
-        print("To test with SDK: pip install claude-agent-sdk")
+        print('To test with SDK: pip install -e ".[sdk]"')
         print("\nShowing how options would be wrapped:")
 
         # Mock demonstration

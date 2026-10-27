@@ -193,7 +193,8 @@ impl Checker<'_> {
             },
             None => {
                 if mode == Mode::Full && ambiguous {
-                    let extra = if external {
+                    // Injected recovery context has no schema to refine.
+                    let extra = if external && r.root != super::recovery::RECOVERY_ROOT {
                         " or refine the inputs schema"
                     } else {
                         ""

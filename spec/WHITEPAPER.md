@@ -203,7 +203,9 @@ The `mutate` capability is the primary state-change point. It requires:
 
 We distinguish hard and soft dependencies:
 
-**Hard dependencies** are encoded through `requires_checkpoint: true` for mutating capabilities.
+**Hard dependencies** are encoded as `requires` edges in the ontology: `checkpoint` is required before `mutate`, `send` and `rollback`. The high-risk capabilities also carry `requires_checkpoint: true`.
+
+**Soft dependencies** are `soft_requires` edges (for example, `constrain` before `execute`, `mutate` and `send`); an unmet one is a warning (W601), not an error.
 
 ```json
 {
@@ -214,7 +216,7 @@ We distinguish hard and soft dependencies:
 }
 ```
 
-**Safety constraints** are enforced structurally. Capabilities with `mutation: true` require explicit checkpoints.
+**Safety constraints** are enforced structurally. The validator rejects a `mutate`, `send` or `rollback` step without an earlier `checkpoint` step (V102), and a step cannot weaken its safety flags below the ontology's: a weaker declaration is ignored with a warning (W602). The checkpoint requirement follows `requires_checkpoint` and the `requires` edges, not `mutation`: `checkpoint`, `audit` and `persist` are `mutation: true` without needing a checkpoint.
 
 This distinction allows flexibility while ensuring critical safety properties.
 
@@ -283,21 +285,26 @@ A workflow consists of:
 
 ```yaml
 workflow_name:
-  goal: What this workflow achieves
-  risk: low | medium | high
-  inputs: External input schema
-  steps: Ordered list of capability invocations
-  success: Criteria for successful completion
+  goal: What this workflow achieves              # required
+  risk: low | medium | high                      # required
+  steps: Ordered list of capability invocations  # required
+  inputs: External input schema                  # optional
+  success: Criteria for successful completion    # optional
+  spec_version: "1.1"                            # optional; standard version targeted
 ```
+
+A catalog file can instead declare the version for all its workflows with a `# Standard version: 1.1.0` header. A workflow with neither draws a warning (W605); an unsupported version is an error (V109).
 
 Each step invokes a capability and stores its output:
 
 ```yaml
-- capability: detect-anomaly
+- capability: detect
+  domain: anomaly
   purpose: Find unusual patterns
   store_as: anomaly_out
   input_bindings:
-    context: ${inspect_out.findings}
+    data: ${observe_out.observation}
+    pattern: anomaly
 ```
 
 ### 4.3 The Binding System
@@ -325,10 +332,12 @@ gates:
     message: "Cannot proceed without checkpoint"
 ```
 
+A gate's `action` is `stop`, `rollback`, `skip` or `warn`, and `message` is optional. A gate runs before its step by default; `phase: after` runs it after the step, which a gate that reads its own step's output needs. Gate `when` clauses, step `condition`s and failure-mode `when` clauses share one expression grammar ([STANDARD v1.1.0 §5.8](STANDARD-v1.1.0.md#58-condition-expressions)): references, JSON literals, comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`) and boolean `&&`, `||`, `!`, checked statically for syntax and types.
+
 Conditions enable step-level branching:
 
 ```yaml
-- capability: act-plan
+- capability: mutate
   condition: ${approval_out.approved} == true
   skip_if_false: true
 ```
@@ -339,10 +348,11 @@ Steps can declare expected failure scenarios:
 
 ```yaml
 failure_modes:
-  - condition: verdict == FAIL
+  - condition: Verification failed      # prose description
+    when: ${verify_out.passed} == false  # trigger expression
     action: rollback
     recovery:
-      goto_step: plan
+      goto_step: plan_out
       inject_context:
         failure_evidence: ${verify_out.violations}
       max_loops: 3
@@ -364,7 +374,7 @@ Steps can execute concurrently:
 
 - capability: integrate
   input_bindings:
-    sources: [${search_out}, ${retrieve_out}]
+    sources: ["${search_out}", "${retrieve_out}"]
 ```
 
 ---
@@ -440,10 +450,10 @@ We enforce: "Modification requires checkpoint, which requires file access"
 ### 6.2 Safety Invariants
 
 **Invariant 1: Mutation requires checkpoint**
-Any step with `mutation: true` must be preceded by a checkpoint. The validator rejects workflows that violate this.
+Any `mutate`, `send` or `rollback` step must be preceded by a `checkpoint` step. The validator rejects workflows that violate this (V102), and step flags cannot weaken the requirement (W602).
 
-**Invariant 2: Actions require plans**
-The `act-plan` capability requires a `plan` from an earlier step. This ensures deliberate rather than impulsive action.
+**Invariant 2: Actions follow plans and checks**
+When a workflow plans, the `plan` step must come before `execute` and `mutate` (`precedes`), and a `constrain` policy check should come before `execute`, `mutate` and `send` (`soft_requires`, W601 when missing). This ensures deliberate rather than impulsive action.
 
 **Invariant 3: Claims require grounding**
 Outputs should include evidence anchors. Ungrounded claims must explicitly state their inference method.
@@ -475,18 +485,21 @@ The validator operates at four conformance levels:
 
 ### 7.2 Error Model
 
-Errors are categorized:
+Diagnostics are categorized:
 
-| Category | Code Range | Description |
-|----------|------------|-------------|
-| Validation | V1xx | Static validation failures |
-| Binding | B2xx | Binding resolution failures |
-| Schema | S3xx | Schema validation failures |
-| Runtime | R4xx | Runtime execution failures |
-| Safety | F5xx | Safety constraint violations |
+| Category | Code Range | Severity | Description |
+|----------|------------|----------|-------------|
+| Validation | V1xx | error | Static validation failures |
+| Binding | B2xx | error | Binding and expression-reference failures |
+| Schema | S3xx | error | Schema validation failures |
+| Runtime | R4xx | error | Runtime execution failures |
+| Safety | F5xx | error | Safety constraint violations |
+| Warning | W6xx | warning | Valid but suspect; the workflow is accepted |
 
-Each error includes:
-- Code and name for programmatic handling
+A workflow is valid when it has no errors. Warnings include unmet soft prerequisites (W601), safety-flag downgrades (W602), deprecated forms (W603), unknown fields (W604) and a missing version declaration (W605); a strict mode can treat warnings as errors.
+
+Each diagnostic includes:
+- Code, name and severity for programmatic handling
 - Human-readable message
 - Location (workflow, step, field)
 - Suggestion for fixing
@@ -656,14 +669,21 @@ Production agents require architecture, not vibes. This standard provides that a
 
 | Workflow | Goal | Risk | Steps |
 |----------|------|------|-------|
-| `debug_code_change` | Fix bugs safely | High | 11 |
-| `world_model_build` | Construct world model | Low | 11 |
-| `capability_gap_analysis` | Find missing capabilities | Medium | 7 |
-| `digital_twin_sync_loop` | Sync digital twin | High | 20 |
+| `monitor_and_replan` | Replan when the world changes | Medium | 7 |
+| `clarify_intent` | Resolve ambiguous requests | Low | 5 |
+| `debug_code_change` | Fix bugs safely | Medium | 11 |
+| `world_model_build` | Construct world model | Low | 13 |
+| `capability_gap_analysis` | Find missing capabilities | Low | 7 |
+| `digital_twin_sync_loop` | Sync digital twin | High | 21 |
 | `digital_twin_bootstrap` | Initialize twin | High | 2 (nested) |
+| `rag_pipeline` | Grounded, cited answers | Low | 7 |
+| `security_assessment` | Assess vulnerabilities | Low | 7 |
+| `multi_agent_orchestration` | Coordinate agents | Medium | 7 |
+| `data_quality_pipeline` | Clean and validate data | Medium | 9 |
+| `model_deployment` | Deploy a model safely | High | 8 |
 
 ---
 
-*Agent Capability Standard v1.0.0*
+*Agent Capability Standard v1.1.0 (Draft; v1.0.0 still supported)*
 *Copyright 2026 Synapti.ai*
 *Licensed under Apache 2.0*

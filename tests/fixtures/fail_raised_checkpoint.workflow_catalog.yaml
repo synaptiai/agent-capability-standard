@@ -1,0 +1,19 @@
+# Standard version: 1.1.0
+# A step that raises requires_checkpoint (STANDARD v1.1 §5.2.1) is held to
+# it: no checkpoint runs before it, so F501.
+raised_without_checkpoint:
+  goal: Run a command that asks for a checkpoint first.
+  risk: medium
+  steps:
+  - capability: plan
+    purpose: Plan.
+    store_as: plan_out
+  - capability: constrain
+    purpose: Check policy.
+    store_as: policy_out
+    input_bindings: {target: "${plan_out}", constraints: [policy]}
+  - capability: execute
+    purpose: Run the migration.
+    store_as: migrate_out
+    requires_checkpoint: true
+    input_bindings: {code: migrate}

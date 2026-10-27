@@ -47,7 +47,7 @@ The system decomposes into **six subsystems**: Schema (formal definitions), SDK 
 
 | File | Lines | Role |
 |------|-------|------|
-| `schemas/capability_ontology.yaml` | 1,912 | Master ontology: 36 nodes, 80+ edges, 7 edge types, I/O contracts |
+| `schemas/capability_ontology.yaml` | 1,912 | Master ontology: 36 nodes, 97 edges, 7 edge types, I/O contracts |
 | `schemas/workflow_catalog.yaml` | 1,909 | 12 reference workflows with step bindings, gates, failure modes |
 | `schemas/world_state_schema.yaml` | 491 | World model: entities, relationships, state variables, observations, transitions |
 | `schemas/entity_taxonomy.yaml` | 193 | 24 entity classes (11 digital + 13 physical), 57 subtypes, 10 core relations |
@@ -141,16 +141,19 @@ options = adapter.wrap_options(base_options)  # Injects hooks, permissions, sett
 |---------|------|---------|
 | `create_evidence_collector(store, mapper)` | PostToolUse | Captures evidence anchors from all tool executions |
 | `create_skill_tracker(tracker)` | PostToolUse | Tracks checkpoint/rollback skill invocations |
-| `_make_permission_callback()` | CanUseTool | **Core safety gate**: denies mutations without valid checkpoint |
-| `_make_mutation_consumer()` | PostToolUse | Auto-consumes checkpoints after successful mutations |
+| `_make_pretooluse_checkpoint_hook()` | PreToolUse | Reserves the active checkpoint for each checkpoint-gated call (keyed by `tool_use_id`); denies via `hookSpecificOutput` in strict mode |
+| `_make_permission_callback()` | CanUseTool | **Core safety gate**: repeats the reservation idempotently; denies mutations without a valid, unreserved checkpoint |
+| `_make_mutation_consumer()` | PostToolUse | Consumes the call's reserved checkpoint after a successful mutation; releases it on error or a non-mutating call |
+| `_make_failure_releaser()` | PostToolUseFailure | Releases the reservation of a failed or interrupted call |
 
 **Enforcement Chain** (for a mutation like Write):
 1. Shell PreToolUse hook checks `.claude/checkpoint.ok` file exists
-2. Python `can_use_tool` callback checks `CheckpointTracker.has_valid_checkpoint()`
-3. If both pass: tool executes
-4. Python PostToolUse evidence collector captures evidence
-5. Python PostToolUse mutation consumer auto-consumes checkpoint
-6. Shell PostToolUse audit hook logs the invocation
+2. Python PreToolUse hook reserves the active checkpoint via `CheckpointTracker.validate_and_reserve(tool_use_id)` (denies in strict mode if none is valid or another call holds it)
+3. Python `can_use_tool` callback repeats the reservation for the same `tool_use_id` (idempotent)
+4. If all pass: tool executes
+5. Python PostToolUse evidence collector captures evidence
+6. Python PostToolUse mutation consumer consumes the reserved checkpoint (`consume_checkpoint(tool_use_id)`), or releases it if the call errored; on failure/interrupt the PostToolUseFailure hook releases it
+7. Shell PostToolUse audit hook logs the invocation
 
 **Error Handling Philosophy**:
 - Shell hooks: Exit 0 on tooling errors (non-fatal), exit 1 only on policy violations
@@ -187,29 +190,31 @@ Followed by markdown sections: Intent, Success Criteria, Input Contract, Procedu
 
 ### 2.5 Validation Subsystem
 
-**Purpose**: Seven Python validators for design-time checking of schemas, workflows, profiles, skills, ontology graph, transform refs, and YAML utility sync.
+**Purpose**: Design-time checking of schemas, workflows, profiles, skills, ontology graph, transform refs, and YAML utility sync. Workflow validation runs in the Rust core (`core/`, crate `acs-core`, compiled into `grounded_agency._core`); the other checks are standalone Python scripts under `tools/`.
 
 | Tool | LOC | Stages | What It Validates |
 |------|-----|--------|-------------------|
-| `validate_workflows.py` | ~800 | 5 | Capability refs, bindings, type inference, consumer contracts, patch suggestions |
-| `validate_ontology.py` | ~300 | 5 | Orphan nodes, symmetric edges, cycles, valid refs, duplicate edges |
-| `validate_profiles.py` | ~400 | 5 | Required fields, trust weight ranges, enum values, semver format, source types |
-| `validate_skill_refs.py` | ~250 | 4 | Path existence for schemas, references, locations, workflow refs |
-| `validate_transform_refs.py` | ~200 | 3 | Transform `mapping_ref` paths, registry consistency, no broken refs |
-| `validate_yaml_util_sync.py` | ~150 | 2 | YAML utility sync between `safe_yaml.py` and `yaml_util.py` |
-| `sync_skill_schemas.py` | ~300 | 3 | Extracts output schemas from ontology, bundles transitive deps, syncs to skills |
+| `validate_workflows.py` | ~175 | CLI | Thin front end to the Rust core: formats the report, writes `tools/validator_suggestions.json`, renders the optional `--emit-patch` diff |
+| `validate_ontology.py` | ~300 | 7 | Orphan nodes, symmetric edges, cycles, valid refs, `mutation_overridable` constraints, edges listed twice, (optional) multiple edge types per pair |
+| `validate_profiles.py` | ~380 | 5 | Required fields, trust weight ranges, enum values, semver format, source types |
+| `validate_skill_refs.py` | ~200 | 4 | Path existence for schemas, references, locations, workflow refs |
+| `validate_transform_refs.py` | ~120 | 3 | Transform `mapping_ref` paths, registry consistency, no broken refs |
+| `validate_yaml_util_sync.py` | ~130 | 2 | YAML utility sync between `safe_yaml.py` and `yaml_util.py` |
+| `sync_skill_schemas.py` | ~265 | 3 | Regenerates skill output schemas from the ontology, the 17 vendored workflow catalogs and vendored schema copies; removes orphaned generated schemas; `--check` / `--dry-run` |
 
-**Type System** (in `validate_workflows.py`):
-- Supports: `string`, `number`, `boolean`, `object`, `nullable<T>`, `array<T>`, `map<K,V>`
-- Type inference: Resolves `${step_out.field}` bindings to producer capability's output schema
-- Coercion integration: Suggests `transform_coercion_registry.yaml` entries for type mismatches
-- Consumer-side checking: Validates binding types against consumer capability's input schema
-- Patch generation: Emits `tools/validator_patch.diff` for auto-fixable issues
+**Workflow Validator Core** (`core/src/`):
+- `yaml.rs` — YAML 1.2 loader used for all validation (PyYAML's `safe_yaml_load` is only used by `--emit-patch` to re-serialize the catalog)
+- `types.rs` — type system: `string`, `number`, `boolean`, `object`, `nullable<T>`, `array<T>`, `map<K,V>`
+- `refs.rs` / `schema.rs` — `$ref` resolution and schema-based type inference: resolves `${step_out.field}` bindings to the producer capability's output schema
+- `expr/` — gate/condition expression lexer, parser, type checker and evaluator (a CEL-compatible profile)
+- `validate/{mod,bindings,exprs,semantics,extensions}.rs` — capability existence and prerequisites, binding and consumer-contract checks, expression checks, edge semantics (`precedes`, `conflicts_with`, `soft_requires`), safety-flag inheritance, extension handling, coercion-based patch suggestions
+- Diagnostics carry a severity (`error` | `warning`); warnings are W601–W614
 
 **Conformance Testing** (`scripts/run_conformance.py`):
-- 22 fixture files covering all 4 conformance levels (L1–L4)
-- Uses temp directory copy (no longer swaps production file)
-- Results output to `.conformance/conformance_results.json`
+- 55 fixture files in `tests/fixtures/` covering all 4 conformance levels (L1–L4)
+- Runs the validator on each fixture via `--catalog` (the production catalog is never swapped or modified)
+- Checks `tests/fixtures/EXPECTATIONS.json` (`should_pass`, `expected_error_codes`, `expected_warning_codes`; an empty list means none may be emitted)
+- Results output to `build/conformance_results.json`; expression fixtures live in `tests/conformance/expressions/{eval,check}.json`
 
 ---
 
@@ -308,6 +313,7 @@ The core safety pattern for mutations:
 - `CheckpointTracker.has_valid_checkpoint()` checks: exists AND not consumed AND not expired
 - `Checkpoint.matches_scope(target)` validates target covered by scope patterns (supports `*` and fnmatch globs)
 - `CheckpointTracker.consume_checkpoint()` marks consumed with timestamp, moves to history
+- `CheckpointTracker.validate_and_reserve(holder)` reserves the active checkpoint for one tool call (keyed by `tool_use_id`, idempotent for the same holder, lapses after `reservation_seconds`, default 600); `release_reservation(holder)` gives it back; `consume_checkpoint(holder)` consumes only what that holder reserved
 - `CheckpointTracker.invalidate_all()` clears all checkpoints (for rollback)
 
 ### 4.3 Dual-Layer Enforcement
@@ -319,14 +325,21 @@ Layer 1: Shell Hooks (Claude Code CLI)
      └─ Blocks Write|Edit without valid marker
      └─ Uses CLAUDE_PROJECT_DIR for absolute path resolution
 
-Layer 2: Python SDK (Permission Callback)
-  └─ adapter._make_permission_callback()
+Layer 2: Python SDK (PreToolUse hook + Permission Callback)
+  └─ adapter._make_pretooluse_checkpoint_hook()
+     └─ Runs for every tool call, including pre-approved ones
      └─ Maps tool → capability via ToolCapabilityMapper
      └─ Checks requires_checkpoint flag
-     └─ Atomic validate_and_reserve() with thread lock
-     └─ CheckpointTracker manages .claude/checkpoint.ok lifecycle (synchronized)
+     └─ Atomic validate_and_reserve(tool_use_id) with thread lock
+     └─ strict_mode=True → deny via hookSpecificOutput (permissionDecision: "deny")
+  └─ adapter._make_permission_callback()
+     └─ Repeats the reservation for the same tool_use_id (idempotent)
      └─ strict_mode=True → PermissionResultDeny
      └─ strict_mode=False → Warning + Allow
+  └─ PostToolUse: consume_checkpoint(tool_use_id) after a successful mutation;
+     release_reservation(tool_use_id) on error / non-mutating call
+  └─ PostToolUseFailure: release_reservation(tool_use_id)
+  └─ CheckpointTracker manages .claude/checkpoint.ok lifecycle (synchronized)
 ```
 
 **Dual-Layer Synchronization**: `CheckpointTracker.create_checkpoint()` writes `.claude/checkpoint.ok` with checkpoint ID and expiry timestamp; `consume_checkpoint()` removes it. This bridges the shell and SDK layers.
@@ -370,19 +383,20 @@ The `ToolCapabilityMapper._classify_bash_command()` method uses a priority-order
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
 | **Language** | Python | >=3.10 | `\|` union types, `slots=True` dataclasses, `match` statements |
-| **Build** | hatchling | latest | PEP 517 build backend for `grounded-agency` package |
+| **Build** | maturin | >=1.9,<2 | PEP 517 build backend; compiles the Rust crate `core/` (`acs-core`) into `grounded_agency._core` (abi3 wheels per platform) |
+| **Core** | Rust | >=1.86 | Workflow validator and executor (YAML 1.2 loader, type system, expressions, diagnostics) |
 | **Schema** | YAML | 1.2 | All ontology, workflow, profile, and mapping definitions |
-| **YAML Parser** | PyYAML | >=6.0 | Only runtime dependency; uses `yaml.safe_load()` exclusively |
+| **YAML Parser** | PyYAML | >=6.0,<7 | Only runtime Python dependency; Python-side loading uses `yaml.safe_load()` exclusively (workflow validation uses the Rust core's YAML 1.2 loader) |
 | **Testing** | pytest | >=7.0 | Unit tests with async support |
 | **Async Testing** | pytest-asyncio | >=0.21 | `auto` mode for async test functions |
 | **Type Checking** | mypy | >=1.0 | Strict mode, Python 3.10+ target |
-| **Linting** | ruff | >=0.1.0 | pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade |
-| **SDK** | claude-agent-sdk | >=0.1.0 | Optional dependency (`pip install grounded-agency[sdk]`) |
+| **Linting** | ruff | >=0.16,<0.17 (exact pin in `constraints.txt`) | pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade |
+| **SDK** | claude-agent-sdk | >=0.1.25,<0.3 | Optional dependency (`pip install grounded-agency[sdk]`) |
 | **Plugin** | Claude Code | CLI | Hooks, skills, audit logging |
 | **Shell** | Bash | 4+ | Hook scripts with jq for JSON parsing |
 | **SCM** | Git | 2+ | Version control, checkpoint integration |
 
-**Dependency Minimalism**: The core package has exactly **one** runtime dependency (`pyyaml>=6.0`). The SDK integration is an optional extra. This keeps the attack surface minimal and installation lightweight.
+**Dependency Minimalism**: The core package has exactly **one** runtime Python dependency (`pyyaml>=6.0,<7`); the validator and executor ship inside the package as the compiled `grounded_agency._core` extension, so building from source needs a Rust toolchain. The SDK integration is an optional extra. This keeps the attack surface minimal and installation lightweight.
 
 ---
 
@@ -586,8 +600,9 @@ event_schema.yaml ──→ world_state_schema.yaml (observation event mapping)
 
 ```
 grounded-agency (Python package)
-    └── pyyaml>=6.0 (only runtime dependency)
-    └── [optional] claude-agent-sdk>=0.1.0
+    └── pyyaml>=6.0,<7 (only runtime Python dependency)
+    └── grounded_agency._core (compiled from core/, Rust >= 1.86, via maturin)
+    └── [optional] claude-agent-sdk>=0.1.25,<0.3
 
 Claude Code Plugin
     └── Claude Code CLI (hooks, skills)
@@ -603,7 +618,7 @@ Claude Code Plugin
 |--------|-------|
 | Atomic capabilities | 36 |
 | Cognitive layers | 9 |
-| Capability edges | 80+ |
+| Capability edges | 97 |
 | Edge types | 7 |
 | Workflow patterns | 12 |
 | Domain profiles | 7 |
@@ -617,7 +632,7 @@ Claude Code Plugin
 | Entity classes | 24 (11 digital + 13 physical) |
 | Trust source ranks | 6 |
 | Transform coercions | 7 |
-| Conformance fixtures | 22 |
+| Conformance fixtures | 55 |
 | CI pipeline | `.github/workflows/ci.yml` |
 | Plugin version | 1.1.0 |
 | SDK version | 0.1.0 |

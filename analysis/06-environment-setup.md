@@ -27,7 +27,10 @@ This document provides comprehensive instructions for setting up, configuring, a
 | **Python** | 3.10+ | Runtime, validators, SDK package | `python --version` |
 | **Git** | 2.x | Version control, clone, hooks | `git --version` |
 | **pip** | 22.0+ | Package installation | `pip --version` |
-| **PyYAML** | 6.0+ | Only runtime dependency (ontology/schema parsing) | `python -c "import yaml; print(yaml.__version__)"` |
+| **Rust toolchain** | rustc 1.86+ | Builds the validator/executor core (`core/`, crate `acs-core`) into `grounded_agency._core` via maturin; needed for any install from source, including `pip install -e` | `rustc --version` |
+| **PyYAML** | 6.0+ (<7) | Only runtime Python dependency (installed automatically) | `python -c "import yaml; print(yaml.__version__)"` |
+
+There is deliberately no pure-Python fallback for the core: `pip install -e ".[dev]" -c constraints.txt` compiles the Rust crate, and every consumer (the SDK, `tools/validate_workflows.py`, the conformance runner) runs that one implementation. CI pins the toolchain it uses (`RUST_TOOLCHAIN` in `.github/workflows/ci.yml`) and also checks the minimum supported version (1.86).
 
 ### Optional Software
 
@@ -37,6 +40,7 @@ This document provides comprehensive instructions for setting up, configuring, a
 | **jq** | JSON processing in audit log hook (`posttooluse_log_tool.sh`) | `jq --version` |
 | **mypy** | Static type checking (development) | `mypy --version` |
 | **ruff** | Linting and formatting (development) | `ruff --version` |
+| **Go** | Only for the CEL differential check (`tools/cel_differential/`, run in CI) | `go version` |
 
 ### Why Python 3.10+?
 
@@ -91,7 +95,7 @@ The plugin metadata is defined in `.claude-plugin/plugin.json`:
 ```json
 {
   "name": "agent-capability-standard",
-  "version": "1.0.5",
+  "version": "1.2.0",
   "description": "Grounded Agency: 36 atomic capabilities across 9 cognitive layers...",
   "skills": "./skills/"
 }
@@ -107,10 +111,10 @@ After installation, the plugin hooks defined in `hooks/hooks.json` are automatic
 This method installs the `grounded_agency` Python package for programmatic integration with the Claude Agent SDK. It does not install the Claude Code plugin, skills, or hooks.
 
 ```bash
-# Core package -- PyYAML only, no SDK dependency
+# Core package -- PyYAML plus the compiled core, no SDK dependency
 pip install grounded-agency
 
-# With Claude Agent SDK integration (adds claude-agent-sdk>=0.1.0)
+# With Claude Agent SDK integration (adds claude-agent-sdk>=0.1.25,<0.3)
 pip install grounded-agency[sdk]
 
 # With development tools (adds pytest, mypy, ruff)
@@ -124,9 +128,11 @@ pip install grounded-agency[all]
 
 | Extra | Added Dependencies | Use Case |
 |-------|--------------------|----------|
-| *(core)* | `pyyaml>=6.0` | Ontology loading, schema parsing |
-| `[sdk]` | `claude-agent-sdk>=0.1.0` | Wrapping SDK options with safety layer |
-| `[dev]` | `pytest>=7.0`, `pytest-asyncio>=0.21`, `mypy>=1.0`, `ruff>=0.1.0` | Testing, type checking, linting |
+| *(core)* | `pyyaml>=6.0,<7` (the validator/executor ships inside the wheel as `grounded_agency._core`) | Ontology loading, schema parsing, workflow validation |
+| `[sdk]` | `claude-agent-sdk>=0.1.25,<0.3` | Wrapping SDK options with safety layer |
+| `[dev]` | `pytest>=7.0,<9`, `pytest-asyncio>=0.21,<1`, `mypy>=1.0,<2`, `ruff>=0.16,<0.17`, `types-PyYAML`, `hypothesis`, `jsonschema`, `claude-agent-sdk` | Testing, type checking, linting |
+
+Wheels are built per platform with the stable ABI (abi3, Python >= 3.10). Where no wheel matches the platform, pip builds from the sdist, which needs a Rust toolchain (>= 1.86).
 | `[all]` | All of the above | Full development environment |
 
 **Post-install verification:**
@@ -156,7 +162,8 @@ source .venv/bin/activate        # macOS/Linux
 # .venv\Scripts\activate.bat     # Windows (cmd)
 
 # Step 3: Install in editable mode with all dependencies
-pip install -e ".[dev,sdk]"
+# (compiles the Rust core; needs rustc >= 1.86)
+pip install -e ".[dev]" -c constraints.txt
 
 # Step 4: Verify installation
 python -c "from grounded_agency import GroundedAgentAdapter; print('SDK OK')"
@@ -164,21 +171,28 @@ python tools/validate_workflows.py
 python tools/validate_ontology.py
 ```
 
-**Why editable mode (`-e`)?** Editable installs create a symlink from the virtual environment's `site-packages` to your source tree. Changes to Python files under `grounded_agency/` take effect immediately without reinstallation. The `pyproject.toml` hatch build target confirms the package layout:
+**Why editable mode (`-e`)?** Editable installs point the virtual environment at your source tree. Changes to Python files under `grounded_agency/` take effect immediately without reinstallation; changes to the Rust code under `core/` do not -- re-run the `pip install -e` line to rebuild the `grounded_agency._core` extension. The `[dev]` extra already includes the SDK. Pass `-c constraints.txt` so the tool versions (notably ruff) match exactly what CI runs.
+
+The package is built with maturin; `pyproject.toml` configures the layout:
 
 ```toml
-[tool.hatch.build.targets.wheel]
-packages = ["grounded_agency"]
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
-[tool.hatch.build.targets.sdist]
+[tool.maturin]
+manifest-path = "core/Cargo.toml"
+module-name = "grounded_agency._core"
+python-source = "."
+python-packages = ["grounded_agency"]
+features = ["python"]
 include = [
-    "/grounded_agency",
-    "/schemas",
-    "/skills",
+    { path = "schemas/**/*", format = "sdist" },
+    { path = "skills/**/*", format = "sdist" },
 ]
 ```
 
-Note that the sdist includes `schemas/` and `skills/` alongside the Python package, ensuring the `capability_ontology.yaml` is available for ontology path resolution even when installed from a source distribution.
+Note that the sdist includes `schemas/` and `skills/` alongside the Python package and the Rust crate, ensuring the `capability_ontology.yaml` is available for ontology path resolution even when installed from a source distribution.
 
 ---
 
@@ -216,22 +230,33 @@ __pycache__/
 
 ### Installing All Dependencies
 
-For a full development environment, install with both `dev` and `sdk` extras:
+For a full development environment, install the `dev` extra (which includes the SDK) against the constraints file:
 
 ```bash
-pip install -e ".[dev,sdk]"
+pip install -e ".[dev]" -c constraints.txt
 ```
 
-This provides:
+This builds the Rust core and provides:
 
-| Package | Version | Purpose |
+| Package | Version (supported range; exact pins in `constraints.txt`) | Purpose |
 |---------|---------|---------|
-| `pyyaml` | >=6.0 | YAML parsing for ontology, schemas, profiles |
-| `claude-agent-sdk` | >=0.1.0 | SDK integration for `GroundedAgentAdapter` |
-| `pytest` | >=7.0 | Test runner |
-| `pytest-asyncio` | >=0.21 | Async test support (adapter hooks are async) |
-| `mypy` | >=1.0 | Static type analysis |
-| `ruff` | >=0.1.0 | Linting and import sorting |
+| `pyyaml` | >=6.0,<7 | YAML parsing for ontology, schemas, profiles |
+| `claude-agent-sdk` | >=0.1.25,<0.3 | SDK integration for `GroundedAgentAdapter` |
+| `pytest` | >=7.0,<9 | Test runner |
+| `pytest-asyncio` | >=0.21,<1 | Async test support (adapter hooks are async) |
+| `mypy` | >=1.0,<2 | Static type analysis |
+| `ruff` | >=0.16,<0.17 | Linting, formatting and import sorting |
+| `types-PyYAML`, `hypothesis`, `jsonschema` | see `pyproject.toml` | Type stubs, property tests, schema tests |
+
+For the Rust core itself, the checks CI runs are:
+
+```bash
+cd core
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features python -- -D warnings
+cargo test
+```
 
 ### Editor Configuration
 
@@ -485,12 +510,12 @@ The project includes a suite of validation tools under `tools/` and `scripts/`. 
 
 | Command | Purpose | Expected Output |
 |---------|---------|-----------------|
-| `python tools/validate_workflows.py` | Validate workflow compositions against the ontology. Checks that all referenced capabilities exist and bindings are well-typed. | `VALIDATION PASS` or errors with line references and suggested fixes. |
-| `python tools/validate_ontology.py` | Check ontology graph integrity. Detects orphan nodes (capabilities with no edges), cycles in `requires` chains, and asymmetry in bidirectional edge types. | `OK` or warnings listing orphan/cycle/symmetry issues. |
-| `python tools/validate_profiles.py` | Validate domain profiles (`schemas/profiles/*.yaml`) against the profile schema. Checks for required fields, valid capability references, and threshold ranges. | `OK` or field-level errors identifying the failing profile. |
-| `python tools/validate_skill_refs.py` | Check for phantom paths in skill files. Ensures all file references in SKILL.md documents point to files that actually exist in the repository. | `OK` or list of broken references with file locations. |
-| `python tools/sync_skill_schemas.py` | Generate skill-local output schemas from the ontology. Creates `skills/<name>/schemas/output_schema.yaml` for each capability defined in the ontology. | Count of files created or updated. |
-| `python scripts/run_conformance.py` | Run conformance tests against the ontology and workflow catalog. Validates structural compliance with the formal specification. | `Conformance PASSED (N/N)` or failure details. |
+| `python tools/validate_workflows.py` | Validate workflow compositions against the ontology (checks run in the Rust core, so the package must be built: `pip install -e .`). Checks that all referenced capabilities exist, edge semantics hold, bindings and expressions are well-typed. Options: `--catalog PATH`, `--strict`, `--emit-patch`. | A `WARNINGS:` block if any, then `VALIDATION PASS` or `VALIDATION FAIL:` with lines `[workflow] step N (capability): CODE message — hint`. |
+| `python tools/validate_ontology.py` | Check ontology graph integrity. Detects orphan nodes (capabilities with no edges), cycles in `requires`/`precedes` chains, asymmetry in bidirectional edge types, misuse of `mutation_overridable` and edges listed twice. | `VALIDATION PASSED` or errors listing the issues. |
+| `python tools/validate_profiles.py` | Validate domain profiles (`schemas/profiles/*.yaml`) against the profile schema. Checks for required fields, valid capability references, and threshold ranges. | `PROFILE VALIDATION PASS: N profiles validated` or field-level errors identifying the failing profile. |
+| `python tools/validate_skill_refs.py` | Check for phantom paths in skill files. Ensures all file references in SKILL.md documents point to files that actually exist in the repository. | `SKILL REFERENCE VALIDATION PASS: N skills validated` or list of broken references with file locations. |
+| `python tools/sync_skill_schemas.py` | Regenerate skill-local files from their sources: `skills/<name>/schemas/output_schema.yaml` for each capability, the 17 vendored `reference/workflow_catalog.yaml` copies and their vendored schema copies; removes orphaned generated schemas. `--check` exits 1 on drift (run in CI); `--dry-run` lists changes. | `SYNC COMPLETE: X of N generated files changed, Y removed` (`SYNC CHECK PASS: ...` with `--check`). |
+| `python scripts/run_conformance.py` | Run the validator on every fixture in `tests/fixtures/` (via `--catalog`) and check each against `tests/fixtures/EXPECTATIONS.json`: pass/fail and expected error and warning codes. | A `PASS:`/`FAIL:` line per fixture, then `Conformance PASSED` (or `Conformance FAILED (N failures)`). |
 | `pytest tests/ -v` | Run SDK unit tests. Covers adapter, registry, mapper, checkpoint tracker, evidence store, and OASF adapter. | Standard pytest output with pass/fail per test. |
 | `mypy grounded_agency/` | Run static type checking on the SDK package. Enforces `disallow_untyped_defs` and `warn_return_any`. | Type errors or `Success: no issues found`. |
 | `ruff check .` | Run linting across the entire project. Checks pycodestyle, pyflakes, isort, bugbear, comprehensions, and pyupgrade rules. | Lint warnings or `All checks passed!`. |
@@ -501,10 +526,10 @@ The workflow validator can emit machine-readable patch suggestions:
 
 ```bash
 python tools/validate_workflows.py --emit-patch
-# Writes validator_patch.diff and validator_suggestions.json
+# Writes tools/validator_patch.diff in addition to tools/validator_suggestions.json
 ```
 
-These files are in `.gitignore` and are meant for local use only.
+`tools/validator_suggestions.json` is written on every run, pass or fail (keys `errors`, `warnings`, `structured_errors`, `structured_warnings`, `suggestions`); `--emit-patch` only adds the diff. Both files are in `.gitignore` and are meant for local use only.
 
 ### Full Validation Script
 
@@ -526,8 +551,11 @@ python tools/validate_profiles.py
 echo "=== Skill File References ==="
 python tools/validate_skill_refs.py
 
-echo "=== Schema Sync ==="
-python tools/sync_skill_schemas.py
+echo "=== Generated Files In Sync ==="
+python tools/sync_skill_schemas.py --check
+
+echo "=== Rust Core ==="
+(cd core && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test)
 
 echo "=== Conformance Tests ==="
 python scripts/run_conformance.py
@@ -603,6 +631,11 @@ agent-capability-standard/
 |   |   +-- OASF_SAFETY_EXTENSIONS.md #     OASF safety property integration
 |   |-- research/                     #   Research notes and references
 |   +-- reviews/                      #   Review documents
+|
+|-- core/                             # Rust crate acs-core: validator + executor,
+|   |-- Cargo.toml                    #   compiled by maturin into grounded_agency._core
+|   |-- src/                          #   yaml.rs, types.rs, refs.rs, schema.rs, expr/, validate/
+|   +-- tests/                        #   cargo test suites
 |
 |-- examples/                         # Usage examples
 |   |-- grounded_agent_demo.py        #   Full adapter usage demo
@@ -741,7 +774,7 @@ agent-capability-standard/
 |-- NOTICE                           # Legal notices
 |-- CHANGELOG.md                     # Project changelog
 |-- CITATION.cff                     # Citation metadata
-+-- conformance_results.json         # Latest conformance run output (gitignored)
++-- build/conformance_results.json   # Latest conformance run output (gitignored)
 ```
 
 ### Key Structural Decisions
@@ -804,7 +837,7 @@ If using system Python with a conflicting PyYAML, ensure your virtualenv is acti
 ```bash
 python -m venv .venv --clear  # Recreate virtualenv
 source .venv/bin/activate
-pip install -e ".[dev,sdk]"
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 ### Missing jq (Audit Hook Fails Silently)
@@ -890,7 +923,7 @@ python -c "from grounded_agency import GroundedAgentAdapter; print('OK')"
 
 Option 3 -- Reinstall in editable mode to ensure the symlink:
 ```bash
-pip install -e ".[dev,sdk]"
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 ### Hook Script Permission Errors
@@ -914,21 +947,24 @@ chmod +x hooks/posttooluse_log_tool.sh
 ```
 ModuleNotFoundError: No module named 'yaml'
 ```
-when running tools like `python tools/validate_workflows.py`.
+or
+```
+ModuleNotFoundError: No module named 'grounded_agency._core'
+```
+(or `ImportError: cannot import name '_core' from 'grounded_agency'`) when running `python tools/validate_workflows.py`, `python scripts/run_conformance.py` or importing `grounded_agency`.
 
-**Cause:** PyYAML is not installed in the active Python environment. The validators are standalone scripts that import `yaml` directly.
+**Cause:** Most validators under `tools/` are standalone scripts that need only PyYAML. `validate_workflows.py` (and therefore the conformance runner), `validate_benchmark_deps.py` and the `grounded_agency` package itself need the compiled Rust extension `grounded_agency._core`, which exists only after the package has been built and installed.
 
 **Fix:**
 ```bash
 # Ensure virtualenv is activated
 source .venv/bin/activate
 
-# Install the minimum dependency
-pip install pyyaml>=6.0
-
-# Or install everything
-pip install -e ".[dev,sdk]"
+# Build the Rust core and install everything (needs rustc >= 1.86)
+pip install -e ".[dev]" -c constraints.txt
 ```
+
+If the build fails with `rustc` not found or a version error, install or update Rust (e.g. via `rustup`) to 1.86 or newer. After pulling changes to `core/`, re-run the same command: an editable install does not rebuild the extension automatically.
 
 ### Checkpoint Marker Not Found
 

@@ -123,7 +123,7 @@ Organizing capabilities into layers serves two purposes: it clarifies the ontolo
 
 - **Remember** (2 capabilities): Persist state. Examples: `persist`, `recall`.
 
-- **Coordinate** (3 capabilities): Multi-agent interaction. Examples: `delegate`, `synchronize`, `invoke`.
+- **Coordinate** (4 capabilities): Multi-agent and user interaction. Examples: `delegate`, `synchronize`, `invoke`, `inquire`.
 
 ### 3.2 Capability Schema
 
@@ -131,32 +131,37 @@ Each capability node specifies:
 
 ```yaml
 id: verify
-type: DIS.Level4Verb
 layer: VERIFY
-risk: medium
+description: Check that conditions are met
+risk: low
 mutation: false
-requires_checkpoint: false
-requires_approval: false
 
 input_schema:
   type: object
-  required: [target, criteria]
+  required: [conditions]
   properties:
-    target: {type: [string, object]}
-    criteria: {type: array, items: {type: string}}
-    evidence_policy: {type: string, default: anchors_required}
+    target: {type: any, description: What to verify}
+    conditions: {type: array, description: Conditions to check}
+    strict: {type: boolean, description: Fail on first violation}
 
 output_schema:
   type: object
-  required: [verdict, evidence_anchors, confidence]
+  required: [passed, evidence_anchors, confidence]
   properties:
-    verdict: {type: string, enum: [PASS, FAIL, INCONCLUSIVE]}
-    failures: {type: array, items: {type: string}}
-    evidence_anchors: {type: array, items: {type: string}}
+    passed: {type: boolean}
+    results: {type: array, description: Per-condition results}
+    violations: {type: array, description: Failed conditions}
+    evidence_anchors: {type: array}
     confidence: {type: number, minimum: 0, maximum: 1}
+```
 
-requires: [inspect]
-soft_requires: [search]
+Relationships are declared separately, as typed edges:
+
+```yaml
+edges:
+  - {from: mutate, to: verify, type: precedes}
+  - {from: verify, to: audit, type: precedes}
+  - {from: verify, to: constrain, type: alternative_to}
 ```
 
 Key design decisions:
@@ -165,29 +170,29 @@ Key design decisions:
 
 2. **Evidence by Default**: Every output schema requires `evidence_anchors` and `confidence`.
 
-3. **Risk Classification**: Capabilities are labeled low (88), medium (8), or high (3) risk. High-risk capabilities (e.g., `act-plan`) require checkpoints.
+3. **Risk Classification**: Capabilities are labeled low (29), medium (5), or high (2) risk. High-risk capabilities (`mutate`, `send`) require checkpoints.
 
-4. **Mutation Tracking**: 7 capabilities are marked as mutating; these modify external state and require explicit safety measures.
+4. **Mutation Tracking**: 6 capabilities are marked as mutating; these modify external state and require explicit safety measures.
 
 ### 3.3 Dependency Graph
 
-The ontology defines **54 dependency edges** across **7 edge types**:
+The ontology defines **97 dependency edges** across **7 edge types**:
 
-- **enables** (20 edges): The source capability produces outputs that make the target more effective.
+- **enables** (46 edges): The source capability produces outputs that make the target more effective.
 
-- **precedes** (12 edges): Temporal ordering; the source must complete before the target begins.
+- **precedes** (18 edges): Temporal ordering; when a workflow contains both capabilities, the target must have a source step running before it. It never demands that the source be present.
 
-- **soft_requires** (7 edges): Preferred but not mandatory prerequisite.
+- **alternative_to** (12 edges): Substitutability; capabilities can replace each other.
+
+- **soft_requires** (8 edges): Preferred but not mandatory prerequisite; a target with none of its sources running before it draws a warning (W601).
 
 - **specializes** (6 edges): Inheritance; the source is a more specific variant of the target.
 
-- **requires** (4 edges): Hard prerequisite. The dependent capability cannot execute unless the required capability has produced output.
+- **conflicts_with** (4 edges, 2 symmetric pairs): Mutual exclusivity of concurrent execution; the two capabilities may not share a `parallel_group`, though they may run in sequence (a rollback after a mutation is the normal recovery pattern).
 
-- **alternative_to** (3 edges): Substitutability; capabilities can replace each other.
+- **requires** (3 edges): Hard prerequisite. Every `mutate`, `send` and `rollback` step needs a `checkpoint` step running before it.
 
-- **conflicts_with** (2 edges): Mutual exclusivity; both cannot coexist in the same workflow.
-
-This graph enables the validator to check that workflows satisfy all hard prerequisites, respect temporal ordering, and avoid conflicting capability combinations. See [spec/EDGE_TYPES.md](../spec/EDGE_TYPES.md) for full edge type documentation.
+A step runs before another when it comes earlier in the step list and is not in the same `parallel_group`. This graph enables the validator to check that workflows satisfy all hard prerequisites, respect temporal ordering, and never place conflicting capabilities in the same parallel group. See [spec/EDGE_TYPES.md](../spec/EDGE_TYPES.md) for full edge type documentation.
 
 ### 3.4 Derivation Methodology
 
@@ -476,6 +481,7 @@ Each workflow step specifies:
   output_conforms_to: docs/schemas/event_schema.yaml#/event
   gates:
     - when: ${transform_out.confidence} < 0.5
+      phase: after
       action: stop
       message: Low confidence transformation
   failure_modes:
@@ -503,7 +509,7 @@ The `${ref}` syntax enables referencing outputs from earlier steps:
   store_as: search_out
 ```
 
-**Gates**: Runtime conditions that halt execution:
+**Gates**: Runtime conditions that can halt or redirect execution. `when` is an expression in the grammar of [STANDARD v1.1.0 §5.8](../spec/STANDARD-v1.1.0.md#58-condition-expressions) (comparisons, `&&`, `||`, `!`, literals and `${ref}` references); `action` is `stop`, `rollback`, `skip` or `warn`; `message` is optional. A gate runs before its step unless it declares `phase: after`, which a gate that reads its own step's output needs:
 
 ```yaml
 gates:
@@ -517,8 +523,10 @@ gates:
 ```yaml
 failure_modes:
   - condition: Verdict == FAIL
+    when: ${verify_out.passed} == false
+    action: rollback
     recovery:
-      goto_step: plan
+      goto_step: plan_out
       inject_context:
         failure_evidence: ${verify_out.violations}
       max_loops: 3
@@ -526,13 +534,17 @@ failure_modes:
 
 ### 7.4 Design-Time Type Validator
 
-The validator performs five passes:
+The reference validator (the Rust core in `core/`, compiled into `grounded_agency._core` and run by `tools/validate_workflows.py`) performs these checks:
 
-1. **Structural**: Capability exists in ontology
-2. **Prerequisite**: Dependency edges satisfied
-3. **File**: `mapping_ref` and `output_conforms_to` files exist
-4. **Reference**: `${store.path}` expressions resolve
-5. **Type**: Producer output type ⊆ Consumer input type
+1. **Structural**: Required fields present and well-typed; unknown fields reported as warnings (W604)
+2. **Capability**: Capability exists in ontology (V101)
+3. **Prerequisite**: `requires` and `precedes` edges satisfied (V102); no `conflicts_with` pair in one parallel group (F504); `soft_requires` met, else a warning (W601)
+4. **Safety flags**: Step flags inherit from the ontology; a weaker declaration is ignored (W602)
+5. **File**: `mapping_ref` and `output_conforms_to` files exist
+6. **Reference**: `${store.path}` expressions resolve (B201, B202)
+7. **Type**: Producer output type ⊆ Consumer input type (B203–B205)
+8. **Expression**: Conditions, gates and failure-mode triggers parse and type-check (V108, B206, W610, W611)
+9. **Version**: The targeted standard version is declared (W605) and supported (V109)
 
 The type system supports:
 
@@ -568,7 +580,7 @@ We evaluate Grounded Agency on three dimensions: coverage, validation effectiven
 |-----------|-------|-------|
 | Capabilities | 36 | 100% schema coverage |
 | Layers | 9 | Perceive to Coordinate |
-| Dependency edges | 54 | 7 edge types (see spec/EDGE_TYPES.md) |
+| Dependency edges | 97 | 7 edge types (see spec/EDGE_TYPES.md) |
 | Entity classes | 18 | 10 digital, 8 real-world |
 | Entity subtypes | 57 | Extensible taxonomy |
 | Core relations | 13 | depends_on, owns, causes... |
@@ -578,16 +590,16 @@ We evaluate Grounded Agency on three dimensions: coverage, validation effectiven
 
 ### 8.2 Workflow Catalog
 
-We developed 5 reference workflows:
+We evaluate 5 of the 12 reference workflows in `schemas/workflow_catalog.yaml`:
 
 | Workflow | Steps | Risk | Parallel | Recovery |
 |----------|-------|------|----------|----------|
 | debug_code_change | 11 | medium | 0 | ✓ |
-| world_model_build | 11 | low | 0 | — |
+| world_model_build | 13 | low | 0 | — |
 | capability_gap_analysis | 7 | low | 0 | — |
-| digital_twin_sync_loop | 20 | high | 1 | ✓ |
+| digital_twin_sync_loop | 21 | high | 1 | ✓ |
 | digital_twin_bootstrap | 2 | high | 0 | — |
-| **Total** | **51** | — | 1 | 2 |
+| **Total** | **54** | — | 1 | 2 |
 
 The `digital_twin_sync_loop` demonstrates the full capability:
 
@@ -595,22 +607,23 @@ The `digital_twin_sync_loop` demonstrates the full capability:
 2. `search`: Parallel context gathering
 3. `transform`: Normalize to canonical events
 4. `integrate`: Merge with existing twin
-5. `identity-resolution`: Resolve entity collisions
-6. `world-state`: Produce updated snapshot
-7. `diff-world-state`: Compute delta from previous
-8. `state-transition`: Apply transition rules
-9. `detect-anomaly`: Identify drift
-10. `estimate-risk`: Score severity
-11. `forecast-risk`: Project trajectory
-12. `plan`: Generate remediation plan
-13. `constrain`: Apply safety policies
-14. `checkpoint`: Save recovery point
-15. `act-plan`: Execute if policy allows
-16. `model-schema`: Define verification invariants
-17. `verify`: Check success criteria
-18. `audit`: Record provenance
-19. `rollback`: Revert on failure
-20. `summarize`: Produce human report
+5. `detect`: Detect entities in integrated data
+6. `classify`: Resolve entity identities
+7. `state`: Produce updated snapshot
+8. `compare`: Compute delta from previous snapshot
+9. `transition`: Apply transition rules
+10. `detect` (`domain: anomaly`): Identify drift
+11. `measure` (`domain: risk`): Score severity
+12. `predict` (`domain: risk`): Project trajectory
+13. `plan`: Generate remediation plan
+14. `constrain`: Apply safety policies
+15. `checkpoint`: Save recovery point
+16. `mutate`: Execute the plan if approved
+17. `execute`: Run verification tests
+18. `verify`: Check success criteria
+19. `audit`: Record provenance
+20. `rollback`: Revert on failure
+21. `explain`: Produce human report
 
 ### 8.3 Validation Effectiveness
 
@@ -710,7 +723,7 @@ The framework assumes a trusted implementation environment and focuses on preven
 
 Our framework makes three design bets. First, that **grounding every claim in evidence** prevents the hallucination and confabulation that undermine agent reliability. Second, that **typing uncertainty** (epistemic vs. aleatoric) enables agents to reason appropriately about knowledge gaps versus inherent randomness. Third, that **mandating reversibility** for mutations transforms agent errors from catastrophic events into recoverable incidents.
 
-The 36-capability ontology with 54 dependency edges provides the compositional vocabulary. The world state schema with provenance records and typed uncertainty provides the representational foundation. The trust model with temporal decay and field-specific authority provides the conflict resolution mechanism. The design-time validator with type inference and coercion suggestions catches errors before they reach production.
+The 36-capability ontology with 97 dependency edges provides the compositional vocabulary. The world state schema with provenance records and typed uncertainty provides the representational foundation. The trust model with temporal decay and field-specific authority provides the conflict resolution mechanism. The design-time validator with type inference and coercion suggestions catches errors before they reach production.
 
 The framework enforces three invariants we believe are essential for trustworthy agentic AI: **grounding** (every claim has evidence), **uncertainty** (confidence is typed and explicit), and **reversibility** (every mutation can be undone). These are not conventions to be followed but structural properties enforced by the ontology's dependency edges and the validator's type system.
 
@@ -955,6 +968,6 @@ The standard is framework-agnostic. The validator works on YAML/JSON definitions
 
 ---
 
-*Agent Capability Standard v1.0.0*
+*Agent Capability Standard v1.1.0 (Draft; v1.0.0 still supported)*
 *Copyright 2026 Synapti.ai*
 *Licensed under Apache 2.0*

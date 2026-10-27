@@ -72,18 +72,20 @@ The Agent Capability Standard implements a **defense-in-depth** security archite
 
 **YAML Loading Security Verification:**
 
-A comprehensive codebase scan confirms that `yaml.safe_load()` is used **exclusively** across all Python modules. Zero instances of the unsafe `yaml.load()` were found. Verified locations:
+A comprehensive codebase scan confirms that `yaml.safe_load()` is used **exclusively** across all Python modules. Zero instances of the unsafe `yaml.load()` were found. Python modules load YAML through the size-limited `safe_yaml_load()` wrapper (`grounded_agency/utils/safe_yaml.py`, mirrored for `tools/` by `tools/yaml_util.py`), which calls `yaml.safe_load()`. Workflow validation does not use PyYAML at all: catalogs, the ontology and schema files are parsed by the Rust core's hardened YAML 1.2 loader (`core/src/yaml.rs`), which applies the same size limits and symlink refusal and additionally bounds nesting depth (128) and anchor/alias expansion. Verified locations:
 
 | File | Usage |
 |------|-------|
-| `grounded_agency/capabilities/registry.py:127` | `yaml.safe_load(f)` |
-| `grounded_agency/adapters/oasf.py:116` | `yaml.safe_load(f)` |
-| `tools/validate_workflows.py:165,497,498` | `yaml.safe_load(...)` |
-| `tools/validate_ontology.py:26` | `yaml.safe_load(f)` |
-| `tools/validate_profiles.py:325` | `yaml.safe_load(...)` |
-| `tools/sync_skill_schemas.py:54` | `yaml.safe_load(f)` |
-| `benchmarks/scenarios/conflicting_sources.py:35` | `yaml.safe_load(f)` |
-| `skills/perspective-validation/scripts/validate_pvc.py:202` | `yaml.safe_load(...)` |
+| `grounded_agency/utils/safe_yaml.py:86` / `tools/yaml_util.py:89,98` | `yaml.safe_load(f)` inside `safe_yaml_load()` |
+| `grounded_agency/capabilities/registry.py:171` | `safe_yaml_load(...)` |
+| `grounded_agency/adapters/oasf.py:114` | `safe_yaml_load(...)` |
+| `core/src/yaml.rs` (via `grounded_agency._core`) | Rust YAML 1.2 loader used by `tools/validate_workflows.py` and `WorkflowEngine` for all validation |
+| `tools/validate_workflows.py:141` | `safe_yaml_load(...)`, only to re-serialize the catalog for `--emit-patch` |
+| `tools/validate_ontology.py:29` | `safe_yaml_load(...)` |
+| `tools/validate_profiles.py:356` | `safe_yaml_load(...)` |
+| `tools/sync_skill_schemas.py:126` | `safe_yaml_load(...)` |
+| `benchmarks/scenarios/conflicting_sources.py` | `safe_yaml_load(...)` |
+| `skills/perspective-validation/scripts/validate_pvc.py:204` | `safe_yaml_load(...)` |
 
 **Known CVEs for PyYAML 6.x:**
 
@@ -108,15 +110,15 @@ The project has zero other runtime dependencies beyond PyYAML. This minimal depe
 | `pytest>=7.0` | Dev-only | Low | Not shipped in production builds |
 | `pytest-asyncio>=0.21` | Dev-only | Low | Async test support only |
 | `mypy>=1.0` | Dev-only | Low | Static type checker only |
-| `ruff>=0.1.0` | Dev-only | Low | Linter/formatter only |
+| `ruff>=0.16,<0.17` | Dev-only | Low | Linter/formatter only (exact version pinned in `constraints.txt`) |
 
-**Assessment:** All development dependencies are installed via `pip install -e ".[dev]"` and are excluded from production wheel builds via `pyproject.toml` configuration. The `[tool.hatch.build.targets.wheel]` section explicitly limits the package to `grounded_agency/` directory only.
+**Assessment:** All development dependencies are installed via `pip install -e ".[dev]"` and are excluded from production wheel builds via `pyproject.toml` configuration. The `[tool.maturin]` section limits the wheel to the `grounded_agency` Python package plus the compiled `grounded_agency._core` extension.
 
 ### 2.3. Optional SDK Dependency
 
 | Package | Version | Classification | Risk Notes |
 |---------|---------|---------------|------------|
-| `claude-agent-sdk>=0.1.0` | Optional | Medium | External dependency from Anthropic |
+| `claude-agent-sdk>=0.1.25,<0.3` | Optional | Medium | External dependency from Anthropic |
 
 **Assessment:** The SDK is an optional dependency installed via `pip install -e ".[sdk]"`. The adapter code (`grounded_agency/adapter.py`) handles missing SDK gracefully via `try/except ImportError` blocks for SDK types like `PermissionResultAllow`, `PermissionResultDeny`, and `HookMatcher`. When SDK types are unavailable, the adapter falls back to plain dict representations, maintaining functionality without the SDK installed.
 
@@ -124,10 +126,11 @@ The project has zero other runtime dependencies beyond PyYAML. This minimal depe
 
 | Component | Package | Risk Notes |
 |-----------|---------|------------|
-| Build backend | `hatchling` | Used only at build time |
-| Build requires | `hatchling` | Not a runtime dependency |
+| Build backend | `maturin` | Used only at build time |
+| Build requires | `maturin>=1.9,<2` | Not a runtime dependency |
+| Native extension | Rust crate `core/` (`acs-core`, Rust >= 1.86) | Compiled into `grounded_agency._core`; crate dependencies pinned by `core/Cargo.lock` (`saphyr`, `serde`, `serde_json`, `indexmap`, `chrono-tz`, `pyo3`) |
 
-**Assessment:** The hatch build system is used only for packaging. The `[tool.hatch.build.targets.sdist]` section includes `/grounded_agency`, `/schemas`, and `/skills` directories, which is appropriate for a self-contained distribution.
+**Assessment:** maturin is used only for packaging; it compiles the Rust validator/executor core into `grounded_agency._core` (abi3 wheels, one per platform). The `[tool.maturin]` `include` entries add `schemas/` and `skills/` to the sdist, which is appropriate for a self-contained distribution. The Rust crate dependencies are a second, build-time supply chain to monitor alongside PyPI.
 
 ---
 
@@ -293,7 +296,10 @@ async def check_permission(tool_name, input_data, context):
     try:
         mapping = mapper.map_tool(tool_name, input_data)
         if mapping.requires_checkpoint:
-            if not tracker.has_valid_checkpoint():
+            # SEC-007: atomic check + reservation for this tool call
+            holder = getattr(context, "tool_use_id", None)
+            is_valid, checkpoint_id = tracker.validate_and_reserve(holder)
+            if not is_valid:
                 if strict:
                     return PermissionResultDeny(message=message)
                 # Non-strict: warn but allow
@@ -513,12 +519,13 @@ fi
 
 ```python
 if mapping.requires_checkpoint:
-    if not tracker.has_valid_checkpoint():
-        return PermissionResultDeny(message=message)
+    reserved, checkpoint_id = tracker.validate_and_reserve(tool_use_id)
+    if not reserved:
+        return PermissionResultDeny(message=message)  # or a PreToolUse deny
 ```
 
-**Mechanism:** Queries `CheckpointTracker` in-memory state
-**Scope:** All tools routed through `wrap_options()` permission callback
+**Mechanism:** Atomically checks and reserves the active checkpoint in `CheckpointTracker` (PreToolUse hook and permission callback, keyed by `tool_use_id`)
+**Scope:** All tools routed through `wrap_options()` (PreToolUse hook and permission callback)
 **State:** In-memory Python object (`CheckpointTracker._active_checkpoint`)
 
 #### Synchronization Issues
@@ -707,7 +714,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | A mutation could execute without a valid checkpoint at the actual moment of execution, despite the check passing moments earlier. |
 | **Existing Mitigation** | The window is typically very small (milliseconds between check and execution). The 30-minute default expiry makes expiry-based races unlikely. Single-threaded SDK execution reduces concurrency risks. |
 | **Recommended Mitigation** | (1) Atomically reserve-and-consume the checkpoint in a single operation within the permission callback. (2) Return the checkpoint ID in the permission result for correlation with the tool execution. (3) For concurrent scenarios, use a mutex or compare-and-swap pattern on checkpoint consumption. |
-| **Status** | **Resolved** (PR #91) -- Atomic `validate_and_reserve()` with thread lock prevents TOCTOU race; checkpoint is reserved and consumed in a single operation. |
+| **Status** | **Resolved** (PR #91, reservation semantics refined since) -- `CheckpointTracker.validate_and_reserve(holder)` atomically (under a thread lock) checks the active checkpoint and reserves it for one tool call, keyed by its `tool_use_id`; while reserved, any other holder is refused, so concurrent calls cannot both proceed on one checkpoint. Reserving again with the same holder is idempotent, so the adapter's PreToolUse hook (which also covers pre-approved calls that never reach `can_use_tool`) and the permission callback both reserve. The reservation ends with `consume_checkpoint(holder)` in the PostToolUse hook after a successful mutation, or `release_reservation(holder)` when the call errors, changes nothing, or fails (new PostToolUseFailure hook); `consume_checkpoint(holder)` only consumes what that holder reserved. A reservation nobody ends lapses after `reservation_seconds` (default 600, `GroundedAgentConfig.checkpoint_reservation_seconds`). Reservations are in-memory only. |
 
 ### SEC-008: Metadata Injection via Malformed Keys
 
@@ -1066,7 +1073,7 @@ The Agent Capability Standard, as a framework for AI agent safety, would likely 
 2. **No SDK integration testing:** The `claude-agent-sdk` is an optional dependency. Typed fallback tests now provide coverage without the real SDK (PR #92).
 3. **No formal verification:** Safety properties were assessed through code review, not mathematical proof.
 4. **Point-in-time assessment:** The initial review reflects the codebase at commit `e14a723`. The 2026-02-01 update reflects remediation through PRs #89–#93 on the `main` branch.
-5. **Scope boundary:** Third-party dependencies (PyYAML internals, hatchling build system) were assessed at the interface level only, not through source code audit.
+5. **Scope boundary:** Third-party dependencies (PyYAML internals, maturin build system, Rust crates) were assessed at the interface level only, not through source code audit.
 
 ### 9.4. Risk Severity Definitions
 

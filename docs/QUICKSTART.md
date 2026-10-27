@@ -29,7 +29,8 @@ Fixing these statically saves hours of runtime debugging and prevents data corru
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.10+
+- Rust 1.86+ (the validator is a compiled Rust extension, built during install)
 - Git
 
 ## Step 1: Clone and Setup (2 min)
@@ -43,8 +44,8 @@ cd agent-capability-standard
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies
-pip install pyyaml
+# Install the package and dev tools (builds the Rust core with maturin)
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 ## Step 2: Validate the Reference Workflows (2 min)
@@ -58,8 +59,10 @@ python tools/validate_workflows.py
 Expected output:
 ```
 VALIDATION PASS
-Suggestions written to: tools/validator_suggestions.json
+Suggestions written to: .../tools/validator_suggestions.json
 ```
+
+Any warnings are printed in a `WARNINGS` block before the verdict. Use `--catalog PATH` to validate a different file and `--strict` to make warnings fail.
 
 The validator checks:
 - All capabilities exist in the ontology
@@ -75,26 +78,27 @@ The conformance suite tests both valid and intentionally invalid fixtures:
 python scripts/run_conformance.py
 ```
 
-Expected output:
+Expected output (one line per fixture, abbreviated here):
 ```
 PASS: pass_reference
-PASS: fail_unknown_capability
-PASS: fail_bad_binding_path
-PASS: fail_ambiguous_untyped
-PASS: fail_consumer_contract_mismatch
+PASS: pass_minimal_single_step
+PASS: pass_all_36_capabilities
+...
 
 Conformance PASSED
 ```
 
-Each test verifies a specific validation behavior:
+The fixtures live in `tests/fixtures/` (40+ of them); `tests/fixtures/EXPECTATIONS.json` records whether each should pass and which error and warning codes it must produce. Each verifies a specific validation behavior, for example:
 
 | Test | Purpose |
 |------|---------|
 | `pass_reference` | Valid workflows should pass |
-| `fail_unknown_capability` | Unknown capabilities should fail |
-| `fail_bad_binding_path` | Invalid binding paths should fail |
-| `fail_ambiguous_untyped` | Ambiguous types without annotations should fail |
-| `fail_consumer_contract_mismatch` | Type mismatches should fail |
+| `fail_unknown_capability` | Unknown capabilities should fail (V101) |
+| `fail_bad_binding_path` | A path missing from the producer's schema should fail (B201) |
+| `fail_missing_store_ref` | A reference to an unknown store should fail (B202) |
+| `fail_type_mismatch_binding` | Type mismatches should fail (B203) |
+| `fail_conflicts_parallel` | Conflicting capabilities in one parallel group should fail (F504) |
+| `pass_soft_requires_warn` | A missing soft prerequisite passes with warning W601 |
 
 ## Step 4: Explore a Workflow (2 min)
 
@@ -126,7 +130,7 @@ debug_code_change:
   - capability: checkpoint           # <-- Safety: checkpoint before mutation
     purpose: Create checkpoint before mutation.
     store_as: checkpoint_out
-  - capability: execute              # <-- Requires checkpoint (enforced)
+  - capability: execute              # <-- Runs after the checkpoint
     purpose: Apply fix, run tests, and produce diff summary.
     requires_checkpoint: true
     store_as: execute_out
@@ -143,7 +147,7 @@ debug_code_change:
 
 Key observations:
 - **Capabilities are atomic**: Each step does one thing
-- **Safety by construction**: `checkpoint` before `execute` is required
+- **Safety by construction**: a `checkpoint` runs before `execute`; the validator requires one before `mutate`, `send` and `rollback`
 - **Outputs are named**: `store_as` enables later steps to reference outputs
 
 ## Step 5: Explore the Capability Ontology (2 min)
@@ -277,16 +281,16 @@ Each domain provides:
 | Build your own workflow | [TUTORIAL.md](TUTORIAL.md) |
 | Understand key terms | [GLOSSARY.md](GLOSSARY.md) |
 | Work with images, audio, video | [MODALITY_HANDLING.md](guides/MODALITY_HANDLING.md) |
-| Read the full spec | [STANDARD-v1.0.0.md](../spec/STANDARD-v1.0.0.md) |
+| Read the full spec | [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) |
 | Understand conformance levels | [CONFORMANCE.md](../spec/CONFORMANCE.md) |
 
 ## Common Issues
 
-### "ModuleNotFoundError: No module named 'yaml'"
+### "ModuleNotFoundError: No module named 'grounded_agency._core'" (or 'yaml')
 
-Install the dependency:
+The compiled Rust extension is missing or stale. Rebuild it from the repository root (requires Rust 1.86+):
 ```bash
-pip install pyyaml
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 ### "FileNotFoundError: schemas/..."

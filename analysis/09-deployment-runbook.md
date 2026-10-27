@@ -59,7 +59,7 @@ claude plugin install agent-capability-standard
 ```json
 {
   "name": "agent-capability-standard",
-  "version": "1.0.5",
+  "version": "1.2.0",
   "description": "Grounded Agency: 36 atomic capabilities across 9 cognitive layers...",
   "author": {
     "name": "Agent Capability Standard Contributors",
@@ -79,14 +79,15 @@ The `skills` field points Claude Code to the flat skill directory structure. Eac
 **Target audience:** Python developers integrating the Grounded Agency safety layer into Claude Agent SDK workflows.
 
 **Package name:** `grounded-agency`
-**Build system:** Hatchling (`hatchling.build`)
+**Build system:** maturin (`maturin>=1.9,<2`); compiles the Rust crate `core/` (`acs-core`) into `grounded_agency._core`
 **Minimum Python:** 3.10+
-**License:** MIT
+**Minimum Rust (building from source):** 1.86
+**License:** Apache-2.0
 
 **Install commands:**
 
 ```bash
-# Core package (PyYAML only)
+# Core package (PyYAML plus the compiled core)
 pip install grounded-agency
 
 # With Claude Agent SDK integration
@@ -101,27 +102,38 @@ pip install grounded-agency[all]
 
 **Package contents (wheel target):**
 
-The wheel includes only the `grounded_agency/` Python package. The sdist target additionally bundles `schemas/` and `skills/` directories so consumers can access the ontology and skill definitions at build time.
+The wheel includes the `grounded_agency/` Python package and the compiled `grounded_agency._core` extension. Wheels use the stable ABI (abi3, one wheel per platform covering Python >= 3.10). The sdist additionally bundles the Rust crate and the `schemas/` and `skills/` directories so consumers can access the ontology and skill definitions at build time; installing from the sdist needs a Rust toolchain.
 
 ```toml
-# pyproject.toml build targets
-[tool.hatch.build.targets.wheel]
-packages = ["grounded_agency"]
+# pyproject.toml build configuration
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
-[tool.hatch.build.targets.sdist]
-include = ["/grounded_agency", "/schemas", "/skills"]
+[tool.maturin]
+manifest-path = "core/Cargo.toml"
+module-name = "grounded_agency._core"
+python-source = "."
+python-packages = ["grounded_agency"]
+features = ["python"]
+include = [
+    { path = "schemas/**/*", format = "sdist" },
+    { path = "skills/**/*", format = "sdist" },
+]
 ```
 
 **Dependencies:**
 
 | Dependency | Version | Required For |
 |-----------|---------|-------------|
-| `pyyaml` | >=6.0 | Core (ontology/schema parsing) |
-| `claude-agent-sdk` | >=0.1.0 | Optional `[sdk]` extra |
-| `pytest` | >=7.0 | Optional `[dev]` extra |
-| `pytest-asyncio` | >=0.21 | Optional `[dev]` extra |
-| `mypy` | >=1.0 | Optional `[dev]` extra |
-| `ruff` | >=0.1.0 | Optional `[dev]` extra |
+| `pyyaml` | >=6.0,<7 | Core (ontology/schema parsing) |
+| `maturin` | >=1.9,<2 | Build only |
+| `claude-agent-sdk` | >=0.1.25,<0.3 | Optional `[sdk]` extra (also in `[dev]`) |
+| `pytest` | >=7.0,<9 | Optional `[dev]` extra |
+| `pytest-asyncio` | >=0.21,<1 | Optional `[dev]` extra |
+| `mypy` | >=1.0,<2 | Optional `[dev]` extra |
+| `ruff` | >=0.16,<0.17 | Optional `[dev]` extra (exact pin in `constraints.txt`) |
+| `types-PyYAML`, `hypothesis`, `jsonschema` | see `pyproject.toml` | Optional `[dev]` extra |
 
 **Key exported components:**
 
@@ -146,10 +158,10 @@ include = ["/grounded_agency", "/schemas", "/skills"]
 git clone https://github.com/synaptiai/agent-capability-standard.git
 cd agent-capability-standard
 python -m venv .venv && source .venv/bin/activate
-pip install pyyaml
+pip install pyyaml   # enough for the standalone tools (not validate_workflows.py)
 
-# Editable install with all extras
-pip install -e ".[all]"
+# Editable install with dev tools and the SDK (builds the Rust core; rustc >= 1.86)
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 **Release artifacts:** GitHub Releases should include:
@@ -181,11 +193,11 @@ Follow semantic versioning: MAJOR for breaking API changes, MINOR for new featur
 
 **File:** `.claude-plugin/plugin.json`
 **Field:** `version`
-**Current value:** `1.0.5`
+**Current value:** `1.2.0`
 
 ```json
 {
-  "version": "1.0.6"
+  "version": "1.2.1"
 }
 ```
 
@@ -203,31 +215,36 @@ __version__ = "0.2.0"  # Must match pyproject.toml
 
 This value must exactly match the version in `pyproject.toml`. It is the runtime-accessible version (accessible via `grounded_agency.__version__` or `importlib.metadata.version("grounded-agency")`).
 
-### Step 4: Run All 5 Validators [GATE]
+### Step 4: Run the Validators and Rust Core Checks [GATE]
 
-Each validator must exit with code 0. Any failure blocks the release.
+Each command must exit with code 0. Any failure blocks the release. The package must be built first (`pip install -e ".[dev]" -c constraints.txt`), since `validate_workflows.py` runs the Rust core.
 
 ```bash
 # 1. Validate workflow definitions against the ontology
 python tools/validate_workflows.py
-# Expected output: VALIDATION PASS
+# Expected output: VALIDATION PASS (a WARNINGS: block may precede it)
 
 # 2. Validate domain profiles against profile schema
 python tools/validate_profiles.py
-# Expected output: All profiles valid
+# Expected output: PROFILE VALIDATION PASS: N profiles validated
 
 # 3. Validate skill file references (no phantom paths)
 python tools/validate_skill_refs.py
-# Expected output: All skill references valid
+# Expected output: SKILL REFERENCE VALIDATION PASS: N skills validated
 
-# 4. Validate ontology graph (orphans, cycles, symmetry)
+# 4. Validate ontology graph (orphans, cycles, symmetry, mutation_overridable)
 python tools/validate_ontology.py
-# Expected output: Ontology graph valid
+# Expected output: VALIDATION PASSED
 
-# 5. Sync and verify skill-local schemas
-python tools/sync_skill_schemas.py
-# Expected output: All schemas in sync
+# 5. Verify generated skill files are in sync (does not write)
+python tools/sync_skill_schemas.py --check
+# Expected output: SYNC CHECK PASS: N generated files up to date
+
+# 6. Rust core: formatting, lints, tests
+(cd core && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test)
 ```
+
+CI additionally runs `validate_canonical_schemas.py`, `validate_rfcs.py`, `validate_constraints.py`, `validate_doc_links.py`, `validate_benchmark_deps.py`, clippy with `--features python`, an MSRV (1.86) build and the cel-go differential check.
 
 **One-liner for CI:**
 
@@ -236,8 +253,11 @@ python tools/validate_workflows.py && \
 python tools/validate_profiles.py && \
 python tools/validate_skill_refs.py && \
 python tools/validate_ontology.py && \
-python tools/sync_skill_schemas.py
+python tools/sync_skill_schemas.py --check && \
+(cd core && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test)
 ```
+
+If `sync_skill_schemas.py --check` reports drift, run `python tools/sync_skill_schemas.py` and commit the regenerated files.
 
 ### Step 5: Run All Tests [GATE]
 
@@ -245,11 +265,11 @@ python tools/sync_skill_schemas.py
 pytest tests/ -v
 ```
 
-This runs:
+This runs the Python test suite under `tests/`, including:
 - `tests/test_sdk_integration.py` -- SDK class unit tests (CapabilityRegistry, ToolCapabilityMapper, CheckpointTracker, EvidenceStore, GroundedAgentAdapter)
 - `tests/test_oasf_adapter.py` -- OASF compatibility adapter tests
 
-All tests must pass. The pytest configuration in `pyproject.toml` sets `testpaths = ["tests"]`, `asyncio_mode = "auto"`, and `addopts = "-v"`.
+All tests must pass. The pytest configuration in `pyproject.toml` sets `testpaths = ["tests", "benchmarks/tests"]`, `asyncio_mode = "auto"`, and `addopts = "-v"`.
 
 ### Step 6: Run Type Checking [GATE]
 
@@ -282,11 +302,11 @@ Zero violations required for release.
 python scripts/run_conformance.py
 ```
 
-The conformance runner (`scripts/run_conformance.py`) tests the reference validator against fixture workflow catalogs located in `tests/`. For each fixture, it temporarily swaps `schemas/workflow_catalog.yaml` with the fixture content, runs `tools/validate_workflows.py`, and checks the exit code against the expected result defined in `tests/EXPECTATIONS.json`.
+The conformance runner (`scripts/run_conformance.py`) tests the reference validator against the fixture workflow catalogs in `tests/fixtures/`. For each entry in `tests/fixtures/EXPECTATIONS.json`, it runs `tools/validate_workflows.py --catalog <fixture>` (the production catalog is never swapped or modified), checks the exit code against `should_pass`, and checks the emitted codes against `expected_error_codes` and `expected_warning_codes` (an empty list means no warning may be emitted).
 
 **Output artifacts:**
-- Console: `Conformance PASSED (N/N)` or `Conformance FAILED`
-- File: `conformance_results.json` (written to project root)
+- Console: a `PASS:`/`FAIL:` line per fixture, then `Conformance PASSED` or `Conformance FAILED (N failures)`
+- File: `build/conformance_results.json`
 
 ### Step 9: Update CHANGELOG
 
@@ -304,13 +324,15 @@ Document changes for the release version. Group changes by category:
 # Clean previous builds
 rm -rf dist/ build/ *.egg-info
 
-# Build sdist and wheel
+# Build sdist and wheel (maturin backend; needs a Rust toolchain)
 python -m build
 ```
 
 This produces:
-- `dist/grounded_agency-0.2.0.tar.gz` (sdist with schemas/ and skills/)
-- `dist/grounded_agency-0.2.0-py3-none-any.whl` (wheel with grounded_agency/ only)
+- `dist/grounded_agency-0.2.0.tar.gz` (sdist with the Rust crate, schemas/ and skills/)
+- `dist/grounded_agency-0.2.0-cp310-abi3-<platform>.whl` (abi3 wheel with grounded_agency/ and the compiled `_core` extension, for the build machine's platform only)
+
+Because the wheel contains native code, publishing wheels for every supported platform (Linux, macOS, Windows; x86_64 and arm64) needs one build per platform, e.g. a CI matrix running `maturin build --release` (or `maturin-action`). Platforms without a wheel fall back to the sdist and need Rust >= 1.86.
 
 Verify the built artifacts:
 
@@ -438,7 +460,7 @@ meta:
 
 **File:** `.claude-plugin/plugin.json`
 **Field:** `version`
-**Current value:** `1.0.5`
+**Current value:** `1.2.0`
 
 The plugin version tracks changes to the Claude Code integration surface: skill files, hook scripts, and the plugin manifest itself. It follows its own release cadence because plugin updates can ship without SDK changes.
 
@@ -461,7 +483,7 @@ Four independent version sources must stay synchronized at release time. Failure
 | Source | File | Field | Current | Tracks |
 |--------|------|-------|---------|--------|
 | SDK Package | `pyproject.toml` | `project.version` | `0.1.0` | Python package releases |
-| Plugin | `.claude-plugin/plugin.json` | `version` | `1.0.5` | Claude Code plugin releases |
+| Plugin | `.claude-plugin/plugin.json` | `version` | `1.2.0` | Claude Code plugin releases |
 | Runtime | `grounded_agency/__init__.py` | `__version__` | `0.1.0` | Must match pyproject.toml |
 | Ontology | `schemas/capability_ontology.yaml` | `meta.version` | `2.0.0` | Capability graph changes |
 
@@ -471,13 +493,13 @@ Four independent version sources must stay synchronized at release time. Failure
 The `__version__` in `grounded_agency/__init__.py` must equal the `version` in `pyproject.toml`. A mismatch means `importlib.metadata.version("grounded-agency")` and `grounded_agency.__version__` will return different values.
 
 **Rule 2: Plugin and SDK are independently versioned.**
-The plugin version (`1.0.5`) and SDK version (`0.1.0`) follow separate tracks. A plugin update that only changes skill files does not require an SDK release. An SDK release that only changes adapter logic does not require a plugin update.
+The plugin version (`1.2.0`) and SDK version (`0.1.0`) follow separate tracks. A plugin update that only changes skill files does not require an SDK release. An SDK release that only changes adapter logic does not require a plugin update.
 
 **Rule 3: Ontology version changes propagate.**
 When the ontology version changes, both the plugin and SDK should be tested against the new ontology. If the change is breaking (MAJOR bump), both may need releases.
 
 **Rule 4: Document cross-version compatibility.**
-Each release should document which ontology version it targets. For example, SDK `0.2.0` might target ontology `2.0.0`, while plugin `1.0.6` also targets ontology `2.0.0`.
+Each release should document which ontology version it targets. For example, SDK `0.2.0` might target ontology `2.0.0`, while plugin `1.2.1` also targets ontology `2.0.0`.
 
 ### 4.3 Pre-Release Version Check Script
 
@@ -534,7 +556,7 @@ The audit log captures timestamped entries for every skill invocation during a C
 
 ### 5.2 Conformance Results
 
-**Location:** `conformance_results.json` (project root)
+**Location:** `build/conformance_results.json`
 **Written by:** `scripts/run_conformance.py`
 **Format:** JSON array of test results
 
@@ -799,27 +821,35 @@ git commit -m "revert: rollback <domain> profile to previous version"
 
 ### 7.4 Build Failures
 
-**Symptom:** `python -m build` fails with import errors.
+**Symptom:** `python -m build` or `pip install -e .` fails while building the extension (e.g. `rustc` / `cargo` not found, or a "requires rustc 1.86" error).
 
 **Diagnosis:**
-1. Verify hatchling is installed:
+1. Verify a Rust toolchain of at least 1.86 is installed:
    ```bash
-   pip install hatchling
+   rustc --version
+   cargo --version
    ```
-2. Verify the build-system configuration in `pyproject.toml`:
+   Install or update it with `rustup` if needed.
+2. Verify the crate builds on its own:
+   ```bash
+   cd core && cargo build && cargo test
+   ```
+3. Verify the build-system configuration in `pyproject.toml`:
    ```toml
    [build-system]
-   requires = ["hatchling"]
-   build-backend = "hatchling.build"
+   requires = ["maturin>=1.9,<2"]
+   build-backend = "maturin"
    ```
-3. Verify the package directory exists and contains `__init__.py`:
-   ```bash
-   ls grounded_agency/__init__.py
-   ```
+
+**Symptom:** `ModuleNotFoundError: No module named 'grounded_agency._core'` after a source checkout.
+
+**Cause:** The extension has not been built (or was built before the last change to `core/`).
+
+**Fix:** Run `pip install -e ".[dev]" -c constraints.txt` again.
 
 **Symptom:** Built wheel is missing schemas or skills.
 
-**Cause:** The wheel target only includes `grounded_agency/`. Schemas and skills are only in the sdist.
+**Cause:** The wheel includes `grounded_agency/` and the compiled `_core` extension; schemas and skills are only in the sdist (`[tool.maturin] include` with `format = "sdist"`).
 
 **Fix:** This is by design. If consumers need schemas at runtime, they should install from sdist or access them via `importlib.resources` after packaging them inside the `grounded_agency/` tree.
 
@@ -829,8 +859,8 @@ git commit -m "revert: rollback <domain> profile to previous version"
 
 **Fix:**
 ```bash
-# Install the package in editable mode
-pip install -e ".[dev]"
+# Install the package in editable mode (builds the Rust core)
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 **Symptom:** Async tests fail with `RuntimeError: no running event loop`.
@@ -846,13 +876,13 @@ pip install -e ".[dev]"
    asyncio_mode = "auto"
    ```
 
-**Symptom:** Conformance tests fail with `Missing fixture: tests/<name>.workflow_catalog.yaml`.
+**Symptom:** Conformance tests fail with `Missing fixture: tests/fixtures/<name>.workflow_catalog.yaml`.
 
-**Cause:** The fixture file referenced in `tests/EXPECTATIONS.json` does not exist.
+**Cause:** The fixture file referenced in `tests/fixtures/EXPECTATIONS.json` does not exist.
 
 **Fix:**
 1. Create the missing fixture file, or
-2. Remove the entry from `tests/EXPECTATIONS.json`
+2. Remove the entry from `tests/fixtures/EXPECTATIONS.json`
 3. Re-run `python scripts/run_conformance.py`
 
 ### 7.6 Type Checking Failures
@@ -913,22 +943,24 @@ A recommended CI/CD pipeline for the project:
 
 ```
 on:
-  pull_request:
-    - Run all 5 validators
-    - Run pytest tests/ -v
-    - Run mypy grounded_agency/
-    - Run ruff check .
+  pull_request and push (main branch) -- implemented in .github/workflows/ci.yml:
+    - validate-schemas: all validators + sync_skill_schemas.py --check
+    - rust-core: cargo fmt --check, clippy (x2, with and without --features python),
+      cargo test, MSRV (1.86) check
+    - cel-differential: expression fixtures vs cel-go
+    - lint: ruff check, ruff format --check, mypy grounded_agency/
+    - test: pytest tests/ on Python 3.10, 3.11, 3.12
+    - benchmarks: benchmark tests, runner, validate_benchmark_deps.py
+    - conformance: run_conformance.py, upload build/conformance_results.json
 
+  (recommended, not yet implemented)
   push (main branch):
-    - All PR checks
-    - Run conformance tests
-    - Build package (python -m build)
-    - Upload conformance_results.json as artifact
+    - Build abi3 wheels per platform + sdist (maturin)
 
   tag (v*):
     - All main branch checks
     - Version consistency check (Section 4.3)
-    - Build package
+    - Build abi3 wheels for each platform and the sdist (maturin)
     - Publish to PyPI (twine upload)
     - Create GitHub Release with notes
     - Update marketplace listing

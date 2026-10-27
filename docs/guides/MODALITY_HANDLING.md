@@ -691,7 +691,7 @@ When no specialization is needed, the modality alone suffices:
 This appendix demonstrates a full workflow that uses domain parameters across multiple modalities.
 
 ```yaml
-# Standard version: 1.0.0
+# Standard version: 1.1.0
 content_moderation:
   goal: Analyze user-submitted content across text, image, and audio for policy violations.
   risk: medium
@@ -702,34 +702,36 @@ content_moderation:
       purpose: Fetch the user submission containing text, images, and audio.
       store_as: content_out
 
-    # 2. Analyze text content
-    - capability: classify
-      domain: text.toxicity
-      purpose: Classify text for toxic or harmful content.
-      store_as: text_moderation_out
-      input_bindings:
-        item: ${content_out.data.text}
-        taxonomy: ["safe", "mild", "moderate", "severe"]
-      parallel_group: modality_analysis
-
-    # 3. Analyze image content
-    - capability: classify
-      domain: image.content
-      purpose: Classify images for policy-violating content.
-      store_as: image_moderation_out
-      input_bindings:
-        item: ${content_out.data.images}
-        taxonomy: ["safe", "suggestive", "explicit", "violent"]
-      parallel_group: modality_analysis
-
-    # 4. Analyze audio content
+    # 2. Analyze audio content
+    # The ontology orders detect before classify (`detect precedes classify`),
+    # so detection runs first rather than in the same parallel group as the
+    # classify steps: steps of one group run concurrently.
     - capability: detect
       domain: audio.speech
       purpose: Detect speech in audio for transcription and analysis.
       store_as: audio_detection_out
       input_bindings:
-        data: ${content_out.data.audio}
+        data: "${content_out.data.audio: object}"
         pattern: "human_speech"
+
+    # 3. Analyze text content
+    - capability: classify
+      domain: text.toxicity
+      purpose: Classify text for toxic or harmful content.
+      store_as: text_moderation_out
+      input_bindings:
+        item: "${content_out.data.text: string}"
+        taxonomy: ["safe", "mild", "moderate", "severe"]
+      parallel_group: modality_analysis
+
+    # 4. Analyze image content
+    - capability: classify
+      domain: image.content
+      purpose: Classify images for policy-violating content.
+      store_as: image_moderation_out
+      input_bindings:
+        item: "${content_out.data.images: array<object>}"
+        taxonomy: ["safe", "suggestive", "explicit", "violent"]
       parallel_group: modality_analysis
       join: all_complete
 
@@ -738,7 +740,7 @@ content_moderation:
       purpose: Transcribe detected speech to text for policy review.
       store_as: transcript_out
       input_bindings:
-        input: ${audio_detection_out.matches}
+        input: "${audio_detection_out.matches: array<object>}"
         source_format: "audio.speech"
         target_format: "text.transcript"
 
@@ -749,8 +751,8 @@ content_moderation:
       store_as: evasion_out
       input_bindings:
         data:
-          text: ${content_out.data.text}
-          images: ${content_out.data.images}
+          text: "${content_out.data.text: string}"
+          images: "${content_out.data.images: array<object>}"
           audio_transcript: ${transcript_out.output}
 
     # 7. Integrate all moderation signals
@@ -792,10 +794,10 @@ content_moderation:
       input_bindings:
         event:
           action: "content_moderation"
-          verdict: ${verdict_out.labels}
+          verdict: "${verdict_out.labels: array<string>}"
           explanation: ${explanation_out.explanation}
         context:
-          content_id: ${content_out.data.id}
+          content_id: "${content_out.data.id: string}"
           all_signals: ${integrated_out}
 
   success:

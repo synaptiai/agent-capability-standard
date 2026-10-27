@@ -310,6 +310,8 @@ output_schema:
 - `critique` enables `inquire` (critique identifies what's unclear)
 - `inquire` soft_requires `receive` (agent needs to accept the response)
 
+> **As adopted:** the ontology added `critique` enables `inquire`, but models the second relation as `inquire` enables `receive` (an inquiry's answer arrives through `receive`), not `soft_requires`.
+
 **Why COORDINATE layer?**: `inquire` is fundamentally about agent-user coordination, similar to `delegate` (agent-agent coordination).
 
 ### 4.2 Workflow Pattern: `monitor-and-replan`
@@ -374,6 +376,8 @@ monitor-and-replan:
       store_as: revised_plan
 ```
 
+> **As implemented:** the catalog workflow is `monitor_and_replan` in `schemas/workflow_catalog.yaml`. It uses `*_out` store names, adds a closing `audit` step, and its `plan` step is skipped by the gate `${critique_out.issues} == []`: `critique` runs with `severity_threshold: major` and receives the detected violations, so an empty issue list means no violation of major severity or worse.
+
 ### 4.3 Workflow Pattern: `clarify-intent`
 
 Document as a reference workflow:
@@ -426,6 +430,8 @@ clarify-intent:
         strategy: parameter_merge
       store_as: resolved_request
 ```
+
+> **As implemented:** the catalog workflow `clarify_intent` is `critique → inquire → receive → integrate → audit`, with no `send` step: `inquire` asks the user directly, and `receive` is skipped when no questions were asked (`${clarification_request_out} == null || ${clarification_request_out.questions} == []`).
 
 ### 4.4 Domain Extensions
 

@@ -1,0 +1,17 @@
+# Standard version: 1.1.0
+# An event trigger must deliver to an input holding the canonical event
+# (STANDARD v1.1 §5.10): V107.
+wrong_delivery:
+  goal: Deliver an event into a string input.
+  risk: low
+  workflow_extensions:
+    requires: [triggers@1]
+  triggers:
+  - kind: event
+    event: {event_type: ticket.opened, delivers_to: ticket_id}
+  inputs:
+    ticket_id: {type: string, required: false}
+  steps:
+  - capability: observe
+    purpose: Observe.
+    store_as: observe_out

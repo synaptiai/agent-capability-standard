@@ -1,0 +1,73 @@
+# Standard version: 1.1.0
+# Recovery and escalation (STANDARD v1.1 §5.11, §5.12): a bounded loop back
+# to the plan, escalation to a handler when the loop is exhausted or the
+# deployment fails, and a handler that pages the on-call engineer.
+deploy_with_escalation:
+  goal: Deploy, verify, and escalate to a person when recovery runs out.
+  risk: high
+  workflow_extensions:
+    requires: [recovery@1]
+  inputs:
+    change: {type: object, required: true}
+  steps:
+  - capability: plan
+    purpose: Plan the deployment.
+    store_as: plan_out
+    input_bindings:
+      goal: Deploy the change.
+      constraints: ["${_recovery.failure_evidence: array<object>}"]
+  - capability: constrain
+    purpose: Check the plan against deployment policy.
+    store_as: policy_out
+    input_bindings:
+      target: ${plan_out}
+      constraints: [deployment_policy]
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: checkpoint_out
+  - capability: execute
+    purpose: Run the deployment.
+    store_as: deploy_out
+    input_bindings:
+      code: deploy --plan
+    failure_modes:
+    - condition: The deployment command failed or timed out.
+      on_error: [R401, R402]
+      action: escalate
+      recovery:
+        goto_step: page_oncall_out
+  - capability: verify
+    purpose: Verify the deployment.
+    store_as: verify_out
+    input_bindings:
+      target: ${deploy_out}
+      conditions: [healthy]
+    failure_modes:
+    - condition: Verification failed.
+      when: ${verify_out.passed} == false
+      action: rollback
+      recovery:
+        goto_step: plan_out
+        inject_context:
+          failure_evidence: ${verify_out.violations}
+        max_loops: 2
+        on_exhausted:
+          goto_step: page_oncall_out
+  - capability: invoke
+    purpose: Page the on-call engineer with the failure.
+    store_as: page_oncall_out
+    handler: true
+    workflow_id: page_oncall
+    input_bindings:
+      workflow: page_oncall
+      input:
+        plan: ${plan_out}
+page_oncall:
+  goal: Page the on-call engineer.
+  risk: medium
+  steps:
+  - capability: inquire
+    purpose: Ask the on-call engineer to take over.
+    store_as: page_out
+    input_bindings:
+      ambiguous_input: Deployment needs a person.

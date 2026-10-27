@@ -20,6 +20,7 @@ pub(crate) const WORKFLOW_KEYS: &[&str] = &[
     "description",
     "spec_version",
     "workflow_extensions",
+    "triggers",
     "domain",
     "profile",
     "risk_propagation",
@@ -48,13 +49,16 @@ pub(crate) const STEP_KEYS: &[&str] = &[
     "risk",
     "domain",
     "workflow_id",
+    "handler",
     "resolution_strategy",
     "conflict_resolution_strategies",
 ];
 
 pub(crate) const GATE_KEYS: &[&str] = &["when", "action", "message", "phase"];
-pub(crate) const FAILURE_MODE_KEYS: &[&str] = &["condition", "action", "recovery", "when"];
-pub(crate) const RECOVERY_KEYS: &[&str] = &["goto_step", "inject_context", "max_loops"];
+pub(crate) const FAILURE_MODE_KEYS: &[&str] =
+    &["condition", "action", "recovery", "when", "on_error"];
+pub(crate) const RECOVERY_KEYS: &[&str] =
+    &["goto_step", "inject_context", "max_loops", "on_exhausted"];
 pub(crate) const RETRY_KEYS: &[&str] = &["max", "backoff"];
 pub(crate) const WORKFLOW_EXTENSIONS_KEYS: &[&str] = &[
     "supports_input_bindings",
@@ -62,6 +66,7 @@ pub(crate) const WORKFLOW_EXTENSIONS_KEYS: &[&str] = &[
     "supports_parallel_groups",
     "supports_recovery_loops",
     "supports_gates",
+    "requires",
 ];
 
 /// Standard versions this validator implements (GOVERNANCE: the last two
@@ -199,6 +204,9 @@ pub(crate) struct Placed<'a> {
     pub index: usize,
     pub capability: &'a str,
     pub parallel_group: Option<&'a str>,
+    /// Effective `requires_checkpoint` (§5.2.1): the ontology's, or true
+    /// when the step raises it.
+    pub requires_checkpoint: bool,
 }
 
 impl Placed<'_> {
@@ -222,10 +230,16 @@ struct Occurrences {
 /// any-of, W601) and `conflicts_with` (concurrency, F504) over the
 /// workflow's steps in order. A step "runs before" another when it comes
 /// earlier in the list and is not in the same parallel group.
+///
+/// `handlers` are handler steps (§5.11) with the position in `placed` of
+/// their earliest targeter: a handler runs after that step fails, so its
+/// `requires` and effective `requires_checkpoint` are checked against what
+/// runs before the targeter. Handlers take no part in the other edges.
 pub(crate) fn check_edges(
     ctx: &Context,
     workflow: &str,
     placed: &[Placed<'_>],
+    handlers: &[(Placed<'_>, usize)],
     report: &mut Report,
 ) {
     let at = |p: &Placed<'_>, code: Code, msg: String| {
@@ -270,10 +284,26 @@ pub(crate) fn check_edges(
         o.first_elsewhere.is_some_and(|e| e < pos)
     };
 
-    let mut reported_precedes: HashSet<(&str, &str)> = HashSet::new();
-    for (pos, p) in placed.iter().enumerate() {
-        for req in ctx.ontology.incoming(p.capability, EdgeType::Requires) {
-            if !ran_before(req, pos) {
+    // requires (V102) and the effective requires_checkpoint (F501, §5.2.1)
+    // of step `p`, given whether a capability ran before it. Where a
+    // `requires checkpoint` edge exists, a missing checkpoint is V102.
+    let prerequisites = |p: &Placed<'_>, ran: &dyn Fn(&str) -> bool, report: &mut Report| {
+        let requires = ctx.ontology.incoming(p.capability, EdgeType::Requires);
+        if p.requires_checkpoint && !requires.contains(&"checkpoint") && !ran("checkpoint") {
+            report.push(
+                at(
+                    p,
+                    Code::CheckpointRequired,
+                    format!(
+                        "'{}' requires a checkpoint (requires_checkpoint), but no checkpoint step runs before it",
+                        p.capability
+                    ),
+                )
+                .at("field", "requires_checkpoint"),
+            );
+        }
+        for req in requires {
+            if !ran(req) {
                 report.push(
                     at(
                         p,
@@ -287,6 +317,14 @@ pub(crate) fn check_edges(
                 );
             }
         }
+    };
+    for (h, targeter) in handlers {
+        prerequisites(h, &|cap| ran_before(cap, *targeter), report);
+    }
+
+    let mut reported_precedes: HashSet<(&str, &str)> = HashSet::new();
+    for (pos, p) in placed.iter().enumerate() {
+        prerequisites(p, &|cap| ran_before(cap, pos), report);
         // precedes: when both are present, `from` must run first; reported
         // once per edge, at the first step that breaks it.
         for from in ctx.ontology.incoming(p.capability, EdgeType::Precedes) {

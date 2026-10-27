@@ -118,20 +118,22 @@ The ontology encodes three risk tiers with structural enforcement:
 | Risk Level | Capabilities | Properties |
 |-----------|-------------|------------|
 | **high** | mutate, send | `mutation: true`, `requires_checkpoint: true`, `requires_approval: true` |
-| **medium** | execute, delegate, invoke, rollback | `requires_approval: true` (execute, delegate, invoke) |
-| **low** | All remaining 30 capabilities | Read-only or low-risk operations |
+| **medium** | execute, rollback, delegate, synchronize, invoke | `requires_approval: true` (execute only); `mutation: true` (rollback) |
+| **low** | All remaining 29 capabilities | Read-only or low-risk operations; `checkpoint`, `audit` and `persist` have `mutation: true` (`audit` is `mutation_overridable`) |
 
 ### 2.5 Edge Type Semantics
 
 | Edge Type | Count | Transitive | Symmetric | Enforcement |
 |-----------|-------|-----------|-----------|-------------|
-| `requires` | 4 | No | No | Validator MUST reject violations |
-| `soft_requires` | 10 | No | No | Validator SHOULD warn |
-| `enables` | 28 | No | No | Capability flow pattern |
-| `precedes` | 14 | Yes | No | Temporal ordering enforced |
-| `conflicts_with` | 4 pairs | No | Yes | Mutual exclusivity enforced |
-| `alternative_to` | 7 pairs | No | Yes | Substitution allowed |
-| `specializes` | 5 | Yes | No | Contract inheritance |
+| `requires` | 3 | No | No | Validator MUST reject violations (V102): source must run before target |
+| `soft_requires` | 8 | No | No | Any-of: if none of the target's soft sources runs before it, warning W601 |
+| `enables` | 46 | No | No | Capability flow pattern |
+| `precedes` | 18 | Yes | No | Ordering only: when both are present, source must run before target (V102); the source is not required to be present |
+| `conflicts_with` | 4 (2 pairs) | No | Yes | May not share a `parallel_group` (F504); sequential use is allowed |
+| `alternative_to` | 12 (6 pairs) | No | Yes | Substitution allowed |
+| `specializes` | 6 | Yes | No | Contract inheritance |
+
+Total: 97 edges. Steps in the same `parallel_group` never count as running before one another when `requires`, `precedes` and `soft_requires` are checked.
 
 ---
 
@@ -826,6 +828,9 @@ class GroundedAgentConfig:
     audit_log_path: str        # Path for audit log file (default: ".claude/audit.log")
     checkpoint_dir: str        # Directory for checkpoint storage (default: ".checkpoints")
     expiry_minutes: int        # Default checkpoint expiry in minutes (default: 30)
+    # ... rate_limit, ontology_hash, output_format, max_budget_usd, model,
+    #     max_turns, enable_discovery
+    checkpoint_reservation_seconds: float | None  # Reservation lapse time (default: None -> 600)
 ```
 
 | Field | Type | Default | Description |
@@ -835,6 +840,7 @@ class GroundedAgentConfig:
 | `audit_log_path` | `str` | `".claude/audit.log"` | File path where audit entries are appended. |
 | `checkpoint_dir` | `str` | `".checkpoints"` | Directory where checkpoint metadata is stored. |
 | `expiry_minutes` | `int` | `30` | Default time-to-live for checkpoints in minutes. After expiry, checkpoints are no longer valid for authorizing mutations. |
+| `checkpoint_reservation_seconds` | `float \| None` | `None` | How long a tool call holds the checkpoint it reserved (via `CheckpointTracker.validate_and_reserve(tool_use_id)`) if it never reports back. `None` uses the tracker default, `CheckpointTracker.DEFAULT_RESERVATION_SECONDS` = 600. |
 
 ### 7.2 Checkpoint
 
@@ -1009,6 +1015,7 @@ class CapabilityNode:
     mutation: bool                    # Whether it changes persistent state
     requires_checkpoint: bool         # Needs checkpoint before use (default: False)
     requires_approval: bool           # Needs human/agent approval (default: False)
+    mutation_overridable: bool        # A step may declare mutation: false (default: False)
     input_schema: dict[str, Any]      # JSON Schema for inputs (default: {})
     output_schema: dict[str, Any]     # JSON Schema for outputs (default: {})
 ```
@@ -1022,6 +1029,7 @@ class CapabilityNode:
 | `mutation` | `bool` | `False` | Whether this capability changes persistent state. |
 | `requires_checkpoint` | `bool` | `False` | Whether a checkpoint must exist before invocation. |
 | `requires_approval` | `bool` | `False` | Whether human or agent approval is needed. |
+| `mutation_overridable` | `bool` | `False` | Whether a workflow step may declare `mutation: false` for this capability and have it honoured (otherwise a weaker flag is ignored with W602). Allowed only with `mutation: true`, `risk: low` and neither `requires_checkpoint` nor `requires_approval` (checked by `tools/validate_ontology.py`); currently set only on `audit`. |
 | `input_schema` | `dict` | `{}` | JSON Schema defining the input contract. |
 | `output_schema` | `dict` | `{}` | JSON Schema defining the output contract. |
 
@@ -1057,6 +1065,7 @@ classDiagram
         +audit_log_path: str
         +checkpoint_dir: str
         +expiry_minutes: int
+        +checkpoint_reservation_seconds: float|None
     }
 
     class GroundedAgentAdapter {
@@ -1093,7 +1102,9 @@ classDiagram
     class CheckpointTracker {
         +create_checkpoint(scope, reason) str
         +has_valid_checkpoint() bool
-        +consume_checkpoint() str
+        +validate_and_reserve(holder) tuple
+        +release_reservation(holder) bool
+        +consume_checkpoint(holder) str
         +get_history(limit) list~Checkpoint~
         +clear_expired() int
     }
@@ -1463,9 +1474,13 @@ gates:
   - when: ${comparison_out.confidence} > 0.9
     action: stop
     message: No significant divergence detected.
-  - when: ${critique_out.severity} == "minor"
+  - when: ${critique_out.issues} == []
     action: skip
-    message: Minor violation, continue with current plan.
+    message: No violation of major severity or worse; keep the current plan.
+  - when: ${verify_out.passed} == false
+    phase: after
+    action: rollback
+    message: Verification failed. Rolling back.
 ```
 
 **Condition syntax:**
@@ -1477,8 +1492,12 @@ skip_if_false: true
 Gate actions:
 | Action | Behavior |
 |--------|----------|
-| `stop` | Halt the workflow entirely |
-| `skip` | Skip this step and continue to the next |
+| `stop` | Halt the workflow entirely (R403) |
+| `rollback` | Roll back to the latest checkpoint, then halt (R403) |
+| `skip` | Skip this step and continue to the next (before-gates only) |
+| `warn` | Record a trace warning and continue |
+
+Gate phase: `phase: before` (default) evaluates the gate before the step runs; `phase: after` evaluates it after the step, so it may read the step's own output but cannot `skip` (S303). Evaluation order is `condition` → before-gates in declaration order → the step → after-gates. A gate that reads its own step's output without declaring `phase` is treated as `after` and reported as W603.
 
 ### 9.6 Risk Propagation
 
@@ -1492,7 +1511,7 @@ risk_propagation:
 
 The `max_step_risk` strategy sets the workflow's computed risk to the highest risk level among all its steps. This is the only currently defined strategy. A workflow containing a `mutate` step (high risk) will always have `computed_risk: high`, regardless of how many low-risk steps surround it.
 
-Note: Workflow steps may override the ontology-defined risk level for a capability when the workflow context changes the risk profile. For example, `execute` is `risk: medium` in the ontology but `risk: high` in the `model_deployment` workflow because executing deployment scripts in production is inherently riskier.
+Note: Step safety flags (`risk`, `mutation`, `requires_checkpoint`, `requires_approval`) inherit from the ontology, and a step may only make them stricter: a step's effective flags are the stricter of its declaration and the ontology (booleans OR-ed, the higher risk). For example, `execute` is `risk: medium` in the ontology but `risk: high` in the `model_deployment` workflow because executing deployment scripts in production is inherently riskier. A declaration weaker than the ontology (a lower `risk`, or `false` for a flag the ontology sets) is ignored and reported as warning W602 (`SAFETY_FLAG_DOWNGRADE`); the one exception is `mutation: false` on a `mutation_overridable` capability (see §7.7).
 
 ### 9.7 Type Coercion Registry
 

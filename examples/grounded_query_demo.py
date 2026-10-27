@@ -7,7 +7,10 @@ the SDK's query() function, with automatic safety enforcement and
 cost tracking.
 
 Prerequisites:
-    pip install claude-agent-sdk
+    The grounded_agency package must be built and installed: it includes a
+    Rust extension (grounded_agency._core), so a Rust toolchain (rustc >= 1.86)
+    is required. From the repository root:
+        pip install -e ".[sdk]"    # or ".[dev]", which includes the SDK
 
 Usage:
     python examples/grounded_query_demo.py
@@ -120,7 +123,7 @@ async def demo_grounded_query_with_sdk():
 
     except ImportError:
         print("Claude Agent SDK not installed.")
-        print("Install with: pip install claude-agent-sdk")
+        print('Install with: pip install -e ".[sdk]"')
 
 
 async def demo_grounded_client():

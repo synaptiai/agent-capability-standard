@@ -1,0 +1,19 @@
+# Standard version: 1.1.0
+# Malformed schedules (STANDARD v1.1 §5.10): a 4-field cron, a time zone
+# that is not an IANA name, and both cron and every. S303.
+bad_schedules:
+  goal: Schedule badly.
+  risk: low
+  workflow_extensions:
+    requires: [triggers@1]
+  triggers:
+  - kind: schedule
+    schedule: {cron: "0 6 * *"}
+  - kind: schedule
+    schedule: {cron: "0 6 * * *", timezone: Lisbon/Portugal}
+  - kind: schedule
+    schedule: {cron: "0 6 * * *", every: 1h}
+  steps:
+  - capability: observe
+    purpose: Observe.
+    store_as: observe_out

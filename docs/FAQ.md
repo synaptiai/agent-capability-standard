@@ -209,7 +209,7 @@ The standard can be implemented *within* existing frameworks.
 
 ### What languages are supported?
 
-The standard is language-agnostic. The reference implementation uses Python, but the specification can be implemented in any language. The key artifacts are:
+The standard is language-agnostic. The reference validator is written in Rust (`core/`) and exposed to Python as `grounded_agency._core`, but the specification can be implemented in any language. The key artifacts are:
 - JSON/YAML schemas
 - Capability ontology
 - Workflow definitions
@@ -217,8 +217,8 @@ The standard is language-agnostic. The reference implementation uses Python, but
 ### How do I validate my workflows?
 
 ```bash
-# Validate against the specification
-python tools/validate_workflows.py path/to/your/workflow.yaml
+# Validate against the specification (--strict also fails on warnings)
+python tools/validate_workflows.py --catalog path/to/your/workflow.yaml --strict
 
 # Generate patch suggestions
 python tools/validate_workflows.py --emit-patch
@@ -251,7 +251,7 @@ Bindings reference outputs from earlier steps:
 
 Typed bindings add explicit type annotations:
 ```yaml
-observations: ${integrate_out.merged.observations: array<object>}
+observations: "${integrate_out.merged.observations: array<object>}"  # quote typed references
 ```
 
 ### What are gates?
@@ -304,6 +304,14 @@ Yes. Define a workflow in YAML:
 my_workflow:
   goal: What this workflow achieves
   risk: medium
+  spec_version: "1.1"
+  inputs:
+    user_input:
+      type: object
+      properties:
+        limits:
+          type: array
+          items: {type: string}
   steps:
     - capability: observe
       purpose: First step
@@ -311,6 +319,12 @@ my_workflow:
     - capability: plan
       purpose: Create a plan
       store_as: plan_out
+    - capability: constrain
+      purpose: Check the plan against the limits before changing anything
+      store_as: constrain_out
+      input_bindings:
+        target: ${plan_out}
+        constraints: ${user_input.limits}
     - capability: checkpoint
       purpose: Save state
       store_as: checkpoint_out
@@ -319,13 +333,15 @@ my_workflow:
       store_as: result
 ```
 
+`checkpoint` must run before `mutate` (error V102 otherwise); `constrain` is recommended before it (warning W601 otherwise).
+
 See [TUTORIAL.md](TUTORIAL.md) for a guided walkthrough.
 
 ### How do I extend the validator?
 
-The validator is in `tools/validate_workflows.py`. You can:
-- Add new validation rules
-- Extend the coercion registry
+The validation rules live in the Rust core under `core/src/validate`; `tools/validate_workflows.py` is a thin CLI over it. You can:
+- Add new validation rules (in `core/src/validate`, then rebuild with `pip install -e ".[dev]" -c constraints.txt`)
+- Extend the coercion registry (`schemas/transforms/transform_coercion_registry.yaml`)
 - Add custom patch suggestions
 
 ### Is there a runtime executor?
@@ -389,7 +405,7 @@ Modality profiles add source-type-specific trust weights and grounding requireme
 
 1. Follow the [Quickstart Guide](QUICKSTART.md) (10 min)
 2. Complete the [Tutorial](TUTORIAL.md) (30 min)
-3. Read the [Specification](../spec/STANDARD-v1.0.0.md)
+3. Read the [Specification](../spec/STANDARD-v1.1.0.md)
 
 ### Can I use this commercially?
 

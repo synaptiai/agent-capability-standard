@@ -147,9 +147,9 @@ workflows:          # Recommended workflows
 
 6. **Document** in `docs/domains/<your-domain>/README.md`
 
-7. **Validate** workflows against the capability ontology:
+7. **Validate** workflows against the capability ontology (without `--catalog` the validator checks only `schemas/workflow_catalog.yaml`):
    ```bash
-   python tools/validate_workflows.py
+   python tools/validate_workflows.py --catalog schemas/workflows/<your-domain>_workflows.yaml
    ```
 
 ## How Domains Demonstrate Domain-Agnostic Capabilities

@@ -990,9 +990,10 @@ digital_twin_sync_loop:
     store_as: verify_out
     failure_modes:
     - condition: Verdict == FAIL
+      when: ${verify_out.passed} == false
       action: rollback
       recovery:
-        goto_step: plan
+        goto_step: plan_out
         inject_context:
           failure_evidence: ${verify_out.violations}
         max_loops: 3

@@ -1539,20 +1539,20 @@ edge_types:
     semantics: Validator MUST reject workflows that violate this ordering
     transitive: false
   soft_requires:
-    description: 'Soft dependency: the ''from'' capability SHOULD be satisfied when available'
-    semantics: Validator SHOULD warn if not satisfied, but workflow is still valid
+    description: 'Soft dependency: one of the ''to'' capability''s incoming soft_requires sources SHOULD run before it (any-of per target)'
+    semantics: Validator MUST warn (W601) if none runs before it; the workflow is still valid
     transitive: false
   enables:
     description: The 'from' capability unlocks or makes possible the 'to' capability
     semantics: Represents capability flow and composition patterns
     transitive: false
   precedes:
-    description: 'Temporal ordering: ''from'' must complete before ''to'' begins in any workflow'
-    semantics: Enforces execution order even when no data dependency exists
+    description: 'Temporal ordering: when a workflow contains both, a ''from'' step must run before every ''to'' step'
+    semantics: Orders capabilities without requiring either to be present (V102); a step in the same parallel_group does not run before another
     transitive: true
   conflicts_with:
-    description: 'Mutual exclusivity: ''from'' and ''to'' cannot both execute in the same workflow'
-    semantics: Validator MUST reject workflows containing both capabilities
+    description: 'No concurrency: ''from'' and ''to'' must not run in the same parallel_group'
+    semantics: Validator MUST reject the pair within one parallel_group (F504); in sequence they are allowed
     transitive: false
     symmetric: true
   alternative_to:

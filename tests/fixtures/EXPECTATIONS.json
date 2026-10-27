@@ -53,7 +53,10 @@
     "should_pass": true,
     "level": "L4",
     "category": "advanced",
-    "expected_warning_codes": []
+    "expected_warning_codes": [
+      "W603",
+      "W609"
+    ]
   },
   "pass_domain_parameterized": {
     "should_pass": true,
@@ -312,6 +315,99 @@
     "category": "versioning",
     "expected_warning_codes": [
       "W605"
+    ]
+  },
+  "pass_triggers": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "fail_trigger_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
+  },
+  "fail_unknown_extension": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
+  },
+  "fail_trigger_schedule": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S303"
+    ]
+  },
+  "fail_event_delivers_to": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V107"
+    ]
+  },
+  "pass_legacy_timeout_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W614"
+    ]
+  },
+  "pass_escalation": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "fail_recovery_target": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V107"
+    ]
+  },
+  "fail_escalation_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
+  },
+  "fail_invoke_cycle": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V105"
+    ]
+  },
+  "pass_recovery_warnings": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": [
+      "W609",
+      "W613"
+    ]
+  },
+  "fail_raised_checkpoint": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "safety",
+    "expected_error_codes": [
+      "F501"
     ]
   }
 }

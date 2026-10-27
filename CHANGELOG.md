@@ -7,6 +7,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Rust core (`core/`, #114).** The workflow validator now lives in a Rust
+  crate compiled into `grounded_agency._core` (maturin build; Rust >= 1.86).
+  It brings a hardened YAML 1.2 loader (size and depth limits, alias budget,
+  no symlinks, unique string keys) with a PyYAML parity test, the condition
+  expression language of Standard v1.1 §5.8, and the v1.1 edge, safety-flag,
+  unknown-field and version rules. `tools/validate_workflows.py` and the
+  Python `WorkflowEngine` both call it, so they can no longer disagree. CI
+  gains a `rust-core` job (fmt, clippy, tests, MSRV) and a `cel-differential`
+  job that checks the expression fixtures against cel-go
+- **Orchestration extensions, first part (#114):** `workflow_extensions.requires`
+  is validated (unknown extensions and undeclared extension fields are V106),
+  `triggers` (schedule with 5-field cron or interval and IANA time zone,
+  event, manual, invoke) are validated under `triggers@1`, and a step
+  `timeout` outside the duration grammar warns (W614). Recovery is validated
+  under `recovery@1`: `goto_step` resolves to a `store_as` (V107 otherwise;
+  a capability id is deprecated, W603), `on_error` triggers, escalation to
+  `handler: true` invoke steps through `action: escalate` and
+  `on_exhausted`, injected `${_recovery.*}` context, untriggered recoveries
+  (W609), unreachable handlers (W613), unknown invoke targets (W607) and
+  invoke cycles (V105). Declaring an extension the validator cannot check
+  yet is refused (V106). New guide:
+  [docs/guides/ORCHESTRATION_EXTENSIONS.md](docs/guides/ORCHESTRATION_EXTENSIONS.md)
+- A step that raises `requires_checkpoint` above the ontology is now held to
+  it: F501 when no checkpoint runs before it
+- `spec/STANDARD-v1.1.0.md` (draft) and `spec/RFC-0003-orchestration-extensions.md`
+  (Accepted) answering #114; see the [specification changelog](spec/CHANGELOG.md)
+- Validator warnings: `tools/validate_workflows.py` reports warnings (W6xx)
+  separately and passes unless `--strict` is given;
+  `tools/validator_suggestions.json` gains `warnings` and
+  `structured_warnings`, and hints such as "did you mean" are printed
+- `WorkflowEngine.validate_report()`, `add_workflow()` and `effective_flags()`;
+  `ErrorCode` gains the v1.1 codes and `Severity` is exported
+- `python tools/sync_skill_schemas.py --check`, run in CI, fails when a
+  generated skill file (output schemas, the 17 bundled workflow catalogs and
+  their schema copies) has drifted from its source
+- Conformance fixtures for the v1.1 edge, flag, unknown-field and version
+  rules; `expected_warning_codes` in `tests/fixtures/EXPECTATIONS.json`
+  (empty means none allowed); language-neutral expression fixtures under
+  `tests/conformance/expressions/`
 - `tools/validate_canonical_schemas.py` and a CI job covering the five canonical
   schemas designated by spec §6.1, which no validator checked before. It asserts
   §6.2/§6.3 required fields, trust-model internal consistency, alias-threshold
@@ -49,6 +88,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Comprehensive analysis documentation package (13 documents, ~570KB)
 
 ### Changed
+- **Workflow catalog (#114).** Declares `# Standard version: 1.1.0`; approval
+  flags no longer understate the ontology; `clarify_intent` asks through
+  `inquire` and receives the answer only when questions were asked;
+  `model_deployment` checks artifacts with `constrain` before deploying;
+  `monitor_and_replan` critiques the detected violations at major severity;
+  gates that read their own step declare `phase: after`;
+  `digital_twin_sync_loop`'s verification loop fires on
+  `${verify_out.passed} == false` and targets `plan_out`
+- **Ontology edges (#114).** Five follow-up edges are `enables` instead of
+  `soft_requires`, a redundant one is removed, and `constrain` is the soft
+  prerequisite of `execute`, `mutate` and `send`; `audit` is
+  `mutation_overridable`
+- **`WorkflowEngine` safety fields are effective values** (the stricter of the
+  step's declaration and the ontology); what the source declared is in
+  `WorkflowStep.declared`. `validate_*` methods return errors only; an unknown
+  store reference maps to B202 (`MISSING_PRODUCER`) instead of B201
+- **`schemas/workflow_catalog.schema.json`** requires only the fields Standard
+  §5 requires, and describes gate `phase`, failure-mode `when` and
+  `spec_version`
+- The 17 bundled `skills/*/reference/workflow_catalog.yaml` copies are
+  regenerated from `schemas/workflow_catalog.yaml`; they had drifted.
+  `sync_skill_schemas.py` also maintains schema copies a skill vendors
+  without a bundled catalog (`skills/receive/reference/event_schema.yaml`)
+- `schemas/event_schema.yaml` 1.1.0: `source.kind` gains `agent`
 - Development dependencies are version-bounded instead of open-ended, and each
   cap names the major this repo is verified against rather than the next
   unreleased one: `mypy>=1.0,<2`, `pytest>=7.0,<9`, `pytest-asyncio>=0.21,<1`.
@@ -90,6 +153,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- **The Python PreToolUse checkpoint hook never blocked anything.** It
+  returned a top-level `permissionDecision`, which the Claude Agent SDK
+  ignores; it now denies through `hookSpecificOutput` (#114)
+- **Checkpoint reservation race (SEC-007).** `validate_and_reserve()` did not
+  reserve: two concurrent mutations could pass on one checkpoint. A
+  reservation now belongs to one tool call (`tool_use_id`), is taken in
+  PreToolUse (so pre-approved tools are covered too), is consumed on success
+  and released by a new PostToolUseFailure hook on failure or interrupt, and
+  lapses after `GroundedAgentConfig.checkpoint_reservation_seconds` (#114)
 - `templates/SKILL_TEMPLATE_ENHANCED.md` nested a ```` ```markdown ```` block
   containing ```` ```yaml ```` blocks of the same fence length. Per CommonMark
   the outer block closes at the first bare fence, so the document's structure

@@ -8,22 +8,24 @@ them divergent.
 ## 1. Architecture
 
 ```
-core/                       Rust crate `acs-core` (lib: rlib + cdylib, bin: `acs`)
+core/                       Rust crate `acs-core` (lib: rlib + cdylib; no binary —
+                            the CLI is tools/validate_workflows.py over the module)
   src/yaml.rs               saphyr loader -> serde_json::Value, with guards
-  src/ontology.rs           capability nodes, edges, layers
+  src/ontology.rs           capability nodes, edges
   src/schema.rs             $ref resolution, schema navigation
+  src/refs.rs               reference syntax ${root.path: type}
   src/types.rs              type AST, annotation grammar, compatibility
-  src/diag.rs               Diagnostic, codes, severities, report
-  src/model.rs              typed workflow model + unknown-field detection
+  src/diag.rs               Diagnostic, codes, severities
   src/expr/                 expression grammar (lexer, parser, eval, check)
-  src/duration.rs           duration grammar
-  src/cron.rs               5-field cron
-  src/validate/             structure, bindings, edges, flags, extensions
-  src/exec/                 sans-IO executor
+  src/validate/             structure + bindings (mod, bindings), expressions
+                            and gates (exprs), edges/flags/fields/versions
+                            (semantics)
   src/python.rs             PyO3 bindings (feature `python`)
-  src/bin/acs.rs            CLI
+  -- planned --
+  src/duration.rs, src/cron.rs, src/validate/extensions.rs   (S5)
+  src/exec/                 sans-IO executor                 (S6)
 grounded_agency/_core       compiled module (maturin)
-grounded_agency/workflows/  Python facade over the core (engine, executor)
+grounded_agency/workflows/  Python facade over the core (engine; executor in S6)
 tools/validate_workflows.py thin CLI over the core
 ```
 
@@ -31,14 +33,19 @@ tools/validate_workflows.py thin CLI over the core
   `[tool.maturin] manifest-path = "core/Cargo.toml"`, `module-name =
   "grounded_agency._core"`, `features = ["python"]`, `python-source = "."`.
   No pure-Python fallback.
-* Dependencies (Rust): serde, serde_json (`float_roundtrip`,
-  `preserve_order`), saphyr + saphyr-parser, chrono, chrono-tz, sha2, hmac,
-  hex, pyo3 (optional), libc (unix: `O_NOFOLLOW`), indexmap (ordered maps of
+* Dependencies (Rust), today: serde, serde_json (`float_roundtrip`,
+  `preserve_order`), saphyr + saphyr-parser, pyo3 (optional), libc (unix:
+  `O_NOFOLLOW`), indexmap; planned: chrono, chrono-tz (S5), sha2, hmac, hex
+  (S6). indexmap (ordered maps of
   typed values — capabilities in file order, scopes in declaration order —
   which `serde_json::Map` cannot hold; already in the tree via
   `preserve_order`). Nothing else without a recorded reason.
 * Values crossing the boundary are JSON-compatible; Python passes native
-  objects, the core converts with a depth cap of 128.
+  objects, the core converts with the YAML loader's depth cap (128 nested
+  containers) and a node budget per workflow (1,000,000).
+* Python API: `_core.load_yaml`, `load_yaml_str`, `load_catalog` (data +
+  header version), `validate_catalog`, `Validator(ontology, schema_root)`
+  with `validate_file` / `validate(catalog, header=None)`, and `CODES`.
 
 ## 2. YAML loading (core)
 
@@ -100,7 +107,25 @@ meaning. New codes:
   `digits.digits[.digits]`, nothing else.
 * `workflow_extensions`: `supports_*` booleans (advisory) and `requires:
   ["name@major"]`. Known: `triggers@1`, `recovery@1`, `wait@1`, `approval@1`,
-  `delegation@1`, `quorum@1`. Unknown name or major → V106.
+  `delegation@1`, `quorum@1`. Unknown name or major → V106; a specified
+  extension this validator does not implement yet → V106 (implemented:
+  `extensions::IMPLEMENTED`). A non-mapping `workflow_extensions`, a
+  non-list `requires`, a non-string entry or a duplicate → S303, and then
+  extension fields are not reported again as undeclared.
+* Must-understand: each extension's fields may only be used when the
+  extension is declared, else V106 at the field:
+
+  | Extension | Fields |
+  |-----------|--------|
+  | `triggers@1` | workflow `triggers` |
+  | `recovery@1` | step `handler`; recovery `on_exhausted`; failure-mode `action: escalate` |
+  | `wait@1` | step `wait` |
+  | `approval@1` | step `approval` |
+  | `delegation@1` | bindings of `delegate.fresh_context`, `delegate.model_family`, `delegate.role`, `receive.accept_from`, `synchronize.accept_from` |
+  | `quorum@1` | step `quorum` |
+
+  `failure_modes[].on_error` and `.when` are base 1.1 (not an extension): a
+  consumer that ignores them only loses an optional trigger.
 * Step keys: `capability`, `purpose`, `store_as` (required: missing
   capability → V103, missing purpose/store_as → S304); optional §5.2 keys
   plus `workflow_id`, `domain`, `handler`, `wait`, `approval`, `quorum`, and
@@ -230,23 +255,53 @@ string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no sur
 
 * `failure_modes[]`: `condition` (prose), `action` (stop | rollback |
   request_more_context | pause_and_checkpoint | escalate; else S303),
-  optional `on_error` (R401 | R402 | R403 | R405 | F502), optional `when`
-  (expression), `recovery` (string | object).
+  optional `on_error` (one code or a non-empty list of R401 | R402 | R403 |
+  R405 | F502; else S303), optional `when` (expression), `recovery` (string |
+  object).
 * Fires when the step raised a matching `on_error`, or `when` is true after
   the step. First match in order. Neither present → documentation only; with
   an object recovery → W609.
-* Recovery object: `goto_step`, `inject_context` (map of ref-strings),
-  `max_loops` (int ≥ 1, default 1), `on_exhausted: {goto_step}`.
+* `recovery` is a string or an object, else S303. Recovery object:
+  `goto_step`, `inject_context` (map of ref-strings, else S303),
+  `max_loops` (int ≥ 1, default 1, a float with no fraction accepted as
+  JSON Schema does; else S303), `on_exhausted: {goto_step}` (S304 without
+  goto_step; S303 if not a mapping). `max_loops` / `on_exhausted` without a
+  `goto_step` → S304. `on_error` is checked before the recovery@1 gate on
+  `action: escalate`, since it is base 1.1.
 * goto_step resolution: store_as; else a capability id held by exactly one
-  step (W603); else V107. Loop targets must be at or before the current step.
+  non-handler step (W603); else V107. Loop targets must be non-handler steps
+  at or before the current step (V107).
 * Escalation targets (`on_exhausted.goto_step`, and `recovery.goto_step` when
-  `action: escalate`) must be steps with `handler: true`, else V107.
-* `handler: true`: capability must be `invoke` (else S303); skipped in normal
-  flow; unreferenced → W613. Running it ends the run with outcome
-  `escalated` (R404 or the triggering code is still recorded).
+  `action: escalate`, which then requires it: S304) must be steps with
+  `handler: true`, else V107. An escalation takes no `max_loops`,
+  `on_exhausted` or `inject_context` (S303 each).
+* `handler: true`: boolean (S303); capability must be `invoke` (else
+  S303). Only a valid flag (invoke, recovery@1 declared) makes a handler;
+  otherwise the step stays in the normal flow, so nothing cascades.
+  Skipped in normal flow; unreferenced → W613. Running it ends the run with
+  outcome `escalated` (R404 or the triggering code is still recorded), so a
+  handler's own failure modes cannot loop or escalate (V107) — which also
+  means only normal steps target handlers.
+* Checking order (validate/recovery.rs): a pre-pass resolves targets; each
+  targeted handler is checked right after its earliest targeting step, in
+  that scope, with the targeting step's store and its earlier
+  parallel-group mates' stores maybe-absent. The scope is switched in place
+  and restored (`HandlerView`), never copied. Handlers are not placed in
+  the edge sequence and their store is never added to the shared scope;
+  their `requires` edges and effective `requires_checkpoint` (F501) are
+  checked against what runs before the earliest targeter. V104 is judged
+  in list order.
 * Injected context is readable as `${_recovery.<key>}` from the loop target
-  onward.
-* invoke cycles among catalog workflows → V105.
+  onward: the scope root `_recovery` is an object of the injected keys
+  (type any), maybe-absent. Injections are sorted by target and brought
+  into scope by a cursor as the main loop reaches each target, so the cost
+  is linear in the keys. `_recovery` as a store_as or input → S303.
+* invoke targets: `workflow_id`, else literal `input_bindings.workflow`
+  (diagnostics name whichever field it was). Not in the catalog → W607;
+  cycles (incl. self) → V105 at each invoke step whose caller and target
+  share a strongly connected component (iterative Tarjan, linear); target
+  with triggers but none of kind invoke → V107 (validate/invoke.rs,
+  catalog-level).
 
 ## 10. Durations
 
@@ -296,8 +351,7 @@ version|digest (default digest), on_change: reask|replan|stop (default
 reask)}, expires?, when_unattended: defer_to_queue|skip|fail (default fail)}`
 
 * Allowed only where effective `requires_approval` is true (else S303).
-  `mandate_ref` required iff standing_mandate. standing_mandate requires
-  `approval@1` in `workflow_extensions.requires` (V106).
+  `mandate_ref` required iff standing_mandate (S304 / S303).
 * Runtime: RequestApproval carries the shown values and their SHA-256 digest
   (canonical JSON). A decision is valid only if the digest matches, distinct
   approver ids ≥ min_approvers, not expired, and unused (single use).

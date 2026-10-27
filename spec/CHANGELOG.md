@@ -4,6 +4,48 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 
 ## Unreleased
 
+### Added — Standard v1.1.0 (draft) and RFC-0003 (#114)
+- **[STANDARD-v1.1.0](STANDARD-v1.1.0.md)** and
+  **[RFC-0003](RFC-0003-orchestration-extensions.md)** (Accepted). v1.0.0
+  remains supported; Appendix C of v1.1.0 lists every change. Sections marked
+  *pending reference implementation* are normative but not yet enforced by the
+  reference validator.
+- **Condition expression language (§5.8)** for `condition`, `gates[].when` and
+  `failure_modes[].when`: a small grammar that is a strict subset of CEL, with
+  fixed limits, fail-safe error handling per site, static type checks and null
+  narrowing. Gates gain `phase: before|after` (§5.6).
+- **Diagnostic severities (§9.1)** and warning codes W601–W614 (§9.7); new
+  error codes V106–V109, B206, R405.
+- **`mutation_overridable` (§4.4)** for append-only capabilities (`audit`).
+- **Orchestration extensions (§5.9–§5.16)** — triggers, handler steps,
+  recovery and escalation, wait, approval, delegation, quorum — opted into
+  with `workflow_extensions.requires`.
+  Extension fields are must-understand (V106 when used undeclared).
+  Enforced so far: declarations, `triggers@1` (§5.10, with the duration
+  grammar of §5.10.1) and `recovery@1` (§5.11, §5.12). A validator must
+  refuse a declared extension it does not check (V106).
+- **Effective `requires_checkpoint` (§5.2.1)** raised by a step is enforced:
+  F501 when no checkpoint runs before it.
+- **`event_schema.yaml` 1.1.0:** `source.kind` gains `agent`, so events from
+  other agents can trigger workflows (§5.10).
+
+### Changed — clarifications of 1.0 semantics (#114)
+- **Edges (§4.3, [EDGE_TYPES](EDGE_TYPES.md)).** `precedes` orders two
+  capabilities only when both are present; `conflicts_with` forbids
+  concurrency (a shared parallel group), not co-existence; `soft_requires` is
+  any-of presence per target and warns. A step in the same parallel group
+  does not run before another. Five follow-up edges became `enables`, one
+  redundant edge was removed, and `constrain` became the soft prerequisite of
+  `execute`, `mutate` and `send`.
+- **Safety flags (§5.2.1)** inherit from the ontology; a weaker declaration
+  has no effect and warns (W602).
+- **Unknown fields (§11.3)** are reported (W604) and ignored; `x-` fields are
+  vendor extensions. `inputs` is optional (§5.1).
+- **Version declaration (§11.5):** `spec_version` or the file header; missing
+  → W605, unsupported → V109.
+- **B205** means "annotation names no type"; an annotation that contradicts
+  the schema is B203 (§9.3).
+
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`
   is `0.5 ** (age/half_life)`, which returns exactly 0.5 at `age == half_life`. The published

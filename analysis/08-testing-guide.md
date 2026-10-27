@@ -78,19 +78,23 @@ The runner supports multiple iterations with seed-based reproducibility and can 
 
 ### 1.3 Conformance Tests (Layer 3)
 
-**Location:** `scripts/run_conformance.py`, `tests/EXPECTATIONS.json`, `tests/*.workflow_catalog.yaml`
+**Location:** `scripts/run_conformance.py`, `tests/fixtures/EXPECTATIONS.json`, `tests/fixtures/*.workflow_catalog.yaml`, `tests/conformance/expressions/{eval,check}.json`
 
-Conformance tests validate that the workflow validator (`tools/validate_workflows.py`) correctly accepts valid workflows and rejects invalid ones. They work by temporarily swapping `schemas/workflow_catalog.yaml` with fixture files and checking the validator's exit code against expected pass/fail outcomes.
+Conformance tests validate that the workflow validator (the Rust core behind `tools/validate_workflows.py`) correctly accepts valid workflows and rejects invalid ones with the right diagnostics. The runner passes each fixture to the validator with `--catalog` (the production catalog is never swapped or modified) and checks the exit code and the emitted error and warning codes against `EXPECTATIONS.json`.
 
-**Fixture files in `tests/`:**
+**Fixture files in `tests/fixtures/`:** 55 at the time of writing (`ls tests/fixtures/*.workflow_catalog.yaml | wc -l`), named `pass_*`, `fail_*` and `patch_*` and covering levels L1-L4. A sample:
 
 | Fixture File                                         | Expected Result |
 |------------------------------------------------------|-----------------|
-| `pass_reference.workflow_catalog.yaml`               | PASS            |
-| `fail_unknown_capability.workflow_catalog.yaml`       | FAIL            |
-| `fail_bad_binding_path.workflow_catalog.yaml`         | FAIL            |
-| `fail_ambiguous_untyped.workflow_catalog.yaml`        | FAIL            |
-| `fail_consumer_contract_mismatch.workflow_catalog.yaml` | FAIL          |
+| `pass_reference.workflow_catalog.yaml`               | PASS, no warnings |
+| `pass_soft_requires_warn.workflow_catalog.yaml`      | PASS, warning W601 |
+| `fail_unknown_capability.workflow_catalog.yaml`       | FAIL (V101)     |
+| `fail_bad_binding_path.workflow_catalog.yaml`         | FAIL (B201)     |
+| `fail_precedes_order.workflow_catalog.yaml`           | FAIL (V102)     |
+| `fail_conflicts_parallel.workflow_catalog.yaml`       | FAIL (F504)     |
+| `patch_string_to_number_coercion.workflow_catalog.yaml` | FAIL (B203), with suggestions |
+
+The expression fixtures (`eval.json`, `check.json`) are exercised by the Rust tests and compared against cel-go in CI's `cel-differential` job.
 
 ---
 
@@ -100,8 +104,9 @@ The pytest configuration is defined in `pyproject.toml` under the `[tool.pytest.
 
 ```toml
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "benchmarks/tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 addopts = "-v"
 ```
 
@@ -109,7 +114,7 @@ addopts = "-v"
 
 | Setting         | Value      | Effect                                                       |
 |-----------------|------------|--------------------------------------------------------------|
-| `testpaths`     | `["tests"]`| Restricts test discovery to the `tests/` directory           |
+| `testpaths`     | `["tests", "benchmarks/tests"]`| Restricts test discovery to `tests/` and `benchmarks/tests/` |
 | `asyncio_mode`  | `"auto"`   | Automatically handles async test functions without explicit event loop setup |
 | `addopts`       | `"-v"`     | Enables verbose output by default for all test runs          |
 
@@ -129,16 +134,20 @@ From `pyproject.toml` `[project.optional-dependencies]`:
 
 ```toml
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
-    "mypy>=1.0",
-    "ruff>=0.1.0",
+    "pytest>=7.0,<9",
+    "pytest-asyncio>=0.21,<1",
+    "mypy>=1.0,<2",
+    "ruff>=0.16,<0.17",
+    "types-PyYAML>=6.0,<7",
+    "hypothesis>=6.0,<7",
+    "jsonschema>=4.0,<5",
+    "claude-agent-sdk>=0.1.25,<0.3",
 ]
 ```
 
-Install with:
+Install with (builds the Rust core; `constraints.txt` pins the exact versions CI runs):
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 ---
@@ -343,59 +352,71 @@ Tests enumeration: listing categories, listing all mappings, and single-mapping 
 
 ### 4.1 How Conformance Tests Work
 
-The conformance runner (`scripts/run_conformance.py`) performs the following steps for each fixture:
+The conformance runner (`scripts/run_conformance.py`) performs the following steps for each entry in `EXPECTATIONS.json`:
 
 ```
-1. Read the real schemas/workflow_catalog.yaml (backup)
-2. Replace it with the fixture file content
-3. Run tools/validate_workflows.py --emit-patch
-4. Check exit code (0 = pass, non-zero = fail)
-5. Compare against expected result from EXPECTATIONS.json
-6. Restore the original workflow_catalog.yaml
+1. Locate tests/fixtures/<name>.workflow_catalog.yaml (missing file = failure)
+2. Delete any stale tools/validator_suggestions.json
+3. Run tools/validate_workflows.py --catalog <fixture>
+4. Check exit code (0 = pass, non-zero = fail) against should_pass
+5. Read tools/validator_suggestions.json and check expected_error_codes
+   (structured_errors, for failing fixtures) and expected_warning_codes
+   (structured_warnings)
 ```
 
-This swap-and-restore pattern allows the validator to run against modified workflow catalogs without permanent changes.
+The production `schemas/workflow_catalog.yaml` is never touched. Because the validator lives in the Rust core, the package must be built first (`pip install -e .`).
 
 ### 4.2 EXPECTATIONS.json Structure
 
 ```json
 {
   "pass_reference": {
-    "should_pass": true
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": []
+  },
+  "pass_soft_requires_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "edges",
+    "expected_warning_codes": ["W601"]
   },
   "fail_unknown_capability": {
-    "should_pass": false
-  },
-  "fail_bad_binding_path": {
-    "should_pass": false
-  },
-  "fail_ambiguous_untyped": {
-    "should_pass": false
-  },
-  "fail_consumer_contract_mismatch": {
     "should_pass": false,
-    "should_emit_suggestions": true
+    "level": "L1",
+    "category": "structural",
+    "expected_error_codes": ["V101"]
+  },
+  "patch_string_to_number_coercion": {
+    "should_pass": false,
+    "should_emit_suggestions": true,
+    "level": "L4",
+    "category": "patches",
+    "expected_error_codes": ["B203"]
   }
 }
 ```
 
-Each key corresponds to a fixture file named `<key>.workflow_catalog.yaml` in `tests/`. The `should_pass` field indicates whether the validator should exit with code 0 (pass) or non-zero (fail). The optional `should_emit_suggestions` field indicates whether the validator is expected to produce suggestion output.
+Each key corresponds to a fixture file named `<key>.workflow_catalog.yaml` in `tests/fixtures/`. The `should_pass` field indicates whether the validator should exit with code 0 (pass) or non-zero (fail). `expected_error_codes` lists codes that must be emitted; `expected_warning_codes` lists warning codes that must be emitted, and an empty list means no warning may be emitted. `level` and `category` are informational; the optional `should_emit_suggestions` field indicates whether the validator is expected to produce suggestion output.
 
 ### 4.3 Fixture File Format
 
-Fixture files are complete `workflow_catalog.yaml` documents. They follow the same schema as the production catalog but contain intentional errors for fail-case fixtures:
+Fixture files are complete `workflow_catalog.yaml` documents, usually starting with a `# Standard version: 1.1.0` header. They follow the same schema as the production catalog but contain intentional errors for fail-case fixtures:
 
 | Fixture                                | Injected Error                                  |
 |----------------------------------------|-------------------------------------------------|
 | `pass_reference`                       | None -- valid reference catalog                 |
-| `fail_unknown_capability`              | References `nonexistent-capability` in a step   |
-| `fail_bad_binding_path`                | Invalid `${store.path}` references              |
-| `fail_ambiguous_untyped`               | Ambiguous untyped binding that cannot be inferred |
-| `fail_consumer_contract_mismatch`      | Consumer capability input schema type mismatch  |
+| `fail_unknown_capability`              | References a nonexistent capability in a step (V101) |
+| `fail_bad_binding_path`                | Invalid `${store.path}` references (B201)       |
+| `fail_missing_store_ref`               | Reference to an undefined store (B202)          |
+| `fail_precedes_order`                  | `classify` placed before `detect` (V102)        |
+| `fail_conflicts_parallel`              | `conflicts_with` pair in one `parallel_group` (F504) |
+| `pass_safety_flag_downgrade`           | Step flag weaker than the ontology (W602, still passes) |
 
 ### 4.4 Results Output
 
-The runner writes `conformance_results.json` to the project root with details for each fixture:
+The runner writes `build/conformance_results.json` with details for each fixture:
 
 ```json
 [
@@ -414,7 +435,7 @@ The runner writes `conformance_results.json` to the project root with details fo
 ]
 ```
 
-Console output shows `PASS` or `FAIL` for each fixture, with a summary line indicating overall conformance status. The exit code is 0 for full conformance and 1 for any failures.
+Console output shows `PASS: <name>` or `FAIL: <name> ...` for each fixture, then `Conformance PASSED` or `Conformance FAILED (N failures)`. The exit code is 0 for full conformance and 1 for any failures.
 
 ---
 
@@ -642,7 +663,7 @@ SCENARIOS = {
 | Integration workflows  | 4+         | Medium         |
 | OASF Adapter           | 25         | High           |
 | Benchmark scenarios    | 30+        | High           |
-| Conformance fixtures   | 22         | High           |
+| Conformance fixtures   | 55    | High           |
 | Regex fuzz testing     | 10+        | Medium         |
 | Validator tools        | 7+         | Medium         |
 
@@ -671,7 +692,7 @@ Evidence store performance tests added covering:
 
 #### ~~No tests for validator tools~~ — **RESOLVED** (PR #92)
 
-Validator tools are now tested both directly and via the expanded conformance suite (22 fixtures). The 7 validators all run in CI.
+Validator tools are now tested both directly and via the expanded conformance suite (55 fixtures). The validation logic itself lives in the Rust core and is also covered by `cargo test` (CI `rust-core` job). All validators run in CI.
 
 #### ~~No fuzz testing for regex patterns~~ — **RESOLVED** (PR #91)
 
@@ -687,7 +708,7 @@ The adapter tests now include typed fallback tests that exercise the SDK integra
 
 #### ~~No test isolation for conformance runner~~ — **RESOLVED** (PR #92)
 
-The conformance runner has been refactored to use a temporary directory copy of the catalog rather than overwriting the production file in-place. Signal handlers and `atexit` callbacks guarantee file restoration.
+The conformance runner no longer touches the production catalog at all: it passes each fixture to the validator with `--catalog`. It uses a temporary directory for its build output and installs signal handlers for clean shutdown.
 
 ---
 
@@ -700,8 +721,14 @@ The conformance runner has been refactored to use a temporary directory copy of 
 python -m venv .venv
 source .venv/bin/activate
 
-# Install with development dependencies
-pip install -e ".[dev]"
+# Install with development dependencies (builds the Rust core; needs rustc >= 1.86)
+pip install -e ".[dev]" -c constraints.txt
+```
+
+The Rust core has its own test suite:
+
+```bash
+cd core && cargo test
 ```
 
 ### 8.2 Unit Tests
@@ -778,15 +805,16 @@ python scripts/run_conformance.py
 
 ```
 PASS: pass_reference
+PASS: pass_minimal_single_step
+...
 PASS: fail_unknown_capability
 PASS: fail_bad_binding_path
-PASS: fail_ambiguous_untyped
-PASS: fail_consumer_contract_mismatch
+...
 
 Conformance PASSED
 ```
 
-Note: a `PASS` for a `fail_*` fixture means the validator correctly rejected the invalid workflow. Results are written to `conformance_results.json`.
+Note: a `PASS` for a `fail_*` fixture means the validator correctly rejected the invalid workflow with the expected error codes. Results are written to `build/conformance_results.json`.
 
 ### 8.5 Static Analysis
 
@@ -840,6 +868,10 @@ python tools/validate_workflows.py
 python tools/validate_profiles.py
 python tools/validate_skill_refs.py
 python tools/validate_ontology.py
+python tools/sync_skill_schemas.py --check
+
+# Rust core
+(cd core && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test)
 ```
 
 ---
@@ -848,29 +880,45 @@ python tools/validate_ontology.py
 
 ### 9.1 Current CI Pipeline (`.github/workflows/ci.yml`)
 
-The CI pipeline executes the following stages on every PR and push to `main`:
+The CI pipeline runs these jobs in parallel on every PR and push to `main`. Every Python job installs a pinned Rust toolchain (`RUST_TOOLCHAIN`) and builds the package with `pip install -e`, since the validator lives in the Rust core:
 
 ```
-Stage 1: Lint + Type Check
-  - ruff check .
-  - mypy grounded_agency/
-
-Stage 2: Unit Tests
-  - pytest tests/ -v
-
-Stage 3: Benchmark Tests
-  - pytest benchmarks/tests/test_scenarios.py -v
-
-Stage 4: Conformance Tests
-  - python scripts/run_conformance.py
-
-Stage 5: Schema Validation
+validate-schemas: Validate YAML schemas
+  - python tools/validate_ontology.py
   - python tools/validate_workflows.py
   - python tools/validate_profiles.py
   - python tools/validate_skill_refs.py
-  - python tools/validate_ontology.py
-  - python tools/validate_transform_refs.py
-  - python tools/validate_yaml_util_sync.py
+  - python tools/validate_canonical_schemas.py
+  - python tools/validate_rfcs.py
+  - python tools/validate_constraints.py
+  - python tools/validate_doc_links.py
+  - python tools/sync_skill_schemas.py --check
+
+rust-core: Rust core (fmt, clippy, tests, MSRV)   [in core/]
+  - cargo fmt --check
+  - cargo clippy --locked --all-targets -- -D warnings
+  - cargo clippy --locked --all-targets --features python -- -D warnings
+  - cargo test --locked
+  - cargo +1.86.0 check --locked --all-targets --features python   (MSRV)
+
+cel-differential: Expressions stay a CEL-compatible profile   [Go]
+  - go run . tests/conformance/expressions/eval.json .../check.json   (vs cel-go)
+
+lint: Lint & type-check
+  - ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
+  - ruff format --check grounded_agency/ tests/ benchmarks/
+  - mypy grounded_agency/
+
+test: Tests (Python 3.10, 3.11, 3.12)
+  - pytest tests/ -v --tb=short
+
+benchmarks: Benchmark validation
+  - pytest benchmarks/tests/ -v --tb=short
+  - python benchmarks/runner.py --report --format json --output benchmarks/results/benchmark_results.json
+  - python tools/validate_benchmark_deps.py
+
+conformance: Conformance tests
+  - python scripts/run_conformance.py
 ```
 
 ### 9.2 Environment Matrix
@@ -879,16 +927,19 @@ From `pyproject.toml`:
 
 ```
 Python versions: 3.10, 3.11, 3.12
-Required: pyyaml>=6.0
-Dev: pytest>=7.0, pytest-asyncio>=0.21, mypy>=1.0, ruff>=0.1.0
-Optional: claude-agent-sdk>=0.1.0
+Rust: pinned toolchain (RUST_TOOLCHAIN in ci.yml); MSRV 1.86 checked
+Build: maturin>=1.9,<2
+Required: pyyaml>=6.0,<7
+Dev: pytest>=7.0,<9, pytest-asyncio>=0.21,<1, mypy>=1.0,<2, ruff>=0.16,<0.17 (exact versions in constraints.txt)
+Optional: claude-agent-sdk>=0.1.25,<0.3
 ```
 
 ### 9.3 Artifacts to Preserve
 
-- `conformance_results.json` -- Conformance test output
-- `benchmarks/results/` -- Benchmark reports (Markdown or JSON)
-- `tools/validator_suggestions.json` -- Validator patch suggestions (when `--emit-patch` is used)
+- `build/conformance_results.json` -- Conformance test output (uploaded by the `conformance` job)
+- `benchmarks/results/` -- Benchmark reports (Markdown or JSON; `benchmark_results.json` uploaded by the `benchmarks` job)
+- `tools/validator_suggestions.json` -- Validator diagnostics and patch suggestions (written on every run)
+- `tools/validator_patch.diff` -- Suggested patch (only with `--emit-patch`)
 
 ---
 
@@ -898,18 +949,19 @@ Optional: claude-agent-sdk>=0.1.0
 
 **`ModuleNotFoundError: No module named 'grounded_agency'`**
 
-The package is not installed. Run `pip install -e ".[dev]"` from the repository root.
+The package is not installed. Run `pip install -e ".[dev]" -c constraints.txt` from the repository root (needs a Rust toolchain, rustc >= 1.86).
+
+**`ModuleNotFoundError: No module named 'grounded_agency._core'`** (or `cannot import name '_core'`)
+
+The Rust extension has not been built, or the build is stale. Re-run `pip install -e ".[dev]" -c constraints.txt`; an editable install does not rebuild the extension when `core/` changes.
 
 **`ModuleNotFoundError: No module named 'pytest_asyncio'`**
 
 The dev dependencies are not installed. Run `pip install -e ".[dev]"`.
 
-**Conformance tests leave `workflow_catalog.yaml` in a corrupted state**
+**Conformance fixture fails with "missing expected warning codes" or "expected no warning codes"**
 
-If the conformance runner is interrupted, restore the file from git:
-```bash
-git checkout schemas/workflow_catalog.yaml
-```
+The fixture's `expected_warning_codes` in `tests/fixtures/EXPECTATIONS.json` no longer matches what the validator emits. Run `python tools/validate_workflows.py --catalog tests/fixtures/<name>.workflow_catalog.yaml` to see the warnings, then fix the fixture or the expectation. (The runner never modifies `schemas/workflow_catalog.yaml`.)
 
 **Benchmark tests fail with `AssertionError: setup() must be called`**
 

@@ -7,7 +7,13 @@
   one, regenerated from schemas/workflow_catalog.yaml with its schema paths
   rewritten to co-located copies
 - those co-located copies (world_state_schema.yaml, event_schema.yaml,
-  transform_mapping_rawlog_to_observation.yaml) next to each bundled catalog
+  transform_mapping_rawlog_to_observation.yaml) next to each bundled catalog,
+  and any other copy of them a skill vendors in its reference/ directory
+
+A sync also removes generated output_schema.yaml files the plan no longer
+produces (e.g. for a capability removed from the ontology); only files that
+carry the generated header are ever removed. --check reports both drift and
+such orphans; --dry-run lists the writes and removals without making them.
 
 Usage:
     python tools/sync_skill_schemas.py            # write what changed
@@ -132,14 +138,14 @@ def planned_files(root: Path) -> tuple[dict[Path, bytes], list[str]]:
         ).encode("utf-8")
 
     catalogs = sorted(skills_dir.glob("*/reference/workflow_catalog.yaml"))
-    if not catalogs:
-        return files, errors
     source = root / VENDORED_CATALOG_SOURCE
-    if not source.exists():
+    if catalogs and not source.exists():
         errors.append(f"Catalog source missing: {VENDORED_CATALOG_SOURCE}")
         return files, errors
-    catalog = render_vendored_catalog(source.read_text(encoding="utf-8")).encode(
-        "utf-8"
+    catalog = (
+        render_vendored_catalog(source.read_text(encoding="utf-8")).encode("utf-8")
+        if catalogs
+        else b""
     )
     deps: dict[str, bytes] = {}
     for repo_path, local_name in WORKFLOW_CATALOG_TRANSITIVE_DEPS.items():
@@ -152,6 +158,12 @@ def planned_files(root: Path) -> tuple[dict[Path, bytes], list[str]]:
         files[catalog_path] = catalog
         for local_name, content in deps.items():
             files[catalog_path.parent / local_name] = content
+    # A skill may vendor a schema without bundling a catalog (e.g.
+    # skills/receive/reference/event_schema.yaml); keep those copies current
+    # too, so no copy of a source schema is left unmaintained (#107).
+    for local_name, content in deps.items():
+        for copy in sorted(skills_dir.glob(f"*/reference/{local_name}")):
+            files.setdefault(copy, content)
     return files, errors
 
 

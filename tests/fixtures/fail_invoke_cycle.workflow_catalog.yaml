@@ -1,0 +1,18 @@
+# Standard version: 1.1.0
+# Workflows that invoke each other (STANDARD v1.1 §5.12): V105.
+ping:
+  goal: Invoke pong.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run pong.
+    store_as: pong_out
+    workflow_id: pong
+pong:
+  goal: Invoke ping.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run ping.
+    store_as: ping_out
+    workflow_id: ping

@@ -39,7 +39,7 @@ This diagram shows the six major subsystems and their data flow relationships. T
 flowchart TB
     subgraph Schemas["SCHEMAS (Source of Truth)"]
         direction TB
-        ONT["capability_ontology.yaml\n36 capabilities, 9 layers\n7 edge types, 80+ edges"]
+        ONT["capability_ontology.yaml\n36 capabilities, 9 layers\n7 edge types, 97 edges"]
         WFC["workflow_catalog.yaml\n12 workflow patterns"]
         PRF["profiles/*.yaml\n7 domain profiles"]
         WSS["world_state_schema.yaml\nevent_schema.yaml"]
@@ -76,7 +76,7 @@ flowchart TB
 
     subgraph Validators["VALIDATORS (tools/)"]
         direction TB
-        VW["validate_workflows.py\nSchema + type + consumer checking"]
+        VW["validate_workflows.py\nCLI over the Rust core\n(grounded_agency._core)"]
         VP["validate_profiles.py\nProfile schema conformance"]
         VO["validate_ontology.py\nGraph: orphans, cycles, symmetry"]
         VR["validate_skill_refs.py\nPhantom path detection"]
@@ -283,6 +283,7 @@ classDiagram
         +str audit_log_path
         +str checkpoint_dir
         +int expiry_minutes
+        +float|None checkpoint_reservation_seconds
     }
 
     class GroundedAgentAdapter {
@@ -299,8 +300,10 @@ classDiagram
         +get_mutations() list~EvidenceAnchor~
         +ontology_version: str
         +capability_count: int
+        -_make_pretooluse_checkpoint_hook() Callable
         -_make_permission_callback() Callable
         -_make_mutation_consumer() Callable
+        -_make_failure_releaser() Callable
         -_wrap_hook(hook_fn, matcher) Any
     }
 
@@ -378,7 +381,9 @@ classDiagram
         +has_checkpoint_for_scope(target) bool
         +get_active_checkpoint() Checkpoint|None
         +get_active_checkpoint_id() str|None
-        +consume_checkpoint() str|None
+        +validate_and_reserve(holder) tuple~bool,str|None~
+        +release_reservation(holder) bool
+        +consume_checkpoint(holder) str|None
         +get_checkpoint_by_id(checkpoint_id) Checkpoint|None
         +get_history(limit) list~Checkpoint~
         +clear_expired() int
@@ -508,27 +513,42 @@ sequenceDiagram
     Note over Agent,Tool: Tool Invocation Request
 
     Agent->>SDK: invoke_tool("Write", {file_path: "src/app.py", ...})
-    SDK->>Adapter: can_use_tool("Write", input, context)
+
+    Note over Adapter: PreToolUse Hook Phase (every call, incl. pre-approved ones)
+
+    SDK->>Adapter: check_checkpoint_before_tool(input_data, tool_use_id, context)
+    Adapter->>Mapper: map_tool("Write", input)
+    Mapper-->>Adapter: ToolMapping{capability_id="mutate",<br/>risk="high", mutation=true,<br/>requires_checkpoint=true}
+    Adapter->>Tracker: validate_and_reserve(tool_use_id)
+
+    alt No valid checkpoint, or reserved by another call
+        Tracker-->>Adapter: (false, None) / (false, "chk_...")
+        alt strict_mode = true
+            Adapter-->>SDK: hookSpecificOutput{permissionDecision: "deny"}
+            SDK-->>Agent: Tool blocked - create checkpoint first
+        else strict_mode = false
+            Note over Adapter: Log warning, continue
+            Adapter-->>SDK: {}
+        end
+    else Valid checkpoint, now reserved for tool_use_id
+        Tracker-->>Adapter: (true, "chk_...")
+        Adapter-->>SDK: {}
+    end
 
     Note over Adapter: Permission Callback Phase
 
+    SDK->>Adapter: can_use_tool("Write", input, context)
     Adapter->>Mapper: map_tool("Write", input)
-    Mapper-->>Adapter: ToolMapping{capability_id="mutate",<br/>risk="high", mutation=true,<br/>requires_checkpoint=true}
+    Adapter->>Tracker: validate_and_reserve(context.tool_use_id)
+    Note over Tracker: Same holder → idempotent (true, "chk_...")
 
-    Adapter->>Tracker: has_valid_checkpoint()
-
-    alt No valid checkpoint exists
-        Tracker-->>Adapter: false
+    alt Not reserved for this call
         alt strict_mode = true
             Adapter-->>SDK: PermissionResultDeny<br/>"Capability 'mutate' requires checkpoint"
-            SDK-->>Agent: Tool blocked - create checkpoint first
         else strict_mode = false
-            Note over Adapter: Log warning, allow execution
-            Adapter-->>SDK: PermissionResultAllow
+            Adapter-->>SDK: PermissionResultAllow (with warning)
         end
-    else Valid checkpoint exists
-        Tracker-->>Adapter: true
-        Tracker->>Tracker: get_active_checkpoint_id()
+    else Reserved for this call
         Note over Adapter: Log: "Write allowed with checkpoint chk_..."
         Adapter-->>SDK: PermissionResultAllow{updated_input}
     end
@@ -536,41 +556,54 @@ sequenceDiagram
     Note over SDK,Tool: Tool Execution Phase
 
     SDK->>Tool: execute("Write", input)
-    Tool-->>SDK: ToolResult{success, content}
 
-    Note over SDK,Store: PostToolUse Hook Phase
+    alt Tool call failed or was interrupted
+        Tool-->>SDK: failure
+        SDK->>Adapter: release_after_failure(input_data, tool_use_id, context)
+        Note over Adapter: PostToolUseFailure hook
+        Adapter->>Tracker: release_reservation(tool_use_id)
+        Note over Tracker: Checkpoint stays active for a retry
+        Adapter-->>SDK: {}
+    else Tool call completed
+        Tool-->>SDK: ToolResult{success, content}
 
-    par Evidence Collection
-        SDK->>Adapter: evidence_collector(input_data, tool_use_id, context)
-        Adapter->>Mapper: map_tool("Write", input)
-        Mapper-->>Adapter: ToolMapping{capability_id="mutate"}
-        Adapter->>Store: add_anchor(EvidenceAnchor.from_tool_output(...), "mutate")
-        Adapter->>Store: add_anchor(EvidenceAnchor.from_file("src/app.py", "write"))
-        Adapter-->>SDK: {}
-    and Skill Tracking
-        SDK->>Adapter: skill_tracker(input_data, tool_use_id, context)
-        Note over Adapter: tool_name != "Skill", skip
-        Adapter-->>SDK: {}
-    and Mutation Consumer
-        SDK->>Adapter: mutation_consumer(input_data, tool_use_id, context)
-        Adapter->>Mapper: map_tool("Write", input)
-        Mapper-->>Adapter: ToolMapping{mutation=true}
-        Adapter->>Tracker: has_valid_checkpoint()
-        Tracker-->>Adapter: true
-        Adapter->>Tracker: consume_checkpoint()
-        Tracker-->>Adapter: "chk_20260130_abc..."
-        Note over Adapter: Log: "Checkpoint consumed after Write"
-        Adapter-->>SDK: {}
+        Note over SDK,Store: PostToolUse Hook Phase
+
+        par Evidence Collection
+            SDK->>Adapter: evidence_collector(input_data, tool_use_id, context)
+            Adapter->>Mapper: map_tool("Write", input)
+            Mapper-->>Adapter: ToolMapping{capability_id="mutate"}
+            Adapter->>Store: add_anchor(EvidenceAnchor.from_tool_output(...), "mutate")
+            Adapter->>Store: add_anchor(EvidenceAnchor.from_file("src/app.py", "write"))
+            Adapter-->>SDK: {}
+        and Skill Tracking
+            SDK->>Adapter: skill_tracker(input_data, tool_use_id, context)
+            Note over Adapter: tool_name != "Skill", skip
+            Adapter-->>SDK: {}
+        and Mutation Consumer
+            SDK->>Adapter: mutation_consumer(input_data, tool_use_id, context)
+            Adapter->>Mapper: map_tool("Write", input)
+            Mapper-->>Adapter: ToolMapping{mutation=true}
+            alt tool_response.is_error or not a mutation
+                Adapter->>Tracker: release_reservation(tool_use_id)
+                Note over Adapter: Log: "Write changed nothing, checkpoint preserved"
+            else Successful mutation
+                Adapter->>Tracker: consume_checkpoint(tool_use_id)
+                Tracker-->>Adapter: "chk_20260130_abc..."
+                Note over Adapter: Log: "Checkpoint consumed after Write"
+            end
+            Adapter-->>SDK: {}
+        end
     end
 
-    SDK-->>Agent: ToolResult{success}
-    Note over Tracker: Checkpoint consumed.<br/>Next mutation requires new checkpoint.
+    SDK-->>Agent: ToolResult
+    Note over Tracker: After a successful mutation the checkpoint is consumed.<br/>Next mutation requires new checkpoint.
 ```
 
 ### Safety Invariants Enforced
 
 1. **Checkpoint-before-mutation**: High-risk tools (Write, Edit, Bash mutations) are blocked unless a valid checkpoint exists.
-2. **One-checkpoint-per-mutation**: After a successful mutation, the checkpoint is consumed, requiring a fresh checkpoint for the next mutation.
+2. **One-checkpoint-per-mutation**: Each checkpoint-gated tool call reserves the active checkpoint under its `tool_use_id`, so concurrent calls cannot share it (SEC-007). After a successful mutation, that reserved checkpoint is consumed, requiring a fresh checkpoint for the next mutation; a failed, interrupted or non-mutating call releases the reservation instead. A reservation nobody ends lapses after `checkpoint_reservation_seconds` (default 600).
 3. **Fail-closed on errors**: If the permission check fails internally, access is denied (secure default).
 4. **Non-blocking evidence collection**: Evidence hooks never block tool execution; they fail silently if evidence capture fails.
 
@@ -680,11 +713,13 @@ The ACS employs two layers of hooks: shell-level hooks configured in `hooks.json
 sequenceDiagram
     participant CC as Claude Code Runtime
     participant PreShell as PreToolUse Shell Hook<br/>pretooluse_require_checkpoint.sh
+    participant PyPre as PreToolUse Checkpoint Hook<br/>adapter._make_pretooluse_checkpoint_hook()
     participant PyPerm as Python Permission Callback<br/>adapter._make_permission_callback()
     participant Tool as Tool Execution Engine
     participant PyEvidence as PostToolUse Evidence Collector<br/>evidence_collector.py
     participant PySkill as PostToolUse Skill Tracker<br/>skill_tracker.py
     participant PyMutation as PostToolUse Mutation Consumer<br/>adapter._make_mutation_consumer()
+    participant PyFail as PostToolUseFailure Releaser<br/>adapter._make_failure_releaser()
     participant PostShell as PostToolUse Shell Hook<br/>posttooluse_log_tool.sh
 
     Note over CC,PostShell: === Tool Invocation Pipeline ===
@@ -699,8 +734,18 @@ sequenceDiagram
         PreShell-->>CC: exit 0 -- proceed
     end
 
+    CC->>PyPre: check_checkpoint_before_tool(input_data, tool_use_id, ctx)
+    PyPre->>PyPre: map_tool() -> ToolMapping<br/>If requires_checkpoint:<br/>validate_and_reserve(tool_use_id)
+
+    alt Not reserved + strict_mode
+        PyPre-->>CC: hookSpecificOutput{permissionDecision: "deny"}
+        Note over CC: Tool execution ABORTED
+    else Reserved (or not checkpoint-gated, or non-strict)
+        PyPre-->>CC: {}
+    end
+
     CC->>PyPerm: can_use_tool(tool_name, input, context)
-    PyPerm->>PyPerm: map_tool() -> ToolMapping<br/>Check requires_checkpoint<br/>Check has_valid_checkpoint()
+    PyPerm->>PyPerm: map_tool() -> ToolMapping<br/>Rate limit check<br/>validate_and_reserve(tool_use_id) (idempotent)
 
     alt Permission denied
         PyPerm-->>CC: PermissionResultDeny
@@ -710,6 +755,14 @@ sequenceDiagram
     end
 
     CC->>Tool: Execute tool with input
+
+    alt Tool call failed or interrupted
+        Tool-->>CC: failure
+        CC->>PyFail: release_after_failure(input_data, tool_use_id, ctx)
+        PyFail->>PyFail: checkpoint_tracker.release_reservation(tool_use_id)
+        PyFail-->>CC: {} (passive)
+    end
+
     Tool-->>CC: ToolResult
 
     Note over CC,PostShell: === PostToolUse Hook Chain ===
@@ -732,10 +785,11 @@ sequenceDiagram
         PySkill-->>CC: {} (passive)
     and Hook 3: Mutation Consumer
         CC->>PyMutation: consume_after_mutation(input_data, tool_use_id, ctx)
-        alt ToolMapping.mutation == true AND no error
-            PyMutation->>PyMutation: checkpoint_tracker.consume_checkpoint()
-            Note over PyMutation: Checkpoint consumed
-        else Not a mutation or mutation failed
+        alt requires_checkpoint AND mutation == true AND no error
+            PyMutation->>PyMutation: checkpoint_tracker.consume_checkpoint(tool_use_id)
+            Note over PyMutation: Reserved checkpoint consumed
+        else Not a mutation or tool reported an error
+            PyMutation->>PyMutation: checkpoint_tracker.release_reservation(tool_use_id)
             Note over PyMutation: Checkpoint preserved
         end
         PyMutation-->>CC: {} (passive)
@@ -759,8 +813,10 @@ sequenceDiagram
 | PostToolUse | Shell | `posttooluse_log_tool.sh` | `Skill` | Append skill invocations to `.claude/audit.log` |
 | PostToolUse | Python | `evidence_collector.py` | All tools | Capture evidence anchors to `EvidenceStore` |
 | PostToolUse | Python | `skill_tracker.py` | `Skill` | Update `CheckpointTracker` on checkpoint/rollback skills |
-| PreToolUse | Python | `adapter._make_permission_callback()` | All tools | SDK-level checkpoint enforcement |
-| PostToolUse | Python | `adapter._make_mutation_consumer()` | All tools | Consume checkpoint after successful mutation |
+| PreToolUse | Python | `adapter._make_pretooluse_checkpoint_hook()` | All tools | Reserve the active checkpoint for the call (`tool_use_id`); deny via `hookSpecificOutput` in strict mode |
+| can_use_tool | Python | `adapter._make_permission_callback()` | All tools | SDK-level rate limiting and checkpoint enforcement (repeats the reservation idempotently) |
+| PostToolUse | Python | `adapter._make_mutation_consumer()` | All tools | Consume the call's reserved checkpoint after a successful mutation; release it otherwise |
+| PostToolUseFailure | Python | `adapter._make_failure_releaser()` | All tools | Release the reservation of a failed or interrupted call |
 
 ---
 
@@ -847,7 +903,7 @@ flowchart TB
 
 ## 9. Diagram 8: Capability Edge Graph
 
-The ontology defines 80+ edges between capabilities using 7 edge types. This diagram shows a representative subset demonstrating all edge types and their semantics.
+The ontology defines 97 edges between capabilities using 7 edge types. This diagram shows a representative subset demonstrating all edge types and their semantics.
 
 ```mermaid
 flowchart LR
@@ -913,8 +969,7 @@ flowchart LR
     %% REQUIRES edges (hard dependency, solid red)
     checkpoint -->|"requires"| mutate
     checkpoint -->|"requires"| send
-    mutate -->|"requires"| verify
-    send -->|"requires"| verify
+    checkpoint -->|"requires"| rollback
 
     %% ENABLES edges (blue, dashed)
     retrieve -.->|"enables"| detect
@@ -927,6 +982,8 @@ flowchart LR
     plan -.->|"enables"| mutate
     plan -.->|"enables"| generate
     verify -.->|"enables"| rollback
+    ground -.->|"enables"| verify
+    generate -.->|"enables"| verify
     state -.->|"enables"| transition
     transition -.->|"enables"| simulate
     decompose -.->|"enables"| delegate
@@ -937,11 +994,14 @@ flowchart LR
     constrain -.->|"enables"| checkpoint
 
     %% SOFT_REQUIRES edges (orange, dotted)
-    ground -.-o|"soft_requires"| verify
+    observe -.-o|"soft_requires"| ground
+    detect -.-o|"soft_requires"| ground
     predict -.-o|"soft_requires"| ground
-    generate -.-o|"soft_requires"| verify
-    explain -.-o|"soft_requires"| ground
     attribute -.-o|"soft_requires"| ground
+    explain -.-o|"soft_requires"| ground
+    constrain -.-o|"soft_requires"| execute
+    constrain -.-o|"soft_requires"| mutate
+    constrain -.-o|"soft_requires"| send
 
     %% PRECEDES edges (temporal, green)
     checkpoint ==>|"precedes"| mutate
@@ -952,6 +1012,9 @@ flowchart LR
     constrain ==>|"precedes"| execute
     constrain ==>|"precedes"| mutate
     verify ==>|"precedes"| audit
+    mutate ==>|"precedes"| verify
+    execute ==>|"precedes"| verify
+    send ==>|"precedes"| verify
 
     %% CONFLICTS_WITH edges (red, bidirectional)
     rollback <-->|"conflicts_with"| persist
@@ -962,6 +1025,8 @@ flowchart LR
     measure <-.->|"alternative_to"| predict
     verify <-.->|"alternative_to"| constrain
     detect <-.->|"alternative_to"| discover
+    persist <-.->|"alternative_to"| checkpoint
+    transform <-.->|"alternative_to"| generate
 
     %% SPECIALIZES edges (gray, inheritance)
     detect -.->|"specializes"| observe
@@ -990,13 +1055,15 @@ flowchart LR
 
 | Edge Type | Count | Semantics | Transitive | Symmetric |
 |-----------|-------|-----------|------------|-----------|
-| `requires` | 4 | Hard dependency: MUST be satisfied before target executes | No | No |
-| `soft_requires` | 12 | Recommended but not mandatory | No | No |
-| `enables` | 30+ | Unlocks or makes possible the target capability | No | No |
-| `precedes` | 15+ | Temporal ordering: must complete before target begins | Yes | No |
-| `conflicts_with` | 4 (8 directed) | Mutual exclusivity: cannot coexist in same workflow | No | Yes |
-| `alternative_to` | 7 (14 directed) | Substitutability: can replace each other | No | Yes |
+| `requires` | 3 | Hard dependency: source MUST run before the target (V102 if missing) | No | No |
+| `soft_requires` | 8 | Recommended, any-of: at least one source should run before the target; otherwise warning W601 | No | No |
+| `enables` | 46 | Unlocks or makes possible the target capability | No | No |
+| `precedes` | 18 | Ordering only: when both are present, source must run before target (V102); does not require the source to be present | Yes | No |
+| `conflicts_with` | 4 (2 pairs) | Concurrency exclusion: may not share a `parallel_group` (F504); sequential use is allowed | No | Yes |
+| `alternative_to` | 12 (6 pairs) | Substitutability: can replace each other | No | Yes |
 | `specializes` | 6 | Inheritance: more specific variant of general capability | Yes | No |
+
+Steps in the same `parallel_group` never count as running before one another for `requires`, `precedes` and `soft_requires`.
 
 ---
 
@@ -1009,7 +1076,7 @@ flowchart LR
 | S-01 | Capability Ontology | 36 atomic capabilities with typed I/O schemas, risk levels, and mutation flags | `schemas/capability_ontology.yaml` |
 | S-02 | Cognitive Layer Organization | 9 layers (PERCEIVE through COORDINATE) with cognitive mapping annotations | `schemas/capability_ontology.yaml` (layers section) |
 | S-03 | Edge Type System | 7 edge types (requires, soft_requires, enables, precedes, conflicts_with, alternative_to, specializes) with formal semantics | `schemas/capability_ontology.yaml` (edge_types section) |
-| S-04 | Capability Edge Graph | 80+ directed edges between capabilities encoding dependencies, ordering, conflicts, and substitutability | `schemas/capability_ontology.yaml` (edges section) |
+| S-04 | Capability Edge Graph | 97 directed edges between capabilities encoding dependencies, ordering, conflicts, and substitutability | `schemas/capability_ontology.yaml` (edges section) |
 | S-05 | Input Schema Contracts | Typed input schemas per capability with required fields, types, and descriptions | `schemas/capability_ontology.yaml` (nodes.input_schema) |
 | S-06 | Output Schema Contracts | Typed output schemas requiring evidence_anchors and confidence on all capabilities | `schemas/capability_ontology.yaml` (nodes.output_schema) |
 | S-07 | Workflow Catalog | 12 composed workflow patterns with step definitions, gates, failure modes, and recovery | `schemas/workflow_catalog.yaml` |
@@ -1086,8 +1153,8 @@ flowchart LR
 | K-32 | Skill tracker hook | PostToolUse hook detecting checkpoint/rollback skill invocations | `grounded_agency/hooks/skill_tracker.py` |
 | K-33 | Autonomous checkpoint creation | When Claude invokes the checkpoint skill, the tracker automatically creates a checkpoint | `grounded_agency/hooks/skill_tracker.py` |
 | K-34 | Rollback invalidation | When Claude invokes the rollback skill, all checkpoints are invalidated | `grounded_agency/hooks/skill_tracker.py` |
-| K-35 | Permission callback | `can_use_tool` callback enforcing checkpoint-before-mutation with strict/non-strict modes | `grounded_agency/adapter.py` |
-| K-36 | Mutation consumer hook | PostToolUse hook that auto-consumes checkpoint after successful mutation | `grounded_agency/adapter.py` |
+| K-35 | Checkpoint gate (PreToolUse + permission callback) | PreToolUse hook reserves the active checkpoint per tool call (`validate_and_reserve(tool_use_id)`, denies via `hookSpecificOutput` in strict mode); `can_use_tool` callback repeats the reservation idempotently, with strict/non-strict modes | `grounded_agency/adapter.py` |
+| K-36 | Mutation consumer + failure releaser | PostToolUse hook consumes the call's reserved checkpoint after a successful mutation (releases it on error or non-mutating call); PostToolUseFailure hook releases the reservation of a failed or interrupted call | `grounded_agency/adapter.py` |
 | K-37 | SDK-agnostic integration | Uses `Any` types and try/except imports to avoid hard dependency on `claude_agent_sdk` | `grounded_agency/adapter.py` |
 | K-38 | HookCallback type alias | Canonical type: `Callable[[dict, str|None, Any], Coroutine[Any, Any, dict]]` | `grounded_agency/__init__.py` |
 | K-39 | OASFAdapter | Translates OASF skill codes to Grounded Agency capabilities with safety metadata | `grounded_agency/adapters/oasf.py` |
@@ -1136,17 +1203,17 @@ flowchart LR
 
 | # | Feature | Description | Location |
 |---|---------|-------------|----------|
-| V-01 | Workflow validator | Schema resolution, type inference, consumer-type checking, and patch suggestions | `tools/validate_workflows.py` |
-| V-02 | Structural validation | Capability existence, prerequisite satisfaction, mapping_ref/output_conforms_to resolution | `tools/validate_workflows.py` |
-| V-03 | Reference validation | `${store.path}` resolution and external input reference resolution | `tools/validate_workflows.py` |
-| V-04 | Type system validation | Inferred types for untyped bindings, typed annotation validation against schema | `tools/validate_workflows.py` |
-| V-05 | Consumer-side type checking | Validates binding types against consumer capability's input_schema | `tools/validate_workflows.py` |
-| V-06 | Patch suggestions | Machine-usable fix suggestions: insert transform step, update binding, mapping_ref from coercion registry | `tools/validate_workflows.py` |
+| V-01 | Workflow validator | Schema resolution, type inference, consumer-type checking, expression checking, edge semantics and patch suggestions; implemented in the Rust core, `tools/validate_workflows.py` is a thin CLI (`--catalog`, `--strict`, `--emit-patch`) | `core/src/validate/`, `tools/validate_workflows.py` |
+| V-02 | Structural validation | Capability existence, prerequisite satisfaction (`requires`/`precedes`/`soft_requires`/`conflicts_with`), mapping_ref/output_conforms_to resolution | `core/src/validate/` (via `tools/validate_workflows.py`) |
+| V-03 | Reference validation | `${store.path}` resolution and external input reference resolution | `core/src/refs.rs`, `core/src/validate/bindings.rs` |
+| V-04 | Type system validation | Inferred types for untyped bindings, typed annotation validation against schema | `core/src/types.rs`, `core/src/schema.rs` |
+| V-05 | Consumer-side type checking | Validates binding types against consumer capability's input_schema | `core/src/validate/bindings.rs` |
+| V-06 | Patch suggestions | Machine-usable fix suggestions: insert transform step, update binding, mapping_ref from coercion registry; always written to `tools/validator_suggestions.json` | `core/src/validate/` (via `tools/validate_workflows.py`) |
 | V-07 | Diff patch output | Optional `--emit-patch` flag generates unified diff of suggested fixes | `tools/validate_workflows.py` |
 | V-08 | Profile validator | Validates domain profiles against profile_schema.yaml for field presence, trust weight ranges, enum values | `tools/validate_profiles.py` |
 | V-09 | Trust weight range validation | Ensures all trust weights are between 0.0 and 1.0 | `tools/validate_profiles.py` |
 | V-10 | Semantic version validation | Checks version field matches semver format | `tools/validate_profiles.py` |
-| V-11 | Ontology graph validator | Detects orphan capabilities, validates edge symmetry, detects cycles in hard dependencies | `tools/validate_ontology.py` |
+| V-11 | Ontology graph validator | Detects orphan capabilities, validates edge symmetry, detects cycles in hard dependencies, checks `mutation_overridable` constraints and edges listed twice | `tools/validate_ontology.py` |
 | V-12 | Orphan detection | Finds capabilities with no incoming or outgoing edges | `tools/validate_ontology.py` |
 | V-13 | Symmetric edge validation | Verifies bidirectional edges for conflicts_with and alternative_to | `tools/validate_ontology.py` |
 | V-14 | Cycle detection | Detects cycles in requires and precedes edge subgraphs | `tools/validate_ontology.py` |
@@ -1154,11 +1221,11 @@ flowchart LR
 | V-16 | Skill reference validator | Checks that file paths in SKILL.md files resolve to existing files | `tools/validate_skill_refs.py` |
 | V-17 | Phantom path detection | Catches references to files that were never created or have been removed | `tools/validate_skill_refs.py` |
 | V-18 | Strict section parsing | Only validates paths in structural dependency sections (Compatible schemas, References, Located at, Workflow references) | `tools/validate_skill_refs.py` |
-| V-19 | Schema synchronizer | Generates skill-local output_schema.yaml from ontology and bundles transitive dependencies | `tools/sync_skill_schemas.py` |
+| V-19 | Schema synchronizer | Generates skill-local output_schema.yaml from ontology, regenerates the 17 vendored workflow catalogs and vendored schema copies, removes orphaned generated schemas; `--check` fails CI on drift | `tools/sync_skill_schemas.py` |
 | V-20 | Transitive dependency bundling | Copies world_state_schema, event_schema, and transform mappings into skill reference directories | `tools/sync_skill_schemas.py` |
 | V-21 | Path rewriting | Rewrites internal `schemas/` paths in bundled workflow_catalog.yaml to use skill-local paths | `tools/sync_skill_schemas.py` |
 | V-22 | Dry-run mode | `--dry-run` flag previews schema sync without writing files | `tools/sync_skill_schemas.py` |
-| V-23 | Conformance test runner | Script for running conformance tests locally | `scripts/run_conformance.py` |
+| V-23 | Conformance test runner | Runs the validator on every fixture in `tests/fixtures/` via `--catalog` and checks `EXPECTATIONS.json` (pass/fail, expected error and warning codes); runs locally and in CI | `scripts/run_conformance.py` |
 
 ### 10.6 Interop Subsystem
 
@@ -1194,7 +1261,7 @@ This matrix tracks the implementation status of every major feature across all s
 | 36 atomic capabilities with I/O schemas | Implemented | `capability_ontology.yaml` | All 36 nodes with typed input/output schemas |
 | 9 cognitive layers with cognitive mapping | Implemented | `capability_ontology.yaml` | BDI, ReAct, and MCP mappings |
 | 7 edge types with formal semantics | Implemented | `capability_ontology.yaml` | Documented in `spec/EDGE_TYPES.md` |
-| 80+ capability edges | Implemented | `capability_ontology.yaml` | Including all symmetric pairs |
+| 97 capability edges | Implemented | `capability_ontology.yaml` | Including all symmetric pairs |
 | 12 workflow patterns | Implemented | `workflow_catalog.yaml` | monitor_and_replan through model_deployment |
 | Input binding system (`${store_as}`) | Implemented | `workflow_catalog.yaml` | With typed annotations (`${ref: type}`) |
 | Step gates (skip/stop) | Implemented | `workflow_catalog.yaml` | Condition-based pre-step guards |
@@ -1239,16 +1306,16 @@ This matrix tracks the implementation status of every major feature across all s
 | Command evidence capture | Implemented | `evidence_collector.py` | Bash with exit code |
 | Skill tracker hook | Implemented | `skill_tracker.py` | Checkpoint/rollback skill detection |
 | Permission callback | Implemented | `adapter.py` | Strict/non-strict modes |
-| Mutation consumer hook | Implemented | `adapter.py` | Auto-consume after success, preserve on failure |
+| Mutation consumer hook | Implemented | `adapter.py` | Consume the reserved checkpoint after success; release on error (PostToolUse) or failure (PostToolUseFailure) |
 | SDK-agnostic integration | Implemented | `adapter.py` | try/except for claude_agent_sdk imports |
 | OASFAdapter | Implemented | `oasf.py` | Full translate + reverse_lookup |
 | OASF flat index building | Implemented | `oasf.py` | Categories + subcategories flattened |
 | OASF reverse lookup with caching | Implemented | `oasf.py` | Computed reverse mapping |
 | OASFMapping/OASFSkillResult | Implemented | `oasf.py` | Frozen dataclasses |
 | UnknownSkillError exception | Implemented | `oasf.py` | Custom KeyError subclass |
-| Persistent checkpoint storage | Planned | `checkpoint_tracker.py` | `_checkpoint_dir` exists but no disk I/O implemented |
+| Persistent checkpoint storage | Implemented | `checkpoint_tracker.py` | State persisted to `_checkpoint_dir` (TD-011); reservations are in-memory only |
 | SDK test suite | Implemented | `tests/test_sdk_integration.py` | Integration tests for adapter |
-| Conformance test suite | Partial | `scripts/run_conformance.py` | Local-only, optional |
+| Conformance test suite | Implemented | `scripts/run_conformance.py` | 55 fixtures; runs locally and in CI |
 
 ### 11.3 Hook Features
 
@@ -1262,6 +1329,8 @@ This matrix tracks the implementation status of every major feature across all s
 | PostToolUse skill tracker (Python) | Implemented | `skill_tracker.py` | Injected via wrap_options |
 | PostToolUse mutation consumer (Python) | Implemented | `adapter.py` | Injected via wrap_options |
 | Permission callback (Python) | Implemented | `adapter.py` | Injected via wrap_options |
+| PreToolUse checkpoint hook (Python) | Implemented | `adapter.py` | Reserves the checkpoint per `tool_use_id`; injected via wrap_options |
+| PostToolUseFailure releaser (Python) | Implemented | `adapter.py` | Releases the reservation of a failed call; injected via wrap_options |
 
 ### 11.4 Skill Features
 
@@ -1280,12 +1349,12 @@ This matrix tracks the implementation status of every major feature across all s
 
 | Feature | Status | Component | Notes |
 |---------|--------|-----------|-------|
-| Workflow validator | Implemented | `validate_workflows.py` | 5 validation phases |
-| Structural validation | Implemented | `validate_workflows.py` | Capability existence, prerequisites |
-| Reference validation | Implemented | `validate_workflows.py` | ${store_as} resolution |
-| Type system validation | Implemented | `validate_workflows.py` | Inferred and annotated types |
-| Consumer-side type checking | Implemented | `validate_workflows.py` | Input schema conformance |
-| Patch suggestions | Implemented | `validate_workflows.py` | JSON output + optional diff |
+| Workflow validator | Implemented | Rust core + `validate_workflows.py` CLI | Errors and warnings (W601–W614); `--strict` treats warnings as errors |
+| Structural validation | Implemented | Rust core (`validate/semantics.rs`) | Capability existence, prerequisites, edge semantics |
+| Reference validation | Implemented | Rust core (`refs.rs`, `validate/bindings.rs`) | ${store_as} resolution |
+| Type system validation | Implemented | Rust core (`types.rs`, `schema.rs`) | Inferred and annotated types |
+| Consumer-side type checking | Implemented | Rust core (`validate/bindings.rs`) | Input schema conformance |
+| Patch suggestions | Implemented | Rust core + `validate_workflows.py` | JSON output (always) + optional diff (`--emit-patch`) |
 | Profile validator | Implemented | `validate_profiles.py` | Schema conformance checking |
 | Trust weight range validation | Implemented | `validate_profiles.py` | 0.0-1.0 range check |
 | Semantic version validation | Implemented | `validate_profiles.py` | Semver format check |
@@ -1297,7 +1366,7 @@ This matrix tracks the implementation status of every major feature across all s
 | Schema synchronizer | Implemented | `sync_skill_schemas.py` | Ontology-to-skill sync |
 | Transitive dependency bundling | Implemented | `sync_skill_schemas.py` | Reference directory population |
 | Path rewriting | Implemented | `sync_skill_schemas.py` | Internal path translation |
-| Conformance tests | Partial | `scripts/run_conformance.py` | Local only, optional |
+| Conformance tests | Implemented | `scripts/run_conformance.py` | 55 fixtures; runs in CI (`conformance` job) |
 
 ### 11.6 Interop Features
 
@@ -1335,7 +1404,7 @@ This matrix tracks the implementation status of every major feature across all s
 | Extension governance | Implemented | `docs/methodology/EXTENSION_GOVERNANCE.md` | Process for adding capabilities |
 | Skills README | Implemented | `skills/README.md` | Skills directory documentation |
 | Benchmarks | Partial | `benchmarks/` | Benchmark fixtures exist, harness unclear |
-| CI/CD integration | Planned | N/A | Validation tools exist but no CI config file |
+| CI/CD integration | Implemented | `.github/workflows/ci.yml` | Schema validation, Rust core, CEL differential, lint, tests, benchmarks, conformance |
 | npm/PyPI publishing | Planned | `pyproject.toml` | pyproject.toml exists but not published |
 
 ---
@@ -1345,17 +1414,17 @@ This matrix tracks the implementation status of every major feature across all s
 | # | Workflow | Risk | Steps | Key Capabilities Used |
 |---|----------|------|-------|----------------------|
 | 1 | monitor_and_replan | medium | 7 | observe, state, compare, detect, critique, plan, audit |
-| 2 | clarify_intent | low | 6 | critique, inquire, send, receive, integrate, audit |
+| 2 | clarify_intent | low | 5 | critique, inquire, receive, integrate, audit |
 | 3 | debug_code_change | medium | 11 | observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, audit, rollback |
 | 4 | world_model_build | low | 13 | retrieve, observe, detect, classify, integrate, state, transition, attribute, measure, audit, ground, simulate, explain |
 | 5 | capability_gap_analysis | low | 7 | observe, attribute, discover, compare (x2), generate, audit |
-| 6 | digital_twin_sync_loop | high | 22 | receive, search, transform, integrate, detect (x2), classify, state, compare, transition, measure, predict, plan, constrain, checkpoint, mutate, execute, verify, audit, rollback, explain |
+| 6 | digital_twin_sync_loop | high | 21 | receive, search, transform, integrate, detect (x2), classify, state, compare, transition, measure, predict, plan, constrain, checkpoint, mutate, execute, verify, audit, rollback, explain |
 | 7 | digital_twin_bootstrap | high | 2 | invoke (x2, nesting world_model_build and digital_twin_sync_loop) |
 | 8 | rag_pipeline | low | 7 | search, retrieve, detect, ground, generate, explain, audit |
 | 9 | security_assessment | low | 7 | search, detect, measure, attribute, critique, generate, audit |
 | 10 | multi_agent_orchestration | medium | 7 | decompose, plan, delegate, synchronize, verify, integrate, audit |
 | 11 | data_quality_pipeline | medium | 9 | observe, detect, classify, measure, checkpoint, transform, verify, audit, rollback |
-| 12 | model_deployment | high | 9 | verify (x2), constrain, checkpoint, execute, measure, audit, rollback |
+| 12 | model_deployment | high | 8 | constrain (x2: artifact checks, then policy), checkpoint, execute, verify, measure, audit, rollback |
 
 ## Appendix B: Domain Profile Quick Reference
 

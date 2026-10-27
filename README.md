@@ -4,10 +4,10 @@
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet?logo=anthropic)](https://github.com/synaptiai/synapti-marketplace)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Spec](https://img.shields.io/badge/Spec-v1.0.0-blue.svg)](spec/STANDARD-v1.0.0.md)
+[![Spec](https://img.shields.io/badge/Spec-v1.1.0_Draft-blue.svg)](spec/STANDARD-v1.1.0.md)
 [![Plugin](https://img.shields.io/badge/Plugin-v1.2.0-green.svg)](CHANGELOG.md)
 
-> **Versioning:** The spec version (v1.0.0) tracks the standard itself. The plugin version (v1.2.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
+> **Versioning:** The spec version (v1.1.0, Draft; [v1.0.0](spec/STANDARD-v1.0.0.md) still supported) tracks the standard itself. The plugin version (v1.2.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
 
 ```bash
 # Install as Claude Code plugin
@@ -147,17 +147,17 @@ Use the validator independently:
 git clone https://github.com/synaptiai/agent-capability-standard.git
 cd agent-capability-standard
 
-# Set up Python environment
+# Set up Python environment (Python >= 3.10; builds the Rust core, so Rust >= 1.86 is required)
 python -m venv .venv && source .venv/bin/activate
-pip install pyyaml
+pip install -e ".[dev]" -c constraints.txt
 
-# Validate workflows
+# Validate workflows (defaults to schemas/workflow_catalog.yaml; --catalog PATH for another file)
 python tools/validate_workflows.py
 # → VALIDATION PASS
 
 # Run conformance tests
 python scripts/run_conformance.py
-# → Conformance PASSED (5/5)
+# → Conformance PASSED
 ```
 
 **Next:** See [QUICKSTART.md](docs/QUICKSTART.md) for a guided walkthrough.
@@ -169,7 +169,7 @@ python scripts/run_conformance.py
 | **Evaluate** if this fits my needs | [FAQ](docs/FAQ.md) → [Whitepaper](spec/WHITEPAPER.md) |
 | **Use** this in Claude Code | [Quickstart](docs/QUICKSTART.md) (10 min) |
 | **Build** agents with the Python SDK | [SDK Guide](docs/integrations/claude_agent_sdk.md) |
-| **Read** the formal specification | [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) |
+| **Read** the formal specification | [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) |
 | **Create** custom workflows | [Tutorial](docs/TUTORIAL.md) (30 min) |
 | **Contribute** to the standard | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Deploy** in a regulated industry | [Compliance Suite](docs/compliance/) |
@@ -263,13 +263,15 @@ Hooks implementing SAFETY layer capabilities:
 | [GLOSSARY.md](docs/GLOSSARY.md) | Key terms and definitions |
 | [FAQ.md](docs/FAQ.md) | Common questions |
 | [MODALITY_HANDLING.md](docs/guides/MODALITY_HANDLING.md) | Working with vision, audio, and multimodal domains |
+| [ORCHESTRATION_EXTENSIONS.md](docs/guides/ORCHESTRATION_EXTENSIONS.md) | Triggers, escalation, waiting, approval, delegation and quorum (Standard v1.1) |
 | [PERSPECTIVE_VALIDATION_CHECKLIST.md](skills/perspective-validation/CHECKLIST.md) | Socio-technical and governance review checklist (PVC) |
 
 ### For Implementers
 
 | Document | Purpose |
 |----------|---------|
-| [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Formal specification |
+| [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) | Formal specification (Draft, accepted by [RFC-0003](spec/RFC-0003-orchestration-extensions.md)) |
+| [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Previous specification (still supported) |
 | [CONFORMANCE.md](spec/CONFORMANCE.md) | Conformance levels and testing |
 | [SECURITY.md](spec/SECURITY.md) | Threat model and mitigations |
 
@@ -325,8 +327,10 @@ agent-capability-standard/
 │   ├── interop/                       # Framework interoperability mappings
 │   │   └── oasf_mapping.yaml          # OASF skill code mapping
 │   └── transforms/          # Type coercion mappings
+├── core/                    # Rust crate: validator, compiled into grounded_agency._core
+├── grounded_agency/         # Python package (SDK integration)
 ├── hooks/                   # Safety hooks (checkpoint, audit)
-├── tools/                   # Validator CLI
+├── tools/                   # Validator CLI (thin wrapper over core/)
 ├── tests/                   # Conformance fixtures
 ├── spec/                    # Standard documentation
 ├── docs/                    # User documentation + methodology
@@ -376,6 +380,8 @@ pip install grounded-agency
 pip install grounded-agency[sdk]
 ```
 
+The package includes a compiled Rust extension; installing from a source distribution needs a Rust toolchain (>= 1.86).
+
 ---
 
 ## Installation
@@ -406,14 +412,17 @@ claude plugin install agent-capability-standard
 git clone https://github.com/synaptiai/agent-capability-standard.git
 cd agent-capability-standard
 python -m venv .venv && source .venv/bin/activate
-pip install pyyaml
+pip install -e ".[dev]" -c constraints.txt   # needs Python >= 3.10 and Rust >= 1.86
 ```
 
 ## Validation
 
 ```bash
-# Validate workflow definitions
+# Validate workflow definitions (writes tools/validator_suggestions.json)
 python tools/validate_workflows.py
+
+# Validate another catalog; --strict makes warnings fail
+python tools/validate_workflows.py --catalog path/to/catalog.yaml --strict
 
 # Generate patch suggestions
 python tools/validate_workflows.py --emit-patch
@@ -455,4 +464,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [spec/GOVERNANCE.md](s
 
 ---
 
-**Status:** Candidate Standard v1.0.0 | **Released:** 2026-01-24
+**Status:** Draft Standard v1.1.0 (accepted by RFC-0003; v1.0.0, released 2026-01-24, still supported)

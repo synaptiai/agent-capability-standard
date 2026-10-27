@@ -1331,27 +1331,35 @@ class TestSafetyFlagValidation:
         )
         assert self._downgrades(eng, "test_honest_mutate") == []
 
-    def test_upgrade_from_ontology_passes(self) -> None:
-        """Being MORE cautious than the ontology is fine."""
-        eng = WorkflowEngine(ONTOLOGY_PATH)
-        eng.add_workflow(
-            WorkflowDefinition(
-                name="test_upgrade",
-                goal="test",
-                risk="low",
-                spec_version="1.1",
-                steps=[
-                    WorkflowStep(
-                        capability="observe",  # Ontology: mutation=false
-                        purpose="cautious observe",
-                        store_as="o",
-                        mutation=True,  # Step upgrades to true — fine
-                        requires_checkpoint=True,
-                    ),
-                ],
+    def test_upgrade_from_ontology_takes_effect(self) -> None:
+        """Being MORE cautious than the ontology is allowed (no W602) and
+        binding: a raised requires_checkpoint needs a checkpoint (F501)."""
+
+        def report(steps: list[WorkflowStep]) -> list[ErrorCode]:
+            eng = WorkflowEngine(ONTOLOGY_PATH)
+            eng.add_workflow(
+                WorkflowDefinition(
+                    name="test_upgrade",
+                    goal="test",
+                    risk="low",
+                    spec_version="1.1",
+                    steps=steps,
+                )
             )
-        )
-        assert eng.validate_report("test_upgrade") == []
+            return [d.code for d in eng.validate_report("test_upgrade")]
+
+        def cautious() -> WorkflowStep:
+            return WorkflowStep(
+                capability="observe",  # Ontology: mutation=false
+                purpose="cautious observe",
+                store_as="o",
+                mutation=True,  # Step upgrades to true — fine
+                requires_checkpoint=True,
+            )
+
+        assert report([cautious()]) == [ErrorCode.CHECKPOINT_REQUIRED]
+        checkpoint = WorkflowStep(capability="checkpoint", purpose="save", store_as="c")
+        assert report([checkpoint, cautious()]) == []
 
     def test_omitted_flags_inherit_from_ontology(self) -> None:
         """Parsed with a registry, a step that omits its safety fields is

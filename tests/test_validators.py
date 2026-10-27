@@ -494,6 +494,18 @@ class TestJsonSchemaValidation:
             {"gates": [{"when": "true", "action": "halt"}]},
             {"gates": [{"when": "true", "action": "stop", "phase": "during"}]},
             {"failure_modes": [{"condition": "c", "action": "stop", "when": 1}]},
+            {"handler": True},
+            {"failure_modes": [{"condition": "c", "action": "escalate"}]},
+            {
+                "failure_modes": [
+                    {
+                        "condition": "c",
+                        "action": "escalate",
+                        "recovery": {"goto_step": "h", "max_loops": 2},
+                    }
+                ]
+            },
+            {"store_as": "_recovery"},
         ],
         ids=[
             "missing-purpose",
@@ -501,6 +513,10 @@ class TestJsonSchemaValidation:
             "bad-gate-action",
             "bad-gate-phase",
             "non-string-failure-when",
+            "handler-not-invoke",
+            "escalate-without-target",
+            "escalate-with-loop-fields",
+            "reserved-store-as",
         ],
     )
     def test_workflow_schema_rejects_bad_steps(
@@ -906,6 +922,23 @@ class TestSyncSkillSchemas:
         assert self._sync(root).returncode == 0
         assert not orphan.exists() and hand_written.exists()
         assert self._sync(root, "--check").returncode == 0
+
+    def test_unbundled_vendored_copy_is_maintained(self, tmp_path: Path) -> None:
+        """A skill that vendors a schema without bundling a catalog (receive)
+        gets its copy kept current too, instead of drifting unnoticed (#107)."""
+        root = self._tree(tmp_path)
+        copy = root / "skills" / "receive" / "reference" / "event_schema.yaml"
+        assert copy.exists()
+        assert not (copy.parent / "workflow_catalog.yaml").exists()
+        copy.write_text(copy.read_text() + "# stale\n")
+
+        check = self._sync(root, "--check")
+        assert check.returncode == 1
+        assert "skills/receive/reference/event_schema.yaml" in check.stdout
+        assert self._sync(root).returncode == 0
+        assert (
+            copy.read_bytes() == (root / "schemas" / "event_schema.yaml").read_bytes()
+        )
 
     def test_crlf_checkout_is_not_drift(self, tmp_path: Path) -> None:
         root = self._tree(tmp_path)

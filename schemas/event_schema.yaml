@@ -1,6 +1,6 @@
 schema:
   name: canonical_event
-  version: 1.0.0
+  version: 1.1.0
   generated_at: '2026-01-24T02:37:11.950296Z'
   description: Canonical event schema used by transform/integrate steps. Supports
     raw ingestion, normalization, and linkage to world_state.observations.
@@ -99,6 +99,7 @@ event:
           - sensor
           - message_bus
           - human
+          - agent
         name:
           type: string
         channel:

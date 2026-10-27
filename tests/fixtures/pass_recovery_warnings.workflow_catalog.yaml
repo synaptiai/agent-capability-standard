@@ -1,0 +1,33 @@
+# Standard version: 1.1.0
+# Valid but suspect recovery (STANDARD v1.1 §9.7): a structured recovery
+# with no trigger never fires (W609); a handler nothing escalates to never
+# runs (W613).
+dormant_recovery:
+  goal: Declare recovery that cannot run.
+  risk: low
+  workflow_extensions:
+    requires: [recovery@1]
+  steps:
+  - capability: plan
+    purpose: Plan.
+    store_as: plan_out
+  - capability: verify
+    purpose: Verify.
+    store_as: verify_out
+    input_bindings: {target: "${plan_out}", conditions: [c]}
+    failure_modes:
+    - condition: Failed.
+      action: rollback
+      recovery: {goto_step: plan_out}
+  - capability: invoke
+    purpose: A handler nobody calls.
+    store_as: orphan_out
+    handler: true
+    workflow_id: dormant_recovery_handler
+dormant_recovery_handler:
+  goal: Handle nothing.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe.
+    store_as: observe_out
