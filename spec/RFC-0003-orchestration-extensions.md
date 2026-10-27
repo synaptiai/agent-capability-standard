@@ -221,6 +221,14 @@ They reported five gaps, closed in the candidate before it is final:
   on an undrained node. Running every later step was rejected for the same
   reason as a "continue" failure action.
 
+With the nine workflows shared as fixtures, the author listed what they
+still could not express. Closed in the candidate:
+
+- **Membership in expressions.** `in` is added to the expression grammar
+  (§5.8) with CEL's meaning: an element of a list by `==`, or a key of a
+  map. Like the other comparison operators it does not chain. `and` stays
+  a syntax error (CEL has no such keyword); V108 says to use `&&`.
+
 ## Open questions
 
 - How agent identity (RFC-0002) will extend E2 with a named agent and

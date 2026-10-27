@@ -1,0 +1,26 @@
+# Standard version: 1.1.0
+# Positive fixture (STANDARD v1.1 §5.8): `in` tests membership in a list or
+# the keys of a map, as in CEL.
+membership:
+  goal: Act only on labels and severities the policy names.
+  risk: low
+  steps:
+  - capability: classify
+    purpose: Label the finding.
+    store_as: classify_out
+    input_bindings:
+      item: finding
+  - capability: explain
+    purpose: Explain the finding when its label is actionable.
+    store_as: explain_out
+    condition: '${classify_out.labels[0]: string} in ["bug", "regression"]'
+    input_bindings:
+      conclusion: actionable
+  - capability: audit
+    purpose: Record findings whose label is not reviewed.
+    store_as: audit_out
+    condition: '!(${classify_out.labels[0]: string} in ["reviewed"])'
+    input_bindings:
+      event: {type: unreviewed_finding}
+  success:
+  - Explained only actionable findings

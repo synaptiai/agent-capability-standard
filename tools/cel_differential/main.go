@@ -45,8 +45,8 @@ type fixture struct {
 var allowedDivergences = map[string]string{}
 
 // hoist replaces every ${...} outside string literals with a fresh variable
-// name, calling bind with the reference body. Inside a string literal
-// `${` is data, as in ACS.
+// name, padded with spaces, calling bind with the reference body. Inside a
+// string literal `${` is data, as in ACS.
 func hoist(src string, bind func(body string) string) string {
 	var out strings.Builder
 	for i := 0; i < len(src); {
@@ -69,7 +69,9 @@ func hoist(src string, bind func(body string) string) string {
 				i = len(src)
 				continue
 			}
-			out.WriteString(bind(src[i+2 : i+close]))
+			// A reference is one token: pad its variable so an adjacent
+			// keyword (`${x}in[1]`) cannot merge into one identifier.
+			out.WriteString(" " + bind(src[i+2:i+close]) + " ")
 			i += close + 1
 		default:
 			out.WriteByte(src[i])

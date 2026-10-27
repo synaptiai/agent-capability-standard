@@ -410,7 +410,7 @@ expr      = or_expr ;
 or_expr   = and_expr { "||" and_expr } ;
 and_expr  = cmp_expr { "&&" cmp_expr } ;
 cmp_expr  = unary [ cmp_op unary ] ;            (* non-associative *)
-cmp_op    = "==" | "!=" | "<=" | ">=" | "<" | ">" ;
+cmp_op    = "==" | "!=" | "<=" | ">=" | "<" | ">" | "in" ;
 unary     = "!" unary | primary ;
 primary   = reference | literal | "(" expr ")" ;
 literal   = "null" | "true" | "false" | number | string | list | map ;
@@ -432,6 +432,12 @@ V108; a malformed annotation alone is B205.
 - Ordering (`<`, `<=`, `>`, `>=`) is defined for number/number,
   string/string (by code point) and boolean/boolean (`false < true`); any
   other pair is an evaluation error.
+- `x in y` is membership, as in CEL: when `y` is a list, whether some
+  element equals `x` (by `==` above); when `y` is a map, whether `x` is one
+  of its keys (a non-string `x` is no map's key, so the result is `false`).
+  Any other `y`, null included, is an evaluation error. Like the other
+  comparison operators it does not chain: `x in y == true` is V108; write
+  `(x in y) == true`, and `!(x in y)` for "not in".
 - `!`, `&&`, `||` require booleans. `&&` and `||` absorb errors as CEL does:
   a determining operand (`false` for `&&`, `true` for `||`) decides the
   result even if the other operand is an error.
@@ -458,10 +464,10 @@ cel-go (§10.3).
 | Malformed annotation | B205 |
 | Unknown root / bad path | B202 / B201 |
 | Annotation incompatible with the schema | B203 |
-| Ordering or logic on a value of unknown type with no annotation | B204 |
-| Operator applied to kinds it does not accept; non-boolean result | B206 |
-| An ordering operand may be null (optional field, skippable producer) | W610 |
-| Equality between kinds that can never be equal | W611 |
+| Ordering, logic or `in` on a value of unknown type with no annotation (for `in`, the right operand) | B204 |
+| Operator applied to kinds it does not accept (for `in`, a right operand that is not a list or map); non-boolean result | B206 |
+| An ordering operand, or the right operand of `in`, may be null (optional field, skippable producer) | W610 |
+| Equality between kinds that can never be equal; `in` whose left operand matches nothing on the right (a literal list's members, or a map's keys, which are strings) | W611 |
 
 After a B202 or B201 no further diagnostic is reported for that operand.
 
@@ -1066,8 +1072,8 @@ NOT change any code's severity otherwise.
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
 | W608 | WAIT_SPANS_CHECKPOINT | A wait sits between a checkpoint and a later step that requires one (§5.13) |
 | W609 | UNTRIGGERED_FAILURE_MODE | Structured recovery with neither `on_error` nor `when`, or a failure mode that fires only on R406 where no wait has `liveness` |
-| W610 | NULLABLE_OPERAND | An ordering operand may be null |
-| W611 | CONSTANT_COMPARISON | Equality between kinds that can never be equal |
+| W610 | NULLABLE_OPERAND | An ordering operand, or the right operand of `in`, may be null |
+| W611 | CONSTANT_COMPARISON | Equality between kinds that can never be equal; `in` that can never hold |
 | W612 | MANGLED_REFERENCE | YAML read a typed reference as a mapping; quote it |
 | W613 | UNREACHABLE_HANDLER | A handler step no escalation targets |
 | W614 | INVALID_DURATION | Legacy `timeout` outside the duration grammar |

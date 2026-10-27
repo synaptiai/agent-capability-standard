@@ -1,0 +1,107 @@
+{
+  "description": "`in` tests list membership and map keys; an `in` gate whose right operand is a string errors and so fires.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "condition": "\"urgent\" in ${labels}",
+          "input_bindings": {
+            "target": "x"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "condition": "\"high\" in ${severity}",
+          "input_bindings": {
+            "target": "y"
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "z"
+          },
+          "gates": [
+            {
+              "when": "\"a\" in ${r.data: array<string>}",
+              "action": "warn"
+            }
+          ]
+        }
+      ],
+      "inputs": {
+        "labels": {
+          "type": "array",
+          "required": true
+        },
+        "severity": {
+          "type": "object",
+          "required": true
+        }
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "labels": [
+      "urgent",
+      "infra"
+    ],
+    "severity": {
+      "low": 1
+    }
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": "text",
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "step_skipped",
+    "expression_error",
+    "gate_fired"
+  ]
+}

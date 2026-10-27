@@ -125,6 +125,21 @@ fn eval_inner<'a>(e: &'a Expr, b: &'a dyn Bindings) -> Result<Cow<'a, Value>, Ev
             let res = match op {
                 CmpOp::Eq => deep_eq(&lv, &rv),
                 CmpOp::Ne => !deep_eq(&lv, &rv),
+                // As in CEL: an element of a list by equality, a key of a map
+                // (a key that is not a string is in no map).
+                CmpOp::In => match &*rv {
+                    Value::Array(items) => items.iter().any(|x| deep_eq(&lv, x)),
+                    Value::Object(m) => lv.as_str().is_some_and(|k| m.contains_key(k)),
+                    other => {
+                        return Err(EvalError {
+                            pos: *pos,
+                            msg: format!(
+                                "'in' needs a list or a map on the right, got {}",
+                                kind_of(other)
+                            ),
+                        });
+                    }
+                },
                 _ => {
                     let o = order(&lv, &rv).ok_or_else(|| EvalError {
                         pos: *pos,

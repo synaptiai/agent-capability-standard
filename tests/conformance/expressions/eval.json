@@ -427,11 +427,11 @@
    }
   },
   {
-   "id": "syntax-53",
+   "id": "in-absent-left",
    "expr": "${a} in [1]",
    "bindings": {},
    "expect": {
-    "error": "V108"
+    "value": false
    }
   },
   {
@@ -1765,6 +1765,437 @@
    "bindings": {},
    "expect": {
     "error": "R405"
+   }
+  },
+  {
+   "id": "in-list-string",
+   "expr": "\"high\" in ${r.levels}",
+   "bindings": {
+    "r": {
+     "levels": [
+      "low",
+      "high"
+     ]
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-list-missing",
+   "expr": "\"mid\" in ${r.levels}",
+   "bindings": {
+    "r": {
+     "levels": [
+      "low",
+      "high"
+     ]
+    }
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-list-literal",
+   "expr": "${r.label} in [\"approve\", \"abstain\"]",
+   "bindings": {
+    "r": {
+     "label": "abstain"
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-list-numeric",
+   "expr": "1 in [1.0, 2]",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-list-deep",
+   "expr": "{\"k\": [1]} in ${r.items}",
+   "bindings": {
+    "r": {
+     "items": [
+      {
+       "k": [
+        1
+       ]
+      }
+     ]
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-list-null-member",
+   "expr": "${absent} in [null]",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-list-kinds-differ",
+   "expr": "\"1\" in [1]",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-empty-list",
+   "expr": "${r.x} in []",
+   "bindings": {
+    "r": {
+     "x": 1
+    }
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-map-key",
+   "expr": "\"a\" in ${r.m}",
+   "bindings": {
+    "r": {
+     "m": {
+      "a": 1
+     }
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-map-key-null-value",
+   "expr": "\"b\" in ${r.m}",
+   "bindings": {
+    "r": {
+     "m": {
+      "b": null
+     }
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-map-missing",
+   "expr": "\"z\" in ${r.m}",
+   "bindings": {
+    "r": {
+     "m": {
+      "a": 1
+     }
+    }
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-map-non-string",
+   "expr": "1 in {\"1\": true}",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-map-null-key",
+   "expr": "null in {\"a\": 1}",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-string",
+   "expr": "\"a\" in \"abc\"",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "in-null",
+   "expr": "\"a\" in ${absent}",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "in-number",
+   "expr": "1 in ${r.n}",
+   "bindings": {
+    "r": {
+     "n": 1
+    }
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "in-negated",
+   "expr": "!(\"a\" in [\"a\"])",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-and",
+   "expr": "\"a\" in [\"a\"] && ${r.ok} == true",
+   "bindings": {
+    "r": {
+     "ok": true
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-guarded",
+   "expr": "${r.m} != null && \"a\" in ${r.m}",
+   "bindings": {
+    "r": {}
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-absorbed",
+   "expr": "${r.ok} == false || \"a\" in ${r.n}",
+   "bindings": {
+    "r": {
+     "ok": false,
+     "n": 1
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "syntax-in-chained",
+   "expr": "1 in [1] == true",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-in-chained-2",
+   "expr": "1 in [1] in [true]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-in-parenthesized",
+   "expr": "(1 in [1]) == true",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "syntax-in-no-left",
+   "expr": "in [1]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-in-word",
+   "expr": "\"a\" inside [\"a\"]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-in-ref-member",
+   "expr": "\"a\" in [${r.x}]",
+   "bindings": {
+    "r": {
+     "x": "a"
+    }
+   },
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-not-in",
+   "expr": "\"a\" !in [\"a\"]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-and-word",
+   "expr": "${r.a} == 1 and ${r.b} == 2",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "in-adjacent-ref",
+   "expr": "${x}in[1]",
+   "bindings": {
+    "x": 1
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-adjacent-refs",
+   "expr": "\"a\"in${r.m}",
+   "bindings": {
+    "r": {
+     "m": {
+      "a": 1
+     }
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-adjacent-both",
+   "expr": "${x}in${y}",
+   "bindings": {
+    "x": 2,
+    "y": [
+     1,
+     2
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-word-index",
+   "expr": "${x} index [1]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "in-word-inx",
+   "expr": "1 inx [1]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "in-keyword-as-string",
+   "expr": "\"in\" in [\"in\"]",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-not-binds-tighter",
+   "expr": "!true in [false]",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-bound-map-number-key",
+   "expr": "1 in ${r.m}",
+   "bindings": {
+    "r": {
+     "m": {
+      "1": true
+     }
+    }
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-bound-map-null-key",
+   "expr": "${absent} in ${r.m}",
+   "bindings": {
+    "r": {
+     "m": {
+      "a": 1
+     }
+    }
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "in-nested-numeric",
+   "expr": "[1] in [[1.0]]",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-nested-object-numeric",
+   "expr": "{\"a\": 1} in ${r.items}",
+   "bindings": {
+    "r": {
+     "items": [
+      {
+       "a": 1.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "in-empty-map",
+   "expr": "\"a\" in {}",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "syntax-not-in-word",
+   "expr": "\"a\" not in [\"a\"]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
    }
   }
  ]

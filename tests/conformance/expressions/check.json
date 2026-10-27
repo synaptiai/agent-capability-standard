@@ -602,6 +602,154 @@
    "expect": [
     "B203"
    ]
+  },
+  {
+   "id": "in-literal-list",
+   "expr": "${c.label} in [\"a\", \"b\"]",
+   "expect": []
+  },
+  {
+   "id": "in-array-ref",
+   "expr": "{\"name\": \"a\"} in ${c.items}",
+   "expect": []
+  },
+  {
+   "id": "in-map-ref",
+   "expr": "${c.sev} != null && \"high\" in ${c.sev}",
+   "expect": []
+  },
+  {
+   "id": "in-open-map",
+   "expr": "\"k\" in ${c.open}",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "in-string-right",
+   "expr": "\"a\" in ${c.label}",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "in-number-right",
+   "expr": "1 in ${c.count}",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "in-null-right",
+   "expr": "\"a\" in null",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "in-untyped-right",
+   "expr": "\"a\" in ${untyped}",
+   "expect": [
+    "B204"
+   ]
+  },
+  {
+   "id": "in-any-right",
+   "expr": "\"a\" in ${c.x}",
+   "expect": [
+    "B204"
+   ]
+  },
+  {
+   "id": "in-annotated-right",
+   "expr": "${c.x} != null && \"a\" in ${c.x: array<string>}",
+   "expect": []
+  },
+  {
+   "id": "in-optional-right",
+   "expr": "\"a\" in ${skipped.items}",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "in-guarded-right",
+   "expr": "${skipped} != null && {\"name\": \"a\"} in ${skipped.items}",
+   "expect": []
+  },
+  {
+   "id": "in-list-never-matches",
+   "expr": "${c.count} in [\"a\", \"b\"]",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-list-numbers-match",
+   "expr": "${c.confidence} in [0, 1]",
+   "expect": []
+  },
+  {
+   "id": "in-empty-list",
+   "expr": "${c.label} in []",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-map-non-string-key",
+   "expr": "${c.sev} != null && ${c.count} in ${c.sev}",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-map-null-key",
+   "expr": "${c.sev} != null && null in ${c.sev}",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-nullable-left-null-member",
+   "expr": "${u} in [null, \"a\"]",
+   "expect": []
+  },
+  {
+   "id": "in-dynamic-left",
+   "expr": "${untyped} in [\"a\"]",
+   "expect": []
+  },
+  {
+   "id": "in-result-boolean",
+   "expr": "${c.sev} != null && !(\"a\" in ${c.sev})",
+   "expect": []
+  },
+  {
+   "id": "in-chained",
+   "expr": "\"a\" in ${c.sev} == true",
+   "expect": [
+    "V108"
+   ]
+  },
+  {
+   "id": "in-adjacent-ref",
+   "expr": "${c.label}in[\"a\"]",
+   "expect": []
+  },
+  {
+   "id": "in-empty-map",
+   "expr": "\"a\" in {}",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-empty-list-dynamic-left",
+   "expr": "${untyped} in []",
+   "expect": [
+    "W611"
+   ]
   }
  ]
 }

@@ -319,6 +319,8 @@ impl<'s> Checker<'s> {
                 }
                 if op.is_ordering() {
                     self.check_ordering(*op, lt, rt, *pos);
+                } else if *op == CmpOp::In {
+                    self.check_membership(lt, rt, r, *pos);
                 } else if !(lt.literal_null || rt.literal_null || lt.dynamic || rt.dynamic)
                     && lt.kinds & rt.kinds & !K_NULL == 0
                 {
@@ -381,6 +383,93 @@ impl<'s> Checker<'s> {
                     "an operand of '{o}' may be null or absent at runtime, which is an evaluation error (R405); guard it with '!= null &&'"
                 ),
             );
+        }
+    }
+
+    /// `l in r`: `r` must be a list or a map; anything else, null included,
+    /// is an evaluation error. A left side that can match nothing in `r` is
+    /// always false (W611), as for `==`.
+    fn check_membership(&mut self, l: Ty, r: Ty, right: &Expr, pos: usize) {
+        if r.literal_null {
+            self.push(
+                Code::ExpressionTypeError,
+                pos,
+                "'in' with null on the right is always an evaluation error".to_string(),
+            );
+            return;
+        }
+        if r.dynamic {
+            self.push(
+                Code::AmbiguousType,
+                pos,
+                "'in' needs a list or a map on the right; annotate the reference (e.g. '${x.y: array<string>}')".to_string(),
+            );
+            return;
+        }
+        let rk = r.kinds & !K_NULL;
+        if rk == 0 || rk & !(K_ARR | K_OBJ) != 0 {
+            self.push(
+                Code::ExpressionTypeError,
+                pos,
+                format!(
+                    "'in' needs a list or a map on the right, found {}",
+                    kinds_str(r.kinds)
+                ),
+            );
+            return;
+        }
+        if r.maybe_null || r.kinds & K_NULL != 0 {
+            self.push(
+                Code::NullableOperand,
+                pos,
+                "the right operand of 'in' may be null or absent at runtime, which is an evaluation error (R405); guard it with '!= null &&'".to_string(),
+            );
+        }
+        // Nothing is in an empty literal list or map, whatever the left side.
+        let empty = match right {
+            Expr::Lit(Value::Array(items), _) => items.is_empty(),
+            Expr::Lit(Value::Object(m), _) => m.is_empty(),
+            _ => false,
+        };
+        if empty {
+            self.push(
+                Code::ConstantComparison,
+                pos,
+                "'in' an empty literal list or map is always false".to_string(),
+            );
+            return;
+        }
+        if l.dynamic {
+            return;
+        }
+        let left = l.kinds | if l.maybe_null { K_NULL } else { 0 };
+        // What the left side could match: the kinds of a literal list's
+        // members, or a map's keys (strings).
+        let matchable = match right {
+            Expr::Lit(Value::Array(items), _) => {
+                Some(items.iter().fold(0, |k, v| k | value_kinds(v)))
+            }
+            _ if rk == K_OBJ => Some(K_STR),
+            _ => None,
+        };
+        if let Some(m) = matchable {
+            // Integers and other numbers compare by value.
+            let widen = |k: u8| if k & K_NUM != 0 { k | K_NUM } else { k };
+            if widen(left) & widen(m) == 0 {
+                self.push(
+                    Code::ConstantComparison,
+                    pos,
+                    format!(
+                        "'in' is always false: {} can match nothing in {}",
+                        kinds_str(left),
+                        if rk == K_OBJ {
+                            "a map's keys (strings)".to_string()
+                        } else {
+                            "this list".to_string()
+                        }
+                    ),
+                );
+            }
         }
     }
 

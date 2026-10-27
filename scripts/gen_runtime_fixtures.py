@@ -251,6 +251,49 @@ add(
 )
 
 add(
+    "condition_membership",
+    "`in` tests list membership and map keys; an `in` gate whose right operand"
+    " is a string errors and so fires.",
+    {
+        "w": wf(
+            [
+                st(
+                    "retrieve",
+                    "r",
+                    condition='"urgent" in ${labels}',
+                    input_bindings={"target": "x"},
+                ),
+                st(
+                    "observe",
+                    "o",
+                    condition='"high" in ${severity}',
+                    input_bindings={"target": "y"},
+                ),
+                st(
+                    "search",
+                    "s",
+                    input_bindings={"query": "z"},
+                    gates=[
+                        {"when": '"a" in ${r.data: array<string>}', "action": "warn"}
+                    ],
+                ),
+            ],
+            inputs={
+                "labels": {"type": "array", "required": True},
+                "severity": {"type": "object", "required": True},
+            },
+        )
+    },
+    [
+        {"expect": inv("retrieve", step=0), "respond": out(data="text", confidence=1)},
+        {"expect": inv("search", step=2), "respond": out(results=[], confidence=1)},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["step_skipped", "expression_error", "gate_fired"],
+    inputs={"labels": ["urgent", "infra"], "severity": {"low": 1}},
+)
+
+add(
     "gate_rollback",
     "A rollback gate rolls back to the latest checkpoint, then raises R403.",
     {

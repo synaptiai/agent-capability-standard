@@ -544,5 +544,19 @@
     "expected_error_codes": [
       "F504"
     ]
+  },
+  "pass_expression_membership": {
+    "should_pass": true,
+    "level": "L3",
+    "category": "expressions",
+    "expected_warning_codes": []
+  },
+  "fail_expression_membership": {
+    "should_pass": false,
+    "level": "L3",
+    "category": "expressions",
+    "expected_error_codes": [
+      "B206"
+    ]
   }
 }

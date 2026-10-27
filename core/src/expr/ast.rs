@@ -41,11 +41,13 @@ pub enum CmpOp {
     Le,
     Gt,
     Ge,
+    /// Membership: an element of a list, or a key of a map.
+    In,
 }
 
 impl CmpOp {
     pub fn is_ordering(self) -> bool {
-        !matches!(self, CmpOp::Eq | CmpOp::Ne)
+        matches!(self, CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -56,6 +58,7 @@ impl CmpOp {
             CmpOp::Le => "<=",
             CmpOp::Gt => ">",
             CmpOp::Ge => ">=",
+            CmpOp::In => "in",
         }
     }
 }

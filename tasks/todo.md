@@ -277,7 +277,7 @@ Decisions (user, 2026-10-27):
 - [ ] **H2** `identity@1`: RFC-0004, schema, ontology, validator, executor,
   Python, spec §5.17/§8/Appendix C, guides, fixtures; plus an "always ask"
   trust class (an item from it needs approval even under a mandate); review
-- [ ] **H2b** CEL membership `in` in the expression grammar, with cel-go
+- [x] **H2b** CEL membership `in` in the expression grammar, with cel-go
   differential fixtures; V108 on `and` hints `&&`
 - [ ] **H2c** the commenter's orchestrator fixtures (nine workflows, scripted
   runs) as static and runtime conformance fixtures

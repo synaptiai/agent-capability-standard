@@ -65,6 +65,12 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   the schema is B203 (§9.3).
 
 ### Changed — remaining open items (#114)
+- **Membership (§5.8):** `x in y`, as in CEL: an element of a list by `==`,
+  or a key of a map (a non-string key is in no map); any other right
+  operand is an evaluation error. It is a comparison operator, so it does
+  not chain. Static checks: B204 for a right operand of unknown type, B206
+  for one that is not a list or map, W610 when it may be null, W611 when
+  the left operand can match nothing in a literal list or a map's keys.
 - **Missing required inputs (§5.5)** are W615 `MISSING_INPUT`: a step that
   does not bind an input its capability requires. Waits and quorums are
   exempt: the executor runs them itself. The reference catalog now binds

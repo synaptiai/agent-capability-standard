@@ -27,6 +27,7 @@ pub enum Tok {
     Le,
     Gt,
     Ge,
+    In,
     And,
     Or,
     Not,
@@ -128,6 +129,7 @@ impl<'a> Lexer<'a> {
                         "null" => Tok::Null,
                         "true" => Tok::True,
                         "false" => Tok::False,
+                        "in" => Tok::In,
                         w => {
                             let hint = match w {
                                 "True" | "TRUE" => " (literals are lower-case: true)",
@@ -135,7 +137,7 @@ impl<'a> Lexer<'a> {
                                 "None" | "nil" | "NULL" | "Null" | "undefined" => " (use null)",
                                 "and" | "AND" => " (use &&)",
                                 "or" | "OR" => " (use ||)",
-                                "not" | "NOT" => " (use !)",
+                                "not" | "NOT" => " (use !; for 'not in', write !(x in y))",
                                 _ => {
                                     " (bare identifiers are not allowed; reference values with ${...} and quote strings)"
                                 }

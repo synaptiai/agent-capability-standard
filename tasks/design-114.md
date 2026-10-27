@@ -75,7 +75,7 @@ meaning. New codes:
 | V107 | UNRESOLVED_TARGET | goto_step / on_exhausted / reviewers / delivers_to / invoke target does not resolve, or resolves to the wrong kind of step |
 | V108 | INVALID_EXPRESSION | expression syntax error or limit exceeded (a non-string expression is S303) |
 | V109 | UNSUPPORTED_SPEC_VERSION | `spec_version` or header names a version the validator does not support |
-| B206 | EXPRESSION_TYPE_ERROR | ordering on non-orderable kinds, non-boolean logic operand or result |
+| B206 | EXPRESSION_TYPE_ERROR | ordering on non-orderable kinds, `in` on a right operand that is not a list or map, non-boolean logic operand or result |
 | R405 | EXPRESSION_ERROR | runtime expression evaluation error |
 | R406 | LIVENESS_LOST | a wait's source stopped answering (added after the porting feedback) |
 | W601 | SOFT_REQUIREMENT_UNMET | `soft_requires` predecessor absent |
@@ -87,8 +87,8 @@ meaning. New codes:
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
 | W608 | WAIT_SPANS_CHECKPOINT | a `wait` sits between a checkpoint and a later step that requires one (mutate, send, raised flag), with no new checkpoint |
 | W609 | UNTRIGGERED_FAILURE_MODE | structured recovery with neither `on_error` nor `when` |
-| W610 | NULLABLE_OPERAND | ordering operand may be null (optional field or skippable producer) |
-| W611 | CONSTANT_COMPARISON | equality between kinds that can never be equal |
+| W610 | NULLABLE_OPERAND | ordering operand, or `in`'s right operand, may be null (optional field or skippable producer) |
+| W611 | CONSTANT_COMPARISON | equality between kinds that can never be equal; `in` that can never hold |
 | W612 | MANGLED_REFERENCE | YAML parsed `- ${a: t}` as a mapping; quote it |
 | W613 | UNREACHABLE_HANDLER | `handler: true` step that no escalation targets |
 | W614 | INVALID_DURATION | legacy `timeout` value outside the duration grammar |
@@ -198,7 +198,7 @@ expr      = or_expr ;
 or_expr   = and_expr { "||" and_expr } ;
 and_expr  = cmp_expr { "&&" cmp_expr } ;
 cmp_expr  = unary [ cmp_op unary ] ;            (* non-associative *)
-cmp_op    = "==" | "!=" | "<=" | ">=" | "<" | ">" ;
+cmp_op    = "==" | "!=" | "<=" | ">=" | "<" | ">" | "in" ;
 unary     = "!" unary | primary ;
 primary   = reference | literal | "(" expr ")" ;
 literal   = "null" | "true" | "false" | number | string | list | map ;
@@ -212,7 +212,10 @@ string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no sur
   numbers finite binary64. Duplicate map keys rejected.
 * Values are JSON. `==`/`!=`: total, deep, structural; numbers by binary64
   value; different kinds unequal. Ordering: number/number, string/string
-  (code point) or boolean/boolean (false < true, as CEL) else error. `!`, `&&`, `||` need booleans. `&&`/`||` follow
+  (code point) or boolean/boolean (false < true, as CEL) else error. `x in
+  y` (added after porting feedback): membership in a list by `==`, or a key
+  of a map (a non-string key is in no map); any other `y` errors; like the
+  other comparisons it does not chain. `!`, `&&`, `||` need booleans. `&&`/`||` follow
   CEL absorption: a determining operand (false for `&&`, true for `||`) wins
   over an error on the other side. Result must be boolean.
 * Absent path or skipped producer → `null`. A producer is skippable when it
@@ -231,12 +234,12 @@ string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no sur
   are recorded in the trace.
 * Static checks: V108 syntax (B205 when only an annotation is malformed —
   the parser validates annotations), B202/B201 refs, B206 type errors, B204
-  ordering/logic on unknown/any without annotation, B203 annotation vs
+  ordering/logic (or `in`'s right operand) on unknown/any without annotation, B203 annotation vs
   schema (the same `types::compatible` rule as binding annotations), W610,
   W611.
 * Fixtures: `tests/conformance/expressions/{eval,check}.json` (language
   neutral). `tools/cel_differential` (cel-go, unchecked evaluation, refs
-  hoisted to dyn variables) asserts in CI that every ACS-valid case is valid
+  hoisted to dyn variables, each padded with spaces so it stays one token) asserts in CI that every ACS-valid case is valid
   CEL and that results agree wherever CEL returns a value.
 * Every valid expression must be valid CEL (references hoisted to opaque
   variables) with the same result wherever CEL returns a value.

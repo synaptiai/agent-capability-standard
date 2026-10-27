@@ -3,7 +3,7 @@
 //! ```text
 //! or_expr  = and_expr { "||" and_expr }
 //! and_expr = cmp_expr { "&&" cmp_expr }
-//! cmp_expr = unary [ cmp_op unary ]          (non-associative)
+//! cmp_expr = unary [ cmp_op unary ]          (non-associative; cmp_op includes `in`)
 //! unary    = "!" unary | primary
 //! primary  = reference | literal | "(" or_expr ")"
 //! ```
@@ -43,6 +43,7 @@ fn cmp_op(t: &Tok) -> Option<CmpOp> {
         Tok::Le => CmpOp::Le,
         Tok::Gt => CmpOp::Gt,
         Tok::Ge => CmpOp::Ge,
+        Tok::In => CmpOp::In,
         _ => return None,
     })
 }

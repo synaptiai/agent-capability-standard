@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`in` in condition expressions (#114).** `x in y` tests membership in a
+  list or the keys of a map, as in CEL (STANDARD v1.1 §5.8); the cel-go
+  differential covers it
 - **Rust core (`core/`, #114).** The workflow validator now lives in a Rust
   crate compiled into `grounded_agency._core` (maturin build; Rust >= 1.86).
   It brings a hardened YAML 1.2 loader (size and depth limits, alias budget,
