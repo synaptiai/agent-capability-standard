@@ -32,8 +32,15 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 - **`event_schema.yaml` 1.1.0:** `source.kind` gains `agent`, so events from
   other agents can trigger workflows (§5.10).
 - **`world_state_schema.yaml` 1.1.0:** `ActionRecord.status` gains
-  `rejected` and `expired`, and an optional `approval` record binds the
-  action to the decision (§5.14).
+  `rejected` and `expired`, an optional `approval` record binds the action
+  to the decision, and an optional `reason` says why an action did not go
+  ahead (§5.14).
+- **Failure modes (§5.7, §5.12)** fire on the codes a step can fail with:
+  `on_error` takes R401, R402, R403, F501, F502 and F504. An expression
+  error (R405) is fail-safe at its site and never fails a step. A recovery
+  loop's `max_loops` is at most 1000.
+- **Approval digests (§5.14)** are computed over I-JSON values (RFC 7493),
+  so every implementation's RFC 8785 canonical JSON agrees.
 - **`review_verdict_schema.yaml` 1.0.0** for the verdicts a quorum counts,
   and ontology additions for delegation and quorums: `delegate` inputs
   `fresh_context`, `model_family`, `role` and output `effective`;

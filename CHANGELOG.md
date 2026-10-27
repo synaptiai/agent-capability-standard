@@ -54,8 +54,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - A step that raises `requires_checkpoint` above the ontology is now held to
   it: F501 when no checkpoint runs before it
 - `world_state_schema.yaml` 1.1.0: action records gain status `rejected`
-  and `expired` and an optional `approval` record (digest, decision,
-  approvers)
+  and `expired`, an optional `approval` record (digest, decision,
+  approvers) and an optional `reason`
 - `schemas/review_verdict_schema.yaml` for quorum verdicts; ontology inputs
   and outputs for delegation and quorums (`delegate.fresh_context`,
   `.model_family`, `.role`, `.effective`; `receive`/`synchronize`

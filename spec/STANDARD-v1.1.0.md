@@ -658,14 +658,17 @@ approval:
 
 `approval` is allowed only where the effective `requires_approval` is true
 (S303); other values above are S303 when malformed, and unknown fields W604.
-A decision is valid only if the SHA-256 digest of the canonical JSON of the
-shown values matches, at least `min_approvers` distinct approvers agree, it
+The shown values MUST be I-JSON (RFC 7493: integers within ±2^53, no
+duplicate keys), so that every implementation computes the same canonical
+JSON (RFC 8785). A decision is valid only if the SHA-256 digest of the
+canonical JSON of the shown values matches, at least `min_approvers` distinct approvers agree, it
 has not expired, and it has not been used before. Unattended runs follow
 `when_unattended`: `fail` → F502, `skip` → the step is skipped,
 `defer_to_queue` → the run ends `deferred` with a `planned` action record.
 The decision is recorded on the action record (`world_state_schema.yaml`
 1.1.0: `approval` with the digest, decision and approvers; status
-`rejected` or `expired` when it was refused or lapsed).
+`rejected` or `expired`, with a `reason`, when it was refused, invalid or
+lapsed, or when an unattended run did not ask).
 
 ### 5.15 Delegation
 
@@ -1317,7 +1320,7 @@ Field names starting with `x-` are reserved for vendor extensions.
   recovery and escalation, wait, approval, delegation, quorum (§5.9–§5.16)
 - Canonical schemas: `event_schema.yaml` 1.1.0 (`source.kind` gains
   `agent`); `world_state_schema.yaml` 1.1.0 (action status `rejected` and
-  `expired`, and the `approval` record of §5.14)
+  `expired`, the `approval` record of §5.14, and a `reason`)
 - `review_verdict_schema.yaml` 1.0.0 for quorum verdicts (§5.16)
 - Ontology: `delegate` inputs `fresh_context`, `model_family`, `role` and
   output `effective`; `receive`/`synchronize` input `accept_from`; received

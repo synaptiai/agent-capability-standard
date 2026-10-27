@@ -120,14 +120,18 @@ before|after`.
   do not survive a wait.
 - **E2 delegation**, split: `fresh_context`, `model_family`, `role` and
   `accept_from` now; agent identity later (RFC-0002).
-- **E3 approval**: structured approver, digest binding of what was shown,
+- **E3 approval**: structured approver, digest binding of what was shown
+  (RFC 8785 canonical JSON over I-JSON values),
   recheck before acting, expiry, single use, and fail-closed handling of
   unattended runs.
 - **E4 quorum** on `constrain`: typed review verdicts, explicit reviewers,
   vocabulary, pass and blocking values, minimum passes, pinning, and
   reviewer independence checks.
 - **E5 escalation**: `on_exhausted` and `action: escalate` route to an
-  `invoke` step marked `handler: true`.
+  `invoke` step marked `handler: true`. Failure modes fire on the code a
+  step failed with (`on_error`: R401–R403, F501, F502, F504) or on a
+  `when` expression; recovery loops are bounded (`max_loops` ≤ 1000)
+  because a loop needs no host call.
 - **E6 triggers**: a `triggers[]` list of schedule (cron or interval with
   IANA time zone), event, manual and invoke triggers, with attendance.
 
