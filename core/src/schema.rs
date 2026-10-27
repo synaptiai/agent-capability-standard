@@ -4,10 +4,9 @@
 //! schema files relative to a schema root (the repository root). References
 //! that try to leave the root, or name absolute paths, resolve to nothing.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{Map, Value};
 
@@ -20,19 +19,27 @@ const MAX_REF_DEPTH: usize = 12;
 /// Loads schema files under one root, caching each file.
 pub struct SchemaStore {
     root: PathBuf,
-    cache: RefCell<HashMap<PathBuf, Option<Rc<Value>>>>,
+    cache: Mutex<HashMap<PathBuf, Option<Arc<Value>>>>,
 }
 
 impl SchemaStore {
     pub fn new(root: impl Into<PathBuf>) -> SchemaStore {
         SchemaStore {
             root: root.into(),
-            cache: RefCell::new(HashMap::new()),
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Forget every cached file, so the next lookup reads the disk again.
+    pub fn clear_cache(&self) {
+        self.cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
     /// The path a repository-relative reference names, if it stays under the root.
@@ -53,10 +60,16 @@ impl SchemaStore {
     }
 
     /// Load a schema file (`.yaml`, `.yml` or `.json`); `None` if absent or unreadable.
-    pub fn document(&self, rel: &str) -> Option<Rc<Value>> {
+    pub fn document(&self, rel: &str) -> Option<Arc<Value>> {
         let path = self.locate(rel)?;
-        if let Some(hit) = self.cache.borrow().get(&path) {
-            return hit.clone();
+        let cached = self
+            .cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&path)
+            .cloned();
+        if let Some(hit) = cached {
+            return hit;
         }
         let ext = path
             .extension()
@@ -69,8 +82,11 @@ impl SchemaStore {
                 .and_then(|t| serde_json::from_str(&t).ok()),
             _ => None,
         }
-        .map(Rc::new);
-        self.cache.borrow_mut().insert(path, doc.clone());
+        .map(Arc::new);
+        self.cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(path, doc.clone());
         doc
     }
 

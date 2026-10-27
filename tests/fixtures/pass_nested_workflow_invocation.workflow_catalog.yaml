@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 inner_workflow:
   goal: An inner workflow for nesting test.
   risk: low

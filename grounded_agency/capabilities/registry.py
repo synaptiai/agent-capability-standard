@@ -27,6 +27,9 @@ class CapabilityNode:
     mutation: bool
     requires_checkpoint: bool = False
     requires_approval: bool = False
+    # A step may declare mutation: false for this capability (audit's
+    # append-only writes); see STANDARD v1.1 §5.2.
+    mutation_overridable: bool = False
     input_schema: dict[str, Any] = field(default_factory=dict)
     output_schema: dict[str, Any] = field(default_factory=dict)
 
@@ -41,6 +44,7 @@ class CapabilityNode:
             mutation=data.get("mutation", False),
             requires_checkpoint=data.get("requires_checkpoint", False),
             requires_approval=data.get("requires_approval", False),
+            mutation_overridable=data.get("mutation_overridable", False),
             input_schema=data.get("input_schema", {}),
             output_schema=data.get("output_schema", {}),
         )

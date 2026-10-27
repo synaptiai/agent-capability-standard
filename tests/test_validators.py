@@ -457,6 +457,77 @@ class TestJsonSchemaValidation:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(bad, ontology_schema)
 
+    def test_passing_fixtures_validate_against_schema(self, workflow_schema) -> None:
+        """Every catalog the validator accepts is valid under the JSON Schema,
+        so the schema never requires what STANDARD §5 leaves optional."""
+        import jsonschema
+        import yaml
+
+        expectations = json.loads(
+            (ROOT / "tests" / "fixtures" / "EXPECTATIONS.json").read_text()
+        )
+        passing = [n for n, meta in expectations.items() if meta["should_pass"]]
+        assert passing
+        for name in passing:
+            path = ROOT / "tests" / "fixtures" / f"{name}.workflow_catalog.yaml"
+            jsonschema.validate(yaml.safe_load(path.read_text()), workflow_schema)
+
+    def test_workflow_schema_allows_inherited_flags(self, workflow_schema) -> None:
+        """Safety flags, risk and failure_modes may be omitted: they inherit
+        from the ontology (STANDARD v1.1 §5.2)."""
+        import jsonschema
+
+        minimal = {
+            "w": {
+                "goal": "g",
+                "risk": "low",
+                "steps": [{"capability": "retrieve", "purpose": "p", "store_as": "r"}],
+            }
+        }
+        jsonschema.validate(minimal, workflow_schema)
+
+    @pytest.mark.parametrize(
+        "step_patch",
+        [
+            {"purpose": None},
+            {"gates": [{"when": "true", "action": "skip", "phase": "after"}]},
+            {"gates": [{"when": "true", "action": "halt"}]},
+            {"gates": [{"when": "true", "action": "stop", "phase": "during"}]},
+            {"failure_modes": [{"condition": "c", "action": "stop", "when": 1}]},
+        ],
+        ids=[
+            "missing-purpose",
+            "after-gate-skip",
+            "bad-gate-action",
+            "bad-gate-phase",
+            "non-string-failure-when",
+        ],
+    )
+    def test_workflow_schema_rejects_bad_steps(
+        self, workflow_schema, step_patch: dict
+    ) -> None:
+        import jsonschema
+
+        step: dict = {"capability": "retrieve", "purpose": "p", "store_as": "r"}
+        for key, value in step_patch.items():
+            if value is None:
+                del step[key]
+            else:
+                step[key] = value
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {"w": {"goal": "g", "risk": "low", "steps": [step]}}, workflow_schema
+            )
+
+    def test_workflow_schema_rejects_malformed_spec_version(
+        self, workflow_schema
+    ) -> None:
+        import jsonschema
+
+        bad = {"w": {"goal": "g", "risk": "low", "steps": [], "spec_version": "v1"}}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, workflow_schema)
+
 
 # ─── Canonical Schema Validator ───
 
@@ -735,13 +806,8 @@ class TestSyncSkillSchemas:
                 if path.read_text() != original:
                     path.write_text(original)
 
-    def test_rewrite_heals_already_doubled_prefixes(self) -> None:
-        """The rewrite must collapse existing stacking, not merely stop adding.
-
-        Replacing one layer then re-applying makes double-prefixed content a
-        fixed point: the sync would preserve corruption a previous run wrote
-        rather than repairing it.
-        """
+    @staticmethod
+    def _module():
         import importlib.util
 
         sys.path.insert(0, str(ROOT / "tools"))
@@ -752,7 +818,16 @@ class TestSyncSkillSchemas:
         module = importlib.util.module_from_spec(spec)
         sys.modules["sync_skill_schemas"] = module
         spec.loader.exec_module(module)
+        return module
 
+    def test_rewrite_heals_already_doubled_prefixes(self) -> None:
+        """The rewrite must collapse existing stacking, not merely stop adding.
+
+        Replacing one layer then re-applying makes double-prefixed content a
+        fixed point: the sync would preserve corruption a previous run wrote
+        rather than repairing it.
+        """
+        module = self._module()
         old_prefix, new_prefix = next(
             iter(module.WORKFLOW_CATALOG_COMMENT_REWRITES.items())
         )
@@ -760,17 +835,72 @@ class TestSyncSkillSchemas:
         expected = f"#   - {new_prefix}x.yaml"
 
         for layers in (0, 1, 2, 3):
-            content = f"#   - {note * layers}{old_prefix}x.yaml"
-
-            # The rewrite as implemented in bundle_workflow_catalog_deps.
-            while new_prefix in content:
-                content = content.replace(new_prefix, old_prefix)
-            content = content.replace(old_prefix, new_prefix)
-
+            content = module.rewrite_paths(f"#   - {note * layers}{old_prefix}x.yaml")
             assert content == expected, (
                 f"{layers} stacked note(s) collapsed to {content!r}, "
                 f"expected {expected!r}"
             )
+
+    def test_check_passes_on_the_tree(self) -> None:
+        """Every generated file in the repository matches its source."""
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "sync_skill_schemas.py"), "--check"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_check_reports_a_drifted_catalog_and_sync_repairs_it(
+        self, tmp_path: Path
+    ) -> None:
+        """A vendored catalog edited by hand (or left behind when the source
+        changed) fails --check; a sync regenerates it from the source."""
+        for rel in (
+            "schemas/capability_ontology.yaml",
+            "schemas/workflow_catalog.yaml",
+            *self._module().WORKFLOW_CATALOG_TRANSITIVE_DEPS,
+        ):
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(ROOT / rel, tmp_path / rel)
+        shutil.copytree(ROOT / "skills", tmp_path / "skills")
+        vendored = (
+            tmp_path / "skills" / "observe" / "reference" / "workflow_catalog.yaml"
+        )
+        vendored.write_text(
+            vendored.read_text().replace("Standard version: 1.1.0", "x")
+        )
+
+        def sync(*flags: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "sync_skill_schemas.py"),
+                    "--root",
+                    str(tmp_path),
+                    *flags,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+        check = sync("--check")
+        assert check.returncode == 1
+        assert "skills/observe/reference/workflow_catalog.yaml" in check.stdout
+        assert sync().returncode == 0
+        assert sync("--check").returncode == 0
+        assert vendored.read_text().startswith("# Standard version: 1.1.0\n")
+
+    def test_vendored_catalog_carries_the_source_version(self) -> None:
+        module = self._module()
+        rendered = module.render_vendored_catalog(
+            (ROOT / "schemas" / "workflow_catalog.yaml").read_text()
+        )
+        first, second = rendered.splitlines()[:2]
+        assert first == "# Standard version: 1.1.0"
+        assert second.startswith("# Vendored copy of schemas/workflow_catalog.yaml")
 
     def test_sync_does_not_stack_the_repo_level_note(self) -> None:
         for path in sorted((ROOT / "skills").glob("*/reference/workflow_catalog.yaml")):

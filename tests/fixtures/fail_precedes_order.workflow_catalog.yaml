@@ -1,0 +1,13 @@
+# Standard version: 1.1.0
+# 'detect precedes classify': classify may not run before a detect that the
+# workflow runs later (V102).
+classify_before_detect:
+  goal: Classify findings before detecting them.
+  risk: low
+  steps:
+  - capability: classify
+    purpose: Classify findings too early.
+    store_as: classify_out
+  - capability: detect
+    purpose: Detect findings.
+    store_as: detect_out

@@ -1263,9 +1263,12 @@ nodes:
   layer: VERIFY
   description: Record what happened and why
   risk: low
-  # mutation: true because audit writes to persistent storage, but workflows
-  # may override to false because append-only writes are non-destructive
+  # Audit writes to persistent storage, so it is a mutation; but its writes are
+  # append-only and non-destructive, so a step may declare mutation: false
+  # (STANDARD v1.1 §5.2). Only low-risk capabilities without checkpoint or
+  # approval requirements may be overridable (tools/validate_ontology.py).
   mutation: true
+  mutation_overridable: true
   input_schema:
     type: object
     required:
@@ -1631,28 +1634,30 @@ edges:
 - from: observe
   to: ground
   type: soft_requires
+  rationale: Grounding needs a claim to ground; any one of observe, detect, predict, attribute or explain satisfies it
 - from: detect
   to: ground
   type: soft_requires
+  rationale: Detections are claims to ground
 - from: plan
   to: critique
-  type: soft_requires
-- from: execute
-  to: audit
-  type: soft_requires
+  type: enables
+  rationale: Plans should be critiqued before they are acted on
 - from: mutate
   to: persist
-  type: soft_requires
+  type: enables
+  rationale: Mutated state can be persisted
 - from: predict
   to: ground
   type: soft_requires
+  rationale: Predictions are claims to ground
 - from: attribute
   to: ground
   type: soft_requires
   rationale: Causal claims should be grounded in evidence
 - from: constrain
   to: audit
-  type: soft_requires
+  type: enables
   rationale: Constraint violations should be audited
 - from: explain
   to: ground
@@ -1660,14 +1665,35 @@ edges:
   rationale: Explanations should be grounded in evidence
 - from: generate
   to: verify
-  type: soft_requires
+  type: enables
   rationale: Generated artifacts should be verified
 - from: critique
   to: inquire
   type: enables
 - from: inquire
   to: receive
+  type: enables
+  rationale: An inquiry's answer arrives through receive
+- from: constrain
+  to: execute
   type: soft_requires
+  rationale: Policy should be checked before execution (presence; precedes covers order)
+- from: constrain
+  to: mutate
+  type: soft_requires
+  rationale: Policy should be checked before mutation (presence; precedes covers order)
+- from: constrain
+  to: send
+  type: soft_requires
+  rationale: Policy should be checked before external communication (presence; precedes covers order)
+- from: plan
+  to: execute
+  type: soft_requires
+  rationale: Execution should follow a plan (presence; precedes covers order)
+- from: plan
+  to: mutate
+  type: soft_requires
+  rationale: Mutation should follow a plan (presence; precedes covers order)
 - from: detect
   to: attribute
   type: enables

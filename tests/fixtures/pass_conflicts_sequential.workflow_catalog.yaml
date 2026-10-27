@@ -1,0 +1,19 @@
+# Standard version: 1.1.0
+# 'conflicts_with' forbids concurrency only: a rollback after a mutate in
+# sequence is the normal recovery pattern.
+mutate_then_rollback:
+  goal: Apply a change, then restore the checkpoint.
+  risk: high
+  steps:
+  - capability: plan
+    purpose: Plan the change.
+    store_as: plan_out
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: checkpoint_out
+  - capability: mutate
+    purpose: Apply the change.
+    store_as: mutate_out
+  - capability: rollback
+    purpose: Restore the checkpoint.
+    store_as: rollback_out

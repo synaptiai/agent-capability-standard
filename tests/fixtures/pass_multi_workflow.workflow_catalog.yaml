@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 workflow_a:
   goal: First workflow in multi-workflow file.
   risk: low

@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 forward_ref:
   goal: Workflow with forward reference that doesnt exist yet.
   risk: low

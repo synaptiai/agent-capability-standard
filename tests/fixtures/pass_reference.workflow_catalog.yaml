@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 # Workflow Catalog (36-capability model)
 # Maps to capability_ontology.yaml
 
@@ -84,7 +85,7 @@ debug_code_change:
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: execute_out
@@ -678,7 +679,7 @@ digital_twin_sync_loop:
     risk: medium
     mutation: false
     requires_checkpoint: false
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: execute_out
@@ -707,6 +708,7 @@ digital_twin_sync_loop:
     input_bindings: {}
     gates:
     - when: ${verify_out.passed} == false
+      phase: after
       action: rollback
       message: Verification failed. Rolling back.
   - capability: audit

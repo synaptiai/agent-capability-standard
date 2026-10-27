@@ -1,0 +1,14 @@
+# Standard version: 1.1.0
+# Unknown fields are W604 (with a did-you-mean hint) and otherwise ignored;
+# 'x-' fields are vendor extensions and never reported.
+x-owner: platform-team
+typo_workflow:
+  goal: Carry a misspelt step field and a vendor field.
+  risk: low
+  x-ticket: OPS-42
+  steps:
+  - capability: observe
+    purpose: Observe something.
+    store_as: observe_out
+    requires_aproval: true
+    x-trace: true

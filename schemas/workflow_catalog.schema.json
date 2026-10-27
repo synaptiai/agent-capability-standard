@@ -4,15 +4,33 @@
   "title": "Grounded Agency Workflow Catalog Schema",
   "description": "JSON Schema for workflow_catalog.yaml — defines composed workflow patterns that orchestrate atomic capabilities from the ontology.",
   "type": "object",
+  "patternProperties": {
+    "^x-": {
+      "description": "Vendor data; not a workflow."
+    }
+  },
   "additionalProperties": {
     "$ref": "#/$defs/workflow"
   },
   "$defs": {
     "workflow": {
       "type": "object",
-      "required": ["goal", "risk", "steps", "success"],
+      "required": ["goal", "risk", "steps"],
       "additionalProperties": true,
       "properties": {
+        "spec_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$",
+          "description": "Standard version the workflow targets (e.g. \"1.1\"). Without it, a '# Standard version:' file header applies."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Domain the workflow belongs to (e.g. healthcare)."
+        },
+        "profile": {
+          "type": "string",
+          "description": "Path of the domain profile the workflow runs under."
+        },
         "goal": {
           "type": "string",
           "description": "The objective this workflow achieves."
@@ -126,16 +144,7 @@
     },
     "step": {
       "type": "object",
-      "required": [
-        "capability",
-        "purpose",
-        "risk",
-        "mutation",
-        "requires_checkpoint",
-        "requires_approval",
-        "store_as",
-        "failure_modes"
-      ],
+      "required": ["capability", "purpose", "store_as"],
       "additionalProperties": true,
       "properties": {
         "capability": {
@@ -149,19 +158,19 @@
         "risk": {
           "type": "string",
           "enum": ["low", "medium", "high"],
-          "description": "Risk level of this step (may override ontology)."
+          "description": "Risk level of this step. Omitted, it inherits the ontology's; a lower value is ignored (W602)."
         },
         "mutation": {
           "type": "boolean",
-          "description": "Whether this step modifies persistent state."
+          "description": "Whether this step modifies persistent state. Omitted, it inherits the ontology's; false where the ontology says true is ignored (W602)."
         },
         "requires_checkpoint": {
           "type": "boolean",
-          "description": "Whether a checkpoint is required before this step."
+          "description": "Whether a checkpoint is required before this step. Omitted, it inherits the ontology's; false where the ontology says true is ignored (W602)."
         },
         "requires_approval": {
           "type": "boolean",
-          "description": "Whether human approval is needed."
+          "description": "Whether human approval is needed. Omitted, it inherits the ontology's; false where the ontology says true is ignored (W602)."
         },
         "timeout": {
           "type": ["string", "null"],
@@ -176,6 +185,7 @@
               "properties": {
                 "max": {
                   "type": "integer",
+                  "minimum": 0,
                   "description": "Maximum retry attempts."
                 },
                 "backoff": {
@@ -246,12 +256,16 @@
     },
     "failure_mode": {
       "type": "object",
-      "required": ["condition", "action", "recovery"],
+      "required": ["condition", "action"],
       "additionalProperties": true,
       "properties": {
         "condition": {
           "type": "string",
-          "description": "Condition that triggers this failure mode."
+          "description": "Prose description of the failure."
+        },
+        "when": {
+          "type": "string",
+          "description": "Expression (STANDARD §5.8) that fires this failure mode; an expression that errors does not fire it."
         },
         "action": {
           "type": "string",
@@ -271,16 +285,29 @@
     },
     "gate": {
       "type": "object",
-      "required": ["when", "action", "message"],
+      "required": ["when", "action"],
       "additionalProperties": true,
+      "if": {
+        "properties": { "phase": { "const": "after" } },
+        "required": ["phase"]
+      },
+      "then": {
+        "properties": { "action": { "not": { "const": "skip" } } }
+      },
       "properties": {
         "when": {
           "type": "string",
-          "description": "Expression that triggers this gate."
+          "description": "Expression (STANDARD §5.8) that fires this gate; an expression that errors fires it."
         },
         "action": {
           "type": "string",
-          "description": "Action to take (e.g. 'stop', 'skip', 'rollback')."
+          "enum": ["stop", "rollback", "skip", "warn"],
+          "description": "Action to take when the gate fires."
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["before", "after"],
+          "description": "Evaluated before the step (default) or after it; an after-gate cannot skip."
         },
         "message": {
           "type": "string",

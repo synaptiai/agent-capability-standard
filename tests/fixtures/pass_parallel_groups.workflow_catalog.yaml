@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 parallel:
   goal: Workflow with parallel execution groups.
   risk: low

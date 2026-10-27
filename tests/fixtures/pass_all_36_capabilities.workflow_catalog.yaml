@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 all_caps_part1:
   goal: Exercise PERCEIVE and UNDERSTAND layer capabilities.
   risk: low
@@ -239,12 +240,22 @@ all_caps_part2:
     retry: null
     store_as: checkpoint_out
     failure_modes: []
+  - capability: constrain
+    purpose: Apply constraints.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: constrain_out
+    failure_modes: []
   - capability: execute
     purpose: Execute command.
     risk: medium
     mutation: false
     requires_checkpoint: false
-    requires_approval: false
+    requires_approval: true
     timeout: null
     retry: null
     store_as: execute_out
@@ -254,7 +265,7 @@ all_caps_part2:
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: null
     retry: null
     store_as: mutate_out
@@ -264,7 +275,7 @@ all_caps_part2:
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: null
     retry: null
     store_as: send_out
@@ -288,16 +299,6 @@ all_caps_part2:
     timeout: null
     retry: null
     store_as: rollback_out
-    failure_modes: []
-  - capability: constrain
-    purpose: Apply constraints.
-    risk: low
-    mutation: false
-    requires_checkpoint: false
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: constrain_out
     failure_modes: []
   - capability: audit
     purpose: Audit trail.

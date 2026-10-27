@@ -1,0 +1,30 @@
+# Standard version: 1.1.0
+# 'precedes' constrains order only: it never requires the earlier capability
+# to be present, and a 'to' step is fine once some 'from' step ran before it.
+classify_without_detect:
+  goal: Classify supplied findings; nothing in the workflow detects them.
+  risk: low
+  steps:
+  - capability: classify
+    purpose: Classify supplied findings.
+    store_as: classify_out
+  - capability: verify
+    purpose: Verify the classification; no execute step precedes it.
+    store_as: verify_out
+    input_bindings:
+      target: ${classify_out}
+      conditions:
+      - labels_present
+detect_classify_detect:
+  goal: Detect, classify, then detect again.
+  risk: low
+  steps:
+  - capability: detect
+    purpose: Detect findings.
+    store_as: first_detect_out
+  - capability: classify
+    purpose: Classify the findings.
+    store_as: classify_out
+  - capability: detect
+    purpose: Detect again with the labels in hand.
+    store_as: second_detect_out

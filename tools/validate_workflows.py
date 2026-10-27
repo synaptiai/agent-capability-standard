@@ -53,7 +53,7 @@ PATCH_DIFF = ROOT / "tools" / "validator_patch.diff"
 
 
 def describe(d: dict[str, Any]) -> str:
-    """One line for a diagnostic: where, code, message."""
+    """One line for a diagnostic: where, code, message, and any hint."""
     loc = d.get("location", {})
     where = []
     if "workflow" in loc:
@@ -62,7 +62,8 @@ def describe(d: dict[str, Any]) -> str:
         cap = f" ({loc['capability']})" if "capability" in loc else ""
         where.append(f"step {loc['step']}{cap}")
     prefix = " ".join(where)
-    return f"{prefix + ': ' if prefix else ''}{d['code']} {d['message']}"
+    hint = f" — {d['suggestion']}" if d.get("suggestion") else ""
+    return f"{prefix + ': ' if prefix else ''}{d['code']} {d['message']}{hint}"
 
 
 def apply_patch_suggestions_to_yaml(

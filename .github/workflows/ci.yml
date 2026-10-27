@@ -70,6 +70,9 @@ jobs:
       - name: Validate documentation links
         run: python tools/validate_doc_links.py
 
+      - name: Check generated skill files are in sync
+        run: python tools/sync_skill_schemas.py --check
+
   rust-core:
     name: Rust core (fmt, clippy, tests, MSRV)
     runs-on: ubuntu-latest

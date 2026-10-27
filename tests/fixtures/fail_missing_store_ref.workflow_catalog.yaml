@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 missing_store:
   goal: Workflow referencing non-existent store.
   risk: low

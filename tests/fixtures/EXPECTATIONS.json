@@ -219,5 +219,76 @@
       "S303",
       "B202"
     ]
+  },
+  "fail_precedes_order": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "edges",
+    "expected_error_codes": [
+      "V102"
+    ]
+  },
+  "pass_precedes_order_only": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "edges"
+  },
+  "fail_conflicts_parallel": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "edges",
+    "expected_error_codes": [
+      "F504"
+    ]
+  },
+  "pass_conflicts_sequential": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "edges"
+  },
+  "pass_soft_requires_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "edges",
+    "expected_warning_codes": [
+      "W601"
+    ]
+  },
+  "pass_safety_flag_downgrade": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "safety",
+    "expected_warning_codes": [
+      "W602"
+    ]
+  },
+  "pass_inherited_safety_flags": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "safety"
+  },
+  "pass_unknown_fields_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W604"
+    ]
+  },
+  "fail_unsupported_spec_version": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "versioning",
+    "expected_error_codes": [
+      "V109"
+    ]
+  },
+  "pass_missing_spec_version": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "versioning",
+    "expected_warning_codes": [
+      "W605"
+    ]
   }
 }

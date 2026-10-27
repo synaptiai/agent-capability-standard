@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 coercion_test_workflow:
   goal: Test workflow requiring type coercion from string to number.
   risk: low

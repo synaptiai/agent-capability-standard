@@ -7,6 +7,9 @@
 
 mod bindings;
 mod exprs;
+mod semantics;
+
+pub use semantics::header_version;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -170,13 +173,19 @@ impl Report {
 
 /// Load and validate a catalog file. Load failures are returned as `Err`.
 pub fn validate_catalog_file(ctx: &Context, path: &Path) -> Result<Report, String> {
-    let catalog = yaml::load_file(path, yaml::ONTOLOGY_MAX_BYTES)
-        .map_err(|e| format!("cannot load workflow catalog: {e}"))?;
-    Ok(validate_catalog(ctx, &catalog))
+    let load = |e: yaml::YamlError| format!("cannot load workflow catalog: {e}");
+    let text = yaml::read_guarded(path, yaml::ONTOLOGY_MAX_BYTES).map_err(load)?;
+    let catalog = yaml::load_str(&text).map_err(load)?;
+    Ok(validate_catalog(
+        ctx,
+        &catalog,
+        header_version(&text).as_deref(),
+    ))
 }
 
 /// Validate a parsed catalog: a mapping of workflow name to workflow.
-pub fn validate_catalog(ctx: &Context, catalog: &Value) -> Report {
+/// `header` is the version from the file's `# Standard version:` comment.
+pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) -> Report {
     let mut report = Report::default();
     let workflows = match catalog {
         Value::Object(m) => m,
@@ -202,6 +211,7 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value) -> Report {
                 ctx,
                 name,
                 wf,
+                header,
                 report: &mut report,
             }
             .run(),
@@ -312,6 +322,7 @@ struct WorkflowCheck<'a> {
     ctx: &'a Context,
     name: &'a str,
     wf: &'a Map<String, Value>,
+    header: Option<&'a str>,
     report: &'a mut Report,
 }
 
@@ -322,6 +333,19 @@ impl WorkflowCheck<'_> {
 
     fn run(mut self) {
         self.check_header();
+        let name = self.name;
+        let at_wf = |d: Diagnostic| d.at("workflow", name);
+        semantics::unknown_fields(self.wf, semantics::WORKFLOW_KEYS, "", &at_wf, self.report);
+        semantics::spec_version(self.wf, self.header, &at_wf, self.report);
+        if let Some(Value::Object(ext)) = self.wf.get("workflow_extensions") {
+            semantics::unknown_fields(
+                ext,
+                semantics::WORKFLOW_EXTENSIONS_KEYS,
+                "workflow_extensions",
+                &at_wf,
+                self.report,
+            );
+        }
         let (inputs, maybe_absent) = self.resolve_inputs();
         let mut scope = Scope {
             inputs,
@@ -341,6 +365,7 @@ impl WorkflowCheck<'_> {
             None => return,
         };
         let mut seen: Vec<&str> = Vec::new();
+        let mut placed: Vec<semantics::Placed<'_>> = Vec::new();
         let mut first_use: HashMap<&str, usize> = HashMap::new();
         for (i, step) in steps.iter().enumerate() {
             let Some(step) = step.as_object() else {
@@ -372,7 +397,9 @@ impl WorkflowCheck<'_> {
                 step: i,
                 capability: cap,
             };
-            let Some(contracts) = self.ctx.contracts.get(cap) else {
+            let (Some(node), Some(contracts)) =
+                (self.ctx.ontology.get(cap), self.ctx.contracts.get(cap))
+            else {
                 self.report.push(
                     loc.diag(
                         Code::UnknownCapability,
@@ -383,6 +410,13 @@ impl WorkflowCheck<'_> {
                 continue;
             };
             self.check_step_fields(&loc, step);
+            self.check_step_keys(&loc, step);
+            semantics::flag_downgrades(&loc, step, node, self.report);
+            placed.push(semantics::Placed {
+                index: i,
+                capability: cap,
+                parallel_group: step.get("parallel_group").and_then(Value::as_str),
+            });
             for req in &contracts.requires {
                 if !seen.contains(&req.as_str()) {
                     self.report.push(
@@ -479,6 +513,45 @@ impl WorkflowCheck<'_> {
                 }
             }
             seen.push(cap);
+        }
+        semantics::check_edges(self.ctx, self.name, &placed, self.report);
+    }
+
+    /// W604 for unknown keys in a step and its gates, failure modes,
+    /// recovery and retry blocks.
+    fn check_step_keys(&mut self, loc: &StepLoc<'_>, step: &Map<String, Value>) {
+        let at = |d: Diagnostic| {
+            d.at("workflow", loc.workflow)
+                .at("step", loc.step)
+                .at("capability", loc.capability)
+        };
+        semantics::unknown_fields(step, semantics::STEP_KEYS, "", &at, self.report);
+        if let Some(Value::Object(retry)) = step.get("retry") {
+            semantics::unknown_fields(retry, semantics::RETRY_KEYS, "retry", &at, self.report);
+        }
+        for (list, keys) in [
+            ("gates", semantics::GATE_KEYS),
+            ("failure_modes", semantics::FAILURE_MODE_KEYS),
+        ] {
+            let Some(Value::Array(items)) = step.get(list) else {
+                continue;
+            };
+            for (n, item) in items.iter().enumerate() {
+                let Some(item) = item.as_object() else {
+                    continue;
+                };
+                let field = format!("{list}[{n}]");
+                semantics::unknown_fields(item, keys, &field, &at, self.report);
+                if let Some(Value::Object(rec)) = item.get("recovery") {
+                    semantics::unknown_fields(
+                        rec,
+                        semantics::RECOVERY_KEYS,
+                        &format!("{field}.recovery"),
+                        &at,
+                        self.report,
+                    );
+                }
+            }
         }
     }
 
@@ -737,7 +810,7 @@ mod tests {
     }
 
     fn codes(catalog: Value) -> Vec<&'static str> {
-        validate_catalog(&ctx(), &catalog)
+        validate_catalog(&ctx(), &catalog, None)
             .diagnostics
             .iter()
             .map(|d| d.code.as_str())
@@ -745,7 +818,7 @@ mod tests {
     }
 
     fn wf(steps: Value) -> Value {
-        json!({"w": {"goal": "g", "risk": "low", "steps": steps}})
+        json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1", "steps": steps}})
     }
 
     #[test]
@@ -762,9 +835,14 @@ mod tests {
     fn structural_errors() {
         assert_eq!(codes(json!({"w": [1]})), ["S303"]);
         assert_eq!(codes(json!({"x-notes": [1]})), Vec::<&str>::new());
-        assert_eq!(codes(json!({"w": {"risk": "low", "steps": []}})), ["S304"]);
         assert_eq!(
-            codes(json!({"w": {"goal": "g", "risk": "extreme", "steps": []}})),
+            codes(json!({"w": {"risk": "low", "spec_version": "1.1", "steps": []}})),
+            ["S304"]
+        );
+        assert_eq!(
+            codes(
+                json!({"w": {"goal": "g", "risk": "extreme", "spec_version": "1.1", "steps": []}})
+            ),
             ["S303"]
         );
         assert_eq!(
@@ -820,7 +898,7 @@ mod tests {
             {"capability": "search", "purpose": "p", "store_as": "s", "input_bindings": {"query": "q"}},
             {"capability": "search", "purpose": "p", "store_as": "t", "input_bindings": {"query": "q", "scope": "${s.total_count}"}},
         ]));
-        let report = validate_catalog(&ctx(), &catalog);
+        let report = validate_catalog(&ctx(), &catalog, None);
         assert!(
             report
                 .diagnostics
@@ -851,7 +929,7 @@ mod tests {
             {"capability": "search", "purpose": "p", "store_as": "s", "input_bindings": {"query": "q"}},
             {"capability": "search", "purpose": "p", "store_as": "t", "input_bindings": {"query": "q", "scope": "${s.total_count}"}},
         ]));
-        let report = validate_catalog(&ctx(), &catalog);
+        let report = validate_catalog(&ctx(), &catalog, None);
         // integer → string uses the registry's number → string transform.
         assert_eq!(
             report.suggestions[0]["suggested_mapping_ref"],
@@ -882,7 +960,7 @@ mod tests {
         assert_eq!(codes(step(json!({"store_as": "o.p"}))), ["S303"]);
         assert_eq!(codes(step(json!({"risk": "extreme"}))), ["S303"]);
         let with_inputs = |inputs: Value| {
-            json!({"w": {"goal": "g", "risk": "low", "inputs": inputs,
+            json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1", "inputs": inputs,
                 "steps": [{"capability": "observe", "purpose": "p", "store_as": "o"}]}})
         };
         assert_eq!(codes(with_inputs(json!(["a"]))), ["S303"]);
@@ -958,6 +1036,118 @@ mod tests {
         // A field below `type: any` is allowed and untyped in both places.
         assert!(codes(binding).is_empty());
         assert!(codes(condition).is_empty());
+    }
+
+    fn st(cap: &str, store: &str) -> Value {
+        json!({"capability": cap, "purpose": "p", "store_as": store})
+    }
+
+    #[test]
+    fn precedes_is_order_only() {
+        // observe precedes detect: absent observe is fine...
+        assert!(!codes(wf(json!([st("detect", "d")]))).contains(&"V102"));
+        // ...but observe after detect is not.
+        assert!(codes(wf(json!([st("detect", "d"), st("observe", "o")]))).contains(&"V102"));
+        assert!(!codes(wf(json!([st("observe", "o"), st("detect", "d")]))).contains(&"V102"));
+    }
+
+    #[test]
+    fn soft_requires_is_any_of_presence() {
+        let ground = |prior: Value| {
+            let mut steps = prior.as_array().cloned().unwrap_or_default();
+            steps.push(st("ground", "g"));
+            codes(wf(Value::Array(steps)))
+        };
+        assert!(ground(json!([])).contains(&"W601"));
+        assert!(!ground(json!([st("predict", "p")])).contains(&"W601"));
+        assert!(!ground(json!([st("observe", "o")])).contains(&"W601"));
+    }
+
+    #[test]
+    fn conflicts_only_within_a_parallel_group() {
+        let step = |cap: &str, store: &str, group: Option<&str>| {
+            let mut s = st(cap, store);
+            if let Some(g) = group {
+                s["parallel_group"] = json!(g);
+            }
+            s
+        };
+        let sequential = wf(json!([
+            st("checkpoint", "c"),
+            step("persist", "p", None),
+            step("rollback", "r", None)
+        ]));
+        assert!(!codes(sequential).contains(&"F504"));
+        let together = wf(json!([
+            st("checkpoint", "c"),
+            step("persist", "p", Some("g")),
+            step("rollback", "r", Some("g"))
+        ]));
+        let c = codes(together);
+        assert_eq!(c.iter().filter(|x| **x == "F504").count(), 1, "{c:?}");
+    }
+
+    #[test]
+    fn safety_flag_downgrades_warn() {
+        let send = |extra: Value| {
+            let mut s = st("send", "s");
+            s.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            codes(wf(json!([st("checkpoint", "c"), st("constrain", "k"), s])))
+        };
+        assert_eq!(send(json!({})), Vec::<&str>::new());
+        assert_eq!(send(json!({"requires_approval": false})), ["W602"]);
+        assert_eq!(
+            send(json!({"mutation": false, "risk": "low"})),
+            ["W602", "W602"]
+        );
+        // audit's mutation flag may be overridden.
+        let audit = wf(
+            json!([{"capability": "audit", "purpose": "p", "store_as": "a", "mutation": false}]),
+        );
+        assert!(codes(audit).is_empty());
+    }
+
+    #[test]
+    fn unknown_fields_warn_with_a_hint() {
+        let catalog = json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1", "stpes": [],
+            "x-vendor": 1, "steps": [{"capability": "observe", "purpose": "p", "store_as": "o",
+            "requires_aproval": true, "gates": [{"when": "true", "action": "warn", "mesage": "m"}]}]}});
+        let report = validate_catalog(&ctx(), &catalog, None);
+        let w: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == Code::UnknownField)
+            .collect();
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert_eq!(w[0].suggestion.as_deref(), Some("did you mean 'steps'?"));
+        assert_eq!(
+            w[1].suggestion.as_deref(),
+            Some("did you mean 'requires_approval'?")
+        );
+        assert_eq!(w[2].location["field"], "gates[0].mesage");
+    }
+
+    #[test]
+    fn spec_versions() {
+        let v = |version: Value, header: Option<&str>| {
+            let mut w = json!({"goal": "g", "risk": "low", "steps": []});
+            if !version.is_null() {
+                w["spec_version"] = version;
+            }
+            validate_catalog(&ctx(), &json!({"w": w}), header)
+                .diagnostics
+                .iter()
+                .map(|d| d.code.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(v(Value::Null, None), ["W605"]);
+        assert!(v(Value::Null, Some("1.0.0")).is_empty());
+        assert!(v(json!("1.1"), None).is_empty());
+        assert_eq!(v(json!("2.0"), None), ["V109"]);
+        assert_eq!(v(Value::Null, Some("0.9")), ["V109"]);
+        assert_eq!(v(json!(1.1), None), ["S303"]);
     }
 
     #[test]

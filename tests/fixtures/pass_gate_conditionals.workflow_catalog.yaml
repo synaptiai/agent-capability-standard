@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 gated:
   goal: Workflow with gate conditionals.
   risk: medium

@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 debug_code_change:
   goal: Safely diagnose and fix a bug/regression in a codebase.
   risk: medium

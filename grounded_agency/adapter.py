@@ -489,7 +489,9 @@ class GroundedAgentAdapter:
             context: HookContext | None,
         ) -> dict[str, Any]:
             """
-            PostToolUse hook to consume checkpoint after successful mutation.
+            PostToolUse hook: consume the checkpoint after a successful
+            mutation, or release the reservation check_permission took for
+            the call otherwise, so the checkpoint can cover a retry.
             """
             try:
                 tool_name = input_data.get("tool_name", "")
@@ -498,6 +500,8 @@ class GroundedAgentAdapter:
                 # Check if this was a mutation
                 mapping = mapper.map_tool(tool_name, tool_input)
                 if not mapping.mutation:
+                    if mapping.requires_checkpoint:
+                        tracker.release_reservation()
                     return {}
 
                 # Check if mutation was successful (no error in response)
@@ -510,6 +514,7 @@ class GroundedAgentAdapter:
 
                 if is_error:
                     # Mutation failed - don't consume checkpoint
+                    tracker.release_reservation()
                     logger.info("Mutation %s failed, checkpoint preserved", tool_name)
                     return {}
 
@@ -589,15 +594,25 @@ class GroundedAgentAdapter:
 
                 # Check if checkpoint required
                 if mapping.requires_checkpoint:
-                    # SEC-007: Use atomic validate_and_reserve to prevent TOCTOU
+                    # SEC-007: Use atomic validate_and_reserve to prevent TOCTOU;
+                    # the reservation ends in consume_after_mutation.
                     is_valid, checkpoint_id = tracker.validate_and_reserve()
                     if not is_valid:
-                        message = (
-                            f"Capability '{mapping.capability_id}' requires checkpoint. "
-                            f"Create checkpoint before using {tool_name}. "
-                            f"Use the 'checkpoint' skill or call "
-                            f"adapter.checkpoint_tracker.create_checkpoint()."
-                        )
+                        if checkpoint_id is not None:
+                            message = (
+                                f"Capability '{mapping.capability_id}' requires "
+                                f"checkpoint, and checkpoint {checkpoint_id} is "
+                                f"reserved by another in-flight mutation. Retry "
+                                f"{tool_name} after it completes, or create a new "
+                                f"checkpoint."
+                            )
+                        else:
+                            message = (
+                                f"Capability '{mapping.capability_id}' requires checkpoint. "
+                                f"Create checkpoint before using {tool_name}. "
+                                f"Use the 'checkpoint' skill or call "
+                                f"adapter.checkpoint_tracker.create_checkpoint()."
+                            )
 
                         if strict:
                             if has_sdk_types:

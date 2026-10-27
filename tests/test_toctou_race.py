@@ -205,3 +205,88 @@ class TestThreadSafety:
         for cp in tracker._checkpoint_history:
             assert cp.id is not None
             assert isinstance(cp.scope, list)
+
+
+class TestReservation:
+    """A checkpoint covers one mutation: validate_and_reserve() hands it to
+    one caller at a time until consume_checkpoint() or release_reservation()."""
+
+    def test_second_caller_sees_reserved(self, tracker: CheckpointTracker) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        assert tracker.validate_and_reserve() == (True, created)
+        assert tracker.validate_and_reserve() == (False, created)
+        # Still a valid checkpoint, only taken.
+        assert tracker.has_valid_checkpoint()
+
+    def test_release_allows_a_new_reservation(self, tracker: CheckpointTracker) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve()
+        assert tracker.release_reservation() is True
+        assert tracker.release_reservation() is False
+        assert tracker.validate_and_reserve() == (True, created)
+
+    def test_release_of_another_checkpoint_is_a_no_op(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve()
+        assert tracker.release_reservation("chk_other") is False
+        assert tracker.validate_and_reserve() == (False, created)
+        assert tracker.release_reservation(created) is True
+
+    def test_consume_ends_the_reservation(self, tracker: CheckpointTracker) -> None:
+        tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve()
+        tracker.consume_checkpoint()
+        created = tracker.create_checkpoint(scope=["*"], reason="next")
+        assert tracker.validate_and_reserve() == (True, created)
+
+    def test_new_checkpoint_is_unreserved(self, tracker: CheckpointTracker) -> None:
+        tracker.create_checkpoint(scope=["*"], reason="first")
+        tracker.validate_and_reserve()
+        second = tracker.create_checkpoint(scope=["*"], reason="second")
+        assert tracker.validate_and_reserve() == (True, second)
+
+    def test_invalidate_all_ends_the_reservation(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve()
+        tracker.invalidate_all()
+        assert tracker.release_reservation() is False
+
+    def test_abandoned_reservation_lapses(self, tmp_path: Path) -> None:
+        tracker = CheckpointTracker(checkpoint_dir=str(tmp_path), reservation_seconds=0)
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve()
+        assert tracker.validate_and_reserve() == (True, created)
+
+    def test_reservation_is_not_persisted(self, tmp_path: Path) -> None:
+        tracker = CheckpointTracker(checkpoint_dir=str(tmp_path))
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve()
+        reloaded = CheckpointTracker(checkpoint_dir=str(tmp_path))
+        assert reloaded.validate_and_reserve() == (True, created)
+
+    def test_concurrent_reservations_have_one_winner(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        workers = 16
+        barrier = threading.Barrier(workers)
+        results: list[tuple[bool, str | None]] = []
+        results_lock = threading.Lock()
+
+        def reserve() -> None:
+            barrier.wait()
+            result = tracker.validate_and_reserve()
+            with results_lock:
+                results.append(result)
+
+        threads = [threading.Thread(target=reserve) for _ in range(workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert sorted(results) == [(False, created)] * (workers - 1) + [(True, created)]

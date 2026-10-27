@@ -180,7 +180,10 @@ string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no sur
   has a `condition` that skips (`skip_if_false` absent or true) or a
   before-gate with `action: skip`; its own after-gates still see its output.
 * Null narrowing: after `${x} != null` in an `&&` chain (or `${x} == null` in
-  an `||` chain) later operands treat that exact reference as present.
+  an `||` chain) later operands treat that reference as present, and with it
+  every reference it is a prefix of up to that point: `${x}` present makes
+  `${x.f}` non-null when `f` is required (optional segments below stay
+  nullable).
 * After an unknown root (B202) or bad path (B201) no further diagnostic is
   reported for that operand.
 * Runtime errors (R405): a gate whose `when` errors FIRES; a `condition`

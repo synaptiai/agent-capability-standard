@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 recovery:
   goal: Workflow with recovery loop.
   risk: medium

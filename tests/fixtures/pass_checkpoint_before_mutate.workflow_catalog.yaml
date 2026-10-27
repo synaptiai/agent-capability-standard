@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 safe_mutation:
   goal: Workflow demonstrating checkpoint-before-mutate safety pattern.
   risk: high

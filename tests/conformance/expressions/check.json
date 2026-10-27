@@ -490,6 +490,30 @@
    ]
   },
   {
+   "id": "prefix-guard-narrows-required-field",
+   "expr": "${skipped} != null && ${skipped.confidence} > 0.5",
+   "expect": []
+  },
+  {
+   "id": "prefix-or-guard-narrows-required-field",
+   "expr": "${skipped} == null || ${skipped.confidence} < 0.5",
+   "expect": []
+  },
+  {
+   "id": "prefix-guard-keeps-optional-field-nullable",
+   "expr": "${skipped} != null && ${skipped.nullable_n} > 0.5",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "prefix-guard-wrong-polarity-not-narrowed",
+   "expr": "${skipped} != null || ${skipped.confidence} > 0.5",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
    "id": "unknown-root-no-cascade",
    "expr": "${zzz} > 1",
    "expect": [

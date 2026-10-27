@@ -1,4 +1,4 @@
-# Standard version: 1.0.0
+# Standard version: 1.1.0
 # Workflow Catalog (36-capability model)
 # Maps to capability_ontology.yaml
 #
@@ -140,12 +140,12 @@ monitor_and_replan:
     input_bindings:
       goal: ${plan.goal}
       constraints:
-      - ${violations_out.matches: array<object>}
-      - ${critique_out.suggestions: array<string>}
+      - "${violations_out.matches: array<object>}"
+      - "${critique_out.suggestions: array<string>}"
     gates:
-    - when: ${critique_out.severity} == "minor"
+    - when: ${critique_out.issues} == []
       action: skip
-      message: Minor violation, continue with current plan.
+      message: Critique found no issues with the current plan; keep it.
     failure_modes:
     - condition: Unable to find viable plan
       action: stop
@@ -206,7 +206,7 @@ clarify_intent:
       - constraint_clarity
     failure_modes: []
   - capability: inquire
-    purpose: Generate clarifying questions for ambiguous elements.
+    purpose: Ask the user clarifying questions about ambiguous elements.
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -223,36 +223,6 @@ clarify_intent:
       action: skip
       message: Request is sufficiently clear, no clarification needed.
     failure_modes: []
-  - capability: checkpoint
-    purpose: Save state before sending clarification questions to user.
-    risk: low
-    mutation: true
-    requires_checkpoint: false
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: clarify_checkpoint_out
-    input_bindings:
-      scope:
-      - clarification_request_out
-    failure_modes: []
-  - capability: send
-    purpose: Present clarifying questions to user.
-    risk: low
-    mutation: false
-    requires_checkpoint: false
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: sent_questions_out
-    input_bindings:
-      destination: user
-      payload: ${clarification_request_out.questions}
-    gates:
-    - when: ${clarification_request_out.confidence} < 0.5
-      action: skip
-      message: No clarifying questions needed.
-    failure_modes: []
   - capability: receive
     purpose: Accept user's clarification response.
     risk: low
@@ -267,9 +237,9 @@ clarify_intent:
       filter:
         type: clarification_response
     gates:
-    - when: ${sent_questions_out} == null
+    - when: ${clarification_request_out} == null || ${clarification_request_out.confidence} < 0.5
       action: skip
-      message: No questions were sent, nothing to receive.
+      message: No clarifying questions were asked, nothing to receive.
     failure_modes:
     - condition: Timeout waiting for response
       action: stop
@@ -400,7 +370,7 @@ debug_code_change:
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: execute_out
@@ -994,7 +964,7 @@ digital_twin_sync_loop:
     risk: medium
     mutation: false
     requires_checkpoint: false
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: execute_out
@@ -1023,6 +993,7 @@ digital_twin_sync_loop:
     input_bindings: {}
     gates:
     - when: ${verify_out.passed} == false
+      phase: after
       action: rollback
       message: Verification failed. Rolling back.
   - capability: audit
@@ -1756,18 +1727,18 @@ model_deployment:
   - Performance metrics within thresholds
   - Deployment event recorded
   steps:
-  - capability: verify
-    purpose: Validate model artifacts (weights, config, schema compatibility).
+  - capability: constrain
+    purpose: Check model artifacts (weights, config, schema compatibility) before deployment.
     risk: low
     mutation: false
     requires_checkpoint: false
     requires_approval: false
     timeout: 5m
     retry: null
-    store_as: verify_artifacts_out
+    store_as: artifact_constraints_out
     input_bindings:
       target: ${model_package}
-      conditions:
+      constraints:
       - artifact_integrity
       - schema_compatibility
       - version_consistency
@@ -1816,6 +1787,9 @@ model_deployment:
     input_bindings:
       code: ${deployment_config.deploy_command}
     gates:
+    - when: ${artifact_constraints_out.compliant} == false
+      action: stop
+      message: Deployment blocked by invalid model artifacts.
     - when: ${constrain_out.compliant} == false
       action: stop
       message: Deployment blocked by policy violation.

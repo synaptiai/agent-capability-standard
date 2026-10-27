@@ -141,6 +141,10 @@
           "type": "boolean",
           "description": "Whether this capability modifies persistent state."
         },
+        "mutation_overridable": {
+          "type": "boolean",
+          "description": "A workflow step may declare mutation: false for this capability (STANDARD v1.1 §5.2). Only for low-risk capabilities without checkpoint or approval requirements."
+        },
         "requires_checkpoint": {
           "type": "boolean",
           "description": "Whether a checkpoint is required before invoking this capability."

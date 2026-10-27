@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 # Negative fixture (STANDARD v1.1 §5.4, §9.3): an annotation that names no
 # type is B205 INVALID_ANNOTATION, not a silent wildcard.
 invalid_annotation:

@@ -40,8 +40,9 @@ def run_fixture(name: str, path: Path) -> dict:
     }
 
 
-def _read_emitted_codes() -> set[str]:
-    """Read error codes from the validator's suggestions JSON output.
+def _read_emitted_codes(key: str = "structured_errors") -> set[str]:
+    """Read diagnostic codes from the validator's suggestions JSON output:
+    errors by default, warnings with ``key="structured_warnings"``.
 
     Returns an empty set if the file is missing or unreadable.
     Callers should use ``_clear_suggestions()`` before each fixture run
@@ -52,8 +53,8 @@ def _read_emitted_codes() -> set[str]:
     try:
         data = json.loads(SUGGESTIONS_JSON.read_text(encoding="utf-8"))
         codes: set[str] = set()
-        for err in data.get("structured_errors", []):
-            code = err.get("code")
+        for diag in data.get(key, []):
+            code = diag.get("code")
             if code:
                 codes.add(code)
         return codes
@@ -101,19 +102,27 @@ def main() -> None:
                 print(res["stdout"])
                 print(res["stderr"])
             else:
-                # Verify expected error codes if specified
-                expected_codes = meta.get("expected_error_codes")
-                if expected_codes and not res["ok"]:
-                    emitted_codes = _read_emitted_codes()
+                # Verify expected error and warning codes if specified
+                missing_msgs = []
+                for kind, key, applies in (
+                    ("error", "structured_errors", not res["ok"]),
+                    ("warning", "structured_warnings", True),
+                ):
+                    expected_codes = meta.get(f"expected_{kind}_codes")
+                    if not (expected_codes and applies):
+                        continue
+                    emitted_codes = _read_emitted_codes(key)
                     missing = set(expected_codes) - emitted_codes
                     if missing:
-                        failed += 1
-                        print(
-                            f"FAIL: {name} missing expected error codes: "
+                        missing_msgs.append(
+                            f"missing expected {kind} codes: "
                             f"{sorted(missing)} (emitted: {sorted(emitted_codes)})"
                         )
-                        results.append(res)
-                        continue
+                if missing_msgs:
+                    failed += 1
+                    print(f"FAIL: {name} " + "; ".join(missing_msgs))
+                    results.append(res)
+                    continue
                 print(f"PASS: {name}")
             results.append(res)
 

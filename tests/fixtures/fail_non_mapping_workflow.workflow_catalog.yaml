@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 # Negative fixture (STANDARD v1.1 §5.1): every top-level key that is not an
 # `x-` vendor key names a workflow, which must be a mapping. S303.
 not_a_workflow:

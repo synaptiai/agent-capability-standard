@@ -14,6 +14,7 @@ import logging
 import os
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -163,6 +164,9 @@ class CheckpointTracker:
 
     DEFAULT_EXPIRY_MINUTES: int = 30
     DEFAULT_MAX_HISTORY: int = 100
+    # How long a reservation holds if its holder never consumes or releases
+    # it (a permitted tool call that never ran, or never reported back).
+    DEFAULT_RESERVATION_SECONDS: float = 600.0
     _MAX_STATE_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
     def __init__(
@@ -170,6 +174,7 @@ class CheckpointTracker:
         checkpoint_dir: str | Path = ".checkpoints",
         max_history: int | None = None,
         marker_dir: str | Path | None = None,
+        reservation_seconds: float | None = None,
     ) -> None:
         """
         Initialize the tracker.
@@ -182,14 +187,26 @@ class CheckpointTracker:
                        If provided, create_checkpoint() writes .claude/checkpoint.ok
                        and consume_checkpoint() removes it, bridging the Python
                        tracker with the shell PreToolUse hook (SEC-001).
+            reservation_seconds: How long validate_and_reserve() holds the
+                       active checkpoint for its caller if neither
+                       consume_checkpoint() nor release_reservation() follows
+                       (default: 600).
         """
         self._checkpoint_dir = Path(checkpoint_dir)
         self._max_history = (
             max_history if max_history is not None else self.DEFAULT_MAX_HISTORY
         )
         self._marker_dir = Path(marker_dir) if marker_dir is not None else None
+        self._reservation_seconds = (
+            reservation_seconds
+            if reservation_seconds is not None
+            else self.DEFAULT_RESERVATION_SECONDS
+        )
         self._lock = threading.Lock()
         self._active_checkpoint: Checkpoint | None = None
+        # (checkpoint id, time.monotonic() when reserved); in memory only,
+        # since a reservation does not outlive the process holding it.
+        self._reservation: tuple[str, float] | None = None
         self._checkpoint_history: list[Checkpoint] = []
         self._load_persisted_state()
 
@@ -357,6 +374,7 @@ class CheckpointTracker:
                 self._prune_history_if_needed()
 
             self._active_checkpoint = checkpoint
+            self._reservation = None
             self._write_marker(checkpoint)
             self._persist_state()
         return checkpoint_id
@@ -503,24 +521,57 @@ class CheckpointTracker:
                 return False
             return self._active_checkpoint.is_valid()
 
-    def validate_and_reserve(self) -> tuple[bool, str | None]:
-        """Atomically check and reserve the active checkpoint.
+    def _reserved(self) -> bool:
+        """Whether the active checkpoint is reserved. Caller holds the lock."""
+        if self._reservation is None or self._active_checkpoint is None:
+            return False
+        checkpoint_id, reserved_at = self._reservation
+        return (
+            checkpoint_id == self._active_checkpoint.id
+            and time.monotonic() - reserved_at < self._reservation_seconds
+        )
 
-        SEC-007: Prevents TOCTOU race between has_valid_checkpoint() and
-        subsequent use. The lock ensures no other thread can consume or
-        invalidate the checkpoint between the check and the reservation.
+    def validate_and_reserve(self) -> tuple[bool, str | None]:
+        """Atomically check the active checkpoint and reserve it for one
+        mutation.
+
+        SEC-007: Prevents the TOCTOU race between has_valid_checkpoint() and
+        the mutation that relies on it. A checkpoint covers one mutation, so
+        only one caller at a time may hold it: concurrent callers cannot both
+        proceed on the same checkpoint. The holder ends the reservation with
+        consume_checkpoint() after the mutation succeeds, or
+        release_reservation() if it fails or does not run. A reservation
+        nobody ends lapses after ``reservation_seconds``.
 
         Returns:
-            Tuple of (is_valid, checkpoint_id). If is_valid is True, the
-            checkpoint is guaranteed to remain valid until consume_checkpoint()
-            is called.
+            ``(True, checkpoint_id)``: reserved for the caller.
+            ``(False, checkpoint_id)``: valid, but reserved by another caller.
+            ``(False, None)``: no valid checkpoint.
         """
         with self._lock:
-            if self._active_checkpoint is None:
+            checkpoint = self._active_checkpoint
+            if checkpoint is None or not checkpoint.is_valid():
                 return False, None
-            if not self._active_checkpoint.is_valid():
-                return False, None
-            return True, self._active_checkpoint.id
+            if self._reserved():
+                return False, checkpoint.id
+            self._reservation = (checkpoint.id, time.monotonic())
+            return True, checkpoint.id
+
+    def release_reservation(self, checkpoint_id: str | None = None) -> bool:
+        """End a reservation without consuming the checkpoint, e.g. after the
+        mutation failed. With ``checkpoint_id``, only a reservation of that
+        checkpoint is released.
+
+        Returns:
+            True if a reservation was released
+        """
+        with self._lock:
+            if self._reservation is None:
+                return False
+            if checkpoint_id is not None and self._reservation[0] != checkpoint_id:
+                return False
+            self._reservation = None
+            return True
 
     def has_checkpoint_for_scope(self, target: str) -> bool:
         """
@@ -570,6 +621,7 @@ class CheckpointTracker:
             # invalid state where active still points to consumed checkpoint.
             consumed = self._active_checkpoint
             self._active_checkpoint = None
+            self._reservation = None
 
             consumed.consumed = True
             consumed.consumed_at = datetime.now(timezone.utc)
@@ -666,6 +718,7 @@ class CheckpointTracker:
     def invalidate_all(self) -> None:
         """Invalidate all checkpoints (used for rollback scenarios)."""
         with self._lock:
+            self._reservation = None
             if self._active_checkpoint:
                 self._active_checkpoint.consumed = True
                 self._active_checkpoint.consumed_at = datetime.now(timezone.utc)

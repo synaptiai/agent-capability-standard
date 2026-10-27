@@ -64,7 +64,13 @@ from .discovery import (
     TaskRequirement,
     WorkflowSynthesizer,
 )
-from .errors import ErrorCode, ValidationError, format_error, format_errors_response
+from .errors import (
+    ErrorCode,
+    Severity,
+    ValidationError,
+    format_error,
+    format_errors_response,
+)
 from .mcp import create_grounded_mcp_server
 from .query import CostSummary, grounded_query
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
@@ -159,6 +165,7 @@ __all__ = [
     "TaskRequirement",
     # Error model
     "ErrorCode",
+    "Severity",
     "ValidationError",
     "format_error",
     "format_errors_response",

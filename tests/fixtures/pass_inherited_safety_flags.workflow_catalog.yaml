@@ -1,0 +1,22 @@
+# Standard version: 1.1.0
+# Steps may omit risk and the safety flags: they inherit the ontology's.
+inherited_flags:
+  goal: Apply a change with every safety flag inherited.
+  risk: high
+  steps:
+  - capability: plan
+    purpose: Plan the change.
+    store_as: plan_out
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: checkpoint_out
+  - capability: mutate
+    purpose: Apply the change.
+    store_as: mutate_out
+  - capability: verify
+    purpose: Check the change.
+    store_as: verify_out
+    input_bindings:
+      target: ${mutate_out}
+      conditions:
+      - change_applied

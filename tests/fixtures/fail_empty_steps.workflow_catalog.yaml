@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 empty_steps:
   goal: Workflow with no steps.
   risk: low

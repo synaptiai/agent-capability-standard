@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 dupe_store:
   goal: Workflow with duplicate store_as names.
   risk: low

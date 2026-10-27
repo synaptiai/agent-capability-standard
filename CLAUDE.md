@@ -59,9 +59,10 @@ python tools/validate_transform_refs.py
 python tools/validate_benchmark_deps.py
 ```
 
-### Sync skill-local schemas from ontology
+### Sync skill-local schemas and bundled catalogs from their sources
 ```bash
-python tools/sync_skill_schemas.py
+python tools/sync_skill_schemas.py          # write what changed
+python tools/sync_skill_schemas.py --check  # CI: fail on drift
 ```
 
 ### Run conformance tests (optional, local only)

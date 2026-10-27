@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions
@@ -560,6 +561,77 @@ class TestGroundedAgentAdapter:
 
         if isinstance(result, dict):
             assert result.get("allowed") is True
+
+
+def _denied(result: Any) -> bool:
+    """Deny from the SDK (behavior) or the fallback type (allowed)."""
+    return (
+        getattr(result, "behavior", None) == "deny"
+        or getattr(result, "allowed", None) is False
+    )
+
+
+class TestCheckpointReservation:
+    """One checkpoint covers one mutation: a second concurrent mutation is
+    denied until the first consumes or releases it (SEC-007)."""
+
+    @pytest.mark.asyncio
+    async def test_second_concurrent_mutation_is_denied(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        checkpoint_id = adapter.create_checkpoint(["*"], "Test")
+        callback = adapter._make_permission_callback()
+
+        first = await callback("Write", {"file_path": "a.txt"}, None)
+        second = await callback("Write", {"file_path": "b.txt"}, None)
+
+        assert not _denied(first)
+        assert _denied(second)
+        assert f"checkpoint {checkpoint_id} is reserved" in second.message
+
+    @pytest.mark.asyncio
+    async def test_failed_mutation_releases_the_checkpoint(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        adapter.create_checkpoint(["*"], "Test")
+        callback = adapter._make_permission_callback()
+        consumer = adapter._make_mutation_consumer()
+
+        assert not _denied(await callback("Write", {"file_path": "a.txt"}, None))
+        await consumer(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "a.txt"},
+                "tool_response": {"is_error": True},
+            },
+            "tool-1",
+            None,
+        )
+        assert adapter.has_valid_checkpoint()
+        assert not _denied(await callback("Write", {"file_path": "a.txt"}, None))
+
+    @pytest.mark.asyncio
+    async def test_successful_mutation_consumes_the_checkpoint(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        adapter.create_checkpoint(["*"], "Test")
+        callback = adapter._make_permission_callback()
+        consumer = adapter._make_mutation_consumer()
+
+        assert not _denied(await callback("Write", {"file_path": "a.txt"}, None))
+        await consumer(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "a.txt"},
+                "tool_response": {"is_error": False},
+            },
+            "tool-1",
+            None,
+        )
+        assert not adapter.has_valid_checkpoint()
+        denied = await callback("Write", {"file_path": "b.txt"}, None)
+        assert _denied(denied)
+        assert "reserved" not in denied.message
 
 
 # =============================================================================

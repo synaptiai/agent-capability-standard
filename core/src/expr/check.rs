@@ -397,7 +397,9 @@ impl<'s> Checker<'s> {
             );
             return Ty::poisoned();
         };
-        let mut maybe_null = !info.always_present;
+        // A null test on the reference or on any prefix of it narrows: the
+        // prefix is present, so only optional segments below it may be null.
+        let mut maybe_null = !info.always_present && !self.non_null.contains(&r.root);
         // `None`: nothing is known below this point.
         let mut node = info.schema;
         let mut walked = r.root.clone();
@@ -437,6 +439,9 @@ impl<'s> Checker<'s> {
                     return Ty::poisoned();
                 }
             };
+            if self.non_null.contains(&walked) {
+                maybe_null = false;
+            }
         }
         if self.non_null.contains(&at.key()) {
             maybe_null = false;

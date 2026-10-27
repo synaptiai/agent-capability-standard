@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 chained:
   goal: Workflow with chained bindings between steps.
   risk: low
