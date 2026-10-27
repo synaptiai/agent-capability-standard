@@ -212,8 +212,12 @@ the candidate (no new extension versions). Decisions (user, 2026-10-27):
   invoke inputs are S303, not W604, as the executor refuses them; non-mapping
   `input`; Appendix C; stale doc examples; skill input tables reconciled
   with the ontology). Found `digital_twin_bootstrap` passing `inputs:`.
-- [ ] **G3** R406: diag code, `on_error`, retry, executor, §5.13/§9.5,
-  fixtures, docs
+- [x] **G3** R406: diag code, `on_error`, retry, executor, §5.13/§9.5,
+  fixtures, docs. Review: no executor bug; fixed the migration note (an
+  `on_error: R401` that handled lost liveness must add R406), late
+  `LivenessLost` → R401 in the spec, a host `Error` R406 on a wait keeps
+  its code, W609 for an R406-only failure mode where no wait has liveness,
+  stale code lists, deadline renewal documented, fixtures.
 - [ ] **G2** quorum `forbidden_inputs` map, verdict `scope` (schema 1.1.0),
   `min_full` (validator + executor), §5.16, fixtures, docs
 - [ ] **G1** mandates in unattended runs, `unavailable` decision,

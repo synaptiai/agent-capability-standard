@@ -26,7 +26,7 @@ const ACTIONS: &[&str] = &[
 /// Runtime codes a failure mode may fire on (§5.7): the codes a step can
 /// fail with. Expression errors (R405) are not among them: they are
 /// fail-safe at their site and never fail the step.
-const ON_ERROR: &[&str] = &["R401", "R402", "R403", "F501", "F502", "F504"];
+const ON_ERROR: &[&str] = &["R401", "R402", "R403", "R406", "F501", "F502", "F504"];
 
 /// The most loops one failure mode may take: a loop needs no host call, so
 /// an unbounded one would spin the executor.
@@ -239,11 +239,20 @@ pub(crate) fn plan(
         let Some(Value::Array(modes)) = step.get("failure_modes") else {
             continue;
         };
+        // Only a wait with liveness can lose it (R406).
+        let liveness = declared.has("wait@1")
+            && step
+                .get("wait")
+                .and_then(|w| w.get("liveness"))
+                .is_some_and(Value::is_object);
         for (f, fm) in modes.iter().enumerate() {
             let Some(fm) = fm.as_object() else {
                 continue; // reported by the step field checks
             };
             failure_mode(&loc, i, f, fm, &index, declared, &mut plan, report);
+            if !liveness {
+                liveness_only(&loc, f, fm, report);
+            }
         }
     }
     for &h in &plan.handlers {
@@ -549,6 +558,30 @@ fn failure_mode(
     }
 }
 
+/// W609 for a failure mode that fires only on R406 (lost liveness) on a
+/// step that has no wait with liveness, so it can never fire.
+fn liveness_only(loc: &StepLoc<'_>, f: usize, fm: &Map<String, Value>, report: &mut Report) {
+    if fm.contains_key("when") {
+        return;
+    }
+    let only_r406 = match fm.get("on_error") {
+        Some(Value::String(c)) => c == "R406",
+        Some(Value::Array(a)) => !a.is_empty() && a.iter().all(|c| c.as_str() == Some("R406")),
+        _ => false,
+    };
+    if only_r406 {
+        report.push(
+            loc.diag(
+                Code::UntriggeredFailureMode,
+                format!(
+                    "failure_modes[{f}] fires only on R406 (lost liveness), but the step has no wait with liveness, so it never fires"
+                ),
+            )
+            .at("field", format!("failure_modes[{f}].on_error")),
+        );
+    }
+}
+
 fn on_error_codes(value: &Value, field: &str, loc: &StepLoc<'_>, report: &mut Report) {
     let codes: Vec<&Value> = match value {
         Value::Array(a) if !a.is_empty() => a.iter().collect(),
@@ -739,6 +772,11 @@ mod tests {
         };
         assert!(fm(json!({"on_error": "R401"})).is_empty());
         assert!(fm(json!({"on_error": ["R402", "F502"]})).is_empty());
+        // R406 can only fire on a wait with liveness.
+        assert_eq!(fm(json!({"on_error": "R406"})), ["W609"]);
+        assert_eq!(fm(json!({"on_error": ["R406"]})), ["W609"]);
+        assert!(fm(json!({"on_error": ["R406", "R402"]})).is_empty());
+        assert!(fm(json!({"on_error": "R406", "when": "true"})).is_empty());
         assert_eq!(fm(json!({"on_error": "R999"})), ["S303"]);
         // Expression errors are fail-safe and never fail a step.
         assert_eq!(fm(json!({"on_error": "R405"})), ["S303"]);
@@ -835,6 +873,23 @@ mod tests {
         assert_eq!(run(not_bool), ["S303"]);
         let undeclared = codes(catalog(json!([st("observe", "o"), handler("hand")]), &[]));
         assert_eq!(undeclared, ["V106"]);
+    }
+
+    #[test]
+    fn r406_fires_only_on_waits_with_liveness() {
+        let wait = |liveness: bool| {
+            let mut w = json!({"event_type": "job.done"});
+            if liveness {
+                w["liveness"] = json!({"mode": "push", "interval": "1m"});
+            }
+            let step = json!({"capability": "receive", "purpose": "p", "store_as": "r",
+                              "timeout": "1h", "wait": w,
+                              "failure_modes": [{"condition": "quiet", "action": "stop",
+                                                 "on_error": "R406"}]});
+            codes(catalog(json!([step]), &["wait@1"]))
+        };
+        assert!(wait(true).is_empty());
+        assert_eq!(wait(false), ["W609"]);
     }
 
     #[test]

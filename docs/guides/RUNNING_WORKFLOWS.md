@@ -63,7 +63,7 @@ a run.
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}` |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
-| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ...}` (the authenticated party that delivered it, §5.15) or `{"kind": "LivenessLost"}` |
+| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ...}` (the authenticated party that delivered it, §5.15) or `{"kind": "LivenessLost"}` (R406) |
 | `Sleep` | waits until `until` (retry backoff) | — (the runner calls `tick`) |
 | `Completed` / `Failed` | — | the run is over |
 
@@ -105,8 +105,10 @@ ontology contract requires, or the step fails (R402).
   when the action did not go ahead.
 - **Waits.** `AwaitEvent` has a deadline from the step's `timeout`. Events
   that don't match (`event_type`, `source_kind`, `correlate`,
-  `accept_from`) are dropped and the wait goes on. A lapse is R401.
-- **Retries, deadlines.** `retry.max` extra attempts for R401/R402, with
+  `accept_from`) are dropped and the wait goes on. A lapse is R401;
+  `LivenessLost` (or an `Error` with code R406) is R406, unless it comes
+  after the deadline, which is R401.
+- **Retries, deadlines.** `retry.max` extra attempts for R401/R402/R406, with
   `none`, `linear` (1 s × n) or `exponential` (1 s × 2^(n−1)) backoff. A
   result after the step's deadline is R401.
 - **Failure modes and recovery.** The first failure mode that matches the

@@ -190,6 +190,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- **A silent event source and an expired wait were both R401 (#114).**
+  Lost liveness is now R406 (`LIVENESS_LOST`); failure modes (`on_error`)
+  and `retry` take it, so a workflow can re-check a quiet worker and
+  escalate only when the wait expires. A failure mode that handled lost
+  liveness through `on_error: R401` must add R406
 - **Mistyped `input_bindings` keys were silent (#114).** A key the
   capability does not define is now W604 with a did-you-mean hint, and an
   `invoke` step's literal `input` is checked against the invoked workflow's

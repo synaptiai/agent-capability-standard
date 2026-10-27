@@ -13,7 +13,7 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   fixed limits, fail-safe error handling per site, static type checks and null
   narrowing. Gates gain `phase: before|after` (§5.6).
 - **Diagnostic severities (§9.1)** and warning codes W601–W614 (§9.7); new
-  error codes V106–V109, B206, R405.
+  error codes V106–V109, B206, R405, R406.
 - **`mutation_overridable` (§4.4)** for append-only capabilities (`audit`).
 - **Orchestration extensions (§5.9–§5.16)** — triggers, handler steps,
   recovery and escalation, wait, approval, delegation, quorum — opted into
@@ -36,7 +36,7 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   to the decision, and an optional `reason` says why an action did not go
   ahead (§5.14).
 - **Failure modes (§5.7, §5.12)** fire on the codes a step can fail with:
-  `on_error` takes R401, R402, R403, F501, F502 and F504. An expression
+  `on_error` takes R401, R402, R403, R406, F501, F502 and F504. An expression
   error (R405) is fail-safe at its site and never fails a step. A recovery
   loop's `max_loops` is at most 1000.
 - **Approval digests (§5.14)** are computed over I-JSON values (RFC 7493),
@@ -78,6 +78,13 @@ and reported five gaps; these close them.
 - **Principals (§5.15)** are opaque strings compared exactly; the host
   reports the authenticated party that delivered an item, not a sender the
   item claims.
+- **Lost liveness is R406 `LIVENESS_LOST` (§5.13, §9.5)**, no longer the
+  timeout's R401, so a workflow can re-check a silent source (a recovery
+  loop back to the wait itself) and escalate only an expired wait.
+  `on_error` and `retry` take R406; lost liveness reported after the
+  deadline is still R401. **Migration:** a failure mode that handled lost
+  liveness through `on_error: R401` must add R406. A failure mode that
+  fires only on R406 where no wait has `liveness` is W609.
 
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`

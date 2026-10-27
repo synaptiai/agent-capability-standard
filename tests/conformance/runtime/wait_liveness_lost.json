@@ -1,5 +1,5 @@
 {
-  "description": "A source that stops answering ends the wait (R401).",
+  "description": "A source that stops answering ends the wait with R406, not the R401 of a timeout.",
   "catalog": {
     "w": {
       "goal": "g",
@@ -47,7 +47,7 @@
   ],
   "end": {
     "kind": "Failed",
-    "code": "R401"
+    "code": "R406"
   },
   "trace_kinds": []
 }

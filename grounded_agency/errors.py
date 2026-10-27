@@ -67,6 +67,7 @@ class ErrorCode(Enum):
     GATE_BLOCKED = "R403"
     RECOVERY_EXHAUSTED = "R404"
     EXPRESSION_ERROR = "R405"
+    LIVENESS_LOST = "R406"
 
     # -- 9.6 Safety errors (F5xx) -------------------------------------------
     CHECKPOINT_REQUIRED = "F501"

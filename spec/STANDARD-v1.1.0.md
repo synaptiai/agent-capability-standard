@@ -240,7 +240,7 @@ Each step MAY define:
 | `gates` | array | Checks that can halt or redirect execution (§5.6) |
 | `failure_modes` | array | Failure scenarios with recovery (§5.7) |
 | `timeout` | string | Maximum execution time, a duration (§5.10.1) |
-| `retry` | object | `{max, backoff}` |
+| `retry` | object | `{max, backoff}`: up to `max` further attempts after R401, R402 or R406 |
 | `parallel_group` | string | Group ID; steps of one group run concurrently |
 | `join` | string | How to wait for parallel completion |
 | `mapping_ref` | string | Transform mapping file (missing file: S301) |
@@ -385,7 +385,7 @@ failure_modes:
 | `condition` | string | Yes | Prose description of the failure |
 | `action` | enum | Yes | `stop`, `rollback`, `request_more_context`, `pause_and_checkpoint`, `escalate` |
 | `when` | string | No | Expression (§5.8), evaluated after the step; it can read the step's own output |
-| `on_error` | code or list | No | Fires on a code the step failed with: R401, R402, R403, F501, F502, F504 (§5.12) |
+| `on_error` | code or list | No | Fires on a code the step failed with: R401, R402, R403, R406, F501, F502, F504 (§5.12) |
 | `recovery` | string or object | No | Prose, or a recovery loop (§5.12) |
 
 A failure mode fires when the step raised a matching `on_error` code or its
@@ -568,11 +568,12 @@ handler is listed.
 ### 5.12 Recovery and Escalation
 
 A failure mode fires when the step raised a code listed in `on_error` (one
-code or a list: R401, R402, R403, F501, F502, F504; anything else is S303 —
+code or a list: R401, R402, R403, R406, F501, F502, F504; anything else is S303 —
 an expression error, R405, is fail-safe at its site and never fails a step)
 or its
 `when` is true after the step. A structured recovery whose failure mode has
-neither can never fire and is W609.
+neither can never fire and is W609, as is a failure mode that fires only on
+R406 (without `when`) on a step that has no wait with `liveness`.
 
 `recovery` is a description (a string, for people) or a recovery object;
 anything else is S303. A recovery object has `goto_step`, `inject_context`
@@ -634,7 +635,27 @@ legacy timeouts does not apply to a wait, which must end). Liveness MUST
 be able to fail before the timeout: `interval × failure_threshold` less than
 the timeout, else S303. The matching event is delivered in the step's
 output (`data`, under the capability's output contract); a lapse raises
-R401.
+R401. Lost liveness (`failure_threshold` missed heartbeats or failed probes)
+raises R406 (`LIVENESS_LOST`), so failure modes can tell a silent source
+from an expired wait; lost liveness reported after the deadline is R401,
+since the wait had already lapsed. To re-check a silent source, loop back
+to the wait itself (`goto_step` naming its own `store_as`, §5.12) with a
+bounded `max_loops`, and escalate on R401 or `on_exhausted`. A wait run
+again by a loop or a `retry` starts a new `timeout`, so the whole wait can
+last up to `timeout` × (`retry.max` + 1) × (`max_loops` + 1). For a wait
+stored as `result_out` and a handler stored as `page_out`:
+
+```yaml
+failure_modes:
+  - condition: The worker stopped sending heartbeats.
+    on_error: R406
+    action: request_more_context
+    recovery: {goto_step: result_out, max_loops: 1, on_exhausted: {goto_step: page_out}}
+  - condition: The worker did not finish in time.
+    on_error: R401
+    action: escalate
+    recovery: {goto_step: page_out}
+```
 
 A step that requires a checkpoint (`mutate`, `send`, or a raised
 `requires_checkpoint`) whose latest checkpoint runs before a `wait` is
@@ -955,6 +976,7 @@ NOT change any code's severity otherwise.
 | R403 | GATE_BLOCKED | A gate stopped the run, or a condition was false with `skip_if_false: false` |
 | R404 | RECOVERY_EXHAUSTED | Max recovery loops exceeded |
 | R405 | EXPRESSION_ERROR | An expression failed to evaluate (§5.8.2) |
+| R406 | LIVENESS_LOST | A wait's source stopped answering (§5.13) |
 
 ### 9.6 Safety Errors
 
@@ -978,7 +1000,7 @@ NOT change any code's severity otherwise.
 | W606 | UNATTENDED_APPROVAL | An unattended trigger reaches an approval step without `when_unattended` |
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
 | W608 | WAIT_SPANS_CHECKPOINT | A wait sits between a checkpoint and a later step that requires one (§5.13) |
-| W609 | UNTRIGGERED_FAILURE_MODE | Structured recovery with neither `on_error` nor `when` |
+| W609 | UNTRIGGERED_FAILURE_MODE | Structured recovery with neither `on_error` nor `when`, or a failure mode that fires only on R406 where no wait has `liveness` |
 | W610 | NULLABLE_OPERAND | An ordering operand may be null |
 | W611 | CONSTANT_COMPARISON | Equality between kinds that can never be equal |
 | W612 | MANGLED_REFERENCE | YAML read a typed reference as a mapping; quote it |
@@ -1339,7 +1361,7 @@ Field names starting with `x-` are reserved for vendor extensions.
 - Condition expression language with CEL compatibility (§5.8), gate `phase`
   (§5.6) and failure-mode `when` (§5.7)
 - Diagnostic severities and warning codes W601–W614 (§9.1, §9.7); codes
-  V106–V109, B206, R405
+  V106–V109, B206, R405, R406
 - `mutation_overridable` (§4.4)
 - Orchestration extensions and their declaration: triggers, handler steps,
   recovery and escalation, wait, approval, delegation, quorum (§5.9–§5.16)

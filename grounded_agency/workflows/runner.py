@@ -106,8 +106,9 @@ class Host:
     def await_event(self, action: Action) -> Response | None:
         """Wait for an event matching ``action`` until ``action["deadline"]``;
         return ``{"kind": "Event", "event": {...}, "principal": ...}``,
-        ``{"kind": "LivenessLost"}``, or ``None`` when nothing arrived (the
-        run then times out once the deadline has passed)."""
+        ``{"kind": "LivenessLost"}`` when the source stopped answering (the
+        step fails with R406), or ``None`` when nothing arrived (the run then
+        times out, R401, once the deadline has passed)."""
         raise NotImplementedError("no event source")
 
 

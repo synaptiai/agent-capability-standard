@@ -144,7 +144,7 @@
     },
     "fireable_code": {
       "type": "string",
-      "enum": ["R401", "R402", "R403", "F501", "F502", "F504"]
+      "enum": ["R401", "R402", "R403", "R406", "F501", "F502", "F504"]
     },
     "trigger": {
       "type": "object",
@@ -396,7 +396,7 @@
             "interval": { "$ref": "#/$defs/positive_duration" },
             "failure_threshold": { "type": "integer", "minimum": 1, "default": 3 }
           },
-          "description": "Give up early when the source stops answering: interval × failure_threshold must be shorter than the step's timeout."
+          "description": "Give up early when the source stops answering (R406): interval × failure_threshold must be shorter than the step's timeout."
         }
       }
     },

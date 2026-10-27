@@ -139,7 +139,8 @@ deploy_with_escalation:
 ```
 
 - **Firing.** `on_error` takes one code or a list of the codes a step can
-  fail with (R401 timeout, R402 failure, R403 gate, F501 checkpoint, F502
+  fail with (R401 timeout, R402 failure, R403 gate, R406 lost liveness,
+  F501 checkpoint, F502
   approval, F504 quorum or constraint). Expression errors (R405) never fail
   a step: they are fail-safe where they occur. `when` is an
   expression that can read the step's own output. A structured recovery
@@ -170,7 +171,8 @@ deploy_with_escalation:
 ## Waiting for an event (`wait@1`)
 
 A `receive` step with `wait` pauses the run until a matching event arrives
-or the step's `timeout` lapses (R401); the event arrives in the step's
+or the step's `timeout` lapses (R401), or its source stops answering
+(R406, with `liveness`); the event arrives in the step's
 output (`data`). A `synchronize` step can wait too, when its `agents` input
 is a literal list of at least two agents.
 
@@ -190,7 +192,27 @@ is a literal list of at least two agents.
 - `liveness` gives up early when the source goes quiet: after
   `failure_threshold` missed heartbeats (`push`) or failed probes (`probe`)
   one `interval` apart. That window must be shorter than the timeout, or
-  it would never fire first.
+  it would never fire first. Lost liveness is R406, not the timeout's R401,
+  so you can re-check a silent source and escalate only an expired wait:
+
+  ```yaml
+  failure_modes:
+    - condition: The source stopped answering probes.
+      on_error: R406
+      action: request_more_context
+      recovery:
+        goto_step: window_out          # the wait itself: wait again
+        max_loops: 1
+        on_exhausted: {goto_step: page_oncall_out}
+    - condition: The change window never opened.
+      on_error: R401
+      action: escalate
+      recovery: {goto_step: page_oncall_out}
+  ```
+
+  A `retry` on the step covers R406 too, before any failure mode. Each
+  re-check or retry waits a full `timeout` again. Lost liveness reported
+  after the deadline is R401: the wait had already lapsed.
 - A wait can last hours, and the run may resume in another process, so a
   checkpoint taken before the wait no longer covers a later `mutate`,
   `send` or other step that requires a checkpoint (W608). Take the

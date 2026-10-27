@@ -101,7 +101,7 @@ checkpoint or approval) declare `mutation: false`.
 ### 4) Diagnostics have fixed severities
 
 V/B/S/R/F codes are errors and the new W6xx codes are warnings; strict mode
-promotes warnings. New error codes: V106–V109, B206, R405.
+promotes warnings. New error codes: V106–V109, B206, R405, R406.
 
 ### 5) An ACS expression language that is a CEL subset
 
@@ -129,7 +129,7 @@ before|after`.
   reviewer independence checks.
 - **E5 escalation**: `on_exhausted` and `action: escalate` route to an
   `invoke` step marked `handler: true`. Failure modes fire on the code a
-  step failed with (`on_error`: R401–R403, F501, F502, F504) or on a
+  step failed with (`on_error`: R401–R403, R406, F501, F502, F504) or on a
   `when` expression; recovery loops are bounded (`max_loops` ≤ 1000)
   because a loop needs no host call.
 - **E6 triggers**: a `triggers[]` list of schedule (cron or interval with
@@ -200,6 +200,12 @@ They reported five gaps, closed in the candidate before it is final:
   `input` is checked against the target's `inputs` (S303 / S304, §5.12).
 - **Principals** had no defined form. They are opaque strings compared
   exactly, naming the authenticated deliverer of an item (§5.15).
+- **Lost liveness and timeout** were both R401, so a silent worker could
+  not be re-checked while an expired wait escalated. Lost liveness is now
+  R406; a re-check is a recovery loop back to the wait itself. A failure
+  mode that handled lost liveness through R401 must add R406. A failure
+  action that warns and continues was considered and not added: it would
+  let later steps run on the output of a step that failed.
 
 ## Open questions
 

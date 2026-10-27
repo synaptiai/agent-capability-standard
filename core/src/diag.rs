@@ -71,6 +71,7 @@ codes! {
     GateBlocked = "R403", "GATE_BLOCKED", Error;
     RecoveryExhausted = "R404", "RECOVERY_EXHAUSTED", Error;
     ExpressionError = "R405", "EXPRESSION_ERROR", Error;
+    LivenessLost = "R406", "LIVENESS_LOST", Error;
 
     CheckpointRequired = "F501", "CHECKPOINT_REQUIRED", Error;
     ApprovalRequired = "F502", "APPROVAL_REQUIRED", Error;

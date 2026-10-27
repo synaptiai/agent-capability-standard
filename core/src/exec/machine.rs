@@ -904,8 +904,8 @@ impl<'a> Machine<'a> {
         Flow::Continue
     }
 
-    /// An execution error: retried while attempts remain (R401/R402), then
-    /// on to the failure modes.
+    /// An execution error: retried while attempts remain (R401, R402,
+    /// R406), then on to the failure modes.
     fn exec_error(&mut self, code: &str, message: impl Into<String>) -> Flow {
         let message = message.into();
         let (attempt, retry) = {
@@ -915,7 +915,7 @@ impl<'a> Machine<'a> {
                 s.retry.as_ref().map(|r| (r.max, r.backoff.clone())),
             )
         };
-        if matches!(code, "R401" | "R402") {
+        if matches!(code, "R401" | "R402" | "R406") {
             if let Some((max, backoff)) = retry {
                 if attempt <= max {
                     let wait_ms: u64 = match backoff.as_str() {
@@ -1340,19 +1340,21 @@ impl<'a> Machine<'a> {
             (Purpose::Capability, Response::Output { value }) => {
                 self.output(value);
             }
-            (Purpose::Capability | Purpose::Event, Response::Error { code, message }) => {
-                let code = if code == "R401" {
-                    code
-                } else {
-                    "R402".to_string()
-                };
+            (
+                purpose @ (Purpose::Capability | Purpose::Event),
+                Response::Error { code, message },
+            ) => {
+                // A timeout keeps its code; so does lost liveness on a wait.
+                // Anything else a host reports is a failed step.
+                let keep = code == "R401" || (code == "R406" && matches!(purpose, Purpose::Event));
+                let code = if keep { code } else { "R402".to_string() };
                 self.exec_error(&code, message);
             }
             (Purpose::Event, Response::Event { event, principal }) => {
                 self.event(pending, event, principal);
             }
             (Purpose::Event, Response::LivenessLost) => {
-                self.exec_error("R401", "the event source stopped answering (liveness)");
+                self.exec_error("R406", "the event source stopped answering (liveness)");
             }
             (Purpose::Checkpoint, Response::Checkpoint { checkpoint_id }) => {
                 self.add_checkpoint(checkpoint_id);

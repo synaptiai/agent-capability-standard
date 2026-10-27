@@ -1,0 +1,52 @@
+{
+  "description": "A host may report lost liveness on a wait as an Error with code R406; it keeps that code.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "wait": {
+            "event_type": "job.done",
+            "liveness": {
+              "mode": "probe",
+              "interval": "1m"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R406",
+        "message": "probes failed"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R406"
+  },
+  "trace_kinds": []
+}

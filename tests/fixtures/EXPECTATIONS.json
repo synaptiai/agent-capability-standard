@@ -442,6 +442,12 @@
       "W608"
     ]
   },
+  "pass_liveness_recheck": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced",
+    "expected_warning_codes": []
+  },
   "fail_wait_shape": {
     "should_pass": false,
     "level": "L1",

@@ -77,6 +77,7 @@ meaning. New codes:
 | V109 | UNSUPPORTED_SPEC_VERSION | `spec_version` or header names a version the validator does not support |
 | B206 | EXPRESSION_TYPE_ERROR | ordering on non-orderable kinds, non-boolean logic operand or result |
 | R405 | EXPRESSION_ERROR | runtime expression evaluation error |
+| R406 | LIVENESS_LOST | a wait's source stopped answering (added after the porting feedback) |
 | W601 | SOFT_REQUIREMENT_UNMET | `soft_requires` predecessor absent |
 | W602 | SAFETY_FLAG_DOWNGRADE | step declares a flag less safe than the ontology (ineffective: ontology prevails) |
 | W603 | DEPRECATED_FORM | accepted legacy form (goto_step by capability id, self-referencing gate without `phase`) |
@@ -257,7 +258,7 @@ string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no sur
 * `failure_modes[]`: `condition` (prose), `action` (stop | rollback |
   request_more_context | pause_and_checkpoint | escalate; else S303),
   optional `on_error` (one code or a non-empty list of R401 | R402 | R403 |
-  F501 | F502 | F504 — the codes a step can fail with; R405 never fails a
+  R406 | F501 | F502 | F504 — the codes a step can fail with; R405 never fails a
   step; else S303), optional `when` (expression), `recovery` (string |
   object).
 * Fires when the step raised a matching `on_error`, or `when` is true after
@@ -364,7 +365,7 @@ push|probe, interval, failure_threshold (default 3)}}`
   counting the targeter's own wait.
 * Runtime: AwaitEvent; the matching Event is delivered in the step's
   output (`data`); a lapse
-  raises R401 (cause timeout|liveness). After a resume, pre-wait checkpoints
+  raises R401; lost liveness raises R406. After a resume, pre-wait checkpoints
   no longer authorise mutations.
 
 ## 13. Approval (E3)
@@ -483,7 +484,7 @@ runner.py` drives it with a host object.
 | `Rollback{checkpoint_id, step}` | restore it | `RolledBack`, or `Error` (the run fails with F503) |
 | `RequestApproval{step, approver, mode, shown, digest, expires_at}` | ask | `Decision{decision_id, decision: approved/rejected, approvers, digest}`; no decision by `expires_at` → F502 |
 | `RecheckSource{step, source, compare}` | re-read the source now | `Current{value}`, or `Error` (F502) |
-| `AwaitEvent{step, event_type, source_kind, correlate, accept_from, liveness, deadline}` | wait | `Event{event, principal}`, `LivenessLost` (R401) or `Error` (R402) |
+| `AwaitEvent{step, event_type, source_kind, correlate, accept_from, liveness, deadline}` | wait | `Event{event, principal}`, `LivenessLost` (R406) or `Error` (R402) |
 | `Sleep{until}` | call `tick` at or after `until` | — |
 | `Completed{outcome, cause, outputs, action_records}` | finished: `completed`, `escalated` (with the `cause` code), `deferred`, `replan_required` | — |
 | `Failed{code, step, message, action_records}` | finished with an error | — |
@@ -536,7 +537,8 @@ parallel groups run in declaration order):
      (`event.canonical[key]`, else `event[key]`), and its `principal` is in
      `accept_from` (when bound); otherwise it is dropped and the wait goes
      on (drops are counted per reason, traced once per reason, and reported
-     with `event_received`). `LivenessLost` or the deadline → R401. The
+     with `event_received`). `LivenessLost` (or `Error` R406) → R406; the
+     deadline, or a `LivenessLost` after it → R401. The
      output is built from the event: receive → `{data: [event], source:
      event.source.kind, timestamp: event.timestamp, evidence_anchors:
      event.anchors}` (the item gains `sender`: the principal); synchronize
@@ -558,7 +560,7 @@ parallel groups run in declaration order):
      fields, else R402. A late response (`now > deadline`) is R401.
    * a `checkpoint` step's output records a valid checkpoint
      (`checkpoint_id`, else one derived from the run id and step).
-7. Errors R401/R402 are retried up to `retry.max` more times; between
+7. Errors R401/R402/R406 are retried up to `retry.max` more times; between
    attempts `Sleep` for the backoff (`none` 0; `linear` 1 s × n;
    `exponential` 1 s × 2^(n−1); unknown → none).
 8. The output is stored under `store_as`, with the inputs the step ran
