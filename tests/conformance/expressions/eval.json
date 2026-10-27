@@ -1,0 +1,1771 @@
+{
+ "description": "Language-neutral evaluation fixtures for ACS condition expressions (STANDARD v1.1 §5.8). Each case: expr, bindings (reference root -> JSON value; absent roots are null), and expect: {value} or {error: V108 | R405}. Runtimes MUST reproduce every case.",
+ "version": "1.0",
+ "cases": [
+  {
+   "id": "syntax-00",
+   "expr": "",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-01",
+   "expr": "   ",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-02",
+   "expr": "${a} = 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-03",
+   "expr": "${a} == 1 == true",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-04",
+   "expr": "${a} < 1 < 2",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-05",
+   "expr": "${a} == True",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-06",
+   "expr": "${a} == None",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-07",
+   "expr": "${a} == 'x'",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-08",
+   "expr": "${a} == 01",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-09",
+   "expr": "${a} == .5",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-10",
+   "expr": "${a} == 1.",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-11",
+   "expr": "${a} == -${b}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-12",
+   "expr": "${a} == - 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-13",
+   "expr": "${a} == 1e400",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-14",
+   "expr": "${a} == -1e400",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-15",
+   "expr": "${a} == 1e",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-16",
+   "expr": "${a} == \"\\ud800\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-17",
+   "expr": "${a} == \"\\udc00\\ud800\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-18",
+   "expr": "${a} == \"a\nb\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-19",
+   "expr": "${a} == \"\\x41\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-20",
+   "expr": "${a} == \"\\u12\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-21",
+   "expr": "${a} == [${b}]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-22",
+   "expr": "${a} == {\"k\":1,\"k\":2}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-23",
+   "expr": "${a} == [1,]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-24",
+   "expr": "${a} == {k:1}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-25",
+   "expr": "${}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-26",
+   "expr": "${a.}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-27",
+   "expr": "${a..b}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-28",
+   "expr": "${a[01]}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-29",
+   "expr": "${a[-1]}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-30",
+   "expr": "${a[]}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-31",
+   "expr": "${1a}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-32",
+   "expr": "${a.0}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-33",
+   "expr": "$a == 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-34",
+   "expr": "${a",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-35",
+   "expr": "${a} == 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-36",
+   "expr": "${a} ＝＝ 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-37",
+   "expr": "${a} == “x”",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-38",
+   "expr": "${a: integr} == 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-39",
+   "expr": "${a: array<>} == 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-40",
+   "expr": "${a} & ${b}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-41",
+   "expr": "${a} | ${b}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-42",
+   "expr": "${a} and ${b}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-43",
+   "expr": "not ${a}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-44",
+   "expr": "${a} ==",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-45",
+   "expr": "== 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-46",
+   "expr": "(${a} == 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-47",
+   "expr": "${a} == 1)",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-48",
+   "expr": "${a} == 1 ${b}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-49",
+   "expr": "${ a . b } == 1",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-50",
+   "expr": "${a} ${b}",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-51",
+   "expr": "\"unterminated",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-52",
+   "expr": "${a} == \"x\" #comment",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-53",
+   "expr": "${a} in [1]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-54",
+   "expr": "${a} == 1 ? true : false",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-55",
+   "expr": "${a}.size() == 0",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-56",
+   "expr": "has(${a}.b)",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "syntax-57",
+   "expr": "${a} == nil",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "depth-paren-33",
+   "expr": "(((((((((((((((((((((((((((((((((true)))))))))))))))))))))))))))))))))",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "depth-not-33",
+   "expr": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!true",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "depth-array-33",
+   "expr": "${a} == [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "length-4097",
+   "expr": "${a} == \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "depth-paren-32",
+   "expr": "((((((((((((((((((((((((((((((((true))))))))))))))))))))))))))))))))",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "depth-not-32",
+   "expr": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!true",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "length-4096",
+   "expr": "${a} == \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"",
+   "bindings": {
+    "a": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "length-utf8-bytes",
+   "expr": "${a} == \"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"",
+   "bindings": {
+    "a": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "length-utf8-bytes-over",
+   "expr": "${a} == \"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "long-and-chain",
+   "expr": "true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "lit-true",
+   "expr": "true",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "lit-false",
+   "expr": "false",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "null-eq-null",
+   "expr": "null == null",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "int-eq-float",
+   "expr": "1 == 1.0",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "neg-zero-eq",
+   "expr": "-0 == 0",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "neg-zero-lt",
+   "expr": "-0 < 0",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "neg-zero-le",
+   "expr": "-0.0 <= 0",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "exp-eq",
+   "expr": "1e2 == 100",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "exp-neg",
+   "expr": "1E-2 == 0.01",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "exp-plus",
+   "expr": "1e+2 == 100",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "binary64-2^53+1",
+   "expr": "9007199254740993 == 9007199254740992",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "binary64-rounding",
+   "expr": "0.1 == 0.1000000000000000055511151231257827",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "binary64-0.1+0.2-literal",
+   "expr": "0.30000000000000004 == 0.3",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "underflow-to-zero",
+   "expr": "1e-400 == 0",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "big-int-literal",
+   "expr": "123456789012345678901234567890 > 1e29",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "binding-double-roundtrip",
+   "expr": "${x} == 0.030366074329203574",
+   "bindings": {
+    "x": 0.030366074329203574
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "binding-int-vs-float",
+   "expr": "${x} == 3",
+   "bindings": {
+    "x": 3.0
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "binding-large-int-order",
+   "expr": "${x} > 9007199254740992",
+   "bindings": {
+    "x": 9007199254740993
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "binding-large-int",
+   "expr": "${x} == 9007199254740992",
+   "bindings": {
+    "x": 9007199254740993
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "bool-ne-int",
+   "expr": "${b} == 1",
+   "bindings": {
+    "b": true
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "int-ne-bool",
+   "expr": "${z} == false",
+   "bindings": {
+    "z": 0
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "nested-bool-ne-int",
+   "expr": "${b} == [1]",
+   "bindings": {
+    "b": [
+     true
+    ]
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "null-ne-empty-string",
+   "expr": "${s} == \"\"",
+   "bindings": {
+    "s": null
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "null-ne-false",
+   "expr": "${s} == false",
+   "bindings": {
+    "s": null
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "empty-array-ne-null",
+   "expr": "${s} == []",
+   "bindings": {
+    "s": null
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "empty-obj",
+   "expr": "${o} == {}",
+   "bindings": {
+    "o": {}
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "obj-key-order",
+   "expr": "${o} == {\"a\":1,\"b\":2}",
+   "bindings": {
+    "o": {
+     "b": 2,
+     "a": 1
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "obj-extra-key",
+   "expr": "${o} == {\"a\":1}",
+   "bindings": {
+    "o": {
+     "a": 1,
+     "b": 2
+    }
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "array-order",
+   "expr": "${a} == [1,2]",
+   "bindings": {
+    "a": [
+     2,
+     1
+    ]
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "array-nested-numeric",
+   "expr": "${a} == [1.0, 2]",
+   "bindings": {
+    "a": [
+     1,
+     2
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "deep-nested",
+   "expr": "${a} == {\"x\":[{\"y\":null}]}",
+   "bindings": {
+    "a": {
+     "x": [
+      {
+       "y": null
+      }
+     ]
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "ref-ref-eq",
+   "expr": "${a} != ${b}",
+   "bindings": {
+    "a": [
+     1
+    ],
+    "b": [
+     1.0
+    ]
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "string-eq-no-normalization",
+   "expr": "\"é\" == \"é\"",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "escape-eq-raw",
+   "expr": "\"\\u00e9\" == \"é\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "surrogate-escape-rejected",
+   "expr": "\"\\ud83d\\ude00\" == \"😀\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "escapes",
+   "expr": "\"\\\"\\\\/\\b\\f\\n\\r\\t\" == ${s}",
+   "bindings": {
+    "s": "\"\\/\b\f\n\r\t"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "string-not-interpolated",
+   "expr": "\"${a}\" == ${b}",
+   "bindings": {
+    "b": "${a}"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "mixed-kind-ne",
+   "expr": "1 != \"1\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "str-lt",
+   "expr": "\"a\" < \"b\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "str-case",
+   "expr": "\"B\" < \"a\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "str-empty",
+   "expr": "\"\" < \"a\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "str-prefix",
+   "expr": "\"ab\" < \"abc\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "str-numeric-text",
+   "expr": "\"10\" < \"9\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "str-codepoint-order",
+   "expr": "\"\\uffff\" < \"𐀀\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "str-codepoint-order-2",
+   "expr": "\"｡\" < \"😀\"",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "num-gt",
+   "expr": "${x} > 0.85",
+   "bindings": {
+    "x": 0.9
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "num-gt-eq",
+   "expr": "${x} > 0.85",
+   "bindings": {
+    "x": 0.85
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "num-ge",
+   "expr": "${x} >= 0.85",
+   "bindings": {
+    "x": 0.85
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "int-float-order",
+   "expr": "1 < 1.5",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "order-absent",
+   "expr": "${x} > 0.85",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "order-null",
+   "expr": "${x} > 0.85",
+   "bindings": {
+    "x": null
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "order-num-str",
+   "expr": "${x} > 0.85",
+   "bindings": {
+    "x": "0.9"
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "order-lit-mixed",
+   "expr": "1 < \"2\"",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "order-null-lit",
+   "expr": "null < 1",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "order-bool",
+   "expr": "true < false",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "order-array",
+   "expr": "[] < [1]",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "order-object",
+   "expr": "{} <= {}",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "not",
+   "expr": "!${b}",
+   "bindings": {
+    "b": true
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "not-null",
+   "expr": "!${b}",
+   "bindings": {
+    "b": null
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "not-int",
+   "expr": "!${b}",
+   "bindings": {
+    "b": 1
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "and-int",
+   "expr": "${b} && true",
+   "bindings": {
+    "b": 1
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "or-string",
+   "expr": "false || ${b}",
+   "bindings": {
+    "b": "true"
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "and-short-circuit",
+   "expr": "false && ${x} > 1",
+   "bindings": {
+    "x": "s"
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "or-short-circuit",
+   "expr": "true || ${x} > 1",
+   "bindings": {
+    "x": "s"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "and-short-circuit-nonbool",
+   "expr": "false && ${x}",
+   "bindings": {
+    "x": 1
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "and-left-error-first",
+   "expr": "${x} > 1 && false",
+   "bindings": {
+    "x": "s"
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "or-left-error-first",
+   "expr": "${x} > 1 || true",
+   "bindings": {
+    "x": "s"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "and-right-error",
+   "expr": "true && ${x} > 1",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "null-guard-absent",
+   "expr": "${p} != null && ${p} > 0.5",
+   "bindings": {},
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "null-guard-present",
+   "expr": "${p} != null && ${p} > 0.5",
+   "bindings": {
+    "p": 0.7
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "bare-ref-bool",
+   "expr": "${a}",
+   "bindings": {
+    "a": true
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "bare-ref-string",
+   "expr": "${a}",
+   "bindings": {
+    "a": "true"
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "bare-ref-null",
+   "expr": "${a}",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "bare-literal-int",
+   "expr": "1",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "bare-literal-null",
+   "expr": "null",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "prec-and-over-or",
+   "expr": "true || false && false",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "prec-and-over-or-2",
+   "expr": "false && false || true",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "prec-not-over-eq",
+   "expr": "!true == false",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "paren",
+   "expr": "!(true == false)",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "eq-then-and",
+   "expr": "false == false && true",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "or-chain",
+   "expr": "false || false || ${a} == 3",
+   "bindings": {
+    "a": 3
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "missing-root",
+   "expr": "${missing.deep.path} == null",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "into-scalar",
+   "expr": "${s.x} == null",
+   "bindings": {
+    "s": "str"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "into-array-by-key",
+   "expr": "${a.x} == null",
+   "bindings": {
+    "a": [
+     {
+      "x": 1
+     }
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "index",
+   "expr": "${a[0]} == 1",
+   "bindings": {
+    "a": [
+     1
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "index-out-of-range",
+   "expr": "${a[5]} == null",
+   "bindings": {
+    "a": [
+     1
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "index-on-object",
+   "expr": "${a[0]} == null",
+   "bindings": {
+    "a": {
+     "0": 1
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "index-huge",
+   "expr": "${a[18446744073709551615]} == null",
+   "bindings": {
+    "a": [
+     1
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "index-overflow",
+   "expr": "${a[18446744073709551616]} == null",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "index-then-key",
+   "expr": "${a[1].t} == \"x\"",
+   "bindings": {
+    "a": [
+     {},
+     {
+      "t": "x"
+     }
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "slice",
+   "expr": "${a[1:3]} == [2,3]",
+   "bindings": {
+    "a": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "slice-open-end",
+   "expr": "${a[2:]} == [3]",
+   "bindings": {
+    "a": [
+     1,
+     2,
+     3
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "slice-open-start",
+   "expr": "${a[:1]} == [1]",
+   "bindings": {
+    "a": [
+     1,
+     2
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "slice-reversed",
+   "expr": "${a[3:1]} == []",
+   "bindings": {
+    "a": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "slice-clamped",
+   "expr": "${a[0:99]} == [1]",
+   "bindings": {
+    "a": [
+     1
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "slice-full",
+   "expr": "${a[:]} == [1]",
+   "bindings": {
+    "a": [
+     1
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "slice-non-array",
+   "expr": "${a[0:1]} == null",
+   "bindings": {
+    "a": "abc"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "annotation-no-runtime-effect",
+   "expr": "${x: number} > 1",
+   "bindings": {
+    "x": 2
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "annotation-not-a-cast",
+   "expr": "${x: number} > 1",
+   "bindings": {
+    "x": "5"
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "annotation-no-space",
+   "expr": "${x:number} == 1",
+   "bindings": {
+    "x": 1
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "annotation-generic",
+   "expr": "${x: map<string, array<object>>} == {}",
+   "bindings": {
+    "x": {}
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "ws-in-ref",
+   "expr": "${ a } == 1",
+   "bindings": {
+    "a": 1
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "ws-everywhere",
+   "expr": " \t\n\r${a}\n==\ttrue\r\n",
+   "bindings": {
+    "a": true
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "root-underscore",
+   "expr": "${_a1.B_2} == 1",
+   "bindings": {
+    "_a1": {
+     "B_2": 1
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "repo-null-gate",
+   "expr": "${checkpoint_out.checkpoint_id} == null",
+   "bindings": {
+    "checkpoint_out": {}
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "repo-null-gate-set",
+   "expr": "${checkpoint_out.checkpoint_id} == null",
+   "bindings": {
+    "checkpoint_out": {
+     "checkpoint_id": "c1"
+    }
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "repo-and",
+   "expr": "${conflicts_out.detected} == true && ${available_slots_out.total_count} == 0",
+   "bindings": {
+    "conflicts_out": {
+     "detected": true
+    },
+    "available_slots_out": {
+     "total_count": 0
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "repo-empty-array",
+   "expr": "${draft_review_out.issues} == []",
+   "bindings": {
+    "draft_review_out": {
+     "issues": []
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "repo-severity-object",
+   "expr": "${critique_out.severity} == \"minor\"",
+   "bindings": {
+    "critique_out": {
+     "severity": {
+      "i1": "minor"
+     }
+    }
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "escape-solidus-rejected",
+   "expr": "\"\\/\" == \"/\"",
+   "bindings": {},
+   "expect": {
+    "error": "V108"
+   }
+  },
+  {
+   "id": "int-literal-max-exact",
+   "expr": "9007199254740992 == ${x}",
+   "bindings": {
+    "x": 9007199254740992
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "int-literal-negative-max-exact",
+   "expr": "-9007199254740992 < 0",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "and-error-absorbed-by-false-left",
+   "expr": "false && ${x} > 1",
+   "bindings": {
+    "x": "s"
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "or-error-absorbed-by-true-left",
+   "expr": "true || ${x} > 1",
+   "bindings": {
+    "x": "s"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "and-both-error",
+   "expr": "${x} > 1 && ${y} > 1",
+   "bindings": {
+    "x": "s",
+    "y": "t"
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "or-error-and-false",
+   "expr": "${x} > 1 || false",
+   "bindings": {
+    "x": "s"
+   },
+   "expect": {
+    "error": "R405"
+   }
+  },
+  {
+   "id": "and-nary-false-absorbs-later-error",
+   "expr": "true && false && ${x} > 1",
+   "bindings": {
+    "x": "s"
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "and-non-boolean-absorbed",
+   "expr": "${b} && false",
+   "bindings": {
+    "b": 1
+   },
+   "expect": {
+    "value": false
+   }
+  },
+  {
+   "id": "ref-hyphen-root",
+   "expr": "${s-1.ok} == true",
+   "bindings": {
+    "s-1": {
+     "ok": true
+    }
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "field-on-array-is-null",
+   "expr": "${a.x} == null",
+   "bindings": {
+    "a": [
+     {
+      "x": 1
+     }
+    ]
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "astral-literal-equality",
+   "expr": "\"😀\" == ${s}",
+   "bindings": {
+    "s": "😀"
+   },
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "order-bool-true-greater",
+   "expr": "true > false",
+   "bindings": {},
+   "expect": {
+    "value": true
+   }
+  },
+  {
+   "id": "order-bool-vs-number",
+   "expr": "true < 1",
+   "bindings": {},
+   "expect": {
+    "error": "R405"
+   }
+  }
+ ]
+}

@@ -66,7 +66,7 @@ meaning. New codes:
 |------|------|---------|
 | V106 | UNSUPPORTED_EXTENSION | `workflow_extensions.requires` lists an unknown/unsupported extension, or a widening field is used without listing its extension |
 | V107 | UNRESOLVED_TARGET | goto_step / on_exhausted / reviewers / delivers_to / invoke target does not resolve, or resolves to the wrong kind of step |
-| V108 | INVALID_EXPRESSION | expression syntax error, limit exceeded, or non-string expression |
+| V108 | INVALID_EXPRESSION | expression syntax error or limit exceeded (a non-string expression is S303) |
 | V109 | UNSUPPORTED_SPEC_VERSION | `spec_version` or header names a version the validator does not support |
 | B206 | EXPRESSION_TYPE_ERROR | ordering on non-orderable kinds, non-boolean logic operand or result |
 | R405 | EXPRESSION_ERROR | runtime expression evaluation error |
@@ -134,6 +134,11 @@ earliest step that targets them.
   `phase: after` gates, failure_modes[].when, recovery.inject_context → also
   the step's own store. Handler steps → stores produced at or before the
   earliest step that targets them.
+* Paths: a field must name a property; an undeclared key is allowed only
+  where `additionalProperties` permits it (or the object declares no
+  properties). No implicit projection: a field on an array is B201 and null
+  at runtime — select an element with `[n]`. Index segments have no leading
+  zeros.
 * Checks: unknown root B202; bad path B201; annotation token invalid B205;
   annotation vs schema B203; ambiguous untyped (input_bindings, condition,
   gates) B204; consumer input type mismatch B203 + coercion suggestion.
@@ -147,7 +152,7 @@ earliest step that targets them.
 ## 7. Expressions (grammar B — ACS, CEL-compatible)
 
 Sites: `condition`, `gates[].when`, `failure_modes[].when`. Must be YAML
-strings (else V108).
+strings (else S303).
 
 ```ebnf
 expr      = or_expr ;
@@ -161,23 +166,35 @@ literal   = "null" | "true" | "false" | number | string | list | map ;
 list      = "[" [ literal { "," literal } ] "]" ;
 map       = "{" [ string ":" literal { "," string ":" literal } ] "}" ;
 number    = ["-"] int [ "." digits ] [ ("e"|"E") ["+"|"-"] digits ] ;
-string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX *)
+string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no surrogates *)
 ```
 
 * Limits: 4096 UTF-8 bytes, nesting depth 32. Integer literals |n| ≤ 2^53;
   numbers finite binary64. Duplicate map keys rejected.
 * Values are JSON. `==`/`!=`: total, deep, structural; numbers by binary64
-  value; different kinds unequal. Ordering: number/number or string/string
-  (code point) else error. `!`, `&&`, `||` need booleans. `&&`/`||` follow
+  value; different kinds unequal. Ordering: number/number, string/string
+  (code point) or boolean/boolean (false < true, as CEL) else error. `!`, `&&`, `||` need booleans. `&&`/`||` follow
   CEL absorption: a determining operand (false for `&&`, true for `||`) wins
   over an error on the other side. Result must be boolean.
-* Absent path or skipped producer → `null`.
+* Absent path or skipped producer → `null`. A producer is skippable when it
+  has a `condition` that skips (`skip_if_false` absent or true) or a
+  before-gate with `action: skip`; its own after-gates still see its output.
+* Null narrowing: after `${x} != null` in an `&&` chain (or `${x} == null` in
+  an `||` chain) later operands treat that exact reference as present.
+* After an unknown root (B202) or bad path (B201) no further diagnostic is
+  reported for that operand.
 * Runtime errors (R405): a gate whose `when` errors FIRES; a `condition`
   that errors is false; a failure-mode `when` that errors does not fire. All
   are recorded in the trace.
-* Static checks: V108 syntax, B202/B201 refs, B206 type errors, B204
+* Static checks: V108 syntax (B205 when only an annotation is malformed —
+  the parser validates annotations), B202/B201 refs, B206 type errors, B204
   ordering/logic on unknown/any without annotation, B203 annotation vs
-  schema, W610, W611.
+  schema (the same `types::compatible` rule as binding annotations), W610,
+  W611.
+* Fixtures: `tests/conformance/expressions/{eval,check}.json` (language
+  neutral). `tools/cel_differential` (cel-go, unchecked evaluation, refs
+  hoisted to dyn variables) asserts in CI that every ACS-valid case is valid
+  CEL and that results agree wherever CEL returns a value.
 * Every valid expression must be valid CEL (references hoisted to opaque
   variables) with the same result wherever CEL returns a value.
 

@@ -5,6 +5,7 @@
 //! package — runs one implementation. See `tasks/design-114.md`.
 
 pub mod diag;
+pub mod expr;
 pub mod ontology;
 pub mod refs;
 pub mod schema;

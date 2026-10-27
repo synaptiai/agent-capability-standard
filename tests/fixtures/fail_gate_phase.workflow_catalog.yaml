@@ -1,0 +1,23 @@
+# Negative fixture (STANDARD v1.1 §5.6): an after-gate cannot skip a step
+# that already ran (S303), and a before-gate cannot read the output its own
+# step has not produced yet (B202).
+gate_phase:
+  goal: Reject gates evaluated in the wrong phase.
+  risk: low
+  steps:
+  - capability: verify
+    purpose: Verify.
+    store_as: verify_out
+    input_bindings:
+      conditions: []
+    gates:
+    - when: ${verify_out.passed} == false
+      phase: after
+      action: skip
+      message: too late to skip
+    - when: ${verify_out.passed} == false
+      phase: before
+      action: stop
+      message: not produced yet
+  success:
+  - Never valid

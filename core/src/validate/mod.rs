@@ -6,8 +6,9 @@
 //! and machine-usable fix suggestions.
 
 mod bindings;
+mod exprs;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use indexmap::IndexMap;
@@ -227,6 +228,9 @@ pub(crate) struct Scope {
     pub stores: IndexMap<String, Value>,
     /// input name → resolved input schema.
     pub inputs: IndexMap<String, Value>,
+    /// Roots that may be absent at runtime: optional inputs and the outputs
+    /// of steps that a condition or skip gate can skip.
+    pub maybe_absent: HashSet<String>,
 }
 
 /// Where a diagnostic about one step is located.
@@ -318,8 +322,10 @@ impl WorkflowCheck<'_> {
 
     fn run(mut self) {
         self.check_header();
+        let (inputs, maybe_absent) = self.resolve_inputs();
         let mut scope = Scope {
-            inputs: self.resolve_inputs(),
+            inputs,
+            maybe_absent,
             ..Scope::default()
         };
         let steps: &[Value] = match self.wf.get("steps") {
@@ -412,35 +418,64 @@ impl WorkflowCheck<'_> {
                 ctx: self.ctx,
                 loc: &loc,
             };
-            // A step's own output is not visible to its inputs or condition...
+            let gates = exprs::gates(step, store, &loc, self.report);
+            // A step's own output is not visible to its inputs, condition or
+            // before-gates...
             if let Some(b) = step.get("input_bindings") {
                 checker.scan(b, &scope, Mode::Full, "input_bindings", self.report);
             }
             if let Some(Value::String(c)) = step.get("condition") {
-                checker.check_string(c, &scope, Mode::Full, "condition", self.report);
+                exprs::check_expression(c, &scope, &loc, "condition", self.report);
+            }
+            for g in gates.iter().filter(|g| g.phase == exprs::Phase::Before) {
+                if let Some(when) = &g.when {
+                    exprs::check_parsed(when, &scope, &loc, &g.field, self.report);
+                }
             }
             checker.consumer_check(step, &contracts.input, &scope, self.report);
 
-            // ...but gates and recovery run once the step can have produced it.
+            // ...but after-gates and failure modes run once the step has run,
+            // so there its output is present; later steps see it as absent
+            // if the step can be skipped.
             if let Some(store) = store {
                 scope
                     .stores
                     .insert(store.to_string(), contracts.output.clone());
+                scope.maybe_absent.remove(store);
             }
-            if let Some(Value::Array(gates)) = step.get("gates") {
-                for (g, gate) in gates.iter().enumerate() {
-                    if let Some(Value::String(w)) = gate.get("when") {
-                        let field = format!("gates[{g}].when");
-                        checker.check_string(w, &scope, Mode::Full, &field, self.report);
-                    }
+            for g in gates.iter().filter(|g| g.phase == exprs::Phase::After) {
+                if let Some(when) = &g.when {
+                    exprs::check_parsed(when, &scope, &loc, &g.field, self.report);
                 }
             }
             if let Some(Value::Array(fms)) = step.get("failure_modes") {
                 for (f, fm) in fms.iter().enumerate() {
+                    match fm.get("when") {
+                        Some(Value::String(w)) => {
+                            let field = format!("failure_modes[{f}].when");
+                            exprs::check_expression(w, &scope, &loc, &field, self.report);
+                        }
+                        Some(other) => self.report.push(
+                            loc.diag(
+                                Code::SchemaValidationFailed,
+                                format!(
+                                    "failure_modes[{f}].when must be a string, found {}",
+                                    yaml::kind_of(other)
+                                ),
+                            )
+                            .at("field", format!("failure_modes[{f}].when")),
+                        ),
+                        None => {}
+                    }
                     if let Some(inject) = fm.get("recovery").and_then(|r| r.get("inject_context")) {
                         let field = format!("failure_modes[{f}].recovery.inject_context");
                         checker.scan(inject, &scope, Mode::Existence, &field, self.report);
                     }
+                }
+            }
+            if let Some(store) = store {
+                if exprs::skippable(step, &gates) {
+                    scope.maybe_absent.insert(store.to_string());
                 }
             }
             seen.push(cap);
@@ -619,11 +654,12 @@ impl WorkflowCheck<'_> {
 
     /// Resolve the declared inputs to schemas (S302 on a broken `ref`, S303 on
     /// a malformed declaration).
-    fn resolve_inputs(&mut self) -> IndexMap<String, Value> {
+    fn resolve_inputs(&mut self) -> (IndexMap<String, Value>, HashSet<String>) {
         let mut out = IndexMap::new();
+        let mut optional = HashSet::new();
         let empty_object = || json!({"type": "object", "properties": {}});
         let inputs = match self.wf.get("inputs") {
-            None => return out,
+            None => return (out, optional),
             Some(Value::Object(m)) => m,
             Some(other) => {
                 let d = self.wdiag(
@@ -634,7 +670,7 @@ impl WorkflowCheck<'_> {
                     ),
                 );
                 self.report.push(d.at("field", "inputs"));
-                return out;
+                return (out, optional);
             }
         };
         for (key, spec) in inputs {
@@ -679,9 +715,13 @@ impl WorkflowCheck<'_> {
                     empty_object()
                 }
             };
+            // An input is always supplied only if it is declared required.
+            if spec.get("required") != Some(&Value::Bool(true)) {
+                optional.insert(key.clone());
+            }
             out.insert(key.clone(), schema);
         }
-        out
+        (out, optional)
     }
 }
 
@@ -861,6 +901,63 @@ mod tests {
             {"capability": "compare", "purpose": "p", "store_as": "c", "input_bindings": {"options": "${s-1.results: array<object>}"}},
         ]));
         assert!(codes(catalog).is_empty());
+    }
+
+    #[test]
+    fn own_output_is_present_for_after_gates_even_if_skippable() {
+        let catalog = wf(json!([{
+            "capability": "verify", "purpose": "p", "store_as": "v",
+            "condition": "true", "input_bindings": {"conditions": []},
+            "gates": [{"when": "${v.confidence} < 0.5", "phase": "after", "action": "warn", "message": "m"}],
+        }]));
+        assert!(codes(catalog).is_empty());
+    }
+
+    #[test]
+    fn skippable_producers_make_later_operands_nullable() {
+        let steps = |skip_if_false: Value| {
+            let mut v = json!({"capability": "verify", "purpose": "p", "store_as": "v",
+                "condition": "true", "input_bindings": {"conditions": []}});
+            if !skip_if_false.is_null() {
+                v["skip_if_false"] = skip_if_false;
+            }
+            wf(
+                json!([v, {"capability": "explain", "purpose": "p", "store_as": "e",
+                "condition": "${v.confidence} > 0.5", "input_bindings": {"conclusion": "c"}}]),
+            )
+        };
+        assert_eq!(codes(steps(Value::Null)), ["W610"]);
+        assert_eq!(codes(steps(json!(true))), ["W610"]);
+        // skip_if_false: false fails the run instead of skipping (§5.6).
+        assert!(codes(steps(json!(false))).is_empty());
+    }
+
+    #[test]
+    fn self_reference_inside_a_string_literal_is_not_a_read() {
+        let catalog = wf(json!([
+            {"capability": "verify", "purpose": "p", "store_as": "o", "input_bindings": {"conditions": []}},
+            {"capability": "verify", "purpose": "p", "store_as": "me", "input_bindings": {"conditions": []},
+             "gates": [{"when": "${o.passed} == \"${me}\"", "action": "skip", "message": "m"}]},
+        ]));
+        // W611 (boolean vs string), but neither W603 nor S303.
+        assert_eq!(codes(catalog), ["W611"]);
+    }
+
+    #[test]
+    fn binding_and_expression_paths_agree() {
+        let gen_step = json!({"capability": "generate", "purpose": "p", "store_as": "g",
+            "input_bindings": {"specification": "s"}});
+        let binding = wf(
+            json!([gen_step, {"capability": "explain", "purpose": "p", "store_as": "e",
+            "input_bindings": {"conclusion": "${g.content.title: string}"}}]),
+        );
+        let condition = wf(
+            json!([gen_step, {"capability": "explain", "purpose": "p", "store_as": "e",
+            "condition": "${g.content.title: string} == \"x\"", "input_bindings": {"conclusion": "c"}}]),
+        );
+        // A field below `type: any` is allowed and untyped in both places.
+        assert!(codes(binding).is_empty());
+        assert!(codes(condition).is_empty());
     }
 
     #[test]

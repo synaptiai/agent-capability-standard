@@ -189,5 +189,35 @@
     "expected_error_codes": [
       "S303"
     ]
+  },
+  "pass_gate_phases": {
+    "should_pass": true,
+    "level": "L3",
+    "category": "expressions"
+  },
+  "fail_invalid_expression": {
+    "should_pass": false,
+    "level": "L3",
+    "category": "expressions",
+    "expected_error_codes": [
+      "V108"
+    ]
+  },
+  "fail_expression_type": {
+    "should_pass": false,
+    "level": "L3",
+    "category": "expressions",
+    "expected_error_codes": [
+      "B206"
+    ]
+  },
+  "fail_gate_phase": {
+    "should_pass": false,
+    "level": "L3",
+    "category": "expressions",
+    "expected_error_codes": [
+      "S303",
+      "B202"
+    ]
   }
 }

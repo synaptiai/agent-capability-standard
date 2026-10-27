@@ -140,54 +140,108 @@ pub fn json_pointer<'a>(doc: &'a Value, pointer: &str) -> Option<&'a Value> {
     Some(cur)
 }
 
-/// `type: array`, or a type list that includes `array` (e.g. nullable arrays).
-fn is_array_schema(s: &Value) -> bool {
-    match s.get("type") {
-        Some(Value::String(t)) => t == "array",
-        Some(Value::Array(ts)) => ts.iter().any(|t| t == "array"),
-        _ => false,
+/// The result of selecting one path segment on a schema node.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Step<'a> {
+    /// The segment selects this schema node.
+    Node(&'a Value),
+    /// The segment is allowed but nothing is known about what it selects.
+    Untyped,
+    /// The segment cannot apply to this node (B201).
+    Invalid,
+}
+
+/// The type names a node declares, or `None` when it declares none. Handles
+/// a single name, the ontology's `a|b` shorthand and JSON Schema type lists.
+fn type_names(s: &Value) -> Option<Vec<&str>> {
+    match s.get("type")? {
+        Value::String(t) => Some(t.split('|').map(str::trim).collect()),
+        Value::Array(ts) => Some(ts.iter().filter_map(Value::as_str).collect()),
+        _ => None,
     }
 }
 
-/// Declares a type, or is an object by virtue of `properties`.
-fn is_typed(s: &Value) -> bool {
-    s.get("type").is_some() || s.get("properties").is_some()
+/// Whether a value of this schema could be an object: it declares no type,
+/// `any`, `object`, or a union including one of them, or has `properties`.
+fn may_be_object(s: &Value) -> bool {
+    match type_names(s) {
+        None => true,
+        Some(names) => names.iter().any(|n| matches!(*n, "object" | "any")),
+    }
 }
 
-fn items_of(s: &Value) -> &Value {
-    static EMPTY: Value = Value::Null;
-    s.get("items").unwrap_or(&EMPTY)
+/// Whether a value of this schema could be an array.
+fn may_be_array(s: &Value) -> bool {
+    match type_names(s) {
+        None => !s.get("properties").is_some_and(Value::is_object),
+        Some(names) => names.iter().any(|n| matches!(*n, "array" | "any")),
+    }
 }
 
-/// The schema node a reference path selects, or `None` if the path leaves the
-/// schema. A field selected on an array applies to its items (implicit
-/// projection, as STANDARD v1.0 validators have always done); `[n]` selects
-/// the items; a slice keeps the array.
+/// Select field `name` on `node`. A field must name a declared property; an
+/// undeclared key is allowed where `additionalProperties` permits it or the
+/// object declares no properties. There is no implicit projection: a field on
+/// a node that can only be an array is invalid (select an element with `[n]`).
+pub fn field<'a>(node: &'a Value, name: &str) -> Step<'a> {
+    if !may_be_object(node) {
+        return Step::Invalid;
+    }
+    let props = node.get("properties").and_then(Value::as_object);
+    if let Some(child) = props.and_then(|p| p.get(name)) {
+        return Step::Node(child);
+    }
+    match node.get("additionalProperties") {
+        Some(ap @ Value::Object(_)) => Step::Node(ap),
+        Some(Value::Bool(true)) => Step::Untyped,
+        Some(_) => Step::Invalid,
+        None if props.is_none() => Step::Untyped,
+        None => Step::Invalid,
+    }
+}
+
+/// Select an element (`[n]`) of `node`: its `items`, untyped if it declares
+/// none, invalid if the node cannot be an array.
+pub fn index(node: &Value) -> Step<'_> {
+    if !may_be_array(node) {
+        return Step::Invalid;
+    }
+    match node.get("items") {
+        Some(items) => Step::Node(items),
+        None => Step::Untyped,
+    }
+}
+
+/// Whether a slice (`[a:b]`) applies to `node`; a slice keeps the array.
+pub fn slice_ok(node: &Value) -> bool {
+    may_be_array(node)
+}
+
+/// The schema node a reference path selects, `Some(&Value::Null)` when the
+/// path is allowed but untyped, or `None` when it leaves the schema (B201).
 pub fn node_at<'a>(schema: &'a Value, path: &[Seg]) -> Option<&'a Value> {
+    static UNTYPED: Value = Value::Null;
     let mut cur = schema;
     for seg in path {
-        match seg {
-            Seg::Field(name) => {
-                if is_array_schema(cur) {
-                    cur = items_of(cur);
-                }
-                cur = cur.get("properties")?.as_object()?.get(name)?;
-            }
-            // Indexing a node that declares no type cannot be checked, so it
-            // stays untyped; indexing a node of another type is an error.
-            Seg::Index(_) => {
-                if is_array_schema(cur) {
-                    cur = items_of(cur);
-                } else if is_typed(cur) {
-                    return None;
-                }
-            }
-            Seg::Slice(..) => {
-                if !is_array_schema(cur) && is_typed(cur) {
-                    return None;
-                }
-            }
+        // Nothing is known below an untyped node.
+        if cur.is_null() {
+            return Some(&UNTYPED);
         }
+        let step = match seg {
+            Seg::Field(name) => field(cur, name),
+            Seg::Index(_) => index(cur),
+            Seg::Slice(..) => {
+                if slice_ok(cur) {
+                    Step::Node(cur)
+                } else {
+                    Step::Invalid
+                }
+            }
+        };
+        cur = match step {
+            Step::Node(n) => n,
+            Step::Untyped => &UNTYPED,
+            Step::Invalid => return None,
+        };
     }
     Some(cur)
 }
@@ -216,10 +270,8 @@ mod tests {
             node_at(&s, &[field("n")]),
             Some(&json!({"type": "integer"}))
         );
-        assert_eq!(
-            node_at(&s, &[field("items"), field("id")]),
-            Some(&json!({"type": "string"}))
-        );
+        // No implicit projection through arrays.
+        assert_eq!(node_at(&s, &[field("items"), field("id")]), None);
         assert_eq!(
             node_at(&s, &[field("items"), Seg::Index(0), field("id")]),
             Some(&json!({"type": "string"}))
@@ -229,18 +281,28 @@ mod tests {
         // An object declared only by `properties` cannot be indexed.
         let obj = json!({"properties": {"x": {"type": "string"}}});
         assert_eq!(node_at(&obj, &[Seg::Index(3)]), None);
-        // Nullable arrays index and project like arrays.
+        // Nullable arrays index like arrays.
         let nullable =
             json!({"type": ["array", "null"], "items": {"properties": {"id": {"type": "string"}}}});
         assert_eq!(
             node_at(&nullable, &[Seg::Index(0), field("id")]),
             Some(&json!({"type": "string"}))
         );
-        assert_eq!(
-            node_at(&nullable, &[field("id")]),
-            Some(&json!({"type": "string"}))
-        );
+        assert_eq!(node_at(&nullable, &[field("id")]), None);
         assert_eq!(node_at(&s, &[field("missing")]), None);
+        // Undeclared keys: only where additionalProperties allows them.
+        let open = json!({"type": "object", "additionalProperties": true, "properties": {"k": {}}});
+        assert_eq!(node_at(&open, &[field("zzz")]), Some(&Value::Null));
+        let typed = json!({"type": "object", "additionalProperties": {"type": "number"}});
+        assert_eq!(
+            node_at(&typed, &[field("zzz")]),
+            Some(&json!({"type": "number"}))
+        );
+        assert_eq!(
+            node_at(&json!({"type": "object"}), &[field("zzz")]),
+            Some(&Value::Null)
+        );
+        assert_eq!(node_at(&json!({"type": "string"}), &[field("zzz")]), None);
     }
 
     #[test]

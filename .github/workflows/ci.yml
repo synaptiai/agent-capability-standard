@@ -99,6 +99,22 @@ jobs:
           rustup toolchain install "$RUST_MSRV" --profile minimal
           cargo +"$RUST_MSRV" check --locked --all-targets --features python
 
+  cel-differential:
+    name: Expressions stay a CEL-compatible profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/cel_differential/go.mod
+          cache-dependency-path: tools/cel_differential/go.sum
+
+      - name: Compare ACS evaluation fixtures with cel-go
+        working-directory: tools/cel_differential
+        run: go run . ../../tests/conformance/expressions/eval.json ../../tests/conformance/expressions/check.json
+
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest

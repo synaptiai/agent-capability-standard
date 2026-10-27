@@ -164,6 +164,11 @@ pub fn parse_ref(body: &str) -> Result<Ref, String> {
                 if !t.bytes().all(|b| b.is_ascii_digit()) {
                     return Err(format!("malformed reference '${{{raw}}}': bad index '{t}'"));
                 }
+                if t.len() > 1 && t.starts_with('0') {
+                    return Err(format!(
+                        "malformed reference '${{{raw}}}': leading zeros in index '{t}'"
+                    ));
+                }
                 t.parse::<usize>()
                     .map(Some)
                     .map_err(|_| format!("malformed reference '${{{raw}}}': index too large"))
@@ -232,7 +237,7 @@ mod tests {
         assert_eq!(r("s-1.x-y").path, [Seg::Field("x-y".into())]);
         assert!(is_identifier("a_b-c") && !is_identifier("-a") && !is_identifier("a.b"));
         for bad in [
-            "", "1abc", "a.", "a..b", "a[", "a[x]", "a[]", "a.b c", "-a", "a:",
+            "", "1abc", "a.", "a..b", "a[", "a[x]", "a[]", "a.b c", "-a", "a:", "a[01]", "a[1:02]",
         ] {
             assert!(parse_ref(bad).is_err(), "{bad}");
         }

@@ -80,9 +80,22 @@ fn split_top(s: &str) -> Vec<&str> {
     out
 }
 
+/// Maximum nesting of `<...>` in an annotation.
+pub const MAX_ANNOTATION_DEPTH: usize = 32;
+
 /// Parse a type annotation. Unknown names are an error (B205), never a
 /// silent wildcard.
 pub fn parse_annotation(text: &str) -> Result<Type, String> {
+    parse_at(text, 0)
+}
+
+fn parse_at(text: &str, depth: usize) -> Result<Type, String> {
+    if depth > MAX_ANNOTATION_DEPTH {
+        return Err(format!(
+            "type annotation nested deeper than {MAX_ANNOTATION_DEPTH} levels"
+        ));
+    }
+    let parse_annotation = |t: &str| parse_at(t, depth + 1);
     let t = text.trim();
     if let Some(p) = primitive(t) {
         return Ok(p);
@@ -231,6 +244,9 @@ mod tests {
         let inferred = schema_type(&json!({"oneOf": [{"type": "string"}, {"type": "object"}]})).0;
         assert_eq!(p(&inferred.to_string()), inferred);
         assert!(parse_annotation("union<string>").is_err());
+        let deep = |n: usize| format!("{}string{}", "array<".repeat(n), ">".repeat(n));
+        assert!(parse_annotation(&deep(MAX_ANNOTATION_DEPTH)).is_ok());
+        assert!(parse_annotation(&deep(MAX_ANNOTATION_DEPTH + 1)).is_err());
         for bad in [
             "banana",
             "array<banana>",
