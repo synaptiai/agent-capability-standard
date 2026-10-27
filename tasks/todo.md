@@ -65,7 +65,7 @@ Re-planned after D-lang (Rust core): the validator and executor move into
       linear edge checks, bounded hints, holder-keyed checkpoint
       reservations with a PostToolUseFailure release, PreToolUse deny in the
       SDK's format, engine/file-validator parity, stale-source detection.
-- [ ] S5 Extensions E1–E6 static validation (durations, cron/tz, triggers,
+- [x] S5 Extensions E1–E6 static validation (durations, cron/tz, triggers,
       recovery/handlers, wait, approval, delegation, quorum,
       `workflow_extensions.requires`/V106).
   - [x] S5a Declarations (SPECIFIED vs IMPLEMENTED, V106, malformed
@@ -112,8 +112,8 @@ Re-planned after D-lang (Rust core): the validator and executor move into
       `max_loops` ≤ 1000, drop counting, records for every approval
       outcome, fireable codes are the ones a step can fail with (F501/F504
       in, R405 out).
-- [ ] S7 RFC-0003, STANDARD v1.1.0, EDGE_TYPES errata, docs, changelogs;
-      Q3 issue + #114 reply drafts (not posted).
+- [x] S7 RFC-0003, STANDARD v1.1.0 (Candidate Standard), EDGE_TYPES
+      errata, docs, changelogs; Q3 issue + #114 reply drafts (not posted).
 
 ## Decisions after the S4 review
 
@@ -137,4 +137,40 @@ Each stage: ruff, mypy, full pytest, every `tools/validate_*.py`,
 
 ## Review
 
-(filled in at the end)
+**Delivered** on `claude/gifted-albattani-qwnlo3` (base `9e2f65b`), one
+commit per stage, each validated and independently reviewed before commit:
+
+| Stage | Commit(s) | What |
+|-------|-----------|------|
+| Plan | `1af436a` | Decisions D-* and this plan |
+| S1 | `d12f1cf` | Rust core, hardened YAML 1.2 loader, PyYAML parity |
+| S2 | `9abc333` | Validator ported to the core |
+| S3 | `516aec3` | Expression language (CEL subset, cel-go differential) |
+| S4 | `5f1c224`, `3e83198`, `1656061` | Edge and safety-flag semantics, engine on the core, review fixes |
+| S5a+b | `6913c2a` | Declarations, durations, cron, triggers@1, recovery@1, STANDARD v1.1.0 and RFC-0003 |
+| S5c | `3d1a37f` | wait@1, approval@1, world_state 1.1.0 |
+| S5d | `060f312` | delegation@1, quorum@1, review verdicts |
+| S6 | `fd3852a` | Sans-IO executor, `_core.Run`, `WorkflowRunner`, runtime fixtures |
+| S7 | this commit | Standard v1.1.0 Candidate Standard; drafts |
+
+**Reviews.** Every stage from S4 on had an independent code review;
+S4: ~35 findings, S5b: 11, S5c: 11, S5d: 7 groups, S6: 15.
+All findings were fixed or, where by design, documented. The two that
+mattered most: a forbidden input reaching a quorum reviewer through
+recovery-injected context (S5d), W608 missing a wait that shares the
+checkpoint's parallel group (S5c), 1.0-form gates running before their
+step and quorums counting reviewers that never ran (S6).
+
+**Verification at each commit:** cargo fmt/clippy (with and without
+`python`)/test, MSRV 1.86 check, every `tools/validate_*.py`,
+`sync_skill_schemas.py --check`, `run_conformance.py`, CEL differential,
+ruff, ruff format, mypy, full pytest.
+
+**Not done / follow-ups:**
+- The domain catalogs under `schemas/workflows/` still fail validation, as
+  they did on `main`; they need their own clean-up and a CI step (RFC-0003
+  open question).
+- Agent identity for E2 (named agent, attested fresh context) waits for
+  RFC-0002.
+- The #114 reply and the Q3 issue (22 reproduced disagreements between
+  the 1.0 validator and engine) are drafts, not posted (D-del).

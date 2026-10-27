@@ -161,7 +161,9 @@ Python package; `tools/validate_workflows.py` and the Python
 - Language-neutral expression fixtures: `tests/conformance/expressions/eval.json`
   (evaluation) and `tests/conformance/expressions/check.json` (static
   checks), run against the reference core and cel-go.
-- Extension and executor fixtures arrive with their implementation.
+- Extension fixtures (`tests/fixtures/*`: triggers, recovery and
+  escalation, waits, approvals, delegation, quorums) and runtime fixtures
+  for the reference executor (`tests/conformance/runtime/*.json`).
 
 ## Alternatives considered
 

@@ -684,6 +684,6 @@ Production agents require architecture, not vibes. This standard provides that a
 
 ---
 
-*Agent Capability Standard v1.1.0 (Draft; v1.0.0 still supported)*
+*Agent Capability Standard v1.1.0 (Candidate Standard; v1.0.0 still supported)*
 *Copyright 2026 Synapti.ai*
 *Licensed under Apache 2.0*

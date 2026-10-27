@@ -1,9 +1,9 @@
 # Standard: Agent Capability Ontology + Workflow DSL
 
 **Version:** 1.1.0
-**Status:** Draft — accepted by RFC-0003; sections marked *(pending
-reference implementation)* are normative but not yet enforced by the
-reference validator
+**Status:** Candidate Standard — accepted by
+[RFC-0003](RFC-0003-orchestration-extensions.md); the reference validator
+and executor implement every section
 **Date:** 2026-10-27
 **Supersedes:** [STANDARD-v1.0.0](STANDARD-v1.0.0.md) (still supported; see §11.5)
 

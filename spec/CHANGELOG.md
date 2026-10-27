@@ -4,7 +4,7 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 
 ## Unreleased
 
-### Added — Standard v1.1.0 (draft) and RFC-0003 (#114)
+### Added — Standard v1.1.0 (Candidate Standard) and RFC-0003 (#114)
 - **[STANDARD-v1.1.0](STANDARD-v1.1.0.md)** and
   **[RFC-0003](RFC-0003-orchestration-extensions.md)** (Accepted). v1.0.0
   remains supported; Appendix C of v1.1.0 lists every change.

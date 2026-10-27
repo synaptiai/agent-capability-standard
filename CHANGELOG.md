@@ -60,7 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   and outputs for delegation and quorums (`delegate.fresh_context`,
   `.model_family`, `.role`, `.effective`; `receive`/`synchronize`
   `accept_from`; `constrain.tally`)
-- `spec/STANDARD-v1.1.0.md` (draft) and `spec/RFC-0003-orchestration-extensions.md`
+- `spec/STANDARD-v1.1.0.md` (Candidate Standard) and `spec/RFC-0003-orchestration-extensions.md`
   (Accepted) answering #114; see the [specification changelog](spec/CHANGELOG.md)
 - Validator warnings: `tools/validate_workflows.py` reports warnings (W6xx)
   separately and passes unless `--strict` is given;

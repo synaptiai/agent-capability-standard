@@ -29,7 +29,7 @@
 
 ## v1.1.0 — In Progress 🔧
 
-- [Standard v1.1.0](STANDARD-v1.1.0.md) (Draft), accepted by [RFC-0003](RFC-0003-orchestration-extensions.md); v1.0.0 remains supported
+- [Standard v1.1.0](STANDARD-v1.1.0.md) (Candidate Standard), accepted by [RFC-0003](RFC-0003-orchestration-extensions.md); v1.0.0 remains supported
   - Condition expression language for conditions, gates and failure-mode triggers
   - Specified edge and safety-flag semantics
   - Diagnostic model with severities and warnings (W6xx)
