@@ -31,14 +31,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   it, W608 for a checkpoint taken before a wait), and `approval@1`
   validates structured approvals (approver, digest binding, recheck,
   expiry, unattended behaviour; W606 when an unattended run would reach an
-  approval with no plan). Declaring an extension the validator cannot check
-  yet is refused (V106). New guide:
+  approval with no plan). `delegation@1` covers delegation hints
+  (`fresh_context`, `model_family`, `role`) and sender filtering
+  (`accept_from`), and `quorum@1` validates review quorums on blocking
+  `constrain` steps: reviewers are earlier, distinct delegate steps,
+  vocabulary and thresholds are consistent, and reviewers stay independent
+  of forbidden inputs (checked transitively, including through context a
+  recovery loop injects), fresh context and model families (F504). Declaring an extension the validator
+  does not check is refused (V106). New guide:
   [docs/guides/ORCHESTRATION_EXTENSIONS.md](docs/guides/ORCHESTRATION_EXTENSIONS.md)
 - A step that raises `requires_checkpoint` above the ontology is now held to
   it: F501 when no checkpoint runs before it
 - `world_state_schema.yaml` 1.1.0: action records gain status `rejected`
   and `expired` and an optional `approval` record (digest, decision,
   approvers)
+- `schemas/review_verdict_schema.yaml` for quorum verdicts; ontology inputs
+  and outputs for delegation and quorums (`delegate.fresh_context`,
+  `.model_family`, `.role`, `.effective`; `receive`/`synchronize`
+  `accept_from`; `constrain.tally`)
 - `spec/STANDARD-v1.1.0.md` (draft) and `spec/RFC-0003-orchestration-extensions.md`
   (Accepted) answering #114; see the [specification changelog](spec/CHANGELOG.md)
 - Validator warnings: `tools/validate_workflows.py` reports warnings (W6xx)
@@ -96,6 +106,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Comprehensive analysis documentation package (13 documents, ~570KB)
 
 ### Changed
+- **Migration:** binding `fresh_context`, `model_family` or `role` on
+  `delegate`, or `accept_from` on `receive`/`synchronize`, now needs
+  `delegation@1` in `workflow_extensions.requires` (V106). These inputs were
+  previously unknown to the ontology and silently ignored; a consumer that
+  ignored them would reuse a reviewer's context or accept anyone's items
 - **Workflow catalog (#114).** Declares `# Standard version: 1.1.0`; approval
   flags no longer understate the ontology; `clarify_intent` asks through
   `inquire` and receives the answer only when questions were asked;

@@ -251,7 +251,7 @@ Each step MAY define:
 | `handler` | boolean | Escalation target only (§5.11) |
 | `wait` | object | Wait for an event (§5.13) |
 | `approval` | object | How approval is obtained and bound (§5.14) |
-| `quorum` | object | Review quorum (§5.16) *(pending reference implementation)* |
+| `quorum` | object | Review quorum (§5.16) |
 
 Unrecognised step, gate, failure-mode, recovery and retry fields are W604.
 
@@ -494,8 +494,7 @@ extension: a consumer that ignores them only loses an optional trigger.
 
 A validator MUST NOT accept a declaration of an extension it does not
 check: listing one is V106, as for an unknown extension. *(The reference
-validator currently implements `triggers@1`, `recovery@1`, `wait@1` and
-`approval@1`.)*
+validator implements all six.)*
 
 ### 5.10 Triggers
 
@@ -666,34 +665,75 @@ The decision is recorded on the action record (`world_state_schema.yaml`
 1.1.0: `approval` with the digest, decision and approvers; status
 `rejected` or `expired` when it was refused or lapsed).
 
-### 5.15 Delegation *(pending reference implementation)*
+### 5.15 Delegation
 
-`delegate` accepts `fresh_context`, `model_family` and `role` and reports
-the values it actually used as `effective`. `receive` and `synchronize`
-accept `accept_from` (a list of principals); received items from other
-principals are dropped and counted, and each kept item's `sender` is the
-host-authenticated principal.
+```yaml
+- capability: delegate
+  store_as: review_a
+  input_bindings:
+    task: {review: "${diff_out.data: object}"}
+    agent: reviewer-a
+    fresh_context: true
+    model_family: claude
+    role: reviewer
+```
 
-### 5.16 Quorum *(pending reference implementation)*
+`delegate` accepts `fresh_context` (start the delegate without the
+delegator's context), `model_family` and `role`, and reports the values the
+host actually used as `effective`. `receive` and `synchronize` accept
+`accept_from` (a list of principals): received items from other principals
+are dropped and counted, and each kept item's `sender` is the
+host-authenticated principal. Binding any of these inputs needs
+`delegation@1` (V106); they are typed by the ontology like any other input.
+
+### 5.16 Quorum
+
+```yaml
+- capability: constrain
+  store_as: quorum_out
+  input_bindings:
+    target: ${verdicts_out.data}
+    constraints: [two_independent_approvals]
+    action_on_violation: block
+  quorum:
+    verdicts: ${verdicts_out.data}
+    reviewers: [review_a, review_b]
+    vocabulary: [approve, request_changes, abstain]
+    pass_values: [approve]
+    blocking_values: [request_changes]
+    min_pass: 2
+    pinned_to: ${change_ref}
+    forbidden_inputs: [author_notes]
+    require_fresh_context: true
+    require_model_families: [claude, gpt]
+```
 
 `quorum` is allowed only on `constrain` with literal
-`action_on_violation: block` (S303):
+`action_on_violation: block` (S303), so a failed quorum stops the run:
 
 | Field | Description |
 |-------|-------------|
-| `verdicts` | Reference to the reviews (`review_verdict_schema.yaml#/review_verdict` items) |
-| `reviewers` | `store_as` names of earlier `delegate` steps (V107) |
-| `vocabulary` | At least two distinct verdict values |
-| `pass_values`, `blocking_values` | Non-empty subset of the vocabulary; disjoint subset that vetoes |
-| `min_pass` | 1 ≤ `min_pass` ≤ number of reviewers |
-| `pinned_to` | Reference every counted verdict must be pinned to |
-| `forbidden_inputs` | Stores no reviewer may depend on, directly or transitively (F504) |
-| `require_fresh_context`, `require_model_families` | Reviewer independence requirements (F504 when violated by literal bindings) |
+| `verdicts` | Required: reference to the reviews (`review_verdict_schema.yaml#/review_verdict` items) |
+| `reviewers` | Required: `store_as` names of `delegate` steps that run before this one (else V107), delegating to distinct agents when the agents are literal (else F504) |
+| `vocabulary` | Required: at least two distinct verdict values |
+| `pass_values` | Required: a non-empty subset of the vocabulary |
+| `blocking_values` | A subset of the vocabulary, disjoint from `pass_values`, that vetoes |
+| `min_pass` | Required: 1 ≤ `min_pass` ≤ number of reviewers |
+| `pinned_to` | Required: reference every counted verdict must be pinned to (e.g. the commit reviewed) |
+| `forbidden_inputs` | Stores or inputs no reviewer may depend on, directly or transitively through bindings — including context a recovery loop injects (`${_recovery.*}`) — (names that are neither inputs nor stores of steps running before the quorum step: V107; a dependency: F504) |
+| `require_fresh_context` | Every reviewer binds `fresh_context: true` (F504 otherwise) |
+| `require_model_families` | Families the reviewers must cover; F504 when every reviewer binds a literal family and they do not cover the set (otherwise checked at runtime) |
 
-A verdict counts once per reviewer, only if pinned to the resolved
-`pinned_to` and in the vocabulary. The step is compliant iff no counted
-verdict is blocking, passes ≥ `min_pass`, and model-family coverage holds;
-otherwise F504.
+A missing required field is S304; a malformed value is S303; `verdicts` and
+`pinned_to` must be references; unknown fields are W604.
+
+A verdict counts once per reviewer: only if its `reviewer_id` is a
+reviewer delegate's agent, its `pinned` equals the resolved `pinned_to`,
+its value is in the vocabulary, it is the first from that reviewer, and
+(when required) the delegate's `effective` settings show a fresh context.
+The step is compliant iff no counted verdict is blocking, passes ≥
+`min_pass`, and model-family coverage holds; otherwise F504. The output
+gains `tally` (`passes`, `blocks`, `abstains`, `voters`).
 
 ---
 
@@ -1271,6 +1311,10 @@ Field names starting with `x-` are reserved for vendor extensions.
 - Canonical schemas: `event_schema.yaml` 1.1.0 (`source.kind` gains
   `agent`); `world_state_schema.yaml` 1.1.0 (action status `rejected` and
   `expired`, and the `approval` record of §5.14)
+- `review_verdict_schema.yaml` 1.0.0 for quorum verdicts (§5.16)
+- Ontology: `delegate` inputs `fresh_context`, `model_family`, `role` and
+  output `effective`; `receive`/`synchronize` input `accept_from`; received
+  items' `sender`; `constrain` output `tally` (§5.15, §5.16)
 
 ---
 

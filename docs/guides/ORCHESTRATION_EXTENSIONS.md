@@ -14,12 +14,11 @@ the rationale is in [RFC-0003](../../spec/RFC-0003-orchestration-extensions.md).
 | `recovery@1` | Escalation to handler steps | Yes |
 | `wait@1` | Waiting for an event | Yes |
 | `approval@1` | Structured, bound approval | Yes |
-| `delegation@1` | Delegation hints and sender filtering | Not yet |
-| `quorum@1` | Independent review quorums | Not yet |
+| `delegation@1` | Delegation hints and sender filtering | Yes |
+| `quorum@1` | Independent review quorums | Yes |
 
-The reference validator refuses a workflow that declares an extension it
-does not validate yet (V106), and reports that extension's fields as unknown
-(W604) when they are used without the declaration.
+The reference validator checks all six. A workflow that declares any other
+extension (or another major version) is refused (V106).
 
 ## Declaring the extensions you use
 
@@ -227,6 +226,75 @@ and what the decision binds to:
 - Decisions are recorded on the world state's action record
   (`world_state_schema.yaml` 1.1.0): status `approved`, `rejected` or
   `expired`, with an `approval` entry holding the digest and approvers.
+
+## Delegation hints (`delegation@1`)
+
+`delegate` can ask for the conditions a delegate runs under, and the host
+reports what it actually used as `effective`:
+
+```yaml
+- capability: delegate
+  purpose: Review the change independently.
+  store_as: review_a
+  input_bindings:
+    task:
+      review: "${diff_out.data: object}"
+    agent: reviewer-a
+    fresh_context: true      # start without this agent's context
+    model_family: claude     # run on this model family
+    role: reviewer
+```
+
+`receive` and `synchronize` take `accept_from`, a list of principals:
+items from anyone else are dropped (and counted), and each kept item
+carries the host-authenticated `sender`.
+
+```yaml
+- capability: receive
+  purpose: Collect the reviewers' verdicts.
+  store_as: verdicts_out
+  input_bindings:
+    accept_from: [reviewer-a, reviewer-b]
+```
+
+## Review quorums (`quorum@1`)
+
+A blocking `constrain` step can require a quorum of independent reviews
+before the run goes on:
+
+```yaml
+- capability: constrain
+  purpose: Require two approvals and no request for changes.
+  store_as: quorum_out
+  input_bindings:
+    target: ${verdicts_out.data}
+    constraints: [two_independent_approvals]
+    action_on_violation: block   # required: a failed quorum stops the run
+  quorum:
+    verdicts: ${verdicts_out.data}        # review_verdict items
+    reviewers: [review_a, review_b]       # earlier delegate steps
+    vocabulary: [approve, request_changes, abstain]
+    pass_values: [approve]
+    blocking_values: [request_changes]    # any one vetoes
+    min_pass: 2
+    pinned_to: ${change_ref}              # what every verdict must be about
+    forbidden_inputs: [author_notes]      # reviewers must not see these
+    require_fresh_context: true
+    require_model_families: [claude, gpt]
+```
+
+- A verdict ([`review_verdict_schema.yaml`](../../schemas/review_verdict_schema.yaml))
+  has `reviewer_id`, `value` and `pinned`. It counts once per reviewer, and
+  only if it is about the resolved `pinned_to` and uses the vocabulary.
+- Reviewers must be `delegate` steps that run before the quorum, to
+  distinct agents (V107, F504).
+- Independence is checked statically where the bindings are literal: a
+  reviewer that reads a forbidden input, directly, through other steps or
+  through context a recovery loop injects,
+  one without `fresh_context: true` when it is required, or literal model
+  families that cannot cover `require_model_families` are F504.
+- At run time the step is compliant when no counted verdict blocks and
+  at least `min_pass` pass; its output gains a `tally`.
 
 ## Durations
 

@@ -20,5 +20,15 @@ output_schema:
     agent:
       type: string
       description: Assigned agent
+    effective:
+      type: object
+      description: The delegation settings actually used, as attested by the host
+      properties:
+        fresh_context:
+          type: boolean
+        model_family:
+          type: string
+        role:
+          type: string
     evidence_anchors:
       type: array

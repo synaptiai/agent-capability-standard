@@ -349,6 +349,10 @@
           "$ref": "#/$defs/approval",
           "description": "How the step's approval is obtained and bound (STANDARD v1.1 §5.14; needs approval@1). Only where approval is required."
         },
+        "quorum": {
+          "$ref": "#/$defs/quorum",
+          "description": "Count independent reviews (STANDARD v1.1 §5.16; needs quorum@1). Only on a constrain step that binds action_on_violation: block."
+        },
         "handler": {
           "type": "boolean",
           "description": "An invoke step that runs only as an escalation target (STANDARD v1.1 §5.11; needs recovery@1)."
@@ -444,6 +448,56 @@
           "enum": ["defer_to_queue", "skip", "fail"],
           "default": "fail",
           "description": "What an unattended run does here: queue the action and end deferred, skip the step, or fail with F502."
+        }
+      }
+    },
+    "quorum": {
+      "type": "object",
+      "required": ["verdicts", "reviewers", "vocabulary", "pass_values", "min_pass", "pinned_to"],
+      "additionalProperties": true,
+      "properties": {
+        "verdicts": { "type": "string", "description": "Reference to the reviews (review_verdict_schema.yaml#/review_verdict items)." },
+        "reviewers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "store_as names of earlier delegate steps, each a distinct agent."
+        },
+        "vocabulary": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "The verdict values a reviewer may give."
+        },
+        "pass_values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "Vocabulary values that count as a pass."
+        },
+        "blocking_values": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "Vocabulary values that veto, disjoint from pass_values."
+        },
+        "min_pass": { "type": "integer", "minimum": 1, "description": "Passes needed; at most the number of reviewers." },
+        "pinned_to": { "type": "string", "description": "Reference every counted verdict must be pinned to (e.g. the commit reviewed)." },
+        "forbidden_inputs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "Stores or inputs no reviewer may depend on, directly or transitively."
+        },
+        "require_fresh_context": { "type": "boolean", "description": "Every reviewer binds fresh_context: true." },
+        "require_model_families": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "Model families the reviewers must cover between them."
         }
       }
     },

@@ -88,7 +88,15 @@ Re-planned after D-lang (Rust core): the validator and executor move into
         malformed waits, no duplicate timeout diagnostics, saturating
         liveness window, references required in correlate/shows/recheck,
         W606 not repeated for malformed approvals, doc fixes.
-  - [ ] S5d delegation@1 and quorum@1 (ontology inputs, review verdicts).
+  - [x] S5d delegation@1 and quorum@1: ontology inputs and outputs
+        (`fresh_context`, `model_family`, `role`, `effective`,
+        `accept_from`, `sender`, `tally`), review_verdict_schema, V106 for
+        undeclared hints, quorum structure, reviewers as earlier distinct
+        delegates, transitive independence check (F504). Review: context
+        injected by recovery loops counts as a read; the walk is one cached
+        reverse pass per distinct forbidden set (cycle-safe); duplicate
+        reviewers and malformed lists reported once; fixtures fail for one
+        reason each; migration note for the new delegation inputs.
 - [ ] S6 Sans-IO executor in the core + Python driver + runtime fixtures.
 - [ ] S7 RFC-0003, STANDARD v1.1.0, EDGE_TYPES errata, docs, changelogs;
       Q3 issue + #114 reply drafts (not posted).

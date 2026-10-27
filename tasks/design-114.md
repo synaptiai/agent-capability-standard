@@ -107,9 +107,10 @@ meaning. New codes:
   `digits.digits[.digits]`, nothing else.
 * `workflow_extensions`: `supports_*` booleans (advisory) and `requires:
   ["name@major"]`. Known: `triggers@1`, `recovery@1`, `wait@1`, `approval@1`,
-  `delegation@1`, `quorum@1`. Unknown name or major → V106; a specified
-  extension this validator does not implement yet → V106 (implemented:
-  `extensions::IMPLEMENTED`). A non-mapping `workflow_extensions`, a
+  `delegation@1`, `quorum@1` (`extensions::EXTENSIONS`; all checked).
+  Unknown name or major → V106; an extension is listed there only together
+  with its checks, since a validator must not accept a declaration it does
+  not check. A non-mapping `workflow_extensions`, a
   non-list `requires`, a non-string entry or a duplicate → S303, and then
   extension fields are not reported again as undeclared.
 * Must-understand: each extension's fields may only be used when the
@@ -391,6 +392,9 @@ reask)}, expires?, when_unattended: defer_to_queue|skip|fail (default fail)}`
 * Ontology: delegate inputs `fresh_context`, `model_family`, `role`; output
   `effective {fresh_context, model_family, role}`. receive and synchronize
   input `accept_from: array<string>`; receive data items gain `sender`.
+* Static (validate/delegation.rs): binding any of these inputs without
+  `delegation@1` → V106 per input; otherwise they are typed by the
+  ontology like any input.
 * Runtime: receive items count only if the host-authenticated `principal` is
   in `accept_from`; others are dropped and counted. `sender` = principal.
 
@@ -402,13 +406,26 @@ forbidden_inputs?: [store_as], require_fresh_context?: bool,
 require_model_families?: [str]}`
 
 * Only on `constrain` with literal `action_on_violation: block` (S303).
-  reviewers must be earlier delegate steps (V107). vocabulary ≥ 2 unique;
-  pass_values ⊆ vocabulary, non-empty; blocking_values ⊆ vocabulary,
-  disjoint from pass_values; 1 ≤ min_pass ≤ |reviewers| (S303).
+  Required keys (S304): verdicts, reviewers, vocabulary, pass_values,
+  min_pass, pinned_to; `verdicts`/`pinned_to` must be `${...}` references
+  (S303) and are existence-checked. reviewers must be delegate steps listed
+  earlier and not in the quorum step's parallel group (V107), to distinct
+  literal agents (F504: a verdict counts once per agent). vocabulary ≥ 2
+  unique; pass_values ⊆ vocabulary, non-empty; blocking_values ⊆
+  vocabulary, disjoint from pass_values; 1 ≤ min_pass ≤ |reviewers| (S303).
+  Unknown `forbidden_inputs` names → V107.
 * Independence (F504): no reviewer's bindings depend, directly or
-  transitively, on a forbidden store; require_fresh_context → each reviewer
-  binds literal `fresh_context: true`; require_model_families → literal
-  model families cover the set (non-literal → checked at runtime).
+  transitively, on a forbidden store or input; require_fresh_context → each
+  reviewer binds literal `fresh_context: true`; require_model_families →
+  literal model families cover the set (any non-literal → checked at
+  runtime). Dependencies (validate/quorum.rs `Independence`): a reverse
+  "who reads what" graph is built once per workflow from every step's
+  bindings (duplicate names included), with each recovery
+  `inject_context` value read through the root `_recovery`; each distinct
+  forbidden set is propagated breadth-first over it once (cached across
+  quorum steps), recording per store the next hop and the forbidden store
+  reached. Linear per distinct forbidden set, safe on cycles, and each
+  reviewer's diagnostic is O(1). Reviewers listed twice are judged once.
 * Runtime (executor evaluates; no host call for this step): a verdict counts
   if its reviewer_id equals a reviewer delegate's `agent`, its `pinned`
   equals the resolved pinned_to, its value is in the vocabulary, it is the

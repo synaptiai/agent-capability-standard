@@ -1,0 +1,57 @@
+# Standard version: 1.1.0
+# Reviewers that do not meet the quorum's independence requirements
+# (STANDARD v1.1 §5.16): one keeps its context while fresh contexts are
+# required, and both run on one model family while two are required. F504.
+same_family_review:
+  goal: Review a change.
+  risk: medium
+  workflow_extensions:
+    requires: [delegation@1, quorum@1]
+  inputs:
+    change_ref: {type: string, required: true}
+    author_notes: {type: string, required: true}
+  steps:
+  - capability: retrieve
+    purpose: Fetch the diff.
+    store_as: diff_out
+    input_bindings:
+      target: ${change_ref}
+  - capability: delegate
+    purpose: First review.
+    store_as: review_a
+    input_bindings:
+      task:
+        diff: "${diff_out.data: object}"
+      agent: reviewer-a
+      fresh_context: true
+      model_family: claude
+  - capability: delegate
+    purpose: Second review.
+    store_as: review_b
+    input_bindings:
+      task:
+        diff: "${diff_out.data: object}"
+      agent: reviewer-b
+      fresh_context: false
+      model_family: claude
+  - capability: receive
+    purpose: Collect verdicts.
+    store_as: verdicts_out
+  - capability: constrain
+    purpose: Require two approvals.
+    store_as: quorum_out
+    input_bindings:
+      target: ${verdicts_out.data}
+      constraints: [two_approvals]
+      action_on_violation: block
+    quorum:
+      verdicts: ${verdicts_out.data}
+      reviewers: [review_a, review_b]
+      vocabulary: [approve, reject]
+      pass_values: [approve]
+      blocking_values: [reject]
+      min_pass: 2
+      pinned_to: ${change_ref}
+      forbidden_inputs: [author_notes]
+      require_fresh_context: true
+      require_model_families: [claude, gpt]

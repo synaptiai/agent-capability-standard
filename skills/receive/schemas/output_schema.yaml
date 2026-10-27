@@ -16,6 +16,10 @@ output_schema:
       type: array
       items:
         type: object
+        properties:
+          sender:
+            type: string
+            description: The host-authenticated principal that sent the item
       description: Received data/events
     source:
       type: string

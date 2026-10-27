@@ -7,9 +7,11 @@
 
 mod approval;
 mod bindings;
+mod delegation;
 mod exprs;
 mod extensions;
 mod invoke;
+mod quorum;
 mod recovery;
 mod semantics;
 mod wait;
@@ -392,6 +394,7 @@ impl WorkflowCheck<'_> {
                 }
             }
         }
+        let mut independence = quorum::Independence::new(steps);
         let mut invocations = Vec::new();
         let mut placed: Vec<semantics::Placed<'_>> = Vec::new();
         let mut placed_at: HashMap<usize, usize> = HashMap::new();
@@ -539,6 +542,17 @@ impl WorkflowCheck<'_> {
                 self.ctx,
                 &loc,
                 step,
+                &declared,
+                &checker,
+                scope,
+                self.report,
+            );
+            delegation::check(&loc, step, &declared, self.report);
+            quorum::check(
+                &loc,
+                step,
+                &quorum::Earlier::new(steps, &owners, i),
+                &mut independence,
                 &declared,
                 &checker,
                 scope,

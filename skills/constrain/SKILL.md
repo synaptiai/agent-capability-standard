@@ -32,6 +32,12 @@ Execute **constrain** to evaluate proposed actions against defined policies, enf
 | `enforcement_level` | No | enum | strict (block), advisory (warn), audit (log only) |
 | `context` | No | object | Additional context for policy evaluation (user, session, etc.) |
 
+In a workflow, a constrain step that blocks can count independent reviews
+with a `quorum` (Standard v1.1 `quorum@1`): earlier `delegate` steps are
+the reviewers, and the output gains a `tally` of passes, blocks and
+abstentions. See
+[ORCHESTRATION_EXTENSIONS.md](../../docs/guides/ORCHESTRATION_EXTENSIONS.md).
+
 ## Procedure
 
 1) **Identify applicable policies**: Find all policies relevant to the action

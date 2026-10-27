@@ -7,9 +7,7 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 ### Added — Standard v1.1.0 (draft) and RFC-0003 (#114)
 - **[STANDARD-v1.1.0](STANDARD-v1.1.0.md)** and
   **[RFC-0003](RFC-0003-orchestration-extensions.md)** (Accepted). v1.0.0
-  remains supported; Appendix C of v1.1.0 lists every change. Sections marked
-  *pending reference implementation* are normative but not yet enforced by the
-  reference validator.
+  remains supported; Appendix C of v1.1.0 lists every change.
 - **Condition expression language (§5.8)** for `condition`, `gates[].when` and
   `failure_modes[].when`: a small grammar that is a strict subset of CEL, with
   fixed limits, fail-safe error handling per site, static type checks and null
@@ -21,10 +19,11 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   recovery and escalation, wait, approval, delegation, quorum — opted into
   with `workflow_extensions.requires`.
   Extension fields are must-understand (V106 when used undeclared).
-  Enforced so far: declarations, `triggers@1` (§5.10, with the duration
-  grammar of §5.10.1), `recovery@1` (§5.11, §5.12), `wait@1` (§5.13) and
-  `approval@1` (§5.14). A validator must
-  refuse a declared extension it does not check (V106).
+  The reference validator enforces all of them: declarations, `triggers@1`
+  (§5.10, with the duration grammar of §5.10.1), `recovery@1` (§5.11,
+  §5.12), `wait@1` (§5.13), `approval@1` (§5.14), `delegation@1` (§5.15) and
+  `quorum@1` (§5.16). A validator must refuse a declared extension it does
+  not check (V106).
 - **Effective `requires_checkpoint` (§5.2.1)** raised by a step is enforced:
   F501 when no checkpoint runs before it.
 - **`event_schema.yaml` 1.1.0:** `source.kind` gains `agent`, so events from
@@ -32,6 +31,11 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 - **`world_state_schema.yaml` 1.1.0:** `ActionRecord.status` gains
   `rejected` and `expired`, and an optional `approval` record binds the
   action to the decision (§5.14).
+- **`review_verdict_schema.yaml` 1.0.0** for the verdicts a quorum counts,
+  and ontology additions for delegation and quorums: `delegate` inputs
+  `fresh_context`, `model_family`, `role` and output `effective`;
+  `receive`/`synchronize` input `accept_from`; received items' `sender`;
+  `constrain` output `tally` (§5.15, §5.16).
 
 ### Changed — clarifications of 1.0 semantics (#114)
 - **Edges (§4.3, [EDGE_TYPES](EDGE_TYPES.md)).** `precedes` orders two

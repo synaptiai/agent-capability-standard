@@ -52,6 +52,7 @@ pub(crate) const STEP_KEYS: &[&str] = &[
     "handler",
     "wait",
     "approval",
+    "quorum",
     "resolution_strategy",
     "conflict_resolution_strategies",
 ];

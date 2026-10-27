@@ -509,6 +509,16 @@ class TestJsonSchemaValidation:
             {"wait": {"source_kind": "api"}},
             {"wait": {"event_type": "e"}},
             {
+                "quorum": {
+                    "verdicts": "${v}",
+                    "reviewers": ["r"],
+                    "vocabulary": ["ok"],
+                    "pass_values": ["ok"],
+                    "min_pass": 1,
+                    "pinned_to": "${p}",
+                }
+            },
+            {
                 "wait": {
                     "event_type": "e",
                     "liveness": {"mode": "push", "interval": "0s"},
@@ -530,6 +540,7 @@ class TestJsonSchemaValidation:
             "reserved-store-as",
             "wait-without-event-type",
             "wait-without-timeout",
+            "quorum-one-word-vocabulary",
             "zero-liveness-interval",
             "mandate-without-ref",
             "human-with-mandate-ref",
@@ -551,6 +562,25 @@ class TestJsonSchemaValidation:
             jsonschema.validate(
                 {"w": {"goal": "g", "risk": "low", "steps": [step]}}, workflow_schema
             )
+
+    def test_review_verdict_schema_matches_the_executor(self) -> None:
+        """Quorum verdicts (STANDARD v1.1 §5.16): the fields the executor
+        counts are the schema's required ones."""
+        import yaml
+
+        schema = yaml.safe_load(
+            (ROOT / "schemas" / "review_verdict_schema.yaml").read_text()
+        )
+        verdict = schema["review_verdict"]
+        assert verdict["type"] == "object"
+        assert verdict["required"] == ["reviewer_id", "value", "pinned"]
+        assert set(verdict["properties"]) >= {
+            "reviewer_id",
+            "value",
+            "pinned",
+            "evidence_anchors",
+            "notes",
+        }
 
     def test_workflow_schema_rejects_malformed_spec_version(
         self, workflow_schema

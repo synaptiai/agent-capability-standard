@@ -1,0 +1,38 @@
+# Standard version: 1.1.0
+# Delegation hints, sender filtering and a quorum used without declaring
+# delegation@1 and quorum@1 (STANDARD v1.1 §5.9). V106: a 1.0 consumer
+# would ignore them, reusing the reviewer's context and counting anyone's
+# verdict.
+undeclared_review:
+  goal: Review without declaring it.
+  risk: medium
+  inputs:
+    change_ref: {type: string, required: true}
+  steps:
+  - capability: delegate
+    purpose: A fresh-context review.
+    store_as: review_a
+    input_bindings:
+      task:
+        change: ${change_ref}
+      agent: reviewer-a
+      fresh_context: true
+  - capability: receive
+    purpose: Collect the verdict from the reviewer only.
+    store_as: verdicts_out
+    input_bindings:
+      accept_from: [reviewer-a]
+  - capability: constrain
+    purpose: Require the approval.
+    store_as: quorum_out
+    input_bindings:
+      target: ${verdicts_out.data}
+      constraints: [approval]
+      action_on_violation: block
+    quorum:
+      verdicts: ${verdicts_out.data}
+      reviewers: [review_a]
+      vocabulary: [approve, reject]
+      pass_values: [approve]
+      min_pass: 1
+      pinned_to: ${change_ref}

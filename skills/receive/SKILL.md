@@ -33,6 +33,11 @@ Execute **receive** to ingest incoming data from external sources and parse it i
 | `validation_schema` | No | string | Schema to validate parsed data against |
 | `encoding` | No | string | Character encoding. Default: `utf-8` |
 | `max_size` | No | string | Maximum input size to accept (e.g., "10MB"). Default: "100MB" |
+| `accept_from` | No | array[string] | Principals to accept items from; items from others are dropped and counted, and each kept item carries its authenticated `sender` (Standard v1.1 `delegation@1`) |
+
+In a workflow, a step can also `wait` for a matching event with a required
+timeout (Standard v1.1 `wait@1`); see
+[ORCHESTRATION_EXTENSIONS.md](../../docs/guides/ORCHESTRATION_EXTENSIONS.md).
 
 ## Procedure
 

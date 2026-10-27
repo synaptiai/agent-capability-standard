@@ -10,8 +10,11 @@ use crate::cron::Cron;
 use crate::diag::{Code, Diagnostic};
 use crate::{duration, yaml};
 
-/// Extensions Standard v1.1 defines, as `name@major` (§5.9).
-pub(crate) const SPECIFIED: &[&str] = &[
+/// The extensions Standard v1.1 defines, as `name@major` (§5.9); this
+/// validator checks all of them. Must-understand only works if a consumer
+/// never claims an extension it does not check, so add one here only
+/// together with its checks; any other declaration is refused (V106).
+pub(crate) const EXTENSIONS: &[&str] = &[
     "triggers@1",
     "recovery@1",
     "wait@1",
@@ -19,11 +22,6 @@ pub(crate) const SPECIFIED: &[&str] = &[
     "delegation@1",
     "quorum@1",
 ];
-
-/// The extensions this validator implements. A workflow that requires any
-/// other is refused (V106): must-understand only works if a consumer never
-/// claims an extension it does not check.
-pub(crate) const IMPLEMENTED: &[&str] = &["triggers@1", "recovery@1", "wait@1", "approval@1"];
 
 const TRIGGER_KEYS: &[&str] = &["kind", "schedule", "event", "attendance"];
 const SCHEDULE_KEYS: &[&str] = &["cron", "every", "timezone", "overlap"];
@@ -110,20 +108,12 @@ impl Declared {
                     Code::SchemaValidationFailed,
                     format!("extension '{name}' is listed twice"),
                 )));
-            } else if !SPECIFIED.contains(&name.as_str()) {
+            } else if !EXTENSIONS.contains(&name.as_str()) {
                 report.push(at_item(Diagnostic::new(
                     Code::UnsupportedExtension,
                     format!(
-                        "extension '{name}' is not defined by the standard ({}); a consumer must not run a workflow that requires an extension it does not implement",
-                        SPECIFIED.join(", ")
-                    ),
-                )));
-            } else if !IMPLEMENTED.contains(&name.as_str()) {
-                report.push(at_item(Diagnostic::new(
-                    Code::UnsupportedExtension,
-                    format!(
-                        "extension '{name}' is not implemented by this validator (implemented: {}), so it cannot check the workflow's use of it",
-                        IMPLEMENTED.join(", ")
+                        "extension '{name}' is not one this validator checks ({}); a consumer must not run a workflow that requires an extension it does not implement",
+                        EXTENSIONS.join(", ")
                     ),
                 )));
             } else {
@@ -566,11 +556,15 @@ mod tests {
             ))
             .is_empty()
         );
-        // Specified, but this validator cannot check it yet: refused.
+        assert!(
+            codes(wf(json!({"workflow_extensions": {"requires": [
+                "triggers@1", "recovery@1", "wait@1", "approval@1", "delegation@1", "quorum@1"
+            ]}})))
+            .is_empty()
+        );
+        // Another major version is not one this validator checks.
         assert_eq!(
-            codes(wf(
-                json!({"workflow_extensions": {"requires": ["quorum@1"]}})
-            )),
+            codes(wf(json!({"workflow_extensions": {"requires": ["wait@2"]}}))),
             ["V106"]
         );
         assert_eq!(

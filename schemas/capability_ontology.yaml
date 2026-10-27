@@ -217,6 +217,12 @@ nodes:
       timeout:
         type: string
         description: Wait timeout
+      accept_from:
+        type: array
+        items:
+          type: string
+        description: Principals to accept items from; items from others are dropped
+          and counted (delegation@1, STANDARD v1.1 §5.15)
   output_schema:
     type: object
     required:
@@ -227,6 +233,10 @@ nodes:
         type: array
         items:
           type: object
+          properties:
+            sender:
+              type: string
+              description: The host-authenticated principal that sent the item
         description: Received data/events
       source:
         type: string
@@ -1257,6 +1267,21 @@ nodes:
       actions_taken:
         type: array
         description: Enforcement actions
+      tally:
+        type: object
+        description: Review quorum count, when the step has a quorum (quorum@1, STANDARD
+          v1.1 §5.16)
+        properties:
+          passes:
+            type: integer
+          blocks:
+            type: integer
+          abstains:
+            type: integer
+          voters:
+            type: array
+            items:
+              type: string
       evidence_anchors:
         type: array
 - id: audit
@@ -1386,6 +1411,16 @@ nodes:
       constraints:
         type: object
         description: Delegation constraints
+      fresh_context:
+        type: boolean
+        description: Start the delegate without this agent's context (delegation@1,
+          STANDARD v1.1 §5.15)
+      model_family:
+        type: string
+        description: Model family the delegate should run on (delegation@1)
+      role:
+        type: string
+        description: Role the delegate takes, e.g. reviewer (delegation@1)
   output_schema:
     type: object
     required:
@@ -1400,6 +1435,16 @@ nodes:
       agent:
         type: string
         description: Assigned agent
+      effective:
+        type: object
+        description: The delegation settings actually used, as attested by the host
+        properties:
+          fresh_context:
+            type: boolean
+          model_family:
+            type: string
+          role:
+            type: string
       evidence_anchors:
         type: array
 - id: synchronize
@@ -1422,6 +1467,12 @@ nodes:
       timeout:
         type: string
         description: Sync timeout
+      accept_from:
+        type: array
+        items:
+          type: string
+        description: Principals to accept state from (delegation@1, STANDARD v1.1
+          §5.15)
   output_schema:
     type: object
     required:

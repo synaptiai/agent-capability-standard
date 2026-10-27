@@ -1,0 +1,40 @@
+# Standard version: 1.1.0
+# Malformed quorums (STANDARD v1.1 §5.16): a quorum on a step that cannot
+# block, a reviewer that is not a delegate step, a pass value outside the
+# vocabulary, and no min_pass. S303, S304 and V107.
+bad_quorum:
+  goal: Count reviews badly.
+  risk: medium
+  workflow_extensions:
+    requires: [quorum@1]
+  inputs:
+    change_ref: {type: string, required: true}
+  steps:
+  - capability: retrieve
+    purpose: Fetch the diff.
+    store_as: diff_out
+    input_bindings:
+      target: ${change_ref}
+  - capability: delegate
+    purpose: A review.
+    store_as: review_a
+    input_bindings:
+      task:
+        diff: "${diff_out.data: object}"
+      agent: reviewer-a
+  - capability: receive
+    purpose: Collect verdicts.
+    store_as: verdicts_out
+  - capability: constrain
+    purpose: Warn only, so a failed quorum would not stop anything.
+    store_as: quorum_out
+    input_bindings:
+      target: ${verdicts_out.data}
+      constraints: [approvals]
+      action_on_violation: warn
+    quorum:
+      verdicts: ${verdicts_out.data}
+      reviewers: [review_a, diff_out]
+      vocabulary: [approve, reject]
+      pass_values: [lgtm]
+      pinned_to: ${change_ref}

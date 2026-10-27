@@ -32,6 +32,12 @@ Delegate a complex task to one or more subagents by defining clear contracts, in
 | `constraints` | No | object | Global constraints (timeout, resource limits) |
 | `merge_strategy` | No | string | How to combine results (first_wins, consensus, aggregate) |
 | `failure_policy` | No | string | What to do on subtask failure (abort, continue, retry) |
+| `fresh_context` | No | boolean | Start the delegate without this agent's context, e.g. for an independent review (Standard v1.1 `delegation@1`) |
+| `model_family` | No | string | Model family the delegate should run on (`delegation@1`) |
+| `role` | No | string | Role the delegate takes, e.g. `reviewer` (`delegation@1`) |
+
+The host reports the settings it actually used as `effective` in the
+output; a review quorum (`quorum@1`, on `constrain`) relies on them.
 
 ## Procedure
 

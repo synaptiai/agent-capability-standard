@@ -30,6 +30,7 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
 | `strategy` | No | enum | Merge strategy: `merge` (combine), `replace` (latest wins), `conflict_resolve` (manual rules). Default: `merge` |
 | `conflict_rules` | No | object | Rules for conflict resolution: priority order, field-level policies, or custom handlers |
 | `target_schema` | No | string | Schema to validate merged output against |
+| `accept_from` | No | array[string] | Principals to accept state from (Standard v1.1 `delegation@1`) |
 
 ## Procedure
 
