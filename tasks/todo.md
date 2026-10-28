@@ -479,8 +479,8 @@ replace the port with 1.1c and re-script; ask the author for the gap runs;
   loop does not replace waiting delegates inside an invoked child (the
   spec is silent); pre-change dev snapshots with `replaces: null` do not
   restore (unreleased).
-- [ ] Ask the author (on #114) for gap runs 1, 2, 3, 5 as fixtures; report
+- [x] Ask the author (on #114) for gap runs 1, 2, 3, 5 as fixtures; report
   the checkin_recovery finding: `question: ${rows_out}` has no `topic`, so
   owner_decision's answer wait correlates on null and fails R402 when the
-  owner is to be interrupted.
+  owner is to be interrupted. Posted: issuecomment-6477800256.
 
