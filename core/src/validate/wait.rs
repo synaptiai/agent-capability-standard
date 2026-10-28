@@ -1,6 +1,6 @@
 //! Waiting for events (STANDARD v1.1 §5.13, design-114 §12; `wait@1`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
@@ -142,6 +142,51 @@ pub(crate) fn delay(step: &Map<String, Value>, declared: &Declared) -> Option<Du
     crate::duration::parse(text)
         .ok()
         .filter(|d| declared.has("wait@1") && !d.is_zero())
+}
+
+/// The catalog's workflows that can wait (§5.13): a step, handlers
+/// included, waits for an event or a delay, or invokes a catalog workflow
+/// that can. A run it invokes shares the caller's checkpoints, and a
+/// child's handler may wait before the caller retries or recovers, so W608
+/// counts such an `invoke` as a wait. A backward search from the workflows
+/// that wait themselves, over who invokes whom: linear in the catalog.
+pub(crate) fn workflows_that_wait(workflows: &Map<String, Value>) -> HashSet<&str> {
+    let mut callers: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut queue: Vec<&str> = Vec::new();
+    for (name, wf) in workflows.iter().filter(|(n, _)| !n.starts_with("x-")) {
+        let Some(map) = wf.as_object() else { continue };
+        // Declarations are read again only to decide this: their
+        // diagnostics come from each workflow's own check.
+        let declared = Declared::read(map, &|d| d, &mut Report::default());
+        let steps = map
+            .get("steps")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object);
+        let mut waits = false;
+        for s in steps {
+            waits |= (declared.has("wait@1") && s.get("wait").is_some_and(Value::is_object))
+                || delay(s, &declared).is_some();
+            if s.get("capability").and_then(Value::as_str) == Some("invoke") {
+                if let Some((target, _)) = super::invoke::target(s) {
+                    callers.entry(target).or_default().push(name.as_str());
+                }
+            }
+        }
+        if waits {
+            queue.push(name.as_str());
+        }
+    }
+    let mut waiting: HashSet<&str> = queue.iter().copied().collect();
+    while let Some(name) = queue.pop() {
+        for &caller in callers.get(name).into_iter().flatten() {
+            if waiting.insert(caller) {
+                queue.push(caller);
+            }
+        }
+    }
+    waiting
 }
 
 /// `delay` needs `wait@1` (V106) and must be a positive duration (S303).
@@ -431,15 +476,23 @@ pub(crate) fn spans_checkpoint(
             let Some(c) = c else { return };
             // The step's own wait, or a handler's own delay.
             let detail = if w == pos && (step.index == p.index || step.delays) {
-                "but it waits before acting".to_string()
+                "but it waits before acting; take a new checkpoint after the wait".to_string()
+            } else if placed[w].nested {
+                format!(
+                    "but step {} invokes a workflow that waits; take a new checkpoint after the invoke",
+                    placed[w].index
+                )
             } else {
-                format!("but step {} waits after it", placed[w].index)
+                format!(
+                    "but step {} waits after it; take a new checkpoint after the wait",
+                    placed[w].index
+                )
             };
             report.push(
                 Diagnostic::new(
                     Code::WaitSpansCheckpoint,
                     format!(
-                        "'{}' relies on the checkpoint at step {}, {detail}; take a new checkpoint after the wait",
+                        "'{}' relies on the checkpoint at step {}, {detail}",
                         step.capability, placed[c].index
                     ),
                 )
@@ -450,8 +503,9 @@ pub(crate) fn spans_checkpoint(
             );
         };
         // A waiting delegate delegates before it waits; a delay comes
-        // before anything the step does.
-        let waits_before_acting = p.delays || (p.waits && p.capability != "delegate");
+        // before anything the step does; an invoke uses its checkpoint
+        // before the run it invokes waits.
+        let waits_before_acting = p.delays || (p.waits && !p.nested && p.capability != "delegate");
         if p.requires_checkpoint {
             if let Some(w) = covers(waits_before_acting) {
                 flag(p, w);
@@ -729,6 +783,78 @@ mod tests {
         let mut grouped = observe(json!("1m"));
         grouped["parallel_group"] = json!("g");
         assert_eq!(c(json!([grouped]), &["wait@1"]), ["S303"]);
+    }
+
+    #[test]
+    fn an_invoke_of_a_waiting_workflow_spans_a_checkpoint() {
+        let call = |target: &str| {
+            json!({"capability": "invoke", "purpose": "p", "store_as": format!("i_{target}"),
+                   "workflow_id": target, "input_bindings": {"workflow": target, "input": {}}})
+        };
+        let wf = |steps: Value| {
+            json!({"goal": "g", "risk": "low", "spec_version": "1.1",
+                   "workflow_extensions": {"requires": ["wait@1"]}, "steps": steps})
+        };
+        let waiting = wf(json!([receive(
+            "r",
+            json!("1h"),
+            json!({"event_type": "e"})
+        )]));
+        let quiet = wf(json!([st("observe", "o")]));
+        let mut delayed = st("observe", "o");
+        delayed["delay"] = json!("1m");
+        // Only its handler waits: the caller retries or recovers after it.
+        let mut escalates = wf(json!([
+            {"capability": "observe", "purpose": "p", "store_as": "o",
+             "input_bindings": {"target": "t"},
+             "failure_modes": [{"condition": "c", "on_error": "R402", "action": "escalate",
+                                "recovery": {"goto_step": "h"}}]},
+            {"capability": "invoke", "purpose": "p", "store_as": "h", "handler": true,
+             "workflow_id": "waits", "input_bindings": {"workflow": "waits", "input": {}}}
+        ]));
+        escalates["workflow_extensions"]["requires"] = json!(["wait@1", "recovery@1"]);
+        let with = |steps: Value| {
+            let c = json!({"w": wf(steps), "waits": waiting, "quiet": quiet,
+                           "relays": wf(json!([call("waits")])),
+                           "delays": wf(json!([delayed])), "escalates": escalates});
+            let report = super::super::validate_catalog(&super::super::tests::ctx(), &c, None);
+            report
+                .diagnostics
+                .iter()
+                .filter(|d| d.code.as_str() == "W608")
+                .map(|d| (d.location["step"].clone(), d.message.clone()))
+                .collect::<Vec<_>>()
+        };
+        // A run it invokes waits, so the checkpoint before it is stale.
+        let found = with(json!([st("checkpoint", "c"), call("waits"), mutate("m")]));
+        let [(step, message)] = found.as_slice() else {
+            panic!("{found:?}")
+        };
+        assert_eq!(step, &json!(2));
+        assert!(
+            message.contains("step 1 invokes a workflow that waits"),
+            "{message}"
+        );
+        // Transitively, too.
+        assert_eq!(
+            with(json!([st("checkpoint", "c"), call("relays"), mutate("m")])).len(),
+            1
+        );
+        // A delay, a handler's wait, and a target named only in the
+        // bindings count as well.
+        for target in ["delays", "escalates"] {
+            let found = with(json!([st("checkpoint", "c"), call(target), mutate("m")]));
+            assert_eq!(found.len(), 1, "{target}: {found:?}");
+        }
+        let mut by_binding = call("waits");
+        by_binding.as_object_mut().unwrap().remove("workflow_id");
+        assert_eq!(
+            with(json!([st("checkpoint", "c"), by_binding, mutate("m")])).len(),
+            1
+        );
+        // A workflow that does not wait, or a checkpoint after the invoke.
+        assert!(with(json!([st("checkpoint", "c"), call("quiet"), mutate("m")])).is_empty());
+        assert!(with(json!([call("waits"), st("checkpoint", "c"), mutate("m")])).is_empty());
     }
 
     #[test]

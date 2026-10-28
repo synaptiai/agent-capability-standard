@@ -246,6 +246,7 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
         }
     };
     let invoked_unattended = approval::invoked_unattended(workflows);
+    let waiting = wait::workflows_that_wait(workflows);
     let mut schema_budget = schema::MAX_EXPANDED_NODES;
     let mut invocations = Vec::new();
     for (name, wf) in workflows {
@@ -261,6 +262,7 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
                     wf,
                     header,
                     invoked_unattended: invoked_unattended.contains(name.as_str()),
+                    waiting: &waiting,
                     schema_budget: &mut schema_budget,
                     report: &mut report,
                 }
@@ -409,6 +411,9 @@ struct WorkflowCheck<'a> {
     header: Option<&'a str>,
     /// A workflow that an unattended run can invoke runs unattended too.
     invoked_unattended: bool,
+    /// The catalog's workflows that can wait, directly or through ones they
+    /// invoke (W608).
+    waiting: &'a HashSet<&'a str>,
     /// Schema nodes the catalog's input refs may still expand to, shared by
     /// every workflow: their schemas stay in memory together.
     schema_budget: &'a mut usize,
@@ -552,14 +557,19 @@ impl WorkflowCheck<'_> {
             // escalated (which may have failed before producing output),
             // and ends the run: it is outside the normal sequence, and its
             // output is never visible to other steps.
+            let delays = wait::delay(step, &declared).is_some();
+            // An invoke waits when the workflow it runs can (W608).
+            let nested = cap == "invoke"
+                && invoke::target(step).is_some_and(|(t, _)| self.waiting.contains(t));
             let here = semantics::Placed {
                 index: i,
                 capability: cap,
                 parallel_group: step.get("parallel_group").and_then(Value::as_str),
                 requires_checkpoint: node.requires_checkpoint
                     || step.get("requires_checkpoint") == Some(&Value::Bool(true)),
-                waits: waits_well || wait::delay(step, &declared).is_some(),
-                delays: wait::delay(step, &declared).is_some(),
+                waits: waits_well || delays || nested,
+                delays,
+                nested: nested && !waits_well && !delays,
             };
             let store = step.get("store_as").and_then(Value::as_str);
             let view = if plan.handlers.contains(&i) {

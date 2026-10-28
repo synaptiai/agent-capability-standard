@@ -225,7 +225,8 @@ delegates, then waits for that delegate's result (see
 - A wait can last hours, and the run may resume in another process, so a
   checkpoint taken before the wait no longer covers a later `mutate`,
   `send` or other step that requires a checkpoint (W608). Take the
-  checkpoint after the wait, not alongside it in a parallel group.
+  checkpoint after the wait, not alongside it in a parallel group. An
+  `invoke` of a workflow that waits counts as a wait.
 - A `correlate` value that resolves to null, or an `accept_from` that
   resolves to anything but a non-empty list of strings (`[null]`, say, from
   a delegation that returned no `task_id`), fails the step (R402) at once:

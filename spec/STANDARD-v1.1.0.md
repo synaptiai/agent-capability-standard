@@ -779,7 +779,12 @@ checkpoint after the wait. "Runs before" is as in §4.3: a wait in the
 checkpoint's parallel group counts (the checkpoint may finish first), one
 in the step's own group does not. A step that waits itself acts after its
 wait, so any earlier checkpoint is stale for it; a handler (§5.11) is
-judged at its earliest targeting step, including that step's own wait.
+judged at its earliest targeting step, including that step's own wait. An
+`invoke` of a catalog workflow that can wait (any of its steps, handlers
+included, waits or delays, or invokes one that can) counts as a wait: the
+run it invokes shares the caller's checkpoints, so its waits invalidate
+them too. This is conservative: a checkpoint the invoked workflow takes
+after its last wait would cover the caller's next step.
 
 **Delays.** A step may declare `delay`, a duration longer than zero (else
 S303; `wait@1`, else V106): after its condition and before-gates pass, the
@@ -1308,7 +1313,7 @@ NOT change any code's severity otherwise.
 | W605 | MISSING_SPEC_VERSION | No `spec_version` and no version header |
 | W606 | UNATTENDED_APPROVAL | An unattended trigger reaches an approval step without `when_unattended` or a standing mandate, or whose mandate cannot cover an always-ask item it uses (§5.17) |
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
-| W608 | WAIT_SPANS_CHECKPOINT | A wait sits between a checkpoint and a later step that requires one (§5.13) |
+| W608 | WAIT_SPANS_CHECKPOINT | A wait, or an invoke of a workflow that waits, sits between a checkpoint and a later step that requires one (§5.13) |
 | W609 | UNTRIGGERED_FAILURE_MODE | Structured recovery with neither `on_error` nor `when`, or a failure mode that fires only on R406 where no wait has `liveness` |
 | W610 | NULLABLE_OPERAND | An ordering operand, or the right operand of `in`, may be null |
 | W611 | CONSTANT_COMPARISON | Equality between kinds that can never be equal; `in` that can never hold |

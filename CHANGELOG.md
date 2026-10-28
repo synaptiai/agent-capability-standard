@@ -291,6 +291,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- **W608 sees waits in invoked workflows.** An `invoke` of a catalog
+  workflow that can wait (any of its steps, handlers included, or one it
+  invokes) counts as a wait, so a checkpoint taken before it no longer silently covers a later
+  `mutate` or `send`. The #114 port's checkin_recovery mutate is the first
+  case found.
 - **A recovery loop replaces every waiting delegate it runs again.** A loop
   from a later step (a blocked quorum, say) back to before the reviewers
   delegated them again without `replaces`, so the host could not cancel

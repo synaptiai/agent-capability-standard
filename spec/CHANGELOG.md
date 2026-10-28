@@ -188,6 +188,9 @@ gaps on the standard's side (RFC-0003, amendments):
   2.1.0, §4.3): a retrieved source or a search result is evidence to
   ground a claim in, alongside observe, detect, predict, attribute and
   explain.
+- **W608 through `invoke` (§5.13):** an `invoke` of a catalog workflow
+  that can wait counts as a wait, since the run it invokes invalidates the
+  caller's checkpoints.
 - **Replacing delegations on a loop (§5.13)** is stated for every waiting
   delegate from the loop's target to the step whose failure mode loops,
   even one that finished; the reference executor named only the looping

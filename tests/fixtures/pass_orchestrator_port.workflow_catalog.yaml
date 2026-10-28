@@ -2,9 +2,10 @@
 # The nine orchestrator workflows the author of #114 ported to the v1.1
 # candidate (reduced, generic names), revision 1.1d (gate `end`, step
 # `delay`, `after_deferral`, a waiting `delegate` per reviewer, annotated
-# `transform.output` references), kept as contributed. They validate
-# `--strict` with no warnings. The runtime fixtures named orchestrator_*
-# script runs of these workflows.
+# `transform.output` references), kept as contributed. They validate with
+# one warning: W608 on checkin_recovery's mutate, whose checkpoint comes
+# before the escalation, an invoke of a workflow that waits. The runtime
+# fixtures named orchestrator_* script runs of these workflows.
 intake_triage:
   goal: Turn one incoming item (owner request, mention, GitHub event, mail, thread report) into exactly
     one routed next action on the board.

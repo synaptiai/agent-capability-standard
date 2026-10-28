@@ -507,5 +507,13 @@ the gap fixtures verbatim.
   the default `failure_threshold: 3`; in gap5 the content's sender equals
   the principal; checkin_recovery's mutate binds `${checkpoint_out...}`
   across the escalation's waits.
-- [ ] Open: W608 does not see waits inside an invoked workflow.
+- [x] W608 sees waits inside invoked workflows (user: look through invoke):
+  an invoke of a catalog workflow that can wait, directly or transitively
+  and outside handlers, counts as a wait; the port gains one W608
+  (checkin_recovery step 12). Reply posted: issuecomment-6479226517.
+  Review fixes: handler waits count too (a child's handler can wait
+  before the caller retries or recovers); the walk is a linear backward
+  search (a 7000-workflow chain: 6.7 s to 0.21 s); the nested message says
+  to checkpoint after the invoke; §5.13 says the check is conservative (a
+  checkpoint the child takes after its last wait would cover the caller).
 

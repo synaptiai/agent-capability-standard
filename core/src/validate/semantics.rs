@@ -306,6 +306,8 @@ pub(crate) struct Placed<'a> {
     pub waits: bool,
     /// Whether it waits for time before anything else it does (`delay`).
     pub delays: bool,
+    /// Whether its only wait is in the workflow it invokes (W608).
+    pub nested: bool,
 }
 
 impl Placed<'_> {
