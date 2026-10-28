@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **The #114 author's orchestrator workflows as conformance fixtures.** The
+  nine workflows they ported to the v1.1 candidate are a static fixture
+  (`pass_orchestrator_port`, kept as contributed; it validates with two
+  real W601s), and thirteen runtime fixtures (`orchestrator_*`) script runs
+  of them: routing into a nested delegation, a liveness recovery, a quorum
+  that passes and one that loops after a RETHINK, a self-merge and a red
+  base that escalates to incident triage, an owner-approved and an
+  unattended (deferred) message, an owner answer with a foreign one
+  dropped, a scheduled sweep, a prod stop and both kinds of daily report
 - **Read-only reviewers and per-reviewer waits (#114).** `delegate` takes
   `read_only` (attested in `effective`), and `quorum.require_read_only`
   requires it of every reviewer. `wait` is allowed on `delegate`: the step

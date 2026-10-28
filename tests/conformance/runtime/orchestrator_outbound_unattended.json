@@ -1,0 +1,673 @@
+{
+  "description": "Unattended, the send waits in the queue (when_unattended: defer_to_queue) and the steps that read it are deferred with it. The run passes no `run.unattended` flag: the adopter's own skip gate on that flag would skip the send before the deferral.",
+  "catalog": {
+    "outbound_message": {
+      "goal": "Send one message that the owner would send - right channel, right people, grounded text, signed - through the owner's approval path, then prove it arrived and log it.",
+      "risk": "high",
+      "description": "Order follows the ontology: constrain (policy) -> generate (draft) -> constrain\n(text check) -> checkpoint -> send -> verify (read back) -> audit. An unattended\nrun never sends: approval defers the send to an ActionRecord with status planned, and\nthe next brief or digest shows it at the top. Before a deferred send, the source\nis read again; if it changed, the message is planned again.\n",
+      "workflow_extensions": {
+        "requires": [
+          "approval@1",
+          "triggers@1"
+        ]
+      },
+      "triggers": [
+        {
+          "kind": "invoke",
+          "attendance": "attended"
+        }
+      ],
+      "inputs": {
+        "request": {
+          "type": "object",
+          "properties": {
+            "intent": {
+              "type": "string"
+            },
+            "channel": {
+              "type": "string",
+              "enum": [
+                "teams",
+                "mail",
+                "chat",
+                "pr_comment",
+                "ticket_comment",
+                "wiki_comment"
+              ]
+            },
+            "place_of_ask": {
+              "type": "string"
+            },
+            "recipients": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "source_refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "outbound_rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "text_rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style_key": {
+              "type": "string"
+            }
+          }
+        },
+        "run": {
+          "type": "object",
+          "properties": {
+            "unattended": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "Read the place of the ask and its recent history (the thread plus the last 2 h of the channel); never repeat or contradict what others already said.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "context_out",
+          "input_bindings": {
+            "target": "${request.place_of_ask}",
+            "format": "thread_and_last_2h"
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "Find earlier messages to the same people today, and any \"stop\" or \"not mine\" reply (one reminder per person per day; honour opt-outs).",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "prior_sends_out",
+          "input_bindings": {
+            "query": "${request.recipients: array<object>}",
+            "scope": "sent_items_today+opt_out_replies",
+            "limit": 20
+          }
+        },
+        {
+          "capability": "recall",
+          "purpose": "Load the owner's style and signature rules.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "style_out",
+          "input_bindings": {
+            "key": "${profile.style_key}"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "Policy before drafting - channel in {channels}; recipients by ID and inside @example.com; not on the Never list; no chat writes for new users; reminder cap; opt-outs.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "policy_out",
+          "input_bindings": {
+            "target": "${request}",
+            "constraints": "${profile.outbound_rules: array<string>}",
+            "action_on_violation": "block"
+          }
+        },
+        {
+          "capability": "plan",
+          "purpose": "Plan the message - what, to whom, where, why now, and the approval path (card now, or the needs-approval queue when unattended).",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "plan_out",
+          "input_bindings": {
+            "goal": "${request.intent}",
+            "constraints": {
+              "unattended": "${run.unattended}",
+              "policy_violations": "${policy_out.violations: array<object>}"
+            }
+          }
+        },
+        {
+          "capability": "generate",
+          "purpose": "Draft the text - signed \"<assistant> (<agent>), on behalf of <owner>\" where the channel needs it; at most 3 lines in a DM; links, not quotes, for confidential content.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "draft_out",
+          "input_bindings": {
+            "specification": {
+              "plan": "${plan_out.steps: array<object>}",
+              "context": "${context_out.data: object}",
+              "style": "${style_out.data: object}"
+            },
+            "format": "${request.channel}"
+          },
+          "gates": [
+            {
+              "when": "${policy_out.compliant} == false",
+              "action": "stop",
+              "message": "The message breaks an outbound rule. Tell the owner why; do not draft."
+            }
+          ]
+        },
+        {
+          "capability": "critique",
+          "purpose": "Review the draft for tone, one clear ask, and claims that need a source.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "critique_out",
+          "input_bindings": {
+            "target": "${draft_out.content: object}",
+            "criteria": [
+              "one_clear_ask",
+              "tone_fits_recipient",
+              "claims_need_sources"
+            ]
+          }
+        },
+        {
+          "capability": "ground",
+          "purpose": "Ground every factual claim in the draft in a source the orchestrator read itself.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "ground_out",
+          "input_bindings": {
+            "claim": "${draft_out.content: string}",
+            "sources": "${request.source_refs}",
+            "required_strength": "strong"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "Check the exact text - signature, line cap, and the outbound data check floor (national identity numbers, account numbers MOD11, card numbers Luhn, classification labels; <classification label> blocks).",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "text_check_out",
+          "input_bindings": {
+            "target": "${draft_out.content: object}",
+            "constraints": "${profile.text_rules: array<string>}",
+            "action_on_violation": "block"
+          }
+        },
+        {
+          "capability": "checkpoint",
+          "purpose": "Save the exact text, recipients and sources before the irreversible step, so a failed or deferred send can be retried or planned again.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "checkpoint_out",
+          "input_bindings": {
+            "scope": "state.json",
+            "label": "outbound"
+          }
+        },
+        {
+          "capability": "persist",
+          "purpose": "Write the ActionRecord (status planned; needs-approval when unattended) with text, recipients and source links.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "action_record_out",
+          "input_bindings": {
+            "data": {
+              "status": "planned",
+              "draft": "${draft_out.content: object}",
+              "checkpoint_id": "${checkpoint_out.checkpoint_id}"
+            },
+            "key": "state.json"
+          }
+        },
+        {
+          "capability": "retrieve",
+          "purpose": "Read the source again just before sending.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "recheck_out",
+          "input_bindings": {
+            "target": "${request.place_of_ask}",
+            "format": "thread_and_last_2h"
+          }
+        },
+        {
+          "capability": "compare",
+          "purpose": "Compare the source now with the source at drafting time; if it moved (answered elsewhere, stop reply, new facts), plan again.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "drift_out",
+          "input_bindings": {
+            "options": [
+              "${context_out.data: object}",
+              "${recheck_out.data: object}"
+            ],
+            "criteria": [
+              "already_answered",
+              "opt_out_received",
+              "facts_changed"
+            ]
+          }
+        },
+        {
+          "capability": "send",
+          "purpose": "Send the message through the owner's account and approval path.",
+          "risk": "high",
+          "mutation": true,
+          "requires_checkpoint": true,
+          "requires_approval": true,
+          "store_as": "send_out",
+          "input_bindings": {
+            "destination": "${request.place_of_ask}",
+            "payload": "${draft_out.content: object}",
+            "protocol": "${request.channel}"
+          },
+          "approval": {
+            "approver": {
+              "kind": "human",
+              "role": "owner"
+            },
+            "mode": "in_session",
+            "shows": [
+              "${draft_out.content}",
+              "${request.recipients}",
+              "${request.channel}",
+              "${request.source_refs}"
+            ],
+            "binds_to": "digest",
+            "recheck": {
+              "source": "${recheck_out}",
+              "compare": "digest",
+              "on_change": "replan"
+            },
+            "expires": "3d",
+            "when_unattended": "defer_to_queue"
+          },
+          "gates": [
+            {
+              "when": "${run.unattended} == true",
+              "action": "skip",
+              "message": "Unattended run - the ActionRecord stays planned and goes to the top of the next brief or digest."
+            },
+            {
+              "when": "${text_check_out.compliant} == false",
+              "action": "stop",
+              "message": "The text fails the outbound check."
+            },
+            {
+              "when": "${ground_out.grounded} == false",
+              "action": "stop",
+              "message": "A claim in the draft has no source the orchestrator read. Fix the draft."
+            },
+            {
+              "when": "${critique_out.severity.blocking: number} != null && ${critique_out.severity.blocking: number} > 0",
+              "action": "stop",
+              "message": "The critique found a blocking issue (no clear ask, wrong tone, unsourced claim). Fix the draft."
+            },
+            {
+              "when": "${drift_out.recommendation} == \"replan\"",
+              "action": "stop",
+              "message": "The source changed since drafting. Plan the message again."
+            }
+          ],
+          "failure_modes": [
+            {
+              "condition": "Delivery failed (tool error, no message ID)",
+              "action": "pause_and_checkpoint",
+              "recovery": {
+                "goto_step": "recheck_out",
+                "max_loops": 1
+              },
+              "on_error": [
+                "R402"
+              ]
+            }
+          ]
+        },
+        {
+          "capability": "verify",
+          "purpose": "Read back - the message exists at the destination with its ID (Sent Items, thread, PR comment), text and signature as approved.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "readback_out",
+          "condition": "${send_out.sent} == true",
+          "skip_if_false": true,
+          "input_bindings": {
+            "target": "${send_out}",
+            "conditions": [
+              "message_id_present",
+              "text_matches_approved",
+              "signature_present"
+            ],
+            "strict": true
+          }
+        },
+        {
+          "capability": "persist",
+          "purpose": "Update the ActionRecord to executed (or keep planned when deferred) and add the log line.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "log_out",
+          "input_bindings": {
+            "data": {
+              "sent": "${send_out.sent: nullable<boolean>}",
+              "readback": "${readback_out.passed: nullable<boolean>}"
+            },
+            "key": "state.json"
+          }
+        },
+        {
+          "capability": "audit",
+          "purpose": "Record what was sent, where, when, the approval, and the read-back.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "audit_out",
+          "input_bindings": {
+            "event": {
+              "type": "outbound_message",
+              "channel": "${request.channel}",
+              "sent": "${send_out.sent: nullable<boolean>}",
+              "readback": "${readback_out.passed: nullable<boolean>}",
+              "action_record": "${action_record_out.key}"
+            }
+          }
+        }
+      ],
+      "success": [
+        "No message without policy check, grounded text and the owner's approval path",
+        "Unattended runs end with a planned ActionRecord and no message sent",
+        "Every sent message read back at its destination and logged"
+      ],
+      "risk_propagation": {
+        "strategy": "max_step_risk",
+        "computed_risk": "high"
+      }
+    }
+  },
+  "workflow": "outbound_message",
+  "inputs": {
+    "request": {
+      "recipients": [
+        {
+          "id": "dana"
+        }
+      ],
+      "channel": "mail",
+      "source_refs": [
+        "doc-1"
+      ]
+    }
+  },
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 1,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "recall",
+        "step": 2,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 3,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "step": 4,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "generate",
+        "step": 5,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "content": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "critique",
+        "step": 6,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "issues": [],
+          "evidence_anchors": [],
+          "confidence": 1.0,
+          "severity": {
+            "blocking": 0
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "ground",
+        "step": 7,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "grounded": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 8,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 9,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp-checkpoint_out",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 10,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 11,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "compare",
+        "step": 12,
+        "frame": [
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "ranking": [],
+          "evidence_anchors": [],
+          "confidence": 1.0,
+          "recommendation": "send"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "deferred",
+    "action_records": [
+      {
+        "status": "planned"
+      }
+    ],
+    "deferred": [
+      {
+        "store_as": "send_out"
+      },
+      {
+        "store_as": "readback_out"
+      },
+      {
+        "store_as": "log_out"
+      },
+      {
+        "store_as": "audit_out"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "approval_unattended",
+    "step_deferred"
+  ]
+}

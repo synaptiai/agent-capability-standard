@@ -60,7 +60,10 @@ the Rust core in `core/`).
   scripted runs of the reference executor (catalog, inputs, the expected
   actions and the responses to them, the expected end and trace). Run by
   `cargo test --test runtime` (each also replayed through a snapshot and
-  restore before every step) and `tests/test_runner.py`.
+  restore before every step) and `tests/test_runner.py`. Thirteen of them
+  (`orchestrator_*`) script runs of the workflows an adopter ported to the
+  candidate (reduced from production, generic names), kept as contributed
+  (`tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`).
 
 Running the suite:
 

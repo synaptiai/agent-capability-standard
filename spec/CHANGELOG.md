@@ -198,7 +198,9 @@ and reported five gaps; these close them.
 - **Quorum verdict `scope` (§5.16):** a value other than `full` or
   `delta`, which `review_verdict_schema.yaml` rejects, counts as `delta`
   and is noted in `violations`; the schema text says so.
-- **Conformance (§10):** a fixture's expected codes are the exact set it
+- **Conformance (§10):** the workflows an adopter ported to the candidate
+  are a static fixture and thirteen scripted runs
+  (`orchestrator_*`). A fixture's expected codes are the exact set it
   must produce, so each fixture isolates what it tests; an absent warning
   list means none. Two runtime fixtures cover a before-gate `skip` and an
   after-gate with a failure mode on the same step.

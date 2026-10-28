@@ -593,5 +593,13 @@
     "expected_error_codes": [
       "F504"
     ]
+  },
+  "pass_orchestrator_port": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced",
+    "expected_warning_codes": [
+      "W601"
+    ]
   }
 }

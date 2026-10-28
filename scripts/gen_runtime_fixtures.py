@@ -13,11 +13,16 @@ not generate, so the directory holds exactly the fixtures defined here.
 """
 
 import argparse
+import copy
 import json
 import sys
+from functools import cache
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "tests" / "conformance" / "runtime"
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "tests" / "conformance" / "runtime"
 
 
 def st(cap, store, **kw):
@@ -3891,6 +3896,1254 @@ quorum_case(
     BOTH,
     {"kind": "Failed", "code": "F504"},
     skip_b=True,
+)
+
+
+# ---------------------------------------------------------------------------
+# The orchestrator port (#114): scripted runs of the workflows in
+# tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml, as contributed.
+# Each fixture carries the workflow and every workflow it invokes. A host
+# output is the capability's required fields with placeholder values, plus
+# what the scenario sets: what matters is the path the run takes.
+# ---------------------------------------------------------------------------
+
+ORCHESTRATOR = (
+    ROOT / "tests" / "fixtures" / "pass_orchestrator_port.workflow_catalog.yaml"
+)
+PLACEHOLDER = {
+    "string": "x",
+    "number": 1.0,
+    "integer": 1,
+    "boolean": True,
+    "array": [],
+    "object": {},
+}
+
+
+@cache
+def orchestrator_catalog():
+    return yaml.safe_load(ORCHESTRATOR.read_text())
+
+
+@cache
+def required_outputs():
+    """Each capability's required output fields with placeholder values
+    (`any` fields are null)."""
+    ontology = yaml.safe_load(
+        (ROOT / "schemas" / "capability_ontology.yaml").read_text()
+    )
+    out = {}
+    for node in ontology["nodes"]:
+        schema = node.get("output_schema", {})
+        props = schema.get("properties", {})
+        fields = {}
+        for name in schema.get("required", []):
+            t = props.get(name, {}).get("type")
+            t = t.split("|")[0] if isinstance(t, str) else t
+            if t != "any" and t not in PLACEHOLDER:
+                raise ValueError(f"{node['id']}.{name}: no placeholder for type {t!r}")
+            fields[name] = PLACEHOLDER.get(t)
+        out[node["id"]] = fields
+    return out
+
+
+def orch_value(cap, over=None):
+    v = copy.deepcopy(required_outputs()[cap])
+    v["evidence_anchors"] = []
+    v.update(over or {})
+    return v
+
+
+def orch_steps(frame, *steps):
+    """Capability calls of one run (`frame`, outermost first): each is
+    (step, capability) or (step, capability, {output fields})."""
+    entries = []
+    for step, cap, *over in steps:
+        expect = inv(cap, step=step, frame=list(frame))
+        entries.append(
+            {
+                "expect": expect,
+                "respond": {"kind": "Output", "value": orch_value(cap, *over)},
+            }
+        )
+    return entries
+
+
+def orch_closure(workflow):
+    """`workflow` and every workflow it invokes, directly or not."""
+    catalog = orchestrator_catalog()
+    found, todo = {}, [workflow]
+    while todo:
+        name = todo.pop()
+        if name in found:
+            continue
+        found[name] = catalog[name]
+        for step in catalog[name]["steps"]:
+            target = step.get("workflow_id") or (step.get("input_bindings") or {}).get(
+                "workflow"
+            )
+            if step.get("capability") == "invoke" and target in catalog:
+                todo.append(target)
+    return {name: catalog[name] for name in catalog if name in found}
+
+
+def orchestrator(name, description, workflow, script, end, trace, **kw):
+    add(
+        name,
+        description,
+        orch_closure(workflow),
+        script,
+        end,
+        trace,
+        workflow=workflow,
+        **kw,
+    )
+
+
+orchestrator(
+    "orchestrator_intake_delegates",
+    "Intake routes a compliant item to delegate_to_thread, which runs nested: a report from another session is dropped and the thread's own is kept; asking the owner is skipped.",
+    "intake_triage",
+    [
+        *orch_steps(
+            ["intake_triage"],
+            (0, "receive"),
+            (1, "retrieve"),
+            (2, "transform"),
+            (3, "classify"),
+            (4, "classify"),
+            (5, "search"),
+            (6, "constrain", {"compliant": True}),
+            (7, "plan"),
+            (8, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (9, "persist"),
+        ),
+        *orch_steps(
+            ["intake_triage", "delegate_to_thread"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "compare"),
+            (3, "decompose"),
+            (4, "plan"),
+            (5, "constrain"),
+            (6, "generate"),
+            (7, "constrain"),
+            (8, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (9, "delegate", {"accepted": True, "task_id": "th-1"}),
+            (10, "persist"),
+            (11, "observe"),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["intake_triage", "delegate_to_thread"],
+                "event_type": "thread.turn_end",
+                "correlate": {"task_id": "th-1"},
+                "accept_from": ["th-1"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "task_id": "th-1",
+                },
+                "principal": "intruder",
+            },
+        },
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["intake_triage", "delegate_to_thread"],
+                "event_type": "thread.turn_end",
+                "correlate": {"task_id": "th-1"},
+                "accept_from": ["th-1"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "task_id": "th-1",
+                },
+                "principal": "th-1",
+            },
+        },
+        *orch_steps(
+            ["intake_triage", "delegate_to_thread"],
+            (13, "ground"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
+        ),
+        *orch_steps(["intake_triage"], (12, "verify"), (13, "audit")),
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    [
+        "invoke_started",
+        "invoke_returned",
+        "event_dropped",
+        "event_received",
+        "step_skipped",
+    ],
+    inputs={
+        "event": {"event_type": "intake.item", "source": {"kind": "human"}},
+        "profile": {"owner_id": "owner"},
+    },
+)
+
+orchestrator(
+    "orchestrator_delegate_liveness",
+    "A thread that stops answering liveness probes (R406) gets a checkpoint, a fresh liveness check and a second wait, which its report ends.",
+    "delegate_to_thread",
+    [
+        *orch_steps(
+            ["delegate_to_thread"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "compare"),
+            (3, "decompose"),
+            (4, "plan"),
+            (5, "constrain"),
+            (6, "generate"),
+            (7, "constrain"),
+            (8, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (9, "delegate", {"accepted": True, "task_id": "th-1"}),
+            (10, "persist"),
+            (11, "observe"),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["delegate_to_thread"],
+                "event_type": "thread.turn_end",
+                "correlate": {"task_id": "th-1"},
+                "accept_from": ["th-1"],
+            },
+            "respond": {"kind": "LivenessLost"},
+        },
+        {
+            "expect": {
+                "kind": "CreateCheckpoint",
+                "step": 12,
+                "frame": ["delegate_to_thread"],
+            },
+            "respond": {"kind": "Checkpoint", "checkpoint_id": "cp1"},
+        },
+        *orch_steps(["delegate_to_thread"], (11, "observe")),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["delegate_to_thread"],
+                "event_type": "thread.turn_end",
+                "correlate": {"task_id": "th-1"},
+                "accept_from": ["th-1"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "task_id": "th-1",
+                },
+                "principal": "th-1",
+            },
+        },
+        *orch_steps(
+            ["delegate_to_thread"],
+            (13, "ground"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
+        ),
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["failure_mode_fired", "loop", "event_received"],
+    inputs={"task": {"id": "T-7", "goal": "fix the flaky test"}},
+)
+
+orchestrator(
+    "orchestrator_review_blessed",
+    "Two fresh reviewers of different families both bless the pinned head: the verdict post is approved under the mandate after a recheck, and the quorum passes.",
+    "review_gate",
+    [
+        *orch_steps(
+            ["review_gate"],
+            (0, "observe", {"observation": {"head_sha": "abc123"}}),
+            (1, "retrieve"),
+            (2, "classify"),
+            (3, "plan"),
+            (4, "constrain", {"compliant": True}),
+            (5, "generate"),
+            (6, "generate"),
+            (7, "constrain", {"compliant": True}),
+            (8, "checkpoint", {"checkpoint_id": "cp-worktree_ckpt_out"}),
+            (
+                9,
+                "delegate",
+                {
+                    "accepted": True,
+                    "task_id": "rv-a",
+                    "effective": {"fresh_context": True, "model_family": "family_a"},
+                },
+            ),
+            (
+                10,
+                "delegate",
+                {
+                    "accepted": True,
+                    "task_id": "rv-b",
+                    "effective": {"fresh_context": True, "model_family": "family_b"},
+                },
+            ),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 11,
+                "frame": ["review_gate"],
+                "event_type": "thread.turn_end",
+                "correlate": {"head_sha": "abc123"},
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "head_sha": "abc123",
+                },
+                "principal": "peer",
+            },
+        },
+        *orch_steps(
+            ["review_gate"],
+            (
+                12,
+                "receive",
+                {
+                    "data": [
+                        {
+                            "reviewer_id": "reviewer-a",
+                            "value": "BLESSED",
+                            "pinned": "abc123",
+                            "scope": "full",
+                        },
+                        {
+                            "reviewer_id": "reviewer-b",
+                            "value": "BLESSED",
+                            "pinned": "abc123",
+                            "scope": "full",
+                        },
+                    ]
+                },
+            ),
+            (13, "classify"),
+            (14, "critique"),
+            (15, "constrain", {"compliant": True}),
+            (16, "checkpoint", {"checkpoint_id": "cp-post_ckpt_out"}),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 17,
+                "frame": ["review_gate"],
+                "approver": {"kind": "standing_mandate", "mandate_ref": "mandates"},
+            },
+            "respond": approve("d1", who=("mandate",)),
+        },
+        {
+            "expect": {"kind": "RecheckSource", "step": 17, "frame": ["review_gate"]},
+            "respond": {
+                "kind": "Current",
+                "value": orch_value("observe", {"observation": {"head_sha": "abc123"}}),
+            },
+        },
+        *orch_steps(["review_gate"], (17, "send"), (18, "verify"), (20, "audit")),
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {
+            "quorum_out": {
+                "compliant": True,
+                "tally": {"passes": 2, "blocks": 0, "full_passes": 2},
+            }
+        },
+    },
+    ["quorum", "recheck", "approval_decided"],
+    inputs={"change": {"head_sha": "abc123", "number": "42"}},
+)
+
+orchestrator(
+    "orchestrator_review_rethink",
+    "A RETHINK blocks the quorum (F504); the failure mode loops back to the change, and the second round passes with one full sweep (min_full 1).",
+    "review_gate",
+    [
+        *orch_steps(
+            ["review_gate"],
+            (0, "observe", {"observation": {"head_sha": "abc123"}}),
+            (1, "retrieve"),
+            (2, "classify"),
+            (3, "plan"),
+            (4, "constrain", {"compliant": True}),
+            (5, "generate"),
+            (6, "generate"),
+            (7, "constrain", {"compliant": True}),
+            (8, "checkpoint", {"checkpoint_id": "cp-worktree_ckpt_out"}),
+            (
+                9,
+                "delegate",
+                {
+                    "accepted": True,
+                    "task_id": "rv-a",
+                    "effective": {"fresh_context": True, "model_family": "family_a"},
+                },
+            ),
+            (
+                10,
+                "delegate",
+                {
+                    "accepted": True,
+                    "task_id": "rv-b",
+                    "effective": {"fresh_context": True, "model_family": "family_b"},
+                },
+            ),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 11,
+                "frame": ["review_gate"],
+                "event_type": "thread.turn_end",
+                "correlate": {"head_sha": "abc123"},
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "head_sha": "abc123",
+                },
+                "principal": "peer",
+            },
+        },
+        *orch_steps(
+            ["review_gate"],
+            (
+                12,
+                "receive",
+                {
+                    "data": [
+                        {
+                            "reviewer_id": "reviewer-a",
+                            "value": "RETHINK",
+                            "pinned": "abc123",
+                            "scope": "full",
+                        },
+                        {
+                            "reviewer_id": "reviewer-b",
+                            "value": "BLESSED",
+                            "pinned": "abc123",
+                            "scope": "full",
+                        },
+                    ]
+                },
+            ),
+            (13, "classify"),
+            (14, "critique"),
+            (15, "constrain", {"compliant": True}),
+            (16, "checkpoint", {"checkpoint_id": "cp-post_ckpt_out"}),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 17,
+                "frame": ["review_gate"],
+                "approver": {"kind": "standing_mandate", "mandate_ref": "mandates"},
+            },
+            "respond": approve("d1", who=("mandate",)),
+        },
+        {
+            "expect": {"kind": "RecheckSource", "step": 17, "frame": ["review_gate"]},
+            "respond": {
+                "kind": "Current",
+                "value": orch_value("observe", {"observation": {"head_sha": "abc123"}}),
+            },
+        },
+        *orch_steps(
+            ["review_gate"],
+            (17, "send"),
+            (18, "verify"),
+            (0, "observe", {"observation": {"head_sha": "abc123"}}),
+            (1, "retrieve"),
+            (2, "classify"),
+            (3, "plan"),
+            (4, "constrain", {"compliant": True}),
+            (5, "generate"),
+            (6, "generate"),
+            (7, "constrain", {"compliant": True}),
+            (8, "checkpoint", {"checkpoint_id": "cp-worktree_ckpt_out"}),
+            (
+                9,
+                "delegate",
+                {
+                    "accepted": True,
+                    "task_id": "rv-a",
+                    "effective": {"fresh_context": True, "model_family": "family_a"},
+                },
+            ),
+            (
+                10,
+                "delegate",
+                {
+                    "accepted": True,
+                    "task_id": "rv-b",
+                    "effective": {"fresh_context": True, "model_family": "family_b"},
+                },
+            ),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 11,
+                "frame": ["review_gate"],
+                "event_type": "thread.turn_end",
+                "correlate": {"head_sha": "abc123"},
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "head_sha": "abc123",
+                },
+                "principal": "peer",
+            },
+        },
+        *orch_steps(
+            ["review_gate"],
+            (
+                12,
+                "receive",
+                {
+                    "data": [
+                        {
+                            "reviewer_id": "reviewer-a",
+                            "value": "BLESSED",
+                            "pinned": "abc123",
+                            "scope": "delta",
+                        },
+                        {
+                            "reviewer_id": "reviewer-b",
+                            "value": "BLESSED",
+                            "pinned": "abc123",
+                            "scope": "full",
+                        },
+                    ]
+                },
+            ),
+            (13, "classify"),
+            (14, "critique"),
+            (15, "constrain", {"compliant": True}),
+            (16, "checkpoint", {"checkpoint_id": "cp-post_ckpt_out"}),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 17,
+                "frame": ["review_gate"],
+                "approver": {"kind": "standing_mandate", "mandate_ref": "mandates"},
+            },
+            "respond": approve("d2", who=("mandate",)),
+        },
+        {
+            "expect": {"kind": "RecheckSource", "step": 17, "frame": ["review_gate"]},
+            "respond": {
+                "kind": "Current",
+                "value": orch_value("observe", {"observation": {"head_sha": "abc123"}}),
+            },
+        },
+        *orch_steps(["review_gate"], (17, "send"), (18, "verify"), (20, "audit")),
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {
+            "quorum_out": {"compliant": True, "tally": {"passes": 2, "full_passes": 1}}
+        },
+    },
+    ["quorum", "failure_mode_fired", "loop"],
+    inputs={"change": {"head_sha": "abc123", "number": "42"}},
+)
+
+orchestrator(
+    "orchestrator_merge_self",
+    "A self-merge: the build and the merge are each approved under a mandate (the merge after a recheck), CI on the merged head passes, and the hand-off to another merger is skipped.",
+    "merge_ship",
+    [
+        *orch_steps(
+            ["merge_ship"],
+            (0, "observe", {"observation": {"head_sha": "abc123"}}),
+            (1, "retrieve"),
+            (2, "retrieve"),
+            (3, "retrieve"),
+            (4, "classify"),
+            (5, "plan"),
+            (6, "constrain", {"compliant": True}),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 7,
+                "frame": ["merge_ship"],
+                "approver": {"kind": "standing_mandate", "mandate_ref": "mandates"},
+            },
+            "respond": approve("d1", who=("mandate",)),
+        },
+        *orch_steps(
+            ["merge_ship"],
+            (7, "execute", {"exit_code": 0}),
+            (8, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 9,
+                "frame": ["merge_ship"],
+                "approver": {"kind": "standing_mandate", "mandate_ref": "merge_gates"},
+            },
+            "respond": approve("d2", who=("mandate",)),
+        },
+        {
+            "expect": {"kind": "RecheckSource", "step": 9, "frame": ["merge_ship"]},
+            "respond": {
+                "kind": "Current",
+                "value": orch_value("observe", {"observation": {"head_sha": "abc123"}}),
+            },
+        },
+        *orch_steps(["merge_ship"], (9, "mutate"), (11, "verify")),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["merge_ship"],
+                "event_type": "ci.complete",
+                "correlate": {"sha": "abc123"},
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "ci.complete",
+                    "source": {"kind": "api"},
+                    "sha": "abc123",
+                },
+                "principal": "peer",
+            },
+        },
+        *orch_steps(
+            ["merge_ship"],
+            (13, "observe"),
+            (14, "verify", {"passed": True}),
+            (15, "synchronize"),
+            (16, "persist"),
+            (17, "audit"),
+        ),
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "action_records": [{"status": "executed"}, {"status": "executed"}],
+    },
+    ["recheck", "event_received", "step_skipped"],
+    inputs={
+        "change": {
+            "merger": "self",
+            "head_sha": "abc123",
+            "base": "main",
+            "number": "42",
+        }
+    },
+)
+
+orchestrator(
+    "orchestrator_merge_base_red",
+    "Post-merge CI fails twice: the verify failure mode waits for CI once more, then escalates to the incident_triage handler, which delegates a fix and sends a notice; the run ends escalated (R404).",
+    "merge_ship",
+    [
+        *orch_steps(
+            ["merge_ship"],
+            (0, "observe", {"observation": {"head_sha": "abc123"}}),
+            (1, "retrieve"),
+            (2, "retrieve"),
+            (3, "retrieve"),
+            (4, "classify"),
+            (5, "plan"),
+            (6, "constrain"),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 7,
+                "frame": ["merge_ship"],
+                "approver": {"kind": "standing_mandate", "mandate_ref": "mandates"},
+            },
+            "respond": approve("d1", who=("mandate",)),
+        },
+        *orch_steps(
+            ["merge_ship"],
+            (7, "execute", {"exit_code": 0}),
+            (8, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 9,
+                "frame": ["merge_ship"],
+                "approver": {"kind": "standing_mandate", "mandate_ref": "merge_gates"},
+            },
+            "respond": approve("d2", who=("mandate",)),
+        },
+        {
+            "expect": {"kind": "RecheckSource", "step": 9, "frame": ["merge_ship"]},
+            "respond": {
+                "kind": "Current",
+                "value": orch_value("observe", {"observation": {"head_sha": "abc123"}}),
+            },
+        },
+        *orch_steps(["merge_ship"], (9, "mutate"), (11, "verify")),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["merge_ship"],
+                "event_type": "ci.complete",
+                "correlate": {"sha": "abc123"},
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "ci.complete",
+                    "source": {"kind": "api"},
+                    "sha": "abc123",
+                },
+                "principal": "peer",
+            },
+        },
+        *orch_steps(["merge_ship"], (13, "observe"), (14, "verify", {"passed": False})),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["merge_ship"],
+                "event_type": "ci.complete",
+                "correlate": {"sha": "abc123"},
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "ci.complete",
+                    "source": {"kind": "api"},
+                    "sha": "abc123",
+                },
+                "principal": "peer",
+            },
+        },
+        *orch_steps(["merge_ship"], (13, "observe"), (14, "verify", {"passed": False})),
+        *orch_steps(
+            ["merge_ship", "incident_triage"],
+            (0, "receive"),
+            (1, "observe"),
+            (2, "detect"),
+            (3, "classify"),
+            (4, "search"),
+            (5, "attribute"),
+            (6, "ground"),
+            (7, "plan"),
+            (8, "constrain"),
+            (9, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+        ),
+        *orch_steps(
+            ["merge_ship", "incident_triage", "delegate_to_thread"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "compare"),
+            (3, "decompose"),
+            (4, "plan"),
+            (5, "constrain"),
+            (6, "generate"),
+            (7, "constrain"),
+            (8, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (9, "delegate", {"accepted": True, "task_id": "th-1"}),
+            (10, "persist"),
+            (11, "observe"),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["merge_ship", "incident_triage", "delegate_to_thread"],
+                "event_type": "thread.turn_end",
+                "correlate": {"task_id": "th-1"},
+                "accept_from": ["th-1"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "task_id": "th-1",
+                },
+                "principal": "th-1",
+            },
+        },
+        *orch_steps(
+            ["merge_ship", "incident_triage", "delegate_to_thread"],
+            (13, "ground"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
+        ),
+        *orch_steps(
+            ["merge_ship", "incident_triage", "outbound_message"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "recall"),
+            (3, "constrain"),
+            (4, "plan"),
+            (5, "generate"),
+            (6, "critique"),
+            (7, "ground"),
+            (8, "constrain"),
+            (9, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (10, "persist"),
+            (11, "retrieve"),
+            (12, "compare"),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 13,
+                "frame": ["merge_ship", "incident_triage", "outbound_message"],
+                "approver": {"kind": "human", "role": "owner"},
+            },
+            "respond": approve("d3", who=("owner",)),
+        },
+        {
+            "expect": {
+                "kind": "RecheckSource",
+                "step": 13,
+                "frame": ["merge_ship", "incident_triage", "outbound_message"],
+            },
+            "respond": {"kind": "Current", "value": orch_value("retrieve")},
+        },
+        *orch_steps(
+            ["merge_ship", "incident_triage", "outbound_message"],
+            (13, "send"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
+        ),
+        *orch_steps(
+            ["merge_ship", "incident_triage"],
+            (13, "synchronize"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
+        ),
+    ],
+    {"kind": "Completed", "outcome": "escalated", "cause": "R404"},
+    ["loop", "recovery_exhausted", "escalated", "invoke_started"],
+    inputs={
+        "change": {
+            "merger": "self",
+            "head_sha": "abc123",
+            "base": "main",
+            "number": "42",
+        }
+    },
+)
+
+orchestrator(
+    "orchestrator_outbound_sent",
+    "The owner approves the drafted message in session; the recheck finds the source unchanged and the message is sent and read back.",
+    "outbound_message",
+    [
+        *orch_steps(
+            ["outbound_message"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "recall"),
+            (3, "constrain"),
+            (4, "plan"),
+            (5, "generate"),
+            (6, "critique", {"severity": {"blocking": 0}}),
+            (7, "ground", {"grounded": True}),
+            (8, "constrain", {"compliant": True}),
+            (9, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (10, "persist"),
+            (11, "retrieve"),
+            (12, "compare", {"recommendation": "send"}),
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 13,
+                "frame": ["outbound_message"],
+                "approver": {"kind": "human", "role": "owner"},
+            },
+            "respond": approve("d1", who=("owner",)),
+        },
+        {
+            "expect": {
+                "kind": "RecheckSource",
+                "step": 13,
+                "frame": ["outbound_message"],
+            },
+            "respond": {"kind": "Current", "value": orch_value("retrieve")},
+        },
+        *orch_steps(
+            ["outbound_message"],
+            (13, "send", {"sent": True}),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
+        ),
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "action_records": [{"status": "executed"}],
+    },
+    ["approval_decided", "recheck"],
+    inputs={
+        "request": {
+            "recipients": [{"id": "dana"}],
+            "channel": "mail",
+            "source_refs": ["doc-1"],
+        },
+        "run": {"unattended": False},
+    },
+)
+
+orchestrator(
+    "orchestrator_outbound_unattended",
+    "Unattended, the send waits in the queue (when_unattended: defer_to_queue) and the steps that read it are deferred with it. The run passes no `run.unattended` flag: the adopter's own skip gate on that flag would skip the send before the deferral.",
+    "outbound_message",
+    [
+        *orch_steps(
+            ["outbound_message"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "recall"),
+            (3, "constrain"),
+            (4, "plan"),
+            (5, "generate"),
+            (6, "critique", {"severity": {"blocking": 0}}),
+            (7, "ground"),
+            (8, "constrain"),
+            (9, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (10, "persist"),
+            (11, "retrieve"),
+            (12, "compare", {"recommendation": "send"}),
+        ),
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "action_records": [{"status": "planned"}],
+        "deferred": [
+            {"store_as": "send_out"},
+            {"store_as": "readback_out"},
+            {"store_as": "log_out"},
+            {"store_as": "audit_out"},
+        ],
+    },
+    ["approval_unattended", "step_deferred"],
+    inputs={
+        "request": {
+            "recipients": [{"id": "dana"}],
+            "channel": "mail",
+            "source_refs": ["doc-1"],
+        }
+    },
+    attendance="unattended",
+)
+
+orchestrator(
+    "orchestrator_owner_answer",
+    "The owner is asked; an answer from anyone else is dropped, the owner's is kept, and the decision is applied through delegate_to_thread.",
+    "owner_decision",
+    [
+        *orch_steps(
+            ["owner_decision"],
+            (0, "classify", {"labels": ["owner_only"], "confidence": 0.9}),
+            (1, "search"),
+            (2, "retrieve"),
+            (3, "plan"),
+            (4, "critique", {"confidence": 0.9}),
+            (5, "compare"),
+            (6, "constrain"),
+            (7, "inquire", {"confidence": 0.9}),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 8,
+                "frame": ["owner_decision"],
+                "event_type": "owner.answer",
+                "correlate": {"question": "release-date"},
+                "accept_from": ["owner"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "owner.answer",
+                    "source": {"kind": "human"},
+                    "question": "release-date",
+                    "answer": "ship it",
+                },
+                "principal": "intruder",
+            },
+        },
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 8,
+                "frame": ["owner_decision"],
+                "event_type": "owner.answer",
+                "correlate": {"question": "release-date"},
+                "accept_from": ["owner"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "owner.answer",
+                    "source": {"kind": "human"},
+                    "question": "release-date",
+                    "answer": "next week",
+                },
+                "principal": "owner",
+            },
+        },
+        *orch_steps(
+            ["owner_decision"],
+            (9, "integrate"),
+            (10, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (11, "persist"),
+        ),
+        *orch_steps(
+            ["owner_decision", "delegate_to_thread"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "compare"),
+            (3, "decompose"),
+            (4, "plan"),
+            (5, "constrain"),
+            (6, "generate"),
+            (7, "constrain"),
+            (8, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (9, "delegate", {"accepted": True, "task_id": "th-1"}),
+            (10, "persist"),
+            (11, "observe"),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["owner_decision", "delegate_to_thread"],
+                "event_type": "thread.turn_end",
+                "correlate": {"task_id": "th-1"},
+                "accept_from": ["th-1"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "task_id": "th-1",
+                },
+                "principal": "th-1",
+            },
+        },
+        *orch_steps(
+            ["owner_decision", "delegate_to_thread"],
+            (13, "ground"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
+        ),
+        *orch_steps(["owner_decision"], (13, "verify"), (14, "audit")),
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {
+            "answer_out": {"data": [{"answer": "next week", "sender": "owner"}]}
+        },
+    },
+    ["event_dropped", "event_received", "invoke_started"],
+    inputs={"question": {"topic": "release-date"}},
+)
+
+orchestrator(
+    "orchestrator_checkin_sweep",
+    "An unattended sweep skips restarts the policy refuses and defers the reminder's send; the invoke that ran it is deferred too, then the escalation and the next check-in (they may act on the world after a deferred step), verify (the ontology orders it after mutate) and the steps that read verify.",
+    "checkin_recovery",
+    [
+        *orch_steps(["checkin_recovery"], (0, "recall"), (1, "observe")),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 2,
+                "frame": ["checkin_recovery"],
+                "event_type": "sweep.sample_delay",
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "sweep.sample_delay",
+                    "source": {"kind": "message_bus"},
+                },
+                "principal": "peer",
+            },
+        },
+        *orch_steps(
+            ["checkin_recovery"],
+            (3, "observe"),
+            (4, "detect"),
+            (5, "classify"),
+            (6, "attribute"),
+            (7, "plan"),
+            (8, "constrain", {"compliant": False}),
+            (9, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+        ),
+        *orch_steps(
+            ["checkin_recovery", "outbound_message"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "recall"),
+            (3, "constrain"),
+            (4, "plan"),
+            (5, "generate"),
+            (6, "critique", {"severity": {"blocking": 0}}),
+            (7, "ground"),
+            (8, "constrain"),
+            (9, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (10, "persist"),
+            (11, "retrieve"),
+            (12, "compare"),
+        ),
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+            {"store_as": "send_out"},
+            {"store_as": "readback_out"},
+            {"store_as": "log_out"},
+            {"store_as": "audit_out"},
+            {"store_as": "reminders_out"},
+            {"store_as": "escalations_out"},
+            {"store_as": "next_checkin_out"},
+            {"store_as": "verify_out"},
+            {"store_as": "board_out"},
+            {"store_as": "audit_out"},
+        ],
+        "action_records": [{"status": "planned"}, {"status": "planned"}],
+    },
+    ["step_deferred", "approval_unattended", "step_skipped"],
+    attendance="unattended",
+)
+
+orchestrator(
+    "orchestrator_incident_prod",
+    "A prod incident stops at the containment gate (R403) before any change is approved or made.",
+    "incident_triage",
+    [
+        *orch_steps(
+            ["incident_triage"],
+            (0, "receive"),
+            (1, "observe"),
+            (2, "detect"),
+            (3, "classify"),
+            (4, "search"),
+            (5, "attribute"),
+            (6, "ground"),
+            (7, "plan"),
+            (8, "constrain"),
+            (9, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+        ),
+    ],
+    {
+        "kind": "Failed",
+        "code": "R403",
+        "step": 10,
+        "message": "Prod - report and ask; do not act.",
+    },
+    ["gate_fired"],
+    inputs={
+        "signal": {"event_type": "alert.fired", "source": {"kind": "api"}},
+        "environment": {"name": "prod-eu", "own_resource": True, "is_prod": True},
+    },
+)
+
+orchestrator(
+    "orchestrator_daily_digest",
+    "A brief reads the calendar; the text is checked, grounded and verified, then saved.",
+    "daily_digest",
+    [
+        *orch_steps(
+            ["daily_digest"],
+            (0, "recall"),
+            (1, "retrieve"),
+            (2, "retrieve"),
+            (3, "search"),
+            (4, "integrate"),
+            (5, "classify"),
+            (6, "measure"),
+            (7, "constrain", {"compliant": True}),
+            (8, "generate"),
+            (9, "ground", {"grounded": True}),
+            (10, "constrain", {"compliant": True}),
+            (11, "verify", {"passed": True}),
+            (12, "persist"),
+            (13, "audit"),
+        ),
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["step_completed", "run_finished"],
+    inputs={"report": {"kind": "brief"}},
+)
+
+orchestrator(
+    "orchestrator_daily_digest_other",
+    "A report that is not a brief skips the calendar and goes on.",
+    "daily_digest",
+    [
+        *orch_steps(
+            ["daily_digest"],
+            (0, "recall"),
+            (1, "retrieve"),
+            (3, "search"),
+            (4, "integrate"),
+            (5, "classify"),
+            (6, "measure"),
+            (7, "constrain", {"compliant": True}),
+            (8, "generate"),
+            (9, "ground", {"grounded": True}),
+            (10, "constrain", {"compliant": True}),
+            (11, "verify", {"passed": True}),
+            (12, "persist"),
+            (13, "audit"),
+        ),
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["step_skipped", "run_finished"],
+    inputs={"report": {"kind": "digest"}},
 )
 
 

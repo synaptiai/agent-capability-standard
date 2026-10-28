@@ -279,7 +279,7 @@ Decisions (user, 2026-10-27):
   trust class (an item from it needs approval even under a mandate); review
 - [x] **H2b** CEL membership `in` in the expression grammar, with cel-go
   differential fixtures; V108 on `and` hints `&&`
-- [ ] **H2c** the commenter's orchestrator fixtures (nine workflows, scripted
+- [x] **H2c** the commenter's orchestrator fixtures (nine workflows, scripted
   runs) as static and runtime conformance fixtures
 - [x] **H2d** reviewer items. Decisions:
   - read-only reviewer: `delegate` input `read_only` (delegation@1),
@@ -291,7 +291,7 @@ Decisions (user, 2026-10-27):
     the quorum gathers verdicts from the reviewer steps;
   - host/device placement: an RFC-0003 open question (deployment stays
     outside the standard, as for E6's `host`)
-- [ ] **H3** thorough review of the whole branch (parallel reviewers by
+- [x] **H3** thorough review of the whole branch (parallel reviewers by
   area); fix every finding
 
 ### H1 review
@@ -345,3 +345,51 @@ array; the `schedule_management` compare step's `stop` gate (no free
 slots) still ends the run as a failure; some failure modes on non-effectful
 steps have no trigger and are documentation only. H2c (the commenter's
 fixtures) stays blocked on the archive being reachable from the session.
+
+#### H2c results
+The archive held the nine workflows, their combined catalog and the
+author's validation log, but no scripted runs, so the runs were written
+here: a recorder drove each scenario through the executor, every action
+sequence was checked against the spec by hand, and the generator now
+builds them from `(step, capability, outputs)` lists. The combined catalog
+is `tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`, kept as
+contributed (two W601s). Thirteen `orchestrator_*` runtime fixtures; the
+scenarios set every value a description names, rather than leaning on
+placeholder outputs.
+
+What the runs show about the port (feedback for the author, not changed):
+- `ground` in outbound_message and daily_digest has no soft prerequisite
+  before it (W601).
+- `stop` gates on outcomes that are not failures: incident_triage's prod
+  gate ends the run R403 with no notice or audit, though its message says
+  "report and ask"; owner_decision's "research again" gate likewise.
+- In checkin_recovery an unattended run defers the reminder's send; the
+  invoke that ran it is deferred too, then the owner escalation and the
+  next check-in (they may act on the world after a deferred step), verify
+  (the ontology orders it after mutate) and the board save and audit
+  (they read verify). Probably more than intended: keeping the audit means
+  not having it read verify's output.
+- outbound_message's skip gate on an input flag `run.unattended` pre-empts
+  `when_unattended: defer_to_queue`: with the flag set, the send is skipped
+  and no planned action is recorded. Dropping the gate and the flag leaves
+  the deferral to the standard.
+- owner_decision applies a decision the owner never gave: when the ask
+  policy says the question waits for the next brief, `inquire` and
+  `receive` are skipped, yet the run goes on to integrate, persist and
+  delegate the recommendation.
+- merge_ship waits for CI on `change.head_sha`, but a squash merge makes a
+  new commit, so CI events for the merge never match; with no R401 failure
+  mode the run then fails.
+- merge_ship's and incident_triage's descriptions say the ontology forbids
+  mutate and rollback in one workflow; `conflicts_with` only keeps them out
+  of one parallel group (§4.3), and rollback after mutate is the normal
+  recovery.
+- checkin_recovery waits on a `sweep.sample_delay` event as a timer; with
+  no such event the run fails R401. The standard has no timer step; a
+  candidate open question.
+- delegate_to_thread filters reports by `accept_from: [${delegate_out.task_id}]`;
+  a host that returns no task_id resolves it to `[]` and every report is
+  dropped until the timeout. A waiting `delegate` (H2d) avoids this.
+- review_gate predates per-reviewer waits: a reviewer that times out
+  restarts both. Each reviewer as a waiting `delegate` replaces only the
+  hung one.

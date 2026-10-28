@@ -1314,7 +1314,7 @@ This matrix tracks the implementation status of every major feature across all s
 | UnknownSkillError exception | Implemented | `oasf.py` | Custom KeyError subclass |
 | Persistent checkpoint storage | Implemented | `checkpoint_tracker.py` | State persisted to `_checkpoint_dir` (TD-011); reservations are in-memory only |
 | SDK test suite | Implemented | `tests/test_sdk_integration.py` | Integration tests for adapter |
-| Conformance test suite | Implemented | `scripts/run_conformance.py` | 79 workflow fixtures; runs locally and in CI |
+| Conformance test suite | Implemented | `scripts/run_conformance.py` | 80 workflow fixtures; runs locally and in CI |
 
 ### 11.3 Hook Features
 
@@ -1365,7 +1365,7 @@ This matrix tracks the implementation status of every major feature across all s
 | Schema synchronizer | Implemented | `sync_skill_schemas.py` | Ontology-to-skill sync |
 | Transitive dependency bundling | Implemented | `sync_skill_schemas.py` | Reference directory population |
 | Path rewriting | Implemented | `sync_skill_schemas.py` | Internal path translation |
-| Conformance tests | Implemented | `scripts/run_conformance.py` | 79 workflow fixtures; runs in CI (`conformance` job) |
+| Conformance tests | Implemented | `scripts/run_conformance.py` | 80 workflow fixtures; runs in CI (`conformance` job) |
 
 ### 11.6 Interop Features
 
