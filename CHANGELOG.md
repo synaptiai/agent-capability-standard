@@ -22,19 +22,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   warns once per feature, so a forgotten version bump no longer passes
   silently
 - **The #114 author's orchestrator workflows as conformance fixtures.** The
-  nine workflows they ported to the v1.1 candidate (revision 1.1c, which
+  nine workflows they ported to the v1.1 candidate (revision 1.1d, which
   uses gate `end`, `delay`, `after_deferral` and a waiting `delegate` per
   reviewer) are a static fixture (`pass_orchestrator_port`, kept as
-  contributed but for three `: object` annotations on a transform's
-  output), and fifteen runtime fixtures (`orchestrator_*`) script runs of
+  contributed), and fifteen runtime fixtures (`orchestrator_*`) script runs of
   them: routing into a nested delegation, a liveness recovery, a quorum
   that passes and one that loops after a RETHINK, a self-merge and a red
   base that escalates to incident triage, an owner-approved and an
   unattended (deferred) message, an owner answer with a foreign one
   dropped, a question ended for more research, a scheduled sweep where
-  only the reminder is deferred, an escalation whose question has no
-  topic (R402), a prod notice then an early end, and both kinds of daily
-  report
+  only the reminder is deferred, an escalation that interrupts the owner,
+  a prod notice then an early end, and both kinds of daily report
+- **Contributed runtime fixtures.** Twenty scripted runs the #114 author
+  wrote from the spec (`gap1_*` standing mandates, `gap2_*` verdict scope
+  and `min_full`, `gap3_*` R406 and R401 around the deadline, `gap5_*` the
+  authenticated principal) are kept as sent in
+  `tests/conformance/contrib/`; the generator checks and copies them
 - **Read-only reviewers and per-reviewer waits (#114).** `delegate` takes
   `read_only` (attested in `effective`), and `quorum.require_read_only`
   requires it of every reviewer. `wait` is allowed on `delegate`: the step

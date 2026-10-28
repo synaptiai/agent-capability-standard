@@ -1,0 +1,145 @@
+{
+  "description": "Liveness is lost on the wait and again on its one re-check: the loop is exhausted and the handler runs (escalated, cause R404).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "recovery@1"
+        ]
+      },
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "wait": {
+            "event_type": "job.done",
+            "liveness": {
+              "mode": "probe",
+              "interval": "1m"
+            }
+          },
+          "failure_modes": [
+            {
+              "condition": "the worker went quiet",
+              "on_error": "R406",
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "r",
+                "max_loops": 1,
+                "on_exhausted": {
+                  "goto_step": "page"
+                }
+              }
+            },
+            {
+              "condition": "the wait expired",
+              "on_error": "R401",
+              "action": "escalate",
+              "recovery": {
+                "goto_step": "page"
+              }
+            }
+          ]
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "page",
+          "handler": true,
+          "workflow_id": "oncall",
+          "input_bindings": {
+            "workflow": "oncall",
+            "input": {
+              "why": "the worker is silent"
+            }
+          }
+        }
+      ]
+    },
+    "oncall": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "inputs": {
+        "why": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "steps": [
+        {
+          "capability": "inquire",
+          "purpose": "inquire step",
+          "store_as": "q",
+          "input_bindings": {
+            "ambiguous_input": "${why}"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "deadline": 3600000
+      },
+      "respond": {
+        "kind": "LivenessLost"
+      },
+      "at": 60000
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "deadline": 3660000
+      },
+      "respond": {
+        "kind": "LivenessLost"
+      },
+      "at": 120000
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "inquire",
+        "step": 0,
+        "frame": [
+          "w",
+          "oncall"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "questions": [],
+          "ambiguity_analysis": {},
+          "evidence_anchors": [],
+          "confidence": 1
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "escalated",
+    "cause": "R404"
+  },
+  "trace_kinds": [
+    "failure_mode_fired",
+    "loop",
+    "escalated"
+  ]
+}

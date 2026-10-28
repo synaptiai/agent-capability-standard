@@ -1,5 +1,5 @@
 {
-  "description": "When the owner is to be interrupted, the escalation passes a question with no topic: owner_decision's answer wait would correlate on null, so it fails at once (R402) and so does the sweep.",
+  "description": "An unattended sweep interrupts the owner: the escalation asks, the answer wait correlates on the question's topic (checkin_stalled_rows), the owner's answer is applied through delegate_to_thread, and the next check-in takes a fresh checkpoint, since the escalation's waits invalidated the earlier ones; only the reminder chain is deferred.",
   "catalog": {
     "delegate_to_thread": {
       "goal": "Give one task to one thread with a self-contained brief, prove the thread is alive, and accept its result only after checking it at the source.",
@@ -1337,7 +1337,10 @@
           "input_bindings": {
             "workflow": "owner_decision",
             "input": {
-              "question": "${rows_out}"
+              "question": {
+                "topic": "checkin_stalled_rows",
+                "context": "${rows_out}"
+              }
             }
           },
           "after_deferral": "run"
@@ -1986,16 +1989,609 @@
           "confidence": 0.9
         }
       }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 9,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ],
+        "event_type": "owner.answer",
+        "correlate": {
+          "question": "checkin_stalled_rows"
+        },
+        "accept_from": [
+          "owner"
+        ]
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "owner.answer",
+          "source": {
+            "kind": "human"
+          },
+          "question": "checkin_stalled_rows",
+          "answer": "restart the stalled rows"
+        },
+        "principal": "owner"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "integrate",
+        "step": 10,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "merged": {},
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 11,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp-checkpoint_out",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 12,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 1,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "compare",
+        "step": 2,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "ranking": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "decompose",
+        "step": 3,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "subproblems": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "step": 4,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 5,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "generate",
+        "step": 6,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "content": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 7,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 8,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp-checkpoint_out",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 9,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "evidence_anchors": [],
+          "task_id": "th-1"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 10,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "step": 11,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "observation": {},
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 12,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ],
+        "event_type": "thread.turn_end",
+        "correlate": {
+          "task_id": "th-1"
+        },
+        "accept_from": [
+          "th-1"
+        ]
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "thread.turn_end",
+          "source": {
+            "kind": "agent"
+          },
+          "task_id": "th-1"
+        },
+        "principal": "th-1"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "ground",
+        "step": 13,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "grounded": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 14,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 15,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit",
+        "step": 16,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision",
+          "delegate_to_thread"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 14,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit",
+        "step": 15,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 12,
+        "frame": [
+          "checkin_recovery"
+        ],
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "mandates"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 12,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "cp1"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 12,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 13,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 14,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit",
+        "step": 15,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "evidence_anchors": []
+        }
+      }
     }
   ],
   "end": {
-    "kind": "Failed",
-    "code": "R402",
-    "step": 11,
-    "message": "invoked workflow 'owner_decision' failed with R402: wait.correlate.question resolved to null, so it would match events that lack it"
+    "kind": "Completed",
+    "outcome": "deferred",
+    "deferred": [
+      {
+        "store_as": "send_out"
+      },
+      {
+        "store_as": "readback_out"
+      },
+      {
+        "store_as": "log_out"
+      },
+      {
+        "store_as": "audit_out"
+      },
+      {
+        "store_as": "reminders_out"
+      }
+    ],
+    "action_records": [
+      {
+        "status": "planned"
+      },
+      {
+        "status": "executed"
+      }
+    ]
   },
   "trace_kinds": [
-    "step_deferred",
-    "step_failed"
+    "delay_started",
+    "event_received",
+    "checkpoints_invalidated",
+    "step_deferred"
   ]
 }

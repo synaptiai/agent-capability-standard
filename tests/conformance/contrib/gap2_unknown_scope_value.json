@@ -1,0 +1,229 @@
+{
+  "description": "Scopes full and FULL (not a scope value), min_full 1: the unknown value counts as delta; the one full pass meets min_full.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "inputs": {
+        "change": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1",
+          "quorum@1"
+        ]
+      },
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "diff",
+          "input_bindings": {
+            "target": "${change}"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "input_bindings": {
+            "task": {
+              "diff": "${diff.data: string}"
+            },
+            "agent": "a",
+            "fresh_context": true,
+            "model_family": "claude",
+            "role": "reviewer"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "rb",
+          "input_bindings": {
+            "task": {
+              "diff": "${diff.data: string}"
+            },
+            "agent": "b",
+            "fresh_context": true,
+            "model_family": "gpt",
+            "role": "reviewer"
+          }
+        },
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "verdicts",
+          "input_bindings": {
+            "accept_from": [
+              "a",
+              "b"
+            ]
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "gate",
+          "input_bindings": {
+            "target": "${verdicts.data}",
+            "constraints": [
+              "two approvals"
+            ],
+            "action_on_violation": "block"
+          },
+          "quorum": {
+            "verdicts": "${verdicts.data}",
+            "reviewers": [
+              "ra",
+              "rb"
+            ],
+            "vocabulary": [
+              "approve",
+              "request_changes",
+              "abstain"
+            ],
+            "pass_values": [
+              "approve"
+            ],
+            "blocking_values": [
+              "request_changes"
+            ],
+            "min_pass": 2,
+            "pinned_to": "${change}",
+            "require_fresh_context": true,
+            "require_model_families": [
+              "claude",
+              "gpt"
+            ],
+            "min_full": 1
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "change": "c1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": "diff text",
+          "evidence_anchors": [],
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "evidence_anchors": [],
+          "effective": {
+            "fresh_context": true,
+            "model_family": "claude"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 2,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "evidence_anchors": [],
+          "effective": {
+            "fresh_context": true,
+            "model_family": "gpt"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "receive",
+        "step": 3,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            {
+              "reviewer_id": "a",
+              "value": "approve",
+              "pinned": "c1",
+              "scope": "full"
+            },
+            {
+              "reviewer_id": "b",
+              "value": "approve",
+              "pinned": "c1",
+              "scope": "FULL"
+            }
+          ],
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "gate": {
+        "compliant": true,
+        "tally": {
+          "passes": 2,
+          "blocks": 0,
+          "abstains": 0,
+          "full_passes": 1,
+          "voters": [
+            "a",
+            "b"
+          ]
+        }
+      }
+    }
+  },
+  "trace_kinds": [
+    "quorum"
+  ]
+}

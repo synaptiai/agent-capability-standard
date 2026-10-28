@@ -1,11 +1,10 @@
 # Standard version: 1.1.0
 # The nine orchestrator workflows the author of #114 ported to the v1.1
-# candidate (reduced, generic names), revision 1.1c (gate `end`, step
-# `delay`, `after_deferral`, a waiting `delegate` per reviewer), kept as
-# contributed but for three `: object` annotations on a transform's output,
-# which ontology 2.1.0 types `object|array` (a union needs an annotation,
-# B204). The runtime fixtures named orchestrator_* script runs of these
-# workflows.
+# candidate (reduced, generic names), revision 1.1d (gate `end`, step
+# `delay`, `after_deferral`, a waiting `delegate` per reviewer, annotated
+# `transform.output` references), kept as contributed. They validate
+# `--strict` with no warnings. The runtime fixtures named orchestrator_*
+# script runs of these workflows.
 intake_triage:
   goal: Turn one incoming item (owner request, mention, GitHub event, mail, thread report) into exactly
     one routed next action on the board.
@@ -117,7 +116,7 @@ intake_triage:
     mutation: false
     store_as: authority_out
     input_bindings:
-      item: "${canonical_out.output: object}"
+      item: '${canonical_out.output: object}'
       taxonomy:
       - owner
       - decision_person
@@ -133,7 +132,7 @@ intake_triage:
     mutation: false
     store_as: kind_out
     input_bindings:
-      item: "${canonical_out.output: object}"
+      item: '${canonical_out.output: object}'
       taxonomy:
       - bug
       - security
@@ -154,7 +153,7 @@ intake_triage:
     mutation: false
     store_as: existing_out
     input_bindings:
-      query: "${canonical_out.output: object}"
+      query: '${canonical_out.output: object}'
       scope: board_rows+open_threads+github_issues_and_prs_all_states
       limit: 20
   - capability: constrain
@@ -2075,7 +2074,9 @@ checkin_recovery:
     input_bindings:
       workflow: owner_decision
       input:
-        question: ${rows_out}
+        question:
+          topic: checkin_stalled_rows
+          context: ${rows_out}
     after_deferral: run
   - capability: mutate
     purpose: 'Schedule the next check-in for work still running (schedule), instead of waiting passively.

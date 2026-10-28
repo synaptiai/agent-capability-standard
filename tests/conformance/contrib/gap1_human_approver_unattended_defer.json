@@ -1,0 +1,239 @@
+{
+  "description": "Unattended run, human approver, when_unattended: defer_to_queue: the host is not asked; the same steps are deferred as when a mandate is unavailable.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "drain",
+          "input_bindings": {
+            "target": "node-1",
+            "operation": {
+              "drain": true
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human",
+              "role": "owner"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "other",
+          "input_bindings": {
+            "target": "elsewhere"
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "reboot",
+          "input_bindings": {
+            "target": "node-1",
+            "operation": {
+              "reboot": true
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human",
+              "role": "owner"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v0",
+          "input_bindings": {
+            "target": "literal-node",
+            "conditions": [
+              "up"
+            ]
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "${drain.success: boolean}",
+            "conditions": [
+              "applied"
+            ]
+          }
+        },
+        {
+          "capability": "explain",
+          "purpose": "explain step",
+          "store_as": "e",
+          "input_bindings": {
+            "conclusion": "${v.passed}"
+          }
+        },
+        {
+          "capability": "persist",
+          "purpose": "persist step",
+          "store_as": "note",
+          "input_bindings": {
+            "data": "x",
+            "destination": "log"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp0",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 1,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "step": 3,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "observation": {},
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 8,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "deferred",
+    "deferred": [
+      {
+        "step": 2,
+        "store_as": "drain",
+        "reason": "the run is unattended"
+      },
+      {
+        "step": 4,
+        "store_as": "reboot",
+        "reason": "it may act on the world, after a deferred step"
+      },
+      {
+        "step": 5,
+        "store_as": "v0",
+        "reason": "the ontology orders verify after mutate, which was deferred"
+      },
+      {
+        "step": 6,
+        "store_as": "v",
+        "reason": "it reads 'drain', which was deferred"
+      },
+      {
+        "step": 7,
+        "store_as": "e",
+        "reason": "it reads 'v', which was deferred"
+      }
+    ],
+    "action_records": [
+      {
+        "status": "planned",
+        "reason": "the run is unattended (when_unattended: defer_to_queue)"
+      },
+      {
+        "status": "planned",
+        "reason": "it may act on the world, after a deferred step"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "approval_unattended",
+    "step_deferred"
+  ]
+}

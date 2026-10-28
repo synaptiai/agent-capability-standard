@@ -236,8 +236,10 @@ gaps on the standard's side (RFC-0003, amendments):
   `delta`, which `review_verdict_schema.yaml` rejects, counts as `delta`
   and is noted in `violations`; the schema text says so.
 - **Conformance (§10):** the workflows an adopter ported to the candidate
-  are a static fixture (revision 1.1c) and fifteen scripted runs
-  (`orchestrator_*`). A fixture's expected codes are the exact set it
+  are a static fixture (revision 1.1d) and fifteen scripted runs
+  (`orchestrator_*`); twenty more runs the adopter wrote from the spec
+  (`gap*`, standing mandates, verdict scope, liveness and deadlines, the
+  principal) are kept as contributed in `tests/conformance/contrib/`. A fixture's expected codes are the exact set it
   must produce, so each fixture isolates what it tests; an absent warning
   list means none. Two runtime fixtures cover a before-gate `skip` and an
   after-gate with a failure mode on the same step.

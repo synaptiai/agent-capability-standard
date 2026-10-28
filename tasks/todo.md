@@ -484,3 +484,28 @@ replace the port with 1.1c and re-script; ask the author for the gap runs;
   owner_decision's answer wait correlates on null and fails R402 when the
   owner is to be interrupted. Posted: issuecomment-6477800256.
 
+#### H5c: revision 1.1d and the gap fixtures (#114 comment 6478250741)
+Decisions (AskUserQuestion): re-script the checkin interrupt path; load
+the gap fixtures verbatim.
+- [x] `pass_orchestrator_port` is 1.1d (their annotations; checkin
+  escalation passes `{topic: checkin_stalled_rows, context: ...}`); 14 of
+  15 orchestrator fixtures pass unchanged, as they said.
+- [x] `orchestrator_checkin_escalation_no_topic` re-scripted as
+  `orchestrator_checkin_escalation_owner` (the owner is asked and
+  answers; checked by hand). The null-correlate R402 stays covered by
+  `wait_correlate_null*`.
+- [x] The 20 `gap*` fixtures checked by hand against §5.12-§5.16 (all
+  right; `gap2_unknown_scope_value` does not assert the `violations` note,
+  which is fine), kept as sent in `tests/conformance/contrib/`, copied by
+  the generator after a key check.
+- [x] Review: no bugs. Fixed: no fixture asserted §5.16's `violations`
+  note for an unknown scope (`quorum_bad_scope_noted`); `add()` refuses a
+  duplicate name and the contrib loader a non-object or duplicate keys;
+  the checkin-owner description named the wrong wait; the guide says where
+  contributed fixtures are edited. 163 runtime fixtures. Noted for the
+  author: gap3's `LivenessLost` comes 1 minute in with `interval: 1m` and
+  the default `failure_threshold: 3`; in gap5 the content's sender equals
+  the principal; checkin_recovery's mutate binds `${checkpoint_out...}`
+  across the escalation's waits.
+- [ ] Open: W608 does not see waits inside an invoked workflow.
+

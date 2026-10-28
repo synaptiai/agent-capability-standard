@@ -1337,7 +1337,10 @@
           "input_bindings": {
             "workflow": "owner_decision",
             "input": {
-              "question": "${rows_out}"
+              "question": {
+                "topic": "checkin_stalled_rows",
+                "context": "${rows_out}"
+              }
             }
           },
           "after_deferral": "run"

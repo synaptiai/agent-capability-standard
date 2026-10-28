@@ -1,0 +1,85 @@
+{
+  "description": "Principal 'Owner' does not match accept_from 'owner' (exact match): dropped, R401.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1"
+        ]
+      },
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "owner answer only",
+          "store_as": "ans",
+          "timeout": "1d",
+          "input_bindings": {
+            "accept_from": [
+              "owner"
+            ]
+          },
+          "wait": {
+            "event_type": "owner.answer",
+            "source_kind": "human"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "accept_from": [
+          "owner"
+        ],
+        "deadline": 86400000
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "owner.answer",
+          "source": {
+            "kind": "human"
+          },
+          "canonical": {
+            "sender": "owner",
+            "text": "yes"
+          }
+        },
+        "principal": "Owner"
+      },
+      "at": 1000
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "accept_from": [
+          "owner"
+        ],
+        "deadline": 86400000
+      }
+    },
+    {
+      "tick": 86400001
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R401",
+    "step": 0
+  },
+  "trace_kinds": [
+    "event_dropped"
+  ]
+}

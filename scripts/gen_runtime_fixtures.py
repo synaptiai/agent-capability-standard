@@ -10,6 +10,8 @@ trace. Edit the fixtures here, not the JSON, then regenerate:
 
 Writing also deletes any JSON file in the directory that this script does
 not generate, so the directory holds exactly the fixtures defined here.
+Contributed fixtures (tests/conformance/contrib/*.json) are copied as they
+are, after a check of their keys.
 """
 
 import argparse
@@ -95,6 +97,8 @@ def add(
     attendance="attended",
     actor_identity=None,
 ):
+    if name in fixtures:
+        raise ValueError(f"two fixtures are named {name!r}")
     fixtures[name] = {
         "description": description,
         "catalog": catalog,
@@ -1018,6 +1022,31 @@ quorum_case(
         {"reviewer_id": "b", "value": "approve", "pinned": "c1", "scope": "Full"},
     ],
     {"kind": "Failed", "code": "F504", "step": 4},
+    q={"min_full": 1},
+)
+quorum_case(
+    "quorum_bad_scope_noted",
+    "A verdict whose scope is neither full nor delta still passes, as a delta, and is noted in the quorum's violations.",
+    [
+        {"reviewer_id": "a", "value": "approve", "pinned": "c1", "scope": "full"},
+        {"reviewer_id": "b", "value": "approve", "pinned": "c1", "scope": "Full"},
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {
+            "gate": {
+                "compliant": True,
+                "tally": {"passes": 2, "full_passes": 1},
+                "violations": [
+                    {
+                        "reviewer_id": "b",
+                        "note": "scope is neither full nor delta; counted as delta",
+                    }
+                ],
+            }
+        },
+    },
     q={"min_full": 1},
 )
 quorum_case(
@@ -5784,8 +5813,8 @@ orchestrator(
 )
 
 orchestrator(
-    "orchestrator_checkin_escalation_no_topic",
-    "When the owner is to be interrupted, the escalation passes a question with no topic: owner_decision's answer wait would correlate on null, so it fails at once (R402) and so does the sweep.",
+    "orchestrator_checkin_escalation_owner",
+    "An unattended sweep interrupts the owner: the escalation asks, the answer wait correlates on the question's topic (checkin_stalled_rows), the owner's answer is applied through delegate_to_thread, and the next check-in takes a fresh checkpoint, since the escalation's waits invalidated the earlier ones; only the reminder chain is deferred.",
     "checkin_recovery",
     [
         *orch_steps(["checkin_recovery"], (0, "recall"), (1, "observe")),
@@ -5827,14 +5856,114 @@ orchestrator(
             (6, "constrain"),
             (8, "inquire", {"confidence": 0.9}),
         ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 9,
+                "frame": ["checkin_recovery", "owner_decision"],
+                "event_type": "owner.answer",
+                "correlate": {"question": "checkin_stalled_rows"},
+                "accept_from": ["owner"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "owner.answer",
+                    "source": {"kind": "human"},
+                    "question": "checkin_stalled_rows",
+                    "answer": "restart the stalled rows",
+                },
+                "principal": "owner",
+            },
+        },
+        *orch_steps(
+            ["checkin_recovery", "owner_decision"],
+            (10, "integrate"),
+            (11, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (12, "persist"),
+        ),
+        *orch_steps(
+            ["checkin_recovery", "owner_decision", "delegate_to_thread"],
+            (0, "retrieve"),
+            (1, "search"),
+            (2, "compare"),
+            (3, "decompose"),
+            (4, "plan"),
+            (5, "constrain"),
+            (6, "generate"),
+            (7, "constrain"),
+            (8, "checkpoint", {"checkpoint_id": "cp-checkpoint_out"}),
+            (9, "delegate", {"accepted": True, "task_id": "th-1"}),
+            (10, "persist"),
+            (11, "observe"),
+        ),
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "step": 12,
+                "frame": ["checkin_recovery", "owner_decision", "delegate_to_thread"],
+                "event_type": "thread.turn_end",
+                "correlate": {"task_id": "th-1"},
+                "accept_from": ["th-1"],
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {
+                    "event_type": "thread.turn_end",
+                    "source": {"kind": "agent"},
+                    "task_id": "th-1",
+                },
+                "principal": "th-1",
+            },
+        },
+        *orch_steps(
+            ["checkin_recovery", "owner_decision", "delegate_to_thread"],
+            (13, "ground"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
+        ),
+        *orch_steps(
+            ["checkin_recovery", "owner_decision"], (14, "verify"), (15, "audit")
+        ),
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 12,
+                "frame": ["checkin_recovery"],
+                "approver": {"kind": "standing_mandate", "mandate_ref": "mandates"},
+            },
+            "respond": approve("d1", who=("mandate",)),
+        },
+        {
+            "expect": {
+                "kind": "CreateCheckpoint",
+                "step": 12,
+                "frame": ["checkin_recovery"],
+            },
+            "respond": {"kind": "Checkpoint", "checkpoint_id": "cp1"},
+        },
+        *orch_steps(
+            ["checkin_recovery"],
+            (12, "mutate"),
+            (13, "verify"),
+            (14, "persist"),
+            (15, "audit"),
+        ),
     ],
     {
-        "kind": "Failed",
-        "code": "R402",
-        "step": 11,
-        "message": "invoked workflow 'owner_decision' failed with R402: wait.correlate.question resolved to null, so it would match events that lack it",
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+            {"store_as": "send_out"},
+            {"store_as": "readback_out"},
+            {"store_as": "log_out"},
+            {"store_as": "audit_out"},
+            {"store_as": "reminders_out"},
+        ],
+        "action_records": [{"status": "planned"}, {"status": "executed"}],
     },
-    ["step_deferred", "step_failed"],
+    ["delay_started", "event_received", "checkpoints_invalidated", "step_deferred"],
     attendance="unattended",
 )
 
@@ -6036,6 +6165,51 @@ add(
     workflow="rag_pipeline",
     inputs={"user_query": "q"},
 )
+
+
+# ---------------------------------------------------------------------------
+# Contributed runtime fixtures (tests/conformance/contrib/*.json), kept as
+# their authors wrote them: each is checked for the fixture keys and copied.
+# ---------------------------------------------------------------------------
+CONTRIB = ROOT / "tests" / "conformance" / "contrib"
+FIXTURE_KEYS = {
+    "description",
+    "catalog",
+    "workflow",
+    "inputs",
+    "attendance",
+    "start",
+    "script",
+    "end",
+    "trace_kinds",
+}
+
+
+def unique_keys(pairs):
+    keys = [k for k, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError(f"duplicate keys in {sorted(keys)}")
+    return dict(pairs)
+
+
+def contributed():
+    for path in sorted(CONTRIB.glob("*.json")):
+        if path.stem in fixtures:
+            raise ValueError(f"{path}: a generated fixture is named {path.stem!r}")
+        fixture = json.loads(path.read_text(), object_pairs_hook=unique_keys)
+        if not isinstance(fixture, dict):
+            raise ValueError(f"{path}: a fixture is a JSON object")
+        keys = set(fixture)
+        missing = FIXTURE_KEYS - keys
+        unknown = keys - FIXTURE_KEYS - {"actor_identity"}
+        if missing or unknown:
+            raise ValueError(
+                f"{path}: missing {sorted(missing)}, unknown {sorted(unknown)}"
+            )
+        fixtures[path.stem] = fixture
+
+
+contributed()
 
 
 def main(argv: list[str]) -> int:

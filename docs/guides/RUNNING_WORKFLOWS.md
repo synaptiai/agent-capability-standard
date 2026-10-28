@@ -225,6 +225,9 @@ each one with a snapshot and restore before every step, and
 `tests/test_runner.py` runs them through Python. The `orchestrator_*`
 fixtures run the workflows an adopter ported to the candidate
 (`tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`, kept as
-contributed but for three type annotations): nested invocations, gate
+contributed): nested invocations, gate
 `end`s, a `delay`, steps that run after a deferral, waits, approvals with rechecks, a quorum
-that loops, an escalation and unattended deferral, end to end.
+that loops, an escalation and unattended deferral, end to end. Fixtures
+an adopter wrote themselves (`gap*`) are the exception: edit them in
+`tests/conformance/contrib/`, where they are kept as sent; the generator
+checks their keys and copies them in.
