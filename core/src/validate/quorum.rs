@@ -158,6 +158,14 @@ impl<'a> Independence<'a> {
         None
     }
 
+    /// Whether any of `roots` is one of `targets` or depends on one through
+    /// bindings, directly or transitively.
+    pub(crate) fn reads_any(&mut self, roots: &[String], targets: &HashSet<&str>) -> bool {
+        roots
+            .iter()
+            .any(|r| targets.contains(r.as_str()) || self.reaches(r, targets).is_some())
+    }
+
     fn build_readers(steps: &[Value]) -> HashMap<String, Vec<String>> {
         let mut readers: HashMap<String, Vec<String>> = HashMap::new();
         let mut injected = Vec::new();
@@ -245,7 +253,7 @@ struct Path {
     forbidden: String,
 }
 
-fn collect_roots(v: &Value, out: &mut Vec<String>, depth: usize) {
+pub(crate) fn collect_roots(v: &Value, out: &mut Vec<String>, depth: usize) {
     if depth > 64 {
         return;
     }

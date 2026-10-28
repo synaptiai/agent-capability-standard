@@ -274,7 +274,7 @@ Decisions (user, 2026-10-27):
 ## Stages
 - [x] **H1** cleanup: W615 + catalog bindings, v1 example, bootstrap, backoff,
   fixture generator, skill procedure drift; docs; review
-- [ ] **H2** `identity@1`: RFC-0004, schema, ontology, validator, executor,
+- [x] **H2** `identity@1`: RFC-0004, schema, ontology, validator, executor,
   Python, spec §5.17/§8/Appendix C, guides, fixtures; plus an "always ask"
   trust class (an item from it needs approval even under a mandate); review
 - [x] **H2b** CEL membership `in` in the expression grammar, with cel-go

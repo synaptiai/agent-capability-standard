@@ -20,6 +20,10 @@ output_schema:
           sender:
             type: string
             description: The host-authenticated principal that sent the item
+          sender_identity:
+            type: object
+            description: "The sender's identity as the host reported it (agent_identity_schema.yaml;\
+              \ identity@1, STANDARD v1.1 \xA75.17)"
       description: Received data/events
     source:
       type: string

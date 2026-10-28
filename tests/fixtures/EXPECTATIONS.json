@@ -558,5 +558,27 @@
     "expected_error_codes": [
       "B206"
     ]
+  },
+  "pass_identity_senders": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "fail_identity_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
+  },
+  "fail_identity_vocabulary": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S303"
+    ]
   }
 }

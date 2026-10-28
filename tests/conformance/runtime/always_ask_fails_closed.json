@@ -1,0 +1,178 @@
+{
+  "description": "With always_ask_trust_classes bound, an item with no identity, or whose identity has no trust class, counts as always-ask.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "always_ask_trust_classes": [
+              "external"
+            ]
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        },
+        {
+          "capability": "generate",
+          "purpose": "generate step",
+          "store_as": "g",
+          "input_bindings": {
+            "specification": "${r.data: array<object>}"
+          }
+        },
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "routine",
+          "input_bindings": {
+            "code": "rotate-logs"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            }
+          }
+        },
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "act",
+          "input_bindings": {
+            "code": "${g.content: string}"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1",
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "relay",
+          "kind": "service"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "generate",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "content": "restart web",
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "mandates/ops"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 3,
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "always_ask"
+  ]
+}

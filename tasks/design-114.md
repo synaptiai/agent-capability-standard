@@ -109,7 +109,8 @@ meaning. New codes:
   `digits.digits[.digits]`, nothing else.
 * `workflow_extensions`: `supports_*` booleans (advisory) and `requires:
   ["name@major"]`. Known: `triggers@1`, `recovery@1`, `wait@1`, `approval@1`,
-  `delegation@1`, `quorum@1` (`extensions::EXTENSIONS`; all checked).
+  `delegation@1`, `quorum@1`, `identity@1` (`extensions::EXTENSIONS`; all
+  checked).
   Unknown name or major → V106; an extension is listed there only together
   with its checks, since a validator must not accept a declaration it does
   not check. A non-mapping `workflow_extensions`, a
@@ -126,6 +127,7 @@ meaning. New codes:
   | `approval@1` | step `approval` |
   | `delegation@1` | bindings of `delegate.fresh_context`, `delegate.model_family`, `delegate.role`, `receive.accept_from`, `synchronize.accept_from` |
   | `quorum@1` | step `quorum` |
+  | `identity@1` | bindings of `receive`/`synchronize` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes` (RFC-0004) |
 
   `failure_modes[].on_error` and `.when` are base 1.1 (not an extension): a
   consumer that ignores them only loses an optional trigger.
@@ -409,6 +411,27 @@ reask)}, expires?, when_unattended: defer_to_queue|skip|fail (default fail)}`
   ontology like any input.
 * Runtime: receive items count only if the host-authenticated `principal` is
   in `accept_from`; others are dropped and counted. `sender` = principal.
+* Identity (`identity@1`, RFC-0004, STANDARD §5.17; validate/identity.rs):
+  the three inputs need the declaration (V106); literal values come from
+  `agent_identity_schema.yaml` (S303). The `Event` response may carry an
+  `identity` (refused when malformed or naming another principal); the
+  principal defaults to it. `AwaitEvent` carries `sender_check` and
+  `accept_trust_classes`; failing either drops the event (reasons
+  `sender_check`, `accept_trust_classes`). Kept items carry
+  `sender_identity`. Without `identity@1` an identity is ignored. A resolved
+  input that is not a list of known values fails the step (R402); a literal
+  one is S303. Always-ask: `Frame.always_ask` holds marked stores and
+  inputs (and `_recovery` once injected context comes from a marked value);
+  a step is marked when its output holds an item of a listed class or with
+  no trust class (fail closed), it reads a marked root (`Step.reads`), or
+  its nested run marked anything; a marked invoke starts its child with
+  `Frame.marked`, which marks every step. A marked step that requires
+  approval gets a `human` approver with `always_ask: true`, its approval
+  record has no `mandate_ref`, its action records carry `always_ask: true`,
+  and unattended it follows `when_unattended`. W606 also covers a
+  mandate-only step that reads, through bindings, a step binding
+  `always_ask_trust_classes`. `StartOptions.actor_identity` goes on every
+  action record (`actor` = its kind).
 
 ## 15. Quorum (E4)
 

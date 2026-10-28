@@ -30,6 +30,9 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
 | `state` | Yes | object | State to agree on |
 | `timeout` | No | string | Sync timeout |
 | `accept_from` | No | array[string] | Principals to accept state from (Standard v1.1 `delegation@1`) |
+| `sender_check` | No | array[string] | Accepted `authenticated_by` values of the sender's identity (Standard v1.1 `identity@1`) |
+| `accept_trust_classes` | No | array[string] | Trust classes to accept state from (`identity@1`) |
+| `always_ask_trust_classes` | No | array[string] | Trust classes whose state (and state with no trust class) makes any step that requires approval and uses it be asked of a person (`identity@1`) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 

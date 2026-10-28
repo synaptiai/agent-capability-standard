@@ -1,0 +1,137 @@
+{
+  "description": "An invoke marked only by its condition marks every step of its nested run.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "always_ask_trust_classes": [
+              "external"
+            ]
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "child",
+          "condition": "${r.data: array<object>} != []",
+          "input_bindings": {
+            "workflow": "act_now",
+            "input": {}
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1"
+        ]
+      }
+    },
+    "act_now": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "act",
+          "input_bindings": {
+            "code": "apply"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "mail:someone@example.com",
+          "kind": "human",
+          "authenticated_by": "x-mail-dkim",
+          "trust_class": "external"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "frame": [
+          "w",
+          "act_now"
+        ],
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "frame": [
+          "w",
+          "act_now"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "always_ask"
+  ]
+}

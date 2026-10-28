@@ -1,0 +1,219 @@
+{
+  "description": "An action on an item from an always-ask trust class, here through a generate step, is asked of a person despite its standing mandate; an action that uses no such item still uses the mandate. Action records carry the run's actor identity.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "always_ask_trust_classes": [
+              "external"
+            ]
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        },
+        {
+          "capability": "generate",
+          "purpose": "generate step",
+          "store_as": "g",
+          "input_bindings": {
+            "specification": "${r.data: array<object>}"
+          }
+        },
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "routine",
+          "input_bindings": {
+            "code": "rotate-logs"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            }
+          }
+        },
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "act",
+          "input_bindings": {
+            "code": "${g.content: string}"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1",
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "mail:someone@example.com",
+          "kind": "human",
+          "authenticated_by": "x-mail-dkim",
+          "trust_class": "external"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "generate",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "content": "restart web",
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "mandates/ops"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 3,
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "status": "executed",
+        "actor": "agent",
+        "actor_identity": {
+          "principal": "orchestrator",
+          "kind": "agent",
+          "model_family": "claude"
+        },
+        "approval": {
+          "mandate_ref": "mandates/ops",
+          "approvers": [
+            "mandate"
+          ]
+        }
+      },
+      {
+        "status": "executed",
+        "actor": "agent",
+        "actor_identity": {
+          "principal": "orchestrator",
+          "kind": "agent",
+          "model_family": "claude"
+        },
+        "always_ask": true,
+        "approval": {
+          "mandate_ref": null,
+          "approvers": [
+            "dana"
+          ]
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "always_ask",
+    "approval_requested"
+  ],
+  "actor_identity": {
+    "principal": "orchestrator",
+    "kind": "agent",
+    "model_family": "claude"
+  }
+}

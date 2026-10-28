@@ -61,6 +61,7 @@ fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Va
             attendance,
             run_id: "run-1".into(),
             now_ms: now,
+            actor_identity: f.get("actor_identity").cloned(),
         },
     )
     .unwrap_or_else(|e| panic!("{name}: start: {e}"));
@@ -154,6 +155,7 @@ fn opts() -> StartOptions {
         attendance: Attendance::Attended,
         run_id: "r".into(),
         now_ms: 0,
+        actor_identity: None,
     }
 }
 
@@ -351,6 +353,10 @@ fn restore_refuses_malformed_states() {
         ),
         ("no action at all", Box::new(|s| s["pending"] = Value::Null)),
         (
+            "malformed actor identity",
+            Box::new(|s| s["actor_identity"] = serde_json::json!({"kind": "agent"})),
+        ),
+        (
             "missing record",
             Box::new(|s| s["frames"][0]["cur"]["record"] = serde_json::json!(3)),
         ),
@@ -482,4 +488,122 @@ fn restore_refuses_a_parent_frame_that_is_not_invoking() {
             "{what}: a forged state was restored"
         );
     }
+}
+
+/// A run waiting on a receive with `identity@1` inputs.
+fn waiting() -> (Context, Run) {
+    let ctx = ctx();
+    let catalog = serde_json::json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",
+        "workflow_extensions": {"requires": ["wait@1", "identity@1"]},
+        "steps": [{"capability": "receive", "purpose": "p", "store_as": "r", "timeout": "1h",
+                   "input_bindings": {"accept_trust_classes": ["owner"]},
+                   "wait": {"event_type": "answer"}}]}});
+    let run = Run::start(&ctx, &catalog, "w", Map::new(), opts()).unwrap();
+    (ctx, run)
+}
+
+#[test]
+fn submit_refuses_a_malformed_or_contradictory_identity() {
+    let (_ctx, mut run) = waiting();
+    let id = run.next().id;
+    let before = run.snapshot(None);
+    let owner = serde_json::json!({"principal": "dana", "kind": "human", "trust_class": "owner"});
+    let event = serde_json::json!({"event_type": "answer"});
+    for (principal, identity) in [
+        // The principal names someone else than the identity.
+        (Some("eve"), owner.clone()),
+        // Not an agent_identity.
+        (None, serde_json::json!({"principal": "dana"})),
+        (
+            None,
+            serde_json::json!({"principal": "dana", "kind": "robot"}),
+        ),
+        (None, serde_json::json!({"principal": 7, "kind": "human"})),
+        (
+            None,
+            serde_json::json!({"principal": "dana", "kind": "human", "trust_class": "boss"}),
+        ),
+        (
+            None,
+            serde_json::json!({"principal": "dana", "kind": "human", "authenticated_by": "password"}),
+        ),
+        (None, serde_json::json!("dana")),
+    ] {
+        let r = run.submit(
+            id,
+            Response::Event {
+                event: event.clone(),
+                principal: principal.map(str::to_string),
+                identity: Some(identity.clone()),
+            },
+            0,
+        );
+        assert!(
+            matches!(r, Err(acs_core::exec::SubmitError::Malformed(_))),
+            "{identity}: {r:?}"
+        );
+    }
+    assert_eq!(
+        run.snapshot(None),
+        before,
+        "a refused response changes nothing"
+    );
+    // The same principal twice is fine.
+    run.submit(
+        id,
+        Response::Event {
+            event,
+            principal: Some("dana".into()),
+            identity: Some(owner),
+        },
+        0,
+    )
+    .unwrap();
+    assert!(run.is_finished());
+}
+
+#[test]
+fn start_refuses_a_malformed_actor_identity() {
+    let ctx = ctx();
+    for bad in [
+        serde_json::json!({"kind": "agent"}),
+        serde_json::json!({"principal": "a", "kind": "agent", "role": 1}),
+    ] {
+        let options = StartOptions {
+            actor_identity: Some(bad),
+            ..opts()
+        };
+        assert!(matches!(
+            Run::start(&ctx, &one_step(), "w", topic(), options),
+            Err(acs_core::exec::StartError::Identity(_))
+        ));
+    }
+}
+
+#[test]
+fn without_identity_at_1_an_identity_is_ignored() {
+    // A host that reports identities to a workflow that does not declare
+    // identity@1 changes nothing: the identity is neither checked nor kept.
+    let ctx = ctx();
+    let catalog = serde_json::json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",
+        "workflow_extensions": {"requires": ["wait@1"]},
+        "steps": [{"capability": "receive", "purpose": "p", "store_as": "r", "timeout": "1h",
+                   "wait": {"event_type": "answer"}}]}});
+    let mut run = Run::start(&ctx, &catalog, "w", Map::new(), opts()).unwrap();
+    let id = run.next().id;
+    run.submit(
+        id,
+        Response::Event {
+            event: serde_json::json!({"event_type": "answer"}),
+            principal: Some("dana".into()),
+            identity: Some(serde_json::json!({"principal": "someone-else"})),
+        },
+        0,
+    )
+    .unwrap();
+    let end = serde_json::to_value(run.next()).unwrap();
+    assert_eq!(
+        end["outputs"]["r"]["data"],
+        serde_json::json!([{"event_type": "answer", "sender": "dana"}])
+    );
 }

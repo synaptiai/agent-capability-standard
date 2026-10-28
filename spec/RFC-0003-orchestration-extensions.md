@@ -119,7 +119,7 @@ before|after`.
   correlation, liveness probing, a mandatory timeout, and checkpoints that
   do not survive a wait.
 - **E2 delegation**, split: `fresh_context`, `model_family`, `role` and
-  `accept_from` now; agent identity later (RFC-0002).
+  `accept_from` now; agent identity later (done by RFC-0004, `identity@1`).
 - **E3 approval**: structured approver, digest binding of what was shown
   (RFC 8785 canonical JSON over I-JSON values),
   recheck before acting, expiry, single use, and fail-closed handling of
@@ -228,11 +228,21 @@ still could not express. Closed in the candidate:
   (§5.8) with CEL's meaning: an element of a list by `==`, or a key of a
   map. Like the other comparison operators it does not chain. `and` stays
   a syntax error (CEL has no such keyword); V108 says to use `&&`.
+- **Trust classes and "always ask".** Incoming items carry their sender's
+  identity, filtered by how the sender was authenticated and by trust
+  class, and an action on an item from an "always ask" class needs a
+  person whatever mandate would cover it. RFC-0004 specifies this as
+  `identity@1` (§5.17).
 
 ## Open questions
 
-- How agent identity (RFC-0002) will extend E2 with a named agent and
-  attestation of `fresh_context`.
+- ~~How agent identity (RFC-0002) will extend E2 with a named agent and
+  attestation of `fresh_context`.~~ The named agent is answered by
+  [RFC-0004](RFC-0004-agent-identity.md), which adds `identity@1`: the
+  sender's identity on each event, `sender_check`, `accept_trust_classes`
+  and an "always ask" class. Still open: whether delegation should attest
+  the delegate's identity in `effective`, beside `fresh_context` and
+  `model_family`.
 - None further for the domain catalogs: the four under `schemas/workflows/`,
   which failed validation before this RFC, now pass in strict mode and are
   validated in CI.

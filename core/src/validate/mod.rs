@@ -10,6 +10,7 @@ mod bindings;
 mod delegation;
 mod exprs;
 mod extensions;
+pub(crate) mod identity;
 mod invoke;
 mod quorum;
 mod recovery;
@@ -396,6 +397,17 @@ impl WorkflowCheck<'_> {
             }
         }
         let mut independence = quorum::Independence::new(steps);
+        // Steps whose items may be from an always-ask trust class (§5.17).
+        let always_ask: HashSet<&str> = steps
+            .iter()
+            .filter_map(Value::as_object)
+            .filter(|s| {
+                s.get("input_bindings")
+                    .and_then(|b| b.get("always_ask_trust_classes"))
+                    .is_some()
+            })
+            .filter_map(|s| s.get("store_as").and_then(Value::as_str))
+            .collect();
         let mut invocations = Vec::new();
         let mut placed: Vec<semantics::Placed<'_>> = Vec::new();
         let mut placed_at: HashMap<usize, usize> = HashMap::new();
@@ -552,6 +564,7 @@ impl WorkflowCheck<'_> {
                 self.report,
             );
             delegation::check(&loc, step, &declared, self.report);
+            identity::check(&loc, step, &declared, self.report);
             quorum::check(
                 &loc,
                 step,
@@ -587,6 +600,21 @@ impl WorkflowCheck<'_> {
             };
             if requires_approval && unattended && !plan_for_unattended {
                 approval::unattended(&loc, self.report);
+            }
+            // A mandate is no plan for a step that may act on an always-ask
+            // item: it is asked of a person, and no one is present.
+            let mandate_only = matches!(step.get("approval"), Some(Value::Object(a))
+                if !a.contains_key("when_unattended") && plan_for_unattended);
+            if requires_approval && unattended && mandate_only && !always_ask.is_empty() {
+                let mut roots = Vec::new();
+                for key in ["input_bindings", "condition", "gates", "approval", "wait"] {
+                    if let Some(v) = step.get(key) {
+                        quorum::collect_roots(v, &mut roots, 0);
+                    }
+                }
+                if independence.reads_any(&roots, &always_ask) {
+                    approval::unattended_always_ask(&loc, self.report);
+                }
             }
 
             // ...but after-gates and failure modes run once the step has run,

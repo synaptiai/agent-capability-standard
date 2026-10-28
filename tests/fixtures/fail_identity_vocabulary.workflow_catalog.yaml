@@ -1,0 +1,17 @@
+# Standard version: 1.1.0
+# Negative fixture (STANDARD v1.1 §5.17): an authentication mechanism and a
+# trust class outside agent_identity's vocabularies. S303.
+identity_vocabulary:
+  goal: Filter senders with unknown values.
+  risk: low
+  workflow_extensions:
+    requires: [identity@1]
+  steps:
+  - capability: receive
+    purpose: Receive answers.
+    store_as: answer
+    input_bindings:
+      sender_check: [password]
+      accept_trust_classes: [boss]
+  success:
+  - Never valid

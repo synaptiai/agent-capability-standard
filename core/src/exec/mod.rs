@@ -73,6 +73,9 @@ pub struct StartOptions {
     pub attendance: Attendance,
     pub run_id: String,
     pub now_ms: u64,
+    /// Who runs the workflow (`agent_identity`, §5.17): every action record
+    /// carries it as `actor_identity`.
+    pub actor_identity: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +135,11 @@ pub enum Body {
         source_kind: Option<String>,
         correlate: Map<String, Value>,
         accept_from: Option<Vec<String>>,
+        /// `identity@1`: accepted `authenticated_by` values and trust classes.
+        #[serde(default)]
+        sender_check: Option<Vec<String>>,
+        #[serde(default)]
+        accept_trust_classes: Option<Vec<String>>,
         liveness: Option<Value>,
         deadline: Option<u64>,
     },
@@ -208,6 +216,10 @@ pub enum Response {
         event: Value,
         #[serde(default)]
         principal: Option<String>,
+        /// The sender's `agent_identity` (§5.17). Its `principal`, when both
+        /// are given, must equal `principal`.
+        #[serde(default)]
+        identity: Option<Value>,
     },
     LivenessLost,
 }
@@ -233,6 +245,8 @@ pub enum StartError {
     Invalid(Vec<Diagnostic>),
     Inputs(String),
     Program(String),
+    /// The actor identity is not an `agent_identity`.
+    Identity(String),
 }
 
 impl fmt::Display for StartError {
@@ -247,6 +261,7 @@ impl fmt::Display for StartError {
                 )
             }
             StartError::Inputs(m) | StartError::Program(m) => f.write_str(m),
+            StartError::Identity(m) => write!(f, "actor_identity: {m}"),
         }
     }
 }
@@ -338,6 +353,10 @@ pub(crate) struct StepState {
     pub previous: Option<Value>,
     /// Events dropped while waiting, by reason.
     pub dropped: Map<String, Value>,
+    /// The step's output holds an item from an always-ask trust class, or
+    /// its nested run used one (§5.17).
+    #[serde(default)]
+    pub always_ask: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -379,6 +398,14 @@ pub(crate) struct Frame {
     /// (transitively), so ontology order sees through nested runs.
     #[serde(default)]
     pub nested_caps: BTreeMap<usize, Vec<String>>,
+    /// Stores and inputs that hold, or were computed from, an item from an
+    /// always-ask trust class (§5.17): a step reading one needs a person's
+    /// approval.
+    #[serde(default)]
+    pub always_ask: BTreeSet<String>,
+    /// Invoked by a marked step: every step of this run is marked.
+    #[serde(default)]
+    pub marked: bool,
 }
 
 /// What the pending action is waiting for, beyond the action itself.
@@ -433,6 +460,9 @@ pub(crate) struct State {
     /// Every deferral of the run, in order, across nested runs.
     #[serde(default)]
     pub deferrals: Vec<Deferral>,
+    /// Who runs the workflow (§5.17), recorded on every action record.
+    #[serde(default)]
+    pub actor_identity: Option<Value>,
 }
 
 /// One deferred step (§5.14).
@@ -504,6 +534,10 @@ impl Run {
         let program = Self::prepare(ctx, catalog, workflow)?;
         check_inputs(&program.workflows[workflow], &inputs).map_err(StartError::Inputs)?;
         ijson(&Value::Object(inputs.clone())).map_err(StartError::Inputs)?;
+        if let Some(identity) = &options.actor_identity {
+            ijson(identity).map_err(StartError::Identity)?;
+            identity_error(identity).map_or(Ok(()), |e| Err(StartError::Identity(e)))?;
+        }
         let state = State {
             version: SNAPSHOT_VERSION,
             run_id: options.run_id,
@@ -520,6 +554,7 @@ impl Run {
             records: Vec::new(),
             trace: Vec::new(),
             deferrals: Vec::new(),
+            actor_identity: options.actor_identity,
         };
         let mut run = Run { program, state };
         run.machine()
@@ -655,6 +690,9 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
     if st.now > MAX_TIME || st.next_id > MAX_TIME {
         return Err("a time or action id is out of range".into());
     }
+    if let Some(e) = st.actor_identity.as_ref().and_then(identity_error) {
+        return Err(format!("actor_identity: {e}"));
+    }
     for f in &st.frames {
         let Some(wf) = program.workflows.get(&f.workflow) else {
             return Err(format!("unknown workflow '{}'", f.workflow));
@@ -753,6 +791,50 @@ impl Frame {
             escalation: None,
             deferred: Vec::new(),
             nested_caps: BTreeMap::new(),
+            always_ask: BTreeSet::new(),
+            marked: false,
         }
     }
+}
+
+/// Why `v` is not an `agent_identity` (`schemas/agent_identity_schema.yaml`),
+/// if it is not: an object with a string `principal`, a `kind`, string
+/// optional fields, and `authenticated_by` and `trust_class` from their
+/// vocabularies. Unknown fields are allowed.
+pub(crate) fn identity_error(v: &Value) -> Option<String> {
+    use crate::validate::identity::{TRUST_CLASSES, known_mechanism};
+    let Value::Object(m) = v else {
+        return Some("an identity must be an object".into());
+    };
+    if !m.get("principal").is_some_and(Value::is_string) {
+        return Some("an identity needs a string principal".into());
+    }
+    if !matches!(
+        m.get("kind").and_then(Value::as_str),
+        Some("agent" | "human" | "service")
+    ) {
+        return Some("an identity's kind must be agent, human or service".into());
+    }
+    for key in [
+        "role",
+        "model_family",
+        "owner",
+        "authenticated_by",
+        "trust_class",
+    ] {
+        if m.get(key).is_some_and(|x| !x.is_string()) {
+            return Some(format!("an identity's {key} must be a string"));
+        }
+    }
+    if let Some(a) = m.get("authenticated_by").and_then(Value::as_str) {
+        if !known_mechanism(a) {
+            return Some(format!("'{a}' is not an authenticated_by value"));
+        }
+    }
+    if let Some(c) = m.get("trust_class").and_then(Value::as_str) {
+        if !TRUST_CLASSES.contains(&c) {
+            return Some(format!("'{c}' is not a trust class"));
+        }
+    }
+    None
 }

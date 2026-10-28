@@ -63,7 +63,7 @@ a run.
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
-| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ...}` (the authenticated party that delivered it, §5.15) or `{"kind": "LivenessLost"}` (R406) |
+| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's) or `{"kind": "LivenessLost"}` (R406) |
 | `Sleep` | waits until `until` (retry backoff) | — (the runner calls `tick`) |
 | `Completed` / `Failed` | — | the run is over |
 
@@ -110,10 +110,20 @@ ontology contract requires, or the step fails (R402).
   `unavailable` for one. `recheck` re-reads a source before acting, then
   asks again (showing what changed), replans or stops if it changed.
   Every approval leaves an action record, with a `reason` when the action
-  did not go ahead.
+  did not go ahead. A step that uses, directly or through other steps, an
+  item from one of the `always_ask_trust_classes` of `identity@1` (or with
+  no trust class) is asked of a person (`approver.kind: human`,
+  `always_ask: true`) even when its approval names a standing mandate, and
+  its records carry `always_ask: true`; unattended, it follows
+  `when_unattended`. An `identity@1` input that resolves to anything but a
+  list of known values fails its step (R402). A step with `identity@1`
+  inputs that does not wait is your host's to filter: put the sender's
+  `sender_identity` on each item you return, since an item without one
+  counts as always-ask when `always_ask_trust_classes` is bound.
 - **Waits.** `AwaitEvent` has a deadline from the step's `timeout`. Events
   that don't match (`event_type`, `source_kind`, `correlate`,
-  `accept_from`) are dropped and the wait goes on. A lapse is R401;
+  `accept_from`, `sender_check`, `accept_trust_classes`) are dropped and
+  the wait goes on. A lapse is R401;
   `LivenessLost` (or an `Error` with code R406) is R406, unless it comes
   after the deadline, which is R401.
 - **Retries, deadlines.** `retry.max` extra attempts for R401/R402/R406, with
@@ -134,6 +144,11 @@ ontology contract requires, or the step fails (R402).
   using the vocabulary, from fresh-context reviewers when required. Any
   blocking verdict, too few passes, too few full-sweep passes (`min_full`)
   or uncovered model families fail the step with F504.
+
+Start a run with `actor_identity=` (an `agent_identity`, such as
+`AgentDescriptor.identity()` of a registered agent) to say who runs it:
+every action record then carries it as `actor_identity`, and `actor` is its
+`kind`.
 
 `RunResult` gives the `outcome` (`completed`, `escalated`, `deferred`,
 `replan_required`) or the failure `code`, plus the outputs, the action

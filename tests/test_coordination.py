@@ -155,6 +155,64 @@ class TestAgentRegistry:
         assert desc.trust_score == 0.95
         assert agent_registry.agent_count == 1
 
+    def test_identity(self, agent_registry: AgentRegistry) -> None:
+        """An agent's identity (STANDARD v1.1 §5.17): its id as principal, and
+        the identity fields its metadata gives as strings."""
+        desc = agent_registry.register(
+            agent_id="reviewer-a",
+            capabilities={"critique"},
+            trust_score=0.5,
+            metadata={
+                "model_family": "claude",
+                "role": "reviewer",
+                "trust_class": "own_subagent_report",
+                "owner": 7,
+                "version": "1.0",
+            },
+        )
+        assert desc.identity() == {
+            "principal": "reviewer-a",
+            "kind": "agent",
+            "model_family": "claude",
+            "role": "reviewer",
+            "trust_class": "own_subagent_report",
+        }
+
+    def test_identity_vocabularies(self, agent_registry: AgentRegistry) -> None:
+        """Values outside agent_identity's vocabularies are refused, and the
+        vocabularies are the schema's."""
+        import yaml
+
+        from grounded_agency.coordination.registry import (
+            AUTHENTICATION_MECHANISMS,
+            TRUST_CLASSES,
+        )
+
+        schema = yaml.safe_load(
+            (
+                Path(__file__).resolve().parents[1]
+                / "schemas"
+                / "agent_identity_schema.yaml"
+            ).read_text()
+        )["agent_identity"]["properties"]
+        assert TRUST_CLASSES == set(schema["trust_class"]["enum"])
+        for m in AUTHENTICATION_MECHANISMS:
+            assert m + "|" in schema["authenticated_by"]["pattern"]
+        ok = agent_registry.register(
+            agent_id="a",
+            capabilities={"critique"},
+            metadata={"authenticated_by": "x-acme.sso"},
+        )
+        assert ok.identity()["authenticated_by"] == "x-acme.sso"
+        for metadata in ({"trust_class": "boss"}, {"authenticated_by": "password"}):
+            bad = agent_registry.register(
+                agent_id=f"b-{len(metadata)}-{next(iter(metadata))}",
+                capabilities={"critique"},
+                metadata=metadata,
+            )
+            with pytest.raises(ValueError):
+                bad.identity()
+
     def test_register_validates_capabilities(
         self,
         agent_registry: AgentRegistry,

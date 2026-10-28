@@ -1,0 +1,51 @@
+{
+  "description": "An identity@1 input whose reference resolves to something that is not a list of known values fails the step (R402) rather than turning the check off.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "accept_trust_classes": "${classes}"
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        }
+      ],
+      "inputs": {
+        "classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed"
+  ]
+}

@@ -3,10 +3,11 @@
 Standard v1.1 adds optional, versioned **extensions** for what orchestrators
 need beyond a sequence of steps: starting runs on a schedule or an event,
 escalating when recovery runs out, waiting for an event, structured
-approval, delegation hints, and review quorums. This guide shows how to use
-them. The normative text is
-[STANDARD-v1.1.0 §5.9–§5.16](../../spec/STANDARD-v1.1.0.md#59-workflow-extensions);
-the rationale is in [RFC-0003](../../spec/RFC-0003-orchestration-extensions.md).
+approval, delegation hints, review quorums, and checks on who sent an item.
+This guide shows how to use them. The normative text is
+[STANDARD-v1.1.0 §5.9–§5.17](../../spec/STANDARD-v1.1.0.md#59-workflow-extensions);
+the rationale is in [RFC-0003](../../spec/RFC-0003-orchestration-extensions.md)
+and, for sender identity, [RFC-0004](../../spec/RFC-0004-agent-identity.md).
 
 | Extension | What it adds | Validated today |
 |-----------|--------------|-----------------|
@@ -16,8 +17,9 @@ the rationale is in [RFC-0003](../../spec/RFC-0003-orchestration-extensions.md).
 | `approval@1` | Structured, bound approval | Yes |
 | `delegation@1` | Delegation hints and sender filtering | Yes |
 | `quorum@1` | Independent review quorums | Yes |
+| `identity@1` | Sender identity, trust classes, "always ask" | Yes |
 
-The reference validator checks all six. A workflow that declares any other
+The reference validator checks all seven. A workflow that declares any other
 extension (or another major version) is refused (V106).
 
 ## Declaring the extensions you use
@@ -333,6 +335,63 @@ identities (accounts, keys, agent sessions) map to principals, and reports
 as an item's principal whoever authenticated delivering it, not a sender
 named in the item. So when a peer relays the owner's answer, the principal
 is the peer, and `accept_from: [owner]` drops it.
+
+## Sender identity (`identity@1`)
+
+A principal says *who* delivered an item; an **identity** also says how the
+host authenticated them and what standing they have. Your host reports one
+with each event a step waits for (`schemas/agent_identity_schema.yaml`):
+
+```json
+{"principal": "dana", "kind": "human",
+ "authenticated_by": "session_id", "trust_class": "owner"}
+```
+
+`receive` and `synchronize` then take three more inputs:
+
+```yaml
+- capability: receive
+  purpose: Wait for the owner's answer.
+  store_as: answer
+  timeout: 2h
+  input_bindings:
+    sender_check: [session_id, x-acme.sso]          # how they were authenticated
+    accept_trust_classes: [owner, decision_person, colleague]  # who may answer
+    always_ask_trust_classes: [colleague]  # whose answer needs a person in the loop
+  wait:
+    event_type: answer.given
+```
+
+- With `sender_check` or `accept_trust_classes` bound, an item whose sender
+  has no identity, was authenticated some other way, or is of another trust
+  class is dropped and counted, like `accept_from`. A kept item carries
+  `sender` and `sender_identity`. A bound value must be a non-empty list of
+  known values: a reference that resolves to anything else, including an
+  optional input that was left out, fails the step (R402) rather than
+  turning the check off.
+- `authenticated_by` is one of `session_id`, `chat_user_id`,
+  `code_host_login`, `directory_id`, `api_key`, `signed_token`, or your own
+  `x-` value. Trust classes are `owner`, `decision_person`,
+  `system_of_record`, `own_subagent_report`, `peer_agent`, `colleague` and
+  `external`; `authority_trust_model.yaml` gives each a default evidence
+  weight that a profile's `trust_weights` can override.
+- **Always ask.** An item from a listed class, or one with no identity or
+  no trust class, marks what is computed from it: a step that reads it,
+  directly or through other steps (a `generate` that summarises it, context
+  a recovery loop injects, an `invoke` that passes it on or runs because of
+  it), is asked of a person if it needs approval, even when its `approval`
+  names a standing mandate, and its action records say `always_ask: true`.
+  An unattended run follows the step's `when_unattended` instead; the
+  validator warns (W606) when that would leave only a mandate. The mark
+  follows references: if your host carries an item's content into a later
+  step by other means, the executor cannot see it.
+- On a step that does not wait, your host receives the inputs, applies
+  them to what it returns, and must put the `sender_identity` it applied
+  them to on each item it returns: the executor marks from it.
+
+To record who ran a workflow, start the run with an actor identity
+(`WorkflowRunner.run(..., actor_identity=agent.identity())`); every action
+record then carries it. See [Running workflows](RUNNING_WORKFLOWS.md).
 
 ## Review quorums (`quorum@1`)
 

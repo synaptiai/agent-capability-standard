@@ -731,6 +731,29 @@ class TestValidateCanonicalSchemas:
             "    human_note: 0.55\n    ghost_source: 0.5",
         )
 
+    def test_catches_trust_class_without_weight(self, tmp_path: Path) -> None:
+        """Every agent_identity trust class has a default weight (RFC-0004)."""
+        self._assert_drift_is_caught(
+            tmp_path, "authority_trust_model.yaml", "    external: 0.35\n", ""
+        )
+
+    def test_catches_unknown_trust_class(self, tmp_path: Path) -> None:
+        self._assert_drift_is_caught(
+            tmp_path,
+            "authority_trust_model.yaml",
+            "    external: 0.35",
+            "    external: 0.35\n    stranger: 0.1",
+        )
+
+    def test_catches_identity_type_drift(self, tmp_path: Path) -> None:
+        """The world state's AgentIdentity copies agent_identity exactly."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "agent_identity_schema.yaml",
+            "      - service\n",
+            "      - service\n      - robot\n",
+        )
+
     def test_catches_out_of_range_min_trust(self, tmp_path: Path) -> None:
         self._assert_drift_is_caught(
             tmp_path, "authority_trust_model.yaml", "min_trust: 0.25", "min_trust: 25"

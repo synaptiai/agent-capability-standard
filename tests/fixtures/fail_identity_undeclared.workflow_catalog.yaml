@@ -1,0 +1,14 @@
+# Standard version: 1.1.0
+# Negative fixture (STANDARD v1.1 §5.17): sender checks belong to
+# identity@1, which the workflow does not declare. V106.
+undeclared_identity:
+  goal: Filter senders without declaring the extension.
+  risk: low
+  steps:
+  - capability: receive
+    purpose: Receive answers.
+    store_as: answer
+    input_bindings:
+      accept_trust_classes: [owner]
+  success:
+  - Never valid

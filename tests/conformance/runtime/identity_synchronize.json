@@ -1,0 +1,87 @@
+{
+  "description": "A synchronize wait records the identity that delivered the agreed state.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "synchronize",
+          "purpose": "synchronize step",
+          "store_as": "s",
+          "timeout": "1h",
+          "input_bindings": {
+            "agents": [
+              "a",
+              "b"
+            ],
+            "state": {
+              "v": 1
+            },
+            "accept_trust_classes": [
+              "peer_agent"
+            ]
+          },
+          "wait": {
+            "event_type": "state.agreed"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "accept_trust_classes": [
+          "peer_agent"
+        ]
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "state.agreed",
+          "canonical": {
+            "v": 1
+          }
+        },
+        "principal": "agent-7",
+        "identity": {
+          "principal": "agent-7",
+          "kind": "agent",
+          "authenticated_by": "session_id",
+          "trust_class": "peer_agent"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "s": {
+        "sender": "agent-7",
+        "sender_identity": {
+          "principal": "agent-7",
+          "kind": "agent",
+          "authenticated_by": "session_id",
+          "trust_class": "peer_agent"
+        }
+      }
+    }
+  },
+  "trace_kinds": [
+    "event_received"
+  ]
+}

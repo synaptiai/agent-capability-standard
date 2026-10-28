@@ -15,14 +15,14 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 - **Diagnostic severities (§9.1)** and warning codes W601–W615 (§9.7); new
   error codes V106–V109, B206, R405, R406.
 - **`mutation_overridable` (§4.4)** for append-only capabilities (`audit`).
-- **Orchestration extensions (§5.9–§5.16)** — triggers, handler steps,
-  recovery and escalation, wait, approval, delegation, quorum — opted into
-  with `workflow_extensions.requires`.
+- **Orchestration extensions (§5.9–§5.17)** — triggers, handler steps,
+  recovery and escalation, wait, approval, delegation, quorum, sender
+  identity — opted into with `workflow_extensions.requires`.
   Extension fields are must-understand (V106 when used undeclared).
   The reference validator enforces all of them: declarations, `triggers@1`
   (§5.10, with the duration grammar of §5.10.1), `recovery@1` (§5.11,
-  §5.12), `wait@1` (§5.13), `approval@1` (§5.14), `delegation@1` (§5.15) and
-  `quorum@1` (§5.16). A validator must refuse a declared extension it does
+  §5.12), `wait@1` (§5.13), `approval@1` (§5.14), `delegation@1` (§5.15),
+  `quorum@1` (§5.16) and `identity@1` (§5.17). A validator must refuse a declared extension it does
   not check (V106).
 - **Runtime conformance fixtures (§10.3)**: scripted runs of the reference
   executor covering gates, conditions, checkpoints, approvals, waits,
@@ -65,6 +65,20 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   the schema is B203 (§9.3).
 
 ### Changed — remaining open items (#114)
+- **Sender identity (§5.17, `identity@1`, RFC-0004).** An `agent_identity`
+  (`schemas/agent_identity_schema.yaml`) the host reports with each event a
+  wait receives. `receive`/`synchronize` inputs `sender_check` (accepted
+  `authenticated_by` values) and `accept_trust_classes` drop other items;
+  `always_ask_trust_classes` marks items of those classes (and, failing
+  closed, items with no trust class); the mark follows the data through
+  later steps, injected recovery context and nested runs, and a marked step
+  that requires approval is asked of a person whatever mandate would cover
+  it (W606 warns when an unattended run could reach one). Kept items carry
+  `sender_identity`. `ActionRecord.actor_identity`, `.always_ask` and
+  `ProvenanceRecord.agent_identity` (`world_state_schema.yaml` 1.1.0);
+  trust-class weights in `authority_trust_model.yaml` 1.1.0 (§8.3). Binding
+  the inputs needs `identity@1` (V106); a literal that is not a list of
+  known values is S303, and a reference resolving to one is R402.
 - **Membership (§5.8):** `x in y`, as in CEL: an element of a list by `==`,
   or a key of a map (a non-string key is in no map); any other right
   operand is an evaluation error. It is a comparison operator, so it does

@@ -76,7 +76,7 @@ pub struct Step {
 }
 
 /// Every reference root in `v`, in document order.
-fn roots(v: &Value, out: &mut Vec<String>) {
+pub(crate) fn roots(v: &Value, out: &mut Vec<String>) {
     match v {
         Value::String(s) => out.extend(
             crate::refs::find_refs(s)

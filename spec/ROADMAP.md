@@ -29,11 +29,11 @@
 
 ## v1.1.0 — In Progress 🔧
 
-- [Standard v1.1.0](STANDARD-v1.1.0.md) (Candidate Standard), accepted by [RFC-0003](RFC-0003-orchestration-extensions.md); v1.0.0 remains supported
+- [Standard v1.1.0](STANDARD-v1.1.0.md) (Candidate Standard), accepted by [RFC-0003](RFC-0003-orchestration-extensions.md) and [RFC-0004](RFC-0004-agent-identity.md); v1.0.0 remains supported
   - Condition expression language for conditions, gates and failure-mode triggers
   - Specified edge and safety-flag semantics
   - Diagnostic model with severities and warnings (W6xx)
-  - Orchestration extensions (handlers, recovery and escalation, waits, approval, delegation, quorum) specified; reference implementation in progress
+  - Orchestration extensions (handlers, recovery and escalation, waits, approval, delegation, quorum, sender identity) specified and implemented in the reference validator and executor
 - Reference validator moved to a Rust core (`core/`, compiled into `grounded_agency._core`), shared by `tools/validate_workflows.py` and the Python `WorkflowEngine`
 - Multi-agent coordination runtime (delegate, synchronize, invoke)
 - Workflow execution engine

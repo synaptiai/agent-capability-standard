@@ -117,7 +117,7 @@
               "uniqueItems": true,
               "items": {
                 "type": "string",
-                "enum": ["triggers@1", "recovery@1", "wait@1", "approval@1", "delegation@1", "quorum@1"]
+                "enum": ["triggers@1", "recovery@1", "wait@1", "approval@1", "delegation@1", "quorum@1", "identity@1"]
               },
               "description": "Extensions the workflow depends on (STANDARD v1.1 §5.9). A consumer that does not implement one must refuse the workflow."
             }

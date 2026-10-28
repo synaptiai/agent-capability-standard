@@ -7,6 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Agent identity, `identity@1` (RFC-0004, #114).** A new
+  `schemas/agent_identity_schema.yaml` says who a party is (principal, kind,
+  role, model family, owner, how it was authenticated, trust class).
+  `receive`/`synchronize` take `sender_check`, `accept_trust_classes` and
+  `always_ask_trust_classes`: the executor drops items whose sender's
+  identity fails a check, keeps the identity on each kept item, and asks a
+  person (never a standing mandate) to approve any step that requires
+  approval and uses, directly or through other steps, an item from an
+  "always ask" class (or one with no trust class). Runs can carry an
+  actor identity onto every action record (`WorkflowRunner.run(...,
+  actor_identity=...)`), and `AgentDescriptor.identity()` produces one.
+  `world_state_schema.yaml` 1.1.0 and `authority_trust_model.yaml` 1.1.0
+  (default weights per trust class) follow; `validate_canonical_schemas.py`
+  keeps the trust classes and the world state's identity type in step with
+  the identity schema
 - **`in` in condition expressions (#114).** `x in y` tests membership in a
   list or the keys of a map, as in CEL (STANDARD v1.1 §5.8); the cel-go
   differential covers it

@@ -20,5 +20,13 @@ output_schema:
     participants:
       type: array
       description: Participating agents
+    sender:
+      type: string
+      description: The host-authenticated principal that delivered the agreed state,
+        when the step waited for it (wait@1)
+    sender_identity:
+      type: object
+      description: "The sender's identity as the host reported it (agent_identity_schema.yaml;\
+        \ identity@1, STANDARD v1.1 \xA75.17)"
     evidence_anchors:
       type: array

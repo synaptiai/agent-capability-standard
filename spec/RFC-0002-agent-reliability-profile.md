@@ -89,6 +89,12 @@ identity. This RFC therefore proposes, as a prerequisite, that the standard
 define an agent identity object and that `AgentDescriptor` be reconciled with
 it, rather than introducing a third disjoint trust concept.
 
+**Update (2026-10-28):** the prerequisite is met.
+[RFC-0004](RFC-0004-agent-identity.md) (Accepted, Standard v1.1.0 §5.17)
+defines `agent_identity`, records it beside `ActionRecord.actor` and
+`ProvenanceRecord.agent`, and gives `AgentDescriptor` an `identity()`. It
+defines no reliability score, so this RFC stays a Draft for the three axes.
+
 ### 3) The three axes are adopted, but graded by derivability
 They are genuinely orthogonal — high delivery with poor calibration is an
 overconfident agent; high delivery and calibration with low adaptation is an
@@ -229,8 +235,10 @@ it. Whichever is chosen, an untested MUST NOT is a comment.
   depend on this signal existing, so deferring inverts the dependency.
 
 ## Open questions
-- What is the minimal agent identity object, and does it reconcile with
-  `AgentDescriptor` or supersede it?
+- ~~What is the minimal agent identity object, and does it reconcile with
+  `AgentDescriptor` or supersede it?~~ Answered by RFC-0004: `agent_identity`,
+  which `AgentDescriptor.identity()` produces; `trust_score` stays a
+  discovery-ordering hint.
 - Does the standard define a session, or express windows in observations and
   durations it already has?
 - What relation joins a claim to the action it informed, so calibration is
@@ -239,14 +247,18 @@ it. Whichever is chosen, an untested MUST NOT is a comment.
   `planned` and `approved` excluded as non-terminal, and is `rolled_back` a
   failure or a successful safety response? Without an answer, `delivery_score`
   is not comparable between implementations.
-- Does the agent identity object make `actor` type-discriminated, or does
+- ~~Does the agent identity object make `actor` type-discriminated, or does
   `ActionRecord` gain a separate field distinguishing agent actors from human
   ones? The standard already has a precedent to follow rather than invent:
   `event.source.kind` in `schemas/event_schema.yaml` is an enum separating
-  `human` from machine origins, and `Anchor.kind` includes `human_note`.
+  `human` from machine origins, and `Anchor.kind` includes `human_note`.~~
+  Answered by RFC-0004: `ActionRecord.actor_identity.kind` (`agent`,
+  `human`, `service`), following `event.source.kind`.
 - Where should the prohibition on joining `ProvenanceRecord.agent` to
   `ActionRecord.actor` live, given conformance fixtures are workflows and this
-  is a world-state property?
+  is a world-state property? Partly answered by RFC-0004: the rule is in
+  Standard v1.1 §5.17 (two records denote the same party exactly when their
+  identities' principals are equal), but no fixture tests it yet.
 - Should `adaptation_score` be specified now as a reserved optional field, or
   omitted until the telemetry to compute it exists?
 - Is regression detection (a rolling decline over successive windows) a

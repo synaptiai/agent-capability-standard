@@ -119,7 +119,9 @@ class Host:
 
     def await_event(self, action: Action) -> Response | None:
         """Wait for an event matching ``action`` until ``action["deadline"]``;
-        return ``{"kind": "Event", "event": {...}, "principal": ...}``,
+        return ``{"kind": "Event", "event": {...}, "principal": ...}``, with
+        the sender's ``identity`` (an ``agent_identity``) when the step uses
+        ``identity@1`` inputs (STANDARD v1.1 §5.17),
         ``{"kind": "LivenessLost"}`` when the source stopped answering (the
         step fails with R406), or ``None`` when nothing arrived (the run then
         times out, R401, once the deadline has passed)."""
@@ -205,9 +207,12 @@ class WorkflowRunner:
         attendance: str = "attended",
         run_id: str | None = None,
         now_ms: int | None = None,
+        actor_identity: Mapping[str, Any] | None = None,
     ) -> _core.Run:
         """Start a run without driving it (drive it with :meth:`drive`, or
-        step it yourself)."""
+        step it yourself). ``actor_identity`` (an ``agent_identity``, STANDARD
+        v1.1 §5.17, e.g. :meth:`AgentDescriptor.identity`) names who runs the
+        workflow; every action record carries it."""
         try:
             return _core.Run.start(
                 self._engine.core_validator(),
@@ -217,6 +222,7 @@ class WorkflowRunner:
                 attendance=attendance,
                 run_id=run_id or uuid.uuid4().hex,
                 now_ms=time.time_ns() // 1_000_000 if now_ms is None else now_ms,
+                actor_identity=None if actor_identity is None else dict(actor_identity),
             )
         except ValueError as e:
             diagnostics = e.args[1] if len(e.args) > 1 else []
@@ -238,10 +244,16 @@ class WorkflowRunner:
         *,
         attendance: str = "attended",
         run_id: str | None = None,
+        actor_identity: Mapping[str, Any] | None = None,
     ) -> RunResult:
         """Start ``workflow`` and drive it to its end with ``host``."""
         run = self.start(
-            workflow, inputs, attendance=attendance, run_id=run_id, now_ms=host.now_ms()
+            workflow,
+            inputs,
+            attendance=attendance,
+            run_id=run_id,
+            now_ms=host.now_ms(),
+            actor_identity=actor_identity,
         )
         return self.drive(run, host)
 

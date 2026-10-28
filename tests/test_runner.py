@@ -71,6 +71,7 @@ def test_runtime_fixture(validator: _core.Validator, path: Path) -> None:
         attendance=f["attendance"],
         run_id="run-1",
         now_ms=now,
+        actor_identity=f.get("actor_identity"),
     )
     for i, entry in enumerate(f["script"]):
         if "tick" in entry:
@@ -460,3 +461,97 @@ def test_runtime_fixtures_are_generated() -> None:
         check=False,
     )
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_identities_on_records_and_received_items(tmp_path: Path) -> None:
+    """identity@1 (STANDARD v1.1 §5.17): the run's actor identity is on every
+    action record, and a kept item carries the identity the host reported;
+    one from another trust class is dropped."""
+    from grounded_agency.coordination.registry import AgentDescriptor
+
+    catalog = tmp_path / "identity.yaml"
+    catalog.write_text(
+        """\
+# Standard version: 1.1.0
+answer_then_act:
+  goal: Act on the owner's answer.
+  risk: high
+  workflow_extensions:
+    requires: [wait@1, identity@1]
+  steps:
+  - capability: receive
+    purpose: Wait for the owner's answer.
+    store_as: answer
+    timeout: 1h
+    input_bindings:
+      sender_check: [session_id]
+      accept_trust_classes: [owner]
+    wait:
+      event_type: answer
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: cp
+    input_bindings:
+      scope: config
+  - capability: mutate
+    purpose: Apply the answer.
+    store_as: applied
+    input_bindings:
+      target: config
+      operation:
+        answer: "${answer.data: array<object>}"
+"""
+    )
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    clock = Clock()
+    owner = {
+        "principal": "dana",
+        "kind": "human",
+        "authenticated_by": "session_id",
+        "trust_class": "owner",
+    }
+    peer = {
+        **owner,
+        "principal": "agent-7",
+        "kind": "agent",
+        "trust_class": "peer_agent",
+    }
+
+    class Answers(FakeHost):
+        def __init__(self, clock: Clock) -> None:
+            super().__init__(clock)
+            self.events = [peer, owner]
+
+        def await_event(self, action: dict[str, Any]) -> dict[str, Any] | None:
+            identity = self.events.pop(0)
+            return {
+                "kind": "Event",
+                "event": {"event_type": "answer"},
+                "identity": identity,
+            }
+
+    agent = AgentDescriptor(
+        agent_id="orchestrator",
+        capabilities=frozenset({"receive"}),
+        metadata={"model_family": "claude", "trust_class": "own_subagent_report"},
+    )
+    result = WorkflowRunner(engine).run(
+        "answer_then_act", None, Answers(clock), actor_identity=agent.identity()
+    )
+    assert result.ok, result
+    assert result.outputs["answer"]["data"] == [
+        {"event_type": "answer", "sender": "dana", "sender_identity": owner}
+    ]
+    assert [r["actor_identity"] for r in result.action_records] == [agent.identity()]
+    dropped = [t for t in result.trace if t["kind"] == "event_dropped"]
+    assert [t["detail"]["reason"] for t in dropped] == ["accept_trust_classes"]
+    received = next(t for t in result.trace if t["kind"] == "event_received")
+    assert received["detail"]["dropped"] == {"accept_trust_classes": 1}
+
+
+def test_a_malformed_actor_identity_refuses_the_start(runner: WorkflowRunner) -> None:
+    with pytest.raises(RunStartError, match="actor_identity"):
+        runner.start(
+            "change_config", {"setting": "x"}, actor_identity={"kind": "agent"}
+        )

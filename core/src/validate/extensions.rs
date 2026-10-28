@@ -1,4 +1,4 @@
-//! Orchestration extensions (STANDARD v1.1 §5.9–§5.16, design-114 §4,
+//! Orchestration extensions (STANDARD v1.1 §5.9–§5.17, design-114 §4,
 //! §10–§15): declarations, triggers and durations.
 
 use std::collections::HashSet;
@@ -21,6 +21,7 @@ pub(crate) const EXTENSIONS: &[&str] = &[
     "approval@1",
     "delegation@1",
     "quorum@1",
+    "identity@1",
 ];
 
 const TRIGGER_KEYS: &[&str] = &["kind", "schedule", "event", "attendance"];

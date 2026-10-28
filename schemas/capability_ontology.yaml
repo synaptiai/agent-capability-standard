@@ -232,6 +232,26 @@ nodes:
           type: string
         description: Principals to accept items from; items from others are dropped
           and counted (delegation@1, STANDARD v1.1 §5.15)
+      sender_check:
+        type: array
+        items:
+          type: string
+        description: How a sender must have been authenticated (agent_identity
+          authenticated_by values); items whose sender identity says otherwise, or
+          that carry none, are dropped and counted (identity@1, STANDARD v1.1 §5.17)
+      accept_trust_classes:
+        type: array
+        items:
+          type: string
+        description: Trust classes to accept items from; others, and items with no
+          trust class, are dropped and counted (identity@1, STANDARD v1.1 §5.17)
+      always_ask_trust_classes:
+        type: array
+        items:
+          type: string
+        description: Trust classes whose items (and items with no trust class) make
+          any step that requires approval and uses them be asked of a person,
+          whatever mandate would cover it (identity@1, STANDARD v1.1 §5.17)
   output_schema:
     type: object
     required:
@@ -246,6 +266,10 @@ nodes:
             sender:
               type: string
               description: The host-authenticated principal that sent the item
+            sender_identity:
+              type: object
+              description: The sender's identity as the host reported it
+                (agent_identity_schema.yaml; identity@1, STANDARD v1.1 §5.17)
         description: Received data/events
       source:
         type: string
@@ -1498,6 +1522,26 @@ nodes:
           type: string
         description: Principals to accept state from (delegation@1, STANDARD v1.1
           §5.15)
+      sender_check:
+        type: array
+        items:
+          type: string
+        description: How a sender must have been authenticated (agent_identity
+          authenticated_by values); a state update whose sender identity says otherwise,
+          or that carries none, is dropped and counted (identity@1, STANDARD v1.1 §5.17)
+      accept_trust_classes:
+        type: array
+        items:
+          type: string
+        description: Trust classes to accept state from; updates from others, or with
+          no trust class, are dropped and counted (identity@1, STANDARD v1.1 §5.17)
+      always_ask_trust_classes:
+        type: array
+        items:
+          type: string
+        description: Trust classes whose state (and state with no trust class) makes
+          any step that requires approval and uses it be asked of a person,
+          whatever mandate would cover it (identity@1, STANDARD v1.1 §5.17)
   output_schema:
     type: object
     required:
@@ -1512,6 +1556,14 @@ nodes:
       participants:
         type: array
         description: Participating agents
+      sender:
+        type: string
+        description: The host-authenticated principal that delivered the agreed
+          state, when the step waited for it (wait@1)
+      sender_identity:
+        type: object
+        description: The sender's identity as the host reported it
+          (agent_identity_schema.yaml; identity@1, STANDARD v1.1 §5.17)
       evidence_anchors:
         type: array
 - id: invoke

@@ -15,7 +15,9 @@ Validates:
 4) authority_trust_model internal consistency (source symmetry, decay model)
 5) identity_resolution_policy threshold ordering and weight ranges
 6) entity_taxonomy id convention
-7) Cross-file agreement between the trust model and the benchmark fixture
+7) Cross-file agreement between the trust model and the benchmark fixture,
+   and between agent_identity_schema.yaml and the trust classes and the world
+   state's AgentIdentity
 8) Skill reference/ copies of a canonical schema match their source
 
 Usage:
@@ -310,6 +312,56 @@ def validate_entity_taxonomy(
         errors.append(f"[{name}] classes is missing or empty")
 
 
+def _agent_identity(schemas_dir: Path, label: str, errors: list[str]) -> Any:
+    path = schemas_dir / "agent_identity_schema.yaml"
+    try:
+        return (safe_yaml_load(path) or {}).get("agent_identity")
+    except (yaml.YAMLError, YAMLSizeExceededError, OSError, UnicodeDecodeError) as exc:
+        errors.append(f"[{label}] Could not load {_display_path(path)}: {exc}")
+        return None
+
+
+def validate_identity_type(
+    schema: dict[str, Any], schemas_dir: Path, errors: list[str]
+) -> None:
+    """The world state's AgentIdentity is a copy of agent_identity, kept inline
+    so the world state's vendored copies stay self-contained."""
+    label = "world_state_schema <-> agent_identity_schema"
+    identity = _agent_identity(schemas_dir, label, errors)
+    if identity is None:
+        return
+    if (schema.get("types") or {}).get("AgentIdentity") != identity:
+        errors.append(
+            f"[{label}] types.AgentIdentity differs from "
+            f"agent_identity_schema.yaml#/agent_identity; copy it over"
+        )
+
+
+def validate_trust_classes(
+    schema: dict[str, Any], schemas_dir: Path, errors: list[str]
+) -> None:
+    """`trust_classes.weights` covers exactly the identity schema's classes."""
+    weights = (schema.get("trust_classes") or {}).get("weights") or {}
+    label = "authority_trust_model <-> agent_identity_schema"
+    identity = _agent_identity(schemas_dir, label, errors)
+    if identity is None:
+        return
+    classes = (
+        ((identity.get("properties") or {}).get("trust_class") or {}).get("enum")
+    ) or []
+    for cls in classes:
+        if cls not in weights:
+            errors.append(f"[{label}] trust class '{cls}' has no default weight")
+    for cls, weight in weights.items():
+        if cls not in classes:
+            errors.append(f"[{label}] weights name unknown trust class '{cls}'")
+        if not isinstance(weight, int | float) or not 0.0 <= weight <= 1.0:
+            errors.append(
+                f"[{label}] trust_classes.weights['{cls}'] = {weight!r} is not "
+                f"a number in [0.0, 1.0]"
+            )
+
+
 def validate_trust_fixture_sync(schema: dict[str, Any], errors: list[str]) -> None:
     """The benchmark fixture must not drift from the trust model (issue #105)."""
     if not TRUST_FIXTURE.exists():
@@ -378,9 +430,7 @@ def validate_vendored_copies(
             try:
                 actual = copy.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
-                errors.append(
-                    f"[{name}] Could not read {_display_path(copy)}: {exc}"
-                )
+                errors.append(f"[{name}] Could not read {_display_path(copy)}: {exc}")
                 continue
 
             if actual != expected:
@@ -457,6 +507,9 @@ def main() -> None:
 
         if name == "authority_trust_model":
             validate_trust_fixture_sync(schema, errors)
+            validate_trust_classes(schema, schemas_dir, errors)
+        if name == "world_state_schema":
+            validate_identity_type(schema, schemas_dir, errors)
 
         validated_count += 1
 

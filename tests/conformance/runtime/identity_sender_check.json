@@ -1,0 +1,135 @@
+{
+  "description": "sender_check and accept_trust_classes drop items whose sender identity is missing, was authenticated otherwise, or is of another class (counted per reason); a kept item carries its sender and sender_identity, and the principal defaults to the identity's.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "sender_check": [
+              "session_id"
+            ],
+            "accept_trust_classes": [
+              "owner",
+              "decision_person"
+            ]
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "sender_check": [
+          "session_id"
+        ],
+        "accept_trust_classes": [
+          "owner",
+          "decision_person"
+        ]
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "principal": "dana"
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "mail:someone@example.com",
+          "kind": "human",
+          "authenticated_by": "x-mail-dkim",
+          "trust_class": "external"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "agent-7",
+          "kind": "agent",
+          "authenticated_by": "session_id",
+          "trust_class": "peer_agent"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "dana",
+          "kind": "human",
+          "authenticated_by": "session_id",
+          "trust_class": "owner"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "r": {
+        "data": [
+          {
+            "sender": "dana",
+            "sender_identity": {
+              "principal": "dana",
+              "kind": "human",
+              "authenticated_by": "session_id",
+              "trust_class": "owner"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "trace_kinds": [
+    "event_dropped",
+    "event_received"
+  ]
+}

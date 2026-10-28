@@ -198,6 +198,13 @@ impl<'a> Machine<'a> {
             "intent": purpose,
             "status": status,
         });
+        if let Some(identity) = &self.st.actor_identity {
+            record["actor"] = identity["kind"].clone();
+            record["actor_identity"] = identity.clone();
+        }
+        if self.always_ask() {
+            record["always_ask"] = json!(true);
+        }
         if let Some(a) = approval {
             record["approval"] = a;
         }
@@ -400,6 +407,9 @@ impl<'a> Machine<'a> {
             };
         }
         let child = self.st.frames.pop().expect("checked above");
+        if child.marked || !child.always_ask.is_empty() {
+            self.frame().cur.always_ask = true;
+        }
         let result = match &end {
             Ok((o, _)) => json!(o),
             Err((c, _)) => json!(c),
@@ -625,15 +635,28 @@ impl<'a> Machine<'a> {
             return self.set_stage(Stage::Checkpoint);
         }
         let spec = self.approval_spec();
+        // A step that uses an item from an always-ask trust class (§5.17)
+        // is asked of a person: no mandate covers it.
+        let marked = self.always_ask();
+        if marked && !self.frame_ref().cur.always_ask {
+            self.frame().cur.always_ask = true;
+            self.trace_step("always_ask", json!({}));
+        }
         // A standing mandate needs no one present: it is asked even in an
         // unattended run, and the plan applies only if none covers the step.
-        let mandate = spec
-            .get("approver")
-            .and_then(|a| a.get("kind"))
-            .and_then(Value::as_str)
-            == Some("standing_mandate");
+        let mandate = !marked
+            && spec
+                .get("approver")
+                .and_then(|a| a.get("kind"))
+                .and_then(Value::as_str)
+                == Some("standing_mandate");
         if self.st.attendance == Attendance::Unattended && !mandate {
-            return self.unattended(None, "the run is unattended");
+            let why = if marked {
+                "the run is unattended and the step uses an item from an always-ask trust class"
+            } else {
+                "the run is unattended"
+            };
+            return self.unattended(None, why);
         }
         let bindings = FrameBindings(self.frame_ref());
         let mut shown = match spec.get("shows") {
@@ -661,10 +684,17 @@ impl<'a> Machine<'a> {
             .and_then(Value::as_str)
             .and_then(|e| duration::parse(e).ok())
             .map(|d| later(self.st.now, d));
-        let approver = spec
+        let mut approver = spec
             .get("approver")
             .cloned()
             .unwrap_or_else(|| json!({"kind": "human"}));
+        if marked {
+            if let Value::Object(a) = &mut approver {
+                a.insert("kind".into(), json!("human"));
+                a.remove("mandate_ref");
+                a.insert("always_ask".into(), json!(true));
+            }
+        }
         let min = approver
             .get("min_approvers")
             .and_then(|m| m.as_u64().or_else(|| m.as_f64().map(|f| f as u64)))
@@ -887,13 +917,22 @@ impl<'a> Machine<'a> {
         let spec = self.approval_spec();
         let now = self.st.now;
         let distinct: std::collections::BTreeSet<&String> = approvers.iter().collect();
+        // A person was asked instead of the mandate (§5.17).
+        let mandate_ref = if self.always_ask() {
+            Value::Null
+        } else {
+            spec.get("approver")
+                .and_then(|a| a.get("mandate_ref"))
+                .cloned()
+                .unwrap_or(Value::Null)
+        };
         let sub = |decision: &str| {
             json!({
                 "digest": expected,
                 "decision": decision,
                 "approvers": distinct.iter().collect::<Vec<_>>(),
                 "mode": spec.get("mode").and_then(Value::as_str).unwrap_or("in_session"),
-                "mandate_ref": spec.get("approver").and_then(|a| a.get("mandate_ref")),
+                "mandate_ref": mandate_ref,
                 "decided_at": iso(now),
                 "expires_at": expires_at.map(iso),
             })
@@ -1038,6 +1077,13 @@ impl<'a> Machine<'a> {
         let now = self.st.now;
         let deadline = step.timeout.map(|t| later(now, t));
         let index = step.index;
+        if wf.extension("identity@1")
+            && matches!(step.capability.as_str(), "receive" | "synchronize")
+        {
+            if let Err(e) = identity_inputs(&self.frame_ref().cur.inputs) {
+                return self.step_error("R402", e);
+            }
+        }
         if wf.extension("wait@1") {
             if let Some(Value::Object(wait)) = step.raw.get("wait") {
                 let bindings = FrameBindings(self.frame_ref());
@@ -1050,7 +1096,10 @@ impl<'a> Machine<'a> {
                             .collect()
                     })
                     .unwrap_or_default();
-                let accept_from = accept_from(&self.frame_ref().cur.inputs);
+                let inputs = &self.frame_ref().cur.inputs;
+                let accept_from = string_list(inputs, "accept_from");
+                let sender_check = string_list(inputs, "sender_check");
+                let accept_trust_classes = string_list(inputs, "accept_trust_classes");
                 return self.emit(
                     Body::AwaitEvent {
                         step: index,
@@ -1065,6 +1114,8 @@ impl<'a> Machine<'a> {
                             .map(str::to_string),
                         correlate,
                         accept_from,
+                        sender_check,
+                        accept_trust_classes,
                         liveness: wait.get("liveness").cloned(),
                         deadline,
                     },
@@ -1143,7 +1194,9 @@ impl<'a> Machine<'a> {
         }
         self.trace_step("invoke_started", json!({"workflow": target}));
         self.undefer_nested();
-        self.st.frames.push(Frame::new(&target, child_inputs));
+        let mut frame = Frame::new(&target, child_inputs);
+        frame.marked = self.always_ask();
+        self.st.frames.push(frame);
         Flow::Continue
     }
 
@@ -1235,23 +1288,76 @@ impl<'a> Machine<'a> {
         )
     }
 
+    /// Whether the current step reads (in its bindings, condition or gates)
+    /// a store or input marked always-ask (§5.17).
+    fn always_ask(&self) -> bool {
+        let f = self.frame_ref();
+        f.marked
+            || !f.always_ask.is_empty()
+                && self
+                    .step_ref()
+                    .reads
+                    .iter()
+                    .any(|r| f.always_ask.contains(r))
+    }
+
+    /// Whether a `receive` or `synchronize` output holds an item whose
+    /// sender's trust class the step's `always_ask_trust_classes` lists.
+    fn asks_always(&self, out: &Value) -> bool {
+        let Some(classes) = string_list(&self.frame_ref().cur.inputs, "always_ask_trust_classes")
+        else {
+            return false;
+        };
+        // An item with no identity, or no trust class, counts as always-ask.
+        let asks = |identity: &Value| {
+            identity["trust_class"]
+                .as_str()
+                .is_none_or(|c| classes.iter().any(|x| x == c))
+        };
+        match self.step_ref().capability.as_str() {
+            "receive" => out["data"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|i| asks(&i["sender_identity"]))),
+            "synchronize" => asks(&out["sender_identity"]),
+            _ => false,
+        }
+    }
+
     fn add_checkpoint(&mut self, id: String) {
         self.trace_step("checkpoint_created", json!({"checkpoint_id": id}));
         self.st.checkpoints.push(Checkpoint { id, valid: true });
     }
 
-    fn event(&mut self, pending: Pending, event: Value, principal: Option<String>) -> Flow {
+    fn event(
+        &mut self,
+        pending: Pending,
+        event: Value,
+        principal: Option<String>,
+        identity: Option<Value>,
+    ) -> Flow {
         let step = self.step_ref();
         let Body::AwaitEvent {
             event_type,
             source_kind,
             correlate,
             accept_from,
+            sender_check,
+            accept_trust_classes,
             ..
         } = &pending.action.body
         else {
             unreachable!("checked by submit");
         };
+        // Without identity@1 the run is as before: no identity is kept.
+        let identity = identity
+            .filter(|_| self.program.workflows[&self.frame_ref().workflow].extension("identity@1"));
+        // An identity names its principal; the response may give it once.
+        let principal = principal.or_else(|| {
+            identity
+                .as_ref()
+                .and_then(|i| i["principal"].as_str())
+                .map(str::to_string)
+        });
         let field = |k: &str| -> Value {
             event
                 .get("canonical")
@@ -1277,6 +1383,10 @@ impl<'a> Machine<'a> {
             .is_some_and(|a| !principal.as_ref().is_some_and(|p| a.contains(p)))
         {
             Some("accept_from".to_string())
+        } else if !listed(sender_check, &identity, "authenticated_by") {
+            Some("sender_check".to_string())
+        } else if !listed(accept_trust_classes, &identity, "trust_class") {
+            Some("accept_trust_classes".to_string())
         } else {
             None
         };
@@ -1310,17 +1420,29 @@ impl<'a> Machine<'a> {
             );
         }
         let mut item = event.clone();
-        if let (Some(p), Value::Object(m)) = (&principal, &mut item) {
-            m.insert("sender".into(), json!(p));
+        if let Value::Object(m) = &mut item {
+            if let Some(p) = &principal {
+                m.insert("sender".into(), json!(p));
+            }
+            if let Some(i) = &identity {
+                m.insert("sender_identity".into(), i.clone());
+            }
         }
         let anchors = event.get("anchors").cloned().unwrap_or(json!([]));
         let output = if step.capability == "synchronize" {
-            json!({
+            let mut out = json!({
                 "synchronized": true,
                 "agreed_state": event.get("canonical").cloned().unwrap_or(json!({})),
                 "participants": self.frame_ref().cur.inputs.get("agents").cloned().unwrap_or(json!([])),
                 "evidence_anchors": anchors,
-            })
+            });
+            if let Some(p) = &principal {
+                out["sender"] = json!(p);
+            }
+            if let Some(i) = &identity {
+                out["sender_identity"] = i.clone();
+            }
+            out
         } else {
             json!({
                 "data": [item],
@@ -1342,6 +1464,11 @@ impl<'a> Machine<'a> {
         let program = self.program;
         let step = &program.workflows[&self.frame_ref().workflow].steps[self.frame_ref().step];
         if let (Some(store), Some(out)) = (&step.store_as, self.frame_ref().cur.output.clone()) {
+            // The mark follows the data (§5.17): an output holding an item
+            // from an always-ask class, or computed from one, is marked.
+            if self.always_ask() || self.frame_ref().cur.always_ask || self.asks_always(&out) {
+                self.frame().always_ask.insert(store.clone());
+            }
             // The inputs the step ran with: a quorum judges its reviewers
             // by these, not by re-resolving their bindings later.
             let inputs = self.frame_ref().cur.inputs.clone();
@@ -1465,16 +1592,32 @@ impl<'a> Machine<'a> {
                 ))),
             };
         }
-        let injected: Map<String, Value> = fm
+        let inject = fm
             .recovery
             .as_ref()
             .and_then(|r| r.get("inject_context"))
-            .and_then(Value::as_object)
+            .and_then(Value::as_object);
+        let injected: Map<String, Value> = inject
             .map(|m| {
                 let b = FrameBindings(self.frame_ref());
                 m.iter().map(|(k, v)| (k.clone(), resolve(v, &b))).collect()
             })
             .unwrap_or_default();
+        // Injected context computed from a marked value is marked (§5.17).
+        let marked_injection = inject.is_some_and(|m| {
+            let f = self.frame_ref();
+            let mut roots = Vec::new();
+            for v in m.values() {
+                super::program::roots(v, &mut roots);
+            }
+            f.marked
+                || self.frame_ref().cur.always_ask
+                || self.always_ask()
+                || roots.iter().any(|r| f.always_ask.contains(r))
+        });
+        if marked_injection {
+            self.frame().always_ask.insert("_recovery".to_string());
+        }
         let cleared: Vec<String> = wf.steps[target..]
             .iter()
             .filter_map(|s| s.store_as.clone())
@@ -1568,6 +1711,30 @@ impl<'a> Machine<'a> {
         for v in values {
             super::ijson(v).map_err(SubmitError::Malformed)?;
         }
+        let identity_declared =
+            self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
+        if let (
+            true,
+            Response::Event {
+                principal,
+                identity: Some(identity),
+                ..
+            },
+        ) = (identity_declared, &response)
+        {
+            super::ijson(identity).map_err(SubmitError::Malformed)?;
+            if let Some(e) = super::identity_error(identity) {
+                return Err(SubmitError::Malformed(e));
+            }
+            if principal
+                .as_ref()
+                .is_some_and(|p| identity["principal"].as_str() != Some(p))
+            {
+                return Err(SubmitError::Malformed(
+                    "the event's principal is not its identity's principal".into(),
+                ));
+            }
+        }
         self.st.now = self.st.now.max(now.min(MAX_TIME));
         self.st.pending = None;
         let late = pending.deadline.is_some_and(|d| self.st.now > d);
@@ -1594,8 +1761,15 @@ impl<'a> Machine<'a> {
                 let code = if keep { code } else { "R402".to_string() };
                 self.exec_error(&code, message);
             }
-            (Purpose::Event, Response::Event { event, principal }) => {
-                self.event(pending, event, principal);
+            (
+                Purpose::Event,
+                Response::Event {
+                    event,
+                    principal,
+                    identity,
+                },
+            ) => {
+                self.event(pending, event, principal, identity);
             }
             (Purpose::Event, Response::LivenessLost) => {
                 self.exec_error("R406", "the event source stopped answering (liveness)");
@@ -1689,12 +1863,17 @@ impl<'a> Machine<'a> {
                     _ => String::new(),
                 };
                 let spec = self.approval_spec();
+                let mandate_ref = if self.always_ask() {
+                    None
+                } else {
+                    spec.get("approver").and_then(|a| a.get("mandate_ref"))
+                };
                 let sub = json!({
                     "digest": digest,
                     "decision": "expired",
                     "approvers": [],
                     "mode": spec.get("mode").and_then(Value::as_str).unwrap_or("in_session"),
-                    "mandate_ref": spec.get("approver").and_then(|a| a.get("mandate_ref")),
+                    "mandate_ref": mandate_ref,
                     "decided_at": iso(self.st.now),
                     "expires_at": pending.deadline.map(iso),
                 });
@@ -1718,17 +1897,68 @@ impl<'a> Machine<'a> {
     }
 }
 
-/// A bound `accept_from` list (delegation@1), if any.
-fn accept_from(inputs: &Value) -> Option<Vec<String>> {
-    inputs
-        .get("accept_from")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
+/// Whether `identity`'s `field` is one of `allowed` (`sender_check`,
+/// `accept_trust_classes`): true when nothing is required, false when the
+/// identity or the field is missing.
+fn listed(allowed: &Option<Vec<String>>, identity: &Option<Value>, field: &str) -> bool {
+    let Some(allowed) = allowed else {
+        return true;
+    };
+    identity
+        .as_ref()
+        .and_then(|i| i[field].as_str())
+        .is_some_and(|v| allowed.iter().any(|a| a == v))
+}
+
+/// The `identity@1` inputs a step resolved, checked as the validator checks
+/// literals: a bound value that is not a list of known values (say, a
+/// reference that resolved to null) would silently turn a check off, so it
+/// fails the step instead.
+fn identity_inputs(inputs: &Value) -> Result<(), String> {
+    use crate::validate::identity::{TRUST_CLASSES, known_mechanism};
+    for key in [
+        "sender_check",
+        "accept_trust_classes",
+        "always_ask_trust_classes",
+    ] {
+        let Some(value) = inputs.get(key) else {
+            continue;
+        };
+        let Some(items) = value.as_array() else {
+            return Err(format!(
+                "{key} must be a list, got {}",
+                crate::yaml::kind_of(value)
+            ));
+        };
+        if items.is_empty() && key != "always_ask_trust_classes" {
+            return Err(format!("{key} is empty, so it would accept no sender"));
+        }
+        for item in items {
+            let known = item.as_str().is_some_and(|s| {
+                if key == "sender_check" {
+                    known_mechanism(s)
+                } else {
+                    TRUST_CLASSES.contains(&s)
+                }
+            });
+            if !known {
+                return Err(format!(
+                    "{key} holds {item}, which is not one of its values"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A bound list of strings (`accept_from`, `sender_check`, ...), if any.
+fn string_list(inputs: &Value, key: &str) -> Option<Vec<String>> {
+    inputs.get(key).and_then(Value::as_array).map(|a| {
+        a.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    })
 }
 
 #[cfg(test)]

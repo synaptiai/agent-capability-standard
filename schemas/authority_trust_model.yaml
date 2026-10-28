@@ -1,6 +1,6 @@
 schema:
   name: authority_trust_model
-  version: 1.0.0
+  version: 1.1.0
   generated_at: '2026-01-24T02:55:14.291642Z'
   description: First-class source trust model for conflict resolution, identity resolution,
     and world-state updates.
@@ -24,6 +24,20 @@ source_ranking:
     observability_pipeline: 0.8
     derived_inference: 0.65
     human_note: 0.55
+# Default source weight for evidence an item contributes, by the trust_class
+# of the identity that delivered it (agent_identity_schema.yaml; Standard v1.1
+# §8.3, identity@1). A domain profile's trust_weights may override any class,
+# as it may any source. The classes must be exactly agent_identity's
+# trust_class values (validate_canonical_schemas.py checks this).
+trust_classes:
+  weights:
+    owner: 0.95
+    decision_person: 0.9
+    system_of_record: 0.92
+    own_subagent_report: 0.7
+    colleague: 0.6
+    peer_agent: 0.55
+    external: 0.35
 field_authority:
   examples:
   - field: serial_number

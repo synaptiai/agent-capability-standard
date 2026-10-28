@@ -1,0 +1,55 @@
+schema:
+  name: agent_identity
+  version: 1.0.0
+  description: Who a party is, as the host authenticated it (Standard v1.1 §5.17,
+    RFC-0004). The host reports one with each event a step waits for, and the
+    world state may record one beside ActionRecord.actor and
+    ProvenanceRecord.agent. It says nothing about how reliable a party is.
+agent_identity:
+  type: object
+  required:
+  - principal
+  - kind
+  properties:
+    principal:
+      type: string
+      description: The opaque principal of §5.15, compared by exact (code-point)
+        equality. Two records denote the same party exactly when their
+        identities' principals are equal.
+    kind:
+      type: string
+      enum:
+      - agent
+      - human
+      - service
+      description: What kind of party it is.
+    role:
+      type: string
+      description: The role it acts in, e.g. reviewer or owner.
+    model_family:
+      type: string
+      description: For an agent, the model family it ran on.
+    owner:
+      type: string
+      description: The principal of the person or organisation it acts for.
+    authenticated_by:
+      type: string
+      pattern: ^(session_id|chat_user_id|code_host_login|directory_id|api_key|signed_token|x-[a-z0-9][a-z0-9_.-]*)$
+      description: How the host authenticated it. One of session_id,
+        chat_user_id, code_host_login, directory_id, api_key, signed_token,
+        or a vendor value starting with x-. A workflow's sender_check lists
+        the values it accepts.
+    trust_class:
+      type: string
+      enum:
+      - owner
+      - decision_person
+      - system_of_record
+      - own_subagent_report
+      - peer_agent
+      - colleague
+      - external
+      description: What standing the party has for this run, as the host
+        classified it. A workflow's accept_trust_classes filters on it, its
+        always_ask_trust_classes makes actions on its items need a person, and
+        authority_trust_model.yaml gives each class a default source weight.

@@ -1,0 +1,166 @@
+{
+  "description": "Unattended, the action that uses no always-ask item is approved by its mandate; the one on an external item follows when_unattended (here, queued).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "always_ask_trust_classes": [
+              "external"
+            ]
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        },
+        {
+          "capability": "generate",
+          "purpose": "generate step",
+          "store_as": "g",
+          "input_bindings": {
+            "specification": "${r.data: array<object>}"
+          }
+        },
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "routine",
+          "input_bindings": {
+            "code": "rotate-logs"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "act",
+          "input_bindings": {
+            "code": "${g.content: string}"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1",
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "mail:someone@example.com",
+          "kind": "human",
+          "authenticated_by": "x-mail-dkim",
+          "trust_class": "external"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "generate",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "content": "restart web",
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "mandates/ops"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "deferred",
+    "action_records": [
+      {
+        "status": "executed"
+      },
+      {
+        "status": "planned",
+        "always_ask": true
+      }
+    ],
+    "deferred": [
+      {
+        "step": 3,
+        "store_as": "act"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "always_ask",
+    "approval_unattended",
+    "step_deferred"
+  ]
+}

@@ -295,7 +295,9 @@ fn start_err(py: Python<'_>, e: StartError) -> PyErr {
                 Err(err) => err,
             }
         }
-        StartError::Inputs(_) | StartError::Program(_) => PyValueError::new_err(message),
+        StartError::Inputs(_) | StartError::Program(_) | StartError::Identity(_) => {
+            PyValueError::new_err(message)
+        }
     }
 }
 
@@ -317,9 +319,10 @@ struct PyRun {
 impl PyRun {
     /// Validate `catalog` and start `workflow`. Raises ValueError when the
     /// catalog does not validate (with the error diagnostics as the second
-    /// argument) or the inputs do not match the workflow's.
+    /// argument), the inputs do not match the workflow's, or
+    /// `actor_identity` is not an `agent_identity` (§5.17).
     #[staticmethod]
-    #[pyo3(signature = (validator, catalog, workflow, inputs = None, *, attendance = "attended", run_id, now_ms))]
+    #[pyo3(signature = (validator, catalog, workflow, inputs = None, *, attendance = "attended", run_id, now_ms, actor_identity = None))]
     #[allow(clippy::too_many_arguments)]
     fn start(
         py: Python<'_>,
@@ -330,8 +333,10 @@ impl PyRun {
         attendance: &str,
         run_id: String,
         now_ms: u64,
+        actor_identity: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let catalog = catalog_from_py(catalog)?;
+        let actor_identity = actor_identity.map(from_py).transpose()?;
         let inputs = match inputs.map(from_py).transpose()? {
             None => Map::new(),
             Some(Value::Object(m)) => m,
@@ -351,6 +356,7 @@ impl PyRun {
             attendance,
             run_id,
             now_ms,
+            actor_identity,
         };
         let run = py
             .detach(|| {

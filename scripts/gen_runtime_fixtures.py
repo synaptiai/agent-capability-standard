@@ -88,6 +88,7 @@ def add(
     workflow="w",
     inputs=None,
     attendance="attended",
+    actor_identity=None,
 ):
     fixtures[name] = {
         "description": description,
@@ -100,6 +101,8 @@ def add(
         "end": end,
         "trace_kinds": list(trace),
     }
+    if actor_identity is not None:
+        fixtures[name]["actor_identity"] = actor_identity
 
 
 add(
@@ -2379,6 +2382,499 @@ add(
             }
         },
     },
+)
+
+OWNER = {
+    "principal": "dana",
+    "kind": "human",
+    "authenticated_by": "session_id",
+    "trust_class": "owner",
+}
+PEER = {
+    "principal": "agent-7",
+    "kind": "agent",
+    "authenticated_by": "session_id",
+    "trust_class": "peer_agent",
+}
+OUTSIDER = {
+    "principal": "mail:someone@example.com",
+    "kind": "human",
+    "authenticated_by": "x-mail-dkim",
+    "trust_class": "external",
+}
+
+
+def verdict_event(identity=None, principal=None):
+    r = {"kind": "Event", "event": {"event_type": "answer"}}
+    if principal is not None:
+        r["principal"] = principal
+    if identity is not None:
+        r["identity"] = identity
+    return r
+
+
+add(
+    "identity_sender_check",
+    "sender_check and accept_trust_classes drop items whose sender identity is missing,"
+    " was authenticated otherwise, or is of another class (counted per reason); a kept"
+    " item carries its sender and sender_identity, and the principal defaults to the"
+    " identity's.",
+    {
+        "w": wf(
+            [
+                st(
+                    "receive",
+                    "r",
+                    timeout="1h",
+                    input_bindings={
+                        "sender_check": ["session_id"],
+                        "accept_trust_classes": ["owner", "decision_person"],
+                    },
+                    wait={"event_type": "answer"},
+                )
+            ],
+            requires=["wait@1", "identity@1"],
+        )
+    },
+    [
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "sender_check": ["session_id"],
+                "accept_trust_classes": ["owner", "decision_person"],
+            },
+            "respond": verdict_event(principal="dana"),
+        },
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(OUTSIDER)},
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(PEER)},
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(OWNER)},
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {"r": {"data": [{"sender": "dana", "sender_identity": OWNER}]}},
+    },
+    ["event_dropped", "event_received"],
+)
+
+add(
+    "identity_synchronize",
+    "A synchronize wait records the identity that delivered the agreed state.",
+    {
+        "w": wf(
+            [
+                st(
+                    "synchronize",
+                    "s",
+                    timeout="1h",
+                    input_bindings={
+                        "agents": ["a", "b"],
+                        "state": {"v": 1},
+                        "accept_trust_classes": ["peer_agent"],
+                    },
+                    wait={"event_type": "state.agreed"},
+                )
+            ],
+            requires=["wait@1", "identity@1"],
+        )
+    },
+    [
+        {
+            "expect": {"kind": "AwaitEvent", "accept_trust_classes": ["peer_agent"]},
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "state.agreed", "canonical": {"v": 1}},
+                "principal": "agent-7",
+                "identity": PEER,
+            },
+        }
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {"s": {"sender": "agent-7", "sender_identity": PEER}},
+    },
+    ["event_received"],
+)
+
+OPS_MANDATE = {"kind": "standing_mandate", "mandate_ref": "mandates/ops"}
+
+
+def always_ask_catalog(when_unattended=None):
+    """An answer from anyone; a summary of it; an action on the summary and an
+    action on something else, both covered by a standing mandate."""
+    approval = {"approver": OPS_MANDATE}
+    if when_unattended:
+        approval["when_unattended"] = when_unattended
+    return {
+        "w": wf(
+            [
+                st(
+                    "receive",
+                    "r",
+                    timeout="1h",
+                    input_bindings={"always_ask_trust_classes": ["external"]},
+                    wait={"event_type": "answer"},
+                ),
+                st(
+                    "generate",
+                    "g",
+                    input_bindings={"specification": "${r.data: array<object>}"},
+                ),
+                st(
+                    "execute",
+                    "routine",
+                    input_bindings={"code": "rotate-logs"},
+                    approval=approval,
+                ),
+                st(
+                    "execute",
+                    "act",
+                    input_bindings={"code": "${g.content: string}"},
+                    approval=approval,
+                ),
+            ],
+            requires=["wait@1", "identity@1", "approval@1"],
+        )
+    }
+
+
+AGENT = {"principal": "orchestrator", "kind": "agent", "model_family": "claude"}
+
+add(
+    "always_ask_overrides_mandate",
+    "An action on an item from an always-ask trust class, here through a generate"
+    " step, is asked of a person despite its standing mandate; an action that uses"
+    " no such item still uses the mandate. Action records carry the run's actor"
+    " identity.",
+    always_ask_catalog(),
+    [
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(OUTSIDER)},
+        {
+            "expect": inv("generate", step=1),
+            "respond": out(content="restart web", confidence=1),
+        },
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 2,
+                "approver": OPS_MANDATE,
+            },
+            "respond": approve("d1", who=("mandate",)),
+        },
+        {"expect": inv("execute", step=2), "respond": out(result="ok")},
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 3,
+                "approver": {"kind": "human", "always_ask": True},
+            },
+            "respond": approve("d2", who=("dana",)),
+        },
+        {"expect": inv("execute", step=3), "respond": out(result="ok")},
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "action_records": [
+            {
+                "status": "executed",
+                "actor": "agent",
+                "actor_identity": AGENT,
+                "approval": {"mandate_ref": "mandates/ops", "approvers": ["mandate"]},
+            },
+            {
+                "status": "executed",
+                "actor": "agent",
+                "actor_identity": AGENT,
+                "always_ask": True,
+                "approval": {"mandate_ref": None, "approvers": ["dana"]},
+            },
+        ],
+    },
+    ["always_ask", "approval_requested"],
+    actor_identity=AGENT,
+)
+
+add(
+    "always_ask_unattended",
+    "Unattended, the action that uses no always-ask item is approved by its mandate;"
+    " the one on an external item follows when_unattended (here, queued).",
+    always_ask_catalog("defer_to_queue"),
+    [
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(OUTSIDER)},
+        {
+            "expect": inv("generate", step=1),
+            "respond": out(content="restart web", confidence=1),
+        },
+        {
+            "expect": {"kind": "RequestApproval", "step": 2, "approver": OPS_MANDATE},
+            "respond": approve("d1", who=("mandate",)),
+        },
+        {"expect": inv("execute", step=2), "respond": out(result="ok")},
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "action_records": [
+            {"status": "executed"},
+            {"status": "planned", "always_ask": True},
+        ],
+        "deferred": [{"step": 3, "store_as": "act"}],
+    },
+    ["always_ask", "approval_unattended", "step_deferred"],
+    attendance="unattended",
+)
+
+add(
+    "always_ask_unmarked_item",
+    "An item from a class that is not always-ask leaves the mandate in force.",
+    always_ask_catalog(),
+    [
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(OWNER)},
+        {
+            "expect": inv("generate", step=1),
+            "respond": out(content="restart web", confidence=1),
+        },
+        {
+            "expect": {"kind": "RequestApproval", "step": 2, "approver": OPS_MANDATE},
+            "respond": approve("d1", who=("mandate",)),
+        },
+        {"expect": inv("execute", step=2), "respond": out(result="ok")},
+        {
+            "expect": {"kind": "RequestApproval", "step": 3, "approver": OPS_MANDATE},
+            "respond": approve("d2", who=("mandate",)),
+        },
+        {"expect": inv("execute", step=3), "respond": out(result="ok")},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["approval_requested"],
+)
+
+add(
+    "always_ask_through_invoke",
+    "The mark crosses an invoke: a nested run given an always-ask item asks a person"
+    " for its own mandate-covered action.",
+    {
+        "w": wf(
+            [
+                st(
+                    "receive",
+                    "r",
+                    timeout="1h",
+                    input_bindings={"always_ask_trust_classes": ["external"]},
+                    wait={"event_type": "answer"},
+                ),
+                st(
+                    "invoke",
+                    "child",
+                    input_bindings={
+                        "workflow": "act_on",
+                        "input": {"answer": "${r.data: array<object>}"},
+                    },
+                ),
+            ],
+            requires=["wait@1", "identity@1"],
+        ),
+        "act_on": wf(
+            [
+                st(
+                    "execute",
+                    "act",
+                    input_bindings={"code": "apply"},
+                    condition="${answer} != null",
+                    approval={"approver": OPS_MANDATE},
+                )
+            ],
+            inputs={"answer": {"type": "array", "required": True}},
+            requires=["approval@1"],
+        ),
+    },
+    [
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(OUTSIDER)},
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "frame": ["w", "act_on"],
+                "approver": {"kind": "human", "always_ask": True},
+            },
+            "respond": approve("d1", who=("dana",)),
+        },
+        {"expect": inv("execute", frame=["w", "act_on"]), "respond": out(result="ok")},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["always_ask", "invoke_started", "invoke_returned"],
+)
+
+NO_CLASS = {"principal": "relay", "kind": "service"}
+
+add(
+    "always_ask_fails_closed",
+    "With always_ask_trust_classes bound, an item with no identity, or whose"
+    " identity has no trust class, counts as always-ask.",
+    always_ask_catalog(),
+    [
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(NO_CLASS)},
+        {
+            "expect": inv("generate", step=1),
+            "respond": out(content="restart web", confidence=1),
+        },
+        {
+            "expect": {"kind": "RequestApproval", "step": 2, "approver": OPS_MANDATE},
+            "respond": approve("d1", who=("mandate",)),
+        },
+        {"expect": inv("execute", step=2), "respond": out(result="ok")},
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 3,
+                "approver": {"kind": "human", "always_ask": True},
+            },
+            "respond": approve("d2", who=("dana",)),
+        },
+        {"expect": inv("execute", step=3), "respond": out(result="ok")},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["always_ask"],
+)
+
+add(
+    "always_ask_through_recovery",
+    "Context a recovery loop injects from an always-ask item is marked: the"
+    " step it loops back to is asked of a person the second time.",
+    {
+        "w": wf(
+            [
+                st(
+                    "receive",
+                    "r",
+                    timeout="1h",
+                    input_bindings={"always_ask_trust_classes": ["external"]},
+                    wait={"event_type": "answer"},
+                ),
+                st(
+                    "execute",
+                    "act",
+                    input_bindings={"code": "${_recovery.hint: string}"},
+                    approval={"approver": OPS_MANDATE},
+                ),
+                st(
+                    "verify",
+                    "v",
+                    input_bindings={"conditions": ["ok"]},
+                    failure_modes=[
+                        {
+                            "condition": "verification failed",
+                            "action": "request_more_context",
+                            "when": "${v.passed} == false",
+                            "recovery": {
+                                "goto_step": "act",
+                                "inject_context": {"hint": "${r.data: array<object>}"},
+                                "max_loops": 1,
+                            },
+                        }
+                    ],
+                ),
+            ],
+            requires=["wait@1", "identity@1", "approval@1"],
+        )
+    },
+    [
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(OUTSIDER)},
+        {
+            "expect": {"kind": "RequestApproval", "step": 1, "approver": OPS_MANDATE},
+            "respond": approve("d1", who=("mandate",)),
+        },
+        {"expect": inv("execute", step=1), "respond": out(result="ok")},
+        {"expect": inv("verify", step=2), "respond": out(passed=False, confidence=1)},
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "step": 1,
+                "approver": {"kind": "human", "always_ask": True},
+            },
+            "respond": approve("d2", who=("dana",)),
+        },
+        {"expect": inv("execute", step=1), "respond": out(result="ok")},
+        {"expect": inv("verify", step=2), "respond": out(passed=True, confidence=1)},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["loop", "always_ask"],
+)
+
+add(
+    "always_ask_invoke_condition",
+    "An invoke marked only by its condition marks every step of its nested run.",
+    {
+        "w": wf(
+            [
+                st(
+                    "receive",
+                    "r",
+                    timeout="1h",
+                    input_bindings={"always_ask_trust_classes": ["external"]},
+                    wait={"event_type": "answer"},
+                ),
+                st(
+                    "invoke",
+                    "child",
+                    condition="${r.data: array<object>} != []",
+                    input_bindings={"workflow": "act_now", "input": {}},
+                ),
+            ],
+            requires=["wait@1", "identity@1"],
+        ),
+        "act_now": wf(
+            [
+                st(
+                    "execute",
+                    "act",
+                    input_bindings={"code": "apply"},
+                    approval={"approver": OPS_MANDATE},
+                )
+            ],
+            requires=["approval@1"],
+        ),
+    },
+    [
+        {"expect": {"kind": "AwaitEvent"}, "respond": verdict_event(OUTSIDER)},
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "frame": ["w", "act_now"],
+                "approver": {"kind": "human", "always_ask": True},
+            },
+            "respond": approve("d1", who=("dana",)),
+        },
+        {"expect": inv("execute", frame=["w", "act_now"]), "respond": out(result="ok")},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["always_ask"],
+)
+
+add(
+    "identity_input_unresolved",
+    "An identity@1 input whose reference resolves to something that is not a"
+    " list of known values fails the step (R402) rather than turning the check"
+    " off.",
+    {
+        "w": wf(
+            [
+                st(
+                    "receive",
+                    "r",
+                    timeout="1h",
+                    input_bindings={"accept_trust_classes": "${classes}"},
+                    wait={"event_type": "answer"},
+                )
+            ],
+            inputs={"classes": {"type": "array", "items": {"type": "string"}}},
+            requires=["wait@1", "identity@1"],
+        )
+    },
+    [],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
 )
 
 add(

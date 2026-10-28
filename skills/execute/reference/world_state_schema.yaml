@@ -12,6 +12,53 @@ schema:
   - State is separate from observations and from predictions.
   - Transitions are first-class, reversible where possible.
 types:
+  AgentIdentity:
+    type: object
+    required:
+    - principal
+    - kind
+    properties:
+      principal:
+        type: string
+        description: The opaque principal of §5.15, compared by exact (code-point) equality.
+          Two records denote the same party exactly when their identities' principals
+          are equal.
+      kind:
+        type: string
+        enum:
+        - agent
+        - human
+        - service
+        description: What kind of party it is.
+      role:
+        type: string
+        description: The role it acts in, e.g. reviewer or owner.
+      model_family:
+        type: string
+        description: For an agent, the model family it ran on.
+      owner:
+        type: string
+        description: The principal of the person or organisation it acts for.
+      authenticated_by:
+        type: string
+        pattern: ^(session_id|chat_user_id|code_host_login|directory_id|api_key|signed_token|x-[a-z0-9][a-z0-9_.-]*)$
+        description: How the host authenticated it. One of session_id, chat_user_id,
+          code_host_login, directory_id, api_key, signed_token, or a vendor value starting
+          with x-. A workflow's sender_check lists the values it accepts.
+      trust_class:
+        type: string
+        enum:
+        - owner
+        - decision_person
+        - system_of_record
+        - own_subagent_report
+        - peer_agent
+        - colleague
+        - external
+        description: What standing the party has for this run, as the host classified
+          it. A workflow's accept_trust_classes filters on it, its always_ask_trust_classes
+          makes actions on its items need a person, and authority_trust_model.yaml gives
+          each class a default source weight.
   Anchor:
     type: object
     required:
@@ -117,6 +164,11 @@ types:
       agent:
         type: string
         description: subagent/skill name
+      agent_identity:
+        $ref: '#/types/AgentIdentity'
+        description: Who the agent is, when known (Standard v1.1 §5.17). Two records
+          denote the same party exactly when their identities' principals are equal;
+          the agent string alone does not say so.
       capability:
         type: string
         description: capability id
@@ -290,6 +342,14 @@ types:
       actor:
         type: string
         description: agent/human
+      actor_identity:
+        $ref: '#/types/AgentIdentity'
+        description: Who acted, when known (Standard v1.1 §5.17); its kind says agent,
+          human or service.
+      always_ask:
+        type: boolean
+        description: The action used an item from an always-ask trust class, so no
+          standing mandate could approve it (Standard v1.1 §5.17).
       intent:
         type: string
       status:

@@ -250,6 +250,19 @@ pub(crate) fn unattended(loc: &StepLoc<'_>, report: &mut Report) {
     );
 }
 
+/// W606 for a step whose only plan for an unattended run is a standing
+/// mandate, when it may use an item from an always-ask trust class
+/// (`identity@1`, §5.17): no mandate covers that, so the run fails here.
+pub(crate) fn unattended_always_ask(loc: &StepLoc<'_>, report: &mut Report) {
+    report.push(
+        loc.diag(
+            Code::UnattendedApproval,
+            "this step relies on a standing mandate in unattended runs, but it uses data from a step with always_ask_trust_classes; no mandate covers an action on such an item, so an unattended run that brings one fails here with F502 unless approval.when_unattended says otherwise",
+        )
+        .at("field", "approval.when_unattended"),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
@@ -384,6 +397,43 @@ mod tests {
             None,
         ));
         assert_eq!(undeclared, ["V106"]);
+    }
+
+    #[test]
+    fn always_ask_items_defeat_a_mandate_unattended() {
+        let mandate = json!({"kind": "standing_mandate", "mandate_ref": "m"});
+        let run = |code: &str, approval: Value| {
+            let steps = json!([
+                {"capability": "receive", "purpose": "p", "store_as": "r",
+                 "input_bindings": {"always_ask_trust_classes": ["external"]}},
+                {"capability": "generate", "purpose": "p", "store_as": "g",
+                 "input_bindings": {"specification": "${r.data: array<object>}"}},
+                {"capability": "execute", "purpose": "p", "store_as": "x",
+                 "input_bindings": {"code": code}, "approval": approval}
+            ]);
+            codes(catalog(
+                steps,
+                &["triggers@1", "approval@1", "identity@1"],
+                Some(json!([{"kind": "schedule", "schedule": {"every": "1h"}}])),
+            ))
+            .into_iter()
+            .filter(|c| *c != "W601") // execute without a constrain before it
+            .collect::<Vec<_>>()
+        };
+        // Through the generate step, the action uses the received item.
+        assert_eq!(
+            run("${g.content: string}", json!({"approver": mandate})),
+            ["W606"]
+        );
+        // A plan for unattended runs, or no use of the item, is fine.
+        assert!(
+            run(
+                "${g.content: string}",
+                json!({"approver": mandate, "when_unattended": "defer_to_queue"})
+            )
+            .is_empty()
+        );
+        assert!(run("rotate-logs", json!({"approver": mandate})).is_empty());
     }
 
     #[test]

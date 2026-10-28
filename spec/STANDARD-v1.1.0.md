@@ -2,7 +2,8 @@
 
 **Version:** 1.1.0
 **Status:** Candidate Standard — accepted by
-[RFC-0003](RFC-0003-orchestration-extensions.md); the reference validator
+[RFC-0003](RFC-0003-orchestration-extensions.md) and
+[RFC-0004](RFC-0004-agent-identity.md); the reference validator
 and executor implement every section
 **Date:** 2026-10-27
 **Supersedes:** [STANDARD-v1.0.0](STANDARD-v1.0.0.md) (still supported; see §11.5)
@@ -22,7 +23,7 @@ This standard specifies:
 7. A **conformance model** and validation requirements
 8. **Versioning** and backward compatibility policy
 9. **Orchestration extensions** (triggers, recovery and escalation, waiting,
-   approval, delegation, quorum) that a workflow opts into
+   approval, delegation, quorum, sender identity) that a workflow opts into
 
 Changes from 1.0.0 are listed in [Appendix C](#appendix-c-changes-from-100).
 
@@ -505,13 +506,14 @@ waiting or approval semantics.
 | `approval@1` | step `approval` (§5.14) |
 | `delegation@1` | bindings of `delegate.fresh_context`, `.model_family`, `.role` and `receive`/`synchronize` `accept_from` (§5.15) |
 | `quorum@1` | step `quorum` (§5.16) |
+| `identity@1` | bindings of `receive`/`synchronize` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes` (§5.17) |
 
 `failure_modes[].when` and `.on_error` are part of base 1.1, not an
 extension: a consumer that ignores them only loses an optional trigger.
 
 A validator MUST NOT accept a declaration of an extension it does not
 check: listing one is V106, as for an unknown extension. *(The reference
-validator implements all six.)*
+validator implements all seven.)*
 
 ### 5.10 Triggers
 
@@ -545,7 +547,7 @@ is V107. A step whose effective `requires_approval` is true, in a workflow
 with an unattended trigger, with no `approval.when_unattended` and no
 `standing_mandate` approver is W606: an unattended run fails there (F502).
 (With a mandate and no `when_unattended`, an `unavailable` answer still
-fails it.)
+fails it, and so does an item from an always-ask trust class, §5.17.)
 
 #### 5.10.1 Durations
 
@@ -716,7 +718,8 @@ stands for, and `min_approvers` counts them as for people. An
 `unavailable` decision is single-use too, and records no approvers.
 
 A `standing_mandate` approver needs no one present, so it is asked in an
-unattended run too; `when_unattended` applies only when it answers
+unattended run too (except for a step that uses an always-ask item,
+§5.17); `when_unattended` applies only when it answers
 `unavailable`. A `human` approver is not asked in an unattended run, and
 `when_unattended` applies at once. In an attended run, `unavailable` is a
 refusal (F502). The plans:
@@ -794,8 +797,8 @@ identities (accounts, keys, agent sessions) to principals, and reports as
 the principal of an item the authenticated party that delivered it to the
 run, never a sender the item's content claims. So an item a peer relays on
 behalf of the owner has the peer as its principal, and `accept_from: [owner]`
-drops it. Naming agents beyond this (identity objects, attestation) awaits
-RFC-0002. Binding any of these inputs needs
+drops it. The identity behind a principal, and checks on it, are §5.17
+(`identity@1`). Binding any of these inputs needs
 `delegation@1` (V106); they are typed by the ontology like any other input.
 
 ### 5.16 Quorum
@@ -854,6 +857,84 @@ The step is compliant iff no counted verdict is blocking, passes ≥
 model-family coverage holds; otherwise F504. The output gains `tally`
 (`passes`, `blocks`, `abstains`, `full_passes`, `voters`).
 
+### 5.17 Sender Identity
+
+```yaml
+- capability: receive
+  purpose: Wait for the owner's answer.
+  store_as: answer
+  timeout: 2h
+  input_bindings:
+    sender_check: [session_id, x-acme.sso]
+    accept_trust_classes: [owner, decision_person, colleague]
+    always_ask_trust_classes: [colleague]
+  wait: {event_type: answer.given}
+```
+
+An **agent identity** (`schemas/agent_identity_schema.yaml#/agent_identity`)
+says who a party is, as the host authenticated it: its `principal` (§5.15),
+its `kind` (`agent`, `human` or `service`), and optionally its `role`,
+`model_family`, `owner` (the principal it acts for), `authenticated_by` (how
+the host authenticated it: `session_id`, `chat_user_id`, `code_host_login`,
+`directory_id`, `api_key`, `signed_token`, or an `x-` vendor value) and
+`trust_class` (`owner`, `decision_person`, `system_of_record`,
+`own_subagent_report`, `peer_agent`, `colleague` or `external`). The host
+fills it in; the standard does not say how a party is authenticated or
+classified. It records no reliability: that is RFC-0002's subject.
+
+With `identity@1` declared, `receive` and `synchronize` accept three inputs,
+each a list of values from the vocabularies above (`sender_check` and
+`accept_trust_classes` non-empty). Binding any of them otherwise is V106;
+a literal that is not such a list is S303; a reference
+that resolves to anything else (null, say) fails the step (R402), so a
+check is never silently off. A workflow that does not declare `identity@1`
+ignores any identity a host reports.
+
+| Input | Effect on an item |
+|-------|-------------------|
+| `sender_check` | Kept only if its sender's identity has an `authenticated_by` listed here |
+| `accept_trust_classes` | Kept only if its sender's identity has a `trust_class` listed here |
+| `always_ask_trust_classes` | Kept; but if its sender's identity has a `trust_class` listed here, or no identity or no `trust_class`, the item is **always-ask** |
+
+On a wait (§5.13), the host reports the sender's identity with each event
+(the response's `identity`); its `principal` is the item's principal. A
+response whose `principal` names someone other than its identity, or whose
+identity is not an `agent_identity`, is rejected as malformed and changes
+nothing. When `sender_check` or `accept_trust_classes` is bound, an item
+with no identity, or whose identity fails a bound check, is dropped and
+counted (by reason, as for `accept_from`), and the wait goes on. A kept
+item carries `sender` and `sender_identity`; a `synchronize` wait carries
+them beside the agreed state. On a step that does not wait, the host
+receives these inputs with the step and applies them to what it returns,
+and each item it returns MUST carry the `sender_identity` it applied them
+to: the executor reads the always-ask classes from it.
+
+**Always ask.** A step is *marked* when its output holds an always-ask
+item, when it reads a marked store or input (a reference in any of its
+executable fields, as for deferral in §5.14), or when it is an `invoke`
+whose nested run marked anything; a nested run invoked by a marked step
+has every step marked. Context a recovery loop injects from a marked
+value is marked (§5.12). A mark is never removed during a run. A
+marked step that requires approval is asked of a person even when its
+`approval` names a standing mandate (§5.14): the approval request names a
+`human` approver with `always_ask: true`, keeping the `role` and
+`min_approvers` and dropping the `mandate_ref`, and its action records
+carry `always_ask: true`. In an unattended run the step follows its
+`when_unattended` plan, and the action record's `reason` says why; a step whose only plan for an unattended run is a standing
+mandate and that uses, through bindings, a step that binds
+`always_ask_trust_classes` is W606. A marked step that does not require
+approval runs as it would otherwise. The mark follows references only:
+content a host carries into a later step by other means is beyond what the
+executor can see.
+
+**Actor.** A run may be started with the identity of the agent that runs
+it; every action record then carries it as `actor_identity`, and `actor`
+is its `kind`. `ActionRecord.actor_identity` and
+`ProvenanceRecord.agent_identity` are optional in
+`world_state_schema.yaml`. Two records denote the same party exactly when
+their identities' principals are equal; an implementation MUST NOT infer it
+from the `actor` or `agent` strings alone.
+
 ---
 
 ## 6. Canonical Schemas
@@ -867,6 +948,10 @@ model-family coverage holds; otherwise F504. The output gains `tally`
 | `entity_taxonomy.yaml` | Entity type hierarchy |
 | `authority_trust_model.yaml` | Trust scoring configuration |
 | `identity_resolution_policy.yaml` | Identity resolution rules |
+
+Supporting schemas that specific sections use, not required of every
+implementation: `review_verdict_schema.yaml` (§5.16) and
+`agent_identity_schema.yaml` (§5.17).
 
 ### 6.2 Observation Requirements
 
@@ -915,6 +1000,9 @@ World state snapshots MUST record:
 | `actions` | array | Yes | Action records |
 | `indexes` | object | Yes | Lookup indexes |
 | `retention_policy` | object | No | How long to retain |
+
+An action record or a provenance record may carry the identity of who
+acted (`actor_identity`, `agent_identity`; §5.17).
 
 ---
 
@@ -984,6 +1072,18 @@ When sources disagree, resolution strategies include:
 | `prefer_high_confidence` | Highest confidence wins |
 | `merge_with_uncertainty` | Keep both with uncertainty |
 | `escalate_to_human` | Require human decision |
+
+### 8.3 Trust Classes
+
+`authority_trust_model.yaml` gives each sender trust class of §5.17 a
+default weight (`trust_classes.weights`); the classes are exactly those of
+`agent_identity.trust_class`. When evidence comes from an item whose
+sender's identity has a trust class, its static weight in §8.2 is the
+class weight; when the evidence also has a source type of §8.1, the lower
+of the two applies, so a trusted channel cannot lift an untrusted sender.
+A domain profile overrides a class weight with a `trust_weights` key
+`trust_class:<class>` (e.g. `trust_class:peer_agent`), kept apart from
+source keys of the same name.
 
 ---
 
@@ -1068,7 +1168,7 @@ NOT change any code's severity otherwise.
 | W603 | DEPRECATED_FORM | Accepted legacy form (self-reading gate without `phase`, goto_step by capability id) |
 | W604 | UNKNOWN_FIELD | Unrecognised field, ignored; or a binding key outside the capability's inputs (§5.5); with a closest-match hint |
 | W605 | MISSING_SPEC_VERSION | No `spec_version` and no version header |
-| W606 | UNATTENDED_APPROVAL | An unattended trigger reaches an approval step without `when_unattended` or a standing mandate |
+| W606 | UNATTENDED_APPROVAL | An unattended trigger reaches an approval step without `when_unattended` or a standing mandate, or whose mandate cannot cover an always-ask item it uses (§5.17) |
 | W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |
 | W608 | WAIT_SPANS_CHECKPOINT | A wait sits between a checkpoint and a later step that requires one (§5.13) |
 | W609 | UNTRIGGERED_FAILURE_MODE | Structured recovery with neither `on_error` nor `when`, or a failure mode that fires only on R406 where no wait has `liveness` |
@@ -1394,6 +1494,7 @@ Safety flags are omitted below: they inherit from the ontology (§5.2.1).
 
 - [RFC-0001: Agent Capability Ontology](RFC-0001-agent-capability-ontology-and-workflow-dsl.md)
 - [RFC-0003: Orchestration Extensions and Validation Semantics](RFC-0003-orchestration-extensions.md)
+- [RFC-0004: Agent Identity](RFC-0004-agent-identity.md)
 - [Common Expression Language](https://github.com/google/cel-spec)
 - [Whitepaper: Grounded Agency](WHITEPAPER.md)
 - [Conformance Guide](CONFORMANCE.md)
@@ -1452,16 +1553,23 @@ Field names starting with `x-` are reserved for vendor extensions.
   V106–V109, B206, R405, R406
 - `mutation_overridable` (§4.4)
 - Orchestration extensions and their declaration: triggers, handler steps,
-  recovery and escalation, wait, approval, delegation, quorum (§5.9–§5.16)
+  recovery and escalation, wait, approval, delegation, quorum, sender
+  identity (§5.9–§5.17)
 - Canonical schemas: `event_schema.yaml` 1.1.0 (`source.kind` gains
   `agent`); `world_state_schema.yaml` 1.1.0 (action status `rejected` and
   `expired`, the `approval` record of §5.14 with decisions `approved`,
   `rejected`, `expired` and `unavailable`, and a `reason`)
 - `review_verdict_schema.yaml` 1.1.0 for quorum verdicts, with `scope`
   (§5.16)
+- `agent_identity_schema.yaml` 1.0.0 (§5.17); `world_state_schema.yaml`
+  1.1.0 also adds `ActionRecord.actor_identity` and
+  `ProvenanceRecord.agent_identity`; `authority_trust_model.yaml` 1.1.0 adds
+  `trust_classes` (§8.3)
 - Ontology: `delegate` inputs `fresh_context`, `model_family`, `role` and
-  output `effective`; `receive`/`synchronize` input `accept_from`; received
-  items' `sender`; `constrain` output `tally` (§5.15, §5.16); optional
+  output `effective`; `receive`/`synchronize` inputs `accept_from`,
+  `sender_check`, `accept_trust_classes` and `always_ask_trust_classes`
+  (§5.17); received items' `sender` and `sender_identity`, and on
+  `synchronize` the same beside the agreed state; `constrain` output `tally` (§5.15, §5.16); optional
   inputs `retrieve.filter` and `retrieve.references`, `state.observations`,
   `plan.context`, `critique.context` and `explain.constraints`, which
   catalogs already bound

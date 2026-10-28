@@ -32,6 +32,9 @@ Execute **receive** to ingest incoming data from external sources and parse it i
 | `filter` | No | object | Event filter criteria |
 | `timeout` | No | string | Wait timeout |
 | `accept_from` | No | array[string] | Principals to accept items from; items from others are dropped and counted, and each kept item carries its authenticated `sender` (Standard v1.1 `delegation@1`) |
+| `sender_check` | No | array[string] | Accepted `authenticated_by` values of the sender's identity; items without a matching identity are dropped and counted (Standard v1.1 `identity@1`) |
+| `accept_trust_classes` | No | array[string] | Trust classes to accept items from; others are dropped and counted (`identity@1`). Any kept item with an identity carries it as `sender_identity` |
+| `always_ask_trust_classes` | No | array[string] | Trust classes whose items (and items with no trust class) make any step that requires approval and uses them be asked of a person, whatever mandate would cover it (`identity@1`) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 

@@ -44,6 +44,7 @@ class Run:
         attendance: str = "attended",
         run_id: str,
         now_ms: int,
+        actor_identity: dict[str, Any] | None = None,
     ) -> Run: ...
     @staticmethod
     def restore(
