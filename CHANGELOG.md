@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Standard changes from the orchestrator fixtures (#114).** Gates can
+  `end` a run successfully (`RunResult.ended`); a step can `delay` before
+  it goes on (`wait@1`), without a fake event to wait on; an `accept_from`
+  or `correlate` built from a missing value fails the step at once (R402)
+  instead of dropping every sender, or matching every event that lacks the
+  key; and
+  `after_deferral: run` (`approval@1`) lets a step that does not depend on
+  a deferred one, such as an escalation, run anyway. Validator, executor,
+  Python runner, schema, runtime fixtures and docs
 - **The #114 author's orchestrator workflows as conformance fixtures.** The
   nine workflows they ported to the v1.1 candidate are a static fixture
   (`pass_orchestrator_port`, kept as contributed; it validates with two

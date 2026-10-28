@@ -1,0 +1,164 @@
+{
+  "description": "An after-gate end waits for the step's failure modes: one whose when holds fires instead (here it rolls back), so the run does not end as a success.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "config",
+            "conditions": [
+              "applied"
+            ]
+          },
+          "gates": [
+            {
+              "when": "${v.confidence} < 0.5",
+              "phase": "after",
+              "action": "end",
+              "message": "unsure; stop here"
+            }
+          ],
+          "failure_modes": [
+            {
+              "condition": "verification failed",
+              "when": "${v.passed} == false",
+              "action": "rollback"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 0.3,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Rollback",
+        "checkpoint_id": "cp1",
+        "step": 3
+      },
+      "respond": {
+        "kind": "RolledBack"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 3
+  },
+  "trace_kinds": [
+    "gate_fired",
+    "failure_mode_fired",
+    "rolled_back"
+  ]
+}

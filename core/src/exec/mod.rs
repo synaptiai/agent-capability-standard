@@ -155,6 +155,9 @@ pub enum Body {
         outcome: Outcome,
         /// The cause of an escalation.
         cause: Option<String>,
+        /// A gate ended the run (`action: end`, §5.6): `{step, message}`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ended: Option<Value>,
         outputs: Value,
         action_records: Vec<Value>,
         /// Steps deferred to a queue, or deferred because they depend on
@@ -373,17 +376,30 @@ pub(crate) struct StepState {
     /// The `task_id` of a delegation a retry replaces.
     #[serde(default)]
     pub replaces: Option<Value>,
+    /// An after-gate with `action: end` fired (its message, or null): the
+    /// run ends once the step's failure modes are checked, unless one fires.
+    #[serde(default)]
+    pub ending: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "stage")]
 pub(crate) enum Stage {
     Begin,
+    /// `delay` (§5.13): sleeping before the step goes on.
+    Delay {
+        until: u64,
+    },
+    /// The condition and before-gates passed (and any delay is over): the
+    /// step's inputs are resolved next.
+    Ready,
     Checkpoint,
     Approval,
     Recheck,
     Execute,
-    Backoff { until: u64 },
+    Backoff {
+        until: u64,
+    },
     After,
     Failure,
 }
@@ -426,6 +442,9 @@ pub(crate) struct Frame {
     /// delegation that step's next delegation replaces.
     #[serde(default)]
     pub replaces: Option<Replacement>,
+    /// A gate ended this run (`action: end`): `{step, message}`.
+    #[serde(default)]
+    pub ended: Option<Value>,
 }
 
 /// A delegation to name as replaced when step `step` next delegates.
@@ -817,7 +836,8 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
             (Body::CreateCheckpoint { .. }, Purpose::FailureCheckpoint { mode })
             | (Body::Rollback { .. }, Purpose::FailureRollback { mode }) => *mode < modes,
             (Body::Sleep { .. }, Purpose::Sleep) => {
-                matches!(top.stage, Stage::Backoff { .. }) && top.step < wf.steps.len()
+                matches!(top.stage, Stage::Backoff { .. } | Stage::Delay { .. })
+                    && top.step < wf.steps.len()
             }
             _ => false,
         };
@@ -853,6 +873,7 @@ impl Frame {
             stage: Stage::Begin,
             cur: StepState::default(),
             escalation: None,
+            ended: None,
             deferred: Vec::new(),
             nested_caps: BTreeMap::new(),
             always_ask: BTreeSet::new(),

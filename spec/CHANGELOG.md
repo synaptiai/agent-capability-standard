@@ -156,6 +156,25 @@ and reported five gaps; these close them.
   lists the run's deferrals. Before, a mandate was never asked unattended
   and a deferral ended the whole run.
 
+### Changed — from the orchestrator fixtures (#114)
+Running the issue author's nine workflows as scripted fixtures showed four
+gaps on the standard's side (RFC-0003, amendments):
+- **Gate `action: end` (§5.6):** ends the run successfully; no later step
+  runs; the terminal action records `ended: {step, message}`. In an
+  invoked workflow it ends that run only. An after-gate `end` yields to a
+  failure mode that fires; an `end` whose expression errors does not fire;
+  it is S303 in a `parallel_group`, as is `delay`.
+- **Step `delay` (§5.13, `wait@1`):** a positive duration to wait before
+  the step's approval, checkpoint and execution; it invalidates earlier
+  checkpoints like a wait (W608) and counts as acting after a deferral.
+- **Wait filters fail fast (§5.13, §5.15):** a resolved `accept_from` that
+  is not a non-empty list of strings, or a null `correlate` value, is
+  R402 before the step waits or delegates. Before, the first dropped every
+  sender, and the second matched every event lacking the key.
+- **`after_deferral: run` (§5.14, `approval@1`):** exempts a step from the
+  act-after and ordered-after deferral rules; reading a deferred output
+  still defers it.
+
 ### Changed — whole-branch review (#114)
 - **Literal bindings are typed (§5.4).** A literal or template bound to a
   typed input is checked against it: a template is a string, a list or

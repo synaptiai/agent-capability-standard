@@ -1,0 +1,81 @@
+{
+  "description": "A before-gate with action end ends the run successfully: the step and every later one are not run, and the end records which step ended it.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "y"
+          },
+          "gates": [
+            {
+              "when": "${r.data} == 0",
+              "action": "end",
+              "message": "nothing to do"
+            }
+          ]
+        },
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "z"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 0,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "ended": {
+      "step": 1,
+      "message": "nothing to do"
+    },
+    "outputs": {
+      "r": {
+        "data": 0
+      }
+    }
+  },
+  "trace_kinds": [
+    "gate_fired",
+    "run_ended"
+  ]
+}

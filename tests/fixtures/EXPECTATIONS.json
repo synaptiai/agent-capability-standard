@@ -601,5 +601,19 @@
     "expected_warning_codes": [
       "W601"
     ]
+  },
+  "pass_end_delay_after_deferral": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions"
+  },
+  "fail_end_delay_after_deferral": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106",
+      "S303"
+    ]
   }
 }

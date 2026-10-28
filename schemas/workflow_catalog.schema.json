@@ -349,9 +349,18 @@
           "$ref": "#/$defs/wait",
           "description": "Wait for a matching event (STANDARD v1.1 §5.13; needs wait@1). Only on receive, delegate (which delegates, then waits for the result), or synchronize over at least two agents; the step needs a duration timeout."
         },
+        "delay": {
+          "$ref": "#/$defs/positive_duration",
+          "description": "Wait this long before the step's approval, checkpoint and execution (STANDARD v1.1 §5.13; needs wait@1). Like a wait, it invalidates earlier checkpoints."
+        },
         "approval": {
           "$ref": "#/$defs/approval",
           "description": "How the step's approval is obtained and bound (STANDARD v1.1 §5.14; needs approval@1). Only where approval is required."
+        },
+        "after_deferral": {
+          "type": "string",
+          "enum": ["run", "defer"],
+          "description": "With run, the step is not deferred for acting on the world after, or being ordered after, a deferred step; reading a deferred output still defers it (STANDARD v1.1 §5.14; needs approval@1)."
         },
         "quorum": {
           "$ref": "#/$defs/quorum",
@@ -603,8 +612,8 @@
         },
         "action": {
           "type": "string",
-          "enum": ["stop", "rollback", "skip", "warn"],
-          "description": "Action to take when the gate fires."
+          "enum": ["stop", "rollback", "skip", "warn", "end"],
+          "description": "Action to take when the gate fires; end ends the run successfully (STANDARD v1.1 §5.6)."
         },
         "phase": {
           "type": "string",

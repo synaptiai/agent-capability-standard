@@ -376,7 +376,7 @@ gates:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `when` | string | Yes | Expression (§5.8) |
-| `action` | enum | Yes | `stop`, `rollback`, `skip`, `warn` (else S303) |
+| `action` | enum | Yes | `stop`, `rollback`, `skip`, `warn`, `end` (else S303) |
 | `message` | string | No | Explanation for the action |
 | `phase` | enum | No | `before` (default) or `after` the step |
 
@@ -390,6 +390,18 @@ gates:
   `rollback` → roll back to the latest checkpoint (none: the run ends
   F503), then R403; `warn` → a trace warning. R403 goes to the step's
   failure modes (§5.7) like any step error.
+- `end` ends the run successfully: no later step runs, as if the run had
+  reached its end, so it completes (or ends `escalated` while a handler
+  runs, or `deferred` when a step was deferred, §5.14). A before-gate's
+  step does not run. An after-gate keeps the step's output, and the run
+  ends once the step's failure modes are checked: one whose `when` holds
+  fires instead, so a failed step is not reported a success. The end
+  records the step and the gate's `message`, or null (`ended`). Use it
+  where nothing more needs doing ("no change", "report only"), which
+  `stop`, a failure, cannot express. In an invoked workflow it ends that
+  run only: the `invoke` step completes with what that run stored. A step
+  in a `parallel_group` cannot have an `end` gate (S303): its group mates
+  run at the same time and would be left half done.
 - Do not pair a `rollback` gate with a failure mode that rolls back on the
   same condition: the gate rolls back and raises R403, then the failure
   mode's `when` holds too and it rolls back again. To roll back and retry,
@@ -478,8 +490,9 @@ binding (§5.3).
 
 An evaluation error is R405 (`EXPRESSION_ERROR`) and is recorded in the
 trace. Its effect is fail-safe by site: a **gate** whose `when` errors
-fires; a **condition** that errors is false; a **failure-mode** `when` that
-errors does not fire.
+fires, except an `end` gate, which does not (firing would report the run a
+success); a **condition** that errors is false; a **failure-mode** `when`
+that errors does not fire.
 
 **CEL compatibility.** Every valid ACS expression, with each reference
 replaced by an opaque variable bound to the referenced value, MUST be a
@@ -533,8 +546,8 @@ waiting or approval semantics.
 |-----------|-------------------|
 | `triggers@1` | workflow `triggers` (§5.10) |
 | `recovery@1` | step `handler`; recovery `on_exhausted`; failure-mode `action: escalate` (§5.11, §5.12) |
-| `wait@1` | step `wait` (§5.13) |
-| `approval@1` | step `approval` (§5.14) |
+| `wait@1` | step `wait` and `delay` (§5.13) |
+| `approval@1` | step `approval` and `after_deferral` (§5.14) |
 | `delegation@1` | bindings of `delegate.fresh_context`, `.model_family`, `.role`, `.read_only` and `receive`/`synchronize`/`delegate` `accept_from` (§5.15) |
 | `quorum@1` | step `quorum` (§5.16) |
 | `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes` (§5.17) |
@@ -699,6 +712,10 @@ the run with its code, and a step that did not fail goes on to the next.
 | `correlate` | A mapping of event keys to references (each a `${...}` reference, else S303); the event's values must equal theirs |
 | `liveness` | `mode` (`push`: the source sends heartbeats; `probe`: the runtime polls it) and `interval` (a duration longer than zero), both required (S304); `failure_threshold` (integer ≥ 1, default 3) |
 
+A `correlate` value that resolves to null when the step runs fails it
+(R402), before a waiting `delegate` delegates: an event that lacks the key
+reads as null too, so the wait would accept every such event.
+
 `wait` is allowed only on `receive`, on `delegate`, or on `synchronize`
 whose literal `agents` list has at least two entries, all distinct (else S303). The step MUST declare a
 `timeout` (S304) that parses as a duration (S303; the W614 leniency for
@@ -763,6 +780,18 @@ in the step's own group does not. A step that waits itself acts after its
 wait, so any earlier checkpoint is stale for it; a handler (§5.11) is
 judged at its earliest targeting step, including that step's own wait.
 
+**Delays.** A step may declare `delay`, a duration longer than zero (else
+S303; `wait@1`, else V106): after its condition and before-gates pass, the
+executor waits that long, then the step goes on to its approval,
+checkpoint and execution. Use it to sample something twice, a while
+apart, without a fake event to wait on. A delay is a wait on time: when
+it ends, earlier checkpoints no longer authorise anything (W608 applies as
+to a `wait`, with the step acting after its own delay), and after a
+deferral the step counts as acting on the world (§5.14). A `retry` of the
+step does not delay again; a recovery loop that runs the step again does.
+A step in a `parallel_group` cannot delay (S303): whether its group mates
+wait would be unclear.
+
 ### 5.14 Approval
 
 ```yaml
@@ -816,15 +845,23 @@ deferred too if it depends on a deferred step:
 1. it reads a deferred step's store (a reference in any executable field,
    i.e. not `purpose` or a failure mode's prose, or a quorum reviewer);
 2. it may act on, or wait on, the world: its effective
-   `requires_checkpoint` or `requires_approval` is true, it waits (§5.13),
-   or it is an `invoke`, `delegate`, `synchronize` or `rollback`;
+   `requires_checkpoint` or `requires_approval` is true, it waits or
+   delays (§5.13), or it is an `invoke`, `delegate`, `synchronize` or
+   `rollback`;
 3. ontology `precedes` edges, followed transitively, order its capability
    after a deferred step's (as `verify` after `mutate`), including a
    capability that a nested run deferred.
 
 A handler (§5.11) is exempt from rules 2 and 3: it is the escalation path,
-and deferring it would leave a failure unhandled. Rule 1 still applies, so
-a handler that reads a deferred store is deferred.
+and deferring it would leave a failure unhandled. So is a step that
+declares `after_deferral: run` (`approval@1`, else V106; the other value,
+`defer`, is the default; anything else is S303): its author states that it
+does not depend on what was deferred, such as an escalation to a person
+that must happen whether or not a reminder went out. Rule 1 still
+applies to both: a step that reads a deferred store is deferred, since
+the value it reads does not exist. Declare it only where running ahead of
+a deferred action is safe; rule 2 exists because a step that reads
+nothing from a deferred "drain node" may still reboot an undrained node.
 
 A step is checked before its condition, so it waits rather than running
 on a missing value or an unchanged world; a deferred dependent is not
@@ -877,7 +914,10 @@ standard does not say how a host enforces `read_only`, only that
 `accept_from` (a list of principals): received items from other principals
 are dropped and counted, and each kept item's `sender` is the
 host-authenticated principal. A literal empty `accept_from` accepts no one
-and is S303; leave the input out to accept every sender.
+and is S303; leave the input out to accept every sender. A reference that
+resolves, when the step runs, to anything but a non-empty list of strings
+fails the step (R402): an empty list would drop every sender, and a null
+in it (from a missing value) would be dropped silently.
 
 A **principal** is an opaque string, compared by exact (code-point)
 equality; the standard gives it no structure. The host maps its own
@@ -1676,7 +1716,9 @@ either is W609 (§5.12).
 
 **New in 1.1.0:**
 - Condition expression language with CEL compatibility (§5.8), gate `phase`
-  (§5.6) and failure-mode `when` (§5.7)
+  and gate `action: end`, a successful early end (§5.6), and failure-mode
+  `when` (§5.7). A 1.0 consumer does not know `end`; a workflow using it
+  targets 1.1 (§11.5)
 - Diagnostic severities and warning codes W601–W615 (§9.1, §9.7); codes
   V106–V109, B206, R405, R406
 - Orchestration extensions and their declaration: triggers, handler steps,

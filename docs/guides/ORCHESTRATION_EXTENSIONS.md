@@ -226,6 +226,24 @@ delegates, then waits for that delegate's result (see
   checkpoint taken before the wait no longer covers a later `mutate`,
   `send` or other step that requires a checkpoint (W608). Take the
   checkpoint after the wait, not alongside it in a parallel group.
+- A `correlate` value that resolves to null, or an `accept_from` that
+  resolves to anything but a non-empty list of strings (`[null]`, say, from
+  a delegation that returned no `task_id`), fails the step (R402) at once:
+  a null key would match every event that lacks it, and such a filter
+  would drop every sender.
+
+To pause without an event, give the step a `delay` (`wait@1` too): it
+waits that long after its condition and gates, then goes on. Sampling
+twice, a minute apart:
+
+```yaml
+- capability: observe
+  store_as: sample_b_out
+  delay: 1m
+  input_bindings: {target: queue}
+```
+
+A delay ends like a wait: checkpoints taken before it no longer count.
 
 ## Approval (`approval@1`)
 
@@ -300,6 +318,20 @@ and what the decision binds to:
   The `mutate` needs its own `when_unattended`: when the mandate covers
   the send, nothing is deferred, and an unattended run reaches the
   `mutate` with no one to approve it.
+- A step that must run whether or not an earlier action was deferred,
+  such as an escalation to a person, can say so with
+  `after_deferral: run`. It is then deferred only if it reads a deferred
+  step's output. Use it only where running ahead of the queued action is
+  safe:
+
+  ```yaml
+  - capability: invoke
+    store_as: escalate_out
+    after_deferral: run                 # ask the owner even if the reminder waits
+    input_bindings:
+      workflow: owner_decision
+      input: {question: "${rows_out}"}
+  ```
 - A run that fails or escalates after a deferral still lists its
   deferrals; a recovery loop that runs a deferred step again supersedes
   its earlier `planned` record.

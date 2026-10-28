@@ -90,15 +90,30 @@ pub(crate) fn gates<'a>(
         };
         let action = gate.get("action").and_then(Value::as_str);
         if let Some(a) = action {
-            if !matches!(a, "stop" | "rollback" | "skip" | "warn") {
+            if !matches!(a, "stop" | "rollback" | "skip" | "warn" | "end") {
                 report.push(
                     loc.diag(
                         Code::SchemaValidationFailed,
-                        format!("{field}.action '{a}' is not one of stop, rollback, skip, warn"),
+                        format!(
+                            "{field}.action '{a}' is not one of stop, rollback, skip, warn, end"
+                        ),
                     )
                     .at("field", format!("{field}.action")),
                 );
             }
+        }
+        // Ending the run from a concurrently running step would leave its
+        // group mates half done.
+        if action == Some("end") && step.contains_key("parallel_group") {
+            report.push(
+                loc.diag(
+                    Code::SchemaValidationFailed,
+                    format!(
+                        "{field} ends the run, but the step runs concurrently in a parallel_group"
+                    ),
+                )
+                .at("field", format!("{field}.action")),
+            );
         }
         let when = gate.get("when").and_then(Value::as_str).map(expr::parse);
         let reads_own = matches!((&when, store), (Some(Ok(e)), Some(s)) if e.refs().iter().any(|r| r.r.root == s));
@@ -134,7 +149,7 @@ pub(crate) fn gates<'a>(
                 loc.diag(
                     Code::SchemaValidationFailed,
                     format!(
-                        "{field} runs after the step, so it cannot skip it; use stop, rollback or warn"
+                        "{field} runs after the step, so it cannot skip it; use stop, rollback, warn or end"
                     ),
                 )
                 .at("field", format!("{field}.action")),

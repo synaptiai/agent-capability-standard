@@ -51,7 +51,9 @@ pub(crate) const STEP_KEYS: &[&str] = &[
     "workflow_id",
     "handler",
     "wait",
+    "delay",
     "approval",
+    "after_deferral",
     "quorum",
     "resolution_strategy",
     "conflict_resolution_strategies",
@@ -298,8 +300,11 @@ pub(crate) struct Placed<'a> {
     /// Effective `requires_checkpoint` (§5.2.1): the ontology's, or true
     /// when the step raises it.
     pub requires_checkpoint: bool,
-    /// Whether the step waits for an event (`wait`, §5.13).
+    /// Whether the step waits for an event (`wait`) or for time (`delay`)
+    /// (§5.13).
     pub waits: bool,
+    /// Whether it waits for time before anything else it does (`delay`).
+    pub delays: bool,
 }
 
 impl Placed<'_> {

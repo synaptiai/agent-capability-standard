@@ -684,3 +684,47 @@ def test_a_malformed_actor_identity_refuses_the_start(runner: WorkflowRunner) ->
         runner.start(
             "change_config", {"setting": "x"}, actor_identity={"kind": "agent"}
         )
+
+
+def test_an_end_gate_and_a_delay(tmp_path: Path) -> None:
+    """A delay sleeps through the host's clock before the step, and a gate
+    with action end ends the run successfully (RunResult.ended)."""
+    catalog = tmp_path / "end.yaml"
+    catalog.write_text(
+        """\
+# Standard version: 1.1.0
+sample_twice:
+  goal: Sample, wait a minute, sample again, stop if nothing changed.
+  risk: low
+  workflow_extensions:
+    requires: [wait@1]
+  steps:
+  - capability: retrieve
+    purpose: First sample.
+    store_as: first
+    input_bindings: {target: queue}
+  - capability: retrieve
+    purpose: Second sample, a minute later.
+    store_as: second
+    delay: 1m
+    input_bindings: {target: queue}
+    gates:
+    - when: ${second.data} == ${first.data}
+      phase: after
+      action: end
+      message: Nothing changed.
+  - capability: search
+    purpose: Look into the change.
+    store_as: found
+    input_bindings: {query: change}
+"""
+    )
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    host = FakeHost(Clock())
+    result = WorkflowRunner(engine).run("sample_twice", None, host)
+    assert result.ok, result
+    assert result.ended == {"step": 1, "message": "Nothing changed."}
+    assert host.calls == ["retrieve", "retrieve"]
+    # The second sample waited a minute after the first.
+    assert host.slept == [1_000 + 10 + 60_000]

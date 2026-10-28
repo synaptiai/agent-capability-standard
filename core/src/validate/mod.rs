@@ -558,7 +558,8 @@ impl WorkflowCheck<'_> {
                 parallel_group: step.get("parallel_group").and_then(Value::as_str),
                 requires_checkpoint: node.requires_checkpoint
                     || step.get("requires_checkpoint") == Some(&Value::Bool(true)),
-                waits: waits_well,
+                waits: waits_well || wait::delay(step, &declared).is_some(),
+                delays: wait::delay(step, &declared).is_some(),
             };
             let store = step.get("store_as").and_then(Value::as_str);
             let view = if plan.handlers.contains(&i) {
@@ -645,6 +646,8 @@ impl WorkflowCheck<'_> {
                 scope,
                 self.report,
             );
+            wait::check_delay(&loc, step, &declared, self.report);
+            approval::check_after_deferral(&loc, step, &declared, self.report);
             delegation::check(&loc, step, &declared, self.report);
             identity::check(&loc, step, &declared, self.report);
             quorum::check(
@@ -1339,6 +1342,20 @@ pub(crate) mod tests {
         );
         assert_eq!(
             codes(step(json!({"gates": [{"when": 1, "action": "stop"}]}))),
+            ["S303"]
+        );
+        // `end` ends the run successfully, before or after the step.
+        for phase in ["before", "after"] {
+            let gate = json!({"when": "true", "action": "end", "phase": phase});
+            assert!(codes(step(json!({"gates": [gate]}))).is_empty(), "{phase}");
+        }
+        assert_eq!(
+            codes(step(json!({"gates": [{"when": "true", "action": "halt"}]}))),
+            ["S303"]
+        );
+        assert_eq!(
+            codes(step(json!({"parallel_group": "g",
+                               "gates": [{"when": "true", "action": "end"}]}))),
             ["S303"]
         );
         assert_eq!(codes(step(json!({"failure_modes": ["x"]}))), ["S303"]);

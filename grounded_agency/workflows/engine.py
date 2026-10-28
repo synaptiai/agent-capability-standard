@@ -62,7 +62,7 @@ class Gate:
     """Conditional gate on a workflow step (STANDARD v1.1 §5.8)."""
 
     when: str
-    action: str  # "stop", "rollback", "skip", "warn"
+    action: str  # "stop", "rollback", "skip", "warn", "end"
     message: str = ""
     phase: str | None = None  # "before" (the default) or "after"
 

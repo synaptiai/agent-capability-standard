@@ -150,6 +150,9 @@ class RunResult:
     """Steps deferred to a queue, or deferred because they depend on one
     (``frame``, ``step``, ``store_as``, ``reason``, ``action_id``), whatever
     the outcome."""
+    ended: dict[str, Any] | None = None
+    """When a gate with ``action: end`` ended the run early: the ``step``
+    it ended at and the gate's ``message``."""
 
     @property
     def ok(self) -> bool:
@@ -428,6 +431,7 @@ class WorkflowRunner:
                 trace=trace,
                 cause=action.get("cause"),
                 deferred=action.get("deferred", []),
+                ended=action.get("ended"),
             )
         return RunResult(
             outcome=None,

@@ -3900,6 +3900,472 @@ quorum_case(
 
 
 # ---------------------------------------------------------------------------
+# H4 (#114 findings): gate `end`, `delay`, fail-fast wait filters and
+# `after_deferral`.
+# ---------------------------------------------------------------------------
+
+END_GATE = {"when": "${r.data} == 0", "action": "end", "message": "nothing to do"}
+
+add(
+    "gate_end_before",
+    "A before-gate with action end ends the run successfully: the step and every later one are not run, and the end records which step ended it.",
+    {
+        "w": wf(
+            [
+                st("retrieve", "r", input_bindings={"target": "x"}),
+                st("observe", "o", input_bindings={"target": "y"}, gates=[END_GATE]),
+                st("search", "s", input_bindings={"query": "z"}),
+            ]
+        )
+    },
+    [{"expect": inv("retrieve", step=0), "respond": out(data=0, confidence=1)}],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "ended": {"step": 1, "message": "nothing to do"},
+        "outputs": {"r": {"data": 0}},
+    },
+    ["gate_fired", "run_ended"],
+)
+
+add(
+    "gate_end_after",
+    "An after-gate with action end keeps the step's output and ends the run; later steps are not run.",
+    {
+        "w": wf(
+            [
+                st(
+                    "retrieve",
+                    "r",
+                    input_bindings={"target": "x"},
+                    gates=[dict(END_GATE, phase="after")],
+                ),
+                st("observe", "o", input_bindings={"target": "y"}),
+            ]
+        )
+    },
+    [{"expect": inv("retrieve", step=0), "respond": out(data=0, confidence=1)}],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "ended": {"step": 0, "message": "nothing to do"},
+        "outputs": {"r": {"data": 0}},
+    },
+    ["step_completed", "gate_fired", "run_ended"],
+)
+
+add(
+    "gate_end_nested",
+    "An end gate in an invoked workflow ends that run only: the invoke step completes with its stores and the caller goes on.",
+    {
+        "w": wf(
+            [
+                st(
+                    "invoke",
+                    "i",
+                    workflow_id="child",
+                    input_bindings={"workflow": "child", "input": {}},
+                ),
+                st("search", "s", input_bindings={"query": "z"}),
+            ]
+        ),
+        "child": wf(
+            [
+                st("retrieve", "r", input_bindings={"target": "x"}),
+                st("observe", "o", input_bindings={"target": "y"}, gates=[END_GATE]),
+            ]
+        ),
+    },
+    [
+        {
+            "expect": inv("retrieve", step=0, frame=["w", "child"]),
+            "respond": out(data=0, confidence=1),
+        },
+        {
+            "expect": inv("search", step=1, frame=["w"]),
+            "respond": out(results=[], confidence=1),
+        },
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {"i": {"result": {"r": {"data": 0}}, "steps_executed": ["r"]}},
+    },
+    ["run_ended", "invoke_returned"],
+)
+
+add(
+    "delay_waits",
+    "A delay sleeps before the step; like a wait it invalidates the checkpoint taken before it, so the later mutation needs a new one.",
+    {
+        "w": wf(
+            [
+                CP,
+                st("observe", "o", input_bindings={"target": "y"}, delay="1m"),
+                POLICY,
+                mutate("m"),
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [
+        {"expect": inv("checkpoint", step=0), "respond": out(checkpoint_id="cp1")},
+        {"expect": {"kind": "Sleep", "until": 60_000}},
+        {"tick": 60_000},
+        {
+            "expect": inv("observe", step=1),
+            "respond": out(observation={}, confidence=1),
+        },
+        {"expect": inv("constrain", step=2), "respond": out(compliant=True)},
+        {"expect": {"kind": "RequestApproval", "step": 3}, "respond": approve("d1")},
+        {
+            "expect": {"kind": "CreateCheckpoint", "step": 3},
+            "respond": {"kind": "Checkpoint", "checkpoint_id": "cp2"},
+        },
+        {"expect": inv("mutate", step=3), "respond": out(success=True)},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    [
+        "delay_started",
+        "delay_finished",
+        "checkpoints_invalidated",
+        "checkpoint_created",
+    ],
+)
+
+add(
+    "wait_accept_from_empty",
+    "An accept_from that resolves to an empty list fails the step (R402) at once, instead of dropping every sender until the timeout.",
+    {
+        "w": wf(
+            [
+                st("retrieve", "r", input_bindings={"target": "x"}),
+                st(
+                    "receive",
+                    "inbox",
+                    timeout="1h",
+                    input_bindings={"accept_from": "${r.data: array<string>}"},
+                    wait={"event_type": "answer"},
+                ),
+            ],
+            requires=["wait@1", "delegation@1"],
+        )
+    },
+    [{"expect": inv("retrieve", step=0), "respond": out(data=[], confidence=1)}],
+    {"kind": "Failed", "code": "R402", "step": 1},
+    ["step_failed"],
+)
+
+add(
+    "wait_correlate_null",
+    "A correlate value that resolves to null fails the step (R402): it would match every event that lacks the key.",
+    {
+        "w": wf(
+            [
+                st("retrieve", "r", input_bindings={"target": "x"}),
+                st(
+                    "receive",
+                    "inbox",
+                    timeout="1h",
+                    wait={"event_type": "answer", "correlate": {"job": "${r.data}"}},
+                ),
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [{"expect": inv("retrieve", step=0), "respond": out(data=None, confidence=1)}],
+    {"kind": "Failed", "code": "R402", "step": 1},
+    ["step_failed"],
+)
+
+add(
+    "wait_correlate_null_delegate",
+    "A waiting delegate whose correlate resolves to null fails before it delegates: nothing is sent and then abandoned.",
+    {
+        "w": wf(
+            [
+                st("retrieve", "r", input_bindings={"target": "x"}),
+                st(
+                    "delegate",
+                    "d",
+                    timeout="1h",
+                    input_bindings={"task": {"t": 1}, "agent": "a"},
+                    wait={"event_type": "done", "correlate": {"ticket": "${r.data}"}},
+                ),
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [{"expect": inv("retrieve", step=0), "respond": out(data=None, confidence=1)}],
+    {"kind": "Failed", "code": "R402", "step": 1},
+    ["step_failed"],
+)
+
+add(
+    "receive_accept_from_empty",
+    "A receive that does not wait still fails (R402) when its accept_from resolves to an empty list: the host would drop every sender.",
+    {
+        "w": wf(
+            [
+                st("retrieve", "r", input_bindings={"target": "x"}),
+                st(
+                    "receive",
+                    "inbox",
+                    input_bindings={"accept_from": "${r.data: array<string>}"},
+                ),
+            ],
+            requires=["delegation@1"],
+        )
+    },
+    [{"expect": inv("retrieve", step=0), "respond": out(data=[], confidence=1)}],
+    {"kind": "Failed", "code": "R402", "step": 1},
+    ["step_failed"],
+)
+
+add(
+    "gate_end_failure_mode_wins",
+    "An after-gate end waits for the step's failure modes: one whose when holds fires instead (here it rolls back), so the run does not end as a success.",
+    {
+        "w": wf(
+            [
+                CP,
+                POLICY,
+                mutate("m"),
+                st(
+                    "verify",
+                    "v",
+                    input_bindings={"target": "config", "conditions": ["applied"]},
+                    gates=[
+                        {
+                            "when": "${v.confidence} < 0.5",
+                            "phase": "after",
+                            "action": "end",
+                            "message": "unsure; stop here",
+                        }
+                    ],
+                    failure_modes=[
+                        {
+                            "condition": "verification failed",
+                            "when": "${v.passed} == false",
+                            "action": "rollback",
+                        }
+                    ],
+                ),
+            ]
+        )
+    },
+    [
+        *SWEEP_START,
+        {"expect": {"kind": "RequestApproval", "step": 2}, "respond": approve("d1")},
+        {"expect": inv("mutate", step=2), "respond": out(success=True)},
+        {
+            "expect": inv("verify", step=3),
+            "respond": out(passed=False, confidence=0.3),
+        },
+        {
+            "expect": {"kind": "Rollback", "checkpoint_id": "cp1", "step": 3},
+            "respond": {"kind": "RolledBack"},
+        },
+    ],
+    {"kind": "Failed", "code": "R402", "step": 3},
+    ["gate_fired", "failure_mode_fired", "rolled_back"],
+)
+
+add(
+    "gate_end_error_does_not_fire",
+    "An end gate whose expression errors (R405) does not fire, unlike other gates: it would report the run a success. The run goes on.",
+    {
+        "w": wf(
+            [
+                st("retrieve", "r", input_bindings={"target": "x"}),
+                st(
+                    "observe",
+                    "o",
+                    input_bindings={"target": "y"},
+                    gates=[{"when": "${r.data: number} < 1", "action": "end"}],
+                ),
+            ]
+        )
+    },
+    [
+        {"expect": inv("retrieve", step=0), "respond": out(data="oops", confidence=1)},
+        {
+            "expect": inv("observe", step=1),
+            "respond": out(observation={}, confidence=1),
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["expression_error"],
+)
+
+add(
+    "gate_end_while_escalated",
+    "An end gate in a handler ends the run escalated, as the handler's own end would, with the cause and the ending step recorded.",
+    {
+        "w": wf(
+            [
+                st(
+                    "observe",
+                    "o",
+                    input_bindings={"target": "x"},
+                    failure_modes=[
+                        {
+                            "condition": "observation failed",
+                            "action": "escalate",
+                            "on_error": "R402",
+                            "recovery": {"goto_step": "page"},
+                        }
+                    ],
+                ),
+                st(
+                    "invoke",
+                    "page",
+                    handler=True,
+                    workflow_id="oncall",
+                    input_bindings={"workflow": "oncall", "input": {}},
+                    gates=[
+                        {"when": "true", "action": "end", "message": "on-call is paged"}
+                    ],
+                ),
+            ],
+            requires=["recovery@1"],
+        ),
+        "oncall": wf([st("inquire", "q", input_bindings={"ambiguous_input": "x"})]),
+    },
+    [
+        {
+            "expect": inv("observe", step=0),
+            "respond": {"kind": "Error", "code": "R402", "message": "down"},
+        },
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "escalated",
+        "cause": "R402",
+        "ended": {"step": 1, "message": "on-call is paged"},
+    },
+    ["escalated", "run_ended"],
+)
+
+add(
+    "gate_end_after_deferral",
+    "An end gate after a deferral ends the run deferred: the queued action still waits.",
+    {
+        "w": wf(
+            [
+                CP,
+                POLICY,
+                dict(mutate("m"), approval=DEFER),
+                st(
+                    "observe",
+                    "o",
+                    input_bindings={"target": "elsewhere"},
+                    gates=[
+                        {"when": "true", "action": "end", "message": "done for now"}
+                    ],
+                ),
+                st("search", "s", input_bindings={"query": "z"}),
+            ],
+            requires=["approval@1"],
+        )
+    },
+    SWEEP_START,
+    {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "ended": {"step": 3, "message": "done for now"},
+        "deferred": [{"step": 2}],
+    },
+    ["step_deferred", "run_ended"],
+    attendance="unattended",
+)
+
+add(
+    "after_deferral_precedes",
+    "after_deferral: run also lifts the ordering rule: a verify the ontology orders after a deferred mutate runs.",
+    {
+        "w": wf(
+            [
+                CP,
+                POLICY,
+                dict(mutate("m"), approval=DEFER),
+                st(
+                    "verify",
+                    "v",
+                    input_bindings={"target": "config", "conditions": ["unchanged"]},
+                    after_deferral="run",
+                ),
+            ],
+            requires=["approval@1"],
+        )
+    },
+    SWEEP_START
+    + [{"expect": inv("verify", step=3), "respond": out(passed=True, confidence=1)}],
+    {"kind": "Completed", "outcome": "deferred", "deferred": [{"step": 2}]},
+    ["step_deferred"],
+    attendance="unattended",
+)
+
+
+def after_deferral_sweep():
+    """A deferred mutation, then: a delegation that opted out of dependent
+    deferral, one that did not, and an observation that opted out but reads
+    the deferred output."""
+    m = mutate()
+    m["approval"] = DEFER
+
+    def delegate(store, **kw):
+        return st(
+            "delegate", store, input_bindings={"task": {"t": 1}, "agent": "a"}, **kw
+        )
+
+    return {
+        "w": wf(
+            [
+                CP,
+                POLICY,
+                m,
+                delegate("independent", after_deferral="run"),
+                delegate("dependent"),
+                st(
+                    "observe",
+                    "reader",
+                    input_bindings={"target": "x"},
+                    gates=[{"when": "${m.success} == false", "action": "warn"}],
+                    after_deferral="run",
+                ),
+            ],
+            requires=["approval@1"],
+        )
+    }
+
+
+add(
+    "after_deferral_runs",
+    "after_deferral: run lets a step that acts on the world run after a deferral; a step without it is deferred, and so is one that opted out but reads the deferred output.",
+    after_deferral_sweep(),
+    SWEEP_START
+    + [
+        {
+            "expect": inv("delegate", step=3),
+            "respond": out(accepted=True, task_id="t1"),
+        }
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+            {"step": 2},
+            {"step": 4, "reason": "it may act on the world, after a deferred step"},
+            {"step": 5, "reason": "it reads 'm', which was deferred"},
+        ],
+    },
+    ["step_deferred"],
+    attendance="unattended",
+)
+
+
+# ---------------------------------------------------------------------------
 # The orchestrator port (#114): scripted runs of the workflows in
 # tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml, as contributed.
 # Each fixture carries the workflow and every workflow it invokes. A host

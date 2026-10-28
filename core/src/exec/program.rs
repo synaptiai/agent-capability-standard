@@ -20,6 +20,8 @@ pub enum GateAction {
     Rollback,
     Skip,
     Warn,
+    /// End the run successfully: no later step runs (§5.6).
+    End,
 }
 
 pub struct Gate {
@@ -59,6 +61,12 @@ pub struct Step {
     pub gates: Vec<Gate>,
     pub failure_modes: Vec<FailureMode>,
     pub timeout: Option<Duration>,
+    /// `wait@1`: how long to wait before the step's approval, checkpoint
+    /// and execution (§5.13).
+    pub delay: Option<Duration>,
+    /// `approval@1` `after_deferral: run`: only reading a deferred step's
+    /// output defers this step (§5.14).
+    pub after_deferral_runs: bool,
     pub retry: Option<Retry>,
     /// The roots the step reads in its executable fields (not `purpose` or
     /// a failure mode's prose), and the reviewers its quorum counts: a step
@@ -176,7 +184,7 @@ impl Program {
     }
 
     fn workflow(ctx: &Context, name: &str, raw: &Map<String, Value>) -> Result<Workflow, String> {
-        let declared = raw
+        let declared: Vec<String> = raw
             .get("workflow_extensions")
             .and_then(|e| e.get("requires"))
             .and_then(Value::as_array)
@@ -192,17 +200,12 @@ impl Program {
             .and_then(Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let recovery_declared = raw
-            .get("workflow_extensions")
-            .and_then(|e| e.get("requires"))
-            .and_then(Value::as_array)
-            .is_some_and(|a| a.iter().any(|x| x.as_str() == Some("recovery@1")));
         let mut steps = Vec::with_capacity(list.len());
         for (index, value) in list.iter().enumerate() {
             let Some(step) = value.as_object() else {
                 return Err(format!("{name}: step {index} is not a mapping"));
             };
-            steps.push(Self::step(ctx, name, index, step, list, recovery_declared)?);
+            steps.push(Self::step(ctx, name, index, step, list, &declared)?);
         }
         Ok(Workflow {
             name: name.to_string(),
@@ -218,9 +221,10 @@ impl Program {
         index: usize,
         raw: &Map<String, Value>,
         all: &[Value],
-        recovery_declared: bool,
+        declared: &[String],
     ) -> Result<Step, String> {
         let at = |what: &str| format!("{wf}: step {index}: {what}");
+        let has = |ext: &str| declared.iter().any(|d| d == ext);
         let capability = raw
             .get("capability")
             .and_then(Value::as_str)
@@ -264,6 +268,7 @@ impl Program {
                 Some("rollback") => GateAction::Rollback,
                 Some("skip") => GateAction::Skip,
                 Some("warn") => GateAction::Warn,
+                Some("end") => GateAction::End,
                 other => return Err(at(&format!("gates[{g}].action {other:?}"))),
             };
             let when = parse(when).map_err(|e| at(&format!("gates[{g}].when: {e}")))?;
@@ -342,6 +347,10 @@ impl Program {
             Some(Value::String(t)) => duration::parse(t).ok(),
             _ => None,
         };
+        let delay = match raw.get("delay") {
+            Some(Value::String(d)) if has("wait@1") => duration::parse(d).ok(),
+            _ => None,
+        };
         let retry = raw.get("retry").and_then(Value::as_object).map(|r| Retry {
             max: r
                 .get("max")
@@ -378,6 +387,7 @@ impl Program {
         let acts = requires_checkpoint
             || requires_approval
             || raw.contains_key("wait")
+            || delay.is_some()
             || matches!(
                 capability.as_str(),
                 "invoke" | "delegate" | "synchronize" | "rollback"
@@ -409,7 +419,10 @@ impl Program {
             requires_checkpoint,
             requires_approval,
             required_outputs,
-            handler: recovery_declared && capability == "invoke" && flag("handler"),
+            handler: has("recovery@1") && capability == "invoke" && flag("handler"),
+            delay,
+            after_deferral_runs: has("approval@1")
+                && raw.get("after_deferral").and_then(Value::as_str) == Some("run"),
             capability,
             raw: raw.clone(),
             condition,

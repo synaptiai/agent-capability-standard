@@ -66,8 +66,8 @@ JSON data, also raise `RunStartError` (with no diagnostics).
 | `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
 | `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's), `{"kind": "LivenessLost"}` (R406), or `{"kind": "Error", "code": "R401"/"R402"/"R406", "message": ...}` (any other code is read as R402) |
-| `Sleep` | waits until `until` (retry backoff) | — (the runner calls `tick`) |
-| `Completed` / `Failed` | — | the run is over |
+| `Sleep` | waits until `until` (retry backoff, or a step's `delay`) | — (the runner calls `tick`) |
+| `Completed` / `Failed` | — | the run is over (`Completed` carries `ended` when a gate ended it) |
 
 `Host` has a method for each, plus `now_ms()` and `sleep_until()` (wall
 clock by default). A method may return `None` when there is nothing yet
@@ -91,7 +91,10 @@ ontology contract requires, or the step fails (R402).
 - **Conditions and gates.** A false condition skips the step, unless
   `skip_if_false: false`, which makes it R403. Gate actions: `stop` → R403,
   `skip` → skip the step, `rollback` → roll back, then R403, `warn` → a trace
-  event. An expression that errors (R405) is fail-safe: a gate fires, a
+  event, `end` → the run ends successfully, no later step runs, and
+  `RunResult.ended` says at which step and why (an after-gate `end` yields
+  to a failure mode that fires; an `end` whose expression errors does not
+  fire). An expression that errors (R405) is fail-safe: a gate fires, a
   condition is false, and a failure mode does not fire.
 - **Checkpoints.** One checkpoint authorises one step that requires one,
   and is used only once the step is approved and about to run. When none
@@ -107,6 +110,8 @@ ontology contract requires, or the step fails (R402).
   holds back the step and every later step that depends on it (reads its
   output, may act on the world, or comes after it in the ontology), runs
   the steps that only read, reason or record, and ends the run `deferred`.
+  A step with `after_deferral: run` is deferred only if it reads a deferred
+  step's output.
   In an attended run
   `unavailable` is F502. The default `Host` holds no mandates: it answers
   `unavailable` for one. `recheck` re-reads a source before acting, then
@@ -122,7 +127,13 @@ ontology contract requires, or the step fails (R402).
   inputs that does not wait is your host's to filter: put the sender's
   `sender_identity` on each item you return, since an item without one
   counts as always-ask when `always_ask_trust_classes` is bound.
-- **Waits.** `AwaitEvent` has a deadline from the step's `timeout`. Events
+- **Delays.** A step with `delay` (`wait@1`) sleeps that long after its
+  condition and before-gates, before its approval and execution; when it wakes,
+  earlier checkpoints no longer count, as after a wait.
+- **Waits.** `AwaitEvent` has a deadline from the step's `timeout`. An
+  `accept_from` that resolves to anything but a non-empty list of strings,
+  or a `correlate` value that resolves to null, fails the step (R402) before
+  it waits. Events
   that don't match (`event_type`, `source_kind`, `correlate`,
   `accept_from`, `sender_check`, `accept_trust_classes`) are dropped and
   the wait goes on. A lapse is R401;
@@ -164,7 +175,8 @@ every action record then carries it as `actor_identity`, and `actor` is its
 `kind`.
 
 `RunResult` gives the `outcome` (`completed`, `escalated`, `deferred`,
-`replan_required`) or the failure `code`, plus the outputs, the action
+`replan_required`) or the failure `code`, `ended` when a gate ended the
+run early, plus the outputs, the action
 records (world state `ActionRecord`s for every step that required
 approval), the deferrals (`deferred`: each deferred step, why, and the
 `action_id` of its queued action) and the trace (every decision the

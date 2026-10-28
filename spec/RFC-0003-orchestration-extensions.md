@@ -245,6 +245,38 @@ still could not express. Closed in the candidate:
   A recovery loop back to a shared wait, which re-delegated every reviewer,
   is no longer needed.
 
+Running the nine workflows as scripted conformance fixtures showed four
+more gaps on the standard's side, closed in the candidate:
+
+- **No successful early end.** A gate's `stop` is a failure (R403), so a
+  "nothing to do" or "report and ask" path ended runs as failed, and the
+  only alternative was a chain of skips. Gates gain `action: end`, which
+  ends the run as completed (escalated or deferred where the run would
+  end so anyway), records the step and message, and ends only the
+  current run when nested (§5.6). An after-gate `end` yields to a failure
+  mode that fires, and an `end` whose expression errors does not fire, so
+  a failure is never reported a success. A failure-mode action for the
+  same was not added for that reason.
+- **No timed pause.** A workflow that samples twice, a minute apart,
+  waited on an event the host had to invent. A step's `delay` (`wait@1`)
+  waits that long before the step goes on; it ends like a wait, so it
+  invalidates earlier checkpoints and counts as acting after a deferral
+  (§5.13).
+- **Filters built from missing values.** An `accept_from` built from a
+  missing `task_id` resolved to `[null]` and dropped every report until
+  the timeout; a `correlate` key built from a missing value resolved to
+  null, which every event lacking that key matched. At run time, an
+  `accept_from` that is not a non-empty list of strings, or a null
+  `correlate` value, now fails the step (R402), before a waiting delegate
+  delegates, as `sender_check` and `accept_trust_classes` already did
+  (§5.13, §5.15).
+- **Dependent deferral with no way out.** An unattended sweep deferred a
+  reminder's send, and with it an escalation to the owner that did not
+  depend on it. `after_deferral: run` (`approval@1`) exempts a step from
+  the act-after and ordered-after rules, as a handler is; reading a
+  deferred output still defers it (§5.14). The rules themselves stay: the
+  author opts out per step, where running ahead is safe.
+
 ## Open questions
 
 - ~~How agent identity (RFC-0002) will extend E2 with a named agent and

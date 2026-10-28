@@ -393,3 +393,39 @@ What the runs show about the port (feedback for the author, not changed):
 - review_gate predates per-reviewer waits: a reviewer that times out
   restarts both. Each reviewer as a waiting `delegate` replaces only the
   hung one.
+
+# H4: standard changes from the #114 fixture findings (user, 2026-10-28)
+
+Decisions: all four candidates from the evaluation posted on #114.
+- [x] **Fail fast on empty filters** (§5.13, §5.15): an `accept_from` that is
+  not a non-empty list of strings when the step runs, or a `correlate` value
+  that resolves to null, fails the step (R402) instead of dropping every
+  event until the timeout. (`sender_check`/`accept_trust_classes` already do.)
+- [x] **Successful early end** (§5.6): gate `action: end`, before or after the
+  step: the run ends `completed` (or escalated/deferred as it would at its
+  end), no later step runs, and the terminal action carries
+  `ended: {step, message}`. Core v1.1, like `phase`.
+- [x] **Timer** (§5.13, `wait@1`): step field `delay` (a duration): the
+  executor sleeps that long before the step's approval, checkpoint and
+  execution. A delay counts as a wait: it invalidates earlier checkpoints
+  (and W608 warns, as for a wait).
+- [x] **Deferral opt-out** (§5.14, `approval@1`): step field
+  `after_deferral: run | defer` (default `defer`). With `run`, the step is not
+  deferred for acting on the world after, or being ordered after, a deferred
+  step; reading a deferred step's output still defers it.
+- [x] Each: validator (shapes, V106 when the extension is undeclared),
+  executor, check_state, unit tests, runtime fixtures, spec + Appendix C,
+  guides, changelogs, schema JSON; review; fix; commit.
+
+#### H4 review
+Fixed: a null `correlate` on a waiting delegate failed only after it had
+delegated (now checked first); an after-gate `end` pre-empted a failure
+mode whose `when` held, losing a rollback (failure modes now win); an
+`end` gate whose expression errored ended the run as a success (it no
+longer fires); W608 missed a delegate's or handler's own delay; `end` and
+`delay` in a parallel group were undefined (S303); the rationale for the
+null-correlate rule was wrong (a null key matched every event lacking it);
+`ended.message` invented text for a gate without one (now null); docs and
+fixture nits. Left open: a `spec_version: "1.0"` workflow using `end` (or
+`phase`) gets no diagnostic.
+

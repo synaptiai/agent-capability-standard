@@ -1,0 +1,52 @@
+# Standard version: 1.1.0
+# A gate that ends the run successfully (§5.6), a delay between two samples
+# (§5.13), and an escalation that runs after a deferral (§5.14).
+sample_and_escalate:
+  goal: Sample a queue twice, a minute apart; if it is stuck, remind and escalate.
+  risk: medium
+  workflow_extensions:
+    requires: [wait@1, approval@1]
+  steps:
+  - capability: observe
+    purpose: First sample of the queue depth.
+    store_as: first_out
+    input_bindings:
+      target: queue
+  - capability: observe
+    purpose: Second sample, a minute later.
+    store_as: second_out
+    delay: 1m
+    input_bindings:
+      target: queue
+    gates:
+    - when: ${second_out.observation} != ${first_out.observation}
+      phase: after
+      action: end
+      message: The queue is moving; nothing to do.
+  - capability: constrain
+    purpose: Check the reminder against the outbound policy.
+    store_as: policy_out
+    input_bindings:
+      target: reminder
+      constraints: [outbound_policy]
+  - capability: checkpoint
+    purpose: Save a restore point before sending.
+    store_as: checkpoint_out
+    input_bindings:
+      scope: outbox
+  - capability: send
+    purpose: Remind the queue owner.
+    store_as: reminder_out
+    input_bindings:
+      destination: queue-owner
+      payload: {text: The queue is stuck.}
+    approval:
+      approver: {kind: human}
+      when_unattended: defer_to_queue
+  - capability: delegate
+    purpose: Hand the stuck queue to on-call, whether or not the reminder went out.
+    store_as: escalation_out
+    after_deferral: run
+    input_bindings:
+      task: {summary: The queue has not moved in a minute.}
+      agent: on-call

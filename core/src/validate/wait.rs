@@ -133,6 +133,49 @@ fn host(loc: &StepLoc<'_>, step: &Map<String, Value>, report: &mut Report) {
     }
 }
 
+/// A step's `delay` (§5.13), when `wait@1` is declared and it is a
+/// positive duration: the executor waits that long before the step.
+pub(crate) fn delay(step: &Map<String, Value>, declared: &Declared) -> Option<Duration> {
+    let Some(Value::String(text)) = step.get("delay") else {
+        return None;
+    };
+    crate::duration::parse(text)
+        .ok()
+        .filter(|d| declared.has("wait@1") && !d.is_zero())
+}
+
+/// `delay` needs `wait@1` (V106) and must be a positive duration (S303).
+pub(crate) fn check_delay(
+    loc: &StepLoc<'_>,
+    step: &Map<String, Value>,
+    declared: &Declared,
+    report: &mut Report,
+) {
+    let Some(value) = step.get("delay") else {
+        return;
+    };
+    if !declared.require(
+        "wait@1",
+        "'delay'",
+        |d| loc.locate(d).at("field", "delay"),
+        report,
+    ) {
+        return;
+    }
+    let at = |d: Diagnostic| loc.locate(d);
+    if duration_field(value, "delay", &at, report).is_some_and(|d| d.is_zero()) {
+        report.push(s303(&at, "delay", "delay must be longer than zero".into()));
+    }
+    // Its group runs at the same time: whether the others wait is unclear.
+    if step.contains_key("parallel_group") {
+        report.push(s303(
+            &at,
+            "delay",
+            "a step in a parallel_group cannot delay: the group runs concurrently".into(),
+        ));
+    }
+}
+
 /// Whether `value` is a string holding a `${...}` reference, else S303.
 pub(crate) fn references(
     value: &Value,
@@ -386,7 +429,8 @@ pub(crate) fn spans_checkpoint(
         };
         let mut flag = |step: &Placed<'_>, w: usize| {
             let Some(c) = c else { return };
-            let detail = if w == pos && step.index == p.index {
+            // The step's own wait, or a handler's own delay.
+            let detail = if w == pos && (step.index == p.index || step.delays) {
                 "but it waits before acting".to_string()
             } else {
                 format!("but step {} waits after it", placed[w].index)
@@ -405,16 +449,22 @@ pub(crate) fn spans_checkpoint(
                 .at("wait_step", placed[w].index),
             );
         };
-        // A waiting delegate delegates before it waits.
-        let waits_before_acting = p.waits && p.capability != "delegate";
+        // A waiting delegate delegates before it waits; a delay comes
+        // before anything the step does.
+        let waits_before_acting = p.delays || (p.waits && p.capability != "delegate");
         if p.requires_checkpoint {
             if let Some(w) = covers(waits_before_acting) {
                 flag(p, w);
             }
         }
-        // A handler runs after its targeter, which may have waited.
+        // A handler runs after its targeter, which may have waited, and
+        // may delay itself before acting.
         for h in by_targeter.get(&pos).into_iter().flatten() {
-            if let Some(w) = covers(false).or(if p.waits { c.map(|_| pos) } else { None }) {
+            if let Some(w) = covers(false).or(if p.waits || h.delays {
+                c.map(|_| pos)
+            } else {
+                None
+            }) {
                 flag(h, w);
             }
         }
@@ -623,6 +673,62 @@ mod tests {
             ),
             ["S303"]
         );
+    }
+
+    #[test]
+    fn delays() {
+        let observe = |delay: Value| {
+            let mut o = st("observe", "o");
+            o["input_bindings"] = json!({"target": "t"});
+            o["delay"] = delay;
+            o
+        };
+        let c = |steps: Value, requires: &[&str]| errors_and_warnings(catalog(steps, requires));
+        assert!(c(json!([observe(json!("1m"))]), &["wait@1"]).is_empty());
+        assert_eq!(c(json!([observe(json!("1m"))]), &[]), ["V106"]);
+        assert_eq!(c(json!([observe(json!("0s"))]), &["wait@1"]), ["S303"]);
+        assert_eq!(c(json!([observe(json!("soon"))]), &["wait@1"]), ["S303"]);
+        assert_eq!(c(json!([observe(json!(60))]), &["wait@1"]), ["S303"]);
+        // A delay is a wait: a checkpoint before it covers nothing after it,
+        // and a mutation that delays acts after its own delay.
+        assert_eq!(
+            c(
+                json!([st("checkpoint", "c"), observe(json!("1m")), mutate("m")]),
+                &["wait@1"]
+            ),
+            ["W608"]
+        );
+        let mut delayed = mutate("m");
+        delayed["delay"] = json!("5m");
+        assert_eq!(
+            c(json!([st("checkpoint", "c"), delayed]), &["wait@1"]),
+            ["W608"]
+        );
+        // A delegate delays before it delegates.
+        let delegate = json!({"capability": "delegate", "purpose": "p", "store_as": "d",
+                              "requires_checkpoint": true, "delay": "1m",
+                              "input_bindings": {"task": {"t": 1}, "agent": "a"}});
+        assert_eq!(
+            c(json!([st("checkpoint", "c"), delegate]), &["wait@1"]),
+            ["W608"]
+        );
+        // So does a handler, judged at the step that escalates to it.
+        let escalating = json!({"capability": "observe", "purpose": "p", "store_as": "o",
+            "input_bindings": {"target": "t"},
+            "failure_modes": [{"condition": "c", "on_error": "R402", "action": "escalate",
+                               "recovery": {"goto_step": "h"}}]});
+        let handler = json!({"capability": "invoke", "purpose": "p", "store_as": "h",
+            "handler": true, "requires_checkpoint": true, "delay": "1m",
+            "workflow_id": "page", "input_bindings": {"workflow": "page", "input": {}}});
+        let found = c(
+            json!([st("checkpoint", "c"), escalating, handler]),
+            &["wait@1", "recovery@1"],
+        );
+        assert!(found.contains(&"W608"), "{found:?}");
+        // In a parallel group the others' timing would be unclear.
+        let mut grouped = observe(json!("1m"));
+        grouped["parallel_group"] = json!("g");
+        assert_eq!(c(json!([grouped]), &["wait@1"]), ["S303"]);
     }
 
     #[test]

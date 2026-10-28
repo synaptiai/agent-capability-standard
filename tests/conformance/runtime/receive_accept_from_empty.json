@@ -1,0 +1,62 @@
+{
+  "description": "A receive that does not wait still fails (R402) when its accept_from resolves to an empty list: the host would drop every sender.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        },
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "inbox",
+          "input_bindings": {
+            "accept_from": "${r.data: array<string>}"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 1
+  },
+  "trace_kinds": [
+    "step_failed"
+  ]
+}

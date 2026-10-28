@@ -211,7 +211,7 @@ Followed by markdown sections: Intent, Success Criteria, Input Contract, Procedu
 - Diagnostics carry a severity (`error` | `warning`); warnings are W601–W615
 
 **Conformance Testing** (`scripts/run_conformance.py`):
-- 80 fixture files in `tests/fixtures/` covering all 4 conformance levels (L1–L4), plus 121 runtime fixtures in `tests/conformance/runtime/`
+- 82 fixture files in `tests/fixtures/` covering all 4 conformance levels (L1–L4), plus 135 runtime fixtures in `tests/conformance/runtime/`
 - Runs the validator on each fixture via `--catalog` (the production catalog is never swapped or modified)
 - Checks `tests/fixtures/EXPECTATIONS.json` (`should_pass`, `expected_error_codes`, `expected_warning_codes`, compared exactly; an absent or empty warning list means none may be emitted)
 - Results output to `build/conformance_results.json`; expression fixtures live in `tests/conformance/expressions/{eval,check}.json`
@@ -632,7 +632,7 @@ Claude Code Plugin
 | Entity classes | 24 (11 digital + 13 physical) |
 | Trust source ranks | 6 |
 | Transform coercions | 7 |
-| Conformance fixtures | 80 workflow, 121 runtime |
+| Conformance fixtures | 82 workflow, 135 runtime |
 | CI pipeline | `.github/workflows/ci.yml` |
 | Plugin version | 1.1.0 |
 | SDK version | 0.1.0 |

@@ -1,0 +1,158 @@
+{
+  "description": "after_deferral: run lets a step that acts on the world run after a deferral; a step without it is deferred, and so is one that opted out but reads the deferred output.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "independent",
+          "input_bindings": {
+            "task": {
+              "t": 1
+            },
+            "agent": "a"
+          },
+          "after_deferral": "run"
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "dependent",
+          "input_bindings": {
+            "task": {
+              "t": 1
+            },
+            "agent": "a"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "reader",
+          "input_bindings": {
+            "target": "x"
+          },
+          "gates": [
+            {
+              "when": "${m.success} == false",
+              "action": "warn"
+            }
+          ],
+          "after_deferral": "run"
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "deferred",
+    "deferred": [
+      {
+        "step": 2
+      },
+      {
+        "step": 4,
+        "reason": "it may act on the world, after a deferred step"
+      },
+      {
+        "step": 5,
+        "reason": "it reads 'm', which was deferred"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "step_deferred"
+  ]
+}

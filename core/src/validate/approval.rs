@@ -25,6 +25,34 @@ const RECHECK_KEYS: &[&str] = &["source", "compare", "on_change"];
 
 /// Check a step's `approval` block; `requires_approval` is the step's
 /// effective flag.
+/// `after_deferral` (§5.14) needs `approval@1` (V106) and is `run` or
+/// `defer` (S303).
+pub(crate) fn check_after_deferral(
+    loc: &StepLoc<'_>,
+    step: &Map<String, Value>,
+    declared: &Declared,
+    report: &mut Report,
+) {
+    let Some(value) = step.get("after_deferral") else {
+        return;
+    };
+    if !declared.require(
+        "approval@1",
+        "'after_deferral'",
+        |d| loc.locate(d).at("field", "after_deferral"),
+        report,
+    ) {
+        return;
+    }
+    if !matches!(value.as_str(), Some("run" | "defer")) {
+        report.push(s303(
+            &|d| loc.locate(d),
+            "after_deferral",
+            format!("after_deferral must be 'run' or 'defer', found {value}"),
+        ));
+    }
+}
+
 pub(crate) fn check(
     loc: &StepLoc<'_>,
     step: &Map<String, Value>,
@@ -485,6 +513,22 @@ mod tests {
             .is_empty()
         );
         assert!(run("rotate-logs", json!({"approver": mandate})).is_empty());
+    }
+
+    #[test]
+    fn after_deferral() {
+        let with = |value: Value, requires: &[&str]| {
+            let catalog = json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",
+                "workflow_extensions": {"requires": requires},
+                "steps": [{"capability": "observe", "purpose": "p", "store_as": "o",
+                           "input_bindings": {"target": "t"}, "after_deferral": value}]}});
+            super::super::tests::codes(catalog)
+        };
+        assert!(with(json!("run"), &["approval@1"]).is_empty());
+        assert!(with(json!("defer"), &["approval@1"]).is_empty());
+        assert_eq!(with(json!("run"), &[]), ["V106"]);
+        assert_eq!(with(json!("always"), &["approval@1"]), ["S303"]);
+        assert_eq!(with(json!(true), &["approval@1"]), ["S303"]);
     }
 
     #[test]

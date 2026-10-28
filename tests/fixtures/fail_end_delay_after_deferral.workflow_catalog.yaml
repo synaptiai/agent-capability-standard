@@ -1,0 +1,41 @@
+# Standard version: 1.1.0
+# `delay` and `after_deferral` without the extensions that define them
+# (V106), a zero delay and an unknown after_deferral value (S303), and an
+# unknown gate action (S303).
+misdeclared:
+  goal: Use the newer fields without declaring them.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Sample after a delay, undeclared.
+    store_as: a_out
+    delay: 1m
+    input_bindings:
+      target: queue
+  - capability: observe
+    purpose: Run after deferrals, undeclared.
+    store_as: b_out
+    after_deferral: run
+    input_bindings:
+      target: queue
+    gates:
+    - when: ${a_out.observation} == null
+      action: halt
+declared_but_malformed:
+  goal: Use the newer fields with bad values.
+  risk: low
+  workflow_extensions:
+    requires: [wait@1, approval@1]
+  steps:
+  - capability: observe
+    purpose: A delay of zero waits for nothing.
+    store_as: a_out
+    delay: 0s
+    input_bindings:
+      target: queue
+  - capability: observe
+    purpose: An after_deferral value outside run and defer.
+    store_as: b_out
+    after_deferral: always
+    input_bindings:
+      target: queue

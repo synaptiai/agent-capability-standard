@@ -327,7 +327,7 @@ Gates let a step be skipped when it has nothing to do, or stop the run when it m
   store_as: critique_out
   gates:
   - when: ${violations_out} == null || ${violations_out.detected} == false
-    action: skip                    # stop | rollback | skip | warn
+    action: skip                    # stop | rollback | skip | warn | end
     message: No assumption violation detected; the plan remains valid.
   - when: ${critique_out.issues} == []
     phase: after                    # before (default) | after
@@ -341,7 +341,7 @@ Gates let a step be skipped when it has nothing to do, or stop the run when it m
 ```
 
 Gate actions:
-- `stop`: The run must not go on: raises R403, which goes to the step's failure modes like any step error; with none that handles it, the run fails with R403. It is not a way to say "done": when a condition means there is nothing more to do, `skip` the steps that would act on it
+- `stop`: The run must not go on: raises R403, which goes to the step's failure modes like any step error; with none that handles it, the run fails with R403. It is not a way to say "done": when a condition means there is nothing more to do, use `end`, which ends the run successfully (STANDARD v1.1 §5.6), or `skip` the steps that would act on it
 - `rollback`: Roll back to the latest checkpoint (none: the run ends F503), then raise R403
 - `skip`: Skip this step and continue with the next one (before-gates only); later references to its output read null and must be null-guarded
 - `warn`: Record a trace warning and continue

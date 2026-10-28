@@ -273,6 +273,7 @@ impl<'a> Machine<'a> {
         self.finish(Body::Completed {
             outcome,
             cause: None,
+            ended: None,
             outputs,
             action_records: records,
             deferred,
@@ -298,6 +299,8 @@ impl<'a> Machine<'a> {
     fn transition(&mut self) -> Flow {
         match self.frame_ref().stage.clone() {
             Stage::Begin => self.begin(),
+            Stage::Delay { until } => self.emit(Body::Sleep { until }, Purpose::Sleep, None),
+            Stage::Ready => self.ready(),
             Stage::Checkpoint => self.checkpoint(),
             Stage::Approval => self.approval(),
             Stage::Recheck => self.recheck(),
@@ -356,6 +359,19 @@ impl<'a> Machine<'a> {
         Flow::Continue
     }
 
+    /// A gate with `action: end` fired: this run ends as it would after its
+    /// last step (completed, or escalated or deferred), and no later step
+    /// runs.
+    fn end_run(&mut self, message: Value) -> Flow {
+        let step = self.frame_ref().step;
+        self.trace_step("run_ended", json!({"message": message}));
+        self.frame().ended = Some(json!({"step": step, "message": message}));
+        if self.frame_ref().escalation.is_some() {
+            return self.next_step();
+        }
+        self.end_frame(Ok((Outcome::Completed, None)))
+    }
+
     fn fail_run(&mut self, code: &str, message: &str) -> Flow {
         let step = self.st.frames.last().map(|f| f.step);
         self.trace(
@@ -395,9 +411,11 @@ impl<'a> Machine<'a> {
                     let outputs = Value::Object(self.st.frames[0].stores.clone());
                     let records = self.st.records.clone();
                     let deferred = self.deferred_report();
+                    let ended = self.st.frames[0].ended.clone();
                     self.finish(Body::Completed {
                         outcome,
                         cause,
+                        ended,
                         outputs,
                         action_records: records,
                         deferred,
@@ -416,7 +434,7 @@ impl<'a> Machine<'a> {
         };
         self.trace_step(
             "invoke_returned",
-            json!({"workflow": child.workflow, "result": result}),
+            json!({"workflow": child.workflow, "result": result, "ended": child.ended}),
         );
         match end {
             Ok((Outcome::Completed, _)) => {
@@ -555,6 +573,9 @@ impl<'a> Machine<'a> {
             if !self.gate_fires(g, gate) {
                 continue;
             }
+            if gate.action == GateAction::End {
+                return self.end_run(json!(gate.message));
+            }
             let message = gate
                 .message
                 .clone()
@@ -563,9 +584,22 @@ impl<'a> Machine<'a> {
                 GateAction::Stop => return self.step_error("R403", message),
                 GateAction::Skip => return self.skip_step("a gate skipped the step"),
                 GateAction::Rollback => return self.rollback(Purpose::GateRollback { message }),
-                GateAction::Warn => {}
+                GateAction::End | GateAction::Warn => {}
             }
         }
+        // A delay (§5.13) waits before anything else the step does.
+        if let Some(d) = step.delay {
+            let until = later(self.st.now, d);
+            self.trace_step("delay_started", json!({"until": until}));
+            return self.set_stage(Stage::Delay { until });
+        }
+        self.set_stage(Stage::Ready)
+    }
+
+    /// The step goes on: resolve its inputs, then ask for approval.
+    fn ready(&mut self) -> Flow {
+        let program = self.program;
+        let step = &program.workflows[&self.frame_ref().workflow].steps[self.frame_ref().step];
         let bindings = step.raw.get("input_bindings").cloned().unwrap_or(json!({}));
         let inputs = resolve(&bindings, &FrameBindings(self.frame_ref()));
         // Resolving can nest a stored value deeper than any value a host
@@ -586,7 +620,9 @@ impl<'a> Machine<'a> {
                     "expression_error",
                     json!({"site": format!("gates[{g}].when"), "code": "R405", "message": e.msg}),
                 );
-                true
+                // Fail-safe: an error fires a gate, except `end`, which
+                // would report the run a success.
+                gate.action != GateAction::End
             }
         };
         if fired {
@@ -595,6 +631,7 @@ impl<'a> Machine<'a> {
                 GateAction::Rollback => "rollback",
                 GateAction::Skip => "skip",
                 GateAction::Warn => "warn",
+                GateAction::End => "end",
             };
             self.trace_step(
                 "gate_fired",
@@ -827,6 +864,27 @@ impl<'a> Machine<'a> {
         self.next_step()
     }
 
+    /// A wait or delay ended: checkpoints taken before it describe a world
+    /// that may have changed, so they authorise nothing after it (W608).
+    fn invalidate_checkpoints(&mut self) {
+        let invalidated: Vec<String> = self
+            .st
+            .checkpoints
+            .iter_mut()
+            .filter(|c| c.valid)
+            .map(|c| {
+                c.valid = false;
+                c.id.clone()
+            })
+            .collect();
+        if !invalidated.is_empty() {
+            self.trace_step(
+                "checkpoints_invalidated",
+                json!({"checkpoint_ids": invalidated}),
+            );
+        }
+    }
+
     /// Why `step` must wait for a deferred step of this frame, if it must:
     /// it reads a deferred step's store; or (unless it is a handler, the
     /// escalation path) it may act on the world, or the ontology orders its
@@ -845,7 +903,9 @@ impl<'a> Machine<'a> {
         {
             return Some(format!("it reads '{store}', which was deferred"));
         }
-        if step.handler {
+        // A handler is the escalation path; `after_deferral: run` is the
+        // author saying the step does not depend on what was deferred.
+        if step.handler || step.after_deferral_runs {
             return None;
         }
         if step.acts {
@@ -1113,14 +1173,36 @@ impl<'a> Machine<'a> {
             self.frame().cur.deadline = deadline;
         }
         let index = step.index;
-        if wf.extension("identity@1")
-            && matches!(
-                step.capability.as_str(),
-                "receive" | "synchronize" | "delegate"
-            )
-        {
-            if let Err(e) = identity_inputs(&self.frame_ref().cur.inputs) {
-                return self.step_error("R402", e);
+        if matches!(
+            step.capability.as_str(),
+            "receive" | "synchronize" | "delegate"
+        ) {
+            if wf.extension("delegation@1") {
+                if let Err(e) = accept_from_input(&self.frame_ref().cur.inputs) {
+                    return self.step_error("R402", e);
+                }
+            }
+            if wf.extension("identity@1") {
+                if let Err(e) = identity_inputs(&self.frame_ref().cur.inputs) {
+                    return self.step_error("R402", e);
+                }
+            }
+        }
+        // A correlate key that resolves to null would match every event
+        // without that key: fail before acting (delegating) or waiting.
+        if wf.extension("wait@1") {
+            if let Some(Value::Object(c)) = step.raw.get("wait").and_then(|w| w.get("correlate")) {
+                let bindings = FrameBindings(self.frame_ref());
+                if let Some(k) = c
+                    .iter()
+                    .find(|(_, v)| resolve(v, &bindings).is_null())
+                    .map(|(k, _)| k)
+                {
+                    return self.step_error(
+                        "R402",
+                        format!("wait.correlate.{k} resolved to null, so it would match events that lack it"),
+                    );
+                }
             }
         }
         // A delegate that waits delegates first (an InvokeCapability below),
@@ -1496,22 +1578,7 @@ impl<'a> Machine<'a> {
             self.st.pending = Some(pending);
             return Flow::Wait;
         }
-        let invalidated: Vec<String> = self
-            .st
-            .checkpoints
-            .iter_mut()
-            .filter(|c| c.valid)
-            .map(|c| {
-                c.valid = false;
-                c.id.clone()
-            })
-            .collect();
-        if !invalidated.is_empty() {
-            self.trace_step(
-                "checkpoints_invalidated",
-                json!({"checkpoint_ids": invalidated}),
-            );
-        }
+        self.invalidate_checkpoints();
         let mut item = event.clone();
         if let Value::Object(m) = &mut item {
             if let Some(p) = &principal {
@@ -1586,6 +1653,12 @@ impl<'a> Machine<'a> {
             match gate.action {
                 GateAction::Stop => return self.step_error("R403", message),
                 GateAction::Rollback => return self.rollback(Purpose::GateRollback { message }),
+                // A failure mode whose `when` holds still wins: the run
+                // ends once they are checked.
+                GateAction::End => {
+                    self.frame().cur.ending = Some(json!(gate.message));
+                    break;
+                }
                 GateAction::Skip | GateAction::Warn => {}
             }
         }
@@ -1637,7 +1710,10 @@ impl<'a> Machine<'a> {
                 self.record_failed();
                 self.end_frame(Err((e.code, e.message)))
             }
-            None => self.next_step(),
+            None => match self.frame().cur.ending.take() {
+                Some(message) => self.end_run(message),
+                None => self.next_step(),
+            },
         }
     }
 
@@ -1978,8 +2054,15 @@ impl<'a> Machine<'a> {
         match (&pending.action.body, &pending.purpose) {
             (Body::Sleep { until }, _) if self.st.now >= *until => {
                 self.st.pending = None;
-                self.frame().cur.attempt = self.frame_ref().cur.attempt.saturating_add(1);
-                self.set_stage(Stage::Execute);
+                if matches!(self.frame_ref().stage, Stage::Delay { .. }) {
+                    // The world may have changed while the step waited.
+                    self.invalidate_checkpoints();
+                    self.trace_step("delay_finished", json!({}));
+                    self.set_stage(Stage::Ready);
+                } else {
+                    self.frame().cur.attempt = self.frame_ref().cur.attempt.saturating_add(1);
+                    self.set_stage(Stage::Execute);
+                }
             }
             (_, Purpose::Approval { .. }) if pending.deadline.is_some_and(|d| self.st.now > d) => {
                 self.st.pending = None;
@@ -2077,6 +2160,27 @@ fn identity_inputs(inputs: &Value) -> Result<(), String> {
 }
 
 /// A bound list of strings (`accept_from`, `sender_check`, ...), if any.
+/// `accept_from`, when bound, must be a non-empty list of principals when
+/// the step runs: anything else would drop every sender.
+fn accept_from_input(inputs: &Value) -> Result<(), String> {
+    let Some(value) = inputs.get("accept_from") else {
+        return Ok(());
+    };
+    match value.as_array() {
+        Some(items) if items.is_empty() => {
+            Err("accept_from is empty, so it would accept no sender".into())
+        }
+        Some(items) => match items.iter().find(|i| !i.is_string()) {
+            Some(bad) => Err(format!("accept_from holds {bad}, which is not a principal")),
+            None => Ok(()),
+        },
+        None => Err(format!(
+            "accept_from must be a list, got {}",
+            crate::yaml::kind_of(value)
+        )),
+    }
+}
+
 fn string_list(inputs: &Value, key: &str) -> Option<Vec<String>> {
     inputs.get(key).and_then(Value::as_array).map(|a| {
         a.iter()
