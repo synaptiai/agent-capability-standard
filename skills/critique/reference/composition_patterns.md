@@ -561,7 +561,7 @@ Edges: `measure` enables `predict`; `plan` enables `constrain`.
 | Pattern | Risk | When Acceptable |
 |---------|------|-----------------|
 | `mutate`, `execute` or `send` with no `constrain` in the workflow | HIGH | `soft_requires` edge: warning W601. Only for side effects already covered by policy |
-| `ground` with no prior `observe`, `detect`, `predict`, `attribute` or `explain` | MEDIUM | `soft_requires` edge (any one satisfies it): warning W601 |
+| `ground` with no prior `observe`, `detect`, `predict`, `attribute`, `explain`, `retrieve` or `search` | MEDIUM | `soft_requires` edge (any one satisfies it): warning W601 |
 | Skipping `critique` before acting on a `plan` | MEDIUM | Only for trivial, well-understood changes (`plan` enables `critique`) |
 | Skipping `audit` after `mutate`/`execute` | MEDIUM | Only for reversible, low-impact changes (`mutate`, `execute` enable `audit`) |
 | Multiple `mutate` without intermediate `checkpoint` | HIGH | Never acceptable |
@@ -600,7 +600,7 @@ send:
   soft_requires: [constrain]
 
 ground:
-  soft_requires: [observe, detect, predict, attribute, explain]
+  soft_requires: [observe, detect, predict, attribute, explain, retrieve, search]
 ```
 
 ### Ordering (precedes)

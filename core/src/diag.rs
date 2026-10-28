@@ -94,6 +94,7 @@ codes! {
     UnreachableHandler = "W613", "UNREACHABLE_HANDLER", Warning;
     InvalidDuration = "W614", "INVALID_DURATION", Warning;
     MissingInput = "W615", "MISSING_INPUT", Warning;
+    VersionFeatureMismatch = "W616", "VERSION_FEATURE_MISMATCH", Warning;
 }
 
 impl Serialize for Code {

@@ -126,14 +126,14 @@ The ontology encodes three risk tiers with structural enforcement:
 | Edge Type | Count | Transitive | Symmetric | Enforcement |
 |-----------|-------|-----------|-----------|-------------|
 | `requires` | 3 | No | No | Validator MUST reject violations (V102): source must run before target |
-| `soft_requires` | 8 | No | No | Any-of: if none of the target's soft sources runs before it, warning W601 |
+| `soft_requires` | 10 | No | No | Any-of: if none of the target's soft sources runs before it, warning W601 |
 | `enables` | 46 | No | No | Capability flow pattern |
 | `precedes` | 18 | Yes | No | Ordering only: when both are present, source must run before target (V102); the source is not required to be present |
 | `conflicts_with` | 4 (2 pairs) | No | Yes | May not share a `parallel_group` (F504); sequential use is allowed |
 | `alternative_to` | 12 (6 pairs) | No | Yes | Substitution allowed |
 | `specializes` | 6 | Yes | No | Contract inheritance |
 
-Total: 97 edges. Steps in the same `parallel_group` never count as running before one another when `requires`, `precedes` and `soft_requires` are checked.
+Total: 99 edges. Steps in the same `parallel_group` never count as running before one another when `requires`, `precedes` and `soft_requires` are checked.
 
 ---
 

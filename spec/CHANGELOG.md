@@ -15,7 +15,7 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   `failure_modes[].when`: a small grammar that is a strict subset of CEL, with
   fixed limits, fail-safe error handling per site, static type checks and null
   narrowing. Gates gain `phase: before|after` (§5.6).
-- **Diagnostic severities (§9.1)** and warning codes W601–W615 (§9.7); new
+- **Diagnostic severities (§9.1)** and warning codes W601–W616 (§9.7); new
   error codes V106–V109, B206, R405, R406.
 - **`mutation_overridable` (§4.4)** for append-only capabilities (`audit`).
 - **Orchestration extensions (§5.9–§5.17)** — triggers, handler steps,
@@ -174,6 +174,24 @@ gaps on the standard's side (RFC-0003, amendments):
 - **`after_deferral: run` (§5.14, `approval@1`):** exempts a step from the
   act-after and ordered-after deferral rules; reading a deferred output
   still defers it.
+- **W616 `VERSION_FEATURE_MISMATCH` (§11.5, §9.7):** a workflow that
+  targets 1.0 (by `spec_version` or the file header) but uses a feature
+  new in 1.1 — `workflow_extensions.requires`, gate `phase` or
+  `action: end`, the `in` operator, failure-mode `when` or `on_error` —
+  warns once per feature. Before, the
+  mismatch was silent.
+- **`transform.output` is `object|array`** (ontology 2.1.0): a transform
+  can return a list, such as CSV rows as records, without a wrapper
+  object. A reference to it needs an annotation (B204), as for any union;
+  this breaks a catalog that reads it unannotated.
+- **`retrieve` and `search` are soft prerequisites of `ground`** (ontology
+  2.1.0, §4.3): a retrieved source or a search result is evidence to
+  ground a claim in, alongside observe, detect, predict, attribute and
+  explain.
+- **Replacing delegations on a loop (§5.13)** is stated for every waiting
+  delegate from the loop's target to the step whose failure mode loops,
+  even one that finished; the reference executor named only the looping
+  step's own.
 
 ### Changed — whole-branch review (#114)
 - **Literal bindings are typed (§5.4).** A literal or template bound to a
@@ -218,7 +236,7 @@ gaps on the standard's side (RFC-0003, amendments):
   `delta`, which `review_verdict_schema.yaml` rejects, counts as `delta`
   and is noted in `violations`; the schema text says so.
 - **Conformance (§10):** the workflows an adopter ported to the candidate
-  are a static fixture and thirteen scripted runs
+  are a static fixture (revision 1.1c) and fifteen scripted runs
   (`orchestrator_*`). A fixture's expected codes are the exact set it
   must produce, so each fixture isolates what it tests; an absent warning
   list means none. Two runtime fixtures cover a before-gate `skip` and an

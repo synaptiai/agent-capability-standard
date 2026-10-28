@@ -225,5 +225,6 @@ each one with a snapshot and restore before every step, and
 `tests/test_runner.py` runs them through Python. The `orchestrator_*`
 fixtures run the workflows an adopter ported to the candidate
 (`tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`, kept as
-contributed): nested invocations, waits, approvals with rechecks, a quorum
+contributed but for three type annotations): nested invocations, gate
+`end`s, a `delay`, steps that run after a deferral, waits, approvals with rechecks, a quorum
 that loops, an escalation and unattended deferral, end to end.

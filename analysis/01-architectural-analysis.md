@@ -47,7 +47,7 @@ The system decomposes into **six subsystems**: Schema (formal definitions), SDK 
 
 | File | Lines | Role |
 |------|-------|------|
-| `schemas/capability_ontology.yaml` | 1,912 | Master ontology: 36 nodes, 97 edges, 7 edge types, I/O contracts |
+| `schemas/capability_ontology.yaml` | 2,104 | Master ontology: 36 nodes, 99 edges, 7 edge types, I/O contracts |
 | `schemas/workflow_catalog.yaml` | 1,909 | 12 reference workflows with step bindings, gates, failure modes |
 | `schemas/world_state_schema.yaml` | 491 | World model: entities, relationships, state variables, observations, transitions |
 | `schemas/entity_taxonomy.yaml` | 193 | 24 entity classes (11 digital + 13 physical), 57 subtypes, 10 core relations |
@@ -208,10 +208,10 @@ Followed by markdown sections: Intent, Success Criteria, Input Contract, Procedu
 - `refs.rs` / `schema.rs` — `$ref` resolution and schema-based type inference: resolves `${step_out.field}` bindings to the producer capability's output schema
 - `expr/` — gate/condition expression lexer, parser, type checker and evaluator (a CEL-compatible profile)
 - `validate/{mod,bindings,exprs,semantics,extensions}.rs` — capability existence and prerequisites, binding and consumer-contract checks, expression checks, edge semantics (`precedes`, `conflicts_with`, `soft_requires`), safety-flag inheritance, extension handling, coercion-based patch suggestions
-- Diagnostics carry a severity (`error` | `warning`); warnings are W601–W615
+- Diagnostics carry a severity (`error` | `warning`); warnings are W601–W616
 
 **Conformance Testing** (`scripts/run_conformance.py`):
-- 82 fixture files in `tests/fixtures/` covering all 4 conformance levels (L1–L4), plus 135 runtime fixtures in `tests/conformance/runtime/`
+- 83 fixture files in `tests/fixtures/` covering all 4 conformance levels (L1–L4), plus 142 runtime fixtures in `tests/conformance/runtime/`
 - Runs the validator on each fixture via `--catalog` (the production catalog is never swapped or modified)
 - Checks `tests/fixtures/EXPECTATIONS.json` (`should_pass`, `expected_error_codes`, `expected_warning_codes`, compared exactly; an absent or empty warning list means none may be emitted)
 - Results output to `build/conformance_results.json`; expression fixtures live in `tests/conformance/expressions/{eval,check}.json`
@@ -618,7 +618,7 @@ Claude Code Plugin
 |--------|-------|
 | Atomic capabilities | 36 |
 | Cognitive layers | 9 |
-| Capability edges | 97 |
+| Capability edges | 99 |
 | Edge types | 7 |
 | Workflow patterns | 12 |
 | Domain profiles | 7 |
@@ -632,7 +632,7 @@ Claude Code Plugin
 | Entity classes | 24 (11 digital + 13 physical) |
 | Trust source ranks | 6 |
 | Transform coercions | 7 |
-| Conformance fixtures | 82 workflow, 135 runtime |
+| Conformance fixtures | 83 workflow, 142 runtime |
 | CI pipeline | `.github/workflows/ci.yml` |
 | Plugin version | 1.1.0 |
 | SDK version | 0.1.0 |

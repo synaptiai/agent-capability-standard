@@ -988,8 +988,8 @@ nodes:
     - confidence
     properties:
       output:
-        type: object
-        description: Transformed data
+        type: object|array
+        description: Transformed data, a mapping or a list (such as CSV rows as records)
       changes:
         type: array
         description: Applied transformations
@@ -1798,7 +1798,7 @@ edges:
 - from: observe
   to: ground
   type: soft_requires
-  rationale: Grounding needs a claim to ground; any one of observe, detect, predict, attribute or explain satisfies it
+  rationale: Grounding needs a claim to ground; any one of observe, detect, predict, attribute, explain, retrieve or search satisfies it
 - from: detect
   to: ground
   type: soft_requires
@@ -1827,6 +1827,14 @@ edges:
   to: ground
   type: soft_requires
   rationale: Explanations should be grounded in evidence
+- from: retrieve
+  to: ground
+  type: soft_requires
+  rationale: Retrieved sources are evidence a claim can be grounded in
+- from: search
+  to: ground
+  type: soft_requires
+  rationale: Search results are evidence a claim can be grounded in
 - from: generate
   to: verify
   type: enables

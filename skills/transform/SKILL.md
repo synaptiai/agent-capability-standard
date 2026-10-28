@@ -111,7 +111,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
-output: object  # Transformed data
+output: object|array  # Transformed data, a mapping or a list of records
 transformation:
   input_type: string  # Format of source data
   output_type: string  # Format of output data

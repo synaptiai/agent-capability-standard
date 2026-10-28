@@ -316,6 +316,14 @@
       "W615"
     ]
   },
+  "pass_version_feature_mismatch": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "versioning",
+    "expected_warning_codes": [
+      "W616"
+    ]
+  },
   "fail_unsupported_spec_version": {
     "should_pass": false,
     "level": "L1",
@@ -597,10 +605,7 @@
   "pass_orchestrator_port": {
     "should_pass": true,
     "level": "L4",
-    "category": "advanced",
-    "expected_warning_codes": [
-      "W601"
-    ]
+    "category": "advanced"
   },
   "pass_end_delay_after_deferral": {
     "should_pass": true,

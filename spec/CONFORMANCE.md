@@ -60,10 +60,14 @@ the Rust core in `core/`).
   scripted runs of the reference executor (catalog, inputs, the expected
   actions and the responses to them, the expected end and trace). Run by
   `cargo test --test runtime` (each also replayed through a snapshot and
-  restore before every step) and `tests/test_runner.py`. Thirteen of them
+  restore before every step) and `tests/test_runner.py`. Fifteen of them
   (`orchestrator_*`) script runs of the workflows an adopter ported to the
-  candidate (reduced from production, generic names), kept as contributed
-  (`tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`).
+  candidate (reduced from production, generic names; revision 1.1c), kept as contributed
+  but for three annotations that ontology 2.1.0's `object|array`
+  `transform.output` needs
+  (`tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`). One
+  (`domain_schedule_no_slot`) runs a reference domain workflow's no-slot
+  path.
 
 Running the suite:
 

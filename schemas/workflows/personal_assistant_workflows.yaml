@@ -96,15 +96,19 @@ schedule_management:
           - focus_time_protection
         weights: ${user_preferences.weights}
       gates:
-        - when: ${conflicts_out.detected} == true && ${available_slots_out.total_count} == 0
-          action: stop
-          message: No available slots found. User must manually resolve.
+        - when: ${available_slots_out.results} == []
+          action: skip
+          message: No free slot matches the request; there is nothing to rank.
 
     - capability: plan
       purpose: Create calendar modification plan.
       risk: low
       mutation: false
       store_as: calendar_plan_out
+      gates:
+        - when: ${ranked_slots_out} == null
+          action: skip
+          message: No slot was ranked; there is nothing to schedule. The explanation tells the user.
       input_bindings:
         goal: schedule_event
         constraints:
@@ -122,6 +126,9 @@ schedule_management:
         - when: ${clarification_out.questions} != null && ${clarification_out.questions} != []
           action: skip
           message: Clarifying questions are open; ask them before drafting the event.
+        - when: ${calendar_plan_out} == null
+          action: skip
+          message: No slot was found, so there is no event to draft.
       input_bindings:
         specification:
           type: calendar_event
@@ -132,7 +139,7 @@ schedule_management:
           location: ${request.location}
 
     - capability: explain
-      purpose: Summarize scheduling decision for user.
+      purpose: Summarize the scheduling decision for the user, or why no slot was found and which conflicts they must resolve themselves.
       risk: low
       mutation: false
       store_as: explanation_out
@@ -140,6 +147,8 @@ schedule_management:
         conclusion:
           draft: ${event_draft_out}
           open_questions: "${clarification_out.questions: array<object>}"
+          available_slots: "${available_slots_out.results: array<object>}"
+          conflicts: "${conflicts_out.matches: array<object>}"
         audience: user
         depth: brief
 

@@ -40,6 +40,7 @@ world_model_build:
       target: "${user_input.domain}"
     failure_modes:
     - condition: No relevant signals found
+      when: "${observe_out.observation} == {}"
       action: request_more_context
       recovery: Ask for reproduction steps or additional artifacts.
   - capability: detect
@@ -238,11 +239,16 @@ digital_twin_sync_loop:
       backoff: exponential
     store_as: receive_out
     failure_modes:
-    - condition: No messages/events available
+    - condition: Receiving failed (timed out or errored after its retries)
+      on_error: [R401, R402]
       action: stop
-      recovery: Wait for signals or confirm source configuration.
+      recovery: The run ends with the receive error; confirm the source configuration.
     input_bindings: {}
-    gates: []
+    gates:
+    - when: ${receive_out.data} == []
+      phase: after
+      action: end
+      message: No new signals or events; the twin is unchanged.
   - capability: search
     purpose: 'Parallel enrichment: search for existing twin snapshot or relevant context while ingesting events.'
     parallel_group: context_gathering
@@ -284,13 +290,9 @@ digital_twin_sync_loop:
     timeout: null
     retry: null
     store_as: integrate_out
-    failure_modes:
-    - condition: Conflicts exceed threshold
-      action: request_more_context
-      recovery: Ask for resolution strategy or authoritative source preference.
     input_bindings:
       sources:
-      - '${transform_out.output}'
+      - '${transform_out.output: array<object>}'
       - '${previous_world_state}'
       conflict_resolution: prefer_authoritative_sources
     gates: []

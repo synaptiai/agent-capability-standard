@@ -67,8 +67,9 @@ This means: a `checkpoint` MUST exist before any `mutate` operation.
 ```
 
 This means: grounding SHOULD follow something that produced evidence to
-ground — an observation, a detection, a prediction, an attribution or an
-explanation; any one of them satisfies it.
+ground — an observation, a detection, a prediction, an attribution, an
+explanation, a retrieved source or a search result; any one of them
+satisfies it.
 
 Because the group is any-of, only capabilities that are genuine alternatives
 as prerequisites belong in one target's group. `constrain` is the soft

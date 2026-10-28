@@ -1,5 +1,5 @@
 {
-  "description": "An unattended sweep skips restarts the policy refuses and defers the reminder's send; the invoke that ran it is deferred too, then the escalation and the next check-in (they may act on the world after a deferred step), verify (the ontology orders it after mutate) and the steps that read verify.",
+  "description": "An unattended sweep waits its one-minute sample delay, skips restarts the policy refuses and defers the reminder's send and the invoke that ran it; the escalation (owner_decision queues the question and ends: not an interrupt), the next check-in, verify and the audit run (after_deferral: run).",
   "catalog": {
     "delegate_to_thread": {
       "goal": "Give one task to one thread with a self-contained brief, prove the thread is alive, and accept its result only after checking it at the source.",
@@ -219,6 +219,12 @@
               "when": "${brief_check_out.compliant} == false",
               "action": "stop",
               "message": "The brief breaks a brief rule. Fix the brief first."
+            },
+            {
+              "when": "${delegate_out.task_id} == null",
+              "phase": "after",
+              "action": "stop",
+              "message": "The host returned no task id, so no report can be matched to this thread. Do not record or wait."
             }
           ],
           "failure_modes": [
@@ -457,14 +463,6 @@
               "type": "string"
             }
           }
-        },
-        "run": {
-          "type": "object",
-          "properties": {
-            "unattended": {
-              "type": "boolean"
-            }
-          }
         }
       },
       "steps": [
@@ -522,7 +520,6 @@
           "input_bindings": {
             "goal": "${request.intent}",
             "constraints": {
-              "unattended": "${run.unattended}",
               "policy_violations": "${policy_out.violations: array<object>}"
             }
           }
@@ -679,11 +676,6 @@
           },
           "gates": [
             {
-              "when": "${run.unattended} == true",
-              "action": "skip",
-              "message": "Unattended run - the ActionRecord stays planned and goes to the top of the next brief or digest."
-            },
-            {
               "when": "${text_check_out.compliant} == false",
               "action": "stop",
               "message": "The text fails the outbound check."
@@ -738,7 +730,7 @@
         },
         {
           "capability": "persist",
-          "purpose": "Update the ActionRecord to executed (or keep planned when deferred) and add the log line.",
+          "purpose": "Update the ActionRecord to executed and add the log line. In an unattended run this step is deferred with the send; the executor's planned record holds the queued send.",
           "risk": "low",
           "mutation": true,
           "store_as": "log_out",
@@ -939,6 +931,30 @@
             "target": "${ranking_out}",
             "constraints": "${profile.question_rules: array<string>}",
             "action_on_violation": "log"
+          },
+          "gates": [
+            {
+              "when": "${question_check_out.confidence} < 0.7",
+              "action": "end",
+              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Queue the question with its three options for the next brief, when it is not an interrupt.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "queued_out",
+          "condition": "${ask_policy_out.compliant} == false && !(${route_out.confidence} > 0.85 && ${route_out.labels} == [\"decide_self\"])",
+          "skip_if_false": true,
+          "input_bindings": {
+            "data": {
+              "question": "${question}",
+              "ranking": "${ranking_out.ranking: array<object>}",
+              "recommendation": "${ranking_out.recommendation}"
+            },
+            "key": "brief_queue"
           }
         },
         {
@@ -963,13 +979,8 @@
             },
             {
               "when": "${ask_policy_out.compliant} == false",
-              "action": "skip",
-              "message": "Not an interrupt. The question waits in the next brief."
-            },
-            {
-              "when": "${question_check_out.confidence} < 0.7",
-              "action": "stop",
-              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+              "action": "end",
+              "message": "Not an interrupt. The question waits in the next brief; nothing is applied now."
             }
           ]
         },
@@ -1012,7 +1023,14 @@
             ],
             "strategy": "answer_overrides_recommendation",
             "conflict_resolution": "escalate_to_human"
-          }
+          },
+          "gates": [
+            {
+              "when": "${inquiry_out} != null && ${answer_out} == null",
+              "action": "stop",
+              "message": "The owner was asked but no answer was received. Do not apply the recommendation."
+            }
+          ]
         },
         {
           "capability": "checkpoint",
@@ -1169,23 +1187,8 @@
           }
         },
         {
-          "capability": "receive",
-          "purpose": "Wait for the host to deliver the one-minute timer before the second sample.",
-          "risk": "low",
-          "mutation": false,
-          "store_as": "delay_out",
-          "timeout": "2m",
-          "input_bindings": {
-            "channel": "host_timer"
-          },
-          "wait": {
-            "event_type": "sweep.sample_delay",
-            "source_kind": "message_bus"
-          }
-        },
-        {
           "capability": "observe",
-          "purpose": "Second sample one minute later; the delta is the evidence.",
+          "purpose": "Second sample one minute after the first (delay); the delta is the evidence.",
           "risk": "low",
           "mutation": false,
           "store_as": "sample_b_out",
@@ -1198,7 +1201,8 @@
               "last_entry_kind",
               "updated_at"
             ]
-          }
+          },
+          "delay": "1m"
         },
         {
           "capability": "detect",
@@ -1326,7 +1330,7 @@
         },
         {
           "capability": "invoke",
-          "purpose": "Hand rows that have not moved for 2 working days, or that wait on the owner, to the owner decision workflow.",
+          "purpose": "Hand rows that have not moved for 2 working days, or that wait on the owner, to the owner decision workflow. Runs after a deferred reminder (after_deferral: run): The owner is asked whether or not a reminder went out.",
           "risk": "medium",
           "mutation": false,
           "store_as": "escalations_out",
@@ -1335,11 +1339,12 @@
             "input": {
               "question": "${rows_out}"
             }
-          }
+          },
+          "after_deferral": "run"
         },
         {
           "capability": "mutate",
-          "purpose": "Schedule the next check-in for work still running (schedule), instead of waiting passively.",
+          "purpose": "Schedule the next check-in for work still running (schedule), instead of waiting passively. Runs after a deferred reminder (after_deferral: run): The next check-in is due whether or not a reminder went out.",
           "risk": "high",
           "mutation": true,
           "requires_checkpoint": true,
@@ -1360,11 +1365,12 @@
             },
             "binds_to": "digest",
             "when_unattended": "skip"
-          }
+          },
+          "after_deferral": "run"
         },
         {
           "capability": "verify",
-          "purpose": "Prove each restarted thread is alive (same liveness evidence) and each row moved one step or has a recorded reason.",
+          "purpose": "Prove each restarted thread is alive (same liveness evidence) and each row moved one step or has a recorded reason. Runs after a deferred reminder (after_deferral: run): It checks the restarts and the rows, not the queued reminders.",
           "risk": "low",
           "mutation": false,
           "store_as": "verify_out",
@@ -1374,7 +1380,8 @@
               "restarted_threads_live",
               "every_row_moved_or_reason"
             ]
-          }
+          },
+          "after_deferral": "run"
         },
         {
           "capability": "persist",
@@ -1389,7 +1396,7 @@
         },
         {
           "capability": "audit",
-          "purpose": "Record the sweep - samples, detected stalls, causes, recoveries, escalations.",
+          "purpose": "Record the sweep - samples, detected stalls, causes, recoveries, escalations. Runs after a deferred reminder (after_deferral: run): The sweep is recorded; the terminal action lists the queued reminders.",
           "risk": "low",
           "mutation": true,
           "store_as": "audit_out",
@@ -1399,7 +1406,8 @@
               "stalls": "${stalls_out.matches: array<object>}",
               "recovered": "${verify_out.passed}"
             }
-          }
+          },
+          "after_deferral": "run"
         }
       ],
       "success": [
@@ -1454,30 +1462,13 @@
       }
     },
     {
-      "expect": {
-        "kind": "AwaitEvent",
-        "step": 2,
-        "frame": [
-          "checkin_recovery"
-        ],
-        "event_type": "sweep.sample_delay"
-      },
-      "respond": {
-        "kind": "Event",
-        "event": {
-          "event_type": "sweep.sample_delay",
-          "source": {
-            "kind": "message_bus"
-          }
-        },
-        "principal": "peer"
-      }
+      "tick": 60000
     },
     {
       "expect": {
         "kind": "InvokeCapability",
         "capability": "observe",
-        "step": 3,
+        "step": 2,
         "frame": [
           "checkin_recovery"
         ]
@@ -1495,7 +1486,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "detect",
-        "step": 4,
+        "step": 3,
         "frame": [
           "checkin_recovery"
         ]
@@ -1513,7 +1504,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "classify",
-        "step": 5,
+        "step": 4,
         "frame": [
           "checkin_recovery"
         ]
@@ -1531,7 +1522,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "attribute",
-        "step": 6,
+        "step": 5,
         "frame": [
           "checkin_recovery"
         ]
@@ -1549,7 +1540,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "plan",
-        "step": 7,
+        "step": 6,
         "frame": [
           "checkin_recovery"
         ]
@@ -1567,7 +1558,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "constrain",
-        "step": 8,
+        "step": 7,
         "frame": [
           "checkin_recovery"
         ]
@@ -1584,7 +1575,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "checkpoint",
-        "step": 9,
+        "step": 8,
         "frame": [
           "checkin_recovery"
         ]
@@ -1841,6 +1832,249 @@
           "confidence": 1.0
         }
       }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "classify",
+        "step": 0,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "labels": [
+            "ask_owner"
+          ],
+          "evidence_anchors": [],
+          "confidence": 0.6
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 1,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 2,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "step": 3,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "critique",
+        "step": 4,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "issues": [],
+          "evidence_anchors": [],
+          "confidence": 0.9
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "compare",
+        "step": 5,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "ranking": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 6,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": false,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 7,
+        "frame": [
+          "checkin_recovery",
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 12,
+        "frame": [
+          "checkin_recovery"
+        ],
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "mandates"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 12,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 13,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 14,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit",
+        "step": 15,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "evidence_anchors": []
+        }
+      }
     }
   ],
   "end": {
@@ -1861,21 +2095,6 @@
       },
       {
         "store_as": "reminders_out"
-      },
-      {
-        "store_as": "escalations_out"
-      },
-      {
-        "store_as": "next_checkin_out"
-      },
-      {
-        "store_as": "verify_out"
-      },
-      {
-        "store_as": "board_out"
-      },
-      {
-        "store_as": "audit_out"
       }
     ],
     "action_records": [
@@ -1883,13 +2102,15 @@
         "status": "planned"
       },
       {
-        "status": "planned"
+        "status": "executed"
       }
     ]
   },
   "trace_kinds": [
+    "delay_started",
+    "delay_finished",
     "step_deferred",
     "approval_unattended",
-    "step_skipped"
+    "run_ended"
   ]
 }

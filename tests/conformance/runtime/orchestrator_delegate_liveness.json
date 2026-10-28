@@ -219,6 +219,12 @@
               "when": "${brief_check_out.compliant} == false",
               "action": "stop",
               "message": "The brief breaks a brief rule. Fix the brief first."
+            },
+            {
+              "when": "${delegate_out.task_id} == null",
+              "phase": "after",
+              "action": "stop",
+              "message": "The host returned no task id, so no report can be matched to this thread. Do not record or wait."
             }
           ],
           "failure_modes": [

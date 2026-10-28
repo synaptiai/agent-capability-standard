@@ -1,5 +1,5 @@
 {
-  "description": "Unattended, the send waits in the queue (when_unattended: defer_to_queue) and the steps that read it are deferred with it. The run passes no `run.unattended` flag: the adopter's own skip gate on that flag would skip the send before the deferral.",
+  "description": "Unattended, the send waits in the queue (when_unattended: defer_to_queue) and the steps that read it are deferred with it.",
   "catalog": {
     "outbound_message": {
       "goal": "Send one message that the owner would send - right channel, right people, grounded text, signed - through the owner's approval path, then prove it arrived and log it.",
@@ -71,14 +71,6 @@
               "type": "string"
             }
           }
-        },
-        "run": {
-          "type": "object",
-          "properties": {
-            "unattended": {
-              "type": "boolean"
-            }
-          }
         }
       },
       "steps": [
@@ -136,7 +128,6 @@
           "input_bindings": {
             "goal": "${request.intent}",
             "constraints": {
-              "unattended": "${run.unattended}",
               "policy_violations": "${policy_out.violations: array<object>}"
             }
           }
@@ -293,11 +284,6 @@
           },
           "gates": [
             {
-              "when": "${run.unattended} == true",
-              "action": "skip",
-              "message": "Unattended run - the ActionRecord stays planned and goes to the top of the next brief or digest."
-            },
-            {
               "when": "${text_check_out.compliant} == false",
               "action": "stop",
               "message": "The text fails the outbound check."
@@ -352,7 +338,7 @@
         },
         {
           "capability": "persist",
-          "purpose": "Update the ActionRecord to executed (or keep planned when deferred) and add the log line.",
+          "purpose": "Update the ActionRecord to executed and add the log line. In an unattended run this step is deferred with the send; the executor's planned record holds the queued send.",
           "risk": "low",
           "mutation": true,
           "store_as": "log_out",

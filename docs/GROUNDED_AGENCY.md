@@ -176,7 +176,7 @@ Key design decisions:
 
 ### 3.3 Dependency Graph
 
-The ontology defines **97 dependency edges** across **7 edge types**:
+The ontology defines **99 dependency edges** across **7 edge types**:
 
 - **enables** (46 edges): The source capability produces outputs that make the target more effective.
 
@@ -184,7 +184,7 @@ The ontology defines **97 dependency edges** across **7 edge types**:
 
 - **alternative_to** (12 edges): Substitutability; capabilities can replace each other.
 
-- **soft_requires** (8 edges): Preferred but not mandatory prerequisite; a target with none of its sources running before it draws a warning (W601).
+- **soft_requires** (10 edges): Preferred but not mandatory prerequisite; a target with none of its sources running before it draws a warning (W601).
 
 - **specializes** (6 edges): Inheritance; the source is a more specific variant of the target.
 
@@ -582,7 +582,7 @@ We evaluate Grounded Agency on three dimensions: coverage, validation effectiven
 |-----------|-------|-------|
 | Capabilities | 36 | 100% schema coverage |
 | Layers | 9 | Perceive to Coordinate |
-| Dependency edges | 97 | 7 edge types (see spec/EDGE_TYPES.md) |
+| Dependency edges | 99 | 7 edge types (see spec/EDGE_TYPES.md) |
 | Entity classes | 18 | 10 digital, 8 real-world |
 | Entity subtypes | 57 | Extensible taxonomy |
 | Core relations | 13 | depends_on, owns, causes... |
@@ -725,7 +725,7 @@ The framework assumes a trusted implementation environment and focuses on preven
 
 Our framework makes three design bets. First, that **grounding every claim in evidence** prevents the hallucination and confabulation that undermine agent reliability. Second, that **typing uncertainty** (epistemic vs. aleatoric) enables agents to reason appropriately about knowledge gaps versus inherent randomness. Third, that **mandating reversibility** for mutations transforms agent errors from catastrophic events into recoverable incidents.
 
-The 36-capability ontology with 97 dependency edges provides the compositional vocabulary. The world state schema with provenance records and typed uncertainty provides the representational foundation. The trust model with temporal decay and field-specific authority provides the conflict resolution mechanism. The design-time validator with type inference and coercion suggestions catches errors before they reach production.
+The 36-capability ontology with 99 dependency edges provides the compositional vocabulary. The world state schema with provenance records and typed uncertainty provides the representational foundation. The trust model with temporal decay and field-specific authority provides the conflict resolution mechanism. The design-time validator with type inference and coercion suggestions catches errors before they reach production.
 
 The framework enforces three invariants we believe are essential for trustworthy agentic AI: **grounding** (every claim has evidence), **uncertainty** (confidence is typed and explicit), and **reversibility** (every mutation can be undone). These are not conventions to be followed but structural properties enforced by the ontology's dependency edges and the validator's type system.
 

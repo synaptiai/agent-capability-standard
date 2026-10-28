@@ -16,15 +16,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `after_deferral: run` (`approval@1`) lets a step that does not depend on
   a deferred one, such as an escalation, run anyway. Validator, executor,
   Python runner, schema, runtime fixtures and docs
+- **W616 `VERSION_FEATURE_MISMATCH`.** A workflow that declares standard
+  1.0 but uses a 1.1 feature (`workflow_extensions.requires`, gate
+  `phase` or `end`, the `in` operator, failure-mode `when` or `on_error`)
+  warns once per feature, so a forgotten version bump no longer passes
+  silently
 - **The #114 author's orchestrator workflows as conformance fixtures.** The
-  nine workflows they ported to the v1.1 candidate are a static fixture
-  (`pass_orchestrator_port`, kept as contributed; it validates with two
-  real W601s), and thirteen runtime fixtures (`orchestrator_*`) script runs
-  of them: routing into a nested delegation, a liveness recovery, a quorum
+  nine workflows they ported to the v1.1 candidate (revision 1.1c, which
+  uses gate `end`, `delay`, `after_deferral` and a waiting `delegate` per
+  reviewer) are a static fixture (`pass_orchestrator_port`, kept as
+  contributed but for three `: object` annotations on a transform's
+  output), and fifteen runtime fixtures (`orchestrator_*`) script runs of
+  them: routing into a nested delegation, a liveness recovery, a quorum
   that passes and one that loops after a RETHINK, a self-merge and a red
   base that escalates to incident triage, an owner-approved and an
   unattended (deferred) message, an owner answer with a foreign one
-  dropped, a scheduled sweep, a prod stop and both kinds of daily report
+  dropped, a question ended for more research, a scheduled sweep where
+  only the reminder is deferred, an escalation whose question has no
+  topic (R402), a prod notice then an early end, and both kinds of daily
+  report
 - **Read-only reviewers and per-reviewer waits (#114).** `delegate` takes
   `read_only` (attested in `effective`), and `quorum.require_read_only`
   requires it of every reviewer. `wait` is allowed on `delegate`: the step
@@ -164,6 +174,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Comprehensive analysis documentation package (13 documents, ~570KB)
 
 ### Changed
+- **`transform.output` is `object|array`** (ontology 2.1.0), so a
+  transform can return records as a list. **Breaking:** an unannotated
+  reference to it is now B204, as for any union; the reference, domain,
+  example and test catalogs annotate theirs.
+- **`retrieve` and `search` are soft prerequisites of `ground`** (ontology
+  2.1.0): a retrieved source or a search result is evidence to ground a
+  claim in, so grounding generated text against them no longer warns
+  W601.
+- **Catalog failure modes all fire.** Of the 23 in the reference,
+  manufacturing and digital-twin example catalogs that had neither `when`
+  nor `on_error`, 15 gained a trigger (a step error, or an empty or
+  failing output) and 8 were removed: they described a normal outcome (no
+  vulnerabilities, nothing to decompose, conflicts `integrate` resolved),
+  a check a later step or gate already makes (compliance, the cleaned
+  data's quality), or a threshold the step does not have. An empty batch
+  in the digital twin sync loop now ends the run early (gate `end`)
+  instead. Runtime fixtures `domain_twin_no_events` and
+  `domain_rag_no_passages` run two of them.
+- **`schedule_management` with no free slot completes.** Ranking, planning
+  and drafting are skipped, and the explanation (now given the slots and
+  conflicts) and the audit still run; before, a `stop` gate ended the run
+  R403 with neither. A runtime fixture (`domain_schedule_no_slot`) runs
+  this path.
 - **Unattended runs ask standing mandates, and deferral continues (#114).**
   A `standing_mandate` approver is asked even when nobody is present; the
   host answers `approved`, or `unavailable` when no mandate covers the
@@ -255,6 +288,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- **A recovery loop replaces every waiting delegate it runs again.** A loop
+  from a later step (a blocked quorum, say) back to before the reviewers
+  delegated them again without `replaces`, so the host could not cancel
+  the earlier delegations; only a loop from the delegate itself named
+  them. A pending replacement is kept until the delegate next delegates,
+  also across a pass that skips it. Runtime fixtures
+  `delegate_wait_replaced_by_later_loop` and
+  `delegate_wait_replacement_survives_skip`.
 - **Whole-branch review (#114): executor.** Forged snapshots that passed the
   state check and then panicked are refused at restore; resolved inputs
   deeper than I-JSON allows fail the step (R402) instead of breaking

@@ -765,9 +765,10 @@ can cancel it; a delegate that went silent (R406) or ran out of time (R401)
 is replaced, and only that one: give each reviewer of a quorum (§5.16) its
 own waiting `delegate` step to replace a hung reviewer without asking the
 others again. A retry does not ask for approval again, as for any step. A
-recovery loop whose target is the waiting delegate or a step before it
-also replaces: when that delegate next runs, its call names the
-delegation it replaces. For W608, a
+recovery loop also replaces: every waiting delegate from the loop's target
+to the step whose failure mode loops (a quorum's, say) runs again, and
+when it next delegates, its call names the delegation it replaces, even
+one that finished. For W608, a
 waiting delegate acts (delegates) before its own wait.
 
 A step that requires a checkpoint (`mutate`, `send`, or a raised
@@ -1315,6 +1316,7 @@ NOT change any code's severity otherwise.
 | W613 | UNREACHABLE_HANDLER | A handler step no escalation targets |
 | W614 | INVALID_DURATION | Legacy `timeout` outside the duration grammar |
 | W615 | MISSING_INPUT | A required capability input the step does not bind (§5.5) |
+| W616 | VERSION_FEATURE_MISMATCH | A workflow that targets 1.0 uses a feature new in 1.1 (§11.5) |
 
 ### 9.8 Diagnostic Format
 
@@ -1452,6 +1454,14 @@ This standard follows Semantic Versioning 2.0.0:
 | Remove enum value | Breaking |
 | Make a required field optional | Compatible |
 
+**A breaking change in 1.1.0.** Ontology 2.1.0 widens `transform.output`
+from `object` to `object|array`, so a transform can return a list of
+records. By the table this is breaking, and it is the one field type change
+to an existing capability contract in this version: a reference to the
+output is now a union, so one without an annotation is B204 (§5.4), in a
+1.0 workflow too. Annotate it with the type the workflow expects
+(`${t.output: object}`).
+
 ### 11.5 Version Declaration
 
 A workflow declares the standard version it targets with `spec_version`
@@ -1469,6 +1479,14 @@ workflow_name:
 `digits.digits[.digits]`; `spec_version` MUST be a string (quote it in
 YAML). Neither present → W605. A version the validator does not support →
 V109. A validator for this version MUST support 1.0 and 1.1.
+
+A workflow that targets 1.0 is validated and run under this standard, but
+a 1.0 consumer does not know the features 1.1 added. Using one of them
+there is W616, once per feature at its first use:
+`workflow_extensions.requires` (and so every extension; the advisory
+`supports_*` flags are 1.0), gate `phase`, gate `action: end`, the `in`
+operator, and failure-mode `when` and `on_error`. Declaring `"1.1"` clears
+it.
 
 ---
 
@@ -1699,7 +1717,7 @@ Field names starting with `x-` are reserved for vendor extensions.
 | Safety flags | Listed as optional step fields | Inherit from the ontology; downgrades ineffective, W602 (§5.2.1) |
 | Unknown fields | "SHOULD ignore" | Ignored and reported, W604; `x-` exempt (§11.3). Binding keys outside the capability's inputs are W604 too (§5.5) |
 | `invoke` inputs | Unchecked | A literal `input` is checked against the target's `inputs`: undeclared name S303, missing required S304; the executor refuses both (R402) (§5.12) |
-| Version header | "SHOULD warn if missing" | `spec_version` or header; W605 / V109 (§11.5) |
+| Version header | "SHOULD warn if missing" | `spec_version` or header; W605 / V109, and W616 for a 1.1 feature in a workflow that targets 1.0 (§11.5) |
 | B205 | "Type annotation does not match schema" | Annotation names no type; a mismatch is B203 (§9.3) |
 | `inputs` | Required | Optional, default `{}` (§5.1) |
 | `store_as` | Any string | An identifier `[A-Za-z_][A-Za-z0-9_-]*`, else S303; `_recovery` is reserved (§5.2, §5.12) |
@@ -1718,8 +1736,8 @@ either is W609 (§5.12).
 - Condition expression language with CEL compatibility (§5.8), gate `phase`
   and gate `action: end`, a successful early end (§5.6), and failure-mode
   `when` (§5.7). A 1.0 consumer does not know `end`; a workflow using it
-  targets 1.1 (§11.5)
-- Diagnostic severities and warning codes W601–W615 (§9.1, §9.7); codes
+  targets 1.1, and declaring 1.0 is W616 (§11.5)
+- Diagnostic severities and warning codes W601–W616 (§9.1, §9.7); codes
   V106–V109, B206, R405, R406
 - Orchestration extensions and their declaration: triggers, handler steps,
   recovery and escalation, wait, approval, delegation, quorum, sender
@@ -1735,7 +1753,9 @@ either is W609 (§5.12).
   `ProvenanceRecord.agent_identity`; `authority_trust_model.yaml` 1.1.0 adds
   `trust_classes` (§8.3)
 - Capability ontology 2.1.0 (`capability_ontology.yaml`): the
-  `mutation_overridable` flag (§4.4); the edges reclassified by §4.3 (five
+  `mutation_overridable` flag (§4.4); `retrieve` and `search` as soft
+  prerequisites of `ground` (a retrieved source or a search result is
+  evidence to ground a claim in); the edges reclassified by §4.3 (five
   follow-up edges became `enables`, one redundant edge was removed, and
   `constrain` became the soft prerequisite of `execute`, `mutate` and
   `send`); `delegate` inputs `fresh_context`, `model_family`, `role`,
@@ -1746,7 +1766,10 @@ either is W609 (§5.12).
   beside the agreed state; `constrain` output `tally` (§5.15, §5.16);
   optional inputs `retrieve.filter` and `retrieve.references`,
   `state.observations`, `plan.context`, `critique.context` and
-  `explain.constraints`, which catalogs already bound
+  `explain.constraints`, which catalogs already bound; `transform.output`
+  is `object|array` (a list of records, say), so a reference to it needs
+  an annotation (B204): a breaking change for a catalog that reads it
+  unannotated (§11.4)
 
 ---
 

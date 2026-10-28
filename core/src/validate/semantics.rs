@@ -7,6 +7,7 @@ use serde_json::{Map, Value};
 
 use super::{Context, Report, StepLoc};
 use crate::diag::{Code, Diagnostic};
+use crate::expr::ast::{CmpOp, Expr};
 use crate::ontology::{Capability, EdgeType, Risk};
 
 /// Fields a workflow may carry (STANDARD v1.1 §5.1 plus recognised de-facto
@@ -540,7 +541,8 @@ fn parse_version(v: &str) -> Option<(u64, u64)> {
 }
 
 /// W605 when neither `spec_version` nor the file header names a version;
-/// V109 when the named version is not supported.
+/// V109 when the named version is not supported; W616 for each 1.1 feature
+/// a workflow that targets 1.0 uses.
 pub(crate) fn spec_version(
     wf: &Map<String, Value>,
     header: Option<&str>,
@@ -574,6 +576,7 @@ pub(crate) fn spec_version(
         },
     };
     match parse_version(version) {
+        Some((1, 0)) => newer_features(wf, version, field, at, report),
         Some(mm) if SUPPORTED_VERSIONS.contains(&mm) => {}
         _ => report.push(
             at(Diagnostic::new(
@@ -589,6 +592,119 @@ pub(crate) fn spec_version(
             ))
             .at("field", field),
         ),
+    }
+}
+
+/// W616, once per feature at its first use: a workflow that targets 1.0 uses
+/// a feature that is new in 1.1, which a 1.0 consumer does not know (§11.5).
+/// Features that need an extension are covered by
+/// `workflow_extensions.requires`; the advisory `supports_*` flags and
+/// `invoke`'s `workflow_id` are 1.0.
+fn newer_features(
+    wf: &Map<String, Value>,
+    version: &str,
+    declared_in: &str,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    /// The mappings in a list, with their indices.
+    fn objects(v: Option<&Value>) -> Vec<(usize, &Map<String, Value>)> {
+        match v {
+            Some(Value::Array(a)) => a
+                .iter()
+                .enumerate()
+                .filter_map(|(i, v)| Some((i, v.as_object()?)))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+    /// Whether an expression that parses uses the `in` operator.
+    fn uses_in(v: Option<&Value>) -> bool {
+        let Some(Ok(e)) = v.and_then(Value::as_str).map(crate::expr::parse) else {
+            return false;
+        };
+        let mut stack = vec![&e];
+        while let Some(e) = stack.pop() {
+            match e {
+                Expr::Cmp(CmpOp::In, ..) => return true,
+                Expr::Cmp(_, l, r, _) => stack.extend([&**l, &**r]),
+                Expr::Not(x, _) => stack.push(x),
+                Expr::And(v) | Expr::Or(v) => stack.extend(v),
+                Expr::Lit(..) | Expr::Ref(_) => {}
+            }
+        }
+        false
+    }
+    let mut found: Vec<(&'static str, String)> = Vec::new();
+    let mut note = |feature: &'static str, field: String| {
+        if !found.iter().any(|(f, _)| *f == feature) {
+            found.push((feature, field));
+        }
+    };
+    if let Some(Value::Object(ext)) = wf.get("workflow_extensions") {
+        if ext.contains_key("requires") {
+            note(
+                "'workflow_extensions.requires'",
+                "workflow_extensions.requires".into(),
+            );
+        }
+    }
+    for (i, step) in objects(wf.get("steps")) {
+        if uses_in(step.get("condition")) {
+            note("the 'in' operator", format!("steps[{i}].condition"));
+        }
+        for (g, gate) in objects(step.get("gates")) {
+            if gate.contains_key("phase") {
+                note("gate 'phase'", format!("steps[{i}].gates[{g}].phase"));
+            }
+            if gate.get("action").and_then(Value::as_str) == Some("end") {
+                note("gate action 'end'", format!("steps[{i}].gates[{g}].action"));
+            }
+            if uses_in(gate.get("when")) {
+                note("the 'in' operator", format!("steps[{i}].gates[{g}].when"));
+            }
+        }
+        for (f, fm) in objects(step.get("failure_modes")) {
+            if fm.contains_key("when") {
+                note(
+                    "failure-mode 'when'",
+                    format!("steps[{i}].failure_modes[{f}].when"),
+                );
+            }
+            if fm.contains_key("on_error") {
+                note(
+                    "failure-mode 'on_error'",
+                    format!("steps[{i}].failure_modes[{f}].on_error"),
+                );
+            }
+            if uses_in(fm.get("when")) {
+                note(
+                    "the 'in' operator",
+                    format!("steps[{i}].failure_modes[{f}].when"),
+                );
+            }
+        }
+    }
+    // A header cannot override a workflow's own spec_version.
+    let (declared_in, fix) = if declared_in == "spec_version" {
+        ("its 'spec_version'", "declare spec_version \"1.1\"")
+    } else {
+        (
+            "the file's '# Standard version' header",
+            "declare spec_version \"1.1\" or a 1.1 header",
+        )
+    };
+    for (feature, field) in found {
+        report.push(
+            at(Diagnostic::new(
+                Code::VersionFeatureMismatch,
+                format!(
+                    "the workflow targets standard {version} by {declared_in}, but {feature} is new in 1.1 and a 1.0 consumer does not know it"
+                ),
+            ))
+            .at("field", field)
+            .suggest(fix),
+        );
     }
 }
 

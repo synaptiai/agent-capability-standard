@@ -1823,6 +1823,58 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn newer_features_in_a_1_0_workflow() {
+        let step = json!({"capability": "search", "store_as": "s",
+            "input_bindings": {"query": "q"},
+            "gates": [{"when": "\"a\" in [\"a\"]", "action": "end", "phase": "after"}],
+            "failure_modes": [{"condition": "c", "action": "stop", "when": "false",
+                "on_error": "R402"}]});
+        let w1616 = |version: Option<&str>, header: Option<&str>, extensions: bool| {
+            let mut w = json!({"goal": "g", "risk": "low", "steps": [step, step]});
+            if let Some(v) = version {
+                w["spec_version"] = json!(v);
+            }
+            if extensions {
+                w["workflow_extensions"] = json!({"requires": []});
+            }
+            validate_catalog(&ctx(), &json!({"w": w}), header)
+                .diagnostics
+                .iter()
+                .filter(|d| d.code == Code::VersionFeatureMismatch)
+                .map(|d| d.location["field"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        // Once per feature, at its first use, in the order met.
+        let all = [
+            "workflow_extensions.requires",
+            "steps[0].gates[0].phase",
+            "steps[0].gates[0].action",
+            "steps[0].gates[0].when",
+            "steps[0].failure_modes[0].when",
+            "steps[0].failure_modes[0].on_error",
+        ];
+        assert_eq!(w1616(Some("1.0"), None, true), all);
+        assert_eq!(w1616(None, Some("1.0.0"), false), all[1..]);
+        // spec_version takes precedence over the header.
+        assert!(w1616(Some("1.1"), Some("1.0"), true).is_empty());
+        assert_eq!(w1616(Some("1.0.2"), Some("1.1"), false).len(), 5);
+        // The advisory supports_* flags and invoke's workflow_id are 1.0.
+        let w = json!({"goal": "g", "risk": "low", "spec_version": "1.0",
+            "workflow_extensions": {"supports_gates": true},
+            "steps": [{"capability": "invoke", "store_as": "i", "workflow_id": "w"}]});
+        let fields: Vec<_> = validate_catalog(&ctx(), &json!({"w": w}), None)
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.code == Code::VersionFeatureMismatch)
+            .map(|d| d.location["field"].clone())
+            .collect();
+        assert!(fields.is_empty());
+        // No version, or an unsupported one, says nothing about features.
+        assert!(w1616(None, None, true).is_empty());
+        assert!(w1616(Some("0.9"), None, true).is_empty());
+    }
+
+    #[test]
     fn report_passes_unless_errors_or_strict_warnings() {
         let mut r = Report::default();
         assert!(r.passed(true));

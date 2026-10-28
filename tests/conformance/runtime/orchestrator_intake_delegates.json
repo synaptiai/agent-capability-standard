@@ -142,7 +142,7 @@
           "mutation": false,
           "store_as": "authority_out",
           "input_bindings": {
-            "item": "${canonical_out.output}",
+            "item": "${canonical_out.output: object}",
             "taxonomy": [
               "owner",
               "decision_person",
@@ -162,7 +162,7 @@
           "mutation": false,
           "store_as": "kind_out",
           "input_bindings": {
-            "item": "${canonical_out.output}",
+            "item": "${canonical_out.output: object}",
             "taxonomy": [
               "bug",
               "security",
@@ -186,7 +186,7 @@
           "mutation": false,
           "store_as": "existing_out",
           "input_bindings": {
-            "query": "${canonical_out.output}",
+            "query": "${canonical_out.output: object}",
             "scope": "board_rows+open_threads+github_issues_and_prs_all_states",
             "limit": 20
           }
@@ -531,6 +531,12 @@
               "when": "${brief_check_out.compliant} == false",
               "action": "stop",
               "message": "The brief breaks a brief rule. Fix the brief first."
+            },
+            {
+              "when": "${delegate_out.task_id} == null",
+              "phase": "after",
+              "action": "stop",
+              "message": "The host returned no task id, so no report can be matched to this thread. Do not record or wait."
             }
           ],
           "failure_modes": [
@@ -861,6 +867,30 @@
             "target": "${ranking_out}",
             "constraints": "${profile.question_rules: array<string>}",
             "action_on_violation": "log"
+          },
+          "gates": [
+            {
+              "when": "${question_check_out.confidence} < 0.7",
+              "action": "end",
+              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Queue the question with its three options for the next brief, when it is not an interrupt.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "queued_out",
+          "condition": "${ask_policy_out.compliant} == false && !(${route_out.confidence} > 0.85 && ${route_out.labels} == [\"decide_self\"])",
+          "skip_if_false": true,
+          "input_bindings": {
+            "data": {
+              "question": "${question}",
+              "ranking": "${ranking_out.ranking: array<object>}",
+              "recommendation": "${ranking_out.recommendation}"
+            },
+            "key": "brief_queue"
           }
         },
         {
@@ -885,13 +915,8 @@
             },
             {
               "when": "${ask_policy_out.compliant} == false",
-              "action": "skip",
-              "message": "Not an interrupt. The question waits in the next brief."
-            },
-            {
-              "when": "${question_check_out.confidence} < 0.7",
-              "action": "stop",
-              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+              "action": "end",
+              "message": "Not an interrupt. The question waits in the next brief; nothing is applied now."
             }
           ]
         },
@@ -934,7 +959,14 @@
             ],
             "strategy": "answer_overrides_recommendation",
             "conflict_resolution": "escalate_to_human"
-          }
+          },
+          "gates": [
+            {
+              "when": "${inquiry_out} != null && ${answer_out} == null",
+              "action": "stop",
+              "message": "The owner was asked but no answer was received. Do not apply the recommendation."
+            }
+          ]
         },
         {
           "capability": "checkpoint",

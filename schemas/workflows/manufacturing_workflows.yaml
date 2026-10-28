@@ -29,6 +29,8 @@ production_line_monitoring:
           type: [temperature, pressure, vibration, flow_rate, cycle_time]
       failure_modes:
         - condition: No sensor data received
+          when: ${sensor_data_out.data} == []
+          on_error: R401
           action: request_more_context
           recovery: Check sensor connectivity and data source configuration.
 
@@ -48,7 +50,7 @@ production_line_monitoring:
       store_as: line_state_out
       input_bindings:
         scope: production_line
-        observations: ${normalized_data_out.output}
+        observations: "${normalized_data_out.output: array<object>}"
 
     - capability: detect
       purpose: Identify anomalies in sensor patterns.

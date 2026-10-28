@@ -64,6 +64,7 @@ monitor_and_replan:
       target: "${plan.scope}"
     failure_modes:
     - condition: Unable to observe relevant state
+      on_error: [R401, R402]
       action: request_more_context
       recovery: Request specific state aspects to monitor.
   - capability: state
@@ -162,6 +163,8 @@ monitor_and_replan:
       message: No violation of high severity or worse; keep the current plan.
     failure_modes:
     - condition: Unable to find viable plan
+      when: ${revised_plan_out.steps} == []
+      on_error: R402
       action: stop
       recovery: Escalate to human with violation details.
   - capability: audit
@@ -258,8 +261,9 @@ clarify_intent:
       message: No clarifying questions were asked, nothing to receive.
     failure_modes:
     - condition: Timeout waiting for response
+      on_error: R401
       action: stop
-      recovery: Proceed with best interpretation or escalate.
+      recovery: The run ends with the timeout; the caller proceeds with its best interpretation or escalates.
   - capability: integrate
     purpose: Merge clarification with original request.
     risk: low
@@ -320,6 +324,7 @@ debug_code_change:
       target: "${bug.component}"
     failure_modes:
     - condition: No relevant signals found
+      when: "${observe_out.observation} == {}"
       action: request_more_context
       recovery: Ask for reproduction steps or additional artifacts.
   - capability: search
@@ -550,6 +555,7 @@ world_model_build:
       target: "${user_input.domain}"
     failure_modes:
     - condition: No relevant signals found
+      when: "${observe_out.observation} == {}"
       action: request_more_context
       recovery: Ask for reproduction steps or additional artifacts.
   - capability: detect
@@ -741,6 +747,7 @@ capability_gap_analysis:
       target: "${user_input.domain}"
     failure_modes:
     - condition: No relevant signals found
+      when: "${observe_out.observation} == {}"
       action: request_more_context
       recovery: Ask for reproduction steps or additional artifacts.
   - capability: attribute
@@ -875,11 +882,16 @@ digital_twin_sync_loop:
       backoff: exponential
     store_as: receive_out
     failure_modes:
-    - condition: No messages/events available
+    - condition: Receiving failed (timed out or errored after its retries)
+      on_error: [R401, R402]
       action: stop
-      recovery: Wait for signals or confirm source configuration.
+      recovery: The run ends with the receive error; confirm the source configuration.
     input_bindings: {}
-    gates: []
+    gates:
+    - when: ${receive_out.data} == []
+      phase: after
+      action: end
+      message: No new signals or events; the twin is unchanged.
   - capability: search
     purpose: 'Parallel enrichment: search for existing twin snapshot or relevant context while ingesting events.'
     parallel_group: context_gathering
@@ -921,13 +933,9 @@ digital_twin_sync_loop:
     timeout: null
     retry: null
     store_as: integrate_out
-    failure_modes:
-    - condition: Conflicts exceed threshold
-      action: request_more_context
-      recovery: Ask for resolution strategy or authoritative source preference.
     input_bindings:
       sources:
-      - '${transform_out.output}'
+      - '${transform_out.output: array<object>}'
       - '${previous_world_state}'
       conflict_resolution: prefer_authoritative_sources
     gates: []
@@ -1371,6 +1379,7 @@ rag_pipeline:
       query: ${user_query}
     failure_modes:
     - condition: No relevant documents found
+      when: ${search_out.results} == []
       action: request_more_context
       recovery: Broaden search terms or ask user for additional context.
   - capability: retrieve
@@ -1389,8 +1398,9 @@ rag_pipeline:
       references: "${search_out.results: array<object>}"
     failure_modes:
     - condition: Document retrieval fails
+      on_error: [R401, R402]
       action: request_more_context
-      recovery: Try alternative sources or report partial results.
+      recovery: The run ends with the retrieval error; try alternative sources in a new run.
   - capability: detect
     purpose: Extract relevant passages from retrieved documents.
     domain: relevance
@@ -1420,6 +1430,7 @@ rag_pipeline:
         passages: "${detect_out.matches: array<object>}"
     failure_modes:
     - condition: Insufficient evidence for coherent response
+      when: ${detect_out.matches} == []
       action: stop
       recovery: Report that available evidence is insufficient and cite what was found.
   - capability: ground
@@ -1513,8 +1524,9 @@ security_assessment:
       query: ${assessment_target}
     failure_modes:
     - condition: Unable to access vulnerability databases
+      on_error: [R401, R402]
       action: request_more_context
-      recovery: Fall back to pattern-based detection without CVE lookup.
+      recovery: The run ends with the search error; rerun with pattern-based detection, without CVE lookup.
   - capability: detect
     purpose: Find potential security issues in the target.
     domain: vulnerability
@@ -1528,10 +1540,6 @@ security_assessment:
     input_bindings:
       data: "${search_out.results: array<object>}"
       pattern: vulnerability
-    failure_modes:
-    - condition: No vulnerabilities detected
-      action: stop
-      recovery: Report clean assessment with confidence level.
   - capability: measure
     purpose: Assess severity and risk level of detected vulnerabilities.
     domain: severity
@@ -1650,10 +1658,6 @@ multi_agent_orchestration:
     store_as: decompose_out
     input_bindings:
       problem: ${task.goal}
-    failure_modes:
-    - condition: Task cannot be meaningfully decomposed
-      action: stop
-      recovery: Execute task as a single unit without delegation.
   - capability: plan
     purpose: Create execution plan with subtask dependencies and ordering.
     risk: low
@@ -1738,10 +1742,6 @@ multi_agent_orchestration:
       - "${delegate_out: object}"
       - "${synchronize_out.agreed_state: object}"
       strategy: merge_by_subtask
-    failure_modes:
-    - condition: Conflicting results from agents
-      action: request_more_context
-      recovery: Escalate conflicts for manual resolution.
   - capability: audit
     purpose: Record orchestration decisions, delegations, and results.
     risk: low
@@ -1812,6 +1812,7 @@ data_quality_pipeline:
       target: ${raw_data.format}
     failure_modes:
     - condition: Unable to read or parse data
+      on_error: R402
       action: stop
       recovery: Report format incompatibility and request data in supported format.
   - capability: detect
@@ -1869,10 +1870,6 @@ data_quality_pipeline:
       options:
         issues: "${detect_out.matches: array<object>}"
         issue_types: "${classify_out.labels: array<object>}"
-    failure_modes:
-    - condition: Transformation produces unexpected results
-      action: pause_and_checkpoint
-      recovery: Review transformation rules and retry with adjusted parameters.
   - capability: verify
     purpose: Validate cleaned data meets quality thresholds.
     risk: low
@@ -1964,10 +1961,6 @@ model_deployment:
       - artifact_integrity
       - schema_compatibility
       - version_consistency
-    failure_modes:
-    - condition: Model artifacts invalid or corrupted
-      action: stop
-      recovery: Report validation failures and request corrected artifacts.
   - capability: constrain
     purpose: Check deployment policies (approval gates, resource limits, compliance).
     risk: low
@@ -1983,10 +1976,6 @@ model_deployment:
       - deployment_policy
       - resource_limits
       - compliance_requirements
-    failure_modes:
-    - condition: Policy violation detected
-      action: stop
-      recovery: Report policy violations and required remediation steps.
   - capability: checkpoint
     purpose: Save rollback point before deployment begins.
     risk: medium

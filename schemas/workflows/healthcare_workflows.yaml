@@ -61,7 +61,7 @@ patient_monitoring:
       store_as: patient_state_out
       input_bindings:
         scope: patient_physiology
-        observations: ${normalized_vitals_out.output}
+        observations: "${normalized_vitals_out.output: array<object>}"
 
     - capability: compare
       purpose: Compare current vitals to patient baseline.

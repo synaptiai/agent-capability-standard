@@ -39,7 +39,7 @@ This diagram shows the six major subsystems and their data flow relationships. T
 flowchart TB
     subgraph Schemas["SCHEMAS (Source of Truth)"]
         direction TB
-        ONT["capability_ontology.yaml\n36 capabilities, 9 layers\n7 edge types, 97 edges"]
+        ONT["capability_ontology.yaml\n36 capabilities, 9 layers\n7 edge types, 99 edges"]
         WFC["workflow_catalog.yaml\n12 workflow patterns"]
         PRF["profiles/*.yaml\n7 domain profiles"]
         WSS["world_state_schema.yaml\nevent_schema.yaml"]
@@ -902,7 +902,7 @@ flowchart TB
 
 ## 9. Diagram 8: Capability Edge Graph
 
-The ontology defines 97 edges between capabilities using 7 edge types. This diagram shows a representative subset demonstrating all edge types and their semantics.
+The ontology defines 99 edges between capabilities using 7 edge types. This diagram shows a representative subset demonstrating all edge types and their semantics.
 
 ```mermaid
 flowchart LR
@@ -1055,7 +1055,7 @@ flowchart LR
 | Edge Type | Count | Semantics | Transitive | Symmetric |
 |-----------|-------|-----------|------------|-----------|
 | `requires` | 3 | Hard dependency: source MUST run before the target (V102 if missing) | No | No |
-| `soft_requires` | 8 | Recommended, any-of: at least one source should run before the target; otherwise warning W601 | No | No |
+| `soft_requires` | 10 | Recommended, any-of: at least one source should run before the target; otherwise warning W601 | No | No |
 | `enables` | 46 | Unlocks or makes possible the target capability | No | No |
 | `precedes` | 18 | Ordering only: when both are present, source must run before target (V102); does not require the source to be present | Yes | No |
 | `conflicts_with` | 4 (2 pairs) | Concurrency exclusion: may not share a `parallel_group` (F504); sequential use is allowed | No | Yes |
@@ -1075,7 +1075,7 @@ Steps in the same `parallel_group` never count as running before one another for
 | S-01 | Capability Ontology | 36 atomic capabilities with typed I/O schemas, risk levels, and mutation flags | `schemas/capability_ontology.yaml` |
 | S-02 | Cognitive Layer Organization | 9 layers (PERCEIVE through COORDINATE) with cognitive mapping annotations | `schemas/capability_ontology.yaml` (layers section) |
 | S-03 | Edge Type System | 7 edge types (requires, soft_requires, enables, precedes, conflicts_with, alternative_to, specializes) with formal semantics | `schemas/capability_ontology.yaml` (edge_types section) |
-| S-04 | Capability Edge Graph | 97 directed edges between capabilities encoding dependencies, ordering, conflicts, and substitutability | `schemas/capability_ontology.yaml` (edges section) |
+| S-04 | Capability Edge Graph | 99 directed edges between capabilities encoding dependencies, ordering, conflicts, and substitutability | `schemas/capability_ontology.yaml` (edges section) |
 | S-05 | Input Schema Contracts | Typed input schemas per capability with required fields, types, and descriptions | `schemas/capability_ontology.yaml` (nodes.input_schema) |
 | S-06 | Output Schema Contracts | Typed output schemas requiring evidence_anchors and confidence on all capabilities | `schemas/capability_ontology.yaml` (nodes.output_schema) |
 | S-07 | Workflow Catalog | 12 composed workflow patterns with step definitions, gates, failure modes, and recovery | `schemas/workflow_catalog.yaml` |
@@ -1260,7 +1260,7 @@ This matrix tracks the implementation status of every major feature across all s
 | 36 atomic capabilities with I/O schemas | Implemented | `capability_ontology.yaml` | All 36 nodes with typed input/output schemas |
 | 9 cognitive layers with cognitive mapping | Implemented | `capability_ontology.yaml` | BDI, ReAct, and MCP mappings |
 | 7 edge types with formal semantics | Implemented | `capability_ontology.yaml` | Documented in `spec/EDGE_TYPES.md` |
-| 97 capability edges | Implemented | `capability_ontology.yaml` | Including all symmetric pairs |
+| 99 capability edges | Implemented | `capability_ontology.yaml` | Including all symmetric pairs |
 | 12 workflow patterns | Implemented | `workflow_catalog.yaml` | monitor_and_replan through model_deployment |
 | Input binding system (`${store_as}`) | Implemented | `workflow_catalog.yaml` | With typed annotations (`${ref: type}`) |
 | Step gates (skip/stop) | Implemented | `workflow_catalog.yaml` | Condition-based pre-step guards |
@@ -1314,7 +1314,7 @@ This matrix tracks the implementation status of every major feature across all s
 | UnknownSkillError exception | Implemented | `oasf.py` | Custom KeyError subclass |
 | Persistent checkpoint storage | Implemented | `checkpoint_tracker.py` | State persisted to `_checkpoint_dir` (TD-011); reservations are in-memory only |
 | SDK test suite | Implemented | `tests/test_sdk_integration.py` | Integration tests for adapter |
-| Conformance test suite | Implemented | `scripts/run_conformance.py` | 82 workflow fixtures; runs locally and in CI |
+| Conformance test suite | Implemented | `scripts/run_conformance.py` | 83 workflow fixtures; runs locally and in CI |
 
 ### 11.3 Hook Features
 
@@ -1348,7 +1348,7 @@ This matrix tracks the implementation status of every major feature across all s
 
 | Feature | Status | Component | Notes |
 |---------|--------|-----------|-------|
-| Workflow validator | Implemented | Rust core + `validate_workflows.py` CLI | Errors and warnings (W601–W615); `--strict` treats warnings as errors |
+| Workflow validator | Implemented | Rust core + `validate_workflows.py` CLI | Errors and warnings (W601–W616); `--strict` treats warnings as errors |
 | Structural validation | Implemented | Rust core (`validate/semantics.rs`) | Capability existence, prerequisites, edge semantics |
 | Reference validation | Implemented | Rust core (`refs.rs`, `validate/bindings.rs`) | ${store_as} resolution |
 | Type system validation | Implemented | Rust core (`types.rs`, `schema.rs`) | Inferred and annotated types |
@@ -1365,7 +1365,7 @@ This matrix tracks the implementation status of every major feature across all s
 | Schema synchronizer | Implemented | `sync_skill_schemas.py` | Ontology-to-skill sync |
 | Transitive dependency bundling | Implemented | `sync_skill_schemas.py` | Reference directory population |
 | Path rewriting | Implemented | `sync_skill_schemas.py` | Internal path translation |
-| Conformance tests | Implemented | `scripts/run_conformance.py` | 82 workflow fixtures; runs in CI (`conformance` job) |
+| Conformance tests | Implemented | `scripts/run_conformance.py` | 83 workflow fixtures; runs in CI (`conformance` job) |
 
 ### 11.6 Interop Features
 

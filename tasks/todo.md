@@ -343,8 +343,8 @@ open, recorded rather than changed: `transform.output` is typed `object`
 in the ontology though a CSV-to-records transform naturally returns an
 array; the `schedule_management` compare step's `stop` gate (no free
 slots) still ends the run as a failure; some failure modes on non-effectful
-steps have no trigger and are documentation only. H2c (the commenter's
-fixtures) stays blocked on the archive being reachable from the session.
+steps have no trigger and are documentation only. (All three, and H2c,
+resolved since: see H2c results and H5.)
 
 #### H2c results
 The archive held the nine workflows, their combined catalog and the
@@ -353,7 +353,7 @@ here: a recorder drove each scenario through the executor, every action
 sequence was checked against the spec by hand, and the generator now
 builds them from `(step, capability, outputs)` lists. The combined catalog
 is `tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`, kept as
-contributed (two W601s). Thirteen `orchestrator_*` runtime fixtures; the
+contributed (two W601s; H5 replaced it with revision 1.1c and added three type annotations). Thirteen `orchestrator_*` runtime fixtures (fifteen since H5); the
 scenarios set every value a description names, rather than leaning on
 placeholder outputs.
 
@@ -385,8 +385,7 @@ What the runs show about the port (feedback for the author, not changed):
   of one parallel group (§4.3), and rollback after mutate is the normal
   recovery.
 - checkin_recovery waits on a `sweep.sample_delay` event as a timer; with
-  no such event the run fails R401. The standard has no timer step; a
-  candidate open question.
+  no such event the run fails R401. (Resolved in H4: step `delay`.)
 - delegate_to_thread filters reports by `accept_from: [${delegate_out.task_id}]`;
   a host that returns no task_id resolves it to `[]` and every report is
   dropped until the timeout. A waiting `delegate` (H2d) avoids this.
@@ -426,6 +425,62 @@ longer fires); W608 missed a delegate's or handler's own delay; `end` and
 `delay` in a parallel group were undefined (S303); the rationale for the
 null-correlate rule was wrong (a null key matched every event lacking it);
 `ended.message` invented text for a gate without one (now null); docs and
-fixture nits. Left open: a `spec_version: "1.0"` workflow using `end` (or
-`phase`) gets no diagnostic.
+fixture nits. Left open then: a `spec_version: "1.0"` workflow using `end`
+(or `phase`) got no diagnostic (W616 in H5).
+
+# H5: the small items left open (user, 2026-10-28)
+
+Decisions (AskUserQuestion): W616 warning; `object|array`; skip cascade;
+trigger or remove.
+- [x] **W616 `VERSION_FEATURE_MISMATCH`** (§11.5, §9.7): a workflow that
+  targets 1.0 by `spec_version` or header and uses
+  `workflow_extensions.requires`, gate `phase` or `end`, the `in`
+  operator, or failure-mode `when`/`on_error` warns once per feature at
+  its first use. Unit test, fixture
+  `pass_version_feature_mismatch`, Appendix C.
+- [x] **`transform.output: object|array`** (ontology 2.1.0); the four
+  unannotated references in the reference, domain and example catalogs,
+  and three in the test catalogs (the orchestrator port among them), are
+  annotated; skill contract and generated schemas synced.
+- [x] **schedule_management no-slot path**: compare and plan skip on no
+  results, generate skips without a plan, explain gets the slots and
+  conflicts, audit runs. Runtime fixture `domain_schedule_no_slot`.
+- [x] **Untriggered failure modes**: 15 triggered (`on_error` for step
+  errors, `when` on an empty or failing output), 8 removed (normal
+  outcomes, a later step or gate's check, a threshold that does not
+  exist); the twin's empty batch is a gate `end`.
+- [x] Spec, changelogs, guides, analysis counts; verify; review; fix; commit.
+
+#### H5b: the author's revision 1.1c (#114 comment 6473781445)
+Decisions (AskUserQuestion): keep `object|array` (breaking, called out);
+replace the port with 1.1c and re-script; ask the author for the gap runs;
+`retrieve` and `search` as soft prerequisites of `ground`.
+- [x] `pass_orchestrator_port` is 1.1c (+3 annotations); it validates
+  strict with no warnings now (the two W601s were `ground` after
+  retrieve/search).
+- [x] Eight fixtures re-scripted and checked by hand against the spec;
+  two new: `orchestrator_owner_research_again` (gate `end`) and
+  `orchestrator_checkin_escalation_no_topic`.
+- [x] Found by re-scripting, fixed in the core: a loop from a later step
+  (the quorum) re-delegated the reviewers without `replaces`
+  (`Frame.replaces` is now a list per waiting delegate; spec §5.13
+  wording; fixture `delegate_wait_replaced_by_later_loop`).
+- [x] Review (independent) and fixes: a pending replacement was dropped
+  when its delegate was skipped on the next pass (now kept until it
+  delegates; fixture); W616 fired on the 1.0 advisory `supports_*` flags
+  (now `workflow_extensions.requires` only) and missed the `in` operator
+  (`workflow_id`, also suggested, is in the 1.0 catalog, so stays out); §11.4 states the `transform.output` break; three
+  `when` triggers failed normal outcomes (rag now keys on no passages,
+  the multi-agent conflicts mode is removed, the twin's empty batch is a
+  gate `end`); recovery prose matches the action; check_state requires
+  pending replacements to name waiting delegates; 22 stale
+  composition-pattern copies synced; counts. Fixtures
+  `domain_twin_no_events`, `domain_rag_no_passages`. Left as is: a parent
+  loop does not replace waiting delegates inside an invoked child (the
+  spec is silent); pre-change dev snapshots with `replaces: null` do not
+  restore (unreleased).
+- [ ] Ask the author (on #114) for gap runs 1, 2, 3, 5 as fixtures; report
+  the checkin_recovery finding: `question: ${rows_out}` has no `topic`, so
+  owner_decision's answer wait correlates on null and fails R402 when the
+  owner is to be interrupted.
 

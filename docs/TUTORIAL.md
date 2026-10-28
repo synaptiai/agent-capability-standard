@@ -65,7 +65,7 @@ Some capabilities depend on others running first. The ontology's edges say how s
 |------------|-------------|------|------------|
 | `mutate`, `send`, `rollback` | `checkpoint` | `requires` | Error V102 — need a recovery point |
 | `execute`, `mutate`, `send` | `constrain` | `soft_requires` | Warning W601 — act within stated limits |
-| `ground` | one of `observe`, `detect`, `predict`, `attribute`, `explain` | `soft_requires` | Warning W601 — need something to ground |
+| `ground` | one of `observe`, `detect`, `predict`, `attribute`, `explain`, `retrieve`, `search` | `soft_requires` | Warning W601 — need something to ground |
 | `verify` | `execute`, `mutate`, `send` (when present) | `precedes` | Error V102 if they appear in the wrong order |
 
 A `precedes` edge only orders capabilities that are both in the workflow; a step in the same `parallel_group` does not count as running before another.

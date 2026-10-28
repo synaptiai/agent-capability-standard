@@ -1,0 +1,240 @@
+{
+  "description": "A loop replaces a waiting delegate's delegation when the delegate next delegates: a pass that skips it (its condition is false) keeps the replacement for the pass after.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "measure",
+          "purpose": "measure step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "load",
+            "metric": "x"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "condition": "${m.value} > 0",
+          "timeout": "2h",
+          "input_bindings": {
+            "task": {
+              "review": "x"
+            },
+            "agent": "a"
+          },
+          "wait": {
+            "event_type": "review.done"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "load",
+            "conditions": [
+              "ok"
+            ]
+          },
+          "failure_modes": [
+            {
+              "condition": "not verified",
+              "action": "request_more_context",
+              "when": "${v.passed} == false",
+              "recovery": {
+                "goto_step": "m",
+                "max_loops": 2
+              }
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "measure",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "value": 1,
+          "uncertainty": 0.1,
+          "confidence": 0.9,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 1,
+        "correlate": {
+          "task_id": "t1"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t1"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 0.9,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "measure",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "value": 0,
+          "uncertainty": 0.1,
+          "confidence": 0.9,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 0.9,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "measure",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "value": 1,
+          "uncertainty": 0.1,
+          "confidence": 0.9,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1,
+        "replaces": "t1"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 1,
+        "correlate": {
+          "task_id": "t2"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t2"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "confidence": 0.9,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "d": {
+        "task_id": "t2"
+      }
+    }
+  },
+  "trace_kinds": [
+    "step_skipped",
+    "loop",
+    "delegated"
+  ]
+}

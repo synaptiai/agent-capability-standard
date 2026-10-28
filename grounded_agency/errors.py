@@ -92,6 +92,7 @@ class ErrorCode(Enum):
     UNREACHABLE_HANDLER = "W613"
     INVALID_DURATION = "W614"
     MISSING_INPUT = "W615"
+    VERSION_FEATURE_MISMATCH = "W616"
 
     @property
     def severity(self) -> Severity:

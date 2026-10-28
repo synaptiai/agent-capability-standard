@@ -527,14 +527,14 @@ impl<'a> Machine<'a> {
         }
         let f = self.frame();
         // A recovery loop back to a waiting delegate replaces its delegation
-        // when that step runs again, as a retry does.
-        let replaces = match f.replaces.take() {
-            Some(r) if r.step == index => Some(r.task_id),
-            other => {
-                f.replaces = other;
-                None
-            }
-        };
+        // when that step next delegates, as a retry does. The entry stays
+        // pending until the delegation is made: a pass that skips or defers
+        // the step keeps it for the next.
+        let replaces = f
+            .replaces
+            .iter()
+            .find(|r| r.step == index)
+            .map(|r| r.task_id.clone());
         f.cur = StepState {
             replaces,
             ..StepState::default()
@@ -1427,7 +1427,9 @@ impl<'a> Machine<'a> {
                 );
             }
             self.trace_step("delegated", json!({"task_id": value.get("task_id")}));
-            self.frame().cur.delegated = Some(value);
+            let f = self.frame();
+            f.replaces.retain(|r| r.step != step.index);
+            f.cur.delegated = Some(value);
             return self.set_stage(Stage::Execute);
         }
         if step.capability == "checkpoint" {
@@ -1797,22 +1799,40 @@ impl<'a> Machine<'a> {
                 format!("the context a recovery loop injects: {e}"),
             )));
         }
-        // A loop that runs a waiting delegate again replaces its delegation:
-        // the one it holds, or, when a retry's re-delegation failed, the one
-        // that retry was replacing.
-        if target <= step.index {
-            let cur = &self.frame_ref().cur;
-            let task = cur
-                .delegated
-                .as_ref()
-                .and_then(|d| d.get("task_id"))
-                .cloned()
-                .or_else(|| cur.replaces.clone());
-            if let Some(task_id) = task {
-                self.frame().replaces = Some(Replacement {
-                    step: step.index,
-                    task_id,
-                });
+        // A loop runs again every waiting delegate from its target to this
+        // step, and each replaces its delegation (§5.13). This step's is the
+        // one it holds or, when a retry's re-delegation failed, the one that
+        // retry was replacing; an earlier step's is in its output, or still
+        // pending from an earlier loop when the step did not run since.
+        if target <= step.index && wf.extension("wait@1") {
+            for s in &wf.steps[target..=step.index] {
+                if s.capability != "delegate" || !s.raw.get("wait").is_some_and(Value::is_object) {
+                    continue;
+                }
+                let f = self.frame_ref();
+                let task = if s.index == step.index {
+                    f.cur
+                        .delegated
+                        .as_ref()
+                        .and_then(|d| d.get("task_id"))
+                        .cloned()
+                        .or_else(|| f.cur.replaces.clone())
+                } else {
+                    s.store_as
+                        .as_ref()
+                        .and_then(|k| f.stores.get(k))
+                        .and_then(|v| v.get("task_id"))
+                        .cloned()
+                };
+                if let Some(task_id) = task {
+                    let pending = &mut self.frame().replaces;
+                    pending.retain(|r| r.step != s.index);
+                    pending.push(Replacement {
+                        step: s.index,
+                        task_id,
+                    });
+                    pending.sort_by_key(|r| r.step);
+                }
             }
         }
         let cleared: Vec<String> = wf.steps[target..]

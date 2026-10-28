@@ -93,6 +93,7 @@ meaning. New codes:
 | W613 | UNREACHABLE_HANDLER | `handler: true` step that no escalation targets |
 | W614 | INVALID_DURATION | legacy `timeout` value outside the duration grammar |
 | W615 | MISSING_INPUT | a required capability input the step does not bind (added with the remaining open items) |
+| W616 | VERSION_FEATURE_MISMATCH | a workflow that targets 1.0 uses a feature new in 1.1 (added with the #114 follow-ups) |
 
 ## 4. Catalog and workflow model
 

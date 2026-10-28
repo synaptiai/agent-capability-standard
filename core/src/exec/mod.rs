@@ -438,10 +438,10 @@ pub(crate) struct Frame {
     /// Invoked by a marked step: every step of this run is marked.
     #[serde(default)]
     pub marked: bool,
-    /// A recovery loop back to (or to before) a waiting delegate: the
-    /// delegation that step's next delegation replaces.
+    /// A recovery loop back to (or to before) waiting delegates: the
+    /// delegation each one's next delegation replaces, in step order.
     #[serde(default)]
-    pub replaces: Option<Replacement>,
+    pub replaces: Vec<Replacement>,
     /// A gate ended this run (`action: end`): `{step, message}`.
     #[serde(default)]
     pub ended: Option<Value>,
@@ -757,11 +757,15 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
         if f.cur.record.is_some_and(|r| r >= st.records.len()) {
             return Err("a step refers to a missing action record".into());
         }
-        if f.replaces
-            .as_ref()
-            .is_some_and(|r| r.step >= wf.steps.len())
+        let waiting_delegate = |i: usize| {
+            wf.steps.get(i).is_some_and(|s| {
+                s.capability == "delegate" && s.raw.get("wait").is_some_and(Value::is_object)
+            })
+        };
+        if !f.replaces.iter().all(|r| waiting_delegate(r.step))
+            || !f.replaces.windows(2).all(|w| w[0].step < w[1].step)
         {
-            return Err("a replaced delegation names a step out of range".into());
+            return Err("replaced delegations must name waiting delegate steps, in order".into());
         }
         // Deferred steps come before the current one, except while a
         // handler runs: it may be listed before the steps it escalates from.
@@ -878,7 +882,7 @@ impl Frame {
             nested_caps: BTreeMap::new(),
             always_ask: BTreeSet::new(),
             marked: false,
-            replaces: None,
+            replaces: Vec::new(),
         }
     }
 }

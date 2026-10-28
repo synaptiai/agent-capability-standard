@@ -1,0 +1,277 @@
+{
+  "description": "rag_pipeline when the retrieved documents hold no relevant passage: the generate step's failure mode fires on the empty detection, and the run ends R402 before grounding.",
+  "catalog": {
+    "rag_pipeline": {
+      "goal": "Retrieve relevant information and generate a grounded, evidence-cited response.",
+      "risk": "low",
+      "description": "Retrieval-Augmented Generation pipeline inspired by OASF Category 6 (RAG).\nSearches for relevant documents, extracts pertinent passages, generates a\nresponse from them, anchors that response to the retrieved evidence, and\ncites sources.\nThis pattern ensures generated content is grounded in retrieved facts rather\nthan relying solely on parametric knowledge.\n",
+      "success": [
+        "Relevant documents found and retrieved",
+        "Response grounded in retrieved evidence",
+        "Sources cited with provenance"
+      ],
+      "steps": [
+        {
+          "capability": "search",
+          "purpose": "Find relevant documents matching the query.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": {
+            "max": 2,
+            "backoff": "exponential"
+          },
+          "store_as": "search_out",
+          "input_bindings": {
+            "query": "${user_query}"
+          },
+          "failure_modes": [
+            {
+              "condition": "No relevant documents found",
+              "when": "${search_out.results} == []",
+              "action": "request_more_context",
+              "recovery": "Broaden search terms or ask user for additional context."
+            }
+          ]
+        },
+        {
+          "capability": "retrieve",
+          "purpose": "Fetch full content of relevant documents.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": {
+            "max": 2,
+            "backoff": "exponential"
+          },
+          "store_as": "retrieve_out",
+          "input_bindings": {
+            "target": "${user_query}",
+            "references": "${search_out.results: array<object>}"
+          },
+          "failure_modes": [
+            {
+              "condition": "Document retrieval fails",
+              "on_error": [
+                "R401",
+                "R402"
+              ],
+              "action": "request_more_context",
+              "recovery": "The run ends with the retrieval error; try alternative sources in a new run."
+            }
+          ]
+        },
+        {
+          "capability": "detect",
+          "purpose": "Extract relevant passages from retrieved documents.",
+          "domain": "relevance",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "detect_out",
+          "input_bindings": {
+            "data": "${retrieve_out.data: object}",
+            "pattern": "${user_query}"
+          },
+          "failure_modes": []
+        },
+        {
+          "capability": "generate",
+          "purpose": "Produce a response synthesized from the relevant passages.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "generate_out",
+          "input_bindings": {
+            "specification": {
+              "question": "${user_query}",
+              "passages": "${detect_out.matches: array<object>}"
+            }
+          },
+          "failure_modes": [
+            {
+              "condition": "Insufficient evidence for coherent response",
+              "when": "${detect_out.matches} == []",
+              "action": "stop",
+              "recovery": "Report that available evidence is insufficient and cite what was found."
+            }
+          ]
+        },
+        {
+          "capability": "ground",
+          "purpose": "Anchor the generated response to the retrieved evidence with provenance.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "ground_out",
+          "input_bindings": {
+            "claim": "${generate_out.content: string}",
+            "sources": "${search_out.results: array<object>}"
+          },
+          "failure_modes": []
+        },
+        {
+          "capability": "explain",
+          "purpose": "Cite sources and provide reasoning chain for the response.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "explain_out",
+          "input_bindings": {
+            "conclusion": {
+              "response": "${generate_out.content: string}",
+              "evidence": "${ground_out.evidence: array<object>}",
+              "gaps": "${ground_out.gaps: array<object>}"
+            }
+          },
+          "failure_modes": []
+        },
+        {
+          "capability": "audit",
+          "purpose": "Record retrieval provenance and generation lineage.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "audit_out",
+          "input_bindings": {
+            "event": {
+              "type": "rag_pipeline",
+              "query": "${user_query}",
+              "grounded": "${ground_out.grounded}",
+              "response": "${generate_out.content: string}"
+            }
+          },
+          "failure_modes": []
+        }
+      ],
+      "risk_propagation": {
+        "strategy": "max_step_risk",
+        "computed_risk": "low"
+      },
+      "data_flow": {
+        "pattern": "step_outputs_are_addressable",
+        "rule": "Each step output is stored under store_as and may be referenced by later steps."
+      },
+      "inputs": {
+        "user_query": {
+          "type": "string",
+          "required": true,
+          "description": "The user query to answer using retrieved information"
+        }
+      }
+    }
+  },
+  "workflow": "rag_pipeline",
+  "inputs": {
+    "user_query": "q"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 0,
+        "frame": [
+          "rag_pipeline"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [
+            {
+              "id": "doc-1"
+            }
+          ],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 1,
+        "frame": [
+          "rag_pipeline"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "detect",
+        "step": 2,
+        "frame": [
+          "rag_pipeline"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "detected": false,
+          "evidence_anchors": [],
+          "confidence": 1.0,
+          "matches": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "generate",
+        "step": 3,
+        "frame": [
+          "rag_pipeline"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "content": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 3
+  },
+  "trace_kinds": [
+    "failure_mode_fired",
+    "run_failed"
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "description": "A self-merge: the build and the merge are each approved under a mandate (the merge after a recheck), CI on the merged head passes, and the hand-off to another merger is skipped.",
+  "description": "A self-merge: the build and the merge are each approved under a mandate (the merge after a recheck), CI on the merge commit passes, and the hand-off to another merger is skipped.",
   "catalog": {
     "delegate_to_thread": {
       "goal": "Give one task to one thread with a self-contained brief, prove the thread is alive, and accept its result only after checking it at the source.",
@@ -219,6 +219,12 @@
               "when": "${brief_check_out.compliant} == false",
               "action": "stop",
               "message": "The brief breaks a brief rule. Fix the brief first."
+            },
+            {
+              "when": "${delegate_out.task_id} == null",
+              "phase": "after",
+              "action": "stop",
+              "message": "The host returned no task id, so no report can be matched to this thread. Do not record or wait."
             }
           ],
           "failure_modes": [
@@ -390,7 +396,7 @@
     "merge_ship": {
       "goal": "Bring one reviewed change onto its base only when every written gate holds on the final head SHA, by the merger the owner's policy names, and call it done only when post-merge CI is green.",
       "risk": "high",
-      "description": "Two exits share one gate check. When the policy names the orchestrator as\nmerger, it merges with --match-head-commit. When the policy names a human or\nanother orchestrator (for example the maintainer of another repository), it\nsends one READY line with the evidence and does not merge. A merge cannot be\nrolled back by a checkpoint: the recovery for a red base is a fix thread and a\nBLOCKED notice, not `rollback` (the ontology forbids mutate and rollback in one\nworkflow: conflicts_with).\n",
+      "description": "Two exits share one gate check. When the policy names the orchestrator as\nmerger, it merges with --match-head-commit. When the policy names a human or\nanother orchestrator (for example the maintainer of another repository), it\nsends one READY line with the evidence and does not merge. A merge cannot be\nundone by restoring a checkpoint, so the recovery for a red base is a fix thread\nand a BLOCKED notice, not `rollback`. (The ontology allows a rollback after a\nmutate; conflicts_with only keeps the two out of one parallel group.)\nA squash merge makes a new commit: post-merge CI is matched on that commit.\n",
       "workflow_extensions": {
         "requires": [
           "approval@1",
@@ -600,7 +606,7 @@
         },
         {
           "capability": "mutate",
-          "purpose": "Merge with gh pr merge --squash --match-head-commit (never --admin on path a) when the orchestrator is the merger.",
+          "purpose": "Merge with gh pr merge --squash --match-head-commit (never --admin on path a) when the orchestrator is the merger. The host returns the merge commit in new_state.merge_sha; post-merge CI is matched on it, not on the head SHA.",
           "risk": "high",
           "mutation": true,
           "requires_checkpoint": true,
@@ -712,7 +718,7 @@
             "event_type": "ci.complete",
             "source_kind": "api",
             "correlate": {
-              "sha": "${change.head_sha}"
+              "sha": "${merge_out.new_state.merge_sha: string}"
             }
           }
         },
@@ -901,14 +907,6 @@
               "type": "string"
             }
           }
-        },
-        "run": {
-          "type": "object",
-          "properties": {
-            "unattended": {
-              "type": "boolean"
-            }
-          }
         }
       },
       "steps": [
@@ -966,7 +964,6 @@
           "input_bindings": {
             "goal": "${request.intent}",
             "constraints": {
-              "unattended": "${run.unattended}",
               "policy_violations": "${policy_out.violations: array<object>}"
             }
           }
@@ -1123,11 +1120,6 @@
           },
           "gates": [
             {
-              "when": "${run.unattended} == true",
-              "action": "skip",
-              "message": "Unattended run - the ActionRecord stays planned and goes to the top of the next brief or digest."
-            },
-            {
               "when": "${text_check_out.compliant} == false",
               "action": "stop",
               "message": "The text fails the outbound check."
@@ -1182,7 +1174,7 @@
         },
         {
           "capability": "persist",
-          "purpose": "Update the ActionRecord to executed (or keep planned when deferred) and add the log line.",
+          "purpose": "Update the ActionRecord to executed and add the log line. In an unattended run this step is deferred with the send; the executor's planned record holds the queued send.",
           "risk": "low",
           "mutation": true,
           "store_as": "log_out",
@@ -1383,6 +1375,30 @@
             "target": "${ranking_out}",
             "constraints": "${profile.question_rules: array<string>}",
             "action_on_violation": "log"
+          },
+          "gates": [
+            {
+              "when": "${question_check_out.confidence} < 0.7",
+              "action": "end",
+              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Queue the question with its three options for the next brief, when it is not an interrupt.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "queued_out",
+          "condition": "${ask_policy_out.compliant} == false && !(${route_out.confidence} > 0.85 && ${route_out.labels} == [\"decide_self\"])",
+          "skip_if_false": true,
+          "input_bindings": {
+            "data": {
+              "question": "${question}",
+              "ranking": "${ranking_out.ranking: array<object>}",
+              "recommendation": "${ranking_out.recommendation}"
+            },
+            "key": "brief_queue"
           }
         },
         {
@@ -1407,13 +1423,8 @@
             },
             {
               "when": "${ask_policy_out.compliant} == false",
-              "action": "skip",
-              "message": "Not an interrupt. The question waits in the next brief."
-            },
-            {
-              "when": "${question_check_out.confidence} < 0.7",
-              "action": "stop",
-              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+              "action": "end",
+              "message": "Not an interrupt. The question waits in the next brief; nothing is applied now."
             }
           ]
         },
@@ -1456,7 +1467,14 @@
             ],
             "strategy": "answer_overrides_recommendation",
             "conflict_resolution": "escalate_to_human"
-          }
+          },
+          "gates": [
+            {
+              "when": "${inquiry_out} != null && ${answer_out} == null",
+              "action": "stop",
+              "message": "The owner was asked but no answer was received. Do not apply the recommendation."
+            }
+          ]
         },
         {
           "capability": "checkpoint",
@@ -1536,7 +1554,7 @@
     "incident_triage": {
       "goal": "When a shared environment breaks (CI on the base branch, remote host, a staging deploy, the shared workstation), find out what is true, contain it on own resources only, get the cause fixed by the right owner, and tell the people who depend on it.",
       "risk": "high",
-      "description": "The orchestrator owns its own threads, caches and processes. It does not own\nother people's environments: there it reports with evidence and waits for the\nowner of the area. Containment on own resources is a `mutate`; recovery from a\nbad containment step is the failure action `rollback` to the checkpoint, not a\nrollback step (mutate conflicts_with rollback in the ontology).\n",
+      "description": "The orchestrator owns its own threads, caches and processes. It does not own\nother people's environments: there it reports with evidence and waits for the\nowner of the area. Containment on own resources is a `mutate`; recovery from a\nbad containment step is the failure action `rollback` to the checkpoint, which\nties the rollback to the step that failed. (The ontology allows a rollback after\na mutate; conflicts_with only keeps the two out of one parallel group.)\nIn prod the notice goes out first, then the run ends as completed: report and ask.\n",
       "workflow_extensions": {
         "requires": [
           "approval@1",
@@ -1739,6 +1757,22 @@
           }
         },
         {
+          "capability": "invoke",
+          "purpose": "Post the BLOCKED notice or the evidence to the area owner through the outbound workflow.",
+          "risk": "medium",
+          "mutation": false,
+          "store_as": "notice_out",
+          "input_bindings": {
+            "workflow": "outbound_message",
+            "input": {
+              "request": {
+                "intent": "incident_notice",
+                "place_of_ask": "${environment.notify_channel}"
+              }
+            }
+          }
+        },
+        {
           "capability": "checkpoint",
           "purpose": "Record the environment state before containment.",
           "risk": "low",
@@ -1747,7 +1781,14 @@
           "input_bindings": {
             "scope": "${environment.name}",
             "label": "pre_containment"
-          }
+          },
+          "gates": [
+            {
+              "when": "${environment.is_prod} == true",
+              "action": "end",
+              "message": "Prod - report and ask; do not act. The notice has gone to the area owner."
+            }
+          ]
         },
         {
           "capability": "mutate",
@@ -1783,11 +1824,6 @@
               "when": "${policy_out.compliant} == false",
               "action": "stop",
               "message": "Not an own resource, or the step needs the owner's go."
-            },
-            {
-              "when": "${environment.is_prod} == true",
-              "action": "stop",
-              "message": "Prod - report and ask; do not act."
             }
           ],
           "failure_modes": [
@@ -1814,22 +1850,6 @@
             "workflow": "delegate_to_thread",
             "input": {
               "task": "${plan_out}"
-            }
-          }
-        },
-        {
-          "capability": "invoke",
-          "purpose": "Post the BLOCKED notice or the evidence to the area owner through the outbound workflow.",
-          "risk": "medium",
-          "mutation": false,
-          "store_as": "notice_out",
-          "input_bindings": {
-            "workflow": "outbound_message",
-            "input": {
-              "request": {
-                "intent": "incident_notice",
-                "place_of_ask": "${environment.notify_channel}"
-              }
             }
           }
         },
@@ -2182,7 +2202,10 @@
         "kind": "Output",
         "value": {
           "success": true,
-          "evidence_anchors": []
+          "evidence_anchors": [],
+          "new_state": {
+            "merge_sha": "m456"
+          }
         }
       }
     },
@@ -2213,7 +2236,7 @@
         ],
         "event_type": "ci.complete",
         "correlate": {
-          "sha": "abc123"
+          "sha": "m456"
         }
       },
       "respond": {
@@ -2223,7 +2246,7 @@
           "source": {
             "kind": "api"
           },
-          "sha": "abc123"
+          "sha": "m456"
         },
         "principal": "peer"
       }

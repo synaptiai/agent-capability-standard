@@ -71,14 +71,6 @@
               "type": "string"
             }
           }
-        },
-        "run": {
-          "type": "object",
-          "properties": {
-            "unattended": {
-              "type": "boolean"
-            }
-          }
         }
       },
       "steps": [
@@ -136,7 +128,6 @@
           "input_bindings": {
             "goal": "${request.intent}",
             "constraints": {
-              "unattended": "${run.unattended}",
               "policy_violations": "${policy_out.violations: array<object>}"
             }
           }
@@ -293,11 +284,6 @@
           },
           "gates": [
             {
-              "when": "${run.unattended} == true",
-              "action": "skip",
-              "message": "Unattended run - the ActionRecord stays planned and goes to the top of the next brief or digest."
-            },
-            {
               "when": "${text_check_out.compliant} == false",
               "action": "stop",
               "message": "The text fails the outbound check."
@@ -352,7 +338,7 @@
         },
         {
           "capability": "persist",
-          "purpose": "Update the ActionRecord to executed (or keep planned when deferred) and add the log line.",
+          "purpose": "Update the ActionRecord to executed and add the log line. In an unattended run this step is deferred with the send; the executor's planned record holds the queued send.",
           "risk": "low",
           "mutation": true,
           "store_as": "log_out",
@@ -404,9 +390,6 @@
       "source_refs": [
         "doc-1"
       ]
-    },
-    "run": {
-      "unattended": false
     }
   },
   "attendance": "attended",

@@ -14,8 +14,8 @@ output_schema:
   - confidence
   properties:
     output:
-      type: object
-      description: Transformed data
+      type: object|array
+      description: Transformed data, a mapping or a list (such as CSV rows as records)
     changes:
       type: array
       description: Applied transformations

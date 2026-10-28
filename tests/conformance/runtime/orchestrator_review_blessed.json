@@ -1,5 +1,5 @@
 {
-  "description": "Two fresh reviewers of different families both bless the pinned head: the verdict post is approved under the mandate after a recheck, and the quorum passes.",
+  "description": "Two fresh, read-only reviewers of different families, each a waiting delegate, both bless the pinned head: the verdict post is approved under the mandate after a recheck, and the quorum passes.",
   "catalog": {
     "delegate_to_thread": {
       "goal": "Give one task to one thread with a self-contained brief, prove the thread is alive, and accept its result only after checking it at the source.",
@@ -219,6 +219,12 @@
               "when": "${brief_check_out.compliant} == false",
               "action": "stop",
               "message": "The brief breaks a brief rule. Fix the brief first."
+            },
+            {
+              "when": "${delegate_out.task_id} == null",
+              "phase": "after",
+              "action": "stop",
+              "message": "The host returned no task id, so no report can be matched to this thread. Do not record or wait."
             }
           ],
           "failure_modes": [
@@ -597,7 +603,7 @@
         },
         {
           "capability": "delegate",
-          "purpose": "Reviewer A, fresh thread, read-only, runs tests and sabotage in its own scratch worktree.",
+          "purpose": "Reviewer A, fresh thread, read-only, runs tests and sabotage in its own scratch worktree; the step waits for A's own verdict. A silent or late A is replaced alone.",
           "risk": "medium",
           "mutation": false,
           "store_as": "reviewer_a_out",
@@ -615,79 +621,17 @@
             "agent": "reviewer-a",
             "fresh_context": true,
             "model_family": "family_a",
-            "role": "reviewer"
-          }
-        },
-        {
-          "capability": "delegate",
-          "purpose": "Reviewer B, fresh thread, full sweep without review history; second model family on critical changes.",
-          "risk": "medium",
-          "mutation": false,
-          "store_as": "reviewer_b_out",
-          "parallel_group": "reviewers",
-          "join": "all_complete",
-          "input_bindings": {
-            "task": "${brief_b_out.content: object}",
-            "agent": "reviewer-b",
-            "fresh_context": true,
-            "model_family": "family_b",
-            "role": "reviewer"
+            "role": "reviewer",
+            "read_only": true,
+            "accept_from": [
+              "reviewer-a"
+            ]
           },
-          "gates": [
-            {
-              "when": "${brief_b_check_out.compliant} == false",
-              "action": "stop",
-              "message": "Brief B leaks review history. It is not a full sweep. Rewrite it."
-            }
-          ]
-        },
-        {
-          "capability": "synchronize",
-          "purpose": "Wait for both verdicts; end the turn and resume on each turn end. A reviewer silent for 45 min with no state update for 30 min is stopped and replaced.",
-          "risk": "medium",
-          "mutation": false,
-          "store_as": "reviews_sync_out",
           "timeout": "45m",
-          "input_bindings": {
-            "agents": [
-              "reviewer-a",
-              "reviewer-b"
-            ],
-            "state": {
-              "expect": "verdict",
-              "head_sha": "${change.head_sha}"
-            }
+          "retry": {
+            "max": 1,
+            "backoff": "none"
           },
-          "failure_modes": [
-            {
-              "condition": "A reviewer stopped answering liveness probes (R406). Re-check the wait once, then hand to the decider.",
-              "on_error": [
-                "R406"
-              ],
-              "action": "request_more_context",
-              "recovery": {
-                "goto_step": "reviews_sync_out",
-                "max_loops": 1,
-                "on_exhausted": {
-                  "goto_step": "round_cap_out"
-                }
-              }
-            },
-            {
-              "condition": "A reviewer did not finish within the timeout (R401). Start the reviewers again once, then hand to the decider.",
-              "on_error": [
-                "R401"
-              ],
-              "action": "pause_and_checkpoint",
-              "recovery": {
-                "goto_step": "reviewer_a_out",
-                "max_loops": 1,
-                "on_exhausted": {
-                  "goto_step": "round_cap_out"
-                }
-              }
-            }
-          ],
           "wait": {
             "event_type": "thread.turn_end",
             "source_kind": "agent",
@@ -699,24 +643,77 @@
               "interval": "10m",
               "failure_threshold": 3
             }
-          }
+          },
+          "failure_modes": [
+            {
+              "condition": "Reviewer A went silent (R406) or did not finish in time (R401), also after one replacement (the retry replaces only this reviewer). Hand to the decider.",
+              "on_error": [
+                "R401",
+                "R406"
+              ],
+              "action": "escalate",
+              "recovery": {
+                "goto_step": "round_cap_out"
+              }
+            }
+          ]
         },
         {
-          "capability": "receive",
-          "purpose": "Collect each verdict from its own reviewer session (mailbox or verdict file).",
-          "risk": "low",
+          "capability": "delegate",
+          "purpose": "Reviewer B, fresh thread, read-only, full sweep without review history; second model family on critical changes. The step waits for B's own verdict.",
+          "risk": "medium",
           "mutation": false,
-          "store_as": "verdicts_out",
+          "store_as": "reviewer_b_out",
+          "parallel_group": "reviewers",
+          "join": "all_complete",
           "input_bindings": {
-            "channel": "mailbox",
-            "filter": {
-              "head_sha": "${change.head_sha}"
-            },
+            "task": "${brief_b_out.content: object}",
+            "agent": "reviewer-b",
+            "fresh_context": true,
+            "model_family": "family_b",
+            "role": "reviewer",
+            "read_only": true,
             "accept_from": [
-              "reviewer-a",
               "reviewer-b"
             ]
-          }
+          },
+          "gates": [
+            {
+              "when": "${brief_b_check_out.compliant} == false",
+              "action": "stop",
+              "message": "Brief B leaks review history. It is not a full sweep. Rewrite it."
+            }
+          ],
+          "timeout": "45m",
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          },
+          "wait": {
+            "event_type": "thread.turn_end",
+            "source_kind": "agent",
+            "correlate": {
+              "head_sha": "${change.head_sha}"
+            },
+            "liveness": {
+              "mode": "probe",
+              "interval": "10m",
+              "failure_threshold": 3
+            }
+          },
+          "failure_modes": [
+            {
+              "condition": "Reviewer B went silent (R406) or did not finish in time (R401), also after one replacement (the retry replaces only this reviewer). Hand to the decider.",
+              "on_error": [
+                "R401",
+                "R406"
+              ],
+              "action": "escalate",
+              "recovery": {
+                "goto_step": "round_cap_out"
+              }
+            }
+          ]
         },
         {
           "capability": "classify",
@@ -725,7 +722,10 @@
           "mutation": false,
           "store_as": "verdict_class_out",
           "input_bindings": {
-            "item": "${verdicts_out.data: array<object>}",
+            "item": [
+              "${reviewer_a_out.result: object}",
+              "${reviewer_b_out.result: object}"
+            ],
             "taxonomy": [
               "BLESSED",
               "RETHINK",
@@ -741,7 +741,10 @@
           "mutation": false,
           "store_as": "finding_check_out",
           "input_bindings": {
-            "target": "${verdicts_out.data: array<object>}",
+            "target": [
+              "${reviewer_a_out.result: object}",
+              "${reviewer_b_out.result: object}"
+            ],
             "criteria": [
               "trigger_reproducible",
               "file_line_evidence",
@@ -757,7 +760,10 @@
           "mutation": false,
           "store_as": "post_check_out",
           "input_bindings": {
-            "target": "${verdicts_out.data: array<object>}",
+            "target": [
+              "${reviewer_a_out.result: object}",
+              "${reviewer_b_out.result: object}"
+            ],
             "constraints": "${policy.post_rules: array<string>}",
             "action_on_violation": "block"
           }
@@ -783,7 +789,10 @@
           "store_as": "post_out",
           "input_bindings": {
             "destination": "${change.number}",
-            "payload": "${verdicts_out.data: array<object>}",
+            "payload": [
+              "${reviewer_a_out.result: object}",
+              "${reviewer_b_out.result: object}"
+            ],
             "protocol": "github_pr_review_comment"
           },
           "approval": {
@@ -792,7 +801,8 @@
               "mandate_ref": "mandates"
             },
             "shows": [
-              "${verdicts_out.data}",
+              "${reviewer_a_out.result}",
+              "${reviewer_b_out.result}",
               "${change.head_sha}"
             ],
             "binds_to": "digest",
@@ -833,14 +843,20 @@
           "mutation": false,
           "store_as": "quorum_out",
           "input_bindings": {
-            "target": "${verdicts_out.data}",
+            "target": [
+              "${reviewer_a_out.result: object}",
+              "${reviewer_b_out.result: object}"
+            ],
             "constraints": [
               "two_independent_blessed_on_head"
             ],
             "action_on_violation": "block"
           },
           "quorum": {
-            "verdicts": "${verdicts_out.data}",
+            "verdicts": [
+              "${reviewer_a_out.result: object}",
+              "${reviewer_b_out.result: object}"
+            ],
             "reviewers": [
               "reviewer_a_out",
               "reviewer_b_out"
@@ -868,7 +884,8 @@
             "require_model_families": [
               "family_a",
               "family_b"
-            ]
+            ],
+            "require_read_only": true
           },
           "failure_modes": [
             {
@@ -1099,6 +1116,30 @@
             "target": "${ranking_out}",
             "constraints": "${profile.question_rules: array<string>}",
             "action_on_violation": "log"
+          },
+          "gates": [
+            {
+              "when": "${question_check_out.confidence} < 0.7",
+              "action": "end",
+              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Queue the question with its three options for the next brief, when it is not an interrupt.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "queued_out",
+          "condition": "${ask_policy_out.compliant} == false && !(${route_out.confidence} > 0.85 && ${route_out.labels} == [\"decide_self\"])",
+          "skip_if_false": true,
+          "input_bindings": {
+            "data": {
+              "question": "${question}",
+              "ranking": "${ranking_out.ranking: array<object>}",
+              "recommendation": "${ranking_out.recommendation}"
+            },
+            "key": "brief_queue"
           }
         },
         {
@@ -1123,13 +1164,8 @@
             },
             {
               "when": "${ask_policy_out.compliant} == false",
-              "action": "skip",
-              "message": "Not an interrupt. The question waits in the next brief."
-            },
-            {
-              "when": "${question_check_out.confidence} < 0.7",
-              "action": "stop",
-              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+              "action": "end",
+              "message": "Not an interrupt. The question waits in the next brief; nothing is applied now."
             }
           ]
         },
@@ -1172,7 +1208,14 @@
             ],
             "strategy": "answer_overrides_recommendation",
             "conflict_resolution": "escalate_to_human"
-          }
+          },
+          "gates": [
+            {
+              "when": "${inquiry_out} != null && ${answer_out} == null",
+              "action": "stop",
+              "message": "The owner was asked but no answer was received. Do not apply the recommendation."
+            }
+          ]
         },
         {
           "capability": "checkpoint",
@@ -1435,12 +1478,46 @@
         "value": {
           "accepted": true,
           "evidence_anchors": [],
-          "task_id": "rv-a",
+          "task_id": "rv-a1",
           "effective": {
             "fresh_context": true,
-            "model_family": "family_a"
+            "model_family": "family_a",
+            "read_only": true
           }
         }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 9,
+        "frame": [
+          "review_gate"
+        ],
+        "event_type": "thread.turn_end",
+        "correlate": {
+          "head_sha": "abc123",
+          "task_id": "rv-a1"
+        },
+        "accept_from": [
+          "reviewer-a"
+        ]
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "thread.turn_end",
+          "source": {
+            "kind": "agent"
+          },
+          "head_sha": "abc123",
+          "task_id": "rv-a1",
+          "reviewer_id": "reviewer-a",
+          "value": "BLESSED",
+          "pinned": "abc123",
+          "scope": "full"
+        },
+        "principal": "reviewer-a"
       }
     },
     {
@@ -1457,10 +1534,11 @@
         "value": {
           "accepted": true,
           "evidence_anchors": [],
-          "task_id": "rv-b",
+          "task_id": "rv-b1",
           "effective": {
             "fresh_context": true,
-            "model_family": "family_b"
+            "model_family": "family_b",
+            "read_only": true
           }
         }
       }
@@ -1468,14 +1546,18 @@
     {
       "expect": {
         "kind": "AwaitEvent",
-        "step": 11,
+        "step": 10,
         "frame": [
           "review_gate"
         ],
         "event_type": "thread.turn_end",
         "correlate": {
-          "head_sha": "abc123"
-        }
+          "head_sha": "abc123",
+          "task_id": "rv-b1"
+        },
+        "accept_from": [
+          "reviewer-b"
+        ]
       },
       "respond": {
         "kind": "Event",
@@ -1484,46 +1566,21 @@
           "source": {
             "kind": "agent"
           },
-          "head_sha": "abc123"
+          "head_sha": "abc123",
+          "task_id": "rv-b1",
+          "reviewer_id": "reviewer-b",
+          "value": "BLESSED",
+          "pinned": "abc123",
+          "scope": "full"
         },
-        "principal": "peer"
-      }
-    },
-    {
-      "expect": {
-        "kind": "InvokeCapability",
-        "capability": "receive",
-        "step": 12,
-        "frame": [
-          "review_gate"
-        ]
-      },
-      "respond": {
-        "kind": "Output",
-        "value": {
-          "data": [
-            {
-              "reviewer_id": "reviewer-a",
-              "value": "BLESSED",
-              "pinned": "abc123",
-              "scope": "full"
-            },
-            {
-              "reviewer_id": "reviewer-b",
-              "value": "BLESSED",
-              "pinned": "abc123",
-              "scope": "full"
-            }
-          ],
-          "evidence_anchors": []
-        }
+        "principal": "reviewer-b"
       }
     },
     {
       "expect": {
         "kind": "InvokeCapability",
         "capability": "classify",
-        "step": 13,
+        "step": 11,
         "frame": [
           "review_gate"
         ]
@@ -1541,7 +1598,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "critique",
-        "step": 14,
+        "step": 12,
         "frame": [
           "review_gate"
         ]
@@ -1559,7 +1616,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "constrain",
-        "step": 15,
+        "step": 13,
         "frame": [
           "review_gate"
         ]
@@ -1576,7 +1633,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "checkpoint",
-        "step": 16,
+        "step": 14,
         "frame": [
           "review_gate"
         ]
@@ -1592,7 +1649,7 @@
     {
       "expect": {
         "kind": "RequestApproval",
-        "step": 17,
+        "step": 15,
         "frame": [
           "review_gate"
         ],
@@ -1614,7 +1671,7 @@
     {
       "expect": {
         "kind": "RecheckSource",
-        "step": 17,
+        "step": 15,
         "frame": [
           "review_gate"
         ]
@@ -1634,7 +1691,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "send",
-        "step": 17,
+        "step": 15,
         "frame": [
           "review_gate"
         ]
@@ -1651,7 +1708,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "verify",
-        "step": 18,
+        "step": 16,
         "frame": [
           "review_gate"
         ]
@@ -1669,7 +1726,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "audit",
-        "step": 20,
+        "step": 18,
         "frame": [
           "review_gate"
         ]
@@ -1698,6 +1755,7 @@
     }
   },
   "trace_kinds": [
+    "delegated",
     "quorum",
     "recheck",
     "approval_decided"

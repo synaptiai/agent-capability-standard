@@ -1,9 +1,11 @@
 # Standard version: 1.1.0
 # The nine orchestrator workflows the author of #114 ported to the v1.1
-# candidate (reduced, generic names), kept as contributed. They validate;
-# the two W601s are real: `ground` runs in outbound_message and daily_digest
-# with none of its soft prerequisites before it. The runtime fixtures named
-# orchestrator_* script runs of these workflows.
+# candidate (reduced, generic names), revision 1.1c (gate `end`, step
+# `delay`, `after_deferral`, a waiting `delegate` per reviewer), kept as
+# contributed but for three `: object` annotations on a transform's output,
+# which ontology 2.1.0 types `object|array` (a union needs an annotation,
+# B204). The runtime fixtures named orchestrator_* script runs of these
+# workflows.
 intake_triage:
   goal: Turn one incoming item (owner request, mention, GitHub event, mail, thread report) into exactly
     one routed next action on the board.
@@ -115,7 +117,7 @@ intake_triage:
     mutation: false
     store_as: authority_out
     input_bindings:
-      item: ${canonical_out.output}
+      item: "${canonical_out.output: object}"
       taxonomy:
       - owner
       - decision_person
@@ -131,7 +133,7 @@ intake_triage:
     mutation: false
     store_as: kind_out
     input_bindings:
-      item: ${canonical_out.output}
+      item: "${canonical_out.output: object}"
       taxonomy:
       - bug
       - security
@@ -152,7 +154,7 @@ intake_triage:
     mutation: false
     store_as: existing_out
     input_bindings:
-      query: ${canonical_out.output}
+      query: "${canonical_out.output: object}"
       scope: board_rows+open_threads+github_issues_and_prs_all_states
       limit: 20
   - capability: constrain
@@ -417,6 +419,11 @@ delegate_to_thread:
     - when: ${brief_check_out.compliant} == false
       action: stop
       message: The brief breaks a brief rule. Fix the brief first.
+    - when: ${delegate_out.task_id} == null
+      phase: after
+      action: stop
+      message: The host returned no task id, so no report can be matched to this thread. Do not record
+        or wait.
     failure_modes:
     - condition: remote host start fails (capacity or unavailable)
       action: request_more_context
@@ -709,7 +716,8 @@ review_gate:
       scope: ${change.worktree}
       label: pre_review
   - capability: delegate
-    purpose: Reviewer A, fresh thread, read-only, runs tests and sabotage in its own scratch worktree.
+    purpose: Reviewer A, fresh thread, read-only, runs tests and sabotage in its own scratch worktree;
+      the step waits for A's own verdict. A silent or late A is replaced alone.
     risk: medium
     mutation: false
     store_as: reviewer_a_out
@@ -725,9 +733,34 @@ review_gate:
       fresh_context: true
       model_family: family_a
       role: reviewer
+      read_only: true
+      accept_from:
+      - reviewer-a
+    timeout: 45m
+    retry:
+      max: 1
+      backoff: none
+    wait:
+      event_type: thread.turn_end
+      source_kind: agent
+      correlate:
+        head_sha: ${change.head_sha}
+      liveness:
+        mode: probe
+        interval: 10m
+        failure_threshold: 3
+    failure_modes:
+    - condition: Reviewer A went silent (R406) or did not finish in time (R401), also after one replacement
+        (the retry replaces only this reviewer). Hand to the decider.
+      on_error:
+      - R401
+      - R406
+      action: escalate
+      recovery:
+        goto_step: round_cap_out
   - capability: delegate
-    purpose: Reviewer B, fresh thread, full sweep without review history; second model family on critical
-      changes.
+    purpose: Reviewer B, fresh thread, read-only, full sweep without review history; second model family
+      on critical changes. The step waits for B's own verdict.
     risk: medium
     mutation: false
     store_as: reviewer_b_out
@@ -739,45 +772,17 @@ review_gate:
       fresh_context: true
       model_family: family_b
       role: reviewer
+      read_only: true
+      accept_from:
+      - reviewer-b
     gates:
     - when: ${brief_b_check_out.compliant} == false
       action: stop
       message: Brief B leaks review history. It is not a full sweep. Rewrite it.
-  - capability: synchronize
-    purpose: Wait for both verdicts; end the turn and resume on each turn end. A reviewer silent for 45
-      min with no state update for 30 min is stopped and replaced.
-    risk: medium
-    mutation: false
-    store_as: reviews_sync_out
     timeout: 45m
-    input_bindings:
-      agents:
-      - reviewer-a
-      - reviewer-b
-      state:
-        expect: verdict
-        head_sha: ${change.head_sha}
-    failure_modes:
-    - condition: A reviewer stopped answering liveness probes (R406). Re-check the wait once, then hand
-        to the decider.
-      on_error:
-      - R406
-      action: request_more_context
-      recovery:
-        goto_step: reviews_sync_out
-        max_loops: 1
-        on_exhausted:
-          goto_step: round_cap_out
-    - condition: A reviewer did not finish within the timeout (R401). Start the reviewers again once,
-        then hand to the decider.
-      on_error:
-      - R401
-      action: pause_and_checkpoint
-      recovery:
-        goto_step: reviewer_a_out
-        max_loops: 1
-        on_exhausted:
-          goto_step: round_cap_out
+    retry:
+      max: 1
+      backoff: none
     wait:
       event_type: thread.turn_end
       source_kind: agent
@@ -787,18 +792,15 @@ review_gate:
         mode: probe
         interval: 10m
         failure_threshold: 3
-  - capability: receive
-    purpose: Collect each verdict from its own reviewer session (mailbox or verdict file).
-    risk: low
-    mutation: false
-    store_as: verdicts_out
-    input_bindings:
-      channel: mailbox
-      filter:
-        head_sha: ${change.head_sha}
-      accept_from:
-      - reviewer-a
-      - reviewer-b
+    failure_modes:
+    - condition: Reviewer B went silent (R406) or did not finish in time (R401), also after one replacement
+        (the retry replaces only this reviewer). Hand to the decider.
+      on_error:
+      - R401
+      - R406
+      action: escalate
+      recovery:
+        goto_step: round_cap_out
   - capability: classify
     purpose: Read each verdict against the contract - BLESSED or RETHINK stated once, for the full head
       SHA; anything else is NO_VERDICT.
@@ -806,7 +808,9 @@ review_gate:
     mutation: false
     store_as: verdict_class_out
     input_bindings:
-      item: '${verdicts_out.data: array<object>}'
+      item: &id001
+      - '${reviewer_a_out.result: object}'
+      - '${reviewer_b_out.result: object}'
       taxonomy:
       - BLESSED
       - RETHINK
@@ -819,7 +823,7 @@ review_gate:
     mutation: false
     store_as: finding_check_out
     input_bindings:
-      target: '${verdicts_out.data: array<object>}'
+      target: *id001
       criteria:
       - trigger_reproducible
       - file_line_evidence
@@ -832,7 +836,7 @@ review_gate:
     mutation: false
     store_as: post_check_out
     input_bindings:
-      target: '${verdicts_out.data: array<object>}'
+      target: *id001
       constraints: '${policy.post_rules: array<string>}'
       action_on_violation: block
   - capability: checkpoint
@@ -854,14 +858,15 @@ review_gate:
     store_as: post_out
     input_bindings:
       destination: ${change.number}
-      payload: '${verdicts_out.data: array<object>}'
+      payload: *id001
       protocol: github_pr_review_comment
     approval:
       approver:
         kind: standing_mandate
         mandate_ref: mandates
       shows:
-      - ${verdicts_out.data}
+      - ${reviewer_a_out.result}
+      - ${reviewer_b_out.result}
       - ${change.head_sha}
       binds_to: digest
       recheck:
@@ -891,12 +896,12 @@ review_gate:
     mutation: false
     store_as: quorum_out
     input_bindings:
-      target: ${verdicts_out.data}
+      target: *id001
       constraints:
       - two_independent_blessed_on_head
       action_on_violation: block
     quorum:
-      verdicts: ${verdicts_out.data}
+      verdicts: *id001
       reviewers:
       - reviewer_a_out
       - reviewer_b_out
@@ -918,6 +923,7 @@ review_gate:
       require_model_families:
       - family_a
       - family_b
+      require_read_only: true
     failure_modes:
     - condition: Any RETHINK, missing or unpinned verdict (F504).
       on_error:
@@ -978,11 +984,13 @@ merge_ship:
 
     sends one READY line with the evidence and does not merge. A merge cannot be
 
-    rolled back by a checkpoint: the recovery for a red base is a fix thread and a
+    undone by restoring a checkpoint, so the recovery for a red base is a fix thread
 
-    BLOCKED notice, not `rollback` (the ontology forbids mutate and rollback in one
+    and a BLOCKED notice, not `rollback`. (The ontology allows a rollback after a
 
-    workflow: conflicts_with).
+    mutate; conflicts_with only keeps the two out of one parallel group.)
+
+    A squash merge makes a new commit: post-merge CI is matched on that commit.
 
     '
   workflow_extensions:
@@ -1141,7 +1149,8 @@ merge_ship:
       label: pre_merge
   - capability: mutate
     purpose: Merge with gh pr merge --squash --match-head-commit (never --admin on path a) when the orchestrator
-      is the merger.
+      is the merger. The host returns the merge commit in new_state.merge_sha; post-merge CI is matched
+      on it, not on the head SHA.
     risk: high
     mutation: true
     requires_checkpoint: true
@@ -1229,7 +1238,7 @@ merge_ship:
       event_type: ci.complete
       source_kind: api
       correlate:
-        sha: ${change.head_sha}
+        sha: '${merge_out.new_state.merge_sha: string}'
   - capability: observe
     purpose: Watch every workflow run on the merge commit on the base until none is pending (check at
       most every 270 s).
@@ -1374,11 +1383,6 @@ outbound_message:
             type: string
         style_key:
           type: string
-    run:
-      type: object
-      properties:
-        unattended:
-          type: boolean
   steps:
   - capability: retrieve
     purpose: Read the place of the ask and its recent history (the thread plus the last 2 h of the channel);
@@ -1425,7 +1429,6 @@ outbound_message:
     input_bindings:
       goal: ${request.intent}
       constraints:
-        unattended: ${run.unattended}
         policy_violations: '${policy_out.violations: array<object>}'
   - capability: generate
     purpose: Draft the text - signed "<assistant> (<agent>), on behalf of <owner>" where the channel needs
@@ -1546,10 +1549,6 @@ outbound_message:
       expires: 3d
       when_unattended: defer_to_queue
     gates:
-    - when: ${run.unattended} == true
-      action: skip
-      message: Unattended run - the ActionRecord stays planned and goes to the top of the next brief or
-        digest.
     - when: ${text_check_out.compliant} == false
       action: stop
       message: The text fails the outbound check.
@@ -1588,7 +1587,8 @@ outbound_message:
       - signature_present
       strict: true
   - capability: persist
-    purpose: Update the ActionRecord to executed (or keep planned when deferred) and add the log line.
+    purpose: Update the ActionRecord to executed and add the log line. In an unattended run this step
+      is deferred with the send; the executor's planned record holds the queued send.
     risk: low
     mutation: true
     store_as: log_out
@@ -1752,6 +1752,25 @@ owner_decision:
       target: ${ranking_out}
       constraints: '${profile.question_rules: array<string>}'
       action_on_violation: log
+    gates:
+    - when: ${question_check_out.confidence} < 0.7
+      action: end
+      message: The question or its options are not ready (two decisions in one, facts missing, already
+        answered). Research again.
+  - capability: persist
+    purpose: Queue the question with its three options for the next brief, when it is not an interrupt.
+    risk: low
+    mutation: true
+    store_as: queued_out
+    condition: ${ask_policy_out.compliant} == false && !(${route_out.confidence} > 0.85 && ${route_out.labels}
+      == ["decide_self"])
+    skip_if_false: true
+    input_bindings:
+      data:
+        question: ${question}
+        ranking: '${ranking_out.ranking: array<object>}'
+        recommendation: ${ranking_out.recommendation}
+      key: brief_queue
   - capability: inquire
     purpose: Present the question as a ask_card card in the owner's session.
     risk: low
@@ -1768,12 +1787,8 @@ owner_decision:
       action: skip
       message: The owner's rules cover it. Decide and log in unknowns.
     - when: ${ask_policy_out.compliant} == false
-      action: skip
-      message: Not an interrupt. The question waits in the next brief.
-    - when: ${question_check_out.confidence} < 0.7
-      action: stop
-      message: The question or its options are not ready (two decisions in one, facts missing, already
-        answered). Research again.
+      action: end
+      message: Not an interrupt. The question waits in the next brief; nothing is applied now.
   - capability: receive
     purpose: Take the answer only from the owner (a peer or a thread can never answer a ask_card); a free-text
       answer counts.
@@ -1805,6 +1820,10 @@ owner_decision:
       - '${ranking_out.ranking: array<object>}'
       strategy: answer_overrides_recommendation
       conflict_resolution: escalate_to_human
+    gates:
+    - when: ${inquiry_out} != null && ${answer_out} == null
+      action: stop
+      message: The owner was asked but no answer was received. Do not apply the recommendation.
   - capability: checkpoint
     purpose: Snapshot the memory folder before recording the decision.
     risk: low
@@ -1931,19 +1950,8 @@ checkin_recovery:
       - entry_count
       - last_entry_kind
       - updated_at
-  - capability: receive
-    purpose: Wait for the host to deliver the one-minute timer before the second sample.
-    risk: low
-    mutation: false
-    store_as: delay_out
-    timeout: 2m
-    input_bindings:
-      channel: host_timer
-    wait:
-      event_type: sweep.sample_delay
-      source_kind: message_bus
   - capability: observe
-    purpose: Second sample one minute later; the delta is the evidence.
+    purpose: Second sample one minute after the first (delay); the delta is the evidence.
     risk: low
     mutation: false
     store_as: sample_b_out
@@ -1955,6 +1963,7 @@ checkin_recovery:
       - entry_count
       - last_entry_kind
       - updated_at
+    delay: 1m
   - capability: detect
     purpose: Detect threads that are cancelled, failed, stalled on an approval, hung (no update for 30
       min), idle with unfinished work, or that never reported.
@@ -2057,8 +2066,9 @@ checkin_recovery:
       input:
         request: ${recovery_plan_out}
   - capability: invoke
-    purpose: Hand rows that have not moved for 2 working days, or that wait on the owner, to the owner
-      decision workflow.
+    purpose: 'Hand rows that have not moved for 2 working days, or that wait on the owner, to the owner
+      decision workflow. Runs after a deferred reminder (after_deferral: run): The owner is asked whether
+      or not a reminder went out.'
     risk: medium
     mutation: false
     store_as: escalations_out
@@ -2066,8 +2076,11 @@ checkin_recovery:
       workflow: owner_decision
       input:
         question: ${rows_out}
+    after_deferral: run
   - capability: mutate
-    purpose: Schedule the next check-in for work still running (schedule), instead of waiting passively.
+    purpose: 'Schedule the next check-in for work still running (schedule), instead of waiting passively.
+      Runs after a deferred reminder (after_deferral: run): The next check-in is due whether or not a
+      reminder went out.'
     risk: high
     mutation: true
     requires_checkpoint: true
@@ -2085,9 +2098,11 @@ checkin_recovery:
         mandate_ref: mandates
       binds_to: digest
       when_unattended: skip
+    after_deferral: run
   - capability: verify
-    purpose: Prove each restarted thread is alive (same liveness evidence) and each row moved one step
-      or has a recorded reason.
+    purpose: 'Prove each restarted thread is alive (same liveness evidence) and each row moved one step
+      or has a recorded reason. Runs after a deferred reminder (after_deferral: run): It checks the restarts
+      and the rows, not the queued reminders.'
     risk: low
     mutation: false
     store_as: verify_out
@@ -2096,6 +2111,7 @@ checkin_recovery:
       conditions:
       - restarted_threads_live
       - every_row_moved_or_reason
+    after_deferral: run
   - capability: persist
     purpose: Write last moved, causes and the log line to the board and state.json.
     risk: low
@@ -2105,7 +2121,9 @@ checkin_recovery:
       data: ${verify_out}
       key: board
   - capability: audit
-    purpose: Record the sweep - samples, detected stalls, causes, recoveries, escalations.
+    purpose: 'Record the sweep - samples, detected stalls, causes, recoveries, escalations. Runs after
+      a deferred reminder (after_deferral: run): The sweep is recorded; the terminal action lists the
+      queued reminders.'
     risk: low
     mutation: true
     store_as: audit_out
@@ -2114,6 +2132,7 @@ checkin_recovery:
         type: checkin_recovery
         stalls: '${stalls_out.matches: array<object>}'
         recovered: ${verify_out.passed}
+    after_deferral: run
   success:
   - Every thread state is backed by two samples
   - Failed and cancelled work restarted with its cause addressed
@@ -2132,9 +2151,13 @@ incident_triage:
 
     owner of the area. Containment on own resources is a `mutate`; recovery from a
 
-    bad containment step is the failure action `rollback` to the checkpoint, not a
+    bad containment step is the failure action `rollback` to the checkpoint, which
 
-    rollback step (mutate conflicts_with rollback in the ontology).
+    ties the rollback to the step that failed. (The ontology allows a rollback after
+
+    a mutate; conflicts_with only keeps the two out of one parallel group.)
+
+    In prod the notice goes out first, then the run ends as completed: report and ask.
 
     '
   workflow_extensions:
@@ -2285,6 +2308,17 @@ incident_triage:
       target: ${plan_out}
       constraints: '${profile.incident_rules: array<string>}'
       action_on_violation: block
+  - capability: invoke
+    purpose: Post the BLOCKED notice or the evidence to the area owner through the outbound workflow.
+    risk: medium
+    mutation: false
+    store_as: notice_out
+    input_bindings:
+      workflow: outbound_message
+      input:
+        request:
+          intent: incident_notice
+          place_of_ask: ${environment.notify_channel}
   - capability: checkpoint
     purpose: Record the environment state before containment.
     risk: low
@@ -2293,6 +2327,10 @@ incident_triage:
     input_bindings:
       scope: ${environment.name}
       label: pre_containment
+    gates:
+    - when: ${environment.is_prod} == true
+      action: end
+      message: Prod - report and ask; do not act. The notice has gone to the area owner.
   - capability: mutate
     purpose: Contain on own resources only (free own caches, stop own processes by PID, hold own merges).
     risk: high
@@ -2320,9 +2358,6 @@ incident_triage:
     - when: ${policy_out.compliant} == false
       action: stop
       message: Not an own resource, or the step needs the owner's go.
-    - when: ${environment.is_prod} == true
-      action: stop
-      message: Prod - report and ask; do not act.
     failure_modes:
     - condition: Containment made it worse
       action: rollback
@@ -2340,17 +2375,6 @@ incident_triage:
       workflow: delegate_to_thread
       input:
         task: ${plan_out}
-  - capability: invoke
-    purpose: Post the BLOCKED notice or the evidence to the area owner through the outbound workflow.
-    risk: medium
-    mutation: false
-    store_as: notice_out
-    input_bindings:
-      workflow: outbound_message
-      input:
-        request:
-          intent: incident_notice
-          place_of_ask: ${environment.notify_channel}
   - capability: synchronize
     purpose: Tell affected threads what happened and what to do (rerun after the fix, end the turn before
       a rollout window).

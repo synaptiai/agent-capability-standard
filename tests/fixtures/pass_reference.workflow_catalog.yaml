@@ -564,7 +564,7 @@ digital_twin_sync_loop:
       recovery: Ask for resolution strategy or authoritative source preference.
     input_bindings:
       sources:
-      - '${transform_out.output}'
+      - '${transform_out.output: array<object>}'
       - '${previous_world_state}'
       conflict_resolution: prefer_authoritative_sources
     gates: []

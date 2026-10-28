@@ -1,5 +1,5 @@
 {
-  "description": "A prod incident stops at the containment gate (R403) before any change is approved or made.",
+  "description": "A prod incident sends its notice to the area owner, then the containment gate ends the run (gate end), completed, before any change is approved or made.",
   "catalog": {
     "delegate_to_thread": {
       "goal": "Give one task to one thread with a self-contained brief, prove the thread is alive, and accept its result only after checking it at the source.",
@@ -219,6 +219,12 @@
               "when": "${brief_check_out.compliant} == false",
               "action": "stop",
               "message": "The brief breaks a brief rule. Fix the brief first."
+            },
+            {
+              "when": "${delegate_out.task_id} == null",
+              "phase": "after",
+              "action": "stop",
+              "message": "The host returned no task id, so no report can be matched to this thread. Do not record or wait."
             }
           ],
           "failure_modes": [
@@ -457,14 +463,6 @@
               "type": "string"
             }
           }
-        },
-        "run": {
-          "type": "object",
-          "properties": {
-            "unattended": {
-              "type": "boolean"
-            }
-          }
         }
       },
       "steps": [
@@ -522,7 +520,6 @@
           "input_bindings": {
             "goal": "${request.intent}",
             "constraints": {
-              "unattended": "${run.unattended}",
               "policy_violations": "${policy_out.violations: array<object>}"
             }
           }
@@ -679,11 +676,6 @@
           },
           "gates": [
             {
-              "when": "${run.unattended} == true",
-              "action": "skip",
-              "message": "Unattended run - the ActionRecord stays planned and goes to the top of the next brief or digest."
-            },
-            {
               "when": "${text_check_out.compliant} == false",
               "action": "stop",
               "message": "The text fails the outbound check."
@@ -738,7 +730,7 @@
         },
         {
           "capability": "persist",
-          "purpose": "Update the ActionRecord to executed (or keep planned when deferred) and add the log line.",
+          "purpose": "Update the ActionRecord to executed and add the log line. In an unattended run this step is deferred with the send; the executor's planned record holds the queued send.",
           "risk": "low",
           "mutation": true,
           "store_as": "log_out",
@@ -939,6 +931,30 @@
             "target": "${ranking_out}",
             "constraints": "${profile.question_rules: array<string>}",
             "action_on_violation": "log"
+          },
+          "gates": [
+            {
+              "when": "${question_check_out.confidence} < 0.7",
+              "action": "end",
+              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Queue the question with its three options for the next brief, when it is not an interrupt.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "queued_out",
+          "condition": "${ask_policy_out.compliant} == false && !(${route_out.confidence} > 0.85 && ${route_out.labels} == [\"decide_self\"])",
+          "skip_if_false": true,
+          "input_bindings": {
+            "data": {
+              "question": "${question}",
+              "ranking": "${ranking_out.ranking: array<object>}",
+              "recommendation": "${ranking_out.recommendation}"
+            },
+            "key": "brief_queue"
           }
         },
         {
@@ -963,13 +979,8 @@
             },
             {
               "when": "${ask_policy_out.compliant} == false",
-              "action": "skip",
-              "message": "Not an interrupt. The question waits in the next brief."
-            },
-            {
-              "when": "${question_check_out.confidence} < 0.7",
-              "action": "stop",
-              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+              "action": "end",
+              "message": "Not an interrupt. The question waits in the next brief; nothing is applied now."
             }
           ]
         },
@@ -1012,7 +1023,14 @@
             ],
             "strategy": "answer_overrides_recommendation",
             "conflict_resolution": "escalate_to_human"
-          }
+          },
+          "gates": [
+            {
+              "when": "${inquiry_out} != null && ${answer_out} == null",
+              "action": "stop",
+              "message": "The owner was asked but no answer was received. Do not apply the recommendation."
+            }
+          ]
         },
         {
           "capability": "checkpoint",
@@ -1092,7 +1110,7 @@
     "incident_triage": {
       "goal": "When a shared environment breaks (CI on the base branch, remote host, a staging deploy, the shared workstation), find out what is true, contain it on own resources only, get the cause fixed by the right owner, and tell the people who depend on it.",
       "risk": "high",
-      "description": "The orchestrator owns its own threads, caches and processes. It does not own\nother people's environments: there it reports with evidence and waits for the\nowner of the area. Containment on own resources is a `mutate`; recovery from a\nbad containment step is the failure action `rollback` to the checkpoint, not a\nrollback step (mutate conflicts_with rollback in the ontology).\n",
+      "description": "The orchestrator owns its own threads, caches and processes. It does not own\nother people's environments: there it reports with evidence and waits for the\nowner of the area. Containment on own resources is a `mutate`; recovery from a\nbad containment step is the failure action `rollback` to the checkpoint, which\nties the rollback to the step that failed. (The ontology allows a rollback after\na mutate; conflicts_with only keeps the two out of one parallel group.)\nIn prod the notice goes out first, then the run ends as completed: report and ask.\n",
       "workflow_extensions": {
         "requires": [
           "approval@1",
@@ -1295,6 +1313,22 @@
           }
         },
         {
+          "capability": "invoke",
+          "purpose": "Post the BLOCKED notice or the evidence to the area owner through the outbound workflow.",
+          "risk": "medium",
+          "mutation": false,
+          "store_as": "notice_out",
+          "input_bindings": {
+            "workflow": "outbound_message",
+            "input": {
+              "request": {
+                "intent": "incident_notice",
+                "place_of_ask": "${environment.notify_channel}"
+              }
+            }
+          }
+        },
+        {
           "capability": "checkpoint",
           "purpose": "Record the environment state before containment.",
           "risk": "low",
@@ -1303,7 +1337,14 @@
           "input_bindings": {
             "scope": "${environment.name}",
             "label": "pre_containment"
-          }
+          },
+          "gates": [
+            {
+              "when": "${environment.is_prod} == true",
+              "action": "end",
+              "message": "Prod - report and ask; do not act. The notice has gone to the area owner."
+            }
+          ]
         },
         {
           "capability": "mutate",
@@ -1339,11 +1380,6 @@
               "when": "${policy_out.compliant} == false",
               "action": "stop",
               "message": "Not an own resource, or the step needs the owner's go."
-            },
-            {
-              "when": "${environment.is_prod} == true",
-              "action": "stop",
-              "message": "Prod - report and ask; do not act."
             }
           ],
           "failure_modes": [
@@ -1370,22 +1406,6 @@
             "workflow": "delegate_to_thread",
             "input": {
               "task": "${plan_out}"
-            }
-          }
-        },
-        {
-          "capability": "invoke",
-          "purpose": "Post the BLOCKED notice or the evidence to the area owner through the outbound workflow.",
-          "risk": "medium",
-          "mutation": false,
-          "store_as": "notice_out",
-          "input_bindings": {
-            "workflow": "outbound_message",
-            "input": {
-              "request": {
-                "intent": "incident_notice",
-                "place_of_ask": "${environment.notify_channel}"
-              }
             }
           }
         },
@@ -1668,10 +1688,179 @@
     {
       "expect": {
         "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 1,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "recall",
+        "step": 2,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 3,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "step": 4,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "generate",
+        "step": 5,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "content": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "critique",
+        "step": 6,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "issues": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "ground",
+        "step": 7,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "grounded": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 8,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
         "capability": "checkpoint",
         "step": 9,
         "frame": [
-          "incident_triage"
+          "incident_triage",
+          "outbound_message"
         ]
       },
       "respond": {
@@ -1681,15 +1870,188 @@
           "evidence_anchors": []
         }
       }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 10,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 11,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "compare",
+        "step": 12,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "ranking": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 13,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ],
+        "approver": {
+          "kind": "human",
+          "role": "owner"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "owner"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "RecheckSource",
+        "step": 13,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Current",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "send",
+        "step": 13,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "sent": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 14,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 15,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit",
+        "step": 16,
+        "frame": [
+          "incident_triage",
+          "outbound_message"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "evidence_anchors": []
+        }
+      }
     }
   ],
   "end": {
-    "kind": "Failed",
-    "code": "R403",
-    "step": 10,
-    "message": "Prod - report and ask; do not act."
+    "kind": "Completed",
+    "outcome": "completed",
+    "ended": {
+      "step": 10,
+      "message": "Prod - report and ask; do not act. The notice has gone to the area owner."
+    }
   },
   "trace_kinds": [
-    "gate_fired"
+    "gate_fired",
+    "run_ended"
   ]
 }
