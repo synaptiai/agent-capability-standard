@@ -76,9 +76,9 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
-artifact:
+content: string | object  # The generated artifact
+metadata:  # Generation metadata
   type: string  # text, code, plan, config, schema, etc.
-  content: string | object  # The generated artifact
   format: string  # markdown, json, yaml, typescript, etc.
 constraints_used:
   - constraint: string  # Constraint description
@@ -100,8 +100,8 @@ next_actions: array[string]  # Suggested follow-ups
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `artifact.type` | string | Category of generated content |
-| `artifact.content` | string\|object | The generated artifact itself |
+| `content` | string\|object | The generated artifact itself |
+| `metadata` | object | Generation metadata: `type` (category of content) and `format` |
 | `constraints_used` | array | Evaluation of constraint satisfaction |
 | `rationale` | string | Design decision explanation |
 | `alternatives_considered` | array | Other approaches that were rejected |
@@ -132,46 +132,46 @@ format: "typescript"
 
 **Output:**
 ```yaml
-artifact:
-  type: "code"
-  content: |
-    import { Request, Response, NextFunction } from 'express';
-    import { z } from 'zod';
+content: |
+  import { Request, Response, NextFunction } from 'express';
+  import { z } from 'zod';
 
-    const CreateUserSchema = z.object({
-      name: z.string().min(1).max(100),
-      email: z.string().email(),
-      role: z.enum(['admin', 'user'])
-    });
+  const CreateUserSchema = z.object({
+    name: z.string().min(1).max(100),
+    email: z.string().email(),
+    role: z.enum(['admin', 'user'])
+  });
 
-    type CreateUserInput = z.infer<typeof CreateUserSchema>;
+  type CreateUserInput = z.infer<typeof CreateUserSchema>;
 
-    export async function createUser(
-      req: Request,
-      res: Response,
-      next: NextFunction
-    ): Promise<void> {
-      try {
-        const parsed = CreateUserSchema.safeParse(req.body);
+  export async function createUser(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const parsed = CreateUserSchema.safeParse(req.body);
 
-        if (!parsed.success) {
-          res.status(400).json({
-            error: 'Validation failed',
-            details: parsed.error.issues
-          });
-          return;
-        }
-
-        const userData: CreateUserInput = parsed.data;
-
-        // TODO: Implement actual user creation logic
-        const user = await userService.create(userData);
-
-        res.status(200).json({ user });
-      } catch (error) {
-        next(error);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Validation failed',
+          details: parsed.error.issues
+        });
+        return;
       }
+
+      const userData: CreateUserInput = parsed.data;
+
+      // TODO: Implement actual user creation logic
+      const user = await userService.create(userData);
+
+      res.status(200).json({ user });
+    } catch (error) {
+      next(error);
     }
+  }
+metadata:
+  type: "code"
   format: "typescript"
 constraints_used:
   - constraint: "TypeScript with strict mode"
@@ -236,44 +236,44 @@ format: "json"
 
 **Output:**
 ```yaml
-artifact:
+content:
+  $schema: "http://json-schema.org/draft-07/schema#"
+  title: "DatabaseConfig"
+  type: "object"
+  required: ["host", "port", "database"]
+  properties:
+    host:
+      type: "string"
+      description: "Database server hostname"
+      examples: ["localhost", "db.example.com"]
+    port:
+      type: "integer"
+      minimum: 1
+      maximum: 65535
+      description: "Database server port"
+      default: 5432
+    database:
+      type: "string"
+      description: "Database name"
+      minLength: 1
+    ssl:
+      type: "boolean"
+      description: "Enable SSL/TLS connection"
+      default: true
+    poolSize:
+      type: "integer"
+      minimum: 1
+      maximum: 100
+      description: "Connection pool size"
+      default: 10
+    timeout:
+      type: "integer"
+      minimum: 0
+      description: "Connection timeout in milliseconds"
+      default: 30000
+  additionalProperties: false
+metadata:
   type: "schema"
-  content:
-    $schema: "http://json-schema.org/draft-07/schema#"
-    title: "DatabaseConfig"
-    type: "object"
-    required: ["host", "port", "database"]
-    properties:
-      host:
-        type: "string"
-        description: "Database server hostname"
-        examples: ["localhost", "db.example.com"]
-      port:
-        type: "integer"
-        minimum: 1
-        maximum: 65535
-        description: "Database server port"
-        default: 5432
-      database:
-        type: "string"
-        description: "Database name"
-        minLength: 1
-      ssl:
-        type: "boolean"
-        description: "Enable SSL/TLS connection"
-        default: true
-      poolSize:
-        type: "integer"
-        minimum: 1
-        maximum: 100
-        description: "Connection pool size"
-        default: 10
-      timeout:
-        type: "integer"
-        minimum: 0
-        description: "Connection timeout in milliseconds"
-        default: 30000
-    additionalProperties: false
   format: "json"
 constraints_used:
   - constraint: "JSON Schema draft-07"

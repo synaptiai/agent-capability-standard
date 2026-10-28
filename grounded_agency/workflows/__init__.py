@@ -19,13 +19,21 @@ from .engine import (
     WorkflowStep,
     WorkflowStepResult,
 )
-from .runner import Host, RunIncomplete, RunResult, RunStartError, WorkflowRunner
+from .runner import (
+    Host,
+    HostResponseError,
+    RunIncomplete,
+    RunResult,
+    RunStartError,
+    WorkflowRunner,
+)
 from .tracer import ConformanceReport, StepTrace, WorkflowTracer
 
 __all__ = [
     "BindingError",
     "ConformanceReport",
     "Host",
+    "HostResponseError",
     "RunIncomplete",
     "RunResult",
     "RunStartError",

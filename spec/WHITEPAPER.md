@@ -338,7 +338,7 @@ gates:
     message: "Cannot proceed without checkpoint"
 ```
 
-A gate's `action` is `stop`, `rollback`, `skip` or `warn`, and `message` is optional. A gate runs before its step by default; `phase: after` runs it after the step, which a gate that reads its own step's output needs. Gate `when` clauses, step `condition`s and failure-mode `when` clauses share one expression grammar ([STANDARD v1.1.0 §5.8](STANDARD-v1.1.0.md#58-condition-expressions)): references, JSON literals, comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`) and boolean `&&`, `||`, `!`, checked statically for syntax and types.
+A gate's `action` is `stop`, `rollback`, `skip` or `warn`, and `message` is optional. A gate runs before its step by default; `phase: after` runs it after the step, which a gate that reads its own step's output needs. Gate `when` clauses, step `condition`s and failure-mode `when` clauses share one expression grammar ([STANDARD v1.1.0 §5.8](STANDARD-v1.1.0.md#58-condition-expressions)): references, JSON literals, comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`), membership (`in`) and boolean `&&`, `||`, `!`, checked statically for syntax and types.
 
 Conditions enable step-level branching:
 

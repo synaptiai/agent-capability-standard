@@ -71,8 +71,7 @@ fn static_check_fixtures() {
             .map(|v| v.as_str().unwrap())
             .collect();
         let got: Vec<&'static str> = match expr::parse(src) {
-            Err(e) if e.annotation => vec!["B205"],
-            Err(_) => vec!["V108"],
+            Err(e) => vec![e.kind.code().as_str()],
             Ok(e) => {
                 let mut c = Checker::new(&scope);
                 c.check_condition(&e);

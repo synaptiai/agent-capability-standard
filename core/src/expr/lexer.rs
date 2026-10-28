@@ -2,7 +2,7 @@
 //! Unicode whitespace, full-width operators and smart quotes are errors.
 
 use super::ast::RefAt;
-use super::{MAX_LEN, SyntaxError};
+use super::{MAX_LEN, SyntaxError, SyntaxKind};
 use crate::{refs, types};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,7 +61,7 @@ impl<'a> Lexer<'a> {
         Err(SyntaxError {
             pos,
             msg: msg.into(),
-            annotation: false,
+            kind: SyntaxKind::Expression,
         })
     }
 
@@ -216,7 +216,7 @@ impl<'a> Lexer<'a> {
         let v: f64 = text.parse().map_err(|_| SyntaxError {
             pos: start,
             msg: format!("bad number '{text}'"),
-            annotation: false,
+            kind: SyntaxKind::Expression,
         })?;
         if !v.is_finite() {
             return self.err(
@@ -302,14 +302,14 @@ impl<'a> Lexer<'a> {
         let h = self.s.get(self.i..self.i + 4).ok_or(SyntaxError {
             pos,
             msg: "truncated \\u escape".into(),
-            annotation: false,
+            kind: SyntaxKind::Expression,
         })?;
         let mut v = 0u32;
         for &c in h {
             let d = (c as char).to_digit(16).ok_or(SyntaxError {
                 pos,
                 msg: "invalid hex digit in \\u escape".into(),
-                annotation: false,
+                kind: SyntaxKind::Expression,
             })?;
             v = v * 16 + d;
         }
@@ -325,20 +325,28 @@ impl<'a> Lexer<'a> {
         }
         let body_start = self.i + 2;
         let Some(close) = self.src[body_start..].find('}') else {
-            return self.err(pos, "unterminated reference: expected '}'");
+            return Err(SyntaxError {
+                pos,
+                msg: "unterminated reference: expected '}'".into(),
+                kind: SyntaxKind::Reference,
+            });
         };
         let body = &self.src[body_start..body_start + close];
-        let r = refs::parse_ref(body).map_err(|msg| SyntaxError {
+        let r = refs::parse_ref(body).map_err(|e| SyntaxError {
             pos,
-            msg,
-            annotation: false,
+            msg: e.msg,
+            kind: if e.annotation {
+                SyntaxKind::Annotation
+            } else {
+                SyntaxKind::Reference
+            },
         })?;
         let ann = match &r.annotation {
             None => None,
             Some(text) => Some(types::parse_annotation(text).map_err(|msg| SyntaxError {
                 pos,
                 msg,
-                annotation: true,
+                kind: SyntaxKind::Annotation,
             })?),
         };
         self.i = body_start + close + 1;

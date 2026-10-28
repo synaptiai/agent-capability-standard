@@ -1,5 +1,5 @@
 # RFC-0001: Agent capability ontology + type-safe workflow DSL
-**Status:** Draft  
+**Status:** Accepted  
 **Target:** Standard v1.0.0  
 **Date:** 2026-01-24
 

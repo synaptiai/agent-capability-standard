@@ -5,8 +5,8 @@
 ---
 meta:
   name: Grounded Agency Capability Ontology
-  version: 2.0.0
-  generated_at: '2026-01-26T00:00:00.000Z'
+  version: 2.1.0
+  generated_at: '2026-10-28T00:00:00.000Z'
   description: 36 atomic capabilities derived from first principles
   principles:
   - Capabilities are atomic and composable into workflows

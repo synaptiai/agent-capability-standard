@@ -118,7 +118,7 @@ The project has zero other runtime dependencies beyond PyYAML. This minimal depe
 
 | Package | Version | Classification | Risk Notes |
 |---------|---------|---------------|------------|
-| `claude-agent-sdk>=0.1.25,<0.3` | Optional | Medium | External dependency from Anthropic |
+| `claude-agent-sdk>=0.1.52,<0.3` | Optional | Medium | External dependency from Anthropic |
 
 **Assessment:** The SDK is an optional dependency installed via `pip install -e ".[sdk]"`. The adapter code (`grounded_agency/adapter.py`) handles missing SDK gracefully via `try/except ImportError` blocks for SDK types like `PermissionResultAllow`, `PermissionResultDeny`, and `HookMatcher`. When SDK types are unavailable, the adapter falls back to plain dict representations, maintaining functionality without the SDK installed.
 

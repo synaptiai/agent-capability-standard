@@ -4,8 +4,9 @@
 **Status:** Candidate Standard — accepted by
 [RFC-0003](RFC-0003-orchestration-extensions.md) and
 [RFC-0004](RFC-0004-agent-identity.md); the reference validator
-and executor implement every section
-**Date:** 2026-10-27
+and executor implement §4, §5 and §9–§11; they do not check §3.1's
+grounding, §7's identity resolution or F505
+**Date:** 2026-10-28
 **Supersedes:** [STANDARD-v1.0.0](STANDARD-v1.0.0.md) (still supported; see §11.5)
 
 ---
@@ -32,6 +33,10 @@ Changes from 1.0.0 are listed in [Appendix C](#appendix-c-changes-from-100).
 - JSON Schema Draft 2020-12
 - YAML 1.2
 - Semantic Versioning 2.0.0
+- RFC 7493, The I-JSON Message Format (§5.14)
+- RFC 8785, JSON Canonicalization Scheme (JCS) (§5.14)
+- ISO 8601, date and time representations (§5.10.1, §6)
+- IANA Time Zone Database (§5.10, §6.3)
 - Common Expression Language (CEL) — informative for §5.8; ACS expressions
   are a compatible subset
 
@@ -77,9 +82,14 @@ Every transformation MUST be either:
 - Documented with explicit loss (what information is discarded)
 
 ### 3.3 Safety by Construction
-- Mutation REQUIRES checkpoints
-- Actions REQUIRE plans
-- Rollback MUST be possible for any mutation
+- A `checkpoint` MUST run before every `mutate`, `send` and `rollback` (the
+  ontology's `requires` edges, V102) and before any step whose effective
+  `requires_checkpoint` is true (F501), so a mutation that needs one has a
+  restore point (§4.3, §4.4, §5.2.1)
+- A plan is not required. Where a workflow has `plan`, it MUST run before
+  `execute` and `mutate`; where it has `constrain`, before `execute`,
+  `mutate`, `send` and `generate` (`precedes`: ordering only, V102). A
+  `constrain` before `execute`, `mutate` and `send` is recommended (W601)
 - A workflow cannot weaken a capability's safety flags (§5.2.1)
 
 ### 3.4 Composable Atoms
@@ -127,7 +137,7 @@ Capabilities are classified into 9 cognitive layers:
 | **REASON** | Plan and analyze | No | 4 |
 | **MODEL** | Represent the world | No | 5 |
 | **SYNTHESIZE** | Create content | No | 3 |
-| **EXECUTE** | Change the world | Yes | 3 |
+| **EXECUTE** | Change the world | Varies | 3 |
 | **VERIFY** | Ensure correctness | Varies | 5 |
 | **REMEMBER** | Persist state | Varies | 2 |
 | **COORDINATE** | Multi-agent and user interaction | Varies | 4 |
@@ -160,7 +170,7 @@ so neither completes before the other starts.
 | `conflicts_with` | The two capabilities never share a `parallel_group`; in sequence they are allowed (a rollback after a mutation is the normal recovery pattern) | F504, once per (group, pair) |
 | `enables`, `alternative_to`, `specializes` | None | — |
 
-Validators MUST implement these checks in time linear in the number of steps.
+Validators SHOULD implement these checks in time linear in the number of steps.
 
 A check before a mutation is expressed with `constrain`, which the
 ontology orders before `execute`, `mutate`, `send` and `generate`. `verify`
@@ -207,14 +217,15 @@ A workflow MAY define:
 | Field | Type | Description |
 |-------|------|-------------|
 | `inputs` | object | External input declarations (default `{}`) |
-| `success` | array | Success criteria |
+| `success` | array of strings | Success criteria |
 | `description` | string | Long description |
 | `spec_version` | string | Standard version targeted (§11.5) |
 | `workflow_extensions` | object | Extension declarations (§5.9) |
 | `triggers` | array | How runs start (§5.10) |
 | `domain`, `profile`, `risk_propagation`, `data_flow` | — | Recognised descriptive fields |
 
-A missing required field is S304. An unrecognised field is W604 and is
+A missing required field is S304; `goal`, `risk`, `success` or
+`description` of another type is S303. An unrecognised field is W604 and is
 otherwise ignored; fields whose name starts with `x-` are vendor extensions
 and are never reported (§11.3).
 
@@ -241,11 +252,11 @@ Each step MAY define:
 | `gates` | array | Checks that can halt or redirect execution (§5.6) |
 | `failure_modes` | array | Failure scenarios with recovery (§5.7) |
 | `timeout` | string | Maximum execution time, a duration (§5.10.1) |
-| `retry` | object | `{max, backoff}`: up to `max` further attempts after R401, R402 or R406; `max` a non-negative integer and `backoff` one of `none` (also when absent or null), `linear`, `exponential` (else S303) |
+| `retry` | object | `{max, backoff}`: up to `max` further attempts after R401, R402 or R406 (not after an R402 the executor raises itself before asking the host, such as an `invoke` input the target refuses: another attempt would be refused the same way); `max` an integer from 0 to 1000 and `backoff` one of `none` (also when absent or null), `linear`, `exponential` (else S303) |
 | `parallel_group` | string | Group ID; steps of one group run concurrently |
 | `join` | string | How to wait for parallel completion |
 | `mapping_ref` | string | Transform mapping file (missing file: S301) |
-| `output_conforms_to` | string | `file#/pointer` the output must match (S301/S302) |
+| `output_conforms_to` | string | `file#/pointer` the step's whole output must match (S301/S302) |
 | `domain` | string | Domain parameter for the capability |
 | `workflow_id` | string | For `invoke`: the workflow to run |
 | `risk`, `mutation`, `requires_checkpoint`, `requires_approval` | — | Safety flags (§5.2.1) |
@@ -302,7 +313,9 @@ unquoted form as W612 (`MANGLED_REFERENCE`).
 **Annotation grammar:** `unknown`, `any`, `null`, `string`, `number`,
 `integer`, `boolean`, `object`, `array<T>`, `map<K,V>`, `nullable<T>`,
 `union<T,…>`. `integer` is a subtype of `number`. An annotation that names
-no type is B205.
+no type, empty included (`${x:}`), is B205. A reference that does not parse
+otherwise (an unclosed `[`, an index such as `[01]` or `[-1]`, a missing
+`}`) is B201, in a binding and in an expression alike.
 
 ### 5.4 Typed Binding Rules
 
@@ -327,6 +340,13 @@ For each binding, the validator MUST check:
 3. The inferred or annotated type is compatible with the consumer's input
    schema, else B203 (with a coercion suggestion at L4)
 
+A value that is not exactly one reference is checked by its own type: a
+string (a template around references included) is a string, a list an
+array, a mapping an object (which also fits a `map<string, …>` input), a
+number or boolean its kind, and an explicit null is null, since the host
+receives it. An incompatible one is B203. `invoke`'s `input: null` is the
+exception: it passes no inputs (§5.12).
+
 An `input_bindings` key that the capability's input schema does not define
 is W604, unless the schema sets `additionalProperties: true` or the key
 starts with `x-`. The host still receives it, but it is outside the
@@ -335,8 +355,10 @@ in another input.
 
 An input the schema requires that the step does not bind is W615: the host
 would get no value for it. An `invoke` step's `workflow_id` gives its
-`workflow`. A wait (§5.13) and a quorum (§5.16) are exempt, since the
-executor runs them itself and no host receives their inputs.
+`workflow`. A wait on `receive` or `synchronize` (§5.13) and a quorum
+(§5.16) are exempt, since the executor runs them itself and no host
+receives their inputs. A waiting `delegate` is not: it delegates first,
+with its inputs.
 
 ### 5.6 Gate Semantics
 
@@ -345,10 +367,10 @@ gates:
   - when: ${checkpoint_out.checkpoint_id} == null
     action: stop
     message: "No checkpoint created. Do not mutate."
-  - when: ${verify_out.passed} == false
+  - when: ${verify_out.confidence} < 0.5
     phase: after
-    action: rollback
-    message: "Verification failed. Rolling back."
+    action: warn
+    message: "Low-confidence verification."
 ```
 
 | Field | Type | Required | Description |
@@ -365,8 +387,13 @@ gates:
   W603 (`DEPRECATED_FORM`).
 - An after-gate cannot `skip` (S303): the step has already run.
 - Actions at runtime: `stop` → R403; `skip` → the step is skipped;
-  `rollback` → roll back to the latest checkpoint, then R403; `warn` → a
-  trace warning.
+  `rollback` → roll back to the latest checkpoint (none: the run ends
+  F503), then R403; `warn` → a trace warning. R403 goes to the step's
+  failure modes (§5.7) like any step error.
+- Do not pair a `rollback` gate with a failure mode that rolls back on the
+  same condition: the gate rolls back and raises R403, then the failure
+  mode's `when` holds too and it rolls back again. To roll back and retry,
+  use the failure mode alone (§5.7).
 
 A step is **skippable** when its `condition` can skip it (`skip_if_false`
 absent or true) or a before-gate has `action: skip`. A skippable step's
@@ -395,9 +422,11 @@ failure_modes:
 | `recovery` | string or object | No | Prose, or a recovery loop (§5.12) |
 
 A failure mode fires when the step raised a matching `on_error` code or its
-`when` is true; the first match in declaration order applies. A failure
-mode with neither is documentation only. `recovery.inject_context` values
-are references checked like bindings and may read the step's own output.
+`when` is true; the first match in declaration order applies. `condition`
+is never evaluated: a failure mode with neither `when` nor `on_error` is
+documentation only. What a fired failure mode does is §5.12.
+`recovery.inject_context` values are references checked like bindings and
+may read the step's own output.
 
 ### 5.8 Condition Expressions
 
@@ -424,7 +453,8 @@ string    = '"' { char | escape } '"' ;   (* \" \\ \b \f \n \r \t \uXXXX, no sur
 `reference` is the binding syntax of §5.3. Limits: 4096 UTF-8 bytes,
 nesting depth 32, integer literals of magnitude at most 2^53, finite
 numbers, no duplicate map keys. A violation of the grammar or a limit is
-V108; a malformed annotation alone is B205.
+V108; a malformed reference is B201 and a malformed annotation B205, as in a
+binding (§5.3).
 
 #### 5.8.2 Evaluation
 
@@ -463,6 +493,7 @@ cel-go (§10.3).
 |-------|------|
 | Syntax or limit violation | V108 |
 | Malformed annotation | B205 |
+| Malformed reference | B201 |
 | Unknown root / bad path | B202 / B201 |
 | Annotation incompatible with the schema | B203 |
 | Ordering, logic or `in` on a value of unknown type with no annotation (for `in`, the right operand) | B204 |
@@ -539,7 +570,8 @@ semantics). `CRON_TZ=`/`TZ=` prefixes are not allowed; use `timezone`.
 
 A `triggers` that is not a list, a trigger without a valid `kind`, a
 `schedule` or `event` that is missing for its kind or present for another
-kind, a malformed cron, duration or time zone, and an unknown `overlap` or
+kind, a malformed cron or one that can never fire (`0 0 31 2 *`), a
+malformed duration or time zone, and an unknown `overlap` or
 `attendance` are S303 or S304 (missing). Unknown trigger fields are W604.
 
 An `invoke` step whose target declares triggers but none of kind `invoke`
@@ -612,16 +644,40 @@ whether or not the failure mode's action is allowed.
   with `!= null` and annotate it where a type matters. `_recovery` is
   reserved: a `store_as` or input with that name is S303.
 - `invoke` steps name their target with `workflow_id` (or a literal
-  `input_bindings.workflow`). A target that is not in the catalog is W607
+  `input_bindings.workflow`); a step that sets both to different values is
+  S303, since `workflow_id` would win unseen. A target that is not in the catalog is W607
   (it cannot be checked); invoke cycles among catalog workflows, including a
   workflow invoking itself, are V105. The step passes the target's inputs
   as `input_bindings.input`: a mapping, or a `${...}` reference whose value
-  is one. Absent or null, it passes no inputs; any other value is S303.
-  When the target is in the catalog and the input is not a reference, a
+  is one. Absent or null, it passes no inputs; any other value (a list, or
+  a string that is not exactly one reference) is B203 against `input`'s
+  object type (§5.4). When the target is in the catalog and the input is a
+  literal mapping, a
   name the target does not declare is S303 (with no `x-` exemption: these
   are the target's inputs, not fields of the step) and a required input it
   does not give is S304. The executor refuses both when the step runs
   (R402), so a reference is checked then.
+
+**At runtime.** Failure modes are checked after the step and its
+after-gates, or after the step failed. The first that fires (§5.7) runs its
+action, then its recovery:
+
+| `action` | Effect before recovery |
+|----------|------------------------|
+| `stop`, `request_more_context` | None; the name tells people the intent |
+| `rollback` | Roll back to the latest checkpoint; with none, or if the host fails it, the run ends F503 |
+| `pause_and_checkpoint` | Take a new checkpoint; if the host fails it, the run ends F501 |
+| `escalate` | Run the handler `recovery.goto_step` (§5.11); the run ends `escalated` with the cause recorded |
+
+| Recovery | Outcome |
+|----------|---------|
+| `goto_step` loop, fewer than `max_loops` loops taken | Back to the target, with `inject_context` |
+| Loops exhausted | `on_exhausted` handler, cause R404; without one the run ends R404 |
+| No loop (prose or absent `recovery`) | The run ends with the step's code; a failure mode fired by `when` on a step that did not fail ends it R402 ("failure mode N fired") |
+
+Loops are counted per failure mode of a step, and a count is never reset
+during the workflow's run. When no failure mode fires, a failed step ends
+the run with its code, and a step that did not fail goes on to the next.
 
 ### 5.13 Waiting for Events
 
@@ -644,7 +700,7 @@ whether or not the failure mode's action is allowed.
 | `liveness` | `mode` (`push`: the source sends heartbeats; `probe`: the runtime polls it) and `interval` (a duration longer than zero), both required (S304); `failure_threshold` (integer ≥ 1, default 3) |
 
 `wait` is allowed only on `receive`, on `delegate`, or on `synchronize`
-whose literal `agents` list has at least two entries (else S303). The step MUST declare a
+whose literal `agents` list has at least two entries, all distinct (else S303). The step MUST declare a
 `timeout` (S304) that parses as a duration (S303; the W614 leniency for
 legacy timeouts does not apply to a wait, which must end). Liveness MUST
 be able to fail before the timeout: `interval × failure_threshold` less than
@@ -656,8 +712,11 @@ from an expired wait; lost liveness reported after the deadline is R401,
 since the wait had already lapsed. To re-check a silent source, loop back
 to the wait itself (`goto_step` naming its own `store_as`, §5.12) with a
 bounded `max_loops`, and escalate on R401 or `on_exhausted`. A wait run
-again by a loop or a `retry` starts a new `timeout`, so the whole wait can
-last up to `timeout` × (`retry.max` + 1) × (`max_loops` + 1).
+again by a loop or a `retry` starts a new `timeout`. Loops are counted per
+failure mode (§5.12), so the wait's own failure modes let it last up to
+`timeout` × (`retry.max` + 1) × (1 + Σ `max_loops`), the sum over its
+failure modes that loop; a later step's loop back past the wait runs it
+again too. On a waiting `delegate`, one `timeout` bounds both phases.
 
 For a wait stored as `result_out` and a handler
 stored as `page_out`:
@@ -688,8 +747,10 @@ names the delegation it replaces (`replaces`, its `task_id`) so the host
 can cancel it; a delegate that went silent (R406) or ran out of time (R401)
 is replaced, and only that one: give each reviewer of a quorum (§5.16) its
 own waiting `delegate` step to replace a hung reviewer without asking the
-others again. A retry does not ask for approval again, as for any step; a
-recovery loop back to a waiting delegate delegates again too. For W608, a
+others again. A retry does not ask for approval again, as for any step. A
+recovery loop whose target is the waiting delegate or a step before it
+also replaces: when that delegate next runs, its call names the
+delegation it replaces. For W608, a
 waiting delegate acts (delegates) before its own wait.
 
 A step that requires a checkpoint (`mutate`, `send`, or a raised
@@ -756,11 +817,14 @@ deferred too if it depends on a deferred step:
    i.e. not `purpose` or a failure mode's prose, or a quorum reviewer);
 2. it may act on, or wait on, the world: its effective
    `requires_checkpoint` or `requires_approval` is true, it waits (§5.13),
-   or it is an `invoke`, `delegate`, `synchronize` or `rollback`. A handler
-   (§5.11) is exempt from this rule, since it is the escalation path;
+   or it is an `invoke`, `delegate`, `synchronize` or `rollback`;
 3. ontology `precedes` edges, followed transitively, order its capability
    after a deferred step's (as `verify` after `mutate`), including a
    capability that a nested run deferred.
+
+A handler (§5.11) is exempt from rules 2 and 3: it is the escalation path,
+and deferring it would leave a failure unhandled. Rule 1 still applies, so
+a handler that reads a deferred store is deferred.
 
 A step is checked before its condition, so it waits rather than running
 on a missing value or an unchanged world; a deferred dependent is not
@@ -812,7 +876,8 @@ standard does not say how a host enforces `read_only`, only that
 `effective.read_only` attests it. `receive` and `synchronize` accept
 `accept_from` (a list of principals): received items from other principals
 are dropped and counted, and each kept item's `sender` is the
-host-authenticated principal.
+host-authenticated principal. A literal empty `accept_from` accepts no one
+and is S303; leave the input out to accept every sender.
 
 A **principal** is an opaque string, compared by exact (code-point)
 equality; the standard gives it no structure. The host maps its own
@@ -877,8 +942,9 @@ output (its `result`) is that reviewer's: it counts only if its
 `reviewer_id` is that step's agent.
 A verdict's `scope` (`review_verdict_schema.yaml` 1.1.0) is `full` (it
 swept the whole pinned change) or `delta` (only what changed since an
-earlier round); absent or any other value, it counts as `delta`, so it
-still passes or blocks but is never a full sweep.
+earlier round). Absent, it counts as `delta`; any other value (which the
+schema rejects) counts as `delta` too and is noted in `violations`, so the
+verdict still passes or blocks but is never a full sweep.
 The step is compliant iff no counted verdict is blocking, passes ≥
 `min_pass`, passes with scope `full` ≥ `min_full` (when set), and
 model-family coverage holds; otherwise F504. The output gains `tally`
@@ -912,8 +978,11 @@ classified. It records no reliability: that is RFC-0002's subject.
 With `identity@1` declared, `receive`, `synchronize` and a waiting `delegate`
 (for its result, §5.13) accept three inputs,
 each a list of values from the vocabularies above (`sender_check` and
-`accept_trust_classes` non-empty). Binding any of them otherwise is V106;
-a literal that is not such a list is S303; a reference
+`accept_trust_classes` non-empty). Binding any of them without
+`identity@1` declared is V106, and on a `delegate` that does not wait it
+is S303 (§5.13); a literal that is not a list is B203 against the input's
+type (§5.4), and a list holding anything but values of the vocabulary is
+S303; a reference
 that resolves to anything else (null, say) fails the step (R402), so a
 check is never silently off. A workflow that does not declare `identity@1`
 ignores any identity a host reports.
@@ -1142,7 +1211,7 @@ NOT change any code's severity otherwise.
 | V104 | DUPLICATE_STORE_AS | Same store_as used by multiple steps |
 | V105 | CIRCULAR_DEPENDENCY | Workflow contains circular dependencies |
 | V106 | UNSUPPORTED_EXTENSION | `workflow_extensions.requires` lists an unknown or unsupported extension, or an extension field is used without its declaration |
-| V107 | UNRESOLVED_TARGET | A `goto_step`, `on_exhausted`, `reviewers`, `delivers_to` or invoke target does not resolve, or resolves to the wrong kind of step |
+| V107 | UNRESOLVED_TARGET | A `goto_step`, `on_exhausted`, `reviewers`, `forbidden_inputs` or `delivers_to` name does not resolve, or names the wrong kind of step or input; an `invoke` of a catalog workflow whose `triggers` include no `invoke`; a handler's failure mode that loops or escalates (§5.10–§5.12, §5.16). An invoke target not in the catalog is W607 |
 | V108 | INVALID_EXPRESSION | Expression syntax error or limit exceeded |
 | V109 | UNSUPPORTED_SPEC_VERSION | The declared standard version is not supported |
 
@@ -1150,7 +1219,7 @@ NOT change any code's severity otherwise.
 
 | Code | Name | Description |
 |------|------|-------------|
-| B201 | INVALID_BINDING_PATH | Referenced path does not exist in the producer's schema |
+| B201 | INVALID_BINDING_PATH | Reference is malformed, or its path does not exist in the producer's schema |
 | B202 | MISSING_PRODUCER | Root is neither an earlier store_as nor an input |
 | B203 | TYPE_MISMATCH | Annotation or inferred type incompatible with the schema or consumer |
 | B204 | AMBIGUOUS_TYPE | Type cannot be inferred, annotation required |
@@ -1162,7 +1231,7 @@ NOT change any code's severity otherwise.
 | Code | Name | Description |
 |------|------|-------------|
 | S301 | SCHEMA_NOT_FOUND | Referenced schema or mapping file not found |
-| S302 | INVALID_REF | $ref or JSON pointer cannot be resolved |
+| S302 | INVALID_REF | $ref or JSON pointer cannot be resolved, or its refs expand past the validator's size limit |
 | S303 | SCHEMA_VALIDATION_FAILED | A field has the wrong type or value |
 | S304 | MISSING_REQUIRED_FIELD | Required field not present |
 
@@ -1185,7 +1254,7 @@ NOT change any code's severity otherwise.
 | F502 | APPROVAL_REQUIRED | Action requires approval |
 | F503 | ROLLBACK_FAILED | Could not restore checkpoint |
 | F504 | CONSTRAINT_VIOLATED | Policy constraint violated (incl. conflicting capabilities in one parallel group) |
-| F505 | PROVENANCE_MISSING | Claim without provenance |
+| F505 | PROVENANCE_MISSING | Claim without provenance (§3.1). Reserved: the reference validator and executor do not check it yet |
 
 ### 9.7 Warnings
 
@@ -1259,7 +1328,8 @@ An implementation is conformant at a given level if it:
 
 **L2 (Schema)**
 - Resolves all $ref schema references
-- Infers binding types from producer schemas
+- Infers binding types from producer schemas, checking each binding's root
+  and path (B202, B201)
 - Reports ambiguous types requiring annotation
 
 **L3 (Contracts)**
@@ -1279,16 +1349,17 @@ Conformance tests MUST include:
 - Negative fixtures (invalid workflows that MUST fail with specific error codes)
 - Patch fixtures (invalid workflows with expected patch suggestions)
 
-Fixture expectations MAY list `expected_warning_codes`; an empty list means
-the fixture MUST produce no warnings. Expression fixtures
+A negative fixture's `expected_error_codes` are the exact set of error codes
+it MUST produce, so each fixture isolates what it tests. Fixture
+expectations MAY list `expected_warning_codes`, likewise exact; absent or
+empty, the fixture MUST produce no warnings. Expression fixtures
 (`tests/conformance/expressions/eval.json` and `check.json`) are
 language-neutral; the reference suite also runs them against cel-go to
 check §5.8.2's CEL compatibility. Runtime fixtures
 (`tests/conformance/runtime/*.json`) script runs of the reference executor
 — the actions it must request, the responses it gets, and the end and trace
-it must reach — for the runtime semantics of §5.6, §5.7, §5.8.2 and
-§5.11–§5.16; they are informative for implementations that execute
-workflows.
+it must reach — for the runtime semantics of §5.6–§5.17; they are
+informative for implementations that execute workflows.
 
 ---
 
@@ -1491,10 +1562,24 @@ Safety flags are omitted below: they inherit from the ontology (§5.2.1).
 ```
 
 **Pattern: Recovery Loop**
+
+A fragment of Safe Mutation above (declaring `recovery@1`): `verify` rolls
+back and re-plans, and `plan_out` reads the evidence the loop injects.
+`goto_step` names that pattern's `plan_out` step. Before the first loop
+`${_recovery}` is absent, so the plan sees null `context` (§5.11).
+
 ```yaml
+- capability: plan
+  purpose: Plan the change, using why the last attempt failed.
+  input_bindings:
+    goal: Rotate the service certificate
+    context: "${_recovery.failure_evidence: array<object>}"
+  store_as: plan_out
+# ... constrain, checkpoint and mutate as in Safe Mutation ...
 - capability: verify
   purpose: Check the result.
   input_bindings:
+    target: "${mutate_out.new_state: object}"
     conditions: [change_applied]
   store_as: verify_out
   failure_modes:
@@ -1517,6 +1602,10 @@ Safety flags are omitted below: they inherit from the ontology (§5.2.1).
 - [JSON Schema](https://json-schema.org/)
 - [YAML 1.2](https://yaml.org/spec/1.2.2/)
 - [Semantic Versioning](https://semver.org/)
+- [RFC 7493: The I-JSON Message Format](https://www.rfc-editor.org/rfc/rfc7493)
+- [RFC 8785: JSON Canonicalization Scheme (JCS)](https://www.rfc-editor.org/rfc/rfc8785)
+- [ISO 8601: Date and time format](https://www.iso.org/iso-8601-date-and-time-format.html)
+- [IANA Time Zone Database](https://www.iana.org/time-zones)
 
 ### 13.2 Informative References
 
@@ -1573,13 +1662,23 @@ Field names starting with `x-` are reserved for vendor extensions.
 | Version header | "SHOULD warn if missing" | `spec_version` or header; W605 / V109 (§11.5) |
 | B205 | "Type annotation does not match schema" | Annotation names no type; a mismatch is B203 (§9.3) |
 | `inputs` | Required | Optional, default `{}` (§5.1) |
+| `store_as` | Any string | An identifier `[A-Za-z_][A-Za-z0-9_-]*`, else S303; `_recovery` is reserved (§5.2, §5.12) |
+| `retry` | "Retry configuration (max, backoff)", unchecked | A mapping or null; `max` an integer from 0 to 1000, `backoff` `none`, `linear`, `exponential` or null, else S303 (§5.2) |
+| Gate and failure-mode fields | Enums listed | Gate `when` and `action`, failure-mode `condition` and `action` are required strings (S304, S303); an `action` outside its enum is S303 (§5.6, §5.7) |
+| Failure-mode `condition` | "When this failure mode applies" | Prose only, never evaluated; the trigger is `when` (an expression) or `on_error` (codes) (§5.7) |
+
+**Migration of failure modes.** A 1.0 failure mode whose trigger was
+written in `condition` never fires under this standard until it is
+migrated: keep the prose in `condition` and add the trigger as `when` or
+`on_error`. For example, `condition: Verdict == FAIL` gains
+`when: ${verify_out.passed} == false`. A structured recovery without
+either is W609 (§5.12).
 
 **New in 1.1.0:**
 - Condition expression language with CEL compatibility (§5.8), gate `phase`
   (§5.6) and failure-mode `when` (§5.7)
 - Diagnostic severities and warning codes W601–W615 (§9.1, §9.7); codes
   V106–V109, B206, R405, R406
-- `mutation_overridable` (§4.4)
 - Orchestration extensions and their declaration: triggers, handler steps,
   recovery and escalation, wait, approval, delegation, quorum, sender
   identity (§5.9–§5.17)
@@ -1593,15 +1692,19 @@ Field names starting with `x-` are reserved for vendor extensions.
   1.1.0 also adds `ActionRecord.actor_identity` and
   `ProvenanceRecord.agent_identity`; `authority_trust_model.yaml` 1.1.0 adds
   `trust_classes` (§8.3)
-- Ontology: `delegate` inputs `fresh_context`, `model_family`, `role`,
+- Capability ontology 2.1.0 (`capability_ontology.yaml`): the
+  `mutation_overridable` flag (§4.4); the edges reclassified by §4.3 (five
+  follow-up edges became `enables`, one redundant edge was removed, and
+  `constrain` became the soft prerequisite of `execute`, `mutate` and
+  `send`); `delegate` inputs `fresh_context`, `model_family`, `role`,
   `read_only`, and outputs `effective` and `result` (a waiting delegate,
-  §5.13); `receive`/`synchronize` inputs `accept_from`,
-  `sender_check`, `accept_trust_classes` and `always_ask_trust_classes`
-  (§5.17); received items' `sender` and `sender_identity`, and on
-  `synchronize` the same beside the agreed state; `constrain` output `tally` (§5.15, §5.16); optional
-  inputs `retrieve.filter` and `retrieve.references`, `state.observations`,
-  `plan.context`, `critique.context` and `explain.constraints`, which
-  catalogs already bound
+  §5.13); `receive`/`synchronize` inputs `accept_from`, `sender_check`,
+  `accept_trust_classes` and `always_ask_trust_classes` (§5.17); received
+  items' `sender` and `sender_identity`, and on `synchronize` the same
+  beside the agreed state; `constrain` output `tally` (§5.15, §5.16);
+  optional inputs `retrieve.filter` and `retrieve.references`,
+  `state.observations`, `plan.context`, `critique.context` and
+  `explain.constraints`, which catalogs already bound
 
 ---
 

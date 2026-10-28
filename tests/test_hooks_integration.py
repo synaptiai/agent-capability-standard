@@ -72,7 +72,7 @@ class TestFullPipeline:
 
         # Step 3: PreToolUse should PASS for mutation
         result = run_pretooluse("Write to file.py", project_dir)
-        assert result.returncode == 0, f"PreToolUse blocked: {result.stdout}"
+        assert result.returncode == 0, f"PreToolUse blocked: {result.stderr}"
 
         # Step 4: PostToolUse should log a Skill invocation
         skill_payload = {
@@ -96,7 +96,7 @@ class TestFullPipeline:
         # No checkpoint created — no marker file
 
         result = run_pretooluse("Write to file.py", project_dir)
-        assert result.returncode == 1
+        assert result.returncode == 2
 
     def test_consumed_checkpoint_blocks_next_mutation(self, tmp_path: Path) -> None:
         """After consuming checkpoint, next mutation should be blocked."""
@@ -118,7 +118,7 @@ class TestFullPipeline:
 
         # Next mutation should be blocked (marker removed)
         result = run_pretooluse("Edit another file", project_dir)
-        assert result.returncode == 1
+        assert result.returncode == 2
 
 
 class TestHookMatcherRouting:
@@ -131,27 +131,27 @@ class TestHookMatcherRouting:
 
     def test_pretooluse_catches_write(self, tmp_path: Path) -> None:
         result = run_pretooluse("Write to file", str(tmp_path))
-        assert result.returncode == 1
+        assert result.returncode == 2
 
     def test_pretooluse_catches_edit(self, tmp_path: Path) -> None:
         result = run_pretooluse("Edit something", str(tmp_path))
-        assert result.returncode == 1
+        assert result.returncode == 2
 
     def test_pretooluse_catches_bash(self, tmp_path: Path) -> None:
         result = run_pretooluse("Bash rm -rf /tmp/test", str(tmp_path))
-        assert result.returncode == 1
+        assert result.returncode == 2
 
     def test_pretooluse_catches_multiedit(self, tmp_path: Path) -> None:
         """MultiEdit should trigger checkpoint check and be blocked without marker."""
         result = run_pretooluse("MultiEdit files in project", str(tmp_path))
-        assert result.returncode == 1, (
+        assert result.returncode == 2, (
             "MultiEdit should be caught as a mutation and blocked without checkpoint"
         )
 
     def test_pretooluse_catches_notebookedit(self, tmp_path: Path) -> None:
         """NotebookEdit should trigger checkpoint check and be blocked without marker."""
         result = run_pretooluse("NotebookEdit cell 5", str(tmp_path))
-        assert result.returncode == 1, (
+        assert result.returncode == 2, (
             "NotebookEdit should be caught as a mutation and blocked without checkpoint"
         )
 
@@ -188,7 +188,7 @@ class TestPythonShellComplementarity:
 
         # Shell hook now blocks
         result = run_pretooluse("Write to file", str(tmp_path))
-        assert result.returncode == 1
+        assert result.returncode == 2
 
     def test_marker_survives_tracker_restart(self, tmp_path: Path) -> None:
         """Marker persists across Python tracker restarts."""

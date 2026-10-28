@@ -207,9 +207,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   touching only `.gitignore`), but an exact pin in package metadata would
   conflict with a consumer's own ruff. The bounds describe what the package
   supports; the constraints file describes what a green check attests to
-- The `claude-agent-sdk` floor is `>=0.1.25`, the oldest release providing every
-  symbol this package imports, rather than the newest release available. It was
-  briefly `>=0.2.148`, which excluded working installs without cause
+- The `claude-agent-sdk` floor is `>=0.1.52`, the oldest release whose
+  `ToolPermissionContext` carries the `tool_use_id` that keys the checkpoint
+  reservation in `can_use_tool`, rather than the newest release available. It
+  was briefly `>=0.2.148`, which excluded working installs without cause, and
+  then `>=0.1.25`, which admitted releases where the permission callback
+  could not name its own reservation
 - `pyyaml` carries an upper bound (`>=6.0,<7`) like everything else, and the two
   CI jobs that installed it directly now install the package instead, so the
   constraint is declared once rather than in three places
@@ -234,6 +237,72 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
+- **Whole-branch review (#114): executor.** Forged snapshots that passed the
+  state check and then panicked are refused at restore; resolved inputs
+  deeper than I-JSON allows fail the step (R402) instead of breaking
+  snapshots; a huge `min_approvers` still snapshots; `correlate` matches in
+  a stable key order across restores; the executor's own refusals of an
+  invocation are not retried; a recovery loop back to a waiting delegate
+  carries `replaces`, also when the loop targets an earlier step or a
+  retry's re-delegation failed first; clock values are capped at year 9999; a re-asked
+  approval's record says why
+- **Whole-branch review (#114): validator.** The YAML loader stops deep
+  compact sequences at its nesting limit instead of overflowing the stack;
+  same-file `#/...` `$ref`s and chains of refs resolve (only hops count
+  toward the limit), and the schemas one validation resolves share a budget
+  of 200,000 nodes, so refs that fan out are refused (S302) rather than
+  exhausting memory; literal and template bindings are type-checked
+  (B203), an explicit null included (except `invoke`'s `input`, where it
+  means no inputs); reference syntax errors have one code everywhere (B201, B205 for
+  an empty annotation); W606 follows `invoke`; an invoke cycle is reported
+  once per workflow, not once per edge; diagnostics come in catalog order
+  (workflow, then step); B202 has one wording. The stricter rules are
+  listed in the [spec changelog](spec/CHANGELOG.md)
+- **Whole-branch review (#114): catalogs.** `digital_twin_sync_loop` rolled
+  back twice on a failed verification (an after-gate and a failure mode on
+  the same condition); it rolls back once. `stop` gates that ended healthy
+  cycles as failures are skips or conditions, so their audits run. Literal
+  types (`plan.constraints`, `detect.threshold`, `search.scope`,
+  `ground.claim`) match their inputs, steps bind the outputs they reason
+  about, and failure modes on effectful steps have `on_error` triggers.
+  The clarification workflows gate on what the analysis found, not on its
+  confidence
+- **The checkpoint hook did not block anything (#114).**
+  `pretooluse_require_checkpoint.sh` read its payload from an argument,
+  but Claude Code passes it on stdin, and it signalled a block with exit 1,
+  which Claude Code treats as a non-blocking error. It reads stdin now (an
+  argument still works), blocks with exit 2 and the reason on stderr, and
+  still fails closed: every `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and
+  `Bash` call needs a valid marker
+- **Whole-branch review (#114): catalogs, second pass.** Rollback steps no
+  longer require a checkpoint of their own (the one before the mutation
+  was spent, so the executor took a new one of the broken state first).
+  A verify or verification step that errors rolls the mutation back;
+  nothing is rolled back when nothing was mutated, and audits run after
+  the rollback so they record it. `data_quality_pipeline` writes nothing,
+  so it no longer checkpoints or rolls back and its risk is low
+- **Whole-branch review (#114): skills.** Every capability skill's output
+  contract, field table and examples use the ontology's field names and
+  types (`verify` returns `passed`, `checkpoint` `checkpoint_id`, `detect`
+  `matches`, and so on), and their safety constraints match the
+  ontology's flags and risk
+- **Whole-branch review (#114): Python.** The permission callback releases
+  a denied call's checkpoint reservation, and without a `tool_use_id` only
+  checks for a valid checkpoint. `WorkflowRunner` turns a host response the
+  run refuses into R402 for a capability or `HostResponseError` otherwise,
+  bounds the unanswered polls of each action (`max_polls`), and raises `RunStartError` from
+  `restore` and for inputs that are not JSON data. The validator raises
+  `FileNotFoundError` and the other `OSError` types for a missing or
+  unreadable catalog or ontology, as `load_yaml` does. Boolean and NaN
+  weights are rejected in profiles. The bundled ontology copies are kept in sync. The
+  `acs` console script, which only worked inside a checkout, is removed:
+  run `python tools/scaffold.py`
+- **Whole-branch review (#114): tooling.** The conformance runner compares
+  each fixture's codes exactly and gives each run its own suggestions file
+  (`validate_workflows.py --suggestions-out`); four negative fixtures that
+  were 780-line copies tripping unrelated checks are minimal now. CI runs
+  the YAML-sync and transform-ref validators, installs with the
+  constraints file everywhere, and checks the formatting of `tools/`
 - **Unbound required inputs were silent (#114).** A step that does not
   bind an input its capability requires is W615. The reference catalog
   left 60 required inputs unbound across eight workflows; they are bound

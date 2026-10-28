@@ -1610,7 +1610,7 @@ def effects_sweep():
                     input_bindings={"target": "x"},
                     gates=[{"when": "${m.success} == false", "action": "warn"}],
                 ),
-                st("audit", "log", input_bindings={"event": "sweep done"}),
+                st("audit", "log", input_bindings={"event": {"type": "sweep_done"}}),
                 st("observe", "tail", input_bindings={"target": "elsewhere"}),
             ],
             requires=["approval@1"],
@@ -2281,6 +2281,80 @@ for implicit in (False, True):
         {"kind": "Failed", "code": "R403", "message": "low confidence"},
         ["step_completed", "gate_fired"],
     )
+
+add(
+    "gate_skip",
+    "A before-gate with action skip skips the step; later steps run and read null.",
+    {
+        "w": wf(
+            [
+                st("retrieve", "r", input_bindings={"target": "x"}),
+                st(
+                    "observe",
+                    "o",
+                    input_bindings={"target": "y"},
+                    gates=[{"when": "${r.data} == 0", "action": "skip"}],
+                ),
+                st("search", "s", input_bindings={"query": "${o.observation}"}),
+            ]
+        )
+    },
+    [
+        {"expect": inv("retrieve"), "respond": out(data=0, confidence=1)},
+        {
+            "expect": inv("search", step=2, inputs={"query": None}),
+            "respond": out(results=[], confidence=1),
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["gate_fired", "step_skipped"],
+)
+
+add(
+    "after_gate_and_failure_mode",
+    "An after-gate's R403 goes to the step's failure modes: a rollback gate and"
+    " a rollback failure mode on the same condition roll back twice (§5.6).",
+    {
+        "w": wf(
+            [
+                CP,
+                st(
+                    "verify",
+                    "v",
+                    input_bindings={"target": "t", "conditions": ["ok"]},
+                    gates=[
+                        {
+                            "when": "${v.passed} == false",
+                            "phase": "after",
+                            "action": "rollback",
+                        }
+                    ],
+                    failure_modes=[
+                        {
+                            "condition": "verification failed",
+                            "when": "${v.passed} == false",
+                            "action": "rollback",
+                        }
+                    ],
+                ),
+            ]
+        )
+    },
+    [
+        {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+        {"expect": inv("verify"), "respond": out(passed=False, confidence=1)},
+        {
+            "expect": {"kind": "Rollback", "checkpoint_id": "cp1", "step": 1},
+            "respond": {"kind": "RolledBack"},
+        },
+        {
+            "expect": {"kind": "Rollback", "checkpoint_id": "cp1", "step": 1},
+            "respond": {"kind": "RolledBack"},
+        },
+    ],
+    {"kind": "Failed", "code": "R403", "step": 1},
+    ["gate_fired", "rolled_back", "failure_mode_fired", "rolled_back"],
+)
 
 add(
     "wait_source_and_sender",
@@ -3234,6 +3308,209 @@ add(
     ],
     {"kind": "Completed", "outcome": "completed"},
     ["always_ask"],
+)
+
+add(
+    "wait_correlate_key_order",
+    "An event that fails several correlate keys is dropped for the first key in"
+    " sorted order, so a restored run reports the same reason.",
+    {
+        "w": wf(
+            [
+                st(
+                    "receive",
+                    "r",
+                    timeout="1h",
+                    wait={
+                        "event_type": "done",
+                        "correlate": {"zz": "${z}", "aa": "${a}"},
+                    },
+                )
+            ],
+            inputs={
+                "z": {"type": "string", "required": True},
+                "a": {"type": "string", "required": True},
+            },
+            requires=["wait@1"],
+        )
+    },
+    [
+        {
+            "expect": {"kind": "AwaitEvent", "correlate": {"zz": "1", "aa": "2"}},
+            "respond": {"kind": "Event", "event": {"event_type": "done"}},
+        },
+        {
+            "expect": {"kind": "AwaitEvent"},
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "done", "zz": "1", "aa": "2"},
+            },
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["event_dropped", "event_received"],
+    inputs={"z": "1", "a": "2"},
+)
+
+add(
+    "delegate_loop_replaces",
+    "A recovery loop back to a waiting delegate delegates again and names the"
+    " delegation it replaces, as a retry does.",
+    {
+        "w": wf(
+            [
+                st(
+                    "delegate",
+                    "ra",
+                    timeout="2h",
+                    input_bindings={"task": {"review": "x"}, "agent": "a"},
+                    wait={
+                        "event_type": "review.done",
+                        "liveness": {"mode": "push", "interval": "10m"},
+                    },
+                    failure_modes=[
+                        {
+                            "condition": "The reviewer went silent.",
+                            "on_error": "R406",
+                            "action": "request_more_context",
+                            "recovery": {"goto_step": "ra", "max_loops": 1},
+                        }
+                    ],
+                )
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [
+        {
+            "expect": inv("delegate", attempt=1),
+            "respond": out(accepted=True, task_id="t1"),
+        },
+        {"expect": {"kind": "AwaitEvent"}, "respond": {"kind": "LivenessLost"}},
+        {
+            "expect": inv("delegate", replaces="t1"),
+            "respond": out(accepted=True, task_id="t2"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "correlate": {"task_id": "t2"}},
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "review.done", "task_id": "t2"},
+            },
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed", "outputs": {"ra": {"task_id": "t2"}}},
+    ["loop", "delegated"],
+)
+
+add(
+    "delegate_loop_from_earlier_step",
+    "A recovery loop to a step before a waiting delegate runs the delegate again,"
+    " naming the delegation it replaces; the steps in between do not take it.",
+    {
+        "w": wf(
+            [
+                st("plan", "p", input_bindings={"goal": "review x"}),
+                st(
+                    "delegate",
+                    "ra",
+                    timeout="2h",
+                    input_bindings={"task": {"review": "x"}, "agent": "a"},
+                    wait={
+                        "event_type": "review.done",
+                        "liveness": {"mode": "push", "interval": "10m"},
+                    },
+                    failure_modes=[
+                        {
+                            "condition": "The reviewer went silent.",
+                            "on_error": "R406",
+                            "action": "request_more_context",
+                            "recovery": {"goto_step": "p", "max_loops": 1},
+                        }
+                    ],
+                ),
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [
+        {"expect": inv("plan"), "respond": out(steps=[], confidence=1)},
+        {
+            "expect": inv("delegate", attempt=1),
+            "respond": out(accepted=True, task_id="t1"),
+        },
+        {"expect": {"kind": "AwaitEvent"}, "respond": {"kind": "LivenessLost"}},
+        {"expect": inv("plan"), "respond": out(steps=[], confidence=1)},
+        {
+            "expect": inv("delegate", replaces="t1"),
+            "respond": out(accepted=True, task_id="t2"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "correlate": {"task_id": "t2"}},
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "review.done", "task_id": "t2"},
+            },
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed", "outputs": {"ra": {"task_id": "t2"}}},
+    ["loop", "delegated"],
+)
+
+add(
+    "delegate_loop_after_failed_redelegation",
+    "When a retry's re-delegation fails and a recovery loop delegates again,"
+    " the new delegation still names the one it replaces.",
+    {
+        "w": wf(
+            [
+                st(
+                    "delegate",
+                    "ra",
+                    timeout="2h",
+                    retry={"max": 1},
+                    input_bindings={"task": {"review": "x"}, "agent": "a"},
+                    wait={
+                        "event_type": "review.done",
+                        "liveness": {"mode": "push", "interval": "10m"},
+                    },
+                    failure_modes=[
+                        {
+                            "condition": "The replacement could not be delegated.",
+                            "on_error": "R402",
+                            "action": "request_more_context",
+                            "recovery": {"goto_step": "ra", "max_loops": 1},
+                        }
+                    ],
+                )
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [
+        {
+            "expect": inv("delegate", attempt=1),
+            "respond": out(accepted=True, task_id="t1"),
+        },
+        {"expect": {"kind": "AwaitEvent"}, "respond": {"kind": "LivenessLost"}},
+        {
+            "expect": inv("delegate", attempt=2, replaces="t1"),
+            "respond": {"kind": "Error", "code": "R402", "message": "busy"},
+        },
+        {
+            "expect": inv("delegate", replaces="t1"),
+            "respond": out(accepted=True, task_id="t3"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "correlate": {"task_id": "t3"}},
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "review.done", "task_id": "t3"},
+            },
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed", "outputs": {"ra": {"task_id": "t3"}}},
+    ["retry", "failure_mode_fired", "loop", "delegated"],
 )
 
 add(

@@ -101,6 +101,7 @@ evidence_anchors: ["file:line", "command:output"]
 | `diff` | object | Difference between states |
 | `checkpoint_id` | string | Reference for rollback |
 | `rollback_command` | string | How to undo the change |
+| `evidence_anchors` | array | References to the changed location and the command output |
 
 ## Examples
 

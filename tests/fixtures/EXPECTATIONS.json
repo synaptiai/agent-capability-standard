@@ -122,9 +122,8 @@
     "level": "L3",
     "category": "types",
     "expected_error_codes": [
-      "V101"
-    ],
-    "note": "Fixture uses v1 capability names; primary failure is unknown capabilities"
+      "B204"
+    ]
   },
   "fail_unknown_capabilities_v1": {
     "should_pass": false,

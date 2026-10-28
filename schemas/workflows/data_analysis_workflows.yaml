@@ -452,10 +452,7 @@ report_generation:
       mutation: false
       store_as: grounded_insights_out
       input_bindings:
-        claim:
-          trends: ${trends_out}
-          drivers: ${drivers_out}
-          forecast: ${forecast_out}
+        claim: "The trends, drivers and forecast found for report ${report.id} are supported by the queried data and computed metrics"
         sources:
           - ${data_query_out}
           - ${metrics_out}
@@ -473,7 +470,10 @@ report_generation:
           template: "${template_out.data: object}"
           metrics: ${metrics_out}
           comparisons: ${benchmark_comparison_out}
-          insights: ${grounded_insights_out}
+          insights:
+            trends: ${trends_out}
+            drivers: ${drivers_out}
+            grounding: ${grounded_insights_out}
           forecast: ${forecast_out}
         format: ${report.output_format}
 

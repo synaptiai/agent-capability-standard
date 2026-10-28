@@ -42,12 +42,35 @@ impl Ref {
     }
 }
 
+/// Why a `${...}` body does not parse. `annotation` marks an annotation that
+/// names no type (B205); anything else is a malformed reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefError {
+    pub msg: String,
+    pub annotation: bool,
+}
+
+impl RefError {
+    fn path(msg: String) -> Self {
+        Self {
+            msg,
+            annotation: false,
+        }
+    }
+}
+
+impl std::fmt::Display for RefError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.msg)
+    }
+}
+
 /// A `${...}` occurrence in a string: byte span and parse result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefMatch {
     pub start: usize,
     pub end: usize,
-    pub parsed: Result<Ref, String>,
+    pub parsed: Result<Ref, RefError>,
 }
 
 /// Every `${...}` in `s`, left to right. An unterminated `${` is reported as a
@@ -72,7 +95,10 @@ pub fn find_refs(s: &str) -> Vec<RefMatch> {
                 out.push(RefMatch {
                     start,
                     end: s.len(),
-                    parsed: Err(format!("unterminated reference '{}'", &s[start..])),
+                    parsed: Err(RefError::path(format!(
+                        "unterminated reference '{}'",
+                        &s[start..]
+                    ))),
                 });
                 break;
             }
@@ -98,7 +124,7 @@ pub fn is_identifier(s: &str) -> bool {
 }
 
 /// Parse the text inside `${...}`.
-pub fn parse_ref(body: &str) -> Result<Ref, String> {
+pub fn parse_ref(body: &str) -> Result<Ref, RefError> {
     let raw = body.to_string();
     // The annotation starts at the first ':' outside brackets (slices use ':').
     let mut depth = 0i32;
@@ -118,14 +144,21 @@ pub fn parse_ref(body: &str) -> Result<Ref, String> {
         Some(idx) => {
             let ann = body[idx + 1..].trim();
             if ann.is_empty() {
-                return Err(format!("empty type annotation in '${{{raw}}}'"));
+                return Err(RefError {
+                    msg: format!("empty type annotation in '${{{raw}}}'"),
+                    annotation: true,
+                });
             }
             (&body[..idx], Some(ann.to_string()))
         }
         None => (body, None),
     };
     let p = path_part.trim();
-    let bad = |why: &str| Err(format!("malformed reference '${{{raw}}}': {why}"));
+    let bad = |why: &str| {
+        Err(RefError::path(format!(
+            "malformed reference '${{{raw}}}': {why}"
+        )))
+    };
     let mut chars = p.char_indices().peekable();
     let root_end = match chars.peek() {
         Some(&(_, c)) if is_ident_start(c) => {
@@ -157,21 +190,23 @@ pub fn parse_ref(body: &str) -> Result<Ref, String> {
                 return bad("unclosed '['");
             };
             let inner = &r[..close];
-            let num = |t: &str| -> Result<Option<usize>, String> {
+            let num = |t: &str| -> Result<Option<usize>, RefError> {
                 if t.is_empty() {
                     return Ok(None);
                 }
                 if !t.bytes().all(|b| b.is_ascii_digit()) {
-                    return Err(format!("malformed reference '${{{raw}}}': bad index '{t}'"));
+                    return Err(RefError::path(format!(
+                        "malformed reference '${{{raw}}}': bad index '{t}'"
+                    )));
                 }
                 if t.len() > 1 && t.starts_with('0') {
-                    return Err(format!(
+                    return Err(RefError::path(format!(
                         "malformed reference '${{{raw}}}': leading zeros in index '{t}'"
-                    ));
+                    )));
                 }
-                t.parse::<usize>()
-                    .map(Some)
-                    .map_err(|_| format!("malformed reference '${{{raw}}}': index too large"))
+                t.parse::<usize>().map(Some).map_err(|_| {
+                    RefError::path(format!("malformed reference '${{{raw}}}': index too large"))
+                })
             };
             match inner.split_once(':') {
                 Some((a, b)) => path.push(Seg::Slice(num(a)?, num(b)?)),

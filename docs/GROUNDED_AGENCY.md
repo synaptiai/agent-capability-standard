@@ -511,7 +511,7 @@ The `${ref}` syntax enables referencing outputs from earlier steps:
     query: checkpoint timeout errors
 ```
 
-**Gates**: Runtime conditions that can halt or redirect execution. `when` is an expression in the grammar of [STANDARD v1.1.0 §5.8](../spec/STANDARD-v1.1.0.md#58-condition-expressions) (comparisons, `&&`, `||`, `!`, literals and `${ref}` references); `action` is `stop`, `rollback`, `skip` or `warn`; `message` is optional. A gate runs before its step unless it declares `phase: after`, which a gate that reads its own step's output needs:
+**Gates**: Runtime conditions that can halt or redirect execution. `when` is an expression in the grammar of [STANDARD v1.1.0 §5.8](../spec/STANDARD-v1.1.0.md#58-condition-expressions) (comparisons, membership with `in`, `&&`, `||`, `!`, literals and `${ref}` references); `action` is `stop`, `rollback`, `skip` or `warn`; `message` is optional. A gate runs before its step unless it declares `phase: after`, which a gate that reads its own step's output needs:
 
 ```yaml
 gates:

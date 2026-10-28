@@ -15,7 +15,7 @@ deploy_with_escalation:
     store_as: plan_out
     input_bindings:
       goal: Deploy the change.
-      constraints: ["${_recovery.failure_evidence: array<object>}"]
+      constraints: {failure_evidence: "${_recovery.failure_evidence: array<object>}"}
   - capability: constrain
     purpose: Check the plan against deployment policy.
     store_as: policy_out

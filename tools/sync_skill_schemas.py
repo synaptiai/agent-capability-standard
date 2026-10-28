@@ -9,6 +9,8 @@
 - those co-located copies (world_state_schema.yaml, event_schema.yaml,
   transform_mapping_rawlog_to_observation.yaml) next to each bundled catalog,
   and any other copy of them a skill vendors in its reference/ directory
+- skills/<name>/reference/capability_ontology.yaml, wherever a skill vendors
+  one: a verbatim copy of schemas/capability_ontology.yaml
 
 A sync also removes generated output_schema.yaml files the plan no longer
 produces (e.g. for a capability removed from the ontology); only files that
@@ -31,6 +33,8 @@ import yaml
 from yaml_util import ONTOLOGY_MAX_BYTES, safe_yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]
+
+ONTOLOGY_SOURCE = "schemas/capability_ontology.yaml"
 
 # Transitive dependencies referenced inside bundled workflow_catalog.yaml.
 # Maps repo-root paths → local filenames for both copying and path rewriting.
@@ -115,6 +119,8 @@ def planned_files(root: Path) -> tuple[dict[Path, bytes], list[str]]:
     - for each skill that bundles ``reference/workflow_catalog.yaml``: that
       catalog regenerated from ``schemas/workflow_catalog.yaml``, and copies
       of the schemas it references
+    - every vendored ``skills/*/reference/capability_ontology.yaml``: a
+      verbatim copy of the ontology
 
     Returns the plan and the problems found (missing skill directories or
     sources).
@@ -123,9 +129,8 @@ def planned_files(root: Path) -> tuple[dict[Path, bytes], list[str]]:
     errors: list[str] = []
     skills_dir = root / "skills"
 
-    ontology = safe_yaml_load(
-        root / "schemas" / "capability_ontology.yaml", max_size=ONTOLOGY_MAX_BYTES
-    )
+    ontology_path = root / ONTOLOGY_SOURCE
+    ontology = safe_yaml_load(ontology_path, max_size=ONTOLOGY_MAX_BYTES)
     layer_index = build_layer_index(ontology)
     for node in ontology.get("nodes", []):
         skill_dir = skills_dir / node["id"]
@@ -136,6 +141,10 @@ def planned_files(root: Path) -> tuple[dict[Path, bytes], list[str]]:
         files[skill_dir / "schemas" / "output_schema.yaml"] = generate_schema_doc(
             node, layer
         ).encode("utf-8")
+    # Skills that ship the ontology for reference must ship the current one.
+    ontology_bytes = ontology_path.read_bytes()
+    for copy in sorted(skills_dir.glob("*/reference/capability_ontology.yaml")):
+        files[copy] = ontology_bytes
 
     catalogs = sorted(skills_dir.glob("*/reference/workflow_catalog.yaml"))
     source = root / VENDORED_CATALOG_SOURCE

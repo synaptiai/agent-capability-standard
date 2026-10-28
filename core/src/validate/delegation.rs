@@ -45,6 +45,23 @@ pub(crate) fn check(
             report,
         );
     }
+    // An empty allow-list drops every sender: the step can only time out.
+    // (On a delegate that does not wait, the missing wait is the error.)
+    let waits = loc.capability != "delegate" || step.get("wait").is_some_and(Value::is_object);
+    if waits
+        && bindings
+            .get("accept_from")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+    {
+        report.push(
+            loc.diag(
+                Code::SchemaValidationFailed,
+                "an empty accept_from accepts no sender; leave it out to accept all",
+            )
+            .at("field", "input_bindings.accept_from"),
+        );
+    }
     // Sender filters on a delegate apply to the result it waits for.
     if loc.capability == "delegate" && !step.get("wait").is_some_and(Value::is_object) {
         for key in [
@@ -120,6 +137,12 @@ mod tests {
                              "input_bindings": {"accept_from": ["a", "b"]}});
         assert!(codes(catalog(json!([receive.clone()]), &["delegation@1"])).is_empty());
         assert_eq!(codes(catalog(json!([receive]), &[])), ["V106"]);
+        let empty = json!({"capability": "receive", "purpose": "p", "store_as": "r",
+                           "input_bindings": {"accept_from": []}});
+        assert_eq!(codes(catalog(json!([empty]), &["delegation@1"])), ["S303"]);
+        // On a delegate that does not wait, only the missing wait is reported.
+        let d = delegate(json!({"accept_from": []}));
+        assert_eq!(codes(catalog(json!([d]), &["delegation@1"])), ["S303"]);
         let sync = json!({"capability": "synchronize", "purpose": "p", "store_as": "s",
                           "input_bindings": {"agents": ["a", "b"], "state": {},
                                              "accept_from": ["a"]}});

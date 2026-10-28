@@ -101,6 +101,9 @@ assumptions: []
 | `evidence` | array | Supporting evidence with sources and excerpts |
 | `contradictions` | array | Evidence that contradicts the claim |
 | `gaps` | array | Missing evidence that would strengthen grounding |
+| `confidence` | number | 0.0-1.0 confidence in the grounding judgement |
+| `evidence_anchors` | array | References to every source consulted |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 

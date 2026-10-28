@@ -63,13 +63,13 @@ Return a structured object:
 ```yaml
 observation:
   target: string  # What was observed
-  timestamp: string  # ISO 8601 timestamp
   status: string  # Overall status assessment
   aspects:
     - aspect: string  # Name of observed aspect
       value: any  # Observed value or state
       notable: boolean  # Whether this is noteworthy
   anomalies: array[string]  # Unexpected findings
+timestamp: string  # ISO 8601 timestamp
 confidence: 0..1  # Based on observation quality
 evidence_anchors: ["file:line", "command:output"]
 assumptions: []  # What was assumed about the target
@@ -81,7 +81,7 @@ next_actions: array[string]  # 0-3 suggested follow-ups
 | Field | Type | Description |
 |-------|------|-------------|
 | `observation.target` | string | Identifier of what was observed |
-| `observation.timestamp` | string | When observation was made |
+| `timestamp` | string | ISO 8601 date-time the observation was made |
 | `observation.status` | string | Summary status (healthy, degraded, error, unknown) |
 | `observation.aspects` | array | List of observed aspects with values |
 | `confidence` | number | 0.0-1.0 based on observation completeness |
@@ -101,7 +101,6 @@ aspects: ["running", "memory", "connections"]
 ```yaml
 observation:
   target: "nginx process (PID 1234)"
-  timestamp: "2024-01-15T10:30:00Z"
   status: "healthy"
   aspects:
     - aspect: "running"
@@ -115,6 +114,7 @@ observation:
       notable: true
   anomalies:
     - "Connection count higher than typical (avg: 200)"
+timestamp: "2024-01-15T10:30:00Z"
 confidence: 0.95
 evidence_anchors:
   - "command:ps aux | grep nginx"
@@ -138,7 +138,6 @@ aspects: ["content", "permissions", "modified"]
 ```yaml
 observation:
   target: "config/database.yml"
-  timestamp: "2024-01-15T10:35:00Z"
   status: "present"
   aspects:
     - aspect: "content"
@@ -152,6 +151,7 @@ observation:
       notable: false
   anomalies:
     - "File permissions allow group/other read (sensitive credentials)"
+timestamp: "2024-01-15T10:35:00Z"
 confidence: 0.9
 evidence_anchors:
   - "config/database.yml:1-25"

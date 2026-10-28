@@ -2,10 +2,19 @@
 Tests for PreToolUse checkpoint enforcement hooks.
 
 Verifies that the PreToolUse hook correctly blocks mutation tools
-when no checkpoint exists and allows them when one does.
+when no checkpoint exists and allows them when one does: the SDK adapter's
+hook, and the plugin's shell hook as Claude Code runs it (JSON on stdin,
+exit 2 with the reason on stderr to block).
 """
 
 from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import time
+from pathlib import Path
 
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions
@@ -224,3 +233,113 @@ class TestPreToolUseExceptionHandling:
 
         # Should return empty dict (no denial), not crash
         assert result == {}
+
+
+# =============================================================================
+# Plugin shell hook (hooks/pretooluse_require_checkpoint.sh)
+# =============================================================================
+
+SHELL_HOOK = (
+    Path(__file__).resolve().parents[1] / "hooks" / "pretooluse_require_checkpoint.sh"
+)
+
+needs_bash_and_jq = pytest.mark.skipif(
+    shutil.which("bash") is None or shutil.which("jq") is None,
+    reason="the shell hook needs bash, and jq to read the tool call",
+)
+
+
+def _run_shell_hook(
+    tool_call: dict, project_dir: Path
+) -> subprocess.CompletedProcess[str]:
+    """Run the hook the way Claude Code does: the tool call as JSON on stdin."""
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = str(project_dir)
+    return subprocess.run(
+        ["bash", str(SHELL_HOOK)],
+        input=json.dumps(tool_call),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def _write_marker(project_dir: Path, expires_in: int = 1800) -> None:
+    marker_dir = project_dir / ".claude"
+    marker_dir.mkdir(exist_ok=True)
+    now = int(time.time())
+    (marker_dir / "checkpoint.ok").write_text(
+        json.dumps(
+            {
+                "checkpoint_id": "chk_stdin_test",
+                "created_at": now,
+                "expires_at": now + expires_in,
+            }
+        )
+    )
+
+
+@needs_bash_and_jq
+class TestShellPreToolUseHookStdin:
+    """The shell hook reads Claude Code's JSON from stdin and blocks with exit 2."""
+
+    @pytest.mark.parametrize("tool", ["Write", "Edit", "MultiEdit", "NotebookEdit"])
+    def test_blocks_file_tools_without_marker(self, tmp_path: Path, tool: str):
+        result = _run_shell_hook(
+            {"tool_name": tool, "tool_input": {"file_path": "a.py"}}, tmp_path
+        )
+        assert result.returncode == 2
+        assert "missing checkpoint marker" in result.stderr.lower()
+        assert result.stdout == ""
+
+    def test_blocks_mutating_bash_without_marker(self, tmp_path: Path):
+        result = _run_shell_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "rm -rf build"}},
+            tmp_path,
+        )
+        assert result.returncode == 2
+        assert "blocked" in result.stderr.lower()
+
+    def test_blocks_every_bash_call_without_marker(self, tmp_path: Path):
+        """A command is not trusted to be read-only: the hook fails closed."""
+        result = _run_shell_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "ls -la"}}, tmp_path
+        )
+        assert result.returncode == 2
+
+    def test_allows_write_with_valid_marker(self, tmp_path: Path):
+        _write_marker(tmp_path)
+        result = _run_shell_hook(
+            {"tool_name": "Write", "tool_input": {"file_path": "a.py"}}, tmp_path
+        )
+        assert result.returncode == 0
+
+    def test_blocks_and_removes_expired_marker(self, tmp_path: Path):
+        _write_marker(tmp_path, expires_in=-60)
+        result = _run_shell_hook(
+            {"tool_name": "Edit", "tool_input": {"file_path": "a.py"}}, tmp_path
+        )
+        assert result.returncode == 2
+        assert "expired" in result.stderr.lower()
+        assert not (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    def test_allows_non_mutation_tool(self, tmp_path: Path):
+        result = _run_shell_hook(
+            {"tool_name": "Read", "tool_input": {"file_path": "a.py"}}, tmp_path
+        )
+        assert result.returncode == 0
+
+    def test_argument_payload_still_accepted(self, tmp_path: Path):
+        """A payload passed as $1 is read instead of stdin."""
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+        result = subprocess.run(
+            ["bash", str(SHELL_HOOK), json.dumps({"tool_name": "Write"})],
+            input="",
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert result.returncode == 2

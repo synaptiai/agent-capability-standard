@@ -44,7 +44,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
 
       - name: Install dependencies
-        run: pip install -e "."
+        run: pip install -e "." -c constraints.txt
 
       - name: Validate ontology graph
         run: python tools/validate_ontology.py
@@ -76,6 +76,12 @@ jobs:
 
       - name: Validate documentation links
         run: python tools/validate_doc_links.py
+
+      - name: Validate YAML utility sync
+        run: python tools/validate_yaml_util_sync.py
+
+      - name: Validate transform mapping references
+        run: python tools/validate_transform_refs.py
 
       - name: Check generated skill files are in sync
         run: python tools/sync_skill_schemas.py --check
@@ -159,7 +165,7 @@ jobs:
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
 
       - name: Ruff format check
-        run: ruff format --check grounded_agency/ tests/ benchmarks/ scripts/gen_runtime_fixtures.py
+        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py
 
       - name: Mypy type check
         run: mypy grounded_agency/
@@ -262,7 +268,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
 
       - name: Install dependencies
-        run: pip install -e "."
+        run: pip install -e "." -c constraints.txt
 
       - name: Run conformance tests
         run: python scripts/run_conformance.py

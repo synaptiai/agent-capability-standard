@@ -254,6 +254,35 @@ class TestValidateProfiles:
         assert result.returncode == 0
         assert "Validating:" in result.stdout
 
+    def test_boolean_weights_are_refused(self) -> None:
+        """YAML ``true`` is an int in Python, but not a weight."""
+        import importlib.util
+
+        sys.path.insert(0, str(ROOT / "tools"))  # for its `yaml_util` import
+        spec = importlib.util.spec_from_file_location(
+            "validate_profiles", ROOT / "tools" / "validate_profiles.py"
+        )
+        assert spec is not None and spec.loader is not None
+        vp = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vp)
+
+        errors: list[str] = []
+        vp.validate_trust_weights({"trust_weights": {"a": True, "b": 0.5}}, errors, "p")
+        vp.validate_evidence_policy(
+            {"evidence_policy": {"minimum_confidence": False}}, errors, "p"
+        )
+        vp.validate_domain_sources(
+            {"domain_sources": [{"name": "s", "default_trust": True}]}, errors, "p"
+        )
+        assert any("trust_weights.a" in e for e in errors), errors
+        assert any("minimum_confidence" in e for e in errors), errors
+        assert any("default_trust" in e for e in errors), errors
+        assert not any("trust_weights.b" in e for e in errors), errors
+
+        nan: list[str] = []
+        vp.validate_trust_weights({"trust_weights": {"a": float("nan")}}, nan, "p")
+        assert any("trust_weights.a" in e for e in nan), nan
+
     def test_no_trust_calibration_warnings(self) -> None:
         """SEC-009: All profiles have trust_model_reviewed: true — no warnings."""
         result = run_validator("validate_profiles.py")
@@ -312,83 +341,56 @@ class TestConformanceHelpers:
 
     def test_read_emitted_codes_missing_file(self, tmp_path: Path) -> None:
         """Returns empty set when suggestions JSON does not exist."""
-        # Import the helper by manipulating its module-level constant
         import scripts.run_conformance as rc
 
-        original = rc.SUGGESTIONS_JSON
-        try:
-            rc.SUGGESTIONS_JSON = tmp_path / "nonexistent.json"
-            assert rc._read_emitted_codes() == set()
-        finally:
-            rc.SUGGESTIONS_JSON = original
+        missing = tmp_path / "nonexistent.json"
+        assert rc._read_emitted_codes(missing, "structured_errors") == set()
 
     def test_read_emitted_codes_valid_json(self, tmp_path: Path) -> None:
-        """Returns correct codes from well-formed suggestions JSON."""
+        """Returns the codes under the requested key."""
         import scripts.run_conformance as rc
 
-        original = rc.SUGGESTIONS_JSON
-        try:
-            f = tmp_path / "suggestions.json"
-            f.write_text(
-                json.dumps(
-                    {
-                        "structured_errors": [
-                            {
-                                "code": "V101",
-                                "name": "UNKNOWN_CAPABILITY",
-                                "message": "test",
-                            },
-                            {
-                                "code": "V104",
-                                "name": "DUPLICATE_STORE_AS",
-                                "message": "test",
-                            },
-                        ]
-                    }
-                )
+        f = tmp_path / "suggestions.json"
+        f.write_text(
+            json.dumps(
+                {
+                    "structured_errors": [
+                        {"code": "V101", "name": "UNKNOWN_CAPABILITY", "message": "t"},
+                        {"code": "V104", "name": "DUPLICATE_STORE_AS", "message": "t"},
+                    ],
+                    "structured_warnings": [
+                        {"code": "W601", "name": "SOFT_REQUIRES", "message": "t"}
+                    ],
+                }
             )
-            rc.SUGGESTIONS_JSON = f
-            assert rc._read_emitted_codes() == {"V101", "V104"}
-        finally:
-            rc.SUGGESTIONS_JSON = original
+        )
+        assert rc._read_emitted_codes(f, "structured_errors") == {"V101", "V104"}
+        assert rc._read_emitted_codes(f, "structured_warnings") == {"W601"}
 
     def test_read_emitted_codes_malformed_json(self, tmp_path: Path) -> None:
         """Returns empty set on malformed JSON."""
         import scripts.run_conformance as rc
 
-        original = rc.SUGGESTIONS_JSON
-        try:
-            f = tmp_path / "bad.json"
-            f.write_text("{not valid json")
-            rc.SUGGESTIONS_JSON = f
-            assert rc._read_emitted_codes() == set()
-        finally:
-            rc.SUGGESTIONS_JSON = original
+        f = tmp_path / "bad.json"
+        f.write_text("{not valid json")
+        assert rc._read_emitted_codes(f, "structured_errors") == set()
 
-    def test_clear_suggestions_removes_file(self, tmp_path: Path) -> None:
-        """_clear_suggestions deletes the file if it exists."""
-        import scripts.run_conformance as rc
-
-        original = rc.SUGGESTIONS_JSON
-        try:
-            f = tmp_path / "suggestions.json"
-            f.write_text("{}")
-            rc.SUGGESTIONS_JSON = f
-            rc._clear_suggestions()
-            assert not f.exists()
-        finally:
-            rc.SUGGESTIONS_JSON = original
-
-    def test_clear_suggestions_noop_when_missing(self, tmp_path: Path) -> None:
-        """_clear_suggestions is a no-op when file doesn't exist."""
-        import scripts.run_conformance as rc
-
-        original = rc.SUGGESTIONS_JSON
-        try:
-            rc.SUGGESTIONS_JSON = tmp_path / "nonexistent.json"
-            rc._clear_suggestions()  # should not raise
-        finally:
-            rc.SUGGESTIONS_JSON = original
+    def test_suggestions_out_writes_where_asked(self, tmp_path: Path) -> None:
+        """--suggestions-out writes the report to the given path."""
+        out = tmp_path / "out.json"
+        fixture = (
+            ROOT
+            / "tests"
+            / "fixtures"
+            / "fail_unknown_capability.workflow_catalog.yaml"
+        )
+        result = run_validator(
+            "validate_workflows.py",
+            ["--catalog", str(fixture), "--suggestions-out", str(out)],
+        )
+        assert result.returncode == 1
+        data = json.loads(out.read_text())
+        assert {d["code"] for d in data["structured_errors"]} == {"V101"}
 
 
 # ─── Transform Refs Validator ───
@@ -745,6 +747,30 @@ class TestValidateCanonicalSchemas:
             "    external: 0.35\n    stranger: 0.1",
         )
 
+    @pytest.mark.parametrize(
+        ("filename", "old", "new"),
+        [
+            (
+                "authority_trust_model.yaml",
+                "    human_note: 0.55",
+                "    human_note: true",
+            ),
+            ("authority_trust_model.yaml", "    external: 0.35", "    external: true"),
+            ("authority_trust_model.yaml", "min_trust: 0.25", "min_trust: true"),
+            (
+                "identity_resolution_policy.yaml",
+                "    weight: 1.0\n    rule: id string equality",
+                "    weight: true\n    rule: id string equality",
+            ),
+        ],
+        ids=["source-weight", "trust-class-weight", "min-trust", "alias-feature"],
+    )
+    def test_catches_boolean_weights(
+        self, tmp_path: Path, filename: str, old: str, new: str
+    ) -> None:
+        """``true`` is an int in Python (== 1), but not a weight."""
+        self._assert_drift_is_caught(tmp_path, filename, old, new)
+
     def test_catches_identity_type_drift(self, tmp_path: Path) -> None:
         """The world state's AgentIdentity copies agent_identity exactly."""
         self._assert_drift_is_caught(
@@ -1047,6 +1073,23 @@ class TestSyncSkillSchemas:
         assert (
             copy.read_bytes() == (root / "schemas" / "event_schema.yaml").read_bytes()
         )
+
+    def test_vendored_ontology_copies_are_maintained(self, tmp_path: Path) -> None:
+        """Every skills/*/reference/capability_ontology.yaml is a verbatim
+        copy of the ontology; a stale one fails --check and a sync repairs
+        it."""
+        root = self._tree(tmp_path)
+        copies = sorted((root / "skills").glob("*/reference/capability_ontology.yaml"))
+        assert copies, "expected skills that vendor the ontology"
+        stale = copies[0]
+        stale.write_text(stale.read_text() + "# stale\n")
+
+        check = self._sync(root, "--check")
+        assert check.returncode == 1
+        assert str(stale.relative_to(root)) in check.stdout
+        assert self._sync(root).returncode == 0
+        source = (root / "schemas" / "capability_ontology.yaml").read_bytes()
+        assert all(copy.read_bytes() == source for copy in copies)
 
     def test_crlf_checkout_is_not_drift(self, tmp_path: Path) -> None:
         root = self._tree(tmp_path)

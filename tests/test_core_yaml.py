@@ -93,6 +93,34 @@ class TestGuards:
         with pytest.raises(IsADirectoryError):
             _core.load_yaml(str(tmp_path))
 
+    def test_validator_raises_load_errors_like_load_yaml(self, tmp_path: Path) -> None:
+        """Validation entry points raise the OSError subclass load_yaml
+        raises for a file it cannot read, and ValueError for bad content."""
+        ontology = ROOT / "schemas" / "capability_ontology.yaml"
+        absent = tmp_path / "absent.yaml"
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("a: 1\na: 2\n")
+
+        with pytest.raises(FileNotFoundError, match="cannot load ontology"):
+            _core.Validator(absent, ROOT)
+        with pytest.raises(IsADirectoryError):
+            _core.Validator(tmp_path, ROOT)
+        with pytest.raises(ValueError, match="duplicate mapping key"):
+            _core.Validator(bad, ROOT)
+
+        validator = _core.Validator(ontology, ROOT)
+        with pytest.raises(FileNotFoundError, match="cannot load workflow catalog"):
+            validator.validate_file(absent)
+        with pytest.raises(IsADirectoryError):
+            validator.validate_file(tmp_path)
+        with pytest.raises(ValueError, match="duplicate mapping key"):
+            validator.validate_file(bad)
+
+        with pytest.raises(FileNotFoundError):
+            _core.validate_catalog(absent, ontology, ROOT)
+        with pytest.raises(FileNotFoundError):
+            _core.validate_catalog(bad, absent, ROOT)
+
     def test_rejects_duplicate_keys(self) -> None:
         # PyYAML silently keeps the last value; YAML 1.2 forbids duplicates.
         with pytest.raises(ValueError, match="duplicate mapping key"):

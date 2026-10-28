@@ -10,6 +10,12 @@ downgraded_mutate:
     store_as: plan_out
     input_bindings:
       goal: "resolve the request"
+  - capability: constrain
+    purpose: Check the change against policy.
+    store_as: policy_out
+    input_bindings:
+      target: "the change"
+      constraints: ["change policy"]
   - capability: checkpoint
     purpose: Save a restore point.
     store_as: checkpoint_out

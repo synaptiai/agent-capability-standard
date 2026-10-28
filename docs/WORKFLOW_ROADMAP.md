@@ -20,7 +20,7 @@ workflows (step capabilities in order; a domain in brackets):
 ### 3. `debug_code_change`
 - **Goal:** Safely diagnose and fix a bug/regression in a codebase.
 - **Declared risk:** medium
-- **Steps:** observe → search → attribute[dependencies] → constrain → critique → plan → checkpoint → execute → verify → audit → rollback
+- **Steps:** observe → search → attribute[dependencies] → constrain → critique → plan → checkpoint → execute → verify → rollback → audit
 
 ### 4. `world_model_build`
 - **Goal:** Construct a structured world model for a domain (real or digital) with dynamics and uncertainty.
@@ -35,7 +35,7 @@ workflows (step capabilities in order; a domain in brackets):
 ### 6. `digital_twin_sync_loop`
 - **Goal:** Synchronize digital twin state with incoming signals, detect drift, decide and execute safe actions, and record provenance.
 - **Declared risk:** high
-- **Steps:** receive → search → transform → integrate → detect[entity] → classify → state → compare[state_diff] → transition → detect[anomaly] → measure[risk] → predict[risk] → plan → constrain → checkpoint → mutate → execute → verify → audit → rollback → explain
+- **Steps:** receive → search → transform → integrate → detect[entity] → classify → state → compare[state_diff] → transition → detect[anomaly] → measure[risk] → predict[risk] → plan → constrain → checkpoint → mutate → execute → verify → rollback → audit → explain
 
 ### 7. `digital_twin_bootstrap`
 - **Goal:** Initialize a digital twin from scratch then run a first sync loop.
@@ -45,7 +45,7 @@ workflows (step capabilities in order; a domain in brackets):
 ### 8. `rag_pipeline`
 - **Goal:** Retrieve relevant information and generate a grounded, evidence-cited response.
 - **Declared risk:** low
-- **Steps:** search → retrieve → detect[relevance] → ground → generate → explain → audit
+- **Steps:** search → retrieve → detect[relevance] → generate → ground → explain → audit
 
 ### 9. `security_assessment`
 - **Goal:** Identify and assess security vulnerabilities with risk scoring and mitigation recommendations.
@@ -59,13 +59,13 @@ workflows (step capabilities in order; a domain in brackets):
 
 ### 11. `data_quality_pipeline`
 - **Goal:** Examine, detect, classify, measure, clean, verify, and audit data quality issues.
-- **Declared risk:** medium
-- **Steps:** observe → detect[data_issue] → classify → measure[quality] → checkpoint → transform → verify → audit → rollback
+- **Declared risk:** low
+- **Steps:** observe → detect[data_issue] → classify → measure[quality] → transform → verify → audit
 
 ### 12. `model_deployment`
 - **Goal:** Safely deploy an ML model to production with validation, policy checks, and rollback capability.
 - **Declared risk:** high
-- **Steps:** constrain → constrain → checkpoint → execute → verify → measure[performance] → audit → rollback
+- **Steps:** constrain → constrain → checkpoint → execute → verify → measure[performance] → rollback → audit
 
 ## Workflow Skill Directories
 

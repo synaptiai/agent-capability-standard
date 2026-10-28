@@ -7,7 +7,7 @@ use super::program::{GateAction, Program, Step, Workflow};
 use super::quorum;
 use super::{
     Action, Attendance, Body, Checkpoint, Deferral, Frame, MAX_FRAMES, MAX_TIME, Outcome, Pending,
-    Purpose, Response, Stage, State, StepError, StepState, SubmitError, check_inputs,
+    Purpose, Replacement, Response, Stage, State, StepError, StepState, SubmitError, check_inputs,
 };
 use crate::duration;
 use crate::expr::ast::RefAt;
@@ -507,7 +507,20 @@ impl<'a> Machine<'a> {
                 return Flow::Continue;
             }
         }
-        self.frame().cur = StepState::default();
+        let f = self.frame();
+        // A recovery loop back to a waiting delegate replaces its delegation
+        // when that step runs again, as a retry does.
+        let replaces = match f.replaces.take() {
+            Some(r) if r.step == index => Some(r.task_id),
+            other => {
+                f.replaces = other;
+                None
+            }
+        };
+        f.cur = StepState {
+            replaces,
+            ..StepState::default()
+        };
         let capability = self.step_ref().capability.clone();
         self.trace_step("step_started", json!({"capability": capability}));
         let program = self.program;
@@ -555,6 +568,11 @@ impl<'a> Machine<'a> {
         }
         let bindings = step.raw.get("input_bindings").cloned().unwrap_or(json!({}));
         let inputs = resolve(&bindings, &FrameBindings(self.frame_ref()));
+        // Resolving can nest a stored value deeper than any value a host
+        // may send; such inputs could not be snapshotted or sent.
+        if let Err(e) = super::ijson(&inputs) {
+            return self.step_error("R402", format!("the step's resolved inputs: {e}"));
+        }
         self.frame().cur.inputs = inputs;
         self.set_stage(Stage::Approval)
     }
@@ -695,10 +713,13 @@ impl<'a> Machine<'a> {
                 a.insert("always_ask".into(), json!(true));
             }
         }
+        // More approvers than any count can reach: the cap keeps the state
+        // exactly representable (I-JSON) without changing the outcome.
         let min = approver
             .get("min_approvers")
             .and_then(|m| m.as_u64().or_else(|| m.as_f64().map(|f| f as u64)))
-            .unwrap_or(1);
+            .unwrap_or(1)
+            .min(1 << 53);
         let mode = spec
             .get("mode")
             .and_then(Value::as_str)
@@ -1058,6 +1079,10 @@ impl<'a> Machine<'a> {
             }
             _ => {
                 self.set_record_status("expired");
+                if let Some(r) = self.frame_ref().cur.record {
+                    self.st.records[r]["reason"] =
+                        json!("the approved source changed; asked again");
+                }
                 let f = self.frame();
                 f.cur.previous = Some(baseline);
                 f.cur.rebaseline = Some(current);
@@ -1202,13 +1227,15 @@ impl<'a> Machine<'a> {
             .or_else(|| inputs.get("workflow").and_then(Value::as_str))
             .map(str::to_string);
         let Some(target) = target else {
-            return self.exec_error("R402", "the invoke step names no workflow");
+            // The executor's own refusals are not retried: a retry would
+            // meet the same refusal without the host ever being asked.
+            return self.step_error("R402", "the invoke step names no workflow");
         };
         let Some(child) = self.program.workflows.get(&target) else {
-            return self.exec_error("R402", format!("workflow '{target}' is not in the catalog"));
+            return self.step_error("R402", format!("workflow '{target}' is not in the catalog"));
         };
         if self.st.frames.len() >= MAX_FRAMES {
-            return self.exec_error(
+            return self.step_error(
                 "R402",
                 format!("invoking '{target}' would nest more than {MAX_FRAMES} runs"),
             );
@@ -1219,7 +1246,7 @@ impl<'a> Machine<'a> {
             .cloned()
             .unwrap_or_default();
         if let Err(e) = check_inputs(child, &child_inputs) {
-            return self.exec_error("R402", e);
+            return self.step_error("R402", e);
         }
         self.trace_step("invoke_started", json!({"workflow": target}));
         self.undefer_nested();
@@ -1404,7 +1431,7 @@ impl<'a> Machine<'a> {
             ..
         } = &pending.action.body
         else {
-            unreachable!("checked by submit");
+            return self.fail_run("R402", "an event answered an action that awaits none");
         };
         // Without identity@1 the run is as before: no identity is kept.
         let identity = identity
@@ -1434,7 +1461,15 @@ impl<'a> Machine<'a> {
                 != Some(k.as_str())
         }) {
             Some("source_kind".to_string())
-        } else if let Some((k, _)) = correlate.iter().find(|(k, v)| !eval::deep_eq(&field(k), v)) {
+        } else if let Some(k) = {
+            // In key order: a snapshot stores the keys sorted (canonical
+            // JSON), so a restored run would otherwise report a different
+            // key than the live run, which keeps the author's order.
+            let mut keys: Vec<&String> = correlate.keys().collect();
+            keys.sort();
+            keys.into_iter()
+                .find(|k| !eval::deep_eq(&field(k), &correlate[k.as_str()]))
+        } {
             Some(format!("correlate.{k}"))
         } else if accept_from
             .as_ref()
@@ -1680,6 +1715,30 @@ impl<'a> Machine<'a> {
         if marked_injection {
             self.frame().always_ask.insert("_recovery".to_string());
         }
+        if let Err(e) = super::ijson(&Value::Object(injected.clone())) {
+            return self.end_frame(Err((
+                "R402".to_string(),
+                format!("the context a recovery loop injects: {e}"),
+            )));
+        }
+        // A loop that runs a waiting delegate again replaces its delegation:
+        // the one it holds, or, when a retry's re-delegation failed, the one
+        // that retry was replacing.
+        if target <= step.index {
+            let cur = &self.frame_ref().cur;
+            let task = cur
+                .delegated
+                .as_ref()
+                .and_then(|d| d.get("task_id"))
+                .cloned()
+                .or_else(|| cur.replaces.clone());
+            if let Some(task_id) = task {
+                self.frame().replaces = Some(Replacement {
+                    step: step.index,
+                    task_id,
+                });
+            }
+        }
         let cleared: Vec<String> = wf.steps[target..]
             .iter()
             .filter_map(|s| s.store_as.clone())
@@ -1898,8 +1957,12 @@ impl<'a> Machine<'a> {
                     format!("could not recheck the approved source: {message}"),
                 );
             }
+            // check_state and submit rule this out; a run never panics.
             (purpose, response) => {
-                unreachable!("submit admitted {} for {purpose:?}", response.kind())
+                self.fail_run(
+                    "R402",
+                    &format!("a {} response does not fit {purpose:?}", response.kind()),
+                );
             }
         }
     }

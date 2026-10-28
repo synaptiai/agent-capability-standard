@@ -448,6 +448,27 @@
    ]
   },
   {
+   "id": "empty-annotation",
+   "expr": "${c.confidence:} > 1",
+   "expect": [
+    "B205"
+   ]
+  },
+  {
+   "id": "malformed-reference-index",
+   "expr": "${c.confidence[01]} > 1",
+   "expect": [
+    "B201"
+   ]
+  },
+  {
+   "id": "malformed-reference-negative-index",
+   "expr": "${c.confidence[-1]} > 1",
+   "expect": [
+    "B201"
+   ]
+  },
+  {
    "id": "syntax-error",
    "expr": "${c.passed} = true",
    "expect": [

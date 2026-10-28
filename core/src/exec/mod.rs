@@ -24,9 +24,10 @@ use program::Program;
 pub const MAX_FRAMES: usize = 4;
 /// The snapshot format this executor writes and reads.
 pub const SNAPSHOT_VERSION: u32 = 1;
-/// Times (ms since the epoch) are capped here, 2^53: every time stays an
-/// exact JSON number (I-JSON, RFC 7493).
-pub const MAX_TIME: u64 = 1 << 53;
+/// Times (ms since the epoch) are capped at 9999-12-31T23:59:59.999Z: every
+/// time stays an exact JSON number (I-JSON, RFC 7493, below 2^53) and an
+/// RFC 3339 timestamp (a four-digit year).
+pub const MAX_TIME: u64 = 253_402_300_799_999;
 /// The deepest value a run accepts from its host or its inputs; a snapshot
 /// nests it a few levels deeper and still parses.
 pub const MAX_VALUE_DEPTH: usize = 100;
@@ -421,6 +422,17 @@ pub(crate) struct Frame {
     /// Invoked by a marked step: every step of this run is marked.
     #[serde(default)]
     pub marked: bool,
+    /// A recovery loop back to (or to before) a waiting delegate: the
+    /// delegation that step's next delegation replaces.
+    #[serde(default)]
+    pub replaces: Option<Replacement>,
+}
+
+/// A delegation to name as replaced when step `step` next delegates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Replacement {
+    pub step: usize,
+    pub task_id: Value,
 }
 
 /// What the pending action is waiting for, beyond the action itself.
@@ -726,6 +738,12 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
         if f.cur.record.is_some_and(|r| r >= st.records.len()) {
             return Err("a step refers to a missing action record".into());
         }
+        if f.replaces
+            .as_ref()
+            .is_some_and(|r| r.step >= wf.steps.len())
+        {
+            return Err("a replaced delegation names a step out of range".into());
+        }
         // Deferred steps come before the current one, except while a
         // handler runs: it may be listed before the steps it escalates from.
         let ordered = f.deferred.windows(2).all(|w| w[0] < w[1]);
@@ -770,9 +788,41 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
             return Err("a deferral refers to a missing workflow, step or record".into());
         }
     }
+    if !st
+        .records
+        .iter()
+        .all(|r| r.get("status").is_some_and(Value::is_string))
+    {
+        return Err("an action record is not an object with a status".into());
+    }
+    if st.finished.as_ref().is_some_and(|a| !a.body.is_terminal()) {
+        return Err("the terminal action is not terminal".into());
+    }
     if let Some(p) = &st.pending {
         if p.action.body.is_terminal() || p.action.id >= st.next_id {
             return Err("the pending action is not a pending action".into());
+        }
+        // The purpose must be one the action can have, and point at what
+        // exists: responses are dispatched on the pair.
+        let top = st.frames.last().expect("checked non-empty above");
+        let wf = &program.workflows[&top.workflow];
+        let modes = wf.steps.get(top.step).map_or(0, |s| s.failure_modes.len());
+        let fits = match (&p.action.body, &p.purpose) {
+            (Body::InvokeCapability { .. }, Purpose::Capability)
+            | (Body::AwaitEvent { .. }, Purpose::Event)
+            | (Body::CreateCheckpoint { .. }, Purpose::Checkpoint)
+            | (Body::Rollback { .. }, Purpose::GateRollback { .. })
+            | (Body::RequestApproval { .. }, Purpose::Approval { .. })
+            | (Body::RecheckSource { .. }, Purpose::Recheck) => true,
+            (Body::CreateCheckpoint { .. }, Purpose::FailureCheckpoint { mode })
+            | (Body::Rollback { .. }, Purpose::FailureRollback { mode }) => *mode < modes,
+            (Body::Sleep { .. }, Purpose::Sleep) => {
+                matches!(top.stage, Stage::Backoff { .. }) && top.step < wf.steps.len()
+            }
+            _ => false,
+        };
+        if !fits {
+            return Err("the pending action's purpose does not fit it".into());
         }
         let step = match &p.action.body {
             Body::InvokeCapability { step, .. }
@@ -783,8 +833,7 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
             | Body::AwaitEvent { step, .. } => Some(*step),
             _ => None,
         };
-        let top = st.frames.last().expect("checked non-empty above");
-        if step.is_some_and(|s| s != top.step) {
+        if step.is_some_and(|s| s != top.step || s >= wf.steps.len()) {
             return Err("the pending action is for another step".into());
         }
     }
@@ -808,6 +857,7 @@ impl Frame {
             nested_caps: BTreeMap::new(),
             always_ask: BTreeSet::new(),
             marked: false,
+            replaces: None,
         }
     }
 }

@@ -96,24 +96,24 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
-search_results:
+results:
+  - id: string  # Result identifier
+    type: file | web | doc | record
+    source: string  # Where found
+    path: string | null  # File path or URL
+    title: string | null
+    snippet: string  # Relevant excerpt
+    relevance_score: number  # 0.0-1.0
+    metadata:
+      date: string | null
+      author: string | null
+      size: number | null
+    evidence_anchor: string  # Reference for grounding
+total_count: integer  # Total matches before filtering
+query_details:
   query: string  # Original query
   query_expansions: array[string]  # Variations tried
   sources_searched: array[string]  # Where we looked
-  results:
-    - id: string  # Result identifier
-      type: file | web | doc | record
-      source: string  # Where found
-      path: string | null  # File path or URL
-      title: string | null
-      snippet: string  # Relevant excerpt
-      relevance_score: number  # 0.0-1.0
-      metadata:
-        date: string | null
-        author: string | null
-        size: number | null
-      evidence_anchor: string  # Reference for grounding
-  total_found: integer  # Total results before filtering
   returned: integer  # Results in this response
 coverage:
   sources_available: array[string]
@@ -134,11 +134,16 @@ next_searches: array[string]  # Suggested follow-up searches
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `results` | array | Ranked search results |
-| `relevance_score` | number | How well result matches query |
+| `results` | array | Ranked search results (empty when nothing matched) |
+| `results[].relevance_score` | number | How well result matches query |
+| `total_count` | integer | Total matches before filtering (`results` may hold fewer) |
+| `query_details` | object | Query, expansions tried, sources searched, and number returned |
 | `coverage` | object | Assessment of search completeness |
 | `blind_spots` | array | Known areas not searched |
 | `next_searches` | array | Suggested follow-up queries |
+| `confidence` | number | 0.0-1.0 confidence the results answer the query |
+| `evidence_anchors` | array | References to where each result was found |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 
@@ -152,55 +157,55 @@ scope: "repo: *.ts and *.js files, excluding node_modules/ and test/"
 
 **Output:**
 ```yaml
-search_results:
+results:
+  - id: "r1"
+    type: file
+    source: "repo"
+    path: "src/middleware/auth.ts"
+    title: null
+    snippet: |
+      export function validateToken(token: string): JWTPayload {
+        return jwt.verify(token, process.env.JWT_SECRET) as JWTPayload;
+      }
+    relevance_score: 0.95
+    metadata:
+      date: "2025-01-20"
+      author: null
+      size: 2450
+    evidence_anchor: "src/middleware/auth.ts:45-48"
+  - id: "r2"
+    type: file
+    source: "repo"
+    path: "src/services/user-service.ts"
+    title: null
+    snippet: |
+      const decoded = validateToken(authHeader.split(' ')[1]);
+    relevance_score: 0.75
+    metadata:
+      date: "2025-01-15"
+      size: 5200
+    evidence_anchor: "src/services/user-service.ts:23"
+  - id: "r3"
+    type: file
+    source: "repo"
+    path: "src/utils/jwt-helpers.ts"
+    title: null
+    snippet: |
+      export const JWT_ALGORITHM = 'HS256';
+      export const TOKEN_EXPIRY = '24h';
+    relevance_score: 0.60
+    metadata:
+      date: "2024-12-01"
+      size: 800
+    evidence_anchor: "src/utils/jwt-helpers.ts:1-5"
+total_count: 8
+query_details:
   query: "JWT token validation"
   query_expansions:
     - "jwt.*valid"
     - "token.*verify"
     - "jsonwebtoken"
   sources_searched: ["repo:src/"]
-  results:
-    - id: "r1"
-      type: file
-      source: "repo"
-      path: "src/middleware/auth.ts"
-      title: null
-      snippet: |
-        export function validateToken(token: string): JWTPayload {
-          return jwt.verify(token, process.env.JWT_SECRET) as JWTPayload;
-        }
-      relevance_score: 0.95
-      metadata:
-        date: "2025-01-20"
-        author: null
-        size: 2450
-      evidence_anchor: "src/middleware/auth.ts:45-48"
-    - id: "r2"
-      type: file
-      source: "repo"
-      path: "src/services/user-service.ts"
-      title: null
-      snippet: |
-        const decoded = validateToken(authHeader.split(' ')[1]);
-      relevance_score: 0.75
-      metadata:
-        date: "2025-01-15"
-        size: 5200
-      evidence_anchor: "src/services/user-service.ts:23"
-    - id: "r3"
-      type: file
-      source: "repo"
-      path: "src/utils/jwt-helpers.ts"
-      title: null
-      snippet: |
-        export const JWT_ALGORITHM = 'HS256';
-        export const TOKEN_EXPIRY = '24h';
-      relevance_score: 0.60
-      metadata:
-        date: "2024-12-01"
-        size: 800
-      evidence_anchor: "src/utils/jwt-helpers.ts:1-5"
-  total_found: 8
   returned: 3
 coverage:
   sources_available: ["repo", "docs"]
@@ -244,35 +249,35 @@ scope: web
 
 **Output:**
 ```yaml
-search_results:
+results:
+  - id: "w1"
+    type: web
+    source: "web"
+    path: "https://platform.openai.com/docs/guides/rate-limits"
+    title: "Rate limits - OpenAI API"
+    snippet: "Rate limits are measured in tokens per minute (TPM) and requests per minute (RPM). Tier 1 users: 500 RPM, 100,000 TPM..."
+    relevance_score: 0.95
+    metadata:
+      date: "2025-01-15"
+      author: "OpenAI"
+    evidence_anchor: "url:https://platform.openai.com/docs/guides/rate-limits"
+  - id: "w2"
+    type: web
+    source: "web"
+    path: "https://community.openai.com/t/rate-limit-changes-2025"
+    title: "Rate Limit Changes in 2025"
+    snippet: "As of January 2025, we've updated rate limit tiers..."
+    relevance_score: 0.85
+    metadata:
+      date: "2025-01-10"
+    evidence_anchor: "url:https://community.openai.com/t/rate-limit-changes-2025"
+total_count: 15
+query_details:
   query: "OpenAI API rate limits 2025"
   query_expansions:
     - "OpenAI rate limit tiers"
     - "GPT-4 API quota"
   sources_searched: ["web"]
-  results:
-    - id: "w1"
-      type: web
-      source: "web"
-      path: "https://platform.openai.com/docs/guides/rate-limits"
-      title: "Rate limits - OpenAI API"
-      snippet: "Rate limits are measured in tokens per minute (TPM) and requests per minute (RPM). Tier 1 users: 500 RPM, 100,000 TPM..."
-      relevance_score: 0.95
-      metadata:
-        date: "2025-01-15"
-        author: "OpenAI"
-      evidence_anchor: "url:https://platform.openai.com/docs/guides/rate-limits"
-    - id: "w2"
-      type: web
-      source: "web"
-      path: "https://community.openai.com/t/rate-limit-changes-2025"
-      title: "Rate Limit Changes in 2025"
-      snippet: "As of January 2025, we've updated rate limit tiers..."
-      relevance_score: 0.85
-      metadata:
-        date: "2025-01-10"
-      evidence_anchor: "url:https://community.openai.com/t/rate-limit-changes-2025"
-  total_found: 15
   returned: 2
 coverage:
   sources_available: ["web", "docs"]

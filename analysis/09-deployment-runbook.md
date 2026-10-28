@@ -128,7 +128,7 @@ include = [
 |-----------|---------|-------------|
 | `pyyaml` | >=6.0,<7 | Core (ontology/schema parsing) |
 | `maturin` | >=1.9,<2 | Build only |
-| `claude-agent-sdk` | >=0.1.25,<0.3 | Optional `[sdk]` extra (also in `[dev]`) |
+| `claude-agent-sdk` | >=0.1.52,<0.3 | Optional `[sdk]` extra (also in `[dev]`) |
 | `pytest` | >=7.0,<9 | Optional `[dev]` extra |
 | `pytest-asyncio` | >=0.21,<1 | Optional `[dev]` extra |
 | `mypy` | >=1.0,<2 | Optional `[dev]` extra |
@@ -302,7 +302,7 @@ Zero violations required for release.
 python scripts/run_conformance.py
 ```
 
-The conformance runner (`scripts/run_conformance.py`) tests the reference validator against the fixture workflow catalogs in `tests/fixtures/`. For each entry in `tests/fixtures/EXPECTATIONS.json`, it runs `tools/validate_workflows.py --catalog <fixture>` (the production catalog is never swapped or modified), checks the exit code against `should_pass`, and checks the emitted codes against `expected_error_codes` and `expected_warning_codes` (an empty list means no warning may be emitted).
+The conformance runner (`scripts/run_conformance.py`) tests the reference validator against the fixture workflow catalogs in `tests/fixtures/`. For each entry in `tests/fixtures/EXPECTATIONS.json`, it runs `tools/validate_workflows.py --catalog <fixture>` (the production catalog is never swapped or modified), checks the exit code against `should_pass`, and checks that the emitted codes equal `expected_error_codes` and `expected_warning_codes` exactly (an absent or empty warning list means no warning may be emitted). Each run writes its suggestions JSON to its own temporary file (`--suggestions-out`).
 
 **Output artifacts:**
 - Console: a `PASS:`/`FAIL:` line per fixture, then `Conformance PASSED` or `Conformance FAILED (N failures)`
@@ -438,7 +438,7 @@ This validates every YAML file in `schemas/profiles/` (excluding `profile_schema
 
 **File:** `schemas/capability_ontology.yaml`
 **Version field:** `meta.version`
-**Current value:** `2.0.0`
+**Current value:** `2.1.0`
 
 The ontology version is independent of the SDK and plugin versions. It tracks changes to the capability graph itself:
 
@@ -451,8 +451,8 @@ The ontology version is embedded in the `meta` block:
 ```yaml
 meta:
   name: Grounded Agency Capability Ontology
-  version: 2.0.0
-  generated_at: '2026-01-26T00:00:00.000Z'
+  version: 2.1.0
+  generated_at: '2026-10-28T00:00:00.000Z'
   description: 36 atomic capabilities derived from first principles
 ```
 
@@ -485,7 +485,7 @@ Four independent version sources must stay synchronized at release time. Failure
 | SDK Package | `pyproject.toml` | `project.version` | `0.1.0` | Python package releases |
 | Plugin | `.claude-plugin/plugin.json` | `version` | `1.2.0` | Claude Code plugin releases |
 | Runtime | `grounded_agency/__init__.py` | `__version__` | `0.1.0` | Must match pyproject.toml |
-| Ontology | `schemas/capability_ontology.yaml` | `meta.version` | `2.0.0` | Capability graph changes |
+| Ontology | `schemas/capability_ontology.yaml` | `meta.version` | `2.1.0` | Capability graph changes |
 
 ### 4.2 Synchronization Rules
 

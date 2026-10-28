@@ -191,7 +191,7 @@ Example: `${observe_out.observation}`, `${state_out.entities: array<object>}`
 
 ### Gate
 A conditional check that can halt or redirect workflow execution. Gates define:
-- `when`: Condition expression (STANDARD v1.1 §5.8: comparisons `==` `!=` `<` `<=` `>` `>=`, `!`, `&&`, `||`, literals and `${refs}`)
+- `when`: Condition expression (STANDARD v1.1 §5.8: comparisons `==` `!=` `<` `<=` `>` `>=`, membership `in`, `!`, `&&`, `||`, literals and `${refs}`)
 - `action`: What to do if condition matches (stop, rollback, skip, warn)
 - `message` (optional): Explanation for the action
 - `phase` (optional): `before` (default) or `after` the step; a gate that reads its own step's output needs `phase: after`, and an after-gate cannot skip

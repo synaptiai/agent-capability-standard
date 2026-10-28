@@ -292,7 +292,14 @@ and what the decision binds to:
     input_bindings:
       target: build/cache
       operation: {delete: stale_entries}
+    approval:
+      approver: {kind: human, role: build-owner}
+      when_unattended: defer_to_queue   # queued too when the send ran
   ```
+
+  The `mutate` needs its own `when_unattended`: when the mandate covers
+  the send, nothing is deferred, and an unattended run reaches the
+  `mutate` with no one to approve it.
 - A run that fails or escalates after a deferral still lists its
   deferrals; a recovery loop that runs a deferred step again supersedes
   its earlier `planned` record.

@@ -56,7 +56,7 @@ AI systems built on this framework inherit its structural safety properties and 
 
 | Component | Version | Purpose |
 |-----------|---------|---------|
-| Capability ontology | 2.0.0 | Core specification |
+| Capability ontology | 2.1.0 | Core specification |
 | Python SDK integration | 0.1.0 | `grounded_agency/` package |
 | Python runtime | 3.9+ | Execution environment |
 | PyYAML | Latest stable | YAML processing for ontology/profiles |
@@ -263,7 +263,7 @@ Training-related responsibilities:
 
 | Enforcement | Mechanism | Bypass Prevention |
 |-------------|-----------|-------------------|
-| **PreToolUse checkpoint gate** | Shell hook intercepts Write, Edit, MultiEdit, NotebookEdit, Bash tool calls; blocks if no valid checkpoint marker | Hook runs before tool execution; tool cannot proceed without passing |
+| **PreToolUse checkpoint gate** | Shell hook intercepts Write, Edit, MultiEdit, NotebookEdit, Bash tool calls; blocks them (exit code 2) if no valid checkpoint marker | Hook runs before tool execution; tool cannot proceed without passing |
 | **Conflict edges** | `conflicts_with` relationships prevent mutually exclusive capabilities from co-executing | Validated at design time by workflow validator |
 | **Domain blocking** | `block_autonomous` capability lists prevent autonomous execution regardless of approval status | Enforced at profile evaluation level |
 | **Trust decay** | Source trust halves every 10 days (τ₁/₂ = 10d, floor = 0.25) | Mathematical model; no override mechanism |

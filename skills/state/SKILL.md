@@ -75,12 +75,12 @@ state:
   world_id: string  # Unique identifier for this state snapshot
   scope: string  # Domain being modeled
   timestamp: string  # When state was captured
-  entities:
+  entities: &entities
     - id: string  # Unique entity identifier
       type: string  # Entity classification
       properties: object  # Entity attributes
       confidence: number  # Confidence in entity state
-  relationships:
+  relationships: &relationships
     - from: string  # Source entity ID
       to: string  # Target entity ID
       type: string  # Relationship type
@@ -88,6 +88,8 @@ state:
   meta:
     version: string  # State schema version
     completeness: number  # 0-1 estimate of coverage
+entities: *entities  # Same items as state.entities, for bindings like ${<step>.entities}
+relationships: *relationships  # Same items as state.relationships
 confidence: 0..1  # Overall state model confidence
 evidence_anchors: ["file:line", "observation:id"]
 assumptions: []
@@ -102,7 +104,11 @@ assumptions: []
 | `state.entities` | array | Identified entities with properties |
 | `state.relationships` | array | Connections between entities |
 | `state.meta.completeness` | number | Estimated model completeness |
+| `entities` | array | Identified entities (the same items as `state.entities`) |
+| `relationships` | array | Entity relationships (the same items as `state.relationships`) |
 | `confidence` | number | Overall confidence in state accuracy |
+| `evidence_anchors` | array | References to the observations the state was built from |
+| `assumptions` | array | Assumptions about the modeled system |
 
 ## Examples
 
@@ -119,7 +125,7 @@ state:
   world_id: "auth-state-20240115-001"
   scope: "user authentication system"
   timestamp: "2024-01-15T10:30:00Z"
-  entities:
+  entities: &entities
     - id: "auth-service"
       type: "service"
       properties:
@@ -141,7 +147,7 @@ state:
         memory_used: "256MB"
         keys: 15420
       confidence: 0.90
-  relationships:
+  relationships: &relationships
     - from: "auth-service"
       to: "user-db"
       type: "depends_on"
@@ -157,6 +163,8 @@ state:
   meta:
     version: "1.0"
     completeness: 0.85
+entities: *entities  # Same items as state.entities, for bindings like ${<step>.entities}
+relationships: *relationships  # Same items as state.relationships
 confidence: 0.88
 evidence_anchors:
   - "config/services.yml:15-45"
@@ -182,7 +190,7 @@ state:
   world_id: "payments-code-20240115"
   scope: "payment processing module"
   timestamp: "2024-01-15T11:00:00Z"
-  entities:
+  entities: &entities
     - id: "PaymentProcessor"
       type: "class"
       properties:
@@ -206,7 +214,7 @@ state:
         version: "8.0.0"
         usage: ["PaymentProcessor"]
       confidence: 0.90
-  relationships:
+  relationships: &relationships
     - from: "PaymentProcessor"
       to: "stripe-gem"
       type: "depends_on"
@@ -220,6 +228,8 @@ state:
   meta:
     version: "1.0"
     completeness: 0.75
+entities: *entities  # Same items as state.entities, for bindings like ${<step>.entities}
+relationships: *relationships  # Same items as state.relationships
 confidence: 0.85
 evidence_anchors:
   - "src/services/payment_processor.rb:1-145"

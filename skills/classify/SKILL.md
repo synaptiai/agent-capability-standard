@@ -87,6 +87,8 @@ assumptions: []
 | `primary_label` | string | Single best classification |
 | `ambiguous` | boolean | Whether classification is uncertain |
 | `confidence` | number | 0.0-1.0 overall confidence |
+| `evidence_anchors` | array | References to the characteristics each label rests on |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 

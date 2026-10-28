@@ -114,11 +114,14 @@ impl Checker<'_> {
         for m in refs::find_refs(s) {
             match m.parsed {
                 Ok(r) => self.check_ref(&r, scope, mode, field, report),
-                Err(e) => report.push(
-                    self.loc
-                        .diag(Code::InvalidBindingPath, e)
-                        .at("field", field),
-                ),
+                Err(e) => {
+                    let code = if e.annotation {
+                        Code::InvalidAnnotation
+                    } else {
+                        Code::InvalidBindingPath
+                    };
+                    report.push(self.loc.diag(code, e.msg).at("field", field));
+                }
             }
         }
     }
@@ -211,7 +214,10 @@ impl Checker<'_> {
         }
     }
 
-    /// §5.5(3): each top-level string binding against the consumer's input schema.
+    /// §5.5(3): each top-level binding against the consumer's input schema.
+    /// A value that is exactly one reference has the reference's type (its
+    /// annotation's, when it has one); a template or any other string is a
+    /// string, as the executor builds it; other literals have their JSON kind.
     pub fn consumer_check(
         &self,
         step: &Map<String, Value>,
@@ -223,76 +229,162 @@ impl Checker<'_> {
             return;
         };
         for (key, val) in bindings {
-            let Value::String(s) = val else { continue };
-            for m in refs::find_refs(s) {
-                let Ok(r) = m.parsed else { continue };
-                let schema = match resolve_root(scope, &r.root) {
-                    Some(Producer::Store(s)) => s,
-                    Some(Producer::Input(s)) if s.is_object() => s,
-                    _ => continue,
-                };
-                let (actual, _) = infer(schema, &r);
-                let expected_node = input_schema
-                    .get("properties")
-                    .and_then(|p| p.get(key))
-                    .unwrap_or(&Value::Null);
-                let (expected, expected_ambiguous) = types::schema_type(expected_node);
-                if expected_ambiguous || types::compatible(&expected, &actual) {
+            let expected_node = input_schema
+                .get("properties")
+                .and_then(|p| p.get(key))
+                .unwrap_or(&Value::Null);
+            let (expected, expected_ambiguous) = types::schema_type(expected_node);
+            if expected_ambiguous {
+                continue;
+            }
+            let (actual, source) = match val {
+                Value::String(s) => {
+                    let found = refs::find_refs(s);
+                    match found.as_slice() {
+                        [one] if one.start == 0 && one.end == s.len() => {
+                            let Ok(r) = &one.parsed else { continue };
+                            // An unknown root is B202 already.
+                            let Some(producer) = resolve_root(scope, &r.root) else {
+                                continue;
+                            };
+                            let actual = match (&r.annotation, producer) {
+                                // A malformed annotation is B205 already.
+                                (Some(a), _) => match types::parse_annotation(a) {
+                                    Ok(t) => t,
+                                    Err(_) => continue,
+                                },
+                                (None, Producer::Store(s)) => infer(s, r).0,
+                                (None, Producer::Input(s)) if s.is_object() => infer(s, r).0,
+                                (None, Producer::Input(_)) => continue,
+                            };
+                            (actual, Source::Ref(r.clone()))
+                        }
+                        [] => (Type::String, Source::String),
+                        _ => (Type::String, Source::Template),
+                    }
+                }
+                // The host receives an explicit null, so it is typed like any
+                // literal; for `invoke`'s `input` it means no inputs (§5.12).
+                Value::Null if self.loc.capability == "invoke" && key == "input" => continue,
+                // `- ${a.b: t}` unquoted reads as a mapping: W612 reports it
+                // and checks the reference it rebuilds.
+                Value::Object(m) if mangled_reference(m).is_some() => continue,
+                // A mapping literal is an object, and equally a map<string, …>.
+                Value::Object(_)
+                    if types::compatible(
+                        &expected,
+                        &Type::Map(Box::new(Type::String), Box::new(Type::Unknown)),
+                    ) =>
+                {
                     continue;
                 }
-                report.push(
-                    self.loc
-                        .diag(
-                            Code::TypeMismatch,
-                            format!(
-                                "consumer input type mismatch: input '{key}' expects {expected} but got {actual} from ${{{}}}",
-                                r.raw
-                            ),
-                        )
-                        .at("field", format!("input_bindings.{key}"))
-                        .at("input_key", key.as_str())
-                        .at("ref", r.raw.as_str())
-                        .at("expected_type", expected.to_string())
-                        .at("actual_type", actual.to_string()),
-                );
-                let from_t = actual.to_string();
-                let to_t = expected.to_string();
-                let mapping = self
-                    .ctx
-                    .coercion_for(&actual, &expected)
-                    .map(|c| c.mapping_ref.clone());
-                let store = identifier(&format!(
-                    "coerce_{}_{}_{}",
-                    self.loc.workflow, self.loc.step, key
-                ));
-                report.suggestions.push(json!({
-                    "kind": "consumer_input_type_mismatch",
-                    "workflow": self.loc.workflow,
+                literal => (literal_type(literal), Source::Literal),
+            };
+            if types::compatible(&expected, &actual) {
+                continue;
+            }
+            self.mismatch(key, &expected, &actual, &source, report);
+        }
+    }
+
+    fn mismatch(
+        &self,
+        key: &str,
+        expected: &Type,
+        actual: &Type,
+        source: &Source,
+        report: &mut Report,
+    ) {
+        let (from, r) = match source {
+            Source::Ref(r) => (format!("from ${{{}}}", r.raw), Some(r)),
+            Source::Template => ("from a string template".to_string(), None),
+            Source::String => ("from a string".to_string(), None),
+            Source::Literal => ("from a literal value".to_string(), None),
+        };
+        let mut d = self
+            .loc
+            .diag(
+                Code::TypeMismatch,
+                format!(
+                    "consumer input type mismatch: input '{key}' expects {expected} but got {actual} {from}"
+                ),
+            )
+            .at("field", format!("input_bindings.{key}"))
+            .at("input_key", key)
+            .at("expected_type", expected.to_string())
+            .at("actual_type", actual.to_string());
+        if let Some(r) = r {
+            d = d.at("ref", r.raw.as_str());
+        }
+        report.push(d);
+        // A coercion step can only be suggested for a reference.
+        let Some(r) = r else { return };
+        let from_t = actual.to_string();
+        let to_t = expected.to_string();
+        let mapping = self
+            .ctx
+            .coercion_for(actual, expected)
+            .map(|c| c.mapping_ref.clone());
+        let store = identifier(&format!(
+            "coerce_{}_{}_{}",
+            self.loc.workflow, self.loc.step, key
+        ));
+        report.suggestions.push(json!({
+            "kind": "consumer_input_type_mismatch",
+            "workflow": self.loc.workflow,
+            "step_index": self.loc.step,
+            "capability": self.loc.capability,
+            "input_key": key,
+            "binding_ref": r.raw,
+            "from_type": from_t,
+            "to_type": to_t,
+            "suggested_mapping_ref": mapping,
+            "patch": {
+                "action": "insert_transform_before_step",
+                "insert_at_step_index": self.loc.step,
+                "new_step": {
+                    "capability": "transform",
+                    "purpose": format!("Coerce {key} to {to_t} for consumer input contract"),
+                    "mapping_ref": mapping.clone().unwrap_or_else(|| "docs/schemas/transform_mapping_<custom>.yaml".into()),
+                    "input_bindings": {"source": format!("${{{}}}", r.raw)},
+                    "store_as": store,
+                },
+                "update_step": {
                     "step_index": self.loc.step,
-                    "capability": self.loc.capability,
-                    "input_key": key,
-                    "binding_ref": r.raw,
-                    "from_type": from_t,
-                    "to_type": to_t,
-                    "suggested_mapping_ref": mapping,
-                    "patch": {
-                        "action": "insert_transform_before_step",
-                        "insert_at_step_index": self.loc.step,
-                        "new_step": {
-                            "capability": "transform",
-                            "purpose": format!("Coerce {key} to {to_t} for consumer input contract"),
-                            "mapping_ref": mapping.clone().unwrap_or_else(|| "docs/schemas/transform_mapping_<custom>.yaml".into()),
-                            "input_bindings": {"source": format!("${{{}}}", r.raw)},
-                            "store_as": store,
-                        },
-                        "update_step": {
-                            "step_index": self.loc.step,
-                            "input_bindings_update": {key: format!("${{{store}.transformed: {to_t}}}")},
-                        },
-                    },
-                }));
+                    "input_bindings_update": {key: format!("${{{store}.transformed: {to_t}}}")},
+                },
+            },
+        }));
+    }
+}
+
+/// Where a bound value's type came from, for the B203 message.
+enum Source {
+    /// A whole `${...}` reference: a transform can be suggested for it.
+    Ref(Ref),
+    /// A string with text around its references: a string.
+    Template,
+    /// A string with no reference.
+    String,
+    /// Any other literal.
+    Literal,
+}
+
+/// The type of a literal binding value.
+fn literal_type(v: &Value) -> Type {
+    match v {
+        Value::Null => Type::Null,
+        Value::Bool(_) => Type::Boolean,
+        Value::Number(n) => {
+            if n.is_i64() || n.is_u64() || n.as_f64().is_some_and(|f| f.fract() == 0.0) {
+                Type::Integer
+            } else {
+                Type::Number
             }
         }
+        Value::String(_) => Type::String,
+        Value::Array(_) => Type::Array(Box::new(Type::Unknown)),
+        Value::Object(_) => Type::Object,
     }
 }
 
@@ -300,7 +392,7 @@ impl Checker<'_> {
 /// the `: ` inside the reference ends a plain-scalar key. Any key holding a
 /// `${` that is not closed before the end of the key is that accident.
 /// Rebuild the text the author wrote, so its references are still checked.
-fn mangled_reference(m: &Map<String, Value>) -> Option<String> {
+pub(crate) fn mangled_reference(m: &Map<String, Value>) -> Option<String> {
     if m.len() != 1 {
         return None;
     }

@@ -710,6 +710,63 @@ class TestCheckpointReservation:
         reserved, _ = lenient.checkpoint_tracker.validate_and_reserve("t3")
         assert reserved is False
 
+    @pytest.mark.asyncio
+    async def test_context_without_tool_use_id_does_not_reserve(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        """SDKs before 0.1.52 pass a ToolPermissionContext with no
+        tool_use_id. The callback cannot name the PreToolUse reservation, so
+        it must not treat it as foreign: it checks the checkpoint and leaves
+        the reservation to PreToolUse."""
+        adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_checkpoint_hook()
+        callback = adapter._make_permission_callback()
+
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
+        assert not _denied(await callback("Write", {}, SimpleNamespace()))
+        assert not _denied(await callback("Write", {}, None))
+        # t1 still holds the checkpoint; nothing anonymous took it over.
+        assert not adapter.checkpoint_tracker.validate_and_reserve("t2")[0]
+        assert adapter.checkpoint_tracker.validate_and_reserve("t1")[0]
+
+    @pytest.mark.asyncio
+    async def test_context_without_tool_use_id_still_needs_a_checkpoint(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        callback = adapter._make_permission_callback()
+        assert _denied(await callback("Write", {}, SimpleNamespace()))
+
+    @pytest.mark.asyncio
+    async def test_denied_call_releases_its_reservation(
+        self, adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A call can_use_tool denies never runs, so no PostToolUse hook
+        ends the reservation its PreToolUse took; the deny releases it."""
+        adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_checkpoint_hook()
+        callback = adapter._make_permission_callback()
+
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
+        monkeypatch.setattr(adapter.rate_limiter, "allow", lambda risk: False)
+        denied = await callback("Write", {}, self._ctx("t1"))
+        assert _denied(denied)
+        assert "Rate limited" in denied.message
+        monkeypatch.undo()
+
+        assert adapter.has_valid_checkpoint()
+        assert not _denied(await callback("Write", {}, self._ctx("t2")))
+
+    @pytest.mark.asyncio
+    async def test_deny_leaves_another_holders_reservation(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        adapter.create_checkpoint(["*"], "Test")
+        callback = adapter._make_permission_callback()
+
+        assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        assert _denied(await callback("Write", {}, self._ctx("t2")))
+        assert _denied(await callback("Write", {}, self._ctx("t3")))
+
     def test_wrap_options_registers_the_failure_hook(
         self, adapter: GroundedAgentAdapter
     ) -> None:

@@ -4,6 +4,7 @@ host end to end."""
 
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 from typing import Any
@@ -370,6 +371,134 @@ def test_running_out_of_actions_keeps_the_run(runner: WorkflowRunner) -> None:
     resumed = caught.value.run
     assert not resumed.finished
     assert runner.drive(resumed, FakeHost(Clock())).ok
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"kind": "Output"},
+        ["not", "a", "dict"],
+        {"kind": "Output", "value": {"x": float("nan")}},
+        {"kind": "Output", "value": {"x": 2**64}},
+        {"kind": "Output", "value": {"when": datetime.date(2026, 1, 1)}},
+        {"kind": "Decision", "decision": "approved"},
+    ],
+    ids=["no-value", "list", "nan", "huge-int", "date", "wrong-kind"],
+)
+def test_malformed_capability_responses_fail_the_step(
+    runner: WorkflowRunner, response: Any
+) -> None:
+    """A response the run refuses fails the step (R402), as a host exception
+    does, instead of escaping drive() and losing the run."""
+
+    class Garbled(FakeHost):
+        def invoke_capability(self, action: dict[str, Any]) -> Any:
+            return response
+
+    result = runner.run("change_config", {"setting": "x"}, Garbled(Clock()))
+    assert result.code == "R402"
+    assert "refused" in result.message
+
+
+def test_malformed_other_responses_keep_the_run(runner: WorkflowRunner) -> None:
+    from grounded_agency.workflows import HostResponseError, RunIncomplete
+
+    class BadApprover(FakeHost):
+        def request_approval(self, action: dict[str, Any]) -> Any:
+            return {"kind": "Decision", "decision": "approved"}
+
+    with pytest.raises(HostResponseError) as caught:
+        runner.run("change_config", {"setting": "x"}, BadApprover(Clock()))
+    assert isinstance(caught.value, RunIncomplete)
+    assert caught.value.action["kind"] == "RequestApproval"
+    run = caught.value.run
+    assert not run.finished
+    assert run.next()["id"] == caught.value.action["id"]  # still waiting
+    assert runner.drive(run, FakeHost(Clock())).ok
+
+
+def test_unanswered_actions_without_deadline_are_bounded(
+    runner: WorkflowRunner,
+) -> None:
+    """An approval with no expiry that the host never answers ends the
+    drive after max_polls polls, with the live run attached."""
+    from grounded_agency.workflows import RunIncomplete
+
+    class Absent(FakeHost):
+        def request_approval(self, action: dict[str, Any]) -> Any:
+            return None
+
+    limited = WorkflowRunner(runner._engine, max_polls=5)
+    host = Absent(Clock())
+    with pytest.raises(RunIncomplete, match="after 5 polls") as caught:
+        limited.run("change_config", {"setting": "x"}, host)
+    assert len(host.slept) == 5
+    assert runner.drive(caught.value.run, FakeHost(Clock())).ok
+
+
+def test_polls_are_bounded_per_action(runner: WorkflowRunner) -> None:
+    """Each action has its own poll budget: a host that answers every
+    capability on its third ask finishes with max_polls=2, though the run
+    polls far more than twice in all."""
+
+    class Slow(FakeHost):
+        def __init__(self, clock: Clock) -> None:
+            super().__init__(clock)
+            self.asks: dict[str, int] = {}
+
+        def invoke_capability(self, action: dict[str, Any]) -> Any:
+            n = self.asks[action["id"]] = self.asks.get(action["id"], 0) + 1
+            return None if n < 3 else super().invoke_capability(action)
+
+    host = Slow(Clock())
+    result = WorkflowRunner(runner._engine, max_polls=2).run(
+        "change_config", {"setting": "x"}, host
+    )
+    assert result.ok
+    assert len(host.slept) > 2
+
+
+def test_a_bad_clock_is_not_blamed_on_the_run(runner: WorkflowRunner) -> None:
+    """A clock that returns a float is the host's bug: a TypeError, not a
+    RunStartError or a refused response."""
+
+    class FloatClock(FakeHost):
+        def now_ms(self) -> int:
+            return 1.5  # type: ignore[return-value]
+
+    with pytest.raises(TypeError, match="clock reading"):
+        runner.run("change_config", {"setting": "x"}, FloatClock(Clock()))
+    with pytest.raises(ValueError, match="clock reading"):
+        runner.start("change_config", {"setting": "x"}, now_ms=-1)
+    with pytest.raises(TypeError, match="key must be bytes"):
+        runner.restore({}, key="secret")  # type: ignore[arg-type]
+
+
+def test_non_json_inputs_refuse_the_start(runner: WorkflowRunner) -> None:
+    with pytest.raises(RunStartError, match="workflow data") as caught:
+        runner.start("change_config", {"setting": {1, 2}})
+    assert caught.value.diagnostics == []
+
+
+def test_restore_errors_are_run_start_errors(
+    runner: WorkflowRunner, tmp_path: Path
+) -> None:
+    run = runner.start("change_config", {"setting": "x"}, now_ms=1_000)
+    snapshot = run.snapshot()
+    with pytest.raises(RunStartError, match="malformed snapshot"):
+        runner.restore({"state": "nonsense"})
+    with pytest.raises(RunStartError):
+        runner.restore({**snapshot, "extra": object()})
+
+    # A catalog that no longer validates: the diagnostics, not a tuple.
+    catalog = tmp_path / "bad.yaml"
+    catalog.write_text(CATALOG.replace("capability: mutate", "capability: teleport"))
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    with pytest.raises(RunStartError) as caught:
+        WorkflowRunner(engine).restore(snapshot)
+    assert not str(caught.value).startswith("(")
+    assert [d["code"] for d in caught.value.diagnostics] == ["V101"]
 
 
 MANDATE_CATALOG = """\

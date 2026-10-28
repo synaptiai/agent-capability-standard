@@ -101,7 +101,7 @@ The three-tier model provides a consistent risk evaluation:
 
 **Structural Enforcement (not bypassable):**
 
-1. **PreToolUse Hook Gate:** `pretooluse_require_checkpoint.sh` intercepts `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `Bash` tool calls. If no valid checkpoint marker exists, the operation is blocked at the tool level — not logged as a warning, but physically prevented from executing.
+1. **PreToolUse Hook Gate:** `pretooluse_require_checkpoint.sh` intercepts `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `Bash` tool calls. If no valid checkpoint marker exists, the call is blocked at the tool level (exit code 2) — not logged as a warning, but physically prevented from executing.
 
 2. **Conflict Prevention:** The ontology defines `conflicts_with` edges:
    - `mutate` conflicts with `rollback` — cannot mutate during rollback

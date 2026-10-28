@@ -124,15 +124,16 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
-sent:
+sent: boolean  # true when the transport accepted the message (delivery.status sent or queued)
+response: any  # Recipient's response or delivery receipt, if any
+timestamp: string  # ISO 8601 date-time of send
+message:
   destination: string  # Where message was sent
   payload_type: string  # Type of content sent
   payload_summary: string  # Non-sensitive summary of payload
-  timestamp: string  # ISO timestamp of send
   message_id: string | null  # Tracking ID if available
 delivery:
   status: sent | queued | failed  # Delivery outcome
-  confirmation: string | null  # Delivery receipt or acknowledgment
   retry_count: integer  # Number of retry attempts
   response_code: integer | null  # HTTP status or protocol response
   error: string | null  # Error message if failed
@@ -153,7 +154,10 @@ assumptions: []  # Explicit assumptions
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `sent` | object | Details of what was sent |
+| `sent` | boolean | Whether the message was sent (accepted by the transport) |
+| `response` | any | Recipient's response or delivery receipt, or null |
+| `timestamp` | string | ISO 8601 date-time of send |
+| `message` | object | Details of what was sent (destination, payload type, non-sensitive summary, message ID) |
 | `delivery` | object | Outcome of send operation |
 | `constraints_applied` | array | Policy checks performed |
 | `approval` | object | Approval gate information |
@@ -180,15 +184,17 @@ Approval and the checkpoint come from the workflow (an approved step after a `ch
 
 **Output:**
 ```yaml
-sent:
+sent: true
+response:
+  received: true
+timestamp: "2024-01-15T10:30:15Z"
+message:
   destination: "https://api.partner.com/webhooks/order-updates"
   payload_type: "order.completed event"
   payload_summary: "Order completion notification for ORD-12345"
-  timestamp: "2024-01-15T10:30:15Z"
   message_id: "msg-abc123"
 delivery:
   status: sent
-  confirmation: "HTTP 200 OK, body: {\"received\": true}"
   retry_count: 0
   response_code: 200
   error: null
@@ -229,15 +235,16 @@ protocol: "smtp"
 
 **Output:**
 ```yaml
-sent:
+sent: false
+response: null
+timestamp: "2024-01-15T11:00:05Z"
+message:
   destination: "smtp://mail.company.com:587"
   payload_type: "email"
   payload_summary: "Email to user@example.com regarding pending review"
-  timestamp: "2024-01-15T11:00:05Z"
   message_id: null
 delivery:
   status: failed
-  confirmation: null
   retry_count: 3
   response_code: null
   error: "Connection timeout after 30s - SMTP server unreachable"

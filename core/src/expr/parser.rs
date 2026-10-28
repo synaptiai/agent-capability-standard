@@ -12,7 +12,7 @@ use serde_json::{Map, Number, Value};
 
 use super::ast::{CmpOp, Expr};
 use super::lexer::{Lexer, Tok};
-use super::{MAX_DEPTH, SyntaxError};
+use super::{MAX_DEPTH, SyntaxError, SyntaxKind};
 
 /// Parse a condition expression.
 pub fn parse(src: &str) -> Result<Expr, SyntaxError> {
@@ -73,7 +73,7 @@ impl Parser {
         SyntaxError {
             pos: self.pos(),
             msg: msg.into(),
-            annotation: false,
+            kind: SyntaxKind::Expression,
         }
     }
 

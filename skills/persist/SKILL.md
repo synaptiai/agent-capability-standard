@@ -127,12 +127,14 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
+stored: boolean  # true when the data is in the store after this step (written, merged, or already present)
+key: string  # Storage key (destination and section, e.g. "CLAUDE.md#Patterns")
+timestamp: string  # ISO 8601 date-time of persistence
 persisted:
   content_type: decision | pattern | fact | context
   content_id: string  # Unique identifier for this persisted item
   destination: string  # File path where content was written
   section: string | null  # Section within file
-  timestamp: string  # ISO timestamp of persistence
 write_operation:
   strategy: append | replace | merge
   bytes_written: integer
@@ -159,12 +161,17 @@ assumptions: array[string]  # Explicit assumptions
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `stored` | boolean | Whether the data is in the store after this step (written, merged, or already present as a duplicate) |
+| `key` | string | Storage key the data lives under (destination and section) |
+| `timestamp` | string | ISO 8601 date-time of persistence |
 | `persisted.content_id` | string | Unique ID for retrieval with `recall` |
 | `persisted.destination` | string | File path of storage location |
 | `write_operation` | object | Details of the write performed |
 | `verification.write_confirmed` | boolean | Whether write was verified |
 | `duplicates_found` | array | Any duplicate/similar entries detected |
 | `confidence` | number | 1.0 if verified; lower if issues |
+| `evidence_anchors` | array | References to the written location and its verification |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 
@@ -185,12 +192,14 @@ key: "CLAUDE.md#Architecture Decisions"
 
 **Output:**
 ```yaml
+stored: true
+key: "CLAUDE.md#Architecture Decisions"
+timestamp: "2024-01-16T10:00:00Z"
 persisted:
   content_type: decision
   content_id: "decision_db_20240116"
   destination: "CLAUDE.md"
   section: "Architecture Decisions"
-  timestamp: "2024-01-16T10:00:00Z"
 write_operation:
   strategy: append
   bytes_written: 256
@@ -246,12 +255,14 @@ key: "CLAUDE.md#Patterns"
 
 **Output:**
 ```yaml
+stored: true  # Already present as pattern_err_001; nothing new written
+key: "CLAUDE.md#Patterns"
+timestamp: "2024-01-16T11:00:00Z"
 persisted:
   content_type: pattern
   content_id: null
   destination: "CLAUDE.md"
   section: "Patterns"
-  timestamp: "2024-01-16T11:00:00Z"
 write_operation:
   strategy: append
   bytes_written: 0
@@ -296,12 +307,14 @@ Merge with the existing entry rather than appending a duplicate.
 
 **Output:**
 ```yaml
+stored: true
+key: "docs/api-notes.md#Rate Limits"
+timestamp: "2024-01-16T12:00:00Z"
 persisted:
   content_type: fact
   content_id: "fact_rate_limit_20240116"
   destination: "docs/api-notes.md"
   section: "Rate Limits"
-  timestamp: "2024-01-16T12:00:00Z"
 write_operation:
   strategy: merge
   bytes_written: 64
@@ -343,7 +356,7 @@ assumptions:
 - `mutation`: true
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: medium
+- `risk`: low
 
 **Capability-specific rules:**
 - NEVER persist credentials, API keys, or secrets

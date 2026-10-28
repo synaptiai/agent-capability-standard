@@ -103,7 +103,7 @@ pub(crate) fn check(
 }
 
 /// `wait` is for `receive`, `delegate` (delegate, then wait for that
-/// delegate's result), or `synchronize` over at least two agents.
+/// delegate's result), or `synchronize` over at least two distinct agents.
 fn host(loc: &StepLoc<'_>, step: &Map<String, Value>, report: &mut Report) {
     let ok = match loc.capability {
         "receive" | "delegate" => true,
@@ -111,7 +111,12 @@ fn host(loc: &StepLoc<'_>, step: &Map<String, Value>, report: &mut Report) {
             .get("input_bindings")
             .and_then(|b| b.get("agents"))
             .and_then(Value::as_array)
-            .is_some_and(|a| a.len() >= 2),
+            .is_some_and(|a| {
+                // A repeated agent would be waited for twice.
+                let distinct: std::collections::HashSet<String> =
+                    a.iter().map(Value::to_string).collect();
+                a.len() >= 2 && distinct.len() == a.len()
+            }),
         _ => false,
     };
     if !ok {
@@ -119,7 +124,7 @@ fn host(loc: &StepLoc<'_>, step: &Map<String, Value>, report: &mut Report) {
             loc.diag(
                 Code::SchemaValidationFailed,
                 format!(
-                    "'wait' is for receive, delegate, or synchronize with a literal 'agents' list of at least two; not '{}'",
+                    "'wait' is for receive, delegate, or synchronize with a literal 'agents' list of at least two distinct agents; not '{}'",
                     loc.capability
                 ),
             )
@@ -135,15 +140,23 @@ pub(crate) fn references(
     at: &dyn Fn(Diagnostic) -> Diagnostic,
     report: &mut Report,
 ) -> bool {
-    let ok = value
-        .as_str()
-        .is_some_and(|s| !crate::refs::find_refs(s).is_empty());
+    // A template around a reference is a string, not the value referenced.
+    let ok = value.as_str().is_some_and(super::refs_whole);
     if !ok {
-        report.push(s303(
-            at,
-            field,
-            format!("{field} must be a reference such as \"${{step.field}}\", found {value}"),
-        ));
+        // An unquoted typed reference reads as a mapping (W612 in a binding);
+        // here it is unusable, so say how to fix it.
+        let msg = match value
+            .as_object()
+            .and_then(super::bindings::mangled_reference)
+        {
+            Some(rebuilt) => format!(
+                "{field} must be a reference; YAML read '{rebuilt}' as a mapping because of ': ' inside the reference; quote the value"
+            ),
+            None => {
+                format!("{field} must be a reference such as \"${{step.field}}\", found {value}")
+            }
+        };
+        report.push(s303(at, field, msg));
     }
     ok
 }
@@ -423,6 +436,24 @@ mod tests {
 
     use super::super::tests::codes;
 
+    #[test]
+    fn an_unquoted_typed_reference_gets_a_quoting_hint() {
+        // `- ${p.steps: array<object>}` unquoted is read as a mapping.
+        let mangled = json!({"${p.steps": "array<object>}"});
+        let mut report = super::super::Report::default();
+        assert!(!super::references(
+            &mangled,
+            "approval.shows[0]",
+            &|d| d,
+            &mut report
+        ));
+        let [d] = report.diagnostics.as_slice() else {
+            panic!("{:?}", report.diagnostics)
+        };
+        assert_eq!(d.code.as_str(), "S303");
+        assert!(d.message.contains("quote the value"), "{}", d.message);
+    }
+
     fn catalog(steps: Value, requires: &[&str]) -> Value {
         json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",
                      "workflow_extensions": {"requires": requires},
@@ -475,6 +506,7 @@ mod tests {
         let c = |step: Value| catalog(json!([step]), &["wait@1"]);
         assert_eq!(codes(c(sync(json!(["a", "b"])))), Vec::<&str>::new());
         assert_eq!(codes(c(sync(json!(["a"])))), ["S303"]);
+        assert_eq!(codes(c(sync(json!(["a", "a"])))), ["S303"]);
         let mut retrieve = st("retrieve", "r");
         retrieve["input_bindings"] = json!({"target": "t"});
         retrieve["timeout"] = json!("1h");

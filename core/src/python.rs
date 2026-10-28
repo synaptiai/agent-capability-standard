@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 
 use crate::diag::{Code, Severity};
 use crate::exec::{self, Attendance, Response, RestoreError, StartError, StartOptions};
-use crate::validate::{self, Context, Report};
+use crate::validate::{self, Context, LoadError, Report};
 use crate::yaml::{self, YamlError};
 
 pub(crate) fn to_py(py: Python<'_>, v: &Value) -> PyResult<Py<PyAny>> {
@@ -169,9 +169,14 @@ fn report_to_py(py: Python<'_>, report: &Report) -> PyResult<Py<PyAny>> {
 /// malformed or unsupported YAML.
 fn yaml_err(e: YamlError) -> PyErr {
     let msg = e.to_string();
+    yaml_exc(&e, msg)
+}
+
+/// The exception [`yaml_err`] raises for `e`, carrying `msg`.
+fn yaml_exc(e: &YamlError, msg: String) -> PyErr {
     match e {
         YamlError::NotFound(_) => PyFileNotFoundError::new_err(msg),
-        YamlError::Io { kind, .. } => match kind {
+        YamlError::Io { kind, .. } => match *kind {
             std::io::ErrorKind::PermissionDenied => PyPermissionError::new_err(msg),
             std::io::ErrorKind::IsADirectory => PyIsADirectoryError::new_err(msg),
             _ => PyOSError::new_err(msg),
@@ -179,6 +184,17 @@ fn yaml_err(e: YamlError) -> PyErr {
         YamlError::Symlink(_) | YamlError::TooLarge { .. } | YamlError::Parse { .. } => {
             PyValueError::new_err(msg)
         }
+    }
+}
+
+/// A catalog or context load error: a file error raises as [`yaml_err`]
+/// does, so a missing or unreadable file is the same `OSError` subclass as
+/// from `load_yaml`; unusable content (a bad ontology) is a ValueError.
+fn load_err(e: LoadError) -> PyErr {
+    let msg = e.to_string();
+    match e {
+        LoadError::File { err, .. } => yaml_exc(&err, msg),
+        LoadError::Invalid(_) => PyValueError::new_err(msg),
     }
 }
 
@@ -218,7 +234,9 @@ fn load_catalog(
 }
 
 /// Validate a workflow catalog file. Returns `{"diagnostics": [...],
-/// "suggestions": [...]}`; raises if the ontology or catalog cannot be loaded.
+/// "suggestions": [...]}`; raises if the ontology or catalog cannot be
+/// loaded: FileNotFoundError and the other OSError subclasses for the
+/// filesystem, as `load_yaml` does, ValueError otherwise.
 #[pyfunction]
 fn validate_catalog(
     py: Python<'_>,
@@ -231,7 +249,7 @@ fn validate_catalog(
             let ctx = Context::load(&ontology_path, &schema_root)?;
             validate::validate_catalog_file(&ctx, &catalog_path)
         })
-        .map_err(PyValueError::new_err)?;
+        .map_err(load_err)?;
     report_to_py(py, &report)
 }
 
@@ -252,7 +270,7 @@ impl Validator {
     fn new(py: Python<'_>, ontology_path: PathBuf, schema_root: PathBuf) -> PyResult<Self> {
         let ctx = py
             .detach(|| Context::load(&ontology_path, &schema_root))
-            .map_err(PyValueError::new_err)?;
+            .map_err(load_err)?;
         Ok(Validator { ctx })
     }
 
@@ -263,7 +281,7 @@ impl Validator {
                 self.ctx.schemas.clear_cache();
                 validate::validate_catalog_file(&self.ctx, &path)
             })
-            .map_err(PyValueError::new_err)?;
+            .map_err(load_err)?;
         report_to_py(py, &report)
     }
 

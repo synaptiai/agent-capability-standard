@@ -707,17 +707,17 @@ class WorkflowEngine:
         Raises:
             KeyError: If ``workflow_name`` is neither loaded nor one of those
         """
-        if (
-            workflow_name is not None
-            and workflow_name not in self._workflows
-            and workflow_name not in self._unloadable
-        ):
+        if workflow_name is not None and not self._known(workflow_name):
             raise KeyError(f"Workflow not found: {workflow_name}")
         report = self.core_validator().validate(self.catalog_data())
         diagnostics = [ValidationError.from_core(d) for d in report["diagnostics"]]
         if workflow_name is None:
             return diagnostics
         return [d for d in diagnostics if d.location.get("workflow") == workflow_name]
+
+    def _known(self, workflow_name: str) -> bool:
+        """Loaded, or held as an entry too malformed to load."""
+        return workflow_name in self._workflows or workflow_name in self._unloadable
 
     def _errors(self, workflow_name: str) -> list[ValidationError]:
         return [
@@ -735,7 +735,7 @@ class WorkflowEngine:
         Returns:
             List of error messages (empty if all valid)
         """
-        if workflow_name not in self._workflows:
+        if not self._known(workflow_name):
             return [f"Workflow not found: {workflow_name}"]
         return [
             _describe(d)
@@ -752,7 +752,7 @@ class WorkflowEngine:
         Returns:
             List of BindingError objects (empty if all valid)
         """
-        if workflow_name not in self._workflows:
+        if not self._known(workflow_name):
             return [
                 BindingError(
                     workflow_name=workflow_name,
@@ -779,7 +779,7 @@ class WorkflowEngine:
         Returns:
             List of error messages (empty if all valid)
         """
-        if workflow_name not in self._workflows:
+        if not self._known(workflow_name):
             return [f"Workflow not found: {workflow_name}"]
         return [
             _describe(d) for d in self._errors(workflow_name) if d.code in _EDGE_CODES

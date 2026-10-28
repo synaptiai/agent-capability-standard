@@ -84,7 +84,7 @@ impl Cron {
         if dow & (1 << 7) != 0 {
             dow = (dow & !(1 << 7)) | 1;
         }
-        Ok(Cron {
+        let cron = Cron {
             minutes: bits[0],
             hours: bits[1] as u32,
             days_of_month: bits[2] as u32,
@@ -94,7 +94,27 @@ impl Cron {
             // counts as unrestricted for the day-matching rule.
             dom_restricted: !parts[2].starts_with('*'),
             dow_restricted: !parts[4].starts_with('*'),
-        })
+        };
+        if !cron.can_fire() {
+            return Err(format!(
+                "'{text}' never fires: no listed month has any of the listed days"
+            ));
+        }
+        Ok(cron)
+    }
+
+    /// Whether some date matches. Every real date falls on every weekday
+    /// over the years, so only the day of month can make a schedule
+    /// impossible (`0 0 31 2 *`). When both day fields are restricted, a
+    /// matching weekday is enough on its own, so the schedule always fires.
+    fn can_fire(&self) -> bool {
+        // February counts its 29th.
+        const DAYS: [u32; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        if self.dom_restricted && self.dow_restricted {
+            return true;
+        }
+        let first_day = self.days_of_month.trailing_zeros();
+        (1..=12u32).any(|m| self.months & (1 << m) != 0 && first_day <= DAYS[m as usize - 1])
     }
 
     /// Whether the schedule fires at this local time. `dow` is 0 (Sunday)
@@ -259,8 +279,24 @@ mod tests {
             "CRON_TZ=UTC 0 0 * * *",
             "TZ=UTC 0 0 * * *",
             "1-2-3 * * * *",
+            "0 0 31 2 *",
+            "0 0 30,31 FEB *",
+            "0 0 31 4,6,9,11 *",
         ] {
             assert!(Cron::parse(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn rare_but_possible_dates_parse() {
+        for ok in [
+            "0 0 29 2 *",
+            "0 0 31 2,3 *",
+            // Both day fields restricted: any Monday in February matches.
+            "0 0 31 2 MON",
+            "0 0 31 * *",
+        ] {
+            assert!(Cron::parse(ok).is_ok(), "{ok:?}");
         }
     }
 }

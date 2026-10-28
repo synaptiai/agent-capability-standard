@@ -20,11 +20,32 @@ pub const MAX_LEN: usize = 4096;
 /// Maximum nesting of `(`, `!`, `[` and `{`.
 pub const MAX_DEPTH: usize = 32;
 
-/// A syntax or limit error, at a byte offset. A validator reports it as V108,
-/// or as B205 when only a reference's type annotation is malformed.
+/// What a [`SyntaxError`] is about, which decides its code: a malformed
+/// expression is V108, a malformed `${...}` reference B201 (as in a
+/// binding), and an annotation that names no type B205.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxKind {
+    Expression,
+    Reference,
+    Annotation,
+}
+
+impl SyntaxKind {
+    /// The diagnostic code a validator reports for this kind of error.
+    pub fn code(self) -> crate::diag::Code {
+        use crate::diag::Code;
+        match self {
+            SyntaxKind::Expression => Code::InvalidExpression,
+            SyntaxKind::Reference => Code::InvalidBindingPath,
+            SyntaxKind::Annotation => Code::InvalidAnnotation,
+        }
+    }
+}
+
+/// A syntax or limit error, at a byte offset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxError {
     pub pos: usize,
     pub msg: String,
-    pub annotation: bool,
+    pub kind: SyntaxKind,
 }

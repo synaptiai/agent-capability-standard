@@ -28,8 +28,10 @@ review_verdict:
       - delta
       description: How much the reviewer covered. full is a sweep of the whole
         pinned change; delta (the default when absent) covers only what changed
-        since an earlier round. A quorum's min_full counts passing full verdicts;
-        any other value counts as delta (1.1.0).
+        since an earlier round. A quorum's min_full counts passing full verdicts.
+        A reviewer emits one of the two; a quorum reading any other value (which
+        this schema rejects) counts it as delta and notes it in its violations
+        (1.1.0).
     evidence_anchors:
       type: array
       items:

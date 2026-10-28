@@ -106,21 +106,22 @@ patient_monitoring:
       risk: low
       mutation: false
       store_as: severity_out
+      # This step and the next three run only when a pattern was detected;
+      # with vitals within expected parameters they are skipped and the
+      # audit still runs.
+      condition: ${pattern_detection_out.detected} == true
       input_bindings:
         item:
           patterns: "${pattern_detection_out.matches: array<object>}"
           trajectory: "${trajectory_out.prediction: object}"
         taxonomy: [routine, elevated, urgent, critical]
-      gates:
-        - when: ${pattern_detection_out.detected} == false
-          action: stop
-          message: Vitals within expected parameters.
 
     - capability: ground
       purpose: Anchor alert to clinical evidence.
       risk: low
       mutation: false
       store_as: grounded_alert_out
+      condition: ${pattern_detection_out.detected} == true
       input_bindings:
         claim: "${severity_out.labels[0].label: string}"
         sources:
@@ -135,6 +136,7 @@ patient_monitoring:
       risk: low
       mutation: false
       store_as: alert_out
+      condition: ${pattern_detection_out.detected} == true
       input_bindings:
         specification:
           type: clinical_alert
@@ -155,6 +157,7 @@ patient_monitoring:
       risk: low
       mutation: true
       store_as: checkpoint_out
+      condition: ${pattern_detection_out.detected} == true
       input_bindings:
         scope: clinical_alert
         label: "ALERT-${patient.id}"
@@ -483,11 +486,7 @@ care_plan_review:
       mutation: false
       store_as: grounded_findings_out
       input_bindings:
-        claim:
-          interactions: ${interactions_out}
-          alignment: ${alignment_out}
-          gaps: ${care_gaps_out}
-          critique: ${plan_critique_out}
+        claim: "The interactions, target alignment, care gaps and plan critique found for patient ${patient.id} are supported by the labs, medications and notes"
         sources:
           - ${labs_out}
           - ${medications_out}
@@ -500,7 +499,12 @@ care_plan_review:
       mutation: false
       store_as: summary_out
       input_bindings:
-        conclusion: ${grounded_findings_out}
+        conclusion:
+          interactions: ${interactions_out}
+          alignment: ${alignment_out}
+          gaps: ${care_gaps_out}
+          critique: ${plan_critique_out}
+          grounding: ${grounded_findings_out}
         audience: attending_physician
         depth: comprehensive
         constraints:

@@ -65,10 +65,11 @@ Return a structured object:
 ```yaml
 detected: boolean  # True if pattern/entity was found
 target_type: string  # What was being detected (e.g., "security vulnerability", "deprecated API")
-signals:
+matches:
   - signal: string  # Description of what was found
     strength: low | medium | high  # Signal strength
     location: string  # file:line or path where found
+locations: array[string]  # Every location where the pattern was found
 false_positive_risk: low | medium | high  # Likelihood of spurious detection
 confidence: number  # 0.0-1.0 based on evidence quality
 evidence_anchors: array[string]  # File:line references
@@ -82,7 +83,8 @@ next_actions: array[string]  # 0-3 suggested follow-ups if uncertain
 |-------|------|-------------|
 | `detected` | boolean | True if the target pattern/entity was found |
 | `target_type` | string | Category of what was searched for |
-| `signals` | array | List of individual detection signals with strength |
+| `matches` | array<object> | Found occurrences: each detection signal with strength and location (empty when nothing found) |
+| `locations` | array[string] | Every location where the pattern was found |
 | `false_positive_risk` | enum | Assessment of detection reliability |
 | `confidence` | number | 0.0-1.0 based on evidence completeness |
 | `evidence_anchors` | array[string] | File:line references or tool outputs |
@@ -103,13 +105,16 @@ threshold: 0.5  # report matches with at least this confidence
 ```yaml
 detected: true
 target_type: "SQL injection vulnerability"
-signals:
+matches:
   - signal: "String concatenation in SQL query with user input"
     strength: high
     location: "src/api/user_controller.py:47"
   - signal: "Raw SQL execution without parameterization"
     strength: medium
     location: "src/api/user_controller.py:52"
+locations:
+  - "src/api/user_controller.py:47"
+  - "src/api/user_controller.py:52"
 false_positive_risk: low
 confidence: 0.85
 evidence_anchors:
@@ -139,10 +144,12 @@ pattern: "componentWillMount|componentWillReceiveProps"
 ```yaml
 detected: true
 target_type: "deprecated React lifecycle method"
-signals:
+matches:
   - signal: "componentWillMount usage"
     strength: high
     location: "src/components/Dashboard.jsx:23"
+locations:
+  - "src/components/Dashboard.jsx:23"
 false_positive_risk: low
 confidence: 0.95
 evidence_anchors:
@@ -157,7 +164,7 @@ next_actions:
 
 - [ ] Output contains `detected` boolean matching signal presence
 - [ ] At least one evidence anchor exists for positive detections
-- [ ] Confidence score correlates with number and strength of signals
+- [ ] Confidence score correlates with number and strength of matches
 - [ ] All referenced file:line locations are valid and accessible
 - [ ] False positive risk assessment is justified
 

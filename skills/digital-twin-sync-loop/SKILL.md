@@ -54,7 +54,7 @@ Then execute the sync loop:
    - Parallel enrichment (`parallel_group: context_gathering`): search for the existing twin snapshot or relevant context
 
 3) **Invoke `/transform`** on `receive_out.data` to `canonical_event` and store output as `transform_out`
-   - Normalize raw signals into canonical events (`reference/transform_mapping_rawlog_to_observation.yaml`, output conforms to `reference/event_schema.yaml#/event`)
+   - Normalize raw signals into canonical events (`reference/transform_mapping_rawlog_to_observation.yaml`; the step's `output` is one event of `reference/event_schema.yaml#/event`)
 
 4) **Invoke `/integrate`** with `transform_out.output` and `previous_world_state`, and store output as `integrate_out`
    - Merge canonical events with the existing twin snapshot; resolve conflicts with `prefer_authoritative_sources`
@@ -66,24 +66,24 @@ Then execute the sync loop:
    - Classify and resolve entity identities
 
 7) **Invoke `/state`** with `integrate_out.merged.observations`, scoped to `integrate_out.merged.meta.world_id`, and store output as `state_out`
-   - Produce the updated canonical world-state snapshot with uncertainty + provenance
+   - Produce the updated canonical world-state snapshot with uncertainty + provenance: the output wraps the snapshot (`reference/world_state_schema.yaml#/world_state`) in its `state` field, so later steps read `state_out.state`
 
-8) **Invoke `/compare`** (domain: state_diff) on `previous_world_state` and `state_out`, and store output as `compare_state_out`
+8) **Invoke `/compare`** (domain: state_diff) on `previous_world_state` and `state_out.state`, and store output as `compare_state_out`
    - Compute the diff between the previous and the updated snapshot
 
 9) **Invoke `/transition`** from `state_out.state` and store output as `transition_out`
    - Apply transition rules triggered by new observations; compute next states
 
-10) **Invoke `/detect`** (domain: anomaly) on `state_out` for `drift` and store output as `detect_anomaly_out`
+10) **Invoke `/detect`** (domain: anomaly) for `drift` on the observed state (`state_out.state`), the expected effects (`transition_out.effects`) and the diff (`compare_state_out`), and store output as `detect_anomaly_out`
     - Detect drift/anomalies between expected and observed state
 
 11) **Invoke `/measure`** (domain: risk) on `detect_anomaly_out` and store output as `measure_risk_out`
     - Estimate risk impact/probability from drift and transitions
 
-12) **Invoke `/predict`** (domain: risk) for `near_term_risk` and store output as `predict_out`
+12) **Invoke `/predict`** (domain: risk) for `near_term_risk`, conditioned on the risk score (`measure_risk_out.value`, `.uncertainty`), the drift (`detect_anomaly_out.detected`, `.matches`) and the transition rules (`transition_out.rules`), and store output as `predict_out`
     - Forecast near-term risk trajectory and triggers
 
-13) **Invoke `/plan`** with `predict_out` as context and store output as `plan_out`
+13) **Invoke `/plan`** with the forecast (`predict_out`), the state diff (`compare_state_out`), the entity labels (`classify_out.labels`) and the search context (`search_out.results`) as context, and store output as `plan_out`
     - Plan safe action(s) to reduce the detected drift and risk, with verification criteria and rollback plan
 
 14) **Invoke `/constrain`** on `plan_out.steps` (`least_privilege`, `change_policy`) and store output as `constrain_out`
@@ -94,18 +94,22 @@ Then execute the sync loop:
 
 16) **Invoke `/mutate`** on `twin_state`, applying `plan_out.steps`, if `constrain_out.compliant` is true, and store output as `mutate_out`
     - Execute mutations from the action plan (if approved); stop if no checkpoint was created
+    - If the mutation fails or times out (R401/R402), roll back to `checkpoint_out` and end the run with that error
 
-17) **Invoke `/execute`** with `run_verification_suite` and store output as `execute_out`
-    - Run verification tests and commands
+17) **Invoke `/execute`** with `run_verification_suite` if a mutation was applied (`mutate_out` is not null), and store output as `execute_out`
+    - Run verification tests and commands; skip this step when nothing was mutated
+    - If the verification suite fails or times out (R401/R402), roll back to `checkpoint_out` so the unverified mutation does not stay in place, and end the run with that error (no audit is recorded)
 
-18) **Invoke `/verify`** (`drift_resolved`, `no_policy_violation`) and store output as `verify_out`
-    - Verify outcome: PASS/FAIL with evidence. On FAIL, roll back and return to step 13 with `verify_out.violations` as failure evidence (at most 3 loops)
+18) **Invoke `/verify`** on `execute_out` (`drift_resolved`, `no_policy_violation`) if a mutation was applied, and store output as `verify_out`
+    - Verify outcome: PASS/FAIL with evidence; skip this step when nothing was mutated. On FAIL, carry on: step 19 rolls back, once, and `audit` records the verdict and the rollback
+    - If verification cannot run (R401/R402 after its retries), roll back to `checkpoint_out` and end the run with that error
 
-19) **Invoke `/audit`** and store output as `audit_out`
-    - Record provenance, tool usage, diffs, and decision rationale
+19) **Invoke `/rollback`** to `checkpoint_out.checkpoint_id` if a mutation was applied (`mutate_out` is not null) and `verify_out.passed` is false, and store output as `rollback_out`
+    - The step is skipped when nothing was mutated or verification passes
+    - The step does not take a checkpoint of its own (`requires_checkpoint: false`): it restores the one taken at step 15
 
-20) **Invoke `/rollback`** to `checkpoint_out.checkpoint_id` if `verify_out.passed` is false, and store output as `rollback_out`
-    - The step is skipped when verification passes
+20) **Invoke `/audit`** and store output as `audit_out`
+    - Record provenance, tool usage, diffs, decision rationale, and whether the twin was rolled back (`rollback_out.restored`; null when the rollback was skipped)
 
 21) **Invoke `/explain`** and store output as `explain_out`
     - Produce a decision-ready sync report: drift, actions, verification, next steps
@@ -178,24 +182,25 @@ steps:
     previous_state: object
     new_state: object
     evidence_anchors: array[string]
-  execute_out:
+  execute_out:  # null when nothing was mutated (the step was skipped)
     result: any
     evidence_anchors: array[string]
-  verify_out:
+  verify_out:  # null when nothing was mutated (the step was skipped)
     passed: boolean
     violations: array[object]
     evidence_anchors: array[string]
+  rollback_out:  # null when nothing was mutated or verification passed (the step was skipped)
+    restored: boolean
+    evidence_anchors: array[string]
   audit_out:
     audit_id: string
-    evidence_anchors: array[string]
-  rollback_out:  # null when verification passed and the step was skipped
-    restored: boolean
+    recorded: boolean
     evidence_anchors: array[string]
   explain_out:
     explanation: string
     evidence_anchors: array[string]
 verification: PASS | FAIL
-audit_log_pointer: string  # Path to .claude/audit.log
+audit_log_pointer: string  # Where the audit step appended its record (.claude/audit/records.jsonl)
 next_sync:
   recommended_interval: string  # e.g., "5m", "1h"
   triggers: array[string]  # Conditions for immediate resync
@@ -380,17 +385,18 @@ steps:
     violations: []
     evidence_anchors:
       - "tool:bash:run_verification_suite"
+  rollback_out: null  # skipped: verification passed
   audit_out:
     audit_id: "audit_20240115_162000"
+    recorded: true
     evidence_anchors:
-      - "file:.claude/audit.log"
-  rollback_out: null  # skipped: verification passed
+      - "file:.claude/audit/records.jsonl"
   explain_out:
     explanation: "Drift of 1.5°C detected on zone 3a; setpoint lowered to 21.5°C after policy check and checkpoint; verification passed"
     evidence_anchors:
-      - "file:.claude/audit.log"
+      - "file:.claude/audit/records.jsonl"
 verification: PASS
-audit_log_pointer: ".claude/audit.log"
+audit_log_pointer: ".claude/audit/records.jsonl"
 next_sync:
   recommended_interval: "5m"
   triggers:
@@ -400,7 +406,7 @@ confidence: 0.88
 evidence_anchors:
   - "tool:mqtt:sensors.example.com/floor-3"
   - "file:state/floor-3-twin-v47.yaml"
-  - "file:.claude/audit.log"
+  - "file:.claude/audit/records.jsonl"
 assumptions:
   - "Sensor readings are accurate within ±0.1°C"
   - "MQTT connection is reliable"
@@ -411,7 +417,7 @@ assumptions:
 
 ## Verification
 
-- [ ] **Step Completeness**: All 21 workflow steps executed with output (mutate skipped if not compliant, rollback skipped when verification passed)
+- [ ] **Step Completeness**: All 21 workflow steps executed with output (mutate skipped if not compliant; execute and verify skipped when nothing was mutated; rollback skipped when nothing was mutated or verification passed)
 - [ ] **Transform Success**: `transform_out.output` conforms to the canonical event schema
 - [ ] **Identity Resolved**: No unresolved entity references in `classify_out`
 - [ ] **Drift Detection**: `detect_anomaly_out` completed with evidence

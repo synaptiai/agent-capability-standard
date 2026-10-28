@@ -82,7 +82,7 @@ The runner supports multiple iterations with seed-based reproducibility and can 
 
 Conformance tests validate that the workflow validator (the Rust core behind `tools/validate_workflows.py`) correctly accepts valid workflows and rejects invalid ones with the right diagnostics. The runner passes each fixture to the validator with `--catalog` (the production catalog is never swapped or modified) and checks the exit code and the emitted error and warning codes against `EXPECTATIONS.json`.
 
-**Fixture files in `tests/fixtures/`:** 55 at the time of writing (`ls tests/fixtures/*.workflow_catalog.yaml | wc -l`), named `pass_*`, `fail_*` and `patch_*` and covering levels L1-L4. A sample:
+**Fixture files in `tests/fixtures/`:** 79 at the time of writing (`ls tests/fixtures/*.workflow_catalog.yaml | wc -l`), named `pass_*`, `fail_*` and `patch_*` and covering levels L1-L4. A sample:
 
 | Fixture File                                         | Expected Result |
 |------------------------------------------------------|-----------------|
@@ -141,7 +141,7 @@ dev = [
     "types-PyYAML>=6.0,<7",
     "hypothesis>=6.0,<7",
     "jsonschema>=4.0,<5",
-    "claude-agent-sdk>=0.1.25,<0.3",
+    "claude-agent-sdk>=0.1.52,<0.3",
 ]
 ```
 
@@ -663,7 +663,7 @@ SCENARIOS = {
 | Integration workflows  | 4+         | Medium         |
 | OASF Adapter           | 25         | High           |
 | Benchmark scenarios    | 30+        | High           |
-| Conformance fixtures   | 55    | High           |
+| Conformance fixtures   | 79    | High           |
 | Regex fuzz testing     | 10+        | Medium         |
 | Validator tools        | 7+         | Medium         |
 
@@ -692,7 +692,7 @@ Evidence store performance tests added covering:
 
 #### ~~No tests for validator tools~~ — **RESOLVED** (PR #92)
 
-Validator tools are now tested both directly and via the expanded conformance suite (55 fixtures). The validation logic itself lives in the Rust core and is also covered by `cargo test` (CI `rust-core` job). All validators run in CI.
+Validator tools are now tested both directly and via the expanded conformance suite (79 workflow fixtures, and 106 runtime fixtures in `tests/conformance/runtime/`). The validation logic itself lives in the Rust core and is also covered by `cargo test` (CI `rust-core` job). All validators run in CI.
 
 #### ~~No fuzz testing for regex patterns~~ — **RESOLVED** (PR #91)
 
@@ -931,7 +931,7 @@ Rust: pinned toolchain (RUST_TOOLCHAIN in ci.yml); MSRV 1.86 checked
 Build: maturin>=1.9,<2
 Required: pyyaml>=6.0,<7
 Dev: pytest>=7.0,<9, pytest-asyncio>=0.21,<1, mypy>=1.0,<2, ruff>=0.16,<0.17 (exact versions in constraints.txt)
-Optional: claude-agent-sdk>=0.1.25,<0.3
+Optional: claude-agent-sdk>=0.1.52,<0.3
 ```
 
 ### 9.3 Artifacts to Preserve

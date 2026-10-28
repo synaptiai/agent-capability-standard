@@ -103,7 +103,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
-integrated_data:
+merged:
   schema: string | object  # Target schema reference or inline
   entities:
     - id: string  # Canonical ID
@@ -119,6 +119,9 @@ integrated_data:
       target: string
       type: string
       provenance: string
+  observations: array  # Merged observations, when the sources are observation streams
+  meta:
+    world_id: string  # World model identifier, when integrating into a world model
 integration_report:
   sources_used: array[string]
   sources_excluded: array[string]
@@ -130,15 +133,6 @@ integration_report:
     - source_field: string
       target_field: string
       transformation: string | null
-  conflicts:
-    - entity_id: string
-      field: string
-      values:
-        - source: string
-          value: any
-      resolution: string
-      resolved_value: any
-      confidence: number
   information_loss:
     - source: string
       field: string
@@ -148,6 +142,15 @@ integration_report:
     passed: boolean
     errors: array[string]
     warnings: array[string]
+conflicts:
+  - entity_id: string
+    field: string
+    values:
+      - source: string
+        value: any
+    resolution: string
+    resolved_value: any
+    confidence: number
 provenance:
   sources: array[object]  # Source metadata
   integration_timestamp: string
@@ -161,10 +164,15 @@ assumptions: array[string]
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `integrated_data` | object | The unified data model |
-| `source_map` | object | Per-attribute source tracking |
-| `integration_report.conflicts` | array | All conflicts and resolutions |
-| `information_loss` | array | Data that couldn't be integrated |
+| `merged` | object | The unified data model (entities, relationships; `observations` and `meta.world_id` when merging observation streams into a world model) |
+| `merged.entities[].source_map` | object | Per-attribute source tracking |
+| `integration_report` | object | Sources used/excluded, entity counts, field mapping, information loss, validation |
+| `integration_report.information_loss` | array | Data that couldn't be integrated |
+| `conflicts` | array | All conflicts found and how each was resolved |
+| `provenance` | object | Source metadata and integration timestamp |
+| `confidence` | number | 0.0-1.0 overall integration confidence |
+| `evidence_anchors` | array | References to each source consulted |
+| `assumptions` | array | Assumptions made while integrating |
 
 ## Examples
 
@@ -200,7 +208,7 @@ Target schema: `microservices_v1`.
 
 **Output:**
 ```yaml
-integrated_data:
+merged:
   schema: "microservices_v1"
   entities:
     - id: "api-gateway"
@@ -252,17 +260,6 @@ integration_report:
     - source_field: "datadog.service_name"
       target_field: "name"
       transformation: null
-  conflicts:
-    - entity_id: "api-gateway"
-      field: "status"
-      values:
-        - source: "kubernetes"
-          value: "Running"
-        - source: "datadog"
-          value: "healthy"
-      resolution: "prefer_recent (datadog more recent)"
-      resolved_value: "healthy"
-      confidence: 0.85
   information_loss:
     - source: "kubernetes"
       field: "labels"
@@ -273,6 +270,17 @@ integration_report:
     errors: []
     warnings:
       - "Service has no APIs defined"
+conflicts:
+  - entity_id: "api-gateway"
+    field: "status"
+    values:
+      - source: "kubernetes"
+        value: "Running"
+      - source: "datadog"
+        value: "healthy"
+    resolution: "prefer_recent (datadog more recent)"
+    resolved_value: "healthy"
+    confidence: 0.85
 provenance:
   sources:
     - name: "kubernetes"
@@ -327,7 +335,7 @@ Target schema: `api_documentation`.
 
 **Output:**
 ```yaml
-integrated_data:
+merged:
   schema: "api_documentation"
   entities:
     - id: "endpoint_process_order"
@@ -353,18 +361,18 @@ integration_report:
   entity_count:
     total: 1
     merged: 1
-  conflicts:
-    - entity_id: "endpoint_process_order"
-      field: "parameters[0].name"
-      values:
-        - source: "code_analysis"
-          value: "orderId"
-        - source: "api_docs"
-          value: "order_id"
-      resolution: "merge - both names preserved (code vs API)"
-      resolved_value: { name: "order_id", code_name: "orderId" }
-      confidence: 0.95
   information_loss: []
+conflicts:
+  - entity_id: "endpoint_process_order"
+    field: "parameters[0].name"
+    values:
+      - source: "code_analysis"
+        value: "orderId"
+      - source: "api_docs"
+        value: "order_id"
+    resolution: "merge - both names preserved (code vs API)"
+    resolved_value: { name: "order_id", code_name: "orderId" }
+    confidence: 0.95
 confidence: 0.95
 evidence_anchors:
   - "src/orders.ts:processOrder"

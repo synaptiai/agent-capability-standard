@@ -41,14 +41,14 @@ Run the composed workflow **capability_gap_analysis** (`reference/workflow_catal
 2) **Invoke `/attribute`** (domain: dependencies) with `observe_out.observation` as the effect and store output as `attribute_out`
    - Map existing workflows vs capabilities
 
-3) **Invoke `/discover`** on `attribute_out.causes` and store output as `discover_out`
-   - Find hidden dependencies or unmodeled interactions
+3) **Invoke `/discover`** on `attribute_out.causes` with method `gap_analysis`, and store output as `discover_out`
+   - Find capability gaps, hidden dependencies and unmodeled interactions: each entry of `discover_out.patterns` has `type` `gap`, `pattern` or `opportunity`
 
 4) **Invoke `/compare`** (domain: architecture) on `discover_out.patterns` and store output as `compare_architecture_out`
    - Compare alternative skill architectures
 
-5) **Invoke `/compare`** (domain: priority) on `compare_architecture_out.ranking` with criteria `leverage` and `risk_reduction`, and store output as `compare_priority_out`
-   - Rank missing capabilities by leverage and risk reduction
+5) **Invoke `/compare`** (domain: priority) on the discovered patterns (`discover_out.patterns`) with criteria `leverage` and `risk_reduction`, and store output as `compare_priority_out`
+   - Rank every discovered pattern (of type `gap`, `pattern` or `opportunity`) by leverage and risk reduction; the step does not filter by type
 
 6) **Invoke `/generate`** (domain: plan) from `compare_priority_out.ranking` and `compare_architecture_out.recommendation`, and store output as `generate_out`
    - Generate an implementation plan for new skills
@@ -111,7 +111,7 @@ assumptions: array[string]
 | `workflow_id` | string | Unique identifier for this analysis |
 | `status` | enum | Final workflow status |
 | `steps` | object | Each step's output, keyed by its `store_as` |
-| `gaps_identified` | object | Missing capabilities organized by priority (from `compare_priority_out`) |
+| `gaps_identified` | object | Missing capabilities organized by priority: the entries of `compare_priority_out.ranking` that are `gap` patterns |
 | `audit_log_pointer` | string | Where the audit record was written |
 | `confidence` | number | 0.0-1.0 based on evidence completeness |
 | `evidence_anchors` | array | All evidence references collected |
@@ -155,8 +155,16 @@ steps:
       - "file:schemas/workflow_catalog.yaml"
   discover_out:
     patterns:
-      - pattern: "Review loops repeat critique → plan without verify"
-      - pattern: "Security findings are detected but never classified"
+      - type: gap
+        description: "verify has no regression domain: review loops repeat critique → plan without verifying"
+      - type: gap
+        description: "Security findings are detected but never classified (classify has no security_pattern domain)"
+      - type: gap
+        description: "No detect domain for code smells"
+      - type: gap
+        description: "No constrain domain gates an automated merge"
+      - type: gap
+        description: "generate has no review_comment domain"
     relationships:
       - from: "detect"
         to: "critique"
@@ -205,7 +213,7 @@ steps:
     recorded: true
     audit_id: "audit_20240115_121500"
     evidence_anchors:
-      - "file:.claude/audit/gap_20240115_120000_codereview.log"
+      - "file:.claude/audit/records.jsonl"
 gaps_identified:
   total: 5
   by_priority:
@@ -220,12 +228,12 @@ gaps_identified:
     low: []
   evidence_anchors:
     - "file:schemas/capability_ontology.yaml:nodes"
-audit_log_pointer: ".claude/audit/gap_20240115_120000_codereview.log"
+audit_log_pointer: ".claude/audit/records.jsonl"
 confidence: 0.85
 evidence_anchors:
   - "file:schemas/capability_ontology.yaml"
   - "file:schemas/workflow_catalog.yaml"
-  - "file:.claude/audit/gap_20240115_120000_codereview.log"
+  - "file:.claude/audit/records.jsonl"
 assumptions:
   - "Reference ontology is current and complete"
   - "Existing skills are correctly implemented"
@@ -240,7 +248,7 @@ assumptions:
 - [ ] **Evidence Grounding**: Every step output includes evidence_anchors
 - [ ] **Relationships Mapped**: attribute_out and discover_out document dependencies and missing connections
 - [ ] **Architecture Compared**: compare_architecture_out has a recommendation
-- [ ] **Gaps Prioritized**: compare_priority_out ranks every gap
+- [ ] **Gaps Prioritized**: compare_priority_out ranks every discovered pattern, gaps included
 - [ ] **Plan Generated**: generate_out.content is a phased plan
 - [ ] **Audit Trail**: audit_out.recorded is true
 

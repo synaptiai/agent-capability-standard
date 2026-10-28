@@ -92,6 +92,9 @@ assumptions: []
 | `metric` | string | Name of measured property |
 | `method` | string | Measurement methodology used |
 | `breakdown` | array | Optional decomposition of measurement |
+| `confidence` | number | 0.0-1.0 confidence in measurement accuracy |
+| `evidence_anchors` | array | References to the data the measurement was taken from |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 

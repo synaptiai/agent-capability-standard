@@ -252,8 +252,8 @@ still could not express. Closed in the candidate:
   [RFC-0004](RFC-0004-agent-identity.md), which adds `identity@1`: the
   sender's identity on each event, `sender_check`, `accept_trust_classes`
   and an "always ask" class. Still open: whether delegation should attest
-  the delegate's identity in `effective`, beside `fresh_context` and
-  `model_family`.
+  the delegate's identity in `effective`, beside `fresh_context`,
+  `model_family`, `role` and `read_only`.
 - **Host or device placement of a delegated step.** The author asked to
   pin a delegated step to a host or device. Deployment stays outside the
   standard, as for E6's `host`: a placement hint would be opaque to the

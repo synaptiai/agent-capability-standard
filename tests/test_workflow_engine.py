@@ -1006,6 +1006,27 @@ class TestCatalogData:
         with pytest.raises(KeyError, match="nonexistent"):
             engine.validate_report("nonexistent")
 
+    def test_unloadable_entries_are_known_to_every_validator(
+        self, tmp_path: Path
+    ) -> None:
+        """An entry too malformed to load (here, no steps) is validated by
+        the per-concern methods too, not reported as missing."""
+        catalog = tmp_path / "catalog.yaml"
+        catalog.write_text("w:\n  goal: g\n  risk: low\n")
+        eng = WorkflowEngine(ONTOLOGY_PATH)
+        eng.load_catalog(catalog)
+        assert eng.get_workflow("w") is None
+        assert eng.validate_report("w")
+        missing = "Workflow not found: w"
+        assert missing not in eng.validate_capabilities("w")
+        assert missing not in eng.validate_edge_constraints("w")
+        assert all(b.message != missing for b in eng.validate_bindings("w"))
+        assert eng.validate_capabilities("nope") == ["Workflow not found: nope"]
+
+    def test_missing_ontology_is_file_not_found(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            WorkflowEngine(tmp_path / "absent.yaml").validate_report()
+
 
 class TestValidationSeesEdits:
     """Validation reflects the typed fields once they differ from what was

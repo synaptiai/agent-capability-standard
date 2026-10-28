@@ -49,12 +49,14 @@ schedule_management:
       store_as: clarification_out
       input_bindings:
         ambiguous_input: ${request.content}
-        context: "${calendar_out.data: object}"
+        context:
+          calendar: "${calendar_out.data: object}"
+          ambiguities: "${request_analysis_out.issues: array<object>}"
         max_questions: 2
       gates:
-        - when: ${request_analysis_out.confidence} > 0.85
+        - when: ${request_analysis_out.issues} == []
           action: skip
-          message: Request is clear, no clarification needed.
+          message: The analysis found no ambiguity; no clarification needed.
 
     - capability: detect
       purpose: Identify scheduling conflicts in proposed time.
@@ -116,6 +118,10 @@ schedule_management:
       risk: low
       mutation: false
       store_as: event_draft_out
+      gates:
+        - when: ${clarification_out.questions} != null && ${clarification_out.questions} != []
+          action: skip
+          message: Clarifying questions are open; ask them before drafting the event.
       input_bindings:
         specification:
           type: calendar_event
@@ -131,7 +137,9 @@ schedule_management:
       mutation: false
       store_as: explanation_out
       input_bindings:
-        conclusion: ${event_draft_out}
+        conclusion:
+          draft: ${event_draft_out}
+          open_questions: "${clarification_out.questions: array<object>}"
         audience: user
         depth: brief
 
@@ -145,6 +153,7 @@ schedule_management:
           type: scheduling_request
           original_request: ${request.content}
           conflicts_found: ${conflicts_out.detected}
+          open_questions: "${clarification_out.questions: array<object>}"
           proposed_time: "${event_draft_out.content.time: string}"
 
   inputs:
@@ -268,17 +277,6 @@ information_research:
         strategy: weighted_merge
         conflict_resolution: prefer_high_confidence
 
-    - capability: ground
-      purpose: Anchor all claims to source citations.
-      risk: low
-      mutation: false
-      store_as: grounded_out
-      input_bindings:
-        claim: ${query}
-        sources:
-          - ${content_out}
-        required_strength: moderate
-
     - capability: generate
       purpose: Synthesize research into user-friendly summary.
       domain: summary
@@ -290,11 +288,28 @@ information_research:
           type: research_summary
           question: ${query}
           knowledge: ${integrated_knowledge_out.merged}
-          findings: ${grounded_out}
+          findings: "${cross_ref_out.ranking: array<object>}"
           format: ${output_format}
         constraints:
           max_length: ${max_length}
           include_citations: true
+
+    - capability: ground
+      purpose: Anchor every claim in the summary to source citations.
+      risk: low
+      mutation: false
+      store_as: grounded_out
+      input_bindings:
+        claim: "${summary_out.content: string}"
+        sources:
+          - ${content_out}
+          - ${local_search_out}
+        required_strength: moderate
+      gates:
+        - when: ${grounded_out.grounded} == false
+          phase: after
+          action: warn
+          message: The summary is not grounded in the sources; present it with its grounding gaps, not as established fact.
 
     - capability: audit
       purpose: Record research session.
@@ -307,6 +322,8 @@ information_research:
           query: ${query}
           sources_consulted: ${web_search_out.total_count}
           facts_extracted: "${facts_out.matches: array<object>}"
+          summary_grounded: ${grounded_out.grounded}
+          grounding_gaps: "${grounded_out.gaps: array<object>}"
 
   inputs:
     query:
@@ -365,8 +382,10 @@ task_delegation:
       mutation: false
       store_as: executor_search_out
       input_bindings:
-        query: ${task_classification_out}
-        scope: [available_services, contacts, integrations]
+        query:
+          subtask_types: "${task_classification_out.labels: array<object>}"
+          sources: [available_services, contacts, integrations]
+        scope: delegation_executors
 
     - capability: compare
       purpose: Rank potential executors by suitability.
@@ -490,11 +509,12 @@ communication_drafting:
         ambiguous_input: ${request}
         context:
           conversation_history: ${conversation_history}
+          ambiguities: "${intent_analysis_out.issues: array<object>}"
         max_questions: 2
       gates:
-        - when: ${intent_analysis_out.confidence} > 0.85
+        - when: ${intent_analysis_out.issues} == []
           action: skip
-          message: Intent is clear.
+          message: The analysis found no ambiguity in the intent.
 
     - capability: search
       purpose: Find relevant prior communications with recipient.
@@ -530,6 +550,10 @@ communication_drafting:
       risk: low
       mutation: false
       store_as: draft_out
+      gates:
+        - when: ${clarification_out.questions} != null && ${clarification_out.questions} != []
+          action: skip
+          message: Clarifying questions are open; ask them before drafting.
       input_bindings:
         specification:
           type: ${communication_type}
@@ -547,6 +571,10 @@ communication_drafting:
       risk: low
       mutation: false
       store_as: draft_review_out
+      gates:
+        - when: ${draft_out} == null
+          action: skip
+          message: No draft to review.
       input_bindings:
         target: "${draft_out.content: string}"
         criteria:
@@ -565,9 +593,9 @@ communication_drafting:
         source_format: draft
         target_format: polished
         options:
-          corrections: "${draft_review_out.suggestions: array<string>}"
+          corrections: "${draft_review_out.suggestions: array<object>}"
       gates:
-        - when: ${draft_review_out.issues} == []
+        - when: ${draft_review_out} == null || ${draft_review_out.issues} == []
           action: skip
           message: Draft needs no revision.
 
@@ -591,6 +619,7 @@ communication_drafting:
           recipient: ${recipient}
           communication_type: ${communication_type}
           intent: ${intent_analysis_out}
+          open_questions: "${clarification_out.questions: array<object>}"
           checkpoint_id: ${checkpoint_out.checkpoint_id}
 
   inputs:

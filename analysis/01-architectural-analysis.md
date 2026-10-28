@@ -132,7 +132,7 @@ options = adapter.wrap_options(base_options)  # Injects hooks, permissions, sett
 
 | Hook | Trigger | Script | Purpose |
 |------|---------|--------|---------|
-| PreToolUse | Write\|Edit | `pretooluse_require_checkpoint.sh` | Blocks mutations without valid `.claude/checkpoint.ok` (JSON with timestamp freshness, symlink rejection); 21 detection patterns |
+| PreToolUse | Write\|Edit\|MultiEdit\|NotebookEdit\|Bash | `pretooluse_require_checkpoint.sh` | Reads the tool call as JSON on stdin; blocks file edits, and Bash commands matching its 21 detection patterns, without a valid `.claude/checkpoint.ok` (JSON with timestamp freshness, symlink rejection), with exit code 2 and the reason on stderr |
 | PostToolUse | Skill | `posttooluse_log_tool.sh` | Appends HMAC-signed entry to `.claude/audit.log` with `flock` serialization |
 
 **Python Layer** (`grounded_agency/hooks/`):
@@ -156,7 +156,7 @@ options = adapter.wrap_options(base_options)  # Injects hooks, permissions, sett
 7. Shell PostToolUse audit hook logs the invocation
 
 **Error Handling Philosophy**:
-- Shell hooks: Exit 0 on tooling errors (non-fatal), exit 1 only on policy violations
+- Shell hooks: Exit 0 on tooling errors (non-fatal); the PreToolUse hook exits 2 (Claude Code's blocking code, reason on stderr) only on policy violations
 - Python permission callback: **Fail-closed** — any exception denies access
 - Python observational hooks: **Fail-safe** — silently swallow errors and log warnings
 
@@ -211,9 +211,9 @@ Followed by markdown sections: Intent, Success Criteria, Input Contract, Procedu
 - Diagnostics carry a severity (`error` | `warning`); warnings are W601–W615
 
 **Conformance Testing** (`scripts/run_conformance.py`):
-- 55 fixture files in `tests/fixtures/` covering all 4 conformance levels (L1–L4)
+- 79 fixture files in `tests/fixtures/` covering all 4 conformance levels (L1–L4), plus 106 runtime fixtures in `tests/conformance/runtime/`
 - Runs the validator on each fixture via `--catalog` (the production catalog is never swapped or modified)
-- Checks `tests/fixtures/EXPECTATIONS.json` (`should_pass`, `expected_error_codes`, `expected_warning_codes`; an empty list means none may be emitted)
+- Checks `tests/fixtures/EXPECTATIONS.json` (`should_pass`, `expected_error_codes`, `expected_warning_codes`, compared exactly; an absent or empty warning list means none may be emitted)
 - Results output to `build/conformance_results.json`; expression fixtures live in `tests/conformance/expressions/{eval,check}.json`
 
 ---
@@ -322,7 +322,7 @@ The core safety pattern for mutations:
 Layer 1: Shell Hooks (Claude Code CLI)
   └─ pretooluse_require_checkpoint.sh (21 patterns)
      └─ Validates .claude/checkpoint.ok JSON (timestamp freshness, symlink rejection)
-     └─ Blocks Write|Edit without valid marker
+     └─ Blocks file edits and Bash without a valid marker (exit 2, reason on stderr)
      └─ Uses CLAUDE_PROJECT_DIR for absolute path resolution
 
 Layer 2: Python SDK (PreToolUse hook + Permission Callback)
@@ -391,7 +391,7 @@ The `ToolCapabilityMapper._classify_bash_command()` method uses a priority-order
 | **Async Testing** | pytest-asyncio | >=0.21 | `auto` mode for async test functions |
 | **Type Checking** | mypy | >=1.0 | Strict mode, Python 3.10+ target |
 | **Linting** | ruff | >=0.16,<0.17 (exact pin in `constraints.txt`) | pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade |
-| **SDK** | claude-agent-sdk | >=0.1.25,<0.3 | Optional dependency (`pip install grounded-agency[sdk]`) |
+| **SDK** | claude-agent-sdk | >=0.1.52,<0.3 | Optional dependency (`pip install grounded-agency[sdk]`) |
 | **Plugin** | Claude Code | CLI | Hooks, skills, audit logging |
 | **Shell** | Bash | 4+ | Hook scripts with jq for JSON parsing |
 | **SCM** | Git | 2+ | Version control, checkpoint integration |
@@ -602,7 +602,7 @@ event_schema.yaml ──→ world_state_schema.yaml (observation event mapping)
 grounded-agency (Python package)
     └── pyyaml>=6.0,<7 (only runtime Python dependency)
     └── grounded_agency._core (compiled from core/, Rust >= 1.86, via maturin)
-    └── [optional] claude-agent-sdk>=0.1.25,<0.3
+    └── [optional] claude-agent-sdk>=0.1.52,<0.3
 
 Claude Code Plugin
     └── Claude Code CLI (hooks, skills)
@@ -632,7 +632,7 @@ Claude Code Plugin
 | Entity classes | 24 (11 digital + 13 physical) |
 | Trust source ranks | 6 |
 | Transform coercions | 7 |
-| Conformance fixtures | 55 |
+| Conformance fixtures | 79 workflow, 106 runtime |
 | CI pipeline | `.github/workflows/ci.yml` |
 | Plugin version | 1.1.0 |
 | SDK version | 0.1.0 |

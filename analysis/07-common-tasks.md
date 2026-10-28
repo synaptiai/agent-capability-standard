@@ -320,42 +320,51 @@ Steps in the same `parallel_group` do not count as running before one another, s
 
 ### Gates (Conditional Execution)
 
-Gates allow steps to be skipped or the workflow to stop early based on conditions:
+Gates let a step be skipped when it has nothing to do, or stop the run when it must not go on:
 
 ```yaml
-- capability: detect
-  store_as: violations_out
+- capability: critique
+  store_as: critique_out
   gates:
-  - when: ${comparison_out.confidence} > 0.9
-    action: stop                    # stop | rollback | skip | warn
-    message: No significant divergence detected, plan remains valid.
-  - when: ${violations_out.matches} == []
+  - when: ${violations_out} == null || ${violations_out.detected} == false
+    action: skip                    # stop | rollback | skip | warn
+    message: No assumption violation detected; the plan remains valid.
+  - when: ${critique_out.issues} == []
     phase: after                    # before (default) | after
     action: warn
-    message: No violations found.
+    message: No issues found.
+- capability: mutate
+  gates:
+  - when: ${checkpoint_out.checkpoint_id} == null
+    action: stop
+    message: No checkpoint created. Do not mutate.
 ```
 
 Gate actions:
-- `stop`: Halt the entire workflow (condition met, no further steps needed; R403 at runtime)
-- `rollback`: Roll back to the latest checkpoint, then halt
-- `skip`: Skip this step and continue with the next one (before-gates only)
+- `stop`: The run must not go on: raises R403, which goes to the step's failure modes like any step error; with none that handles it, the run fails with R403. It is not a way to say "done": when a condition means there is nothing more to do, `skip` the steps that would act on it
+- `rollback`: Roll back to the latest checkpoint (none: the run ends F503), then raise R403
+- `skip`: Skip this step and continue with the next one (before-gates only); later references to its output read null and must be null-guarded
 - `warn`: Record a trace warning and continue
 
 Gate phase: `before` (default) gates run before the step and cannot read its own output (B202); `after` gates run after the step and may read it, but cannot `skip` (S303). Evaluation order is `condition` → before-gates → the step → after-gates.
 
 ### Failure Modes
 
-Each step can declare failure modes with recovery strategies:
+Each step can declare failure modes. One fires when the step failed with a code in its `on_error`, or its `when` holds after the step; a failure mode with neither only documents the response:
 
 ```yaml
   failure_modes:
-  - condition: Unable to find viable plan
-    action: stop                    # stop | rollback | pause_and_checkpoint | request_more_context
-    recovery: Escalate to human with violation details.
-  - condition: Unexpected side effects
+  - condition: The mutation failed or timed out
+    on_error: [R401, R402]
+    action: rollback                # stop | rollback | pause_and_checkpoint | request_more_context | escalate
+    recovery: Roll back to the checkpoint; the run then ends with the step's error.
+  - condition: State synchronization timeout
+    on_error: R401
     action: pause_and_checkpoint
-    recovery: Checkpoint and require human approval.
+    recovery: Take a new checkpoint of the partial state; the run then ends with R401.
 ```
+
+`rollback` rolls back to the latest checkpoint; `pause_and_checkpoint` takes a new checkpoint (it rolls nothing back); `stop` and `request_more_context` do nothing themselves. With prose `recovery` (no `goto_step` loop), the run then ends with the step's code (STANDARD v1.1.0 §5.12).
 
 ### Parallel Groups
 
@@ -1187,7 +1196,7 @@ The conformance test suite validates the workflow validator itself by running it
 
 ### Conformance Test Fixtures
 
-Test fixtures live in `tests/fixtures/` and follow the naming convention `<name>.workflow_catalog.yaml` (55 at the time of writing; count them with `ls tests/fixtures/*.workflow_catalog.yaml | wc -l`). Each fixture is a complete workflow catalog file designed to test a specific validation scenario. Names start with `pass_`, `fail_` or `patch_`.
+Test fixtures live in `tests/fixtures/` and follow the naming convention `<name>.workflow_catalog.yaml` (79 at the time of writing; count them with `ls tests/fixtures/*.workflow_catalog.yaml | wc -l`). Each fixture is a complete workflow catalog file designed to test a specific validation scenario. Names start with `pass_`, `fail_` or `patch_`.
 
 Representative fixtures:
 

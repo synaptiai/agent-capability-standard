@@ -306,3 +306,42 @@ top of S303; waits and quorums, which the executor runs itself, raised W615;
 still used v1 capability names; they follow the catalog now. A corpus test
 keeps W615 to the fixtures that expect it, since the core's unit tests
 filter it out.
+
+### H3 review findings (five parallel reviewers) and owners
+- Executor (fixed): forged snapshots that passed `check_state` and then
+  panicked; resolved inputs deeper than I-JSON; `min_approvers` above 2^53;
+  map order on restore (`correlate`); the executor's own invoke refusals
+  retried; `replaces` across a recovery loop; times capped at year 9999;
+  reask records' reason.
+- Validator (core): YAML loader stack overflow on deep input; same-file
+  `$ref` and deep refs in schema resolution; consumer typing of templates,
+  annotations and literal/list bindings; W606 through `invoke`; ref syntax
+  codes consistent (B205 for an empty annotation); strict whole-reference
+  check for `correlate`/`shows`/`verdicts`/`pinned_to`/`invoke.input`;
+  W612 hint outside bindings; `accept_from: []`; duplicate `agents`;
+  `workflow_id` vs `input_bindings.workflow`; W615 only for a valid wait;
+  `retry.max` capped; JSON Schema vs validator (`type` lists, `success`,
+  `description`).
+- Fixtures/tools: isolate the noisy fail_* fixtures and compare codes
+  exactly; per-run suggestions file; runtime fixtures for a before-gate
+  `skip` and for an after-gate plus a failure mode; sync the bundled
+  ontology copies; review_verdict `scope` enum vs text.
+- Catalogs (subagent): double rollback, `stop` gates on normal outcomes,
+  data flow, failure modes without triggers, literal type mismatches.
+- Skill output contracts vs the ontology (subagent).
+- Spec and docs (subagent): 1.0 compatibility rows, scope claim, §3.3,
+  failure-mode action semantics, handler deferral rule, conformance runner
+  scope, governance, stale counts, RFC-0004 credits and the rest.
+
+#### H3 results
+All of the above fixed, plus the reviewers' nits: one B202 wording, one
+report per root cause (invoke input, duplicate reviewers), V105 once per
+workflow, diagnostics in catalog order, a cron that cannot fire (S303),
+skill safety constraints matching the ontology, and the subagent's
+`python.rs` re-probe replaced by a typed `LoadError` from the core. Left
+open, recorded rather than changed: `transform.output` is typed `object`
+in the ontology though a CSV-to-records transform naturally returns an
+array; the `schedule_management` compare step's `stop` gate (no free
+slots) still ends the run as a failure; some failure modes on non-effectful
+steps have no trigger and are documentation only. H2c (the commenter's
+fixtures) stays blocked on the archive being reachable from the session.

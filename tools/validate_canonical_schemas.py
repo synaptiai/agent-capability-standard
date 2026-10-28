@@ -104,6 +104,16 @@ ALIAS_THRESHOLD_ORDER = [
 # -------------------- Validation Functions --------------------
 
 
+def _is_unit_number(value: Any) -> bool:
+    """A number in [0.0, 1.0]. ``bool`` is an ``int`` subclass, but a YAML
+    ``true``/``yes`` is not a weight, so it is refused."""
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and 0.0 <= value <= 1.0
+    )
+
+
 def _display_path(path: Path) -> str:
     """Repo-relative when possible; absolute otherwise (e.g. a test fixture)."""
     try:
@@ -211,7 +221,7 @@ def validate_trust_model(schema: dict[str, Any], errors: list[str], name: str) -
             )
 
     for source, weight in weights.items():
-        if not isinstance(weight, int | float) or not 0.0 <= weight <= 1.0:
+        if not _is_unit_number(weight):
             errors.append(
                 f"[{name}] source_ranking.weights['{source}'] = {weight!r} is not "
                 f"a number in [0.0, 1.0]"
@@ -248,9 +258,7 @@ def validate_trust_model(schema: dict[str, Any], errors: list[str], name: str) -
         )
 
     min_trust = decay.get("min_trust")
-    if min_trust is not None and (
-        not isinstance(min_trust, int | float) or not 0.0 <= min_trust <= 1.0
-    ):
+    if min_trust is not None and not _is_unit_number(min_trust):
         errors.append(
             f"[{name}] decay_model.min_trust = {min_trust!r} is not a number in "
             f"[0.0, 1.0]"
@@ -278,7 +286,7 @@ def validate_identity_policy(
     for feature in scoring.get("features") or []:
         weight = feature.get("weight")
         fname = feature.get("name", "<unnamed>")
-        if not isinstance(weight, int | float) or not 0.0 <= weight <= 1.0:
+        if not _is_unit_number(weight):
             errors.append(
                 f"[{name}] alias feature '{fname}' weight {weight!r} is not a "
                 f"number in [0.0, 1.0]"
@@ -355,7 +363,7 @@ def validate_trust_classes(
     for cls, weight in weights.items():
         if cls not in classes:
             errors.append(f"[{label}] weights name unknown trust class '{cls}'")
-        if not isinstance(weight, int | float) or not 0.0 <= weight <= 1.0:
+        if not _is_unit_number(weight):
             errors.append(
                 f"[{label}] trust_classes.weights['{cls}'] = {weight!r} is not "
                 f"a number in [0.0, 1.0]"

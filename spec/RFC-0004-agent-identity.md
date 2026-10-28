@@ -74,8 +74,9 @@ RFC-0002's open question on type discrimination asked for, following the
 precedent of `event.source.kind`.
 
 ### 2) `identity@1` filters by mechanism and trust class
-`receive` and `synchronize` gain two inputs, bound only with `identity@1`
-declared (V106 otherwise):
+`receive`, `synchronize` and a waiting `delegate` (for its result) gain
+three inputs, bound only with `identity@1` declared (V106 otherwise). The
+first two filter:
 
 - `sender_check`: the `authenticated_by` values accepted;
 - `accept_trust_classes`: the `trust_class` values accepted.
@@ -100,7 +101,7 @@ than turning a check off. A workflow that does not declare
 before.
 
 ### 3) Some trust classes always need a person
-`receive` and `synchronize` also gain `always_ask_trust_classes`. An item
+The third input, `always_ask_trust_classes`, marks instead of filtering. An item
 kept from one of those classes, or with no identity or no trust class
 (failing closed), marks the step's output, and the mark follows the data:
 a later step that reads a marked store, directly or through other steps (a
@@ -157,7 +158,7 @@ the start. `AgentDescriptor.trust_score` is unchanged: it orders discovery
 results and says nothing about who an agent is.
 
 ## Backward compatibility
-Every addition is optional: two new inputs gated by a new extension, new
+Every addition is optional: three new inputs gated by a new extension, new
 optional fields in the world state and the trust model, a new schema file.
 A workflow that does not declare `identity@1` validates and runs exactly as
 before; per §11.4 this is a MINOR change, made in the v1.1.0 candidate.
@@ -205,4 +206,5 @@ before; per §11.4 this is a MINOR change, made in the v1.1.0 candidate.
 - Whether a future MAJOR replaces `ActionRecord.actor` and
   `ProvenanceRecord.agent` with identities outright.
 - Whether delegation should also attest the delegate's identity in
-  `effective` (today it attests `fresh_context` and `model_family`).
+  `effective` (today it attests `fresh_context`, `model_family`, `role` and
+  `read_only`).

@@ -202,8 +202,11 @@
       "additionalProperties": true,
       "properties": {
         "type": {
-          "type": "string",
-          "description": "Data type of this input."
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ],
+          "description": "Data type of this input: a JSON Schema type name or a list of them."
         },
         "required": {
           "type": "boolean",
@@ -286,11 +289,12 @@
                 "max": {
                   "type": "integer",
                   "minimum": 0,
-                  "description": "Maximum retry attempts."
+                  "maximum": 1000,
+                  "description": "Further attempts after R401, R402 or R406."
                 },
                 "backoff": {
-                  "type": "string",
-                  "description": "Backoff strategy (e.g. 'exponential')."
+                  "enum": ["none", "linear", "exponential", null],
+                  "description": "Backoff strategy; absent or null means none."
                 }
               }
             }

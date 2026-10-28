@@ -5,7 +5,7 @@
 # digital_twin_bootstrap builds a world model (world_model_build) when no
 # world state is given, then runs a first digital_twin_sync_loop: ingest
 # signals, update the twin's state, detect drift, plan and apply a safe
-# change behind a checkpoint, verify, audit, and roll back on failure.
+# change behind a checkpoint, verify, roll back on failure, and audit.
 #
 # These workflows are copied verbatim from schemas/workflow_catalog.yaml,
 # and a test keeps them identical. Validate with:
@@ -272,7 +272,9 @@ digital_twin_sync_loop:
       target_format: canonical_event
     gates: []
     mapping_ref: schemas/transforms/transform_mapping_rawlog_to_observation.yaml
-    output_conforms_to: schemas/event_schema.yaml#/event
+    # The step's `output` field is one canonical event
+    # (schemas/event_schema.yaml#/event); output_conforms_to would claim the
+    # whole step output is.
   - capability: integrate
     purpose: Merge canonical events with existing twin snapshot; resolve conflicts via strategy.
     risk: low
@@ -341,7 +343,6 @@ digital_twin_sync_loop:
       observations: '${integrate_out.merged.observations: array<object>}'
       scope: ${integrate_out.merged.meta.world_id}
     gates: []
-    output_conforms_to: schemas/world_state_schema.yaml#/world_state
   - capability: compare
     purpose: Compute diff between previous snapshot and updated snapshot.
     domain: state_diff
@@ -349,7 +350,7 @@ digital_twin_sync_loop:
     input_bindings:
       options:
       - '${previous_world_state: object}'
-      - '${state_out: object}'
+      - '${state_out.state: object}'
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -382,7 +383,10 @@ digital_twin_sync_loop:
     store_as: detect_anomaly_out
     failure_modes: []
     input_bindings:
-      data: ${state_out}
+      data:
+        observed: "${state_out.state: object}"
+        expected: "${transition_out.effects: array<object>}"
+        diff: "${compare_state_out: object}"
       pattern: "drift"
     gates: []
   - capability: measure
@@ -413,6 +417,12 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       target: "near_term_risk"
+      conditions:
+        risk: "${measure_risk_out.value}"
+        risk_interval: "${measure_risk_out.uncertainty: object}"
+        drift_detected: "${detect_anomaly_out.detected}"
+        drift: "${detect_anomaly_out.matches: array<object>}"
+        transitions: "${transition_out.rules: array<object>}"
     gates: []
   - capability: plan
     purpose: Plan safe action(s) to reduce risk, with verification criteria and rollback plan.
@@ -425,7 +435,11 @@ digital_twin_sync_loop:
     store_as: plan_out
     failure_modes: []
     input_bindings:
-      context: ${predict_out}
+      context:
+        forecast: "${predict_out: object}"
+        state_diff: "${compare_state_out: object}"
+        entities: "${classify_out.labels: array<object>}"
+        related_context: "${search_out.results: array<object>}"
       goal: "Reduce the detected drift and risk"
     gates: []
   - capability: constrain
@@ -465,9 +479,10 @@ digital_twin_sync_loop:
     retry: null
     store_as: mutate_out
     failure_modes:
-    - condition: Unexpected side effects
-      action: pause_and_checkpoint
-      recovery: Require human approval to proceed.
+    - condition: The mutation failed or timed out
+      on_error: [R401, R402]
+      action: rollback
+      recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and no audit is recorded.
     input_bindings:
       target: "twin_state"
       operation:
@@ -487,10 +502,17 @@ digital_twin_sync_loop:
     timeout: 5m
     retry: null
     store_as: execute_out
-    failure_modes: []
+    failure_modes:
+    - condition: The verification suite failed or timed out
+      on_error: [R401, R402]
+      action: rollback
+      recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and no audit is recorded.
     input_bindings:
       code: "run_verification_suite"
-    gates: []
+    gates:
+    - when: ${mutate_out} == null
+      action: skip
+      message: No mutation was applied, so there is nothing to verify.
   - capability: verify
     purpose: 'Verify outcome: PASS/FAIL with evidence.'
     risk: medium
@@ -503,23 +525,35 @@ digital_twin_sync_loop:
       backoff: exponential
     store_as: verify_out
     failure_modes:
-    - condition: Verdict == FAIL
-      when: ${verify_out.passed} == false
+    - condition: Verification could not run (timed out or failed after its retries)
+      on_error: [R401, R402]
       action: rollback
-      recovery:
-        goto_step: plan_out
-        inject_context:
-          failure_evidence: ${verify_out.violations}
-        max_loops: 3
+      recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and no audit is recorded.
     input_bindings:
+      target: "${execute_out: object}"
       conditions: ["drift_resolved", "no_policy_violation"]
     gates:
-    - when: ${verify_out.passed} == false
-      phase: after
-      action: rollback
-      message: Verification failed. Rolling back.
+    - when: ${mutate_out} == null
+      action: skip
+      message: No mutation was applied, so there is nothing to verify.
+  - capability: rollback
+    purpose: If a mutation was applied and verify FAILs, roll back to the checkpoint.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    failure_modes: []
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    gates:
+    - when: ${mutate_out} == null || ${verify_out.passed} == true
+      action: skip
+      message: No mutation was applied, or the twin passed verification. No rollback needed.
   - capability: audit
-    purpose: Record provenance, tool usage, diffs, and decision rationale.
+    purpose: Record provenance, tool usage, diffs, decision rationale, and any rollback.
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -533,23 +567,8 @@ digital_twin_sync_loop:
         type: "digital_twin_sync"
         mutated: "${mutate_out.success}"
         verified: "${verify_out.passed}"
+        rolled_back: "${rollback_out.restored}"
     gates: []
-  - capability: rollback
-    purpose: If verify FAIL or side effects detected, rollback to checkpoint.
-    risk: medium
-    mutation: true
-    requires_checkpoint: true
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: rollback_out
-    failure_modes: []
-    input_bindings:
-      checkpoint_id: "${checkpoint_out.checkpoint_id}"
-    gates:
-    - when: ${verify_out.passed} == true
-      action: skip
-      message: The twin passed verification. No rollback needed.
   - capability: explain
     purpose: 'Produce decision-ready sync report: drift, actions, verification, next steps.'
     risk: low
@@ -562,14 +581,23 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       conclusion:
+        drift_detected: "${detect_anomaly_out.detected}"
+        risk: "${measure_risk_out.value}"
+        forecast: "${predict_out.prediction: object}"
+        actions: "${plan_out.steps: array<object>}"
+        # mutated and verified are null when no mutation was applied (the
+        # mutate, execute and verify steps were skipped)
+        mutated: "${mutate_out.success}"
         verified: "${verify_out.passed}"
+        # null when the rollback step was skipped: no mutation was applied,
+        # or the twin passed verification
         rolled_back: "${rollback_out.restored}"
     gates: []
   workflow_extensions:
     supports_input_bindings: true
     supports_conditions: true
     supports_parallel_groups: true
-    supports_recovery_loops: true
+    supports_recovery_loops: false
     supports_gates: true
   inputs:
     user_input:
@@ -622,8 +650,10 @@ digital_twin_bootstrap:
     input_bindings:
       input:
         user_input: ${user_input}
-        # result holds the invoked workflow's stores; its state_out is the baseline
-        previous_world_state: '${world_model_out.result.state_out: object}'
+        # result holds the invoked workflow's stores; the state step's output
+        # wraps the world state in its `state` field, so this hands the sync
+        # loop a world state, the same shape as world_state_out below
+        previous_world_state: '${world_model_out.result.state_out.state: object}'
     risk: medium
     mutation: false
     requires_checkpoint: false

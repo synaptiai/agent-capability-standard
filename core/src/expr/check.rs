@@ -479,10 +479,7 @@ impl<'s> Checker<'s> {
             self.push(
                 Code::MissingProducer,
                 at.pos,
-                format!(
-                    "'{}' is neither an earlier step's store_as nor a workflow input",
-                    r.root
-                ),
+                format!("unknown reference store '{}' in ${{{}}}", r.root, r.raw),
             );
             return Ty::poisoned();
         };

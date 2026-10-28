@@ -1,6 +1,8 @@
 //! Structured approval (STANDARD v1.1 §5.14, design-114 §13; `approval@1`)
 //! and unattended runs that reach an approval (W606).
 
+use std::collections::HashSet;
+
 use serde_json::{Map, Value};
 
 use super::bindings::{Checker, Mode};
@@ -237,14 +239,63 @@ pub(crate) fn has_unattended_trigger(wf: &Map<String, Value>, declared: &Declare
         })
 }
 
-/// W606 for a step that needs approval in a workflow an unattended trigger
-/// can start, when it does not say what to do then
-/// (`approval.when_unattended`) and has no standing mandate to ask.
-pub(crate) fn unattended(loc: &StepLoc<'_>, report: &mut Report) {
+/// The workflows an unattended run can reach through `invoke` steps (an
+/// invoked workflow runs with its invoker's attendance, §5.10), starting
+/// from those with an unattended trigger. Only literal targets are followed.
+pub(crate) fn invoked_unattended(workflows: &Map<String, Value>) -> HashSet<&str> {
+    // Declarations are read again only to decide this: their diagnostics
+    // come from each workflow's own check.
+    let starts = |wf: &Map<String, Value>| {
+        let declared = Declared::read(wf, &|d| d, &mut Report::default());
+        has_unattended_trigger(wf, &declared)
+    };
+    let mut queue: Vec<&str> = workflows
+        .iter()
+        // `x-` entries are vendor data: never validated, never run.
+        .filter(|(n, w)| !n.starts_with("x-") && w.as_object().is_some_and(starts))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    let mut seen: HashSet<&str> = queue.iter().copied().collect();
+    let mut reached = HashSet::new();
+    while let Some(name) = queue.pop() {
+        let steps = workflows
+            .get(name)
+            .and_then(|w| w.get("steps"))
+            .and_then(Value::as_array);
+        for step in steps.into_iter().flatten().filter_map(Value::as_object) {
+            if step.get("capability").and_then(Value::as_str) != Some("invoke") {
+                continue;
+            }
+            let Some((target, _)) = super::invoke::target(step) else {
+                continue;
+            };
+            if let Some((key, _)) = workflows.get_key_value(target) {
+                reached.insert(key.as_str());
+                if seen.insert(key.as_str()) {
+                    queue.push(key.as_str());
+                }
+            }
+        }
+    }
+    reached
+}
+
+/// W606 for a step that needs approval in a workflow that can run
+/// unattended (an unattended trigger, or invoked by an unattended run), when
+/// it does not say what to do then (`approval.when_unattended`) and has no
+/// standing mandate to ask.
+pub(crate) fn unattended(loc: &StepLoc<'_>, own_trigger: bool, report: &mut Report) {
+    let why = if own_trigger {
+        "a trigger starts the workflow unattended"
+    } else {
+        "a workflow that runs unattended invokes this one, and it runs with its invoker's attendance"
+    };
     report.push(
         loc.diag(
             Code::UnattendedApproval,
-            "this step needs approval, but a trigger starts the workflow unattended and the step has neither approval.when_unattended (defer_to_queue, skip or fail) nor a standing_mandate approver (needs approval@1), so an unattended run fails here with F502",
+            format!(
+                "this step needs approval, but {why}, and the step has neither approval.when_unattended (defer_to_queue, skip or fail) nor a standing_mandate approver (needs approval@1), so an unattended run fails here with F502"
+            ),
         )
         .at("field", "approval.when_unattended"),
     );
@@ -434,6 +485,42 @@ mod tests {
             .is_empty()
         );
         assert!(run("rotate-logs", json!({"approver": mandate})).is_empty());
+    }
+
+    #[test]
+    fn an_invoked_workflow_runs_unattended_too() {
+        let catalog = json!({
+            "nightly": {"goal": "g", "risk": "low", "spec_version": "1.1",
+                "workflow_extensions": {"requires": ["triggers@1"]},
+                "triggers": [{"kind": "schedule", "schedule": {"every": "1h"}}],
+                "steps": [{"capability": "invoke", "purpose": "p", "store_as": "i",
+                           "input_bindings": {"workflow": "page"}}]},
+            "page": {"goal": "g", "risk": "high", "spec_version": "1.1",
+                "steps": [{"capability": "execute", "purpose": "p", "store_as": "x",
+                           "input_bindings": {"code": "page-oncall"}}]},
+            "manual": {"goal": "g", "risk": "high", "spec_version": "1.1",
+                "steps": [{"capability": "execute", "purpose": "p", "store_as": "x",
+                           "input_bindings": {"code": "c"}}]}
+        });
+        let found: Vec<String> =
+            super::super::validate_catalog(&super::super::tests::ctx(), &catalog, None)
+                .diagnostics
+                .into_iter()
+                .filter(|d| d.code.as_str() == "W606")
+                .map(|d| d.location["workflow"].as_str().unwrap().to_string())
+                .collect();
+        assert_eq!(found, ["page"]);
+        // A vendor `x-` entry is never run, so it makes nothing unattended.
+        let mut vendor = catalog.clone();
+        let nightly = vendor["nightly"].take();
+        vendor.as_object_mut().unwrap().remove("nightly");
+        vendor["x-nightly"] = nightly;
+        let w606 = super::super::validate_catalog(&super::super::tests::ctx(), &vendor, None)
+            .diagnostics
+            .iter()
+            .filter(|d| d.code.as_str() == "W606")
+            .count();
+        assert_eq!(w606, 0);
     }
 
     #[test]

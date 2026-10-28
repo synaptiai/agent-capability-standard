@@ -446,7 +446,9 @@ pub(crate) fn check(
             }
         }
     }
-    vocabulary(q, reviewers.len(), &at, report);
+    // Bound min_pass and min_full by the reviewers as listed: a duplicate is
+    // already S303, and should not also make a bound look unreachable.
+    vocabulary(q, parsed.as_ref().map_or(0, Vec::len), &at, report);
 
     forbidden_inputs(
         q,
@@ -1230,6 +1232,15 @@ mod tests {
                 with(json!({"reviewers": ["ra", "ra", "rb"]}))
             ),
             ["S303", "F504"]
+        );
+        assert_eq!(
+            run_with(
+                reviewer("ra", "a", "claude", json!({})),
+                reviewer("rb", "b", "gpt", json!({})),
+                with(json!({"reviewers": ["ra", "ra"], "min_pass": 2,
+                            "require_model_families": null}))
+            ),
+            ["S303"]
         );
         assert_eq!(run(with(json!({"vocabulary": "approve"}))), ["S303"]);
         assert_eq!(

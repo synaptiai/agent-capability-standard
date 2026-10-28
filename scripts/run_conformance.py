@@ -18,15 +18,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VAL = ROOT / "tools" / "validate_workflows.py"
-SUGGESTIONS_JSON = ROOT / "tools" / "validator_suggestions.json"
 FIX = ROOT / "tests" / "fixtures"
 
 EXPECT = json.loads((FIX / "EXPECTATIONS.json").read_text(encoding="utf-8"))
 
 
-def run_fixture(name: str, path: Path) -> dict:
+def run_fixture(name: str, path: Path, suggestions: Path) -> dict:
+    """Validate one fixture, writing its suggestions JSON to ``suggestions``
+    (one file per run, so concurrent runs and stale output cannot mix)."""
     proc = subprocess.run(
-        [sys.executable, str(VAL), "--catalog", str(path)],
+        [
+            sys.executable,
+            str(VAL),
+            "--catalog",
+            str(path),
+            "--suggestions-out",
+            str(suggestions),
+        ],
         cwd=str(ROOT),
         capture_output=True,
         text=True,
@@ -40,32 +48,15 @@ def run_fixture(name: str, path: Path) -> dict:
     }
 
 
-def _read_emitted_codes(key: str = "structured_errors") -> set[str]:
-    """Read diagnostic codes from the validator's suggestions JSON output:
-    errors by default, warnings with ``key="structured_warnings"``.
-
-    Returns an empty set if the file is missing or unreadable.
-    Callers should use ``_clear_suggestions()`` before each fixture run
-    to prevent stale data from a prior run.
-    """
-    if not SUGGESTIONS_JSON.exists():
-        return set()
+def _read_emitted_codes(suggestions: Path, key: str) -> set[str]:
+    """Diagnostic codes in a run's suggestions JSON: errors with
+    ``key="structured_errors"``, warnings with ``key="structured_warnings"``.
+    Empty if the file is missing or unreadable."""
     try:
-        data = json.loads(SUGGESTIONS_JSON.read_text(encoding="utf-8"))
-        codes: set[str] = set()
-        for diag in data.get(key, []):
-            code = diag.get("code")
-            if code:
-                codes.add(code)
-        return codes
-    except (json.JSONDecodeError, KeyError):
+        data = json.loads(suggestions.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         return set()
-
-
-def _clear_suggestions() -> None:
-    """Remove stale suggestions JSON before each fixture run."""
-    if SUGGESTIONS_JSON.exists():
-        SUGGESTIONS_JSON.unlink()
+    return {d["code"] for d in data.get(key, []) if d.get("code")}
 
 
 def main() -> None:
@@ -91,10 +82,16 @@ def main() -> None:
                 print(f"Missing fixture: {path}")
                 failed += 1
                 continue
-            _clear_suggestions()
-            res = run_fixture(name, path)
+            suggestions = tmp_path / f"{name}.suggestions.json"
+            res = run_fixture(name, path, suggestions)
             should_pass = meta.get("should_pass", False)
-            if res["ok"] != should_pass:
+            if not suggestions.is_file():
+                # No report means the validator did not run to the end.
+                failed += 1
+                print(f"FAIL: {name} wrote no report")
+                print(res["stdout"])
+                print(res["stderr"])
+            elif res["ok"] != should_pass:
                 failed += 1
                 print(
                     f"FAIL: {name} expected should_pass={should_pass} got ok={res['ok']}"
@@ -102,27 +99,22 @@ def main() -> None:
                 print(res["stdout"])
                 print(res["stderr"])
             else:
-                # Verify expected error and warning codes if specified
+                # The listed codes must be exactly the codes emitted: a
+                # fixture that also trips unrelated checks does not isolate
+                # what it tests. An absent list means none may be emitted.
                 missing_msgs = []
                 for kind, key, applies in (
                     ("error", "structured_errors", not res["ok"]),
                     ("warning", "structured_warnings", True),
                 ):
-                    # A list names codes that must be emitted; an empty
-                    # list means none may be.
-                    expected_codes = meta.get(f"expected_{kind}_codes")
-                    if expected_codes is None or not applies:
+                    if not applies:
                         continue
-                    emitted_codes = _read_emitted_codes(key)
-                    missing = set(expected_codes) - emitted_codes
-                    if missing:
+                    emitted = _read_emitted_codes(suggestions, key)
+                    expected = set(meta.get(f"expected_{kind}_codes", []))
+                    if emitted != expected:
                         missing_msgs.append(
-                            f"missing expected {kind} codes: "
-                            f"{sorted(missing)} (emitted: {sorted(emitted_codes)})"
-                        )
-                    elif not expected_codes and emitted_codes:
-                        missing_msgs.append(
-                            f"expected no {kind} codes, emitted {sorted(emitted_codes)}"
+                            f"expected {kind} codes {sorted(expected)}, "
+                            f"emitted {sorted(emitted)}"
                         )
                 if missing_msgs:
                     failed += 1
@@ -136,7 +128,7 @@ def main() -> None:
         results_file = tmp_path / "conformance_results.json"
         results_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
-        # Copy to persistent build dir only on success
+        # Copy to the persistent build dir, pass or fail
         build_dir = ROOT / "build"
         build_dir.mkdir(exist_ok=True)
         (build_dir / "conformance_results.json").write_text(

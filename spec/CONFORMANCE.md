@@ -11,11 +11,10 @@ this page summarises them.
     `soft_requires`
   - resolves effective safety flags; warns on downgrades
   - reports unknown fields and the declared standard version
-  - validates binding path existence
 
 - **L2 Type Conformance**
   - resolves `$ref` schemas
-  - infers binding types
+  - infers binding types, checking each binding's root and path
   - requires typed annotations only when ambiguous
   - validates typed annotations
 
@@ -49,8 +48,9 @@ the Rust core in `core/`).
   (`tests/fixtures/fail_*`)
 - Patch fixtures: expected patch suggestions and diff output
 - Expectations in `tests/fixtures/EXPECTATIONS.json`: `should_pass`,
-  `expected_error_codes`, and `expected_warning_codes` (an empty list means
-  no warnings may be emitted)
+  `expected_error_codes`, and `expected_warning_codes`. The codes a fixture
+  emits must equal the listed set exactly; an absent or empty warning list
+  means no warning may be emitted
 - Expression fixtures, language-neutral:
   `tests/conformance/expressions/eval.json` (evaluation results and runtime
   errors) and `tests/conformance/expressions/check.json` (static
@@ -62,4 +62,17 @@ the Rust core in `core/`).
   `cargo test --test runtime` (each also replayed through a snapshot and
   restore before every step) and `tests/test_runner.py`.
 
-Run the suite with `python scripts/run_conformance.py`.
+Running the suite:
+
+| Fixtures | Command |
+|----------|---------|
+| Workflow fixtures (`tests/fixtures/`) | `python scripts/run_conformance.py` |
+| Runtime fixtures | `cargo test --test runtime` (in `core/`), `pytest tests/test_runner.py` |
+| Expression fixtures | `cargo test --test expressions` (in `core/`); `tools/cel_differential` against cel-go |
+
+`scripts/run_conformance.py` runs only the workflow fixtures.
+
+Coverage gaps: no conformance fixture yet exercises V103, S301, S302, W607
+or W612; the reference implementation's unit tests cover them. F505 is
+reserved and not checked by the reference implementation, so nothing
+tests it.

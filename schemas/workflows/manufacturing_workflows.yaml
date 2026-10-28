@@ -67,13 +67,12 @@ production_line_monitoring:
       risk: low
       mutation: false
       store_as: risk_assessment_out
+      # This step and the next three run only when an anomaly was found;
+      # with production nominal they are skipped and the audit still runs.
+      condition: ${anomaly_out.detected} == true
       input_bindings:
         target: "${anomaly_out.matches: array<object>}"
         metric: operational_risk
-      gates:
-        - when: ${anomaly_out.detected} == false
-          action: stop
-          message: No anomalies detected, production nominal.
 
     - capability: predict
       purpose: Forecast progression if anomaly is not addressed.
@@ -81,6 +80,7 @@ production_line_monitoring:
       risk: low
       mutation: false
       store_as: forecast_out
+      condition: ${anomaly_out.detected} == true
       input_bindings:
         target: anomaly_progression
         horizon: 4h
@@ -93,6 +93,7 @@ production_line_monitoring:
       risk: low
       mutation: false
       store_as: intervention_plan_out
+      condition: ${anomaly_out.detected} == true
       input_bindings:
         goal: resolve_anomaly
         constraints:
@@ -105,6 +106,7 @@ production_line_monitoring:
       risk: low
       mutation: false
       store_as: alert_out
+      condition: ${anomaly_out.detected} == true
       input_bindings:
         specification:
           type: production_alert
@@ -298,8 +300,10 @@ predictive_maintenance:
       store_as: degradation_out
       input_bindings:
         data: ${telemetry_out.data}
-        pattern: trend_deterioration
-        threshold: baseline_deviation
+        pattern:
+          type: trend_deterioration
+          relative_to: baseline
+        threshold: 0.15  # Fractional deviation from the equipment baseline
 
     - capability: attribute
       purpose: Identify likely causes of degradation.
@@ -492,8 +496,9 @@ supply_chain_sync:
       store_as: reorder_needed_out
       input_bindings:
         data: ${threshold_comparison_out}
-        pattern: below_threshold
-        threshold: reorder_point
+        pattern:
+          type: below_threshold
+          relative_to: reorder_point
 
     - capability: predict
       purpose: Forecast demand for reorder quantity calculation.
@@ -501,20 +506,20 @@ supply_chain_sync:
       risk: low
       mutation: false
       store_as: demand_forecast_out
+      # This step and the next three run only when a reorder is needed;
+      # with inventory adequate they are skipped and the audit still runs.
+      condition: ${reorder_needed_out.detected} == true
       input_bindings:
         target: material_demand
         horizon: ${lead_time}
         conditions: ${production_schedule}
-      gates:
-        - when: ${reorder_needed_out.detected} == false
-          action: stop
-          message: All inventory levels adequate, no reorders needed.
 
     - capability: plan
       purpose: Calculate optimal order quantities.
       risk: low
       mutation: false
       store_as: order_plan_out
+      condition: ${reorder_needed_out.detected} == true
       input_bindings:
         goal: replenish_inventory
         constraints:
@@ -529,6 +534,7 @@ supply_chain_sync:
       risk: low
       mutation: false
       store_as: po_draft_out
+      condition: ${reorder_needed_out.detected} == true
       input_bindings:
         specification:
           type: purchase_order_draft
@@ -541,6 +547,7 @@ supply_chain_sync:
       risk: low
       mutation: true
       store_as: checkpoint_out
+      condition: ${reorder_needed_out.detected} == true
       input_bindings:
         scope: supply_chain_action
         label: SCM-replenishment

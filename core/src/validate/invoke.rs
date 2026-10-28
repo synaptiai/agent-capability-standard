@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
-use super::Report;
+use super::{Report, StepLoc};
 use crate::diag::{Code, Diagnostic};
 
 /// One invoke step and the workflow it names.
@@ -29,8 +29,8 @@ pub(crate) enum Input {
     Literal(Vec<String>),
     /// A `${...}` reference: only the executor can check it.
     Computed,
-    /// Any other value; the executor would pass no inputs. Holds its kind.
-    Malformed(&'static str),
+    /// Any other value; the executor would pass no inputs (B203 reports it).
+    Malformed,
 }
 
 /// What an invoke step passes to its workflow.
@@ -38,8 +38,8 @@ pub(crate) fn input(step: &Map<String, Value>) -> Input {
     match step.get("input_bindings").and_then(|b| b.get("input")) {
         None | Some(Value::Null) => Input::Literal(Vec::new()),
         Some(Value::Object(m)) => Input::Literal(m.keys().cloned().collect()),
-        Some(Value::String(s)) if s.contains("${") => Input::Computed,
-        Some(other) => Input::Malformed(crate::yaml::kind_of(other)),
+        Some(Value::String(s)) if super::refs_whole(s) => Input::Computed,
+        Some(_) => Input::Malformed,
     }
 }
 
@@ -55,6 +55,30 @@ pub(crate) fn target(step: &Map<String, Value>) -> Option<(&str, &'static str)> 
         .and_then(Value::as_str)
         .filter(|w| !w.contains("${"))
         .map(|w| (w, "input_bindings.workflow"))
+}
+
+/// S303 when a step names its target twice, in `workflow_id` and in
+/// `input_bindings.workflow`, and the two differ: `workflow_id` would win
+/// unseen.
+pub(crate) fn check_target(loc: &StepLoc<'_>, step: &Map<String, Value>, report: &mut Report) {
+    // A name that is not a string is a shape error reported elsewhere.
+    let (Some(Value::String(id)), Some(Value::String(bound))) = (
+        step.get("workflow_id"),
+        step.get("input_bindings").and_then(|b| b.get("workflow")),
+    ) else {
+        return;
+    };
+    if id != bound {
+        report.push(
+            loc.diag(
+                Code::SchemaValidationFailed,
+                format!(
+                    "names its target twice: workflow_id '{id}' and input_bindings.workflow '{bound}'; name it once"
+                ),
+            )
+            .at("field", "input_bindings.workflow"),
+        );
+    }
 }
 
 pub(crate) fn check(
@@ -107,10 +131,15 @@ pub(crate) fn check(
     }
     // An invocation closes a cycle when its target can reach its caller:
     // it calls itself, or both lie in one strongly connected component.
+    // Each workflow in a cycle is reported once, at its first such
+    // invocation, so a densely connected cycle is not O(edges) reports.
     let component = components(&edges);
+    let mut reported = HashSet::new();
     for inv in resolved {
         let (caller, target) = (inv.workflow.as_str(), inv.target.as_str());
-        if caller == target || component.get(caller) == component.get(target) {
+        if (caller == target || component.get(caller) == component.get(target))
+            && reported.insert(caller)
+        {
             report.push(at(
                 inv,
                 Code::CircularDependency,
@@ -131,21 +160,9 @@ fn check_input(inv: &Invocation, target: &Value, report: &mut Report) {
     let given: &[String] = match &inv.input {
         Input::Computed => return,
         Input::Literal(names) => names,
-        Input::Malformed(kind) => {
-            report.push(
-                Diagnostic::new(
-                    Code::SchemaValidationFailed,
-                    format!(
-                        "input_bindings.input must be a mapping of the target's inputs or a ${{...}} reference, found {kind}"
-                    ),
-                )
-                .at("workflow", inv.workflow.as_str())
-                .at("step", inv.step)
-                .at("capability", "invoke")
-                .at("field", "input_bindings.input"),
-            );
-            &[]
-        }
+        // Not a mapping: B203 against the capability's `input` contract
+        // already says so, and no input could be checked.
+        Input::Malformed => return,
     };
     let empty = Map::new();
     let declared = target
@@ -287,6 +304,22 @@ mod tests {
     }
 
     #[test]
+    fn a_target_is_named_once() {
+        let catalog = |bound: Value| {
+            let mut step = invoke("t", "i");
+            step["input_bindings"] = json!({"workflow": bound});
+            let mut caller = wf(json!([step]));
+            caller["inputs"] = json!({"name": {"type": "string"}});
+            codes(json!({"a": caller, "t": wf(json!([]))}))
+        };
+        assert!(catalog(json!("t")).is_empty());
+        assert_eq!(catalog(json!("u")), ["S303"]);
+        assert_eq!(catalog(json!("${name}")), ["S303"]);
+        // A non-string name is only its type error.
+        assert_eq!(catalog(json!(5)), ["B203"]);
+    }
+
+    #[test]
     fn literal_inputs_match_the_target() {
         let catalog = |step: Value| {
             let mut caller = wf(json!([step]));
@@ -317,9 +350,10 @@ mod tests {
         assert_eq!(call(None), ["S304"]);
         assert_eq!(call(Some(json!({}))), ["S304"]);
         assert_eq!(call(Some(Value::Null)), ["S304"]);
-        // Anything else is malformed: the executor would pass nothing.
-        assert_eq!(call(Some(json!([]))), ["S303", "S304"]);
-        assert_eq!(call(Some(json!("user_input"))), ["S303", "S304"]);
+        // Anything else is not a mapping (B203, from the capability's own
+        // contract), and nothing more is said about its inputs.
+        assert_eq!(call(Some(json!([]))), ["B203"]);
+        assert_eq!(call(Some(json!("user_input"))), ["B203"]);
 
         // The suggestion names the closest declared input.
         let mut step = invoke("t", "i");
@@ -402,6 +436,22 @@ mod tests {
             "{:?}",
             start.elapsed()
         );
+    }
+
+    #[test]
+    fn a_dense_cycle_is_reported_once_per_workflow() {
+        // Every workflow invokes every other: n² edges, n reports.
+        let n = 30;
+        let mut catalog = serde_json::Map::new();
+        for i in 0..n {
+            let steps: Vec<Value> = (0..n)
+                .filter(|&j| j != i)
+                .map(|j| invoke(&format!("w{j}"), &format!("i{j}")))
+                .collect();
+            catalog.insert(format!("w{i}"), wf(Value::Array(steps)));
+        }
+        let c = codes(Value::Object(catalog));
+        assert_eq!(c.iter().filter(|c| **c == "V105").count(), n);
     }
 
     #[test]

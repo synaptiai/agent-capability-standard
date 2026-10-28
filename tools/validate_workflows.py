@@ -10,8 +10,9 @@ renders the optional patch.
 
 Outputs:
 - prints errors and warnings, then ``VALIDATION PASS`` or ``VALIDATION FAIL``;
-- always writes ``tools/validator_suggestions.json`` with the structured
-  diagnostics (§9.7 shape plus ``severity``) and machine-usable fixes;
+- always writes ``tools/validator_suggestions.json`` (or the
+  ``--suggestions-out`` path) with the structured diagnostics (§9.7 shape
+  plus ``severity``) and machine-usable fixes;
 - with ``--emit-patch``, writes ``tools/validator_patch.diff``, a unified diff
   applying the suggested transform insertions.
 
@@ -114,7 +115,15 @@ def main() -> None:
     )
     ap.add_argument("--catalog", default=None, help="Override workflow catalog path.")
     ap.add_argument("--strict", action="store_true", help="Treat warnings as errors.")
+    ap.add_argument(
+        "--suggestions-out",
+        default=None,
+        help="Where to write the suggestions JSON (default tools/validator_suggestions.json).",
+    )
     args = ap.parse_args()
+    suggestions_json = (
+        Path(args.suggestions_out) if args.suggestions_out else SUGGESTIONS_JSON
+    )
 
     wf_path = Path(args.catalog) if args.catalog else WF
     try:
@@ -135,7 +144,7 @@ def main() -> None:
         "structured_warnings": warnings,
         "suggestions": suggestions,
     }
-    SUGGESTIONS_JSON.write_text(json.dumps(output, indent=2), encoding="utf-8")
+    suggestions_json.write_text(json.dumps(output, indent=2), encoding="utf-8")
 
     if args.emit_patch and suggestions:
         workflows = safe_yaml_load(wf_path, max_size=ONTOLOGY_MAX_BYTES) or {}
@@ -157,17 +166,17 @@ def main() -> None:
     failed = bool(errors) or (args.strict and bool(warnings))
     if failed:
         print("VALIDATION FAIL:")
-        for e in output["errors"]:
-            print(" -", e)
+        for err in output["errors"]:
+            print(" -", err)
         if args.strict and warnings:
             print(f" ({len(warnings)} warning(s) count as errors under --strict)")
-        print(f"\nSuggestions written to: {SUGGESTIONS_JSON}")
+        print(f"\nSuggestions written to: {suggestions_json}")
         if args.emit_patch:
             print(f"Patch diff written to: {PATCH_DIFF}")
         sys.exit(1)
 
     print("VALIDATION PASS")
-    print(f"Suggestions written to: {SUGGESTIONS_JSON}")
+    print(f"Suggestions written to: {suggestions_json}")
 
 
 if __name__ == "__main__":

@@ -91,6 +91,15 @@ result, which the output carries as `result`; a `retry` delegates again.
 Return a structured object:
 
 ```yaml
+accepted: boolean  # Whether the target agent accepted the task
+task_id: string  # Delegated task ID
+agent: string  # Assigned agent (the `agent` input)
+effective:  # Delegation settings actually used, as attested by the host
+  fresh_context: boolean
+  model_family: string
+  role: string
+  read_only: boolean
+result: object | null  # The delegate's result (with its sender) when the step waits for it (wait@1)
 delegation:
   task: string  # Original task description
   delegated_to: array  # List of agents/subtasks
@@ -131,6 +140,11 @@ assumptions: []
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `accepted` | boolean | Whether the target agent accepted the task |
+| `task_id` | string | Identifier of the delegated task |
+| `agent` | string | The agent the task was assigned to |
+| `effective` | object | Settings the host actually used (`fresh_context`, `model_family`, `role`, `read_only`); a review quorum relies on them |
+| `result` | object | The delegate's result, with its `sender` (and `sender_identity` under identity@1), when the step waits for it; otherwise null |
 | `delegation` | object | Overall delegation summary |
 | `subtasks` | array | Individual subtask definitions with contracts |
 | `interfaces` | array | Data flow between subtasks |
@@ -167,6 +181,14 @@ constraints:
 
 **Output:**
 ```yaml
+accepted: true
+task_id: "deleg-pr123-review"
+agent: "review-pool"
+effective:
+  fresh_context: false
+  role: "reviewer"
+  read_only: true
+result: null  # Step does not wait; subtasks are still pending
 delegation:
   task: "Review pull request #123"
   delegated_to: ["security-agent", "perf-agent", "style-agent"]
@@ -277,6 +299,13 @@ task:
 
 **Output:**
 ```yaml
+accepted: true
+task_id: "deleg-batch-2024-01-15"
+agent: "pipeline-runner"
+effective:
+  fresh_context: false
+  read_only: false
+result: null
 delegation:
   task: "Process customer data pipeline"
   delegated_to: ["validator", "enricher", "persister"]
@@ -371,7 +400,7 @@ assumptions:
 - `mutation`: false
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: low
+- `risk`: medium
 
 **Capability-specific rules:**
 - Never delegate without explicit contracts

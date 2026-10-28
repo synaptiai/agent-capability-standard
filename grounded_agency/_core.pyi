@@ -4,7 +4,7 @@ Keep in sync with the ``#[pyfunction]``/``#[pyclass]`` items in that file.
 """
 
 from os import PathLike
-from typing import Any
+from typing import Any, final
 
 __version__: str
 DEFAULT_MAX_BYTES: int
@@ -24,13 +24,18 @@ def validate_catalog(
     schema_root: str | PathLike[str],
 ) -> dict[str, Any]: ...
 
+@final
 class Validator:
-    def __init__(
-        self, ontology_path: str | PathLike[str], schema_root: str | PathLike[str]
-    ) -> None: ...
+    """Raises ``FileNotFoundError`` (or another ``OSError``) when the
+    ontology cannot be read, ``ValueError`` when it does not load."""
+
+    def __new__(
+        cls, ontology_path: str | PathLike[str], schema_root: str | PathLike[str]
+    ) -> Validator: ...
     def validate_file(self, path: str | PathLike[str]) -> dict[str, Any]: ...
     def validate(self, catalog: Any, header: str | None = None) -> dict[str, Any]: ...
 
+@final
 class Run:
     """A run of one workflow by the reference executor (design-114 §16)."""
 

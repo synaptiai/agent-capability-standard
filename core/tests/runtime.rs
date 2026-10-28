@@ -390,6 +390,50 @@ fn restore_refuses_malformed_states() {
             }),
         ),
         (
+            "purpose that does not fit the action",
+            Box::new(|s| s["pending"]["purpose"] = serde_json::json!({"purpose": "Event"})),
+        ),
+        (
+            "a failure mode that does not exist",
+            Box::new(|s| {
+                s["pending"]["action"]["kind"] = serde_json::json!("Rollback");
+                s["pending"]["action"]["checkpoint_id"] = serde_json::json!("cp");
+                s["pending"]["purpose"] =
+                    serde_json::json!({"purpose": "FailureRollback", "mode": 7});
+            }),
+        ),
+        (
+            "record that is not an object",
+            Box::new(|s| {
+                s["records"] = serde_json::json!([5]);
+                s["frames"][0]["cur"]["record"] = serde_json::json!(0);
+            }),
+        ),
+        (
+            "pending action past the last step",
+            Box::new(|s| {
+                s["frames"][0]["step"] = serde_json::json!(1);
+                s["frames"][0]["stage"] = serde_json::json!({"stage": "Begin"});
+                s["pending"]["action"]["step"] = serde_json::json!(1);
+            }),
+        ),
+        (
+            "sleep outside a backoff",
+            Box::new(|s| {
+                let id = s["pending"]["action"]["id"].clone();
+                s["pending"]["action"] =
+                    serde_json::json!({"id": id, "frame": ["w"], "kind": "Sleep", "until": 5});
+                s["pending"]["purpose"] = serde_json::json!({"purpose": "Sleep"});
+            }),
+        ),
+        (
+            "terminal action that is not terminal",
+            Box::new(|s| {
+                s["finished"] = s["pending"]["action"].clone();
+                s["pending"] = Value::Null;
+            }),
+        ),
+        (
             "bad version",
             Box::new(|s| s["version"] = serde_json::json!(99)),
         ),
@@ -606,4 +650,77 @@ fn without_identity_at_1_an_identity_is_ignored() {
         end["outputs"]["r"]["data"],
         serde_json::json!([{"event_type": "answer", "sender": "dana"}])
     );
+}
+
+#[test]
+fn resolved_inputs_must_be_ijson_and_states_stay_restorable() {
+    let ctx = ctx();
+    // A stored value nested 98 deep, bound under 30 more levels: the
+    // resolved inputs would be too deep to send or snapshot (R402).
+    let mut deep = serde_json::json!(1);
+    for _ in 0..98 {
+        deep = serde_json::json!([deep]);
+    }
+    let mut wrapper = serde_json::json!("${r.data: array<any>}");
+    for _ in 0..30 {
+        wrapper = serde_json::json!({"k": wrapper});
+    }
+    let catalog = serde_json::json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",
+        "steps": [
+            {"capability": "retrieve", "purpose": "p", "store_as": "r",
+             "input_bindings": {"target": "t"}},
+            {"capability": "transform", "purpose": "p", "store_as": "x",
+             "input_bindings": {"input": wrapper, "target_format": "f"}}]}});
+    let mut run = Run::start(&ctx, &catalog, "w", Map::new(), opts()).unwrap();
+    let id = run.next().id;
+    run.submit(
+        id,
+        Response::Output {
+            value: serde_json::json!({"data": deep, "evidence_anchors": [], "confidence": 1}),
+        },
+        0,
+    )
+    .unwrap();
+    let end = serde_json::to_value(run.next()).unwrap();
+    assert_eq!(end["kind"], "Failed");
+    assert_eq!(end["code"], "R402");
+    let snap = run.snapshot(None);
+    assert!(Run::restore(&ctx, &catalog, &snap, None).is_ok());
+}
+
+#[test]
+fn a_huge_min_approvers_still_snapshots() {
+    let ctx = ctx();
+    let catalog = serde_json::json!({"w": {"goal": "g", "risk": "high", "spec_version": "1.1",
+        "workflow_extensions": {"requires": ["approval@1"]},
+        "steps": [{"capability": "execute", "purpose": "p", "store_as": "x",
+                   "input_bindings": {"code": "c"},
+                   "approval": {"approver": {"kind": "human",
+                                             "min_approvers": 18446744073709551615u64}}}]}});
+    let run = Run::start(&ctx, &catalog, "w", Map::new(), opts()).unwrap();
+    let snap = run.snapshot(None);
+    assert!(Run::restore(&ctx, &catalog, &snap, None).is_ok());
+}
+
+#[test]
+fn the_executors_own_refusals_are_not_retried() {
+    let ctx = ctx();
+    let catalog = serde_json::json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",
+        "steps": [{"capability": "invoke", "purpose": "p", "store_as": "i",
+                   "retry": {"max": 1000, "backoff": "none"},
+                   "input_bindings": {"workflow": "child", "input": {"nope": 1}}}]},
+        "child": {"goal": "g", "risk": "low", "spec_version": "1.1",
+                  "steps": [{"capability": "observe", "purpose": "p", "store_as": "o",
+                             "input_bindings": {"target": "t"}}]}});
+    // The literal input is checked statically too; drive it past the
+    // validator by resolving it from an input instead.
+    let mut c = catalog.clone();
+    c["w"]["inputs"] = serde_json::json!({"payload": {"type": "object"}});
+    c["w"]["steps"][0]["input_bindings"]["input"] = serde_json::json!("${payload: object}");
+    let mut inputs = Map::new();
+    inputs.insert("payload".into(), serde_json::json!({"nope": 1}));
+    let run = Run::start(&ctx, &c, "w", inputs, opts()).unwrap();
+    let end = serde_json::to_value(run.next()).unwrap();
+    assert_eq!(end["code"], "R402");
+    assert!(!run.trace().iter().any(|t| t["kind"] == "retry"));
 }

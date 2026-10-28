@@ -18,7 +18,7 @@ meta:
   date: "2026-01-29"
   description: "Bidirectional mapping between OASF skill categories and Grounded Agency capabilities"
   oasf_version: "0.8.0"
-  grounded_agency_version: "2.0.0"
+  grounded_agency_version: "2.1.0"
   generated_from: "docs/research/analysis/OASF_comparison.md"
 
 # ---------------------------------------------------------------------------

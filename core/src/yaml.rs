@@ -157,18 +157,14 @@ pub fn load_str(text: &str) -> Result<Value, YamlError> {
 
     // Pass 1: which anchors does any alias use? Only those are ever copied.
     let mut scan = AliasScan::default();
-    Parser::new_from_str(text)
-        .load(&mut scan, true)
-        .map_err(scan_error)?;
+    feed(text, &mut scan)?;
 
     // Pass 2: build the values.
     let mut builder = Builder {
         referenced: scan.referenced,
         ..Builder::default()
     };
-    Parser::new_from_str(text)
-        .load(&mut builder, true)
-        .map_err(scan_error)?;
+    feed(text, &mut builder)?;
     if let Some(err) = builder.error {
         return Err(err);
     }
@@ -181,6 +177,33 @@ pub fn load_str(text: &str) -> Result<Value, YamlError> {
             col: 1,
         }),
     }
+}
+
+/// Pass the parser's events to `recv`, one at a time. saphyr's own `load`
+/// recurses once per nesting level, so a deeply nested input could overflow
+/// the stack before any limit is checked; here the depth is counted as the
+/// events arrive and the parse stops at `MAX_DEPTH`.
+fn feed<'a, R: SpannedEventReceiver<'a>>(text: &'a str, recv: &mut R) -> Result<(), YamlError> {
+    let mut depth = 0usize;
+    for item in Parser::new_from_str(text) {
+        let (ev, span) = item.map_err(scan_error)?;
+        match ev {
+            Event::SequenceStart(..) | Event::MappingStart(..) => {
+                depth += 1;
+                if depth > MAX_DEPTH {
+                    return Err(YamlError::Parse {
+                        message: format!("nesting deeper than {MAX_DEPTH} levels"),
+                        line: span.start.line(),
+                        col: span.start.col() + 1,
+                    });
+                }
+            }
+            Event::SequenceEnd | Event::MappingEnd => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        recv.on_event(ev, span);
+    }
+    Ok(())
 }
 
 fn scan_error(e: saphyr_parser::ScanError) -> YamlError {
@@ -647,6 +670,14 @@ mod tests {
             ));
         }
         assert!(err(&doc).contains("anchors and aliases copy more than"));
+    }
+
+    #[test]
+    fn deep_compact_sequences_stop_at_the_limit() {
+        // saphyr's recursive loader overflows the stack on these; the event
+        // loop stops at MAX_DEPTH instead.
+        let doc = format!("w:\n  steps:\n  {}x\n", "- ".repeat(20_000));
+        assert!(err(&doc).contains("nesting deeper than"));
     }
 
     #[test]

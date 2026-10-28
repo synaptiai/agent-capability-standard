@@ -114,7 +114,7 @@ This method installs the `grounded_agency` Python package for programmatic integ
 # Core package -- PyYAML plus the compiled core, no SDK dependency
 pip install grounded-agency
 
-# With Claude Agent SDK integration (adds claude-agent-sdk>=0.1.25,<0.3)
+# With Claude Agent SDK integration (adds claude-agent-sdk>=0.1.52,<0.3)
 pip install grounded-agency[sdk]
 
 # With development tools (adds pytest, mypy, ruff)
@@ -129,7 +129,7 @@ pip install grounded-agency[all]
 | Extra | Added Dependencies | Use Case |
 |-------|--------------------|----------|
 | *(core)* | `pyyaml>=6.0,<7` (the validator/executor ships inside the wheel as `grounded_agency._core`) | Ontology loading, schema parsing, workflow validation |
-| `[sdk]` | `claude-agent-sdk>=0.1.25,<0.3` | Wrapping SDK options with safety layer |
+| `[sdk]` | `claude-agent-sdk>=0.1.52,<0.3` | Wrapping SDK options with safety layer |
 | `[dev]` | `pytest>=7.0,<9`, `pytest-asyncio>=0.21,<1`, `mypy>=1.0,<2`, `ruff>=0.16,<0.17`, `types-PyYAML`, `hypothesis`, `jsonschema`, `claude-agent-sdk` | Testing, type checking, linting |
 
 Wheels are built per platform with the stable ABI (abi3, Python >= 3.10). Where no wheel matches the platform, pip builds from the sdist, which needs a Rust toolchain (>= 1.86).
@@ -241,7 +241,7 @@ This builds the Rust core and provides:
 | Package | Version (supported range; exact pins in `constraints.txt`) | Purpose |
 |---------|---------|---------|
 | `pyyaml` | >=6.0,<7 | YAML parsing for ontology, schemas, profiles |
-| `claude-agent-sdk` | >=0.1.25,<0.3 | SDK integration for `GroundedAgentAdapter` |
+| `claude-agent-sdk` | >=0.1.52,<0.3 | SDK integration for `GroundedAgentAdapter` |
 | `pytest` | >=7.0,<9 | Test runner |
 | `pytest-asyncio` | >=0.21,<1 | Async test support (adapter hooks are async) |
 | `mypy` | >=1.0,<2 | Static type analysis |
@@ -497,7 +497,7 @@ The hooks registered with Claude Code are defined in `hooks/hooks.json`:
 }
 ```
 
-- **PreToolUse hook**: Fires before `Write` or `Edit` tool invocations. Checks for `.claude/checkpoint.ok` marker file. Blocks the operation if the marker is absent.
+- **PreToolUse hook**: Fires before `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Bash` tool invocations, reading the tool call as JSON on stdin. Every such call needs a valid `.claude/checkpoint.ok` marker (JSON with `checkpoint_id` and an unexpired `expires_at`); without one the hook blocks the call (exit code 2, reason on stderr).
 - **PostToolUse hook**: Fires after `Skill` tool invocations. Extracts the skill name and arguments via `jq`, then appends a timestamped entry to `.claude/audit.log`.
 
 ---
@@ -529,7 +529,7 @@ python tools/validate_workflows.py --emit-patch
 # Writes tools/validator_patch.diff in addition to tools/validator_suggestions.json
 ```
 
-`tools/validator_suggestions.json` is written on every run, pass or fail (keys `errors`, `warnings`, `structured_errors`, `structured_warnings`, `suggestions`); `--emit-patch` only adds the diff. Both files are in `.gitignore` and are meant for local use only.
+`tools/validator_suggestions.json` (or the `--suggestions-out` path) is written on every run, pass or fail (keys `errors`, `warnings`, `structured_errors`, `structured_warnings`, `suggestions`); `--emit-patch` only adds the diff. Both files are in `.gitignore` and are meant for local use only.
 
 ### Full Validation Script
 
@@ -664,7 +664,7 @@ agent-capability-standard/
 |
 |-- hooks/                           # Claude Code shell hooks
 |   |-- hooks.json                   #   Hook registration (PreToolUse, PostToolUse)
-|   |-- pretooluse_require_checkpoint.sh  # Blocks Write/Edit without checkpoint
+|   |-- pretooluse_require_checkpoint.sh  # Blocks file edits and Bash without checkpoint
 |   |-- posttooluse_log_tool.sh      #   Logs Skill invocations to audit.log
 |   +-- README.md                    #   Hook documentation
 |
@@ -973,13 +973,16 @@ If the build fails with `rustc` not found or a version error, install or update 
 Blocked: missing checkpoint marker (.claude/checkpoint.ok). Create a checkpoint first.
 ```
 
-**Cause:** The `pretooluse_require_checkpoint.sh` hook detected a mutation operation (Write/Edit) but the checkpoint marker file `.claude/checkpoint.ok` does not exist.
+**Cause:** The `pretooluse_require_checkpoint.sh` hook intercepted a file edit or Bash call but the checkpoint marker file `.claude/checkpoint.ok` does not exist.
 
 **Fix:** Create a checkpoint before performing mutations:
 
 ```bash
-# Manual marker creation (for testing)
-mkdir -p .claude && touch .claude/checkpoint.ok
+# Manual marker creation (for testing): an empty marker is rejected, so
+# write the JSON the hook validates, valid for 30 minutes
+mkdir -p .claude && now=$(date +%s) && \
+  printf '{"checkpoint_id":"chk_manual","created_at":%s,"expires_at":%s}\n' "$now" "$((now + 1800))" \
+  > .claude/checkpoint.ok
 
 # Via the SDK adapter (programmatic)
 adapter.create_checkpoint(scope=["*.py"], reason="Before changes")

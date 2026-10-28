@@ -23,7 +23,7 @@ Before verification, gather current state:
 Execute **verify** to determine whether an artifact (code, configuration, state, output) conforms to a specification, passes tests, or satisfies declared invariants.
 
 **Success criteria:**
-- Clear PASS or FAIL verdict with supporting evidence
+- Clear pass/fail result (`passed`) with supporting evidence
 - Every check is grounded to observable output or file content
 - Failures include actionable fix suggestions
 - All assumptions about expected behavior are explicit
@@ -59,10 +59,10 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - For schema validation: compare structure against schema
    - Record timing and resource usage if relevant
 
-4) **Analyze results**: Determine verdict from check outcomes
-   - PASS: All checks succeed
-   - FAIL: One or more checks fail
-   - INCONCLUSIVE: Unable to determine due to errors or missing data
+4) **Analyze results**: Determine `passed` from check outcomes
+   - `passed: true`: All checks succeed
+   - `passed: false`: One or more checks fail (each listed in `violations`)
+   - Inconclusive (errors or missing data): `passed: false` with `inconclusive: true`
 
 5) **Ground claims**: Attach evidence anchors to all findings
    - Format: `file:line`, `tool:bash:<command>`, or `test:<test_name>`
@@ -77,20 +77,21 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
-verdict: PASS | FAIL | INCONCLUSIVE
-checks_run:
+passed: boolean  # true only when every check passed
+inconclusive: boolean  # true when checks could not run (passed is then false)
+results:  # Per-condition results
   - name: string  # Check identifier
     type: assertion | invariant | regression | schema
     target: string  # What was checked
-    result: PASS | FAIL
+    passed: boolean
     evidence: string  # Output or file reference
-failures:
+violations:  # Failed conditions
   - check: string  # Which check failed
     expected: string  # What was expected
     actual: string  # What was observed
     severity: low | medium | high | critical
 fix_suggestions:
-  - failure_ref: string  # Reference to failure
+  - violation_ref: string  # Which violation (by check name)
     suggestion: string  # How to fix
     confidence: number  # 0.0-1.0 for suggestion quality
 coverage:
@@ -106,10 +107,11 @@ assumptions: []  # Explicit assumptions made
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `verdict` | enum | Overall verification result |
-| `checks_run` | array | List of all checks executed with results |
-| `failures` | array | Details of failed checks |
-| `fix_suggestions` | array | Actionable suggestions to fix failures |
+| `passed` | boolean | Overall result: true only when every check passed |
+| `inconclusive` | boolean | True when checks could not be run; `passed` is then false |
+| `results` | array | Per-condition results for every check executed |
+| `violations` | array | Failed conditions with expected vs. actual |
+| `fix_suggestions` | array | Actionable suggestions to fix violations |
 | `coverage` | object | Metrics about verification coverage |
 | `confidence` | number | 0.0-1.0 based on evidence quality and check coverage |
 | `evidence_anchors` | array | File:line, URLs, or tool output references |
@@ -128,25 +130,26 @@ conditions:
 
 **Output:**
 ```yaml
-verdict: FAIL
-checks_run:
+passed: false
+inconclusive: false
+results:
   - name: test_add_positive
     type: assertion
     target: Calculator.add
-    result: PASS
+    passed: true
     evidence: "tool:bash:pytest - PASSED"
   - name: test_divide_by_zero
     type: assertion
     target: Calculator.divide
-    result: FAIL
+    passed: false
     evidence: "tool:bash:pytest - AssertionError: Expected ZeroDivisionError"
-failures:
+violations:
   - check: test_divide_by_zero
     expected: "ZeroDivisionError raised"
     actual: "Returns infinity"
     severity: high
 fix_suggestions:
-  - failure_ref: test_divide_by_zero
+  - violation_ref: test_divide_by_zero
     suggestion: "Add check for divisor == 0 before division in Calculator.divide()"
     confidence: 0.9
 coverage:
@@ -178,14 +181,15 @@ conditions:
 
 **Output:**
 ```yaml
-verdict: PASS
-checks_run:
+passed: true
+inconclusive: false
+results:
   - name: schema_validation
     type: schema
     target: config/production.yaml
-    result: PASS
+    passed: true
     evidence: "All 12 required fields present, types valid"
-failures: []
+violations: []
 fix_suggestions: []
 coverage:
   checked: 1
@@ -203,10 +207,10 @@ assumptions:
 
 Apply the following verification patterns:
 
-- [ ] **Evidence Grounding**: All verdicts anchored to test output or file content
+- [ ] **Evidence Grounding**: All results anchored to test output or file content
 - [ ] **Contract Validation**: Output matches schema with required fields
-- [ ] **Idempotency Check**: Re-running verify produces same verdict (given unchanged inputs)
-- [ ] **Coverage Tracking**: checks_run.length == coverage.total
+- [ ] **Idempotency Check**: Re-running verify produces the same `passed` result (given unchanged inputs)
+- [ ] **Coverage Tracking**: results.length == coverage.total
 
 **Verification tools:** Bash (for test execution), Read (for evidence files)
 
@@ -215,7 +219,7 @@ Apply the following verification patterns:
 - `mutation`: false
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: medium
+- `risk`: low
 
 **Capability-specific rules:**
 - Do not modify the artifact being verified
@@ -265,13 +269,13 @@ Located at: `scripts/verify-state.sh`
 
 **Commonly precedes:**
 - `audit` - Record verification results for compliance
-- `rollback` - If verify FAIL, trigger rollback (CAVR pattern)
+- `rollback` - If `passed` is false, trigger rollback (CAVR pattern)
 - `critique` - Analyze root cause of failures
 
 **Anti-patterns:**
 - Never verify without a spec (`constrain` invariants or explicit `conditions`)
 - Never modify artifact during verification (breaks idempotency)
-- Never ignore FAIL verdicts and proceed with mutations
+- Never ignore `passed: false` and proceed with mutations
 
 **Workflow references:**
 - See `reference/composition_patterns.md#debug-code-change` for CAVR pattern

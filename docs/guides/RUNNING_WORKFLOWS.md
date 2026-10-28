@@ -13,8 +13,9 @@ enters through the timestamps you pass. So the same catalog, inputs,
 responses and times always produce the same actions, the same trace and
 the same snapshot, and a run can be saved and resumed anywhere.
 
-The contract is [design-114 §16](../../tasks/design-114.md#16-executor-sans-io);
-the semantics are [STANDARD-v1.1.0 §5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl).
+The contract is [STANDARD-v1.1.0 §5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl);
+[design-114 §16](../../tasks/design-114.md#16-executor-sans-io) is
+background on the executor's design.
 
 ## Quick start
 
@@ -52,18 +53,19 @@ else:
 
 A run starts only if the catalog validates. Otherwise `RunStartError` is
 raised, with the error diagnostics in `.diagnostics`. Warnings do not block
-a run.
+a run. Inputs or an `actor_identity` that do not fit the workflow, or are not
+JSON data, also raise `RunStartError` (with no diagnostics).
 
 ## Actions and responses
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs` (a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` |
+| `InvokeCapability` | runs `capability` with `inputs` (a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` (any other code is read as R402) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
-| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's) or `{"kind": "LivenessLost"}` (R406) |
+| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's), `{"kind": "LivenessLost"}` (R406), or `{"kind": "Error", "code": "R401"/"R402"/"R406", "message": ...}` (any other code is read as R402) |
 | `Sleep` | waits until `until` (retry backoff) | — (the runner calls `tick`) |
 | `Completed` / `Failed` | — | the run is over |
 
@@ -126,19 +128,30 @@ ontology contract requires, or the step fails (R402).
   the wait goes on. A lapse is R401;
   `LivenessLost` (or an `Error` with code R406) is R406, unless it comes
   after the deadline, which is R401.
-- **Retries, deadlines.** `retry.max` extra attempts for R401/R402/R406, with
-  `none`, `linear` (1 s × n) or `exponential` (1 s × 2^(n−1)) backoff. A
-  result after the step's deadline is R401.
+- **Retries, deadlines.** `retry.max` (at most 1000) extra attempts for
+  R401/R402/R406, with `none`, `linear` (1 s × n) or `exponential`
+  (1 s × 2^(n−1)) backoff. A result after the step's deadline is R401. A
+  step the executor itself refuses (an invocation whose inputs do not fit
+  the workflow) is not retried: another attempt would be refused the same
+  way. Times are milliseconds since the epoch, capped at the end of year
+  9999.
 - **Failure modes and recovery.** The first failure mode that matches the
-  step's error code (`on_error`) or whose `when` is true applies. It can
-  loop back with injected `${_recovery.*}` context (up to `max_loops`,
-  then `on_exhausted` or R404), escalate to a handler (the run ends
-  `escalated`), or end the run.
+  step's error code (`on_error`) or whose `when` is true applies. Its
+  `action` runs first: `rollback` sends `Rollback`, `pause_and_checkpoint`
+  sends `CreateCheckpoint`. Then it can loop back with injected
+  `${_recovery.*}` context (up to `max_loops`, then `on_exhausted` or
+  R404); when a loop runs a waiting `delegate` again (it is the target,
+  or comes after it), that delegation names the one it replaces in
+  `replaces`. It can also escalate to a handler (the run ends `escalated`), or end the run
+  with the step's code — R402 when `when` fired on a step that did not fail
+  ([STANDARD §5.12](../../spec/STANDARD-v1.1.0.md#512-recovery-and-escalation)).
 - **Invocations.** An `invoke` step runs its workflow as a nested run, at
   most four deep, with `input_bindings.input` as its inputs; inputs the
   workflow does not declare, or a missing required one, fail the step
   (R402). The validator catches this before the run when `input` is
-  literal.
+  literal. Any step whose resolved inputs are not I-JSON (nested deeper
+  than the core's limit, say) fails with R402 rather than reaching the
+  host.
 - **Quorums.** A `constrain` step with a `quorum` counts the verdicts
   itself: one per reviewer whose delegate step ran, pinned to `pinned_to`,
   using the vocabulary, from fresh-context reviewers when required. Any
@@ -175,11 +188,19 @@ result = runner.drive(run, host)
 ```
 
 A snapshot only restores against the catalog (and ontology) it was taken
-from, and a signed snapshot only with its key; a state that is not well
-formed is refused. A response that does not answer the pending action is
-refused, and the run is left unchanged. If a run needs more than
-`max_actions` answers, `RunIncomplete` is raised with the live run in
-`.run`, so you can snapshot it or drive it on.
+from, and a signed snapshot only with its key; `restore` raises
+`RunStartError` for a state that is not well formed or a snapshot that fails
+its HMAC check. A response that does not answer the pending action is
+refused, and the run is left unchanged. Under `drive`, a refused answer to
+an `InvokeCapability` fails that step (R402), as a host exception does; a
+refused answer to any other action raises `HostResponseError`, carrying the
+`.action` and the host's `.response`, with the run still waiting on that
+action. If a run needs more than `max_actions` answers in one `drive`, or a
+host returns `None` (nothing yet) for one action more than `max_polls`
+times (default 100,000, about 28 hours at the default 1 s
+`poll_interval_ms`; each action has its own count),
+`RunIncomplete` is raised with the live run in `.run`, so you can snapshot
+it or drive it on. `HostResponseError` is a `RunIncomplete`.
 
 ## Conformance
 

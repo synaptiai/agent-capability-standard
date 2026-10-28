@@ -92,19 +92,21 @@ timeout (Standard v1.1 `wait@1`); see
 Return a structured object:
 
 ```yaml
+source: string  # Event source: where data came from
+timestamp: string  # ISO 8601 date-time of receipt
 received:
-  source: string  # Where data came from
   source_type: file | url | inline | stream
-  timestamp: string  # ISO timestamp of receipt
   format_detected: json | xml | yaml | csv | text | binary
   size_bytes: integer  # Size of received data
   encoding: string  # Character encoding used
-messages:
+data:
   - id: string  # Unique message identifier
     type: string | null  # Event/message type if identifiable
     payload: object  # Parsed message content
     timestamp: string | null  # Message timestamp if present
     metadata: object | null  # Additional message metadata
+    sender: string  # Host-authenticated principal that sent the item (with accept_from)
+    sender_identity: object  # Sender's identity as the host reported it (identity@1)
 parsed_count: integer  # Number of messages/events parsed
 validation:
   schema_ref: string | null  # Schema used for validation
@@ -127,12 +129,16 @@ assumptions: array[string]  # Explicit assumptions
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `received.source` | string | Origin of the data |
-| `messages` | array[object] | Parsed messages/events |
+| `data` | array[object] | Received messages/events, each with its parsed `payload` (and `sender` / `sender_identity` when the host authenticates senders) |
+| `source` | string | Event source: origin of the data |
+| `timestamp` | string | ISO 8601 date-time of receipt |
+| `received` | object | Transport details: source type, detected format, size, encoding |
 | `validation.valid` | boolean | Whether validation passed |
 | `validation.errors` | array | Validation error details |
 | `conflicts` | array | Anomalies or conflicts in data |
 | `confidence` | number | Lower if parse errors or validation failures |
+| `evidence_anchors` | array | Source references |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 
@@ -145,14 +151,14 @@ channel: "https://api.example.com/events"
 
 **Output:**
 ```yaml
+source: "https://api.example.com/events"
+timestamp: "2024-01-16T12:00:00Z"
 received:
-  source: "https://api.example.com/events"
   source_type: url
-  timestamp: "2024-01-16T12:00:00Z"
   format_detected: json
   size_bytes: 4256
   encoding: "utf-8"
-messages:
+data:
   - id: "evt_001"
     type: "order.created"
     payload:
@@ -202,14 +208,14 @@ channel: "/var/log/sensor_data.json"
 
 **Output:**
 ```yaml
+source: "/var/log/sensor_data.json"
+timestamp: "2024-01-16T14:30:00Z"
 received:
-  source: "/var/log/sensor_data.json"
   source_type: file
-  timestamp: "2024-01-16T14:30:00Z"
   format_detected: json
   size_bytes: 1024
   encoding: "utf-8"
-messages:
+data:
   - id: "msg_001"
     type: "sensor_reading"
     payload:
@@ -282,14 +288,14 @@ channel: inline  # payload delivered with the request
 
 **Output:**
 ```yaml
+source: "inline"
+timestamp: "2024-01-16T15:00:00Z"
 received:
-  source: "inline"
   source_type: inline
-  timestamp: "2024-01-16T15:00:00Z"
   format_detected: xml
   size_bytes: 198
   encoding: "utf-8"
-messages:
+data:
   - id: "msg_001"
     type: "notification.alert"
     payload:

@@ -72,7 +72,9 @@ def validate_edge_references(edges: list[dict], capability_ids: set[str]) -> lis
     return errors
 
 
-def validate_symmetric_edges(edges: list[dict], symmetric_types: list[str]) -> list[str]:
+def validate_symmetric_edges(
+    edges: list[dict], symmetric_types: list[str]
+) -> list[str]:
     """Check that symmetric edge types have bidirectional edges."""
     warnings = []
 
@@ -181,7 +183,9 @@ def detect_cycles(edges: list[dict], cycle_types: list[str]) -> list[list[str]]:
         return False
 
     # Check all nodes
-    all_nodes = set(graph.keys()) | {n for neighbors in graph.values() for n in neighbors}
+    all_nodes = set(graph.keys()) | {
+        n for neighbors in graph.values() for n in neighbors
+    }
     for node in all_nodes:
         if color[node] == WHITE:
             dfs(node)
@@ -191,16 +195,18 @@ def detect_cycles(edges: list[dict], cycle_types: list[str]) -> list[list[str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate capability ontology graph")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed output")
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed output"
+    )
     parser.add_argument(
         "--check-duplicates",
         action="store_true",
-        help="Warn about multiple edge types between the same capability pair"
+        help="Warn about multiple edge types between the same capability pair",
     )
     parser.add_argument(
         "--ontology",
         default="schemas/capability_ontology.yaml",
-        help="Path to ontology file"
+        help="Path to ontology file",
     )
     args = parser.parse_args()
 
@@ -284,8 +290,12 @@ def main() -> int:
     caps_with_incoming = len([c for c in capability_ids if c in incoming])
 
     print("Graph statistics:")
-    print(f"  - Capabilities with outgoing edges: {caps_with_outgoing}/{len(capability_ids)}")
-    print(f"  - Capabilities with incoming edges: {caps_with_incoming}/{len(capability_ids)}")
+    print(
+        f"  - Capabilities with outgoing edges: {caps_with_outgoing}/{len(capability_ids)}"
+    )
+    print(
+        f"  - Capabilities with incoming edges: {caps_with_incoming}/{len(capability_ids)}"
+    )
     print(f"  - Orphan capabilities: {len(orphans)}")
     print()
     print("VALIDATION PASSED")

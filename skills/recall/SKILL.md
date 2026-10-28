@@ -71,7 +71,9 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
-recalled:
+found: boolean  # Whether anything matched the key; when false, data is the `default` input
+stored_at: string | null  # ISO 8601 date-time the top match was recorded
+data:  # Recalled items, best match first
   - id: string  # Unique identifier for this memory
     type: decision | pattern | fact | context
     content: string  # The recalled information
@@ -101,12 +103,16 @@ assumptions: array[string]  # Assumptions about memory validity
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `recalled` | array[object] | List of retrieved memories |
-| `recalled[].type` | enum | Kind of memory: decision, pattern, fact, or context |
-| `recalled[].rationale` | string | Explanation for why decision was made |
-| `recalled[].relevance_score` | number | How well this matches the query |
+| `data` | any | The recalled memories (here a list, best match first), or the `default` input when nothing matched |
+| `found` | boolean | Whether anything matched the key |
+| `stored_at` | string | ISO 8601 date-time the top match was originally recorded |
+| `data[].type` | enum | Kind of memory: decision, pattern, fact, or context |
+| `data[].rationale` | string | Explanation for why decision was made |
+| `data[].relevance_score` | number | How well this matches the query |
 | `consistency_check` | object | Whether recalled items contradict each other |
 | `confidence` | number | Overall confidence in recall quality |
+| `evidence_anchors` | array | Sources for recalled items |
+| `assumptions` | array | Assumptions about memory validity |
 
 ## Examples
 
@@ -119,7 +125,9 @@ key: "error handling approach"
 
 **Output:**
 ```yaml
-recalled:
+found: true
+stored_at: "2024-01-10T09:15:00Z"
+data:
   - id: "decision_err_001"
     type: decision
     content: "Use Result<T, Error> pattern for all fallible operations; avoid exceptions"
@@ -175,7 +183,9 @@ Search session memory only, from 2024-01-16 onward.
 
 **Output:**
 ```yaml
-recalled:
+found: true
+stored_at: "2024-01-16T10:30:00Z"
+data:
   - id: "ctx_fmt_001"
     type: context
     content: "User prefers YAML output over JSON for configuration files"
@@ -217,7 +227,9 @@ key: "database choice"
 
 **Output:**
 ```yaml
-recalled:
+found: true
+stored_at: "2024-01-05T14:00:00Z"
+data:
   - id: "decision_db_001"
     type: decision
     content: "Use PostgreSQL for all persistent storage"
@@ -285,7 +297,7 @@ next_actions:
 - Do not recall or expose credentials, secrets, or PII from memory
 - Respect memory scope boundaries; do not access global when session requested
 - Flag stale memories (>30 days) with lower confidence
-- Do not fabricate memories; return empty if nothing found
+- Do not fabricate memories; if nothing is found return `found: false` with `data` set to the `default` input (or null)
 
 ## Composition Patterns
 

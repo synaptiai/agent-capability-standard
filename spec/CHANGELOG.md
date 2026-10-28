@@ -4,10 +4,13 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 
 ## Unreleased
 
-### Added — Standard v1.1.0 (Candidate Standard) and RFC-0003 (#114)
-- **[STANDARD-v1.1.0](STANDARD-v1.1.0.md)** and
-  **[RFC-0003](RFC-0003-orchestration-extensions.md)** (Accepted). v1.0.0
-  remains supported; Appendix C of v1.1.0 lists every change.
+### Added — Standard v1.1.0 (Candidate Standard), RFC-0003 and RFC-0004 (#114)
+- **[STANDARD-v1.1.0](STANDARD-v1.1.0.md)**,
+  **[RFC-0003](RFC-0003-orchestration-extensions.md)** (Accepted) and
+  **[RFC-0004](RFC-0004-agent-identity.md)** (Accepted; sender identity,
+  listed under the remaining open items below). v1.0.0 remains supported;
+  Appendix C of v1.1.0 lists every change. RFC-0001, which v1.0.0
+  shipped, is marked Accepted.
 - **Condition expression language (§5.8)** for `condition`, `gates[].when` and
   `failure_modes[].when`: a small grammar that is a strict subset of CEL, with
   fixed limits, fail-safe error handling per site, static type checks and null
@@ -25,8 +28,9 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   `quorum@1` (§5.16) and `identity@1` (§5.17). A validator must refuse a declared extension it does
   not check (V106).
 - **Runtime conformance fixtures (§10.3)**: scripted runs of the reference
-  executor covering gates, conditions, checkpoints, approvals, waits,
-  retries, failure modes, recovery, escalation, invocation and quorums.
+  executor covering gates, conditions, checkpoints, approvals, deferral,
+  waits, retries, failure modes, recovery, escalation, invocation, quorums
+  and sender identity (§5.6–§5.17).
 - **Effective `requires_checkpoint` (§5.2.1)** raised by a step is enforced:
   F501 when no checkpoint runs before it.
 - **`event_schema.yaml` 1.1.0:** `source.kind` gains `agent`, so events from
@@ -63,6 +67,14 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   → W605, unsupported → V109.
 - **B205** means "annotation names no type"; an annotation that contradicts
   the schema is B203 (§9.3).
+- **Step fields 1.0 left unchecked (Appendix C).** `store_as` must be an
+  identifier (S303); gate and failure-mode `action` values outside their
+  enums are S303. A failure mode's `condition` is prose and never
+  evaluated: its trigger is `when` or `on_error`. **Migration:** a 1.0
+  failure mode whose trigger was written in `condition` must add a `when`
+  (or `on_error`), or it never fires.
+- **Capability ontology 2.1.0** records the edge changes above,
+  `mutation_overridable` and the new inputs and outputs (Appendix C).
 
 ### Changed — remaining open items (#114)
 - **Wait on `delegate` (§5.13):** a `delegate` step can wait for its
@@ -88,8 +100,9 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   `sender_identity`. `ActionRecord.actor_identity`, `.always_ask` and
   `ProvenanceRecord.agent_identity` (`world_state_schema.yaml` 1.1.0);
   trust-class weights in `authority_trust_model.yaml` 1.1.0 (§8.3). Binding
-  the inputs needs `identity@1` (V106); a literal that is not a list of
-  known values is S303, and a reference resolving to one is R402.
+  the inputs needs `identity@1` (V106); a literal that is not a list is
+  B203, a list of unknown values S303, and a reference resolving to either
+  is R402.
 - **Membership (§5.8):** `x in y`, as in CEL: an element of a list by `==`,
   or a key of a map (a non-string key is in no map); any other right
   operand is an evaluation error. It is a comparison operator, so it does
@@ -100,9 +113,9 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   does not bind an input its capability requires. Waits and quorums are
   exempt: the executor runs them itself. The reference catalog now binds
   every required input, and the §12.5 patterns do too.
-- **`retry` (§5.2):** `max` must be a non-negative integer and `backoff` one
-  of `none`, `linear`, `exponential`, or null for `none` (S303); both were
-  silently ignored otherwise.
+- **`retry` (§5.2):** `max` must be an integer from 0 to 1000 and `backoff`
+  one of `none`, `linear`, `exponential`, or null for `none` (S303); both
+  were silently ignored otherwise.
 
 ### Changed — gaps found by porting workflows to the candidate (#114)
 The issue author ported nine production workflows to the v1.1.0 candidate
@@ -142,6 +155,56 @@ and reported five gaps; these close them.
   steps that only read, reason or record; the run still ends `deferred`, and every terminal action
   lists the run's deferrals. Before, a mandate was never asked unattended
   and a deferral ended the whole run.
+
+### Changed — whole-branch review (#114)
+- **Literal bindings are typed (§5.4).** A literal or template bound to a
+  typed input is checked against it: a template is a string, a list or
+  mapping literal its JSON type (a mapping also fits a `map<string, …>`),
+  and an explicit null is null (the host receives it), so
+  `threshold: "high"` on a number input is B203. `invoke`'s `input: null`
+  still means no inputs. A whole reference keeps its annotation or
+  inferred type.
+- **Reference codes (§5.3, §5.8.1).** An empty annotation (`${x:}`) is
+  B205; a reference that does not parse (`[01]`, `[-1]`, an unclosed `[`)
+  is B201 in an expression as in a binding, not V108. B201's description
+  covers both.
+- **A literal of the wrong JSON type** for `invoke`'s `input` or an
+  `identity@1` input is B203 (§5.4), like any other literal binding, not
+  S303. **`retry` (§5.2)** does not repeat an R402 the executor raises
+  itself before asking the host (a refused `invoke` input).
+- **Fields that take a reference** (`correlate`, `approval.shows`,
+  `recheck.source`, `quorum.verdicts`, `pinned_to`, `invoke`'s
+  `input`) take exactly one `${...}`: a template around one is S303. An
+  unquoted typed reference there gets the W612 quoting hint in its S303.
+- **W606 through `invoke` (§5.10, §5.14):** a workflow invoked, directly or
+  transitively, from one with an unattended trigger runs unattended, so its
+  approval steps warn as its caller's would. `x-` vendor entries are never
+  run, so they make nothing unattended.
+- **Smaller rules made explicit, each S303:** a literal empty
+  `accept_from` (§5.15); a `synchronize` wait whose `agents` repeat one
+  (§5.13); an `invoke` that names different targets in `workflow_id` and
+  `input_bindings.workflow` (§5.12); `retry.max` above 1000 (§5.2); a
+  workflow `success` that is not a list of strings or a `description`
+  that is not a string (§5.1); a cron that can never fire (§5.10).
+- **W615 (§5.5)** is waived only for a wait on `receive` or `synchronize`
+  and for a quorum: a waiting `delegate` delegates first, with its inputs,
+  and a wait on any other capability is S303 with its inputs still checked.
+- **`output_conforms_to` (§5.2)** describes the step's whole output.
+- **Replacing a silent delegate (§5.13):** a recovery loop whose target is
+  the waiting delegate or an earlier step makes the delegate's next call
+  name the delegation it replaces.
+- **The §12.5 Recovery Loop pattern** shows its loop target reading the
+  injected `${_recovery.failure_evidence}`.
+- **Quorum verdict `scope` (§5.16):** a value other than `full` or
+  `delta`, which `review_verdict_schema.yaml` rejects, counts as `delta`
+  and is noted in `violations`; the schema text says so.
+- **Conformance (§10):** a fixture's expected codes are the exact set it
+  must produce, so each fixture isolates what it tests; an absent warning
+  list means none. Two runtime fixtures cover a before-gate `skip` and an
+  after-gate with a failure mode on the same step.
+- **`workflow_catalog.schema.json`** accepts an input `type` that is a list,
+  bounds `retry.max` and enumerates `retry.backoff`, matching the
+  validator.
 
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`

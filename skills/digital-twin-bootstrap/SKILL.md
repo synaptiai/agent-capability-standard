@@ -47,11 +47,11 @@ A world model captures:
      `retrieve_out` → `observe_out` → `detect_out` (domain: entity) → `classify_out` → `integrate_out` → `state_out` → `transition_out` → `attribute_out` (domain: causation) → `measure_out` (domain: uncertainty) → `audit_out` → `ground_out` → `simulate_out` → `explain_out`
 
 2) **Invoke `/invoke`** with workflow `digital_twin_sync_loop`, if `world_state_out` is null, and store output as `sync_out`
-   - Input: `user_input`, and `world_model_out.result.state_out` as `previous_world_state`
+   - Input: `user_input`, and the baseline world state (`world_model_out.result.state_out.state`) as `previous_world_state`
    - Run the initial sync loop using the baseline just built
 
 3) **Invoke `/invoke`** with workflow `digital_twin_sync_loop`, if `world_state_out` is not null, and store output as `sync_existing_out`
-   - Input: `user_input`, and `world_state_out` as `previous_world_state`
+   - Input: `user_input`, and `world_state_out` as `previous_world_state`: a world state, the same shape step 2 passes (the `state` step's output wraps the world state in its `state` field)
    - Run the initial sync loop from the world state passed in
 
 Every step has `skip_if_false: true`, so exactly one branch runs: steps 1-2, or step 3.
@@ -93,7 +93,7 @@ steps:
       explain_out:
         explanation: string
         evidence_anchors: array[string]
-    steps_executed: integer
+    steps_executed: array[string]  # store_as names of the steps that ran, in step order
     evidence_anchors: array[string]
   sync_out:  # null when world_state_out was given and the step was skipped
     result:  # digital_twin_sync_loop's stores, keyed by store_as
@@ -109,11 +109,11 @@ steps:
       explain_out:
         explanation: string
         evidence_anchors: array[string]
-    steps_executed: integer
+    steps_executed: array[string]  # store_as names of the steps that ran, in step order
     evidence_anchors: array[string]
   sync_existing_out:  # null when the baseline was built (steps 1-2 ran)
     result: object  # digital_twin_sync_loop's stores, as in sync_out
-    steps_executed: integer
+    steps_executed: array[string]  # store_as names of the steps that ran, in step order
     evidence_anchors: array[string]
 confidence: number  # 0.0-1.0
 evidence_anchors: array[string]
@@ -210,7 +210,7 @@ steps:
         explanation: "Baseline covers 156 suppliers and 23 manufacturers; the largest risk is semiconductor source concentration"
         evidence_anchors:
           - "file:state/supply_chain_world.yaml"
-    steps_executed: 13
+    steps_executed: [retrieve_out, observe_out, detect_out, classify_out, integrate_out, state_out, transition_out, attribute_out, measure_out, audit_out, ground_out, simulate_out, explain_out]
     evidence_anchors:
       - "file:state/supply_chain_world.yaml"
   sync_out:
@@ -228,21 +228,21 @@ steps:
       audit_out:
         audit_id: "audit_20240115_102000"
         evidence_anchors:
-          - "file:.claude/audit.log"
+          - "file:.claude/audit/records.jsonl"
       explain_out:
         explanation: "First sync ingested 4 shipments; lead-time drift on supplier-taiwan-001 was planned for, passed the policy check and was applied after a checkpoint; verification passed, so rollback was skipped"
         evidence_anchors:
-          - "file:.claude/audit.log"
-    steps_executed: 20  # 21 steps; rollback skipped because verify_out.passed was true
+          - "file:.claude/audit/records.jsonl"
+    steps_executed: [receive_out, search_out, transform_out, integrate_out, detect_entity_out, classify_out, state_out, compare_state_out, transition_out, detect_anomaly_out, measure_risk_out, predict_out, plan_out, constrain_out, checkpoint_out, mutate_out, execute_out, verify_out, audit_out, explain_out]  # rollback_out absent: skipped because verify_out.passed was true
     evidence_anchors:
-      - "file:.claude/audit.log"
+      - "file:.claude/audit/records.jsonl"
   sync_existing_out: null  # skipped: no world state was passed in
 confidence: 0.82
 evidence_anchors:
   - "tool:database:supply-chain-db"
   - "tool:api:logistics.api"
   - "file:state/supply_chain_world.yaml"
-  - "file:.claude/audit.log"
+  - "file:.claude/audit/records.jsonl"
 assumptions:
   - "Database reflects current operational state"
   - "API provides accurate shipment tracking"
@@ -255,7 +255,7 @@ assumptions:
 
 - [ ] **One Branch Ran**: Either `world_model_out` and `sync_out` are set, or `sync_existing_out` is
 - [ ] **Entity Coverage**: All entities in scope identified (`detect_out` → `classify_out` → `integrate_out`)
-- [ ] **State Validity**: The baseline `state_out` conforms to the world state schema
+- [ ] **State Validity**: The baseline world state (`state_out.state`) conforms to the world state schema
 - [ ] **Dynamics Defined**: `transition_out.rules` and `attribute_out.causes` documented
 - [ ] **Uncertainty Quantified**: `measure_out.uncertainty` present
 - [ ] **Grounded**: `ground_out.grounded` is true, gaps listed

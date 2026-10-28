@@ -54,12 +54,6 @@ fn vendor(m: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_.-".contains(c))
 }
 
-/// A string that is one whole `${...}` reference.
-fn is_reference(s: &str) -> bool {
-    let refs = crate::refs::find_refs(s);
-    refs.len() == 1 && refs[0].start == 0 && refs[0].end == s.len() && refs[0].parsed.is_ok()
-}
-
 /// V106 for each `identity@1` input bound without the declaration; S303 for
 /// a literal value outside its vocabulary.
 pub(crate) fn check(
@@ -87,20 +81,10 @@ pub(crate) fn check(
         );
         // Literal values are checked here; values references supply are
         // checked when the step runs (R402).
-        let items = match value {
-            Value::Array(items) => items,
-            Value::String(s) if is_reference(s) => continue,
-            other => {
-                report.push(s303(
-                    &|d| loc.locate(d),
-                    &field,
-                    format!(
-                        "{key} must be a list, found {}",
-                        crate::yaml::kind_of(other)
-                    ),
-                ));
-                continue;
-            }
+        // A value that is not a list is B203 against the ontology's
+        // array<string> type.
+        let Value::Array(items) = value else {
+            continue;
         };
         // An empty list of accepted values accepts nothing: every item is
         // dropped and the wait can only time out.
@@ -191,13 +175,17 @@ mod tests {
             json!({"sender_check": ["x-Upper"]}),
             json!({"accept_trust_classes": ["stranger"]}),
             json!({"always_ask_trust_classes": ["Owner"]}),
-            json!({"accept_trust_classes": "owner"}),
             json!({"accept_trust_classes": ["owner", 5]}),
-            json!({"sender_check": {"a": 1}}),
             json!({"sender_check": []}),
             json!({"accept_trust_classes": []}),
         ] {
             assert_eq!(codes(catalog(bad, &["identity@1"])), ["S303"]);
+        }
+        for not_a_list in [
+            json!({"accept_trust_classes": "owner"}),
+            json!({"sender_check": {"a": 1}}),
+        ] {
+            assert_eq!(codes(catalog(not_a_list, &["identity@1"])), ["B203"]);
         }
         // References are not checked statically.
         let refs = json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",

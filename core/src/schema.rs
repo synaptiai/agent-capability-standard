@@ -8,13 +8,18 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::refs::Seg;
 use crate::yaml;
 
 /// Maximum `$ref` hops followed while resolving one node.
 const MAX_REF_DEPTH: usize = 12;
+
+/// Most schema nodes one validation may produce by resolving refs (a
+/// catalog's inputs, or the ontology's contracts). The repository's largest
+/// schema expands to a few thousand; this bounds memory however refs fan out.
+pub const MAX_EXPANDED_NODES: usize = 200_000;
 
 /// Loads schema files under one root, caching each file.
 pub struct SchemaStore {
@@ -101,40 +106,114 @@ impl SchemaStore {
     }
 
     /// Replace every `$ref` in `node` with what it names, merging sibling keys
-    /// over the target, as the reference validator always has.
-    pub fn resolve_node(&self, node: &Value) -> Value {
-        self.resolve_inner(node, 0)
+    /// over the target, as the reference validator always has. Every node
+    /// produced is charged to `budget`, which the caller shares across all
+    /// the resolutions one validation keeps in memory.
+    pub fn resolve_node(&self, node: &Value, budget: &mut usize) -> Result<Value, TooLarge> {
+        self.expand(node, None, &mut Vec::new(), budget)
     }
 
-    fn resolve_inner(&self, node: &Value, depth: usize) -> Value {
-        if depth > MAX_REF_DEPTH {
-            return node.clone();
-        }
-        match node {
-            Value::Object(m) => {
-                if let Some(Value::String(r)) = m.get("$ref") {
-                    if let Some(Value::Object(target)) = self.resolve_ref(r) {
-                        let mut merged = target;
-                        for (k, v) in m {
-                            if k != "$ref" {
-                                merged.insert(k.clone(), v.clone());
-                            }
-                        }
-                        return self.resolve_inner(&Value::Object(merged), depth + 1);
+    /// Resolve `r` and every `$ref` inside what it names; a `#/...` ref
+    /// there resolves against the file it appears in. `Ok(None)` when `r`
+    /// names nothing. Charged to `budget` as [`Self::resolve_node`] is.
+    pub fn resolve_ref_deep(&self, r: &str, budget: &mut usize) -> Result<Option<Value>, TooLarge> {
+        let Some(target) = self.resolve_ref(r) else {
+            return Ok(None);
+        };
+        let file = r.split_once('#').map_or(r, |(f, _)| f).to_string();
+        let mut chain = vec![absolute(r, None)];
+        self.expand(&target, Some(&file), &mut chain, budget)
+            .map(Some)
+    }
+
+    /// `chain` holds the refs being expanded: at most `MAX_REF_DEPTH` hops,
+    /// and a ref already on it (a cycle), or one that names nothing usable,
+    /// is kept as it is. Every node produced spends one unit of `budget`,
+    /// kept refs included: refs that fan out can multiply a small file into
+    /// an exponentially large tree, so expansion stops there.
+    fn expand(
+        &self,
+        node: &Value,
+        base: Option<&str>,
+        chain: &mut Vec<String>,
+        budget: &mut usize,
+    ) -> Result<Value, TooLarge> {
+        if let Value::Object(m) = node {
+            if let Some(Value::String(r)) = m.get("$ref") {
+                let abs = absolute(r, base);
+                let target = if chain.len() >= MAX_REF_DEPTH || chain.contains(&abs) {
+                    None
+                } else {
+                    self.resolve_ref(&abs)
+                };
+                let Some(Value::Object(target)) = target else {
+                    return charged(node, budget);
+                };
+                let mut merged = target;
+                for (k, v) in m {
+                    if k != "$ref" {
+                        merged.insert(k.clone(), v.clone());
                     }
-                    return node.clone();
                 }
-                let out: Map<String, Value> = m
-                    .iter()
-                    .map(|(k, v)| (k.clone(), self.resolve_inner(v, depth + 1)))
-                    .collect();
-                Value::Object(out)
+                let file = abs
+                    .split_once('#')
+                    .map_or(abs.as_str(), |(f, _)| f)
+                    .to_string();
+                chain.push(abs);
+                let out = self.expand(&Value::Object(merged), Some(&file), chain, budget);
+                chain.pop();
+                return out;
             }
-            Value::Array(a) => {
-                Value::Array(a.iter().map(|v| self.resolve_inner(v, depth + 1)).collect())
-            }
-            other => other.clone(),
         }
+        *budget = budget.checked_sub(1).ok_or(TooLarge)?;
+        Ok(match node {
+            Value::Object(m) => Value::Object(
+                m.iter()
+                    .map(|(k, v)| Ok((k.clone(), self.expand(v, base, chain, budget)?)))
+                    .collect::<Result<_, TooLarge>>()?,
+            ),
+            Value::Array(a) => Value::Array(
+                a.iter()
+                    .map(|v| self.expand(v, base, chain, budget))
+                    .collect::<Result<_, TooLarge>>()?,
+            ),
+            other => other.clone(),
+        })
+    }
+}
+
+/// `node` cloned as it is, each of its nodes charged to `budget`.
+fn charged(node: &Value, budget: &mut usize) -> Result<Value, TooLarge> {
+    fn charge(v: &Value, budget: &mut usize) -> Result<(), TooLarge> {
+        *budget = budget.checked_sub(1).ok_or(TooLarge)?;
+        match v {
+            Value::Object(m) => m.values().try_for_each(|c| charge(c, budget)),
+            Value::Array(a) => a.iter().try_for_each(|c| charge(c, budget)),
+            _ => Ok(()),
+        }
+    }
+    charge(node, budget)?;
+    Ok(node.clone())
+}
+
+/// A schema whose `$ref`s expand to more than [`MAX_EXPANDED_NODES`] nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TooLarge;
+
+impl std::fmt::Display for TooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "its $refs expand to more than {MAX_EXPANDED_NODES} schema nodes"
+        )
+    }
+}
+
+/// A ref made absolute: `#/...` names a node of the file it appears in.
+fn absolute(r: &str, base: Option<&str>) -> String {
+    match (r.strip_prefix('#'), base) {
+        (Some(pointer), Some(file)) => format!("{file}#{pointer}"),
+        _ => r.to_string(),
     }
 }
 
@@ -343,9 +422,151 @@ mod tests {
                 .is_none()
         );
         assert!(store.resolve_ref("schemas/absent.yaml#/x").is_none());
-        let node = store.resolve_node(
-            &json!({"$ref": "schemas/world_state_schema.yaml#/world_state", "description": "x"}),
-        );
+        let node = store
+            .resolve_node(
+                &json!({"$ref": "schemas/world_state_schema.yaml#/world_state", "description": "x"}),
+                &mut { MAX_EXPANDED_NODES },
+            )
+            .unwrap();
         assert_eq!(node["description"], "x");
+    }
+
+    #[test]
+    fn fanned_out_refs_stop_at_the_node_budget() {
+        // Each level refers to the next six times: 6^12 nodes from 3 KB.
+        let dir = std::env::temp_dir().join(format!("acs-ref-bomb-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut doc = String::new();
+        for k in 0..13 {
+            doc.push_str(&format!("a{k}:\n  type: object\n  properties:\n"));
+            for p in 0..6 {
+                doc.push_str(&format!("    p{p}: {{$ref: '#/a{}'}}\n", k + 1));
+            }
+        }
+        doc.push_str("a13: {type: string}\n");
+        std::fs::write(dir.join("bomb.yaml"), doc).unwrap();
+        let store = SchemaStore::new(&dir);
+        let start = std::time::Instant::now();
+        let fresh = || MAX_EXPANDED_NODES;
+        assert_eq!(
+            store.resolve_ref_deep("bomb.yaml#/a0", &mut fresh()),
+            Err(TooLarge)
+        );
+        assert_eq!(
+            store.resolve_node(&json!({"$ref": "bomb.yaml#/a0"}), &mut fresh()),
+            Err(TooLarge)
+        );
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        // A shallow corner of the same file still resolves.
+        assert!(
+            store
+                .resolve_ref_deep("bomb.yaml#/a12", &mut fresh())
+                .unwrap()
+                .is_some()
+        );
+        // The budget is shared: many small resolutions add up.
+        let mut shared = fresh();
+        let mut failed = false;
+        // About 93 nodes each.
+        for _ in 0..5_000 {
+            if store
+                .resolve_ref_deep("bomb.yaml#/a11", &mut shared)
+                .is_err()
+            {
+                failed = true;
+                break;
+            }
+        }
+        assert!(failed, "a shared budget must run out");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn refs_kept_unexpanded_are_charged_too() {
+        // Leaves keep a ref that names nothing, beside a large payload:
+        // those copies count against the budget like expanded nodes.
+        let dir = std::env::temp_dir().join(format!("acs-ref-kept-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let payload: Vec<String> = (0..200).map(|i| format!("k{i}: {i}")).collect();
+        let mut doc = String::new();
+        for k in 0..6 {
+            doc.push_str(&format!("a{k}:\n  properties:\n"));
+            for p in 0..6 {
+                doc.push_str(&format!("    p{p}: {{$ref: '#/a{}'}}\n", k + 1));
+            }
+        }
+        doc.push_str(&format!(
+            "a6: {{$ref: '#/missing', payload: {{{}}}}}\n",
+            payload.join(", ")
+        ));
+        std::fs::write(dir.join("kept.yaml"), doc).unwrap();
+        let store = SchemaStore::new(&dir);
+        assert_eq!(
+            store.resolve_ref_deep("kept.yaml#/a0", &mut { MAX_EXPANDED_NODES }),
+            Err(TooLarge)
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn repository_schemas_are_far_inside_the_node_budget() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let store = SchemaStore::new(&root);
+        for r in [
+            "schemas/world_state_schema.yaml#/world_state",
+            "schemas/event_schema.yaml#/event",
+        ] {
+            let mut budget = MAX_EXPANDED_NODES;
+            let node = store.resolve_ref(r).unwrap();
+            store
+                .expand(
+                    &node,
+                    Some(r.split('#').next().unwrap()),
+                    &mut vec![r.into()],
+                    &mut budget,
+                )
+                .unwrap();
+            let used = MAX_EXPANDED_NODES - budget;
+            assert!(used * 10 < MAX_EXPANDED_NODES, "{r} used {used}");
+        }
+        // All the ontology's contracts together, as `Context::load` resolves
+        // them, under one budget.
+        let ontology =
+            crate::ontology::Ontology::load(&root.join("schemas/capability_ontology.yaml"))
+                .unwrap();
+        let mut budget = MAX_EXPANDED_NODES;
+        for cap in ontology.capabilities.values() {
+            for v in [&cap.input_schema, &cap.output_schema] {
+                store.resolve_node(v, &mut budget).unwrap();
+            }
+        }
+        let used = MAX_EXPANDED_NODES - budget;
+        assert!(used * 10 < MAX_EXPANDED_NODES, "contracts used {used}");
+    }
+
+    #[test]
+    fn same_file_refs_resolve_and_only_hops_count() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let store = SchemaStore::new(root);
+        // event_schema's event uses `#/types/...` refs of its own file.
+        let event = store
+            .resolve_ref_deep("schemas/event_schema.yaml#/event", &mut {
+                MAX_EXPANDED_NODES
+            })
+            .unwrap()
+            .unwrap();
+        let confidence = &event["properties"]["uncertainty"]["properties"]["confidence"];
+        assert_eq!(confidence["type"], "number", "{event}");
+        // Deep schemas resolve whatever their nesting: only hops count.
+        let ws = store
+            .resolve_ref_deep("schemas/world_state_schema.yaml#/world_state", &mut {
+                MAX_EXPANDED_NODES
+            })
+            .unwrap()
+            .unwrap();
+        assert!(
+            !ws.to_string().contains("\"$ref\""),
+            "unresolved refs remain"
+        );
     }
 }

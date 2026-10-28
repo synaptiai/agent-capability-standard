@@ -205,8 +205,10 @@ pub(crate) fn missing_inputs(
     let empty = Map::new();
     // The executor runs a wait (§5.13) or a quorum (§5.16) itself: no host
     // receives the step's inputs, so none is missing. A delegate that waits
-    // still delegates first, with its inputs.
-    if (cap.id != "delegate" && step.get("wait").is_some_and(Value::is_object))
+    // still delegates first, with its inputs; a wait on any other capability
+    // is S303 and does not excuse its inputs.
+    if (matches!(cap.id.as_str(), "receive" | "synchronize")
+        && step.get("wait").is_some_and(Value::is_object))
         || (cap.id == "constrain" && step.get("quorum").is_some_and(Value::is_object))
     {
         return;

@@ -1,0 +1,155 @@
+{
+  "description": "A recovery loop to a step before a waiting delegate runs the delegate again, naming the delegation it replaces; the steps in between do not take it.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "plan",
+          "purpose": "plan step",
+          "store_as": "p",
+          "input_bindings": {
+            "goal": "review x"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "timeout": "2h",
+          "input_bindings": {
+            "task": {
+              "review": "x"
+            },
+            "agent": "a"
+          },
+          "wait": {
+            "event_type": "review.done",
+            "liveness": {
+              "mode": "push",
+              "interval": "10m"
+            }
+          },
+          "failure_modes": [
+            {
+              "condition": "The reviewer went silent.",
+              "on_error": "R406",
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "p",
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "LivenessLost"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "replaces": "t1"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "correlate": {
+          "task_id": "t2"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t2"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "ra": {
+        "task_id": "t2"
+      }
+    }
+  },
+  "trace_kinds": [
+    "loop",
+    "delegated"
+  ]
+}

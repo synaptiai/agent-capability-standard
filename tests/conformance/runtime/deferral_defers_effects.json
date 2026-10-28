@@ -96,7 +96,9 @@
           "purpose": "audit step",
           "store_as": "log",
           "input_bindings": {
-            "event": "sweep done"
+            "event": {
+              "type": "sweep_done"
+            }
           }
         },
         {

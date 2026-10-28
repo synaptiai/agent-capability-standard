@@ -4,9 +4,9 @@ description: Produce a comprehensive audit trail of actions, tools used, changes
 argument-hint: "[event] [context] [retention]"
 disable-model-invocation: false
 user-invocable: true
-allowed-tools: Read, Grep
+allowed-tools: Read, Grep, Bash
 context: fork
-agent: explore
+agent: general-purpose
 hooks:
   PostToolUse:
     - matcher: "Read"
@@ -34,6 +34,7 @@ Current audit context:
 - Uncommitted changes: !`git status --short 2>/dev/null || echo "Not a git repo"`
 - Recent file modifications: !`find . -type f -mtime -1 -not -path './.git/*' 2>/dev/null | wc -l | tr -d ' '` files in last 24h
 - Audit log exists: !`ls -la .audit/ 2>/dev/null | head -5 || echo "No .audit/ directory"`
+- Audit records exist: !`wc -l "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl" 2>/dev/null || echo "No .claude/audit/records.jsonl"`
 - Checkpoint log exists: !`ls -la .checkpoints/ 2>/dev/null | head -5 || echo "No .checkpoints/ directory"`
 
 ## Intent
@@ -87,16 +88,23 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Format: `file:line`, `tool:git:commit_hash`, `timestamp`
    - Include actual command outputs where relevant
 
-6) **Format output**: Structure per audit contract
+6) **Write the record (append-only)**: Persist the audit record before returning
+   - Build one compact JSON line: `audit_id`, `timestamp`, the `event`, the `context`, `retention` if given, and the collected `audit_record`, `changes` and `provenance` (redact credentials and PII first)
+   - Append it with Bash to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` (`mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"`, then `>>`), so the record lands in the same project `.claude/` directory the plugin's hooks use rather than under whatever the working directory is; refuse if the file is a symlink, and never rewrite, truncate or reorder existing lines
+   - Do not write to `.claude/audit.log`: the plugin's PostToolUse hook keeps it as an HMAC-chained log of skill invocations (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends this skill's own invocation only after the skill finishes, so there is no line for it yet: cite earlier lines (the invocations being audited) as evidence, not this one
+   - The plugin's PreToolUse hook blocks a Bash command that matches its mutation pattern (`rm`, `mv`, `sed`, `git`, `curl`, `chmod`, … anywhere in the command, record text included) while there is no valid checkpoint marker (`.claude/checkpoint.ok`); a plain `mkdir`/`printf >>` append whose text matches none of them is not blocked. If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
+
+7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line
 
 ## Output Contract
 
 Return a structured object:
 
 ```yaml
+recorded: boolean  # Whether the record was appended to .claude/audit/records.jsonl
+audit_id: string  # Unique audit record ID
+timestamp: string  # ISO 8601 date-time the audit record was generated
 audit_record:
-  id: string  # Unique audit record ID
-  timestamp: string  # When audit was generated
   actor: string  # Who/what performed audited actions
   action_type: string  # Category of actions
   targets: array[string]  # What was affected
@@ -126,7 +134,9 @@ assumptions: []
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `audit_record.id` | string | Unique identifier for this audit |
+| `recorded` | boolean | Whether the record was appended to `.claude/audit/records.jsonl` (false when the write was blocked or failed) |
+| `audit_id` | string | Unique identifier for this audit record |
+| `timestamp` | string | ISO 8601 date-time the audit record was generated |
 | `audit_record.actor` | string | Who performed the actions |
 | `audit_record.outcome` | enum | Overall result of audited actions |
 | `changes` | array | List of all changes with before/after |
@@ -158,9 +168,10 @@ context:
 
 **Output:**
 ```yaml
+recorded: true
+audit_id: "audit_20240115_160000_session"
+timestamp: "2024-01-15T16:00:00Z"
 audit_record:
-  id: "audit_20240115_160000_session"
-  timestamp: "2024-01-15T16:00:00Z"
   actor: "claude-agent"
   action_type: "code_modification"
   targets:
@@ -203,6 +214,7 @@ provenance:
     - "psycopg2"
 confidence: 0.95
 evidence_anchors:
+  - "file:.claude/audit/records.jsonl"
   - "tool:git:abc123def456"
   - "tool:bash:pytest tests/ - 7 passed"
   - "file:src/api/handlers/user.py:45"
@@ -231,9 +243,10 @@ context:
 
 **Output:**
 ```yaml
+recorded: true
+audit_id: "audit_20240115_config"
+timestamp: "2024-01-15T17:00:00Z"
 audit_record:
-  id: "audit_20240115_config"
-  timestamp: "2024-01-15T17:00:00Z"
   actor: "claude-agent"
   action_type: "configuration_change"
   targets:
@@ -270,6 +283,7 @@ provenance:
   dependencies: []
 confidence: 1.0
 evidence_anchors:
+  - "file:.claude/audit/records.jsonl"
   - "file:.checkpoints/chk_20240115_150000_config/manifest.json"
   - "tool:bash:rollback command output"
 assumptions: []
@@ -280,30 +294,30 @@ assumptions: []
 Apply the following verification patterns:
 
 - [ ] **Evidence Grounding**: All changes linked to evidence_anchors
-- [ ] **Contract Validation**: Output matches audit_record schema
+- [ ] **Contract Validation**: Output has `recorded`, `audit_id` and `evidence_anchors` per the output schema
 - [ ] **Completeness Check**: No gaps in timeline for the specified time window
 - [ ] **Provenance Valid**: All inputs and outputs are verifiable
 
-**Verification tools:** Read (for log files), Grep (for searching history)
+**Verification tools:** Read (for log files and the appended record), Grep (for searching history), Bash (to append the record)
 
 ## Safety Constraints
 
-- `mutation`: false (audit is read-only observation)
+- `mutation`: true (it writes an audit record); `mutation_overridable`, so a step that only reads may declare `mutation: false`
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: medium
+- `risk`: low
 
 **Capability-specific rules:**
 - Never modify audited artifacts during audit
 - Preserve original timestamps (do not alter history)
 - Include failed actions, not just successes
 - Redact sensitive information (credentials, PII) from audit output
-- Store audit records in append-only manner when persisting
+- Store audit records append-only: only ever append to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`; never edit or delete earlier lines, and never write to the hook-maintained `.claude/audit.log`
 
 ## Composition Patterns
 
 **Commonly follows:**
-- `verify` - After verify PASS, audit the successful changes (CAVR pattern)
+- `verify` - After verify passes (`passed: true`), audit the successful changes (CAVR pattern)
 - `execute` / `mutate` - Audit what was executed
 - `rollback` - Audit the rollback event itself
 

@@ -91,7 +91,18 @@ scope_reduction:
   original_scope: object  # Permissions before constraining
   constrained_scope: object  # Permissions after constraining
   removed_permissions: array[string]  # What was removed
-safe_to_proceed: boolean  # Overall go/no-go
+compliant: boolean  # Overall go/no-go: false when any violation is enforced with `block`
+violations:  # Constraint violations (any enforcement level)
+  - constraint: string  # Which constraint was violated
+    detail: string  # What failed
+    action: block | warn | log  # Enforcement applied
+actions_taken: array[string]  # Enforcement actions performed (block, warn, log, scope reduction)
+tally:  # Only when the step has a quorum (quorum@1)
+  passes: integer
+  blocks: integer
+  abstains: integer
+  full_passes: integer
+  voters: array[string]
 blocked_reason: string | null  # Why blocked (if applicable)
 confidence: number  # 0.0-1.0
 evidence_anchors: ["policy:...", "file:..."]
@@ -105,7 +116,10 @@ assumptions: []
 | `constraints_applied` | array | List of constraints evaluated and their enforcement |
 | `policy_evaluation` | object | Result of primary policy evaluation |
 | `scope_reduction` | object | How permissions were reduced |
-| `safe_to_proceed` | boolean | Overall decision: can action proceed? |
+| `compliant` | boolean | Overall decision: true when no violation is enforced with `block`, so the action can proceed (workflows gate on `${<step>.compliant}`) |
+| `violations` | array | Constraint violations, each with the enforcement applied; `warn`/`log` violations leave `compliant` true |
+| `actions_taken` | array | Enforcement actions performed |
+| `tally` | object | Review quorum count (passes, blocks, abstains, full_passes, voters); present only when the step has a `quorum` |
 | `blocked_reason` | string | Explanation if action is blocked |
 | `confidence` | number | 0.0-1.0 based on policy coverage |
 | `evidence_anchors` | array | References to policies evaluated |
@@ -153,7 +167,17 @@ scope_reduction:
     paths: ["/workspace/**"]
   removed_permissions:
     - "write to system paths"
-safe_to_proceed: false
+compliant: false
+violations:
+  - constraint: "workspace_boundary"
+    detail: "path must be within workspace"
+    action: block
+  - constraint: "sensitive_file_protection"
+    detail: "system files are read-only"
+    action: block
+actions_taken:
+  - "block: mutate /etc/passwd"
+  - "scope reduced to /workspace/**"
 blocked_reason: "Action targets system file outside workspace boundary. Editing /etc/passwd is prohibited."
 confidence: 1.0
 evidence_anchors:
@@ -212,7 +236,14 @@ scope_reduction:
     burst_allowed: false
   removed_permissions:
     - "burst requests"
-safe_to_proceed: true
+compliant: true
+violations:
+  - constraint: "external_api_rate_limit"
+    detail: "approaching rate limit (95/100 this hour)"
+    action: warn
+actions_taken:
+  - "warn: 95/100 requests used this hour"
+  - "scope reduced: rate limit 5, no burst"
 blocked_reason: null
 confidence: 0.9
 evidence_anchors:
@@ -261,7 +292,13 @@ scope_reduction:
     mutation_allowed: false
   removed_permissions:
     - "file mutation (pending checkpoint)"
-safe_to_proceed: false
+compliant: false
+violations:
+  - constraint: "checkpoint_required"
+    detail: "checkpoint not found for scope"
+    action: block
+actions_taken:
+  - "block: execute refactor_handlers_plan until checkpoint exists"
 blocked_reason: "This execute step mutates files (requires_checkpoint: true). Call 'checkpoint' first with scope matching the plan."
 confidence: 1.0
 evidence_anchors:

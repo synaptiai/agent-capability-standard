@@ -28,12 +28,10 @@ pub(crate) fn check_parsed(
     let at = |d: crate::diag::Diagnostic, pos: usize| d.at("field", field).at("column", pos + 1);
     match parsed {
         Err(e) => {
-            let code = if e.annotation {
-                Code::InvalidAnnotation
-            } else {
-                Code::InvalidExpression
-            };
-            report.push(at(loc.diag(code, format!("{field}: {}", e.msg)), e.pos));
+            report.push(at(
+                loc.diag(e.kind.code(), format!("{field}: {}", e.msg)),
+                e.pos,
+            ));
         }
         Ok(e) => {
             let mut checker = check::Checker::new(scope);

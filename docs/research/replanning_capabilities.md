@@ -376,7 +376,7 @@ monitor-and-replan:
       store_as: revised_plan
 ```
 
-> **As implemented:** the catalog workflow is `monitor_and_replan` in `schemas/workflow_catalog.yaml`. It uses `*_out` store names, adds a closing `audit` step, and its `plan` step is skipped by the gate `${critique_out.issues} == []`: `critique` runs with `severity_threshold: major` and receives the detected violations, so an empty issue list means no violation of major severity or worse.
+> **As implemented:** the catalog workflow is `monitor_and_replan` in `schemas/workflow_catalog.yaml`. It uses `*_out` store names, adds a closing `audit` step, and its `plan` step is skipped by the gate `${critique_out.issues} == []`: `critique` runs with `severity_threshold: high` and receives the detected violations, so an empty issue list means no violation of high severity or worse.
 
 ### 4.3 Workflow Pattern: `clarify-intent`
 

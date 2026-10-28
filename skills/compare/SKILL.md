@@ -56,7 +56,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 
 5) **Calculate weighted scores**: Aggregate criteria scores
    - weighted_score = sum(criterion_score * criterion_weight)
-   - Rank options by weighted score
+   - Rank options by weighted score (`ranking`, `scores`)
 
 6) **Analyze tradeoffs**: Document what each choice sacrifices
    - Identify criteria where top choice is not best
@@ -86,10 +86,14 @@ comparison_matrix:
       - criterion: string
         score: number  # 0.0-1.0 normalized score
         rationale: string  # Why this score
-recommendation:
-  choice: string  # Recommended option ID
-  rationale: string  # Why this option
-  confidence: number  # 0.0-1.0 in recommendation
+ranking:  # Options ordered best-first by weighted score
+  - option_id: string
+    weighted_score: number  # 0.0-1.0
+scores:  # Weighted score per option
+  <option_id>: number  # 0.0-1.0
+recommendation: string  # Recommended (top) option ID
+recommendation_rationale: string  # Why this option
+recommendation_confidence: number  # 0.0-1.0 in recommendation
 tradeoffs:
   - option: string
     pros: array[string]
@@ -106,7 +110,11 @@ assumptions: array[string]  # Conditions affecting comparison
 | `options` | array | List of alternatives with summaries |
 | `criteria` | array | Evaluation dimensions with weights |
 | `comparison_matrix` | array | Scores for each option on each criterion |
-| `recommendation` | object | Proposed choice with confidence |
+| `ranking` | array<object> | Options ordered best-first, each with `option_id` and `weighted_score` |
+| `scores` | object | Weighted score per option, keyed by option id |
+| `recommendation` | string | Recommended option ID (the top of `ranking` unless rationale says otherwise) |
+| `recommendation_rationale` | string | Why the recommended option was chosen |
+| `recommendation_confidence` | number | 0.0-1.0 confidence in the recommendation |
 | `tradeoffs` | array | Pros/cons for each option |
 | `confidence` | number | 0.0-1.0 overall analysis confidence |
 | `evidence_anchors` | array[string] | References supporting scores |
@@ -200,10 +208,20 @@ comparison_matrix:
       - criterion: "team_familiarity"
         score: 0.3
         rationale: "No team experience with DynamoDB"
-recommendation:
-  choice: "postgres"
-  rationale: "Highest weighted score (0.79) driven by query flexibility and team familiarity. Operational overhead is manageable with RDS."
-  confidence: 0.8
+ranking:
+  - option_id: "postgres"
+    weighted_score: 0.79
+  - option_id: "mongodb"
+    weighted_score: 0.63
+  - option_id: "dynamodb"
+    weighted_score: 0.605
+scores:
+  postgres: 0.79
+  mongodb: 0.63
+  dynamodb: 0.605
+recommendation: "postgres"
+recommendation_rationale: "Highest weighted score (0.79) driven by query flexibility and team familiarity. Operational overhead is manageable with RDS."
+recommendation_confidence: 0.8
 tradeoffs:
   - option: "postgres"
     pros:
@@ -312,10 +330,20 @@ comparison_matrix:
       - criterion: "final_quality"
         score: 0.8
         rationale: "Good design with some integration overhead"
-recommendation:
-  choice: "strangler"
-  rationale: "Best balance of risk and time-to-value (0.78 weighted score). Delivers incremental value while achieving good final quality."
-  confidence: 0.75
+ranking:
+  - option_id: "strangler"
+    weighted_score: 0.78
+  - option_id: "incremental"
+    weighted_score: 0.735
+  - option_id: "rewrite"
+    weighted_score: 0.415
+scores:
+  strangler: 0.78
+  incremental: 0.735
+  rewrite: 0.415
+recommendation: "strangler"
+recommendation_rationale: "Best balance of risk and time-to-value (0.78 weighted score). Delivers incremental value while achieving good final quality; incremental refactoring is close behind (0.735), within the 0.1 margin."
+recommendation_confidence: 0.75
 tradeoffs:
   - option: "strangler"
     pros:

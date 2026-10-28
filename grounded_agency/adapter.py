@@ -623,6 +623,21 @@ class GroundedAgentAdapter:
         except ImportError:
             has_sdk_types = False
 
+        def deny(message: str, holder: str | None) -> Any:
+            # A denied call never runs, so neither PostToolUse nor
+            # PostToolUseFailure ends the reservation its PreToolUse hook
+            # took: release it here, or the checkpoint stays blocked for
+            # reservation_seconds. Only the call's own reservation is
+            # touched; without a holder there is none to identify.
+            if holder is not None:
+                try:
+                    tracker.release_reservation(holder)
+                except Exception as e:  # deny regardless; the hold lapses
+                    logger.error("Could not release reservation: %s", e)
+            if has_sdk_types:
+                return PermissionResultDeny(message=message)
+            return FallbackPermissionDeny(message=message)
+
         async def check_permission(
             tool_name: str,
             input_data: dict[str, Any],
@@ -639,20 +654,19 @@ class GroundedAgentAdapter:
             Returns:
                 PermissionResultAllow or PermissionResultDeny
             """
+            holder = getattr(context, "tool_use_id", None)
             try:
                 # Map tool to capability
                 mapping = mapper.map_tool(tool_name, input_data)
 
                 # SEC-010: Rate limit check
                 if not limiter.allow(mapping.risk):
-                    message = (
+                    return deny(
                         f"Rate limited: {mapping.risk}-risk capability "
                         f"'{mapping.capability_id}' via {tool_name}. "
-                        f"Too many invocations — please wait."
+                        f"Too many invocations — please wait.",
+                        holder,
                     )
-                    if has_sdk_types:
-                        return PermissionResultDeny(message=message)
-                    return FallbackPermissionDeny(message=message)
 
                 # Check if checkpoint required
                 if mapping.requires_checkpoint:
@@ -660,18 +674,23 @@ class GroundedAgentAdapter:
                     # TOCTOU. Keyed by the call's tool_use_id, this repeats
                     # the PreToolUse reservation idempotently; the
                     # reservation ends in consume_after_mutation or
-                    # release_after_failure.
-                    holder = getattr(context, "tool_use_id", None)
-                    is_valid, checkpoint_id = tracker.validate_and_reserve(holder)
+                    # release_after_failure. A context without tool_use_id
+                    # (an SDK older than 0.1.52, or a direct call) cannot
+                    # name the PreToolUse reservation, so reserving would
+                    # see it as foreign: only check that a checkpoint is
+                    # valid and leave the reservation to the PreToolUse hook.
+                    if holder is None:
+                        checkpoint_id = tracker.get_active_checkpoint_id()
+                        is_valid = checkpoint_id is not None
+                    else:
+                        is_valid, checkpoint_id = tracker.validate_and_reserve(holder)
                     if not is_valid:
                         message = _checkpoint_denial(
                             mapping.capability_id, tool_name, checkpoint_id
                         )
 
                         if strict:
-                            if has_sdk_types:
-                                return PermissionResultDeny(message=message)
-                            return FallbackPermissionDeny(message=message)
+                            return deny(message, holder)
 
                         # Non-strict: warn but allow
                         logger.warning("%s executing without checkpoint", tool_name)
@@ -691,10 +710,9 @@ class GroundedAgentAdapter:
                 # Fail-closed: deny access on error (secure default)
                 # In security-critical code, unknown states should deny access
                 logger.error("Permission check failed: %s", e)
-                message = f"Permission check failed due to internal error: {e}"
-                if has_sdk_types:
-                    return PermissionResultDeny(message=message)
-                return FallbackPermissionDeny(message=message)
+                return deny(
+                    f"Permission check failed due to internal error: {e}", holder
+                )
 
         return check_permission
 

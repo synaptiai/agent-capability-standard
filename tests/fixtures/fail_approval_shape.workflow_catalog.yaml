@@ -15,6 +15,12 @@ bad_approvals:
       goal: Plan.
     approval:
       approver: {kind: human}
+  - capability: constrain
+    purpose: Check the change against policy.
+    store_as: policy_out
+    input_bindings:
+      target: "the change"
+      constraints: ["change policy"]
   - capability: checkpoint
     purpose: Save a restore point.
     store_as: checkpoint_out

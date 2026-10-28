@@ -30,7 +30,7 @@ use serde_json::{Map, Value, json};
 use crate::diag::{Code, Diagnostic};
 use crate::ontology::{Ontology, Risk};
 use crate::refs;
-use crate::schema::SchemaStore;
+use crate::schema::{self, SchemaStore};
 use crate::types::{self, Type};
 use crate::yaml;
 
@@ -38,6 +38,10 @@ pub use bindings::Mode;
 
 /// Where the coercion registry lives under the schema root.
 pub const COERCION_REGISTRY: &str = "schemas/transforms/transform_coercion_registry.yaml";
+
+/// The most retries a step may declare (`retry.max`), as `max_loops` is
+/// bounded by `recovery::MAX_LOOPS`.
+pub(crate) const MAX_RETRIES: u64 = 1000;
 
 /// One registry entry: a transform from one type to another.
 pub struct Coercion {
@@ -54,6 +58,33 @@ pub struct Contracts {
     pub output: Value,
 }
 
+/// Why a catalog or its validation context could not be loaded.
+#[derive(Debug)]
+pub enum LoadError {
+    /// Reading or parsing a file failed; `what` names the file's role.
+    File {
+        what: &'static str,
+        err: yaml::YamlError,
+    },
+    /// The file loaded, but its content is unusable.
+    Invalid(String),
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadError::File { what, err } => write!(f, "cannot load {what}: {err}"),
+            LoadError::Invalid(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl From<String> for LoadError {
+    fn from(msg: String) -> Self {
+        LoadError::Invalid(msg)
+    }
+}
+
 /// Everything validation needs besides the catalog itself.
 pub struct Context {
     pub ontology: Ontology,
@@ -65,8 +96,14 @@ pub struct Context {
 impl Context {
     /// Load the ontology and coercion registry; `schema_root` anchors every
     /// relative schema, mapping and input reference.
-    pub fn load(ontology_path: &Path, schema_root: &Path) -> Result<Context, String> {
-        let ontology = Ontology::load(ontology_path)?;
+    pub fn load(ontology_path: &Path, schema_root: &Path) -> Result<Context, LoadError> {
+        let doc = yaml::load_file(ontology_path, yaml::ONTOLOGY_MAX_BYTES).map_err(|err| {
+            LoadError::File {
+                what: "ontology",
+                err,
+            }
+        })?;
+        let ontology = Ontology::from_value(&doc)?;
         let schemas = SchemaStore::new(schema_root);
         let mut coercions = Vec::new();
         if let Some(reg) = schemas.document(COERCION_REGISTRY) {
@@ -86,9 +123,9 @@ impl Context {
                     types::parse_annotation(&from_text),
                     types::parse_annotation(&to_text),
                 ) else {
-                    return Err(format!(
+                    return Err(LoadError::Invalid(format!(
                         "coercion registry entry {from_text} -> {to_text} does not name valid types"
-                    ));
+                    )));
                 };
                 coercions.push(Coercion {
                     from_text,
@@ -100,24 +137,27 @@ impl Context {
             }
         }
         let empty = || json!({"type": "object", "properties": {}});
-        let contracts = ontology
-            .capabilities
-            .values()
-            .map(|cap| {
-                let resolve = |v: &Value| {
-                    if v.is_object() {
-                        schemas.resolve_node(v)
-                    } else {
-                        empty()
-                    }
-                };
-                let c = Contracts {
-                    input: resolve(&cap.input_schema),
-                    output: resolve(&cap.output_schema),
-                };
-                (cap.id.clone(), c)
-            })
-            .collect();
+        // One budget for every contract: all of them stay in memory.
+        let mut budget = schema::MAX_EXPANDED_NODES;
+        let mut contracts = HashMap::new();
+        for cap in ontology.capabilities.values() {
+            let mut resolve = |v: &Value, which: &str| {
+                if !v.is_object() {
+                    return Ok(empty());
+                }
+                schemas.resolve_node(v, &mut budget).map_err(|e| {
+                    LoadError::Invalid(format!(
+                        "the {which} schema of capability '{}' cannot be used: {e}",
+                        cap.id
+                    ))
+                })
+            };
+            let c = Contracts {
+                input: resolve(&cap.input_schema, "input")?,
+                output: resolve(&cap.output_schema, "output")?,
+            };
+            contracts.insert(cap.id.clone(), c);
+        }
         Ok(Context {
             ontology,
             schemas,
@@ -173,8 +213,11 @@ impl Report {
 }
 
 /// Load and validate a catalog file. Load failures are returned as `Err`.
-pub fn validate_catalog_file(ctx: &Context, path: &Path) -> Result<Report, String> {
-    let load = |e: yaml::YamlError| format!("cannot load workflow catalog: {e}");
+pub fn validate_catalog_file(ctx: &Context, path: &Path) -> Result<Report, LoadError> {
+    let load = |err| LoadError::File {
+        what: "workflow catalog",
+        err,
+    };
     let text = yaml::read_guarded(path, yaml::ONTOLOGY_MAX_BYTES).map_err(load)?;
     let catalog = yaml::load_str(&text).map_err(load)?;
     Ok(validate_catalog(
@@ -202,6 +245,8 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
             return report;
         }
     };
+    let invoked_unattended = approval::invoked_unattended(workflows);
+    let mut schema_budget = schema::MAX_EXPANDED_NODES;
     let mut invocations = Vec::new();
     for (name, wf) in workflows {
         // `x-` keys are reserved for vendor data and never validated.
@@ -215,6 +260,8 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
                     name,
                     wf,
                     header,
+                    invoked_unattended: invoked_unattended.contains(name.as_str()),
+                    schema_budget: &mut schema_budget,
                     report: &mut report,
                 }
                 .run(),
@@ -232,6 +279,28 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
         }
     }
     invoke::check(workflows, &invocations, &mut report);
+    // Report in catalog order: by workflow, then step, catalog- and
+    // workflow-level diagnostics first; the sort is stable, so each step's
+    // diagnostics keep the order they were found in.
+    let position: HashMap<&str, usize> = workflows
+        .keys()
+        .enumerate()
+        .map(|(i, k)| (k.as_str(), i))
+        .collect();
+    report.diagnostics.sort_by_key(|d| {
+        let workflow = d
+            .location
+            .get("workflow")
+            .and_then(Value::as_str)
+            .and_then(|w| position.get(w))
+            .map_or(0, |i| i + 1);
+        let step = d
+            .location
+            .get("step")
+            .and_then(Value::as_u64)
+            .map_or(0, |s| s + 1);
+        (workflow, step)
+    });
     report
 }
 
@@ -327,11 +396,22 @@ const STEP_FIELD_SHAPES: &[(&str, Shape)] = &[
     ("workflow_id", Shape::Str),
 ];
 
+/// Whether `s` is exactly one `${...}` (well formed or not: a malformed one
+/// is reported by the reference checks), not a template around one.
+pub(crate) fn refs_whole(s: &str) -> bool {
+    matches!(refs::find_refs(s).as_slice(), [one] if one.start == 0 && one.end == s.len())
+}
+
 struct WorkflowCheck<'a> {
     ctx: &'a Context,
     name: &'a str,
     wf: &'a Map<String, Value>,
     header: Option<&'a str>,
+    /// A workflow that an unattended run can invoke runs unattended too.
+    invoked_unattended: bool,
+    /// Schema nodes the catalog's input refs may still expand to, shared by
+    /// every workflow: their schemas stay in memory together.
+    schema_budget: &'a mut usize,
     report: &'a mut Report,
 }
 
@@ -379,7 +459,8 @@ impl WorkflowCheck<'_> {
             None => return Vec::new(),
         };
         let plan = recovery::plan(self.name, steps, &declared, self.report);
-        let unattended = approval::has_unattended_trigger(self.wf, &declared);
+        let own_trigger = approval::has_unattended_trigger(self.wf, &declared);
+        let unattended = own_trigger || self.invoked_unattended;
         let mut injected = recovery::Injected::new(&plan);
         // Duplicates (V104) are judged in list order, whatever the checking
         // order; the first step to use a name owns it.
@@ -510,6 +591,7 @@ impl WorkflowCheck<'_> {
                 None
             };
             if cap == "invoke" {
+                invoke::check_target(&loc, step, self.report);
                 if let Some((target, field)) = invoke::target(step) {
                     invocations.push(invoke::Invocation {
                         workflow: self.name.to_string(),
@@ -599,7 +681,7 @@ impl WorkflowCheck<'_> {
                 Some(_) => true,
             };
             if requires_approval && unattended && !plan_for_unattended {
-                approval::unattended(&loc, self.report);
+                approval::unattended(&loc, own_trigger, self.report);
             }
             // A mandate is no plan for a step that may act on an always-ask
             // item: it is asked of a person, and no one is present.
@@ -728,10 +810,20 @@ impl WorkflowCheck<'_> {
                 self.report.push(d.at("field", "risk"));
             }
         }
-        if let Some(g) = self.wf.get("goal") {
-            if !g.is_string() {
-                let d = self.wdiag(Code::SchemaValidationFailed, "'goal' must be a string");
-                self.report.push(d.at("field", "goal"));
+        for key in ["goal", "description", "success"] {
+            let Some(v) = self.wf.get(key) else { continue };
+            let (ok, shape) = if key == "success" {
+                let list = v.as_array().is_some_and(|a| a.iter().all(Value::is_string));
+                (list, "a list of strings")
+            } else {
+                (v.is_string(), "a string")
+            };
+            if !ok {
+                let d = self.wdiag(
+                    Code::SchemaValidationFailed,
+                    format!("'{key}' must be {shape}, found {}", yaml::kind_of(v)),
+                );
+                self.report.push(d.at("field", key));
             }
         }
     }
@@ -796,15 +888,20 @@ impl WorkflowCheck<'_> {
             }
         }
         // The executor reads retry.max as a count: anything else would
-        // silently mean no retries.
+        // silently mean no retries. Like max_loops it is bounded, so the
+        // run's worst case stays finite.
         if let Some(max) = step.get("retry").and_then(|r| r.get("max")) {
-            if count(max).is_none() {
+            if !count(max).is_some_and(|n| n <= MAX_RETRIES) {
                 self.report.push(
                     loc.diag(
                         Code::SchemaValidationFailed,
                         format!(
-                            "retry.max must be a non-negative integer, found {}",
-                            yaml::kind_of(max)
+                            "retry.max must be an integer from 0 to {MAX_RETRIES}, found {}",
+                            if max.is_number() {
+                                max.to_string()
+                            } else {
+                                yaml::kind_of(max).to_string()
+                            }
                         ),
                     )
                     .at("field", "retry.max"),
@@ -955,20 +1052,36 @@ impl WorkflowCheck<'_> {
             }
             let schema = match spec {
                 Value::Object(m) => match m.get("ref") {
-                    None => self.ctx.schemas.resolve_node(spec),
-                    Some(Value::String(r)) => match self.ctx.schemas.resolve_ref(r) {
-                        Some(resolved @ Value::Object(_)) => {
-                            self.ctx.schemas.resolve_node(&resolved)
-                        }
-                        _ => {
-                            let d = self.wdiag(
-                                Code::InvalidRef,
-                                format!("{field} ref could not be resolved: {r}"),
-                            );
-                            self.report.push(d.at("field", format!("{field}.ref")));
+                    None => match self.ctx.schemas.resolve_node(spec, self.schema_budget) {
+                        Ok(resolved) => resolved,
+                        Err(e) => {
+                            let d = self
+                                .wdiag(Code::InvalidRef, format!("{field} cannot be used: {e}"));
+                            self.report.push(d.at("field", field));
                             empty_object()
                         }
                     },
+                    Some(Value::String(r)) => {
+                        match self.ctx.schemas.resolve_ref_deep(r, self.schema_budget) {
+                            Ok(Some(resolved @ Value::Object(_))) => resolved,
+                            Err(e) => {
+                                let d = self.wdiag(
+                                    Code::InvalidRef,
+                                    format!("{field} ref {r} cannot be used: {e}"),
+                                );
+                                self.report.push(d.at("field", format!("{field}.ref")));
+                                empty_object()
+                            }
+                            _ => {
+                                let d = self.wdiag(
+                                    Code::InvalidRef,
+                                    format!("{field} ref could not be resolved: {r}"),
+                                );
+                                self.report.push(d.at("field", format!("{field}.ref")));
+                                empty_object()
+                            }
+                        }
+                    }
                     Some(other) => {
                         let d = self.wdiag(
                             Code::SchemaValidationFailed,
@@ -1058,6 +1171,16 @@ pub(crate) mod tests {
             codes(wf(json!([{"purpose": "p", "store_as": "o"}]))),
             ["V103"]
         );
+        for (key, bad) in [
+            ("goal", json!(1)),
+            ("description", json!(5)),
+            ("success", json!("it works")),
+            ("success", json!([1])),
+        ] {
+            let mut w = wf(json!([]));
+            w["w"][key] = bad;
+            assert_eq!(codes(w), ["S303"], "{key}");
+        }
         assert_eq!(
             codes(wf(
                 json!([{"capability": "nope", "purpose": "p", "store_as": "o"}])
@@ -1098,6 +1221,7 @@ pub(crate) mod tests {
         assert_eq!(codes(base("${s.nope}")), ["B201"]);
         assert_eq!(codes(base("${s.results}")), ["B204"]);
         assert_eq!(codes(base("${s.results: banana}")), ["B205"]);
+        assert_eq!(codes(base("${s.results:}")), ["B205"]);
         assert!(codes(base("${s.confidence: string}")).contains(&"B203"));
     }
 
@@ -1119,6 +1243,58 @@ pub(crate) mod tests {
             "consumer_input_type_mismatch"
         );
         assert_eq!(report.suggestions[0]["from_type"], "integer");
+    }
+
+    #[test]
+    fn literal_bindings_are_typed_once() {
+        // An annotated reference to an unknown store is B202 alone, with no
+        // type mismatch or transform suggested for a value that isn't there.
+        let catalog = wf(json!([
+            {"capability": "retrieve", "purpose": "p", "store_as": "r",
+             "input_bindings": {"target": "${nope.x: integer}"}},
+        ]));
+        let report = validate_catalog(&ctx(), &catalog, None);
+        let c: Vec<_> = report.diagnostics.iter().map(|d| d.code.as_str()).collect();
+        assert_eq!(c, ["B202"]);
+        assert!(report.suggestions.is_empty());
+        // A template is a string, and says so.
+        let catalog = wf(json!([
+            {"capability": "search", "purpose": "p", "store_as": "s", "input_bindings": {"query": "q"}},
+            {"capability": "plan", "purpose": "p", "store_as": "p",
+             "input_bindings": {"goal": "g", "constraints": "${s.total_count} items"}},
+        ]));
+        let report = validate_catalog(&ctx(), &catalog, None);
+        let d = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == Code::TypeMismatch)
+            .unwrap();
+        assert!(
+            d.message.contains("from a string template"),
+            "{}",
+            d.message
+        );
+        // The host receives an explicit null: it is typed like any literal,
+        // except as invoke's `input`, where it means no inputs.
+        let null_target = wf(json!([
+            {"capability": "retrieve", "purpose": "p", "store_as": "r",
+             "input_bindings": {"target": null}},
+        ]));
+        assert_eq!(codes(null_target), ["B203"]);
+        let mut caller = wf(json!([
+            {"capability": "invoke", "purpose": "p", "store_as": "i",
+             "workflow_id": "t", "input_bindings": {"input": null}},
+        ]));
+        caller["t"] = json!({"goal": "g", "risk": "low", "spec_version": "1.1", "steps": []});
+        assert!(codes(caller).is_empty());
+        // An unquoted typed reference as a whole binding is W612 alone.
+        let mangled = wf(json!([
+            {"capability": "search", "purpose": "p", "store_as": "s",
+             "input_bindings": {"query": "q"}},
+            {"capability": "search", "purpose": "p", "store_as": "t",
+             "input_bindings": {"query": {"${s.results": "array<object>}"}}},
+        ]));
+        assert_eq!(codes(mangled), ["W612"]);
     }
 
     #[test]
@@ -1529,6 +1705,14 @@ pub(crate) mod tests {
             missing(json!({"capability": "synchronize", "purpose": "p", "store_as": "s"})),
             ["input_bindings.agents", "input_bindings.state"]
         );
+        // A wait on a capability that cannot host one excuses nothing.
+        assert_eq!(
+            missing(
+                json!({"capability": "retrieve", "purpose": "p", "store_as": "r",
+                           "timeout": "1h", "wait": {"event_type": "e"}})
+            ),
+            ["input_bindings.target"]
+        );
         // A malformed input_bindings, null included, is S303, not W615 for
         // every input.
         for malformed in [json!(["data"]), Value::Null] {
@@ -1553,7 +1737,8 @@ pub(crate) mod tests {
         };
         assert!(with(json!(2)).is_empty());
         assert!(with(json!(2.0)).is_empty());
-        for bad in [json!("3"), json!(2.5), json!(-1)] {
+        assert!(with(json!(1000)).is_empty());
+        for bad in [json!("3"), json!(2.5), json!(-1), json!(1001)] {
             assert_eq!(with(bad), ["S303"]);
         }
         let backoff = |b: Value| {

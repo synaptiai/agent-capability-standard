@@ -102,6 +102,8 @@ evidence_anchors: ["model:component", "assumption:id"]
 | `final_state` | object | Most likely end state |
 | `insights` | array | Risks, opportunities, and surprises found |
 | `simulation_meta` | object | Simulation parameters and assumptions |
+| `confidence` | number | 0.0-1.0 confidence in the simulation model |
+| `evidence_anchors` | array | References to the model components and assumptions used |
 
 ## Examples
 

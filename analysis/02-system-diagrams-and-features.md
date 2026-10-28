@@ -653,26 +653,25 @@ flowchart TB
     CheckResult -->|Yes| StoreOutput["Store output under\nstore_as key"]
     StoreOutput --> StepLoop
 
-    CheckResult -->|No| EvalFailure{"Evaluate\nfailure_modes[]"}
-
-    EvalFailure -->|"action: stop"| FailStop(["Workflow failed\nReturn error + partial results"])
-
-    EvalFailure -->|"action: rollback"| Rollback["Execute rollback\nto checkpoint"]
-    Rollback --> RecoveryLoop{"recovery.goto_step\nwith max_loops?"}
-    RecoveryLoop -->|"loops < max"| InjectContext["Inject failure evidence\ninto context"]
-    InjectContext --> StepLoop
-    RecoveryLoop -->|"loops >= max"| FailStop
-
-    EvalFailure -->|"action: request_more_context"| RequestContext["Request additional\ninput from user"]
-    RequestContext --> ResolveBindings
-
-    EvalFailure -->|"action: pause_and_checkpoint"| PauseCheckpoint["Create checkpoint\nRequire human approval"]
-    PauseCheckpoint --> ResolveBindings
-
-    EvalFailure -->|"No matching\nfailure_mode"| RetryCheck{"retry config\nspecified?"}
-    RetryCheck -->|"Yes, retries < max"| BackoffWait["Wait (exponential backoff)"]
+    CheckResult -->|No| RetryCheck{"R401/R402/R406 and\nretries < retry.max?"}
+    RetryCheck -->|Yes| BackoffWait["Wait (backoff)"]
     BackoffWait --> InvokeCap
-    RetryCheck -->|"No or max reached"| FailStop
+    RetryCheck -->|No| EvalFailure{"Evaluate\nfailure_modes[]"}
+
+    EvalFailure -->|"action: stop /\nrequest_more_context"| Recovery
+    EvalFailure -->|"action: rollback"| Rollback["Roll back to the\nlatest checkpoint"]
+    Rollback --> Recovery
+    EvalFailure -->|"action: pause_and_checkpoint"| PauseCheckpoint["Take a new checkpoint"]
+    PauseCheckpoint --> Recovery
+    EvalFailure -->|"action: escalate"| Escalate(["Run the handler\nRun ends escalated"])
+
+    Recovery{"recovery.goto_step\nloop?"}
+    Recovery -->|"loops < max_loops"| InjectContext["Inject context\nas ${_recovery.*}"]
+    InjectContext --> StepLoop
+    Recovery -->|"loops exhausted"| Exhausted(["on_exhausted handler,\nelse the run ends R404"])
+    Recovery -->|"prose or none"| FailStop(["Run ends with the step's code"])
+
+    EvalFailure -->|"No matching\nfailure_mode"| FailStop
 
     StepLoop -->|"No more steps"| CollectOutputs["Collect all store_as\noutputs"]
     CollectOutputs --> AuditTrail["Generate audit trail\nfrom all step evidence"]
@@ -685,10 +684,10 @@ flowchart TB
     classDef recovery fill:#fff9c4,stroke:#f9a825
 
     class Start,Success,EarlyStop startEnd
-    class StepLoop,CheckGates,CheckCondition,CheckCheckpoint,VerifyCheckpoint,CheckTimeout,CheckResult,EvalFailure,RecoveryLoop,RetryCheck decision
+    class StepLoop,CheckGates,CheckCondition,CheckCheckpoint,VerifyCheckpoint,CheckTimeout,CheckResult,EvalFailure,Recovery,RetryCheck decision
     class LoadDef,ResolveInputs,ResolveBindings,InvokeCap,TimedExec,UntimedExec,StoreOutput,CollectOutputs,AuditTrail,SkipStep action
-    class BlockStep,FailStop failure
-    class Rollback,InjectContext,RequestContext,PauseCheckpoint,BackoffWait recovery
+    class BlockStep,FailStop,Exhausted,Escalate failure
+    class Rollback,InjectContext,PauseCheckpoint,BackoffWait recovery
 ```
 
 ### Workflow Extension Points
@@ -724,11 +723,11 @@ sequenceDiagram
 
     Note over CC,PostShell: === Tool Invocation Pipeline ===
 
-    CC->>PreShell: PreToolUse(Write|Edit) -- check payload
-    PreShell->>PreShell: grep payload for mutation keywords<br/>(Edit, Bash, Git, rm, mv, sed, perl)
+    CC->>PreShell: PreToolUse(Write|Edit|MultiEdit|NotebookEdit|Bash) -- tool call JSON on stdin
+    PreShell->>PreShell: file edit, or Bash command matching<br/>mutation keywords (rm, mv, sed, git, curl, ...)
 
     alt Mutation detected + no .claude/checkpoint.ok
-        PreShell-->>CC: exit 1 -- "Blocked: missing checkpoint marker"
+        PreShell-->>CC: exit 2 -- stderr "Blocked: missing checkpoint marker"
         Note over CC: Tool execution ABORTED
     else Not a mutation OR checkpoint.ok exists
         PreShell-->>CC: exit 0 -- proceed
@@ -1315,7 +1314,7 @@ This matrix tracks the implementation status of every major feature across all s
 | UnknownSkillError exception | Implemented | `oasf.py` | Custom KeyError subclass |
 | Persistent checkpoint storage | Implemented | `checkpoint_tracker.py` | State persisted to `_checkpoint_dir` (TD-011); reservations are in-memory only |
 | SDK test suite | Implemented | `tests/test_sdk_integration.py` | Integration tests for adapter |
-| Conformance test suite | Implemented | `scripts/run_conformance.py` | 55 fixtures; runs locally and in CI |
+| Conformance test suite | Implemented | `scripts/run_conformance.py` | 79 workflow fixtures; runs locally and in CI |
 
 ### 11.3 Hook Features
 
@@ -1366,7 +1365,7 @@ This matrix tracks the implementation status of every major feature across all s
 | Schema synchronizer | Implemented | `sync_skill_schemas.py` | Ontology-to-skill sync |
 | Transitive dependency bundling | Implemented | `sync_skill_schemas.py` | Reference directory population |
 | Path rewriting | Implemented | `sync_skill_schemas.py` | Internal path translation |
-| Conformance tests | Implemented | `scripts/run_conformance.py` | 55 fixtures; runs in CI (`conformance` job) |
+| Conformance tests | Implemented | `scripts/run_conformance.py` | 79 workflow fixtures; runs in CI (`conformance` job) |
 
 ### 11.6 Interop Features
 
@@ -1415,16 +1414,16 @@ This matrix tracks the implementation status of every major feature across all s
 |---|----------|------|-------|----------------------|
 | 1 | monitor_and_replan | medium | 7 | observe, state, compare, detect, critique, plan, audit |
 | 2 | clarify_intent | low | 5 | critique, inquire, receive, integrate, audit |
-| 3 | debug_code_change | medium | 11 | observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, audit, rollback |
+| 3 | debug_code_change | medium | 11 | observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, rollback, audit |
 | 4 | world_model_build | low | 13 | retrieve, observe, detect, classify, integrate, state, transition, attribute, measure, audit, ground, simulate, explain |
 | 5 | capability_gap_analysis | low | 7 | observe, attribute, discover, compare (x2), generate, audit |
-| 6 | digital_twin_sync_loop | high | 21 | receive, search, transform, integrate, detect (x2), classify, state, compare, transition, measure, predict, plan, constrain, checkpoint, mutate, execute, verify, audit, rollback, explain |
+| 6 | digital_twin_sync_loop | high | 21 | receive, search, transform, integrate, detect (x2), classify, state, compare, transition, measure, predict, plan, constrain, checkpoint, mutate, execute, verify, rollback, audit, explain |
 | 7 | digital_twin_bootstrap | high | 2 | invoke (x2, nesting world_model_build and digital_twin_sync_loop) |
-| 8 | rag_pipeline | low | 7 | search, retrieve, detect, ground, generate, explain, audit |
+| 8 | rag_pipeline | low | 7 | search, retrieve, detect, generate, ground, explain, audit |
 | 9 | security_assessment | low | 7 | search, detect, measure, attribute, critique, generate, audit |
 | 10 | multi_agent_orchestration | medium | 7 | decompose, plan, delegate, synchronize, verify, integrate, audit |
-| 11 | data_quality_pipeline | medium | 9 | observe, detect, classify, measure, checkpoint, transform, verify, audit, rollback |
-| 12 | model_deployment | high | 8 | constrain (x2: artifact checks, then policy), checkpoint, execute, verify, measure, audit, rollback |
+| 11 | data_quality_pipeline | low | 7 | observe, detect, classify, measure, transform, verify, audit |
+| 12 | model_deployment | high | 8 | constrain (x2: artifact checks, then policy), checkpoint, execute, verify, measure, rollback, audit |
 
 ## Appendix B: Domain Profile Quick Reference
 

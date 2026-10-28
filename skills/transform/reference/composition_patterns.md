@@ -32,7 +32,7 @@ Catalog id: `debug_code_change`
 ### Sequence
 
 ```
-observe → search → attribute → constrain → critique → plan → checkpoint → execute → verify → audit → rollback (skipped when verify passed)
+observe → search → attribute → constrain → critique → plan → checkpoint → execute (skipped when the plan has no steps) → verify (skipped when execute was) → rollback (skipped when nothing was applied or verify passed) → audit
 ```
 
 ### Detailed Steps
@@ -46,12 +46,12 @@ observe → search → attribute → constrain → critique → plan → checkpo
 | 5 | `critique` | List likely failure modes + edge cases | critique_out | low |
 | 6 | `plan` | Produce minimal fix plan with checkpoints | plan_out | low |
 | 7 | `checkpoint` | Create checkpoint before mutation | checkpoint_out | low (step: medium) |
-| 8 | `execute` | Apply fix, run tests, and produce diff summary | execute_out | medium (step: **high**) |
-| 9 | `verify` | Run targeted verification and return PASS/FAIL | verify_out | low (step: medium) |
-| 10 | `audit` | Record what changed and why | audit_out | low (step: medium) |
-| 11 | `rollback` | If verify FAIL, revert safely (gated: skipped when verify passed) | rollback_out | medium |
+| 8 | `execute` | Apply the fix with the bug's fix command, run the tests, and produce a diff summary (gated: skipped when the plan has no steps) | execute_out | medium (step: **high**) |
+| 9 | `verify` | Run targeted verification and return PASS/FAIL (gated: skipped when no fix was applied) | verify_out | low (step: medium) |
+| 10 | `rollback` | If verify FAIL, revert safely (gated: skipped when no fix was applied or verify passed) | rollback_out | medium |
+| 11 | `audit` | Record what changed and why, and whether it was rolled back | audit_out | low (step: medium) |
 
-**Safety flags:** the `execute` step raises the ontology's `mutation` and `requires_checkpoint` to `true` (`requires_approval: true` is the ontology's own), so the `checkpoint` at step 7 is mandatory (F501 without it). `rollback` requires a prior `checkpoint` through the ontology's `requires` edge. The `audit` step declares `mutation: false` (allowed: `audit` is `mutation_overridable`).
+**Safety flags:** the `execute` step raises the ontology's `mutation` and `requires_checkpoint` to `true` (`requires_approval: true` is the ontology's own), so the `checkpoint` at step 7 is mandatory (F501 without it). `rollback` requires a prior `checkpoint` through the ontology's `requires` edge, and declares `requires_checkpoint: false`: `execute` consumed the checkpoint, so a `rollback` step that required one would make the executor take a new checkpoint of the broken state before rolling back, and end the run F501 without rolling back if that failed. The `audit` step declares `mutation: false` (allowed: `audit` is `mutation_overridable`).
 
 ### Data Flow
 
@@ -64,23 +64,47 @@ ${bug.component}                                      → constrain.target
 ${attribute_out.causes}                               → critique.target
 "Fix ${bug.symptom} in ${bug.component}"              → plan.goal
 ${user_input.constraints}                             → plan.constraints
+{observation: ${observe_out.observation},
+ related_code: ${search_out.results},
+ causes: ${attribute_out.causes},
+ failure_modes: ${critique_out.issues},
+ suggestions: ${critique_out.suggestions}}            → plan.context
 ${bug.component}                                      → checkpoint.scope
 ${bug.fix_command}                                    → execute.code
-${bug.component}                                      → verify.target
-["tests_pass", "symptom_resolved"]                    → verify.conditions
-{type: "debug_code_change", component: ${bug.component},
- plan: ${plan_out.steps}, verified: ${verify_out.passed}} → audit.event
+{component: ${bug.component},
+ execution: ${execute_out}}                           → verify.target
+["tests_pass", "symptom_resolved",
+ "public_interfaces_unchanged"]                       → verify.conditions
 ${checkpoint_out.checkpoint_id}                       → rollback.checkpoint_id
+{type: "debug_code_change", component: ${bug.component},
+ causes: ${attribute_out.causes}, plan: ${plan_out.steps},
+ exit_code: ${execute_out.exit_code},
+ verified: ${verify_out.passed},
+ rolled_back: ${rollback_out.restored}}               → audit.event
 ```
+
+`execute`, `verify` and `rollback` can be skipped, so `exit_code`, `verified` and `rolled_back` read null in the audit when their step did not run.
 
 ### Gates and Conditions
 
 ```yaml
+execute:
+  gates:
+  - when: ${plan_out.steps} == []
+    action: skip
+    message: The fix plan has no steps, so no fix is applied; the run goes on to the audit.
+
+verify:
+  gates:
+  - when: ${execute_out} == null
+    action: skip
+    message: No fix was applied, so there is nothing to verify.
+
 rollback:
   gates:
-  - when: ${verify_out.passed} == true
+  - when: ${verify_out} == null || ${verify_out.passed} == true
     action: skip
-    message: The fix passed verification. No rollback needed.
+    message: No fix was applied, or the fix passed verification. No rollback needed.
 ```
 
 Timeouts: `execute` 5m, `verify` 5m. `verify` retries up to 3 times with exponential backoff.
@@ -96,16 +120,20 @@ observe:
 
 execute:
   failure_modes:
-  - condition: Unexpected side effects
-    action: pause_and_checkpoint
-    recovery: Checkpoint and require human approval.
+  - condition: The fix command failed or timed out
+    on_error: [R401, R402]
+    action: rollback
+    recovery: Roll back to the checkpoint taken before the fix; the run then ends with the execute step's error, and no audit is recorded.
 
 verify:
   failure_modes:
-  - condition: Verdict == FAIL
+  - condition: Verification could not run (timed out or failed after its retries)
+    on_error: [R401, R402]
     action: rollback
-    recovery: Rollback, then return to critique/plan with new evidence.
+    recovery: Roll back the unverified fix to the checkpoint; the run then ends with the verify step's error, and no audit is recorded.
 ```
+
+The `observe` failure mode has neither `on_error` nor `when`, so it documents the response and never fires (STANDARD v1.1.0 §5.7). A FAIL verdict is not a step error: `verify` succeeds, and the gated `rollback` step rolls back once, before `audit` records `verified: false` and `rolled_back`. When `execute` or `verify` itself fails, its failure mode rolls back to the latest checkpoint and the run ends with that step's code (STANDARD v1.1.0 §5.12). Do not also give the FAIL verdict a `rollback` failure mode: it would roll back, end the run R402, and skip the audit.
 
 ### Success Criteria
 
@@ -202,7 +230,7 @@ Catalog id: `digital_twin_sync_loop`
 ### Sequence
 
 ```
-receive → search → transform → integrate → detect(entity) → classify → state → compare(state_diff) → transition → detect(anomaly) → measure(risk) → predict(risk) → plan → constrain → checkpoint → mutate → execute → verify → audit → rollback (skipped when verify passed) → explain
+receive → search → transform → integrate → detect(entity) → classify → state → compare(state_diff) → transition → detect(anomaly) → measure(risk) → predict(risk) → plan → constrain → checkpoint → mutate (skipped when not compliant) → execute (skipped when nothing was mutated) → verify (skipped when nothing was mutated) → rollback (skipped when nothing was mutated or verify passed) → audit → explain
 ```
 
 ### Detailed Steps
@@ -225,10 +253,10 @@ receive → search → transform → integrate → detect(entity) → classify �
 | 14 | `constrain` | Enforce policy and least privilege for planned actions | constrain_out | low |
 | 15 | `checkpoint` | Create checkpoint marker before any mutation/side-effect step | checkpoint_out | low (step: medium) |
 | 16 | `mutate` | Execute mutations from action plan (if approved) | mutate_out | **high** |
-| 17 | `execute` | Run verification tests and commands | execute_out | medium |
-| 18 | `verify` | Verify outcome: PASS/FAIL with evidence | verify_out | low (step: medium) |
-| 19 | `audit` | Record provenance, tool usage, diffs, and decision rationale | audit_out | low (step: medium) |
-| 20 | `rollback` | If verify FAIL or side effects detected, rollback to checkpoint (gated: skipped when verify passed) | rollback_out | medium |
+| 17 | `execute` | Run verification tests and commands (gated: skipped when nothing was mutated) | execute_out | medium |
+| 18 | `verify` | Verify outcome: PASS/FAIL with evidence (gated: skipped when nothing was mutated) | verify_out | low (step: medium) |
+| 19 | `rollback` | If a mutation was applied and verify FAILs, roll back to the checkpoint (gated: skipped when nothing was mutated or verify passed) | rollback_out | medium |
+| 20 | `audit` | Record provenance, tool usage, diffs, decision rationale, and any rollback | audit_out | low (step: medium) |
 | 21 | `explain` | Produce decision-ready sync report: drift, actions, verification, next steps | explain_out | low |
 
 ### Data Flow
@@ -245,14 +273,24 @@ ${integrate_out.merged}                       → detect(entity).data
 ${detect_entity_out.matches}                  → classify.item
 ${integrate_out.merged.observations}          → state.observations
 ${integrate_out.merged.meta.world_id}         → state.scope
-[${previous_world_state}, ${state_out}]       → compare.options
+[${previous_world_state}, ${state_out.state}] → compare.options
 ${state_out.state}                            → transition.from_state
-${state_out}                                  → detect(anomaly).data
+{observed: ${state_out.state},
+ expected: ${transition_out.effects},
+ diff: ${compare_state_out}}                  → detect(anomaly).data
 "drift"                                       → detect(anomaly).pattern
 ${detect_anomaly_out}                         → measure.target
 "risk"                                        → measure.metric
 "near_term_risk"                              → predict.target
-${predict_out}                                → plan.context
+{risk: ${measure_risk_out.value},
+ risk_interval: ${measure_risk_out.uncertainty},
+ drift_detected: ${detect_anomaly_out.detected},
+ drift: ${detect_anomaly_out.matches},
+ transitions: ${transition_out.rules}}        → predict.conditions
+{forecast: ${predict_out},
+ state_diff: ${compare_state_out},
+ entities: ${classify_out.labels},
+ related_context: ${search_out.results}}      → plan.context
 "Reduce the detected drift and risk"          → plan.goal
 ${plan_out.steps}                             → constrain.target
 ["least_privilege", "change_policy"]          → constrain.constraints
@@ -260,15 +298,22 @@ ${plan_out.steps}                             → constrain.target
 "twin_state"                                  → mutate.target
 {apply: ${plan_out.steps}}                    → mutate.operation
 "run_verification_suite"                      → execute.code
+${execute_out}                                → verify.target
 ["drift_resolved", "no_policy_violation"]     → verify.conditions
-{type: "digital_twin_sync", mutated: ${mutate_out.success},
- verified: ${verify_out.passed}}              → audit.event
 ${checkpoint_out.checkpoint_id}               → rollback.checkpoint_id
-{verified: ${verify_out.passed},
+{type: "digital_twin_sync", mutated: ${mutate_out.success},
+ verified: ${verify_out.passed},
+ rolled_back: ${rollback_out.restored}}       → audit.event
+{drift_detected: ${detect_anomaly_out.detected},
+ risk: ${measure_risk_out.value},
+ forecast: ${predict_out.prediction},
+ actions: ${plan_out.steps},
+ mutated: ${mutate_out.success},
+ verified: ${verify_out.passed},
  rolled_back: ${rollback_out.restored}}       → explain.conclusion
 ```
 
-`transform` uses `mapping_ref: schemas/transforms/transform_mapping_rawlog_to_observation.yaml` and its output conforms to `schemas/event_schema.yaml#/event`; `state` output conforms to `schemas/world_state_schema.yaml#/world_state`. `integrate` resolves conflicts with `prefer_authoritative_sources` (alternatives: `prefer_recent`, `prefer_high_confidence`, `merge_with_uncertainty`, `escalate_to_human`).
+`transform` uses `mapping_ref: schemas/transforms/transform_mapping_rawlog_to_observation.yaml`, and its `output` field is one canonical event (`schemas/event_schema.yaml#/event`); the step declares no `output_conforms_to`, which would describe its whole output. The `state` step's output wraps the world state in its `state` field, so later steps read the snapshot as `${state_out.state}`. `integrate` resolves conflicts with `prefer_authoritative_sources` (alternatives: `prefer_recent`, `prefer_high_confidence`, `merge_with_uncertainty`, `escalate_to_human`).
 
 ### Gates and Conditions
 
@@ -281,38 +326,55 @@ mutate:
     action: stop
     message: No checkpoint created. Do not mutate.
 
+execute:
+  gates:
+  - when: ${mutate_out} == null
+    action: skip
+    message: No mutation was applied, so there is nothing to verify.
+
 verify:
   gates:
-  - when: ${verify_out.passed} == false
-    phase: after
-    action: rollback
-    message: Verification failed. Rolling back.
+  - when: ${mutate_out} == null
+    action: skip
+    message: No mutation was applied, so there is nothing to verify.
 
 rollback:
   gates:
-  - when: ${verify_out.passed} == true
+  - when: ${mutate_out} == null || ${verify_out.passed} == true
     action: skip
-    message: The twin passed verification. No rollback needed.
+    message: No mutation was applied, or the twin passed verification. No rollback needed.
 ```
 
-Timeouts: `mutate`, `execute` and `verify` 5m. `receive` and `verify` retry up to 3 times with exponential backoff. The workflow declares `workflow_extensions` for input bindings, conditions, parallel groups, recovery loops and gates.
+Timeouts: `mutate`, `execute` and `verify` 5m. `receive` and `verify` retry up to 3 times with exponential backoff. The workflow declares `workflow_extensions` for input bindings, conditions, parallel groups and gates (`supports_recovery_loops: false`).
 
 ### Recovery Pattern
 
+A FAIL verdict after a mutation is rolled back exactly once, by the gated `rollback` step: the run goes on to `rollback`, then `audit` (which records `verified: false` and `rolled_back`), then `explain`. The `rollback` step declares `requires_checkpoint: false` (the ontology's `requires` edge from `checkpoint` still orders it): `mutate` consumed the checkpoint, and a step requiring one would make the executor checkpoint the failed state first. When `mutate` was skipped (the plan was not compliant), there is nothing to verify or roll back: `execute`, `verify` and `rollback` are skipped, so a verification error cannot trigger a rollback, and `verified` and `rolled_back` read null. When `mutate`, the verification suite (`execute`) or `verify` itself fails, its failure mode rolls back to the checkpoint taken before the mutation and the run ends with that step's code (STANDARD v1.1.0 §5.12), so no unverified mutation stays in place:
+
 ```yaml
+mutate:
+  failure_modes:
+  - condition: The mutation failed or timed out
+    on_error: [R401, R402]
+    action: rollback
+    recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and no audit is recorded.
+
+execute:
+  failure_modes:
+  - condition: The verification suite failed or timed out
+    on_error: [R401, R402]
+    action: rollback
+    recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and no audit is recorded.
+
 verify:
   failure_modes:
-  - condition: Verdict == FAIL
-    when: ${verify_out.passed} == false
+  - condition: Verification could not run (timed out or failed after its retries)
+    on_error: [R401, R402]
     action: rollback
-    recovery:
-      goto_step: plan_out
-      inject_context:
-        failure_evidence: ${verify_out.violations}
-      max_loops: 3
+    recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and no audit is recorded.
 ```
 
-Other failure modes: `receive` "No messages/events available" → `stop`; `integrate` "Conflicts exceed threshold" → `request_more_context`; `mutate` "Unexpected side effects" → `pause_and_checkpoint` (require human approval to proceed).
+Other failure modes, which have neither `on_error` nor `when` and so only document the response: `receive` "No messages/events available" → `stop`; `integrate` "Conflicts exceed threshold" → `request_more_context`.
 
 ### Success Criteria
 
@@ -345,9 +407,9 @@ observe → attribute → discover → compare(architecture) → compare(priorit
 |------|------------|---------|-----------|------|
 | 1 | `observe` | Read project docs and current skill coverage | observe_out | low |
 | 2 | `attribute` (domain: dependencies) | Map existing workflows vs capabilities | attribute_out | low |
-| 3 | `discover` | Find hidden dependencies or unmodeled interactions | discover_out | low |
+| 3 | `discover` | Find capability gaps, hidden dependencies and unmodeled interactions (patterns of type gap, pattern or opportunity) | discover_out | low |
 | 4 | `compare` (domain: architecture) | Compare alternative skill architectures | compare_architecture_out | low |
-| 5 | `compare` (domain: priority) | Rank missing capabilities by leverage and risk reduction | compare_priority_out | low |
+| 5 | `compare` (domain: priority) | Rank every pattern discover found (gaps, patterns and opportunities alike) by leverage and risk reduction | compare_priority_out | low |
 | 6 | `generate` (domain: plan) | Generate an implementation plan for new skills | generate_out | low |
 | 7 | `audit` | Record rationale + decision lineage | audit_out | low (step: medium) |
 
@@ -357,8 +419,9 @@ observe → attribute → discover → compare(architecture) → compare(priorit
 ${user_input.domain}                          → observe.target
 ${observe_out.observation}                    → attribute.effect
 ${attribute_out.causes}                       → discover.data
+"gap_analysis"                                → discover.method
 ${discover_out.patterns}                      → compare(architecture).options
-${compare_architecture_out.ranking}           → compare(priority).options
+${discover_out.patterns}                      → compare(priority).options
 ["leverage", "risk_reduction"]                → compare(priority).criteria
 {gaps: ${compare_priority_out.ranking},
  architecture: ${compare_architecture_out.recommendation}} → generate.specification
@@ -410,12 +473,12 @@ All three conditions use `skip_if_false: true`, so exactly one branch runs: step
 ```text
 ${user_input}                                 → invoke(world_model_build).input.user_input
 ${user_input}                                 → invoke(sync_out).input.user_input
-${world_model_out.result.state_out}           → invoke(sync_out).input.previous_world_state
+${world_model_out.result.state_out.state}     → invoke(sync_out).input.previous_world_state
 ${user_input}                                 → invoke(sync_existing_out).input.user_input
 ${world_state_out}                            → invoke(sync_existing_out).input.previous_world_state
 ```
 
-`invoke` returns the invoked workflow's stores under `result`, so `${world_model_out.result.state_out}` is the `state_out` of the world model just built.
+`invoke` returns the invoked workflow's stores under `result`, so `${world_model_out.result.state_out.state}` is the world state the `state` step of the world model just built produced (the `state` output wraps it in its `state` field). Both branches therefore hand the sync loop the same shape: a world state.
 
 ### Success Criteria
 
@@ -432,13 +495,17 @@ ${world_state_out}                            → invoke(sync_existing_out).inpu
 **CAVR:** the standard safety pattern for any mutating workflow (see Debug Code Change and Digital Twin Sync Loop):
 
 ```
-checkpoint → mutate | execute | send → verify → audit → rollback (gate: skip when ${verify_out.passed} == true)
+checkpoint → mutate | execute | send → verify → rollback (gate: skip when ${verify_out.passed} == true) → audit
 ```
 
 **Rules (from the ontology):**
 - `checkpoint` `requires`→ `mutate`, `send`, `rollback`: one of those without a prior `checkpoint` is rejected (V102). A step that raises `requires_checkpoint: true` (as `execute` does in Debug Code Change) with no checkpoint before it is F501.
 - `mutate`, `execute`, `send` `precedes` `verify`, and `verify` `precedes` `audit`: when both are present, the order is enforced (V102). No edge forces `verify` to be present, so always add it after a side effect.
-- `verify` `enables` `rollback`; gate the rollback on `${verify_out.passed}` so it runs only on FAIL.
+- `verify` `enables` `rollback`; gate the rollback on `${verify_out.passed}` so it runs only on FAIL (and on the side effect's output being present, when that step can be skipped).
+- Put `audit` after `rollback` and bind `${rollback_out.restored}` (null when the rollback was skipped), so the record says whether the change was rolled back.
+- Leave the `rollback` step's `requires_checkpoint` false (its ontology default): the side effect consumed the checkpoint, so a `rollback` that required one would make the executor take a new checkpoint of the failed state before rolling back (F501 if that fails). The `requires` edge from `checkpoint` still demands a prior `checkpoint` step.
+- When the side effect can be skipped, gate every step that only checks it (a verification suite, `verify`) on its output being present too, so a check cannot run, or roll back, when nothing changed.
+- Give the side effect, any step that checks it, and `verify` a failure mode with `on_error: [R401, R402]` and `action: rollback`, so a step that cannot finish leaves no unverified change in place; the run then ends with that step's code. Do not also give the FAIL verdict a `rollback` failure mode: the gated `rollback` step handles it, once.
 - `mutate` and `rollback` `conflicts_with` each other: never in the same `parallel_group` (F504).
 
 ### Observe-Model-Act

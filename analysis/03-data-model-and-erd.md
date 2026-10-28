@@ -1291,7 +1291,7 @@ graph TB
 
 **Ontology to Workflows:** The workflow catalog references capability IDs from the ontology in each step's `capability` field. The ontology's I/O schemas define what data flows between steps.
 
-**Workflows to World State:** Several workflows declare `output_conforms_to: schemas/world_state_schema.yaml#/world_state`, binding their output to the canonical world state schema. Workflow inputs also reference the world state via `ref: schemas/world_state_schema.yaml#/world_state`.
+**Workflows to World State:** Workflow inputs reference the world state via `ref: schemas/world_state_schema.yaml#/world_state`. No step declares `output_conforms_to` the world state: `output_conforms_to` describes a step's whole output, and the `state` capability's output wraps the world state in its `state` field (`${state_out.state}`).
 
 **Workflows to Event Schema:** The `digital_twin_sync_loop` workflow's transform step declares `output_conforms_to: schemas/event_schema.yaml#/event`, ensuring transformed outputs match the canonical event format.
 
@@ -1471,12 +1471,15 @@ Workflows can conditionally skip or stop steps based on the values of earlier ou
 **Gate syntax:**
 ```yaml
 gates:
-  - when: ${comparison_out.confidence} > 0.9
-    action: stop
-    message: No significant divergence detected.
-  - when: ${critique_out.issues} == []
+  - when: ${violations_out} == null || ${violations_out.detected} == false
     action: skip
-    message: No violation of major severity or worse; keep the current plan.
+    message: No assumption violation detected; the plan remains valid.
+  - when: ${critique_out} == null || ${critique_out.issues} == []
+    action: skip
+    message: No violation of high severity or worse; keep the current plan.
+  - when: ${checkpoint_out.checkpoint_id} == null
+    action: stop
+    message: No checkpoint created. Do not mutate.
   - when: ${verify_out.passed} == false
     phase: after
     action: rollback
@@ -1492,7 +1495,7 @@ skip_if_false: true
 Gate actions:
 | Action | Behavior |
 |--------|----------|
-| `stop` | Halt the workflow entirely (R403) |
+| `stop` | Raise R403: the step's failure modes handle it like any step error; with none, the run fails R403. Not a way to end early on success: use `skip` for that |
 | `rollback` | Roll back to the latest checkpoint, then halt (R403) |
 | `skip` | Skip this step and continue to the next (before-gates only) |
 | `warn` | Record a trace warning and continue |
@@ -1595,16 +1598,12 @@ The determinism contract ensures transforms are predictable:
 Workflow steps can declare that their output must conform to a specific schema using the `output_conforms_to` field:
 
 ```yaml
-- capability: state
-  store_as: state_out
-  output_conforms_to: schemas/world_state_schema.yaml#/world_state
-
 - capability: transform
   store_as: transform_out
   output_conforms_to: schemas/event_schema.yaml#/event
 ```
 
-This creates a validation checkpoint where the workflow engine (or validator) can verify that the step's actual output matches the declared schema. It bridges the gap between the capability's generic output schema and the workflow's specific structural requirements.
+The declared schema describes the step's whole output, not one of its fields. This creates a validation checkpoint where the workflow engine (or validator) can verify that the step's actual output matches the declared schema. It bridges the gap between the capability's generic output schema and the workflow's specific structural requirements.
 
 ### 9.11 Complete Data Flow Example
 
@@ -1626,23 +1625,27 @@ To illustrate the full I/O contract system in action, here is a trace through th
    Output: { detected: true, matches: [...], evidence_anchors: [...], confidence: 0.85 }
    Stored: detect_out
 
-4. ground (MODEL)
-   Input:  { claim: ${user_query}, sources: ${search_out.results: array<object>} }
-   Output: { grounded: true, evidence: [...], evidence_anchors: [...], confidence: 0.90 }
-   Stored: ground_out
-
-5. generate (SYNTHESIZE)
-   Input:  { specification: ${ground_out.evidence: array<object>} }
+4. generate (SYNTHESIZE)
+   Input:  { specification: { question: ${user_query},
+                              passages: ${detect_out.matches: array<object>} } }
    Output: { content: "...", evidence_anchors: [...], confidence: 0.87 }
    Stored: generate_out
 
+5. ground (MODEL)
+   Input:  { claim: ${generate_out.content: string}, sources: ${search_out.results: array<object>} }
+   Output: { grounded: true, evidence: [...], gaps: [...], evidence_anchors: [...], confidence: 0.90 }
+   Stored: ground_out
+
 6. explain (REASON)
-   Input:  { conclusion: ${generate_out.content: object} }
+   Input:  { conclusion: { response: ${generate_out.content: string},
+                           evidence: ${ground_out.evidence: array<object>},
+                           gaps: ${ground_out.gaps: array<object>} } }
    Output: { explanation: "...", premises: [...], evidence_anchors: [...], confidence: 0.85 }
    Stored: explain_out
 
 7. audit (VERIFY)
-   Input:  { event: { type: rag_pipeline, query: ${user_query}, ... } }
+   Input:  { event: { type: rag_pipeline, query: ${user_query},
+                      grounded: ${ground_out.grounded}, response: ${generate_out.content: string} } }
    Output: { recorded: true, audit_id: "...", evidence_anchors: [...] }
    Stored: audit_out
 ```

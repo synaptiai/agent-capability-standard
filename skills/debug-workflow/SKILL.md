@@ -50,7 +50,7 @@ Run the composed workflow **debug_code_change** (`reference/workflow_catalog.yam
 5) **Invoke `/critique`** on `attribute_out.causes` and store output as `critique_out`
    - List likely failure modes and edge cases
 
-6) **Invoke `/plan`** and store output as `plan_out`
+6) **Invoke `/plan`** with `user_input.constraints`, and the observation, related code, causes and critique (`critique_out.issues`, `critique_out.suggestions`) as context, and store output as `plan_out`
    - Produce a minimal fix plan with checkpoints
 
 7) **Invoke `/checkpoint`** on `bug.component` and store output as `checkpoint_out`
@@ -58,15 +58,20 @@ Run the composed workflow **debug_code_change** (`reference/workflow_catalog.yam
 
 8) **Invoke `/execute`** with `bug.fix_command` and store output as `execute_out`
    - Apply the fix, run tests, and produce a diff summary
+   - Skip this step when `plan_out.steps` is empty: no fix is applied, and the run goes on to the audit
+   - If the fix command fails or times out (R401/R402), roll back to `checkpoint_out` and end the run with that error
 
-9) **Invoke `/verify`** and store output as `verify_out`
-   - Run targeted verification: tests pass and the symptom is resolved
+9) **Invoke `/verify`** on the component and `execute_out`, and store output as `verify_out`
+   - Run targeted verification: tests pass, the symptom is resolved, and public interfaces are unchanged
+   - Skip this step when the fix was not applied (`execute_out` is null)
+   - If verification cannot run (R401/R402 after its retries), roll back to `checkpoint_out` and end the run with that error
 
-10) **Invoke `/audit`** and store output as `audit_out`
-    - Record what changed and why: the component, the plan, the verdict
+10) **Invoke `/rollback`** to `checkpoint_out.checkpoint_id` if `verify_out.passed` is false, and store output as `rollback_out`
+    - The step is skipped when no fix was applied or verification passes
+    - The step does not take a checkpoint of its own (`requires_checkpoint: false`): it restores the one taken at step 7, which the fix consumed
 
-11) **Invoke `/rollback`** to `checkpoint_out.checkpoint_id` if `verify_out.passed` is false, and store output as `rollback_out`
-    - The step is skipped when verification passes
+11) **Invoke `/audit`** and store output as `audit_out`
+    - Record what changed and why: the component, the causes, the plan, the exit code, the verdict, and whether it was rolled back (`rollback_out.restored`; null when the rollback was skipped)
 
 ## Output Contract
 
@@ -108,11 +113,12 @@ steps:
     passed: boolean
     violations: array[object]
     evidence_anchors: array[string]
+  rollback_out:  # null when no fix was applied or verification passed (the step was skipped)
+    restored: boolean
+    evidence_anchors: array[string]
   audit_out:
     audit_id: string
-    evidence_anchors: array[string]
-  rollback_out:  # null when verification passed and the step was skipped
-    restored: boolean
+    recorded: boolean
     evidence_anchors: array[string]
 root_cause:
   description: string
@@ -121,7 +127,7 @@ resolution:
   description: string
   files_changed: array[string]
 verification: PASS | FAIL
-audit_log_pointer: string  # Path to .claude/audit.log
+audit_log_pointer: string  # Where the audit step appended its record (.claude/audit/records.jsonl)
 confidence: number  # 0.0-1.0
 evidence_anchors: array[string]
 assumptions: array[string]
@@ -217,11 +223,12 @@ steps:
     violations: []
     evidence_anchors:
       - "tool:bash:pytest tests/test_auth.py"
+  rollback_out: null  # skipped: verification passed
   audit_out:
     audit_id: "audit_20240115_143500"
+    recorded: true
     evidence_anchors:
-      - "file:.claude/audit.log"
-  rollback_out: null  # skipped: verification passed
+      - "file:.claude/audit/records.jsonl"
 root_cause:
   description: "Token signature validation was moved after expiry check during refactor, causing valid tokens to be rejected before signature verification"
   evidence_anchors:
@@ -232,7 +239,7 @@ resolution:
   files_changed:
     - "src/api/handlers/auth.py"
 verification: PASS
-audit_log_pointer: ".claude/audit.log"
+audit_log_pointer: ".claude/audit/records.jsonl"
 confidence: 0.95
 evidence_anchors:
   - "file:tests/test_auth.py:45"
@@ -248,7 +255,7 @@ assumptions:
 
 ## Verification
 
-- [ ] **Step Completeness**: All 11 workflow steps executed with output (rollback skipped when verification passed)
+- [ ] **Step Completeness**: All 11 workflow steps executed with output (execute and verify skipped when the plan had no steps; rollback skipped when nothing was applied or verification passed)
 - [ ] **Evidence Grounding**: Every step output includes evidence_anchors
 - [ ] **Checkpoint Created**: Mutation steps preceded by checkpoint
 - [ ] **Root Cause Identified**: root_cause has specific description and evidence
