@@ -20,6 +20,7 @@ struct Reviewer {
     agent: Option<String>,
     family: Option<String>,
     fresh: bool,
+    read_only: bool,
 }
 
 /// The values a frame's references read (as in the step algorithm).
@@ -48,10 +49,31 @@ fn strings(q: &Map<String, Value>, key: &str) -> Vec<String> {
 
 pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
     let b = Read(frame);
-    let verdicts = q
-        .get("verdicts")
-        .map(|v| resolve(v, &b))
-        .unwrap_or(Value::Null);
+    // One reference, or a list of them (one per reviewer step that waited
+    // for its result): each a verdict or a list of verdicts. A verdict read
+    // from a reviewer step's own output is that reviewer's, whatever it
+    // claims: it remembers the step.
+    let reviewer_stores: BTreeSet<String> = strings(q, "reviewers").into_iter().collect();
+    let read = |r: &Value| -> Vec<(Value, Option<String>)> {
+        let source = r.as_str().and_then(|s| {
+            let refs = crate::refs::find_refs(s);
+            match refs.as_slice() {
+                [one] => one.parsed.as_ref().ok().map(|p| p.root.clone()),
+                _ => None,
+            }
+            .filter(|root| reviewer_stores.contains(root))
+        });
+        match resolve(r, &b) {
+            Value::Array(items) => items.into_iter().map(|i| (i, source.clone())).collect(),
+            Value::Null => Vec::new(),
+            one => vec![(one, source)],
+        }
+    };
+    let verdicts: Vec<(Value, Option<String>)> = match q.get("verdicts") {
+        Some(Value::Array(refs)) => refs.iter().flat_map(read).collect(),
+        Some(r) => read(r),
+        None => Vec::new(),
+    };
     let pinned_to = q
         .get("pinned_to")
         .map(|v| resolve(v, &b))
@@ -63,6 +85,7 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
     let min_pass = q.get("min_pass").and_then(count).unwrap_or(1);
     let min_full = q.get("min_full").and_then(count).unwrap_or(0);
     let need_fresh = q.get("require_fresh_context") == Some(&Value::Bool(true));
+    let need_read_only = q.get("require_read_only") == Some(&Value::Bool(true));
     let families: BTreeSet<String> = strings(q, "require_model_families").into_iter().collect();
 
     // Reviewer delegates: the agent each was bound to, and what the host
@@ -87,16 +110,19 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
             .or_else(|| bound.get("model_family"))
             .and_then(Value::as_str)
             .map(str::to_string);
-        let fresh = effective
-            .and_then(|e| e.get("fresh_context"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let attested = |key: &str| {
+            effective
+                .and_then(|e| e.get(key))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        };
         reviewers.insert(
             store,
             Reviewer {
                 agent,
                 family,
-                fresh,
+                fresh: attested("fresh_context"),
+                read_only: attested("read_only"),
             },
         );
     }
@@ -109,7 +135,7 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
     let (mut passes, mut blocks, mut abstains, mut full_passes) = (0u64, 0u64, 0u64, 0u64);
     let mut covered: BTreeSet<String> = BTreeSet::new();
     let mut violations: Vec<Value> = Vec::new();
-    for v in verdicts.as_array().into_iter().flatten() {
+    for (v, source) in &verdicts {
         let id = v.get("reviewer_id").and_then(Value::as_str);
         let value = v.get("value").and_then(Value::as_str);
         let reject = |why: &str| json!({"reviewer_id": id, "ignored": why});
@@ -117,6 +143,15 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
             violations.push(reject("not a reviewer"));
             continue;
         };
+        if let Some(store) = source {
+            let owner = reviewers.get(store).and_then(|r| r.agent.as_deref());
+            if owner != id {
+                violations.push(reject(&format!(
+                    "it is in the result of reviewer step '{store}', which is another reviewer's"
+                )));
+                continue;
+            }
+        }
         let id = id.unwrap_or_default();
         if !eval::deep_eq(v.get("pinned").unwrap_or(&Value::Null), &pinned_to) {
             violations.push(reject("pinned to something else"));
@@ -141,6 +176,10 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
         };
         if need_fresh && !reviewer.fresh {
             violations.push(reject("the reviewer did not run with a fresh context"));
+            continue;
+        }
+        if need_read_only && !reviewer.read_only {
+            violations.push(reject("the reviewer was not attested read-only"));
             continue;
         }
         if !counted.insert(id.to_string()) {

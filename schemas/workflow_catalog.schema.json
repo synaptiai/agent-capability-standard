@@ -343,7 +343,7 @@
         },
         "wait": {
           "$ref": "#/$defs/wait",
-          "description": "Wait for a matching event (STANDARD v1.1 §5.13; needs wait@1). Only on receive, or synchronize over at least two agents; the step needs a duration timeout."
+          "description": "Wait for a matching event (STANDARD v1.1 §5.13; needs wait@1). Only on receive, delegate (which delegates, then waits for the result), or synchronize over at least two agents; the step needs a duration timeout."
         },
         "approval": {
           "$ref": "#/$defs/approval",
@@ -456,7 +456,13 @@
       "required": ["verdicts", "reviewers", "vocabulary", "pass_values", "min_pass", "pinned_to"],
       "additionalProperties": true,
       "properties": {
-        "verdicts": { "type": "string", "description": "Reference to the reviews (review_verdict_schema.yaml#/review_verdict items)." },
+        "verdicts": {
+          "description": "Reference to the reviews (review_verdict_schema.yaml#/review_verdict items), or a non-empty list of references, each to a verdict or a list of them.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "minItems": 1, "items": { "type": "string" } }
+          ]
+        },
         "reviewers": {
           "type": "array",
           "minItems": 1,
@@ -498,6 +504,7 @@
         },
         "min_full": { "type": "integer", "minimum": 1, "description": "Passing verdicts with scope: full needed; at most the number of reviewers." },
         "require_fresh_context": { "type": "boolean", "description": "Every reviewer binds fresh_context: true." },
+        "require_read_only": { "type": "boolean", "description": "Every reviewer binds read_only: true, and a verdict counts only if the host attested it." },
         "require_model_families": {
           "type": "array",
           "uniqueItems": true,

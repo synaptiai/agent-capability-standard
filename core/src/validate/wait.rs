@@ -74,6 +74,15 @@ pub(crate) fn check(
         Some(Value::Object(c)) => {
             for (key, v) in c {
                 let field = format!("wait.correlate.{key}");
+                // A waiting delegate correlates by its delegation's task_id.
+                if loc.capability == "delegate" && key == "task_id" {
+                    report.push(s303(
+                        &at,
+                        &field,
+                        "a waiting delegate's result is matched by its delegation's task_id; do not set it".into(),
+                    ));
+                    continue;
+                }
                 if references(v, &field, &at, report) {
                     checker.scan(v, scope, Mode::Existence, &field, report);
                 }
@@ -93,10 +102,11 @@ pub(crate) fn check(
     }
 }
 
-/// `wait` is for `receive`, or `synchronize` over at least two agents.
+/// `wait` is for `receive`, `delegate` (delegate, then wait for that
+/// delegate's result), or `synchronize` over at least two agents.
 fn host(loc: &StepLoc<'_>, step: &Map<String, Value>, report: &mut Report) {
     let ok = match loc.capability {
-        "receive" => true,
+        "receive" | "delegate" => true,
         "synchronize" => step
             .get("input_bindings")
             .and_then(|b| b.get("agents"))
@@ -109,7 +119,7 @@ fn host(loc: &StepLoc<'_>, step: &Map<String, Value>, report: &mut Report) {
             loc.diag(
                 Code::SchemaValidationFailed,
                 format!(
-                    "'wait' is for receive, or synchronize with a literal 'agents' list of at least two; not '{}'",
+                    "'wait' is for receive, delegate, or synchronize with a literal 'agents' list of at least two; not '{}'",
                     loc.capability
                 ),
             )
@@ -382,8 +392,10 @@ pub(crate) fn spans_checkpoint(
                 .at("wait_step", placed[w].index),
             );
         };
+        // A waiting delegate delegates before it waits.
+        let waits_before_acting = p.waits && p.capability != "delegate";
         if p.requires_checkpoint {
-            if let Some(w) = covers(p.waits) {
+            if let Some(w) = covers(waits_before_acting) {
                 flag(p, w);
             }
         }
@@ -468,6 +480,25 @@ mod tests {
         retrieve["timeout"] = json!("1h");
         retrieve["wait"] = wait.clone();
         assert_eq!(codes(c(retrieve)), ["S303"]);
+        // A delegate step can wait for its delegate's result, matched by
+        // the delegation's task_id, which the author may not set.
+        let delegate = json!({"capability": "delegate", "purpose": "p", "store_as": "d",
+                              "timeout": "1h", "wait": wait,
+                              "input_bindings": {"task": {"t": 1}, "agent": "a"}});
+        assert_eq!(codes(c(delegate.clone())), Vec::<&str>::new());
+        let mut pinned = delegate.clone();
+        pinned["wait"]["correlate"] = json!({"task_id": "${d}"});
+        assert_eq!(codes(c(pinned)), ["S303"]);
+        // A waiting delegate that raises requires_checkpoint acts (delegates)
+        // before its wait: a checkpoint just before it is not stale.
+        let mut acting = delegate;
+        acting["requires_checkpoint"] = json!(true);
+        let steps = json!([
+            {"capability": "checkpoint", "purpose": "p", "store_as": "cp",
+             "input_bindings": {"scope": "s"}},
+            acting
+        ]);
+        assert_eq!(codes(catalog(steps, &["wait@1"])), Vec::<&str>::new());
     }
 
     #[test]

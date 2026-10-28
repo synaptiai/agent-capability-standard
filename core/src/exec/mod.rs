@@ -108,6 +108,10 @@ pub enum Body {
         inputs: Value,
         deadline: Option<u64>,
         attempt: u32,
+        /// A waiting `delegate` delegated again (§5.13): the `task_id` of
+        /// the delegation this one replaces, which the host may cancel.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replaces: Option<Value>,
     },
     CreateCheckpoint {
         step: usize,
@@ -357,6 +361,17 @@ pub(crate) struct StepState {
     /// its nested run used one (§5.17).
     #[serde(default)]
     pub always_ask: bool,
+    /// A `delegate` step that waits (§5.13): the delegation's output, once
+    /// the host has delegated; the step then waits for the result.
+    #[serde(default)]
+    pub delegated: Option<Value>,
+    /// The deadline the delegation started under: the wait keeps it, so
+    /// one `timeout` bounds both phases.
+    #[serde(default)]
+    pub deadline: Option<u64>,
+    /// The `task_id` of a delegation a retry replaces.
+    #[serde(default)]
+    pub replaces: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

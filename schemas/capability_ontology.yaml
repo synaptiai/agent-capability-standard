@@ -1470,6 +1470,36 @@ nodes:
       role:
         type: string
         description: Role the delegate takes, e.g. reviewer (delegation@1)
+      read_only:
+        type: boolean
+        description: The delegate may read but must not change anything (files,
+          repositories, external state); the host attests it in effective (delegation@1,
+          STANDARD v1.1 §5.15)
+      accept_from:
+        type: array
+        items:
+          type: string
+        description: For a delegate that waits, principals to accept its result from;
+          others are dropped and counted (delegation@1, STANDARD v1.1 §5.13, §5.15)
+      sender_check:
+        type: array
+        items:
+          type: string
+        description: For a delegate that waits, how the result's sender must have been
+          authenticated (identity@1, STANDARD v1.1 §5.17)
+      accept_trust_classes:
+        type: array
+        items:
+          type: string
+        description: For a delegate that waits, trust classes to accept its result
+          from (identity@1, STANDARD v1.1 §5.17)
+      always_ask_trust_classes:
+        type: array
+        items:
+          type: string
+        description: For a delegate that waits, trust classes whose result (and a
+          result with no trust class) makes any step that requires approval and uses
+          it be asked of a person (identity@1, STANDARD v1.1 §5.17)
   output_schema:
     type: object
     required:
@@ -1494,6 +1524,12 @@ nodes:
             type: string
           role:
             type: string
+          read_only:
+            type: boolean
+      result:
+        type: object
+        description: The delegate's result, when the step waits for it (wait@1, STANDARD
+          v1.1 §5.13), with its sender (and, with identity@1, its sender_identity)
       evidence_anchors:
         type: array
 - id: synchronize

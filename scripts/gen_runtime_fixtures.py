@@ -2877,6 +2877,365 @@ add(
     ["step_failed"],
 )
 
+
+def waiting_reviewer(store, agent, read_only=True):
+    """A reviewer delegated and then awaited in one step (wait on delegate):
+    a retry delegates again, so a reviewer that hangs is replaced alone."""
+    return st(
+        "delegate",
+        store,
+        timeout="2h",
+        retry={"max": 1, "backoff": "none"},
+        input_bindings={
+            "task": {"review": "${change}"},
+            "agent": agent,
+            "read_only": read_only,
+        },
+        wait={
+            "event_type": "review.done",
+            "liveness": {"mode": "push", "interval": "10m", "failure_threshold": 3},
+        },
+    )
+
+
+def waiting_quorum(read_only_b=True):
+    return {
+        "w": wf(
+            [
+                waiting_reviewer("ra", "a"),
+                waiting_reviewer("rb", "b", read_only=read_only_b),
+                st(
+                    "constrain",
+                    "gate",
+                    input_bindings={
+                        "target": "${change}",
+                        "constraints": ["two approvals"],
+                        "action_on_violation": "block",
+                    },
+                    quorum={
+                        "verdicts": ["${ra.result: object}", "${rb.result: object}"],
+                        "reviewers": ["ra", "rb"],
+                        "vocabulary": ["approve", "request_changes"],
+                        "pass_values": ["approve"],
+                        "blocking_values": ["request_changes"],
+                        "min_pass": 2,
+                        "pinned_to": "${change}",
+                        "require_read_only": True,
+                    },
+                ),
+            ],
+            inputs={"change": {"type": "string", "required": True}},
+            requires=["wait@1", "delegation@1", "quorum@1"],
+        )
+    }
+
+
+def delegated(task, agent, read_only=True):
+    return out(
+        accepted=True, task_id=task, agent=agent, effective={"read_only": read_only}
+    )
+
+
+def review_done(task, agent):
+    return {
+        "kind": "Event",
+        "event": {
+            "event_type": "review.done",
+            "task_id": task,
+            "reviewer_id": agent,
+            "value": "approve",
+            "pinned": "c1",
+        },
+        "principal": agent,
+    }
+
+
+add(
+    "delegate_wait_replaces_hung_reviewer",
+    "A delegate step that waits delegates, then awaits that delegation's result"
+    " (correlated by task_id). When reviewer b goes silent (R406), its retry"
+    " delegates again; reviewer a is not asked again, and the quorum counts both"
+    " results.",
+    waiting_quorum(),
+    [
+        {
+            "expect": inv("delegate", step=0, attempt=1, inputs={"read_only": True}),
+            "respond": delegated("t1", "a"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0, "correlate": {"task_id": "t1"}},
+            "respond": review_done("t1", "a"),
+        },
+        {"expect": inv("delegate", step=1, attempt=1), "respond": delegated("t2", "b")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 1, "correlate": {"task_id": "t2"}},
+            "respond": {"kind": "LivenessLost"},
+        },
+        {
+            "expect": inv("delegate", step=1, attempt=2, replaces="t2"),
+            "respond": delegated("t3", "b"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 1, "correlate": {"task_id": "t3"}},
+            "respond": review_done("t3", "b"),
+        },
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {
+            "ra": {"task_id": "t1", "result": {"reviewer_id": "a", "sender": "a"}},
+            "rb": {"task_id": "t3", "result": {"reviewer_id": "b"}},
+            "gate": {"compliant": True, "tally": {"passes": 2, "voters": ["a", "b"]}},
+        },
+    },
+    ["delegated", "retry", "event_received", "quorum"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "delegate_wait_not_accepted",
+    "A delegation the host did not accept is an R402, retried like any other:"
+    " the step delegates again before it waits.",
+    {
+        "w": wf(
+            [
+                st(
+                    "delegate",
+                    "ra",
+                    timeout="2h",
+                    retry={"max": 1, "backoff": "none"},
+                    input_bindings={"task": {"review": "x"}, "agent": "a"},
+                    wait={"event_type": "review.done"},
+                )
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [
+        {"expect": inv("delegate", attempt=1), "respond": out(accepted=False)},
+        {
+            "expect": inv("delegate", attempt=2),
+            "respond": out(accepted=True, task_id="t9"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "correlate": {"task_id": "t9"}},
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "review.done", "task_id": "t9"},
+            },
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed", "outputs": {"ra": {"task_id": "t9"}}},
+    ["retry", "delegated"],
+)
+
+add(
+    "quorum_requires_read_only",
+    "With require_read_only, a verdict from a reviewer the host did not attest"
+    " read-only is not counted: the quorum fails (F504).",
+    waiting_quorum(),
+    [
+        {"expect": inv("delegate", step=0), "respond": delegated("t1", "a")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0},
+            "respond": review_done("t1", "a"),
+        },
+        {
+            "expect": inv("delegate", step=1),
+            "respond": delegated("t2", "b", read_only=False),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 1},
+            "respond": review_done("t2", "b"),
+        },
+    ],
+    {"kind": "Failed", "code": "F504", "step": 2},
+    ["quorum", "step_failed"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "delegate_wait_one_timeout",
+    "One timeout bounds the delegation and the wait: a delegation that answers"
+    " after 50 minutes leaves 10 minutes of a 1h timeout to wait.",
+    {
+        "w": wf(
+            [
+                st(
+                    "delegate",
+                    "ra",
+                    timeout="1h",
+                    input_bindings={"task": {"review": "x"}, "agent": "a"},
+                    wait={"event_type": "review.done"},
+                )
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [
+        {
+            "expect": inv("delegate", deadline=3_600_000),
+            "at": 3_000_000,
+            "respond": out(accepted=True, task_id="t1"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "deadline": 3_600_000},
+            "at": 4_000_000,
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "review.done", "task_id": "t1"},
+            },
+        },
+    ],
+    {"kind": "Failed", "code": "R401", "step": 0},
+    ["delegated", "step_failed"],
+)
+
+add(
+    "delegate_wait_needs_task_id",
+    "A delegation the step waits on must return a task_id to match its result (R402).",
+    {
+        "w": wf(
+            [
+                st(
+                    "delegate",
+                    "ra",
+                    timeout="1h",
+                    input_bindings={"task": {"review": "x"}, "agent": "a"},
+                    wait={"event_type": "review.done"},
+                )
+            ],
+            requires=["wait@1"],
+        )
+    },
+    [{"expect": inv("delegate"), "respond": out(accepted=True)}],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "quorum_result_names_another_reviewer",
+    "A verdict read from a reviewer step's result is that reviewer's: one that"
+    " names another reviewer is not counted.",
+    waiting_quorum(),
+    [
+        {"expect": inv("delegate", step=0), "respond": delegated("t1", "a")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0},
+            "respond": review_done("t1", "b"),
+        },
+        # Each result claims to be the other reviewer's: neither counts.
+        {"expect": inv("delegate", step=1), "respond": delegated("t2", "b")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 1},
+            "respond": review_done("t2", "a"),
+        },
+    ],
+    {
+        "kind": "Failed",
+        "code": "F504",
+        "step": 2,
+    },
+    ["quorum", "step_failed"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "quorum_single_result",
+    "verdicts may be one reference to a single verdict, such as one reviewer's result.",
+    {
+        "w": wf(
+            [
+                waiting_reviewer("ra", "a"),
+                st(
+                    "constrain",
+                    "gate",
+                    input_bindings={
+                        "target": "${change}",
+                        "constraints": ["one approval"],
+                        "action_on_violation": "block",
+                    },
+                    quorum={
+                        "verdicts": "${ra.result: object}",
+                        "reviewers": ["ra"],
+                        "vocabulary": ["approve", "request_changes"],
+                        "pass_values": ["approve"],
+                        "min_pass": 1,
+                        "pinned_to": "${change}",
+                    },
+                ),
+            ],
+            inputs={"change": {"type": "string", "required": True}},
+            requires=["wait@1", "delegation@1", "quorum@1"],
+        )
+    },
+    [
+        {"expect": inv("delegate", step=0), "respond": delegated("t1", "a")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0},
+            "respond": review_done("t1", "a"),
+        },
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {"gate": {"compliant": True, "tally": {"passes": 1}}},
+    },
+    ["quorum"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "always_ask_delegate_result",
+    "A waiting delegate's result from an always-ask class marks what uses it.",
+    {
+        "w": wf(
+            [
+                st(
+                    "delegate",
+                    "ask",
+                    timeout="1h",
+                    input_bindings={
+                        "task": {"question": "which host?"},
+                        "agent": "helper",
+                        "always_ask_trust_classes": ["external"],
+                    },
+                    wait={"event_type": "answer"},
+                ),
+                st(
+                    "execute",
+                    "act",
+                    input_bindings={"code": "${ask.result.answer: string}"},
+                    approval={"approver": OPS_MANDATE},
+                ),
+            ],
+            requires=["wait@1", "identity@1", "approval@1"],
+        )
+    },
+    [
+        {"expect": inv("delegate"), "respond": out(accepted=True, task_id="t1")},
+        {
+            "expect": {"kind": "AwaitEvent", "correlate": {"task_id": "t1"}},
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "answer", "task_id": "t1"},
+                "identity": OUTSIDER,
+            },
+        },
+        {
+            "expect": {
+                "kind": "RequestApproval",
+                "approver": {"kind": "human", "always_ask": True},
+            },
+            "respond": approve("d1", who=("dana",)),
+        },
+        {"expect": inv("execute"), "respond": out(result="ok")},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["always_ask"],
+)
+
 add(
     "wait_error",
     "An error from the event source fails the wait (R402).",

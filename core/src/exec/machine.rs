@@ -1075,19 +1075,36 @@ impl<'a> Machine<'a> {
         let wf = &program.workflows[&self.frame_ref().workflow];
         let step = &wf.steps[self.frame_ref().step];
         let now = self.st.now;
-        let deadline = step.timeout.map(|t| later(now, t));
+        // A waiting delegate keeps the deadline its delegation started
+        // under: one timeout bounds the delegation and the wait.
+        let deadline = match self.frame_ref().cur.deadline {
+            Some(d) if step.capability == "delegate" => Some(d),
+            _ => step.timeout.map(|t| later(now, t)),
+        };
+        if step.capability == "delegate"
+            && wf.extension("wait@1")
+            && step.raw.get("wait").is_some_and(Value::is_object)
+        {
+            self.frame().cur.deadline = deadline;
+        }
         let index = step.index;
         if wf.extension("identity@1")
-            && matches!(step.capability.as_str(), "receive" | "synchronize")
+            && matches!(
+                step.capability.as_str(),
+                "receive" | "synchronize" | "delegate"
+            )
         {
             if let Err(e) = identity_inputs(&self.frame_ref().cur.inputs) {
                 return self.step_error("R402", e);
             }
         }
-        if wf.extension("wait@1") {
+        // A delegate that waits delegates first (an InvokeCapability below),
+        // then waits for its delegate's result.
+        let delegating = step.capability == "delegate" && self.frame_ref().cur.delegated.is_none();
+        if wf.extension("wait@1") && !delegating {
             if let Some(Value::Object(wait)) = step.raw.get("wait") {
                 let bindings = FrameBindings(self.frame_ref());
-                let correlate = wait
+                let mut correlate: Map<String, Value> = wait
                     .get("correlate")
                     .and_then(Value::as_object)
                     .map(|c| {
@@ -1096,6 +1113,17 @@ impl<'a> Machine<'a> {
                             .collect()
                     })
                     .unwrap_or_default();
+                // The result must be for this delegation.
+                if let Some(task) = self
+                    .frame_ref()
+                    .cur
+                    .delegated
+                    .as_ref()
+                    .and_then(|d| d.get("task_id"))
+                    .filter(|t| !t.is_null())
+                {
+                    correlate.insert("task_id".to_string(), task.clone());
+                }
                 let inputs = &self.frame_ref().cur.inputs;
                 let accept_from = string_list(inputs, "accept_from");
                 let sender_check = string_list(inputs, "sender_check");
@@ -1158,6 +1186,7 @@ impl<'a> Machine<'a> {
                 inputs,
                 deadline,
                 attempt,
+                replaces: self.frame_ref().cur.replaces.clone(),
             },
             Purpose::Capability,
             deadline,
@@ -1225,6 +1254,13 @@ impl<'a> Machine<'a> {
                         "retry",
                         json!({"code": code, "message": message, "attempt": attempt, "backoff_ms": wait_ms}),
                     );
+                    // A delegate that waits is delegated again: a delegate
+                    // that went silent is replaced, not waited on again.
+                    let cur = &mut self.frame().cur;
+                    if let Some(d) = cur.delegated.take() {
+                        cur.replaces = d.get("task_id").cloned();
+                    }
+                    cur.deadline = None;
                     if wait_ms == 0 {
                         self.frame().cur.attempt = self.frame_ref().cur.attempt.saturating_add(1);
                         return self.set_stage(Stage::Execute);
@@ -1265,6 +1301,25 @@ impl<'a> Machine<'a> {
                 "R402",
                 format!("{detail}, which the '{capability}' contract requires"),
             );
+        }
+        if step.capability == "delegate"
+            && self.frame_ref().cur.delegated.is_none()
+            && self.program.workflows[&self.frame_ref().workflow].extension("wait@1")
+            && step.raw.get("wait").is_some_and(Value::is_object)
+        {
+            if value.get("accepted") != Some(&Value::Bool(true)) {
+                return self.exec_error("R402", "the delegation was not accepted");
+            }
+            // The result is matched to this delegation by its task_id.
+            if !value.get("task_id").is_some_and(Value::is_string) {
+                return self.exec_error(
+                    "R402",
+                    "a delegation the step waits on needs a task_id to match its result",
+                );
+            }
+            self.trace_step("delegated", json!({"task_id": value.get("task_id")}));
+            self.frame().cur.delegated = Some(value);
+            return self.set_stage(Stage::Execute);
         }
         if step.capability == "checkpoint" {
             let id = value
@@ -1319,6 +1374,9 @@ impl<'a> Machine<'a> {
                 .as_array()
                 .is_some_and(|items| items.iter().any(|i| asks(&i["sender_identity"]))),
             "synchronize" => asks(&out["sender_identity"]),
+            "delegate" => out
+                .get("result")
+                .is_some_and(|r| asks(&r["sender_identity"])),
             _ => false,
         }
     }
@@ -1429,7 +1487,11 @@ impl<'a> Machine<'a> {
             }
         }
         let anchors = event.get("anchors").cloned().unwrap_or(json!([]));
-        let output = if step.capability == "synchronize" {
+        let output = if let Some(delegated) = self.frame_ref().cur.delegated.clone() {
+            let mut out = delegated;
+            out["result"] = item;
+            out
+        } else if step.capability == "synchronize" {
             let mut out = json!({
                 "synchronized": true,
                 "agreed_state": event.get("canonical").cloned().unwrap_or(json!({})),

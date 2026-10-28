@@ -1,0 +1,77 @@
+{
+  "description": "One timeout bounds the delegation and the wait: a delegation that answers after 50 minutes leaves 10 minutes of a 1h timeout to wait.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "timeout": "1h",
+          "input_bindings": {
+            "task": {
+              "review": "x"
+            },
+            "agent": "a"
+          },
+          "wait": {
+            "event_type": "review.done"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "deadline": 3600000
+      },
+      "at": 3000000,
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "deadline": 3600000
+      },
+      "at": 4000000,
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t1"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R401",
+    "step": 0
+  },
+  "trace_kinds": [
+    "delegated",
+    "step_failed"
+  ]
+}

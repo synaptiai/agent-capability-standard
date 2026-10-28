@@ -22,6 +22,7 @@ const QUORUM_KEYS: &[&str] = &[
     "pinned_to",
     "forbidden_inputs",
     "require_fresh_context",
+    "require_read_only",
     "require_model_families",
     "min_full",
 ];
@@ -362,8 +363,20 @@ pub(crate) fn check(
     for key in ["verdicts", "pinned_to"] {
         if let Some(v) = q.get(key) {
             let field = format!("quorum.{key}");
-            if wait::references(v, &field, &at, report) {
-                checker.scan(v, scope, Mode::Existence, &field, report);
+            // Verdicts may come from several steps (one per reviewer that
+            // waits for its result): a non-empty list of references.
+            let parts: Vec<(String, &Value)> = match v {
+                Value::Array(items) if key == "verdicts" && !items.is_empty() => items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| (format!("{field}[{i}]"), x))
+                    .collect(),
+                _ => vec![(field.clone(), v)],
+            };
+            for (f, x) in parts {
+                if wait::references(x, &f, &at, report) {
+                    checker.scan(x, scope, Mode::Existence, &f, report);
+                }
             }
         }
     }
@@ -446,30 +459,33 @@ pub(crate) fn check(
         report,
     );
 
-    match q.get("require_fresh_context") {
-        None | Some(Value::Bool(false)) => {}
-        Some(Value::Bool(true)) => {
-            for (r, s) in &delegates {
-                let fresh = s.get("input_bindings").and_then(|b| b.get("fresh_context"));
-                if fresh != Some(&Value::Bool(true)) {
-                    report.push(
-                        at(Diagnostic::new(
-                            Code::ConstraintViolated,
-                            format!("reviewer '{r}' does not bind fresh_context: true"),
-                        ))
-                        .at("field", "quorum.require_fresh_context"),
-                    );
+    for (requirement, input) in [
+        ("require_fresh_context", "fresh_context"),
+        ("require_read_only", "read_only"),
+    ] {
+        let field = format!("quorum.{requirement}");
+        match q.get(requirement) {
+            None | Some(Value::Bool(false)) => {}
+            Some(Value::Bool(true)) => {
+                for (r, s) in &delegates {
+                    let bound = s.get("input_bindings").and_then(|b| b.get(input));
+                    if bound != Some(&Value::Bool(true)) {
+                        report.push(
+                            at(Diagnostic::new(
+                                Code::ConstraintViolated,
+                                format!("reviewer '{r}' does not bind {input}: true"),
+                            ))
+                            .at("field", field.clone()),
+                        );
+                    }
                 }
             }
+            Some(other) => report.push(s303(
+                &at,
+                &field,
+                format!("{field} must be a boolean, found {}", yaml::kind_of(other)),
+            )),
         }
-        Some(other) => report.push(s303(
-            &at,
-            "quorum.require_fresh_context",
-            format!(
-                "quorum.require_fresh_context must be a boolean, found {}",
-                yaml::kind_of(other)
-            ),
-        )),
     }
 
     if let Some(families) = strings(q, "require_model_families", &at, report) {
@@ -784,6 +800,45 @@ mod tests {
             }
         }
         q
+    }
+
+    #[test]
+    fn read_only_reviewers() {
+        let ro = json!({"read_only": true});
+        assert!(
+            run_with(
+                reviewer("ra", "a", "claude", ro.clone()),
+                reviewer("rb", "b", "gpt", ro.clone()),
+                with(json!({"require_read_only": true}))
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            run_with(
+                reviewer("ra", "a", "claude", ro.clone()),
+                reviewer("rb", "b", "gpt", json!({})),
+                with(json!({"require_read_only": true}))
+            ),
+            ["F504"]
+        );
+        assert_eq!(run(with(json!({"require_read_only": "yes"}))), ["S303"]);
+    }
+
+    #[test]
+    fn verdicts_from_several_steps() {
+        // One reference per reviewer step that waits for its result.
+        assert!(
+            run(with(
+                json!({"verdicts": ["${ra.result: object}", "${rb.result: object}"]})
+            ))
+            .is_empty()
+        );
+        assert_eq!(run(with(json!({"verdicts": []}))), ["S303"]);
+        assert_eq!(
+            run(with(json!({"verdicts": ["${ra.result}", "ra"]}))),
+            ["S303"]
+        );
+        assert_eq!(run(with(json!({"verdicts": ["${nope}"]}))), ["B202"]);
     }
 
     #[test]

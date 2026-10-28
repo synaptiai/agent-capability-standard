@@ -281,7 +281,7 @@ Decisions (user, 2026-10-27):
   differential fixtures; V108 on `and` hints `&&`
 - [ ] **H2c** the commenter's orchestrator fixtures (nine workflows, scripted
   runs) as static and runtime conformance fixtures
-- [ ] **H2d** reviewer items. Decisions:
+- [x] **H2d** reviewer items. Decisions:
   - read-only reviewer: `delegate` input `read_only` (delegation@1),
     attested in `effective`; `quorum.require_read_only` makes every reviewer
     bind it (F504) and refuses at run time a verdict whose delegate did not

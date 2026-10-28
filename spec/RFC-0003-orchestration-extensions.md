@@ -230,9 +230,20 @@ still could not express. Closed in the candidate:
   a syntax error (CEL has no such keyword); V108 says to use `&&`.
 - **Trust classes and "always ask".** Incoming items carry their sender's
   identity, filtered by how the sender was authenticated and by trust
-  class, and an action on an item from an "always ask" class needs a
-  person whatever mandate would cover it. RFC-0004 specifies this as
+  class, and a step that requires approval and uses an item from an
+  "always ask" class is asked of a person whatever mandate would cover it. RFC-0004 specifies this as
   `identity@1` (§5.17).
+- **A read-only reviewer.** E4's `reviewer_may_edit: false`, dropped
+  earlier, returns as a delegation hint: `delegate` takes `read_only`, the
+  host attests it in `effective`, and `quorum.require_read_only` requires
+  it of every reviewer, statically (F504) and when counting verdicts.
+- **Replacing only the reviewer that hung.** `wait` is allowed on
+  `delegate`: the step delegates, then waits for that delegation's result
+  (correlated by `task_id`). With one such step per reviewer, a `retry` on
+  R406 or R401 delegates again to the silent reviewer alone, and
+  `quorum.verdicts` takes a list of references to collect each result.
+  A recovery loop back to a shared wait, which re-delegated every reviewer,
+  is no longer needed.
 
 ## Open questions
 
@@ -243,6 +254,14 @@ still could not express. Closed in the candidate:
   and an "always ask" class. Still open: whether delegation should attest
   the delegate's identity in `effective`, beside `fresh_context` and
   `model_family`.
+- **Host or device placement of a delegated step.** The author asked to
+  pin a delegated step to a host or device. Deployment stays outside the
+  standard, as for E6's `host`: a placement hint would be opaque to the
+  validator and the executor, and only a host could act on it. Candidate
+  designs, should it be needed: an opaque `placement` hint on `delegate`
+  attested in `effective`, as for `model_family`; or `placement: {require,
+  prefer}` labels with a runtime failure when a host cannot meet
+  `require`.
 - None further for the domain catalogs: the four under `schemas/workflows/`,
   which failed validation before this RFC, now pass in strict mode and are
   validated in CI.

@@ -580,5 +580,19 @@
     "expected_error_codes": [
       "S303"
     ]
+  },
+  "pass_delegate_wait_quorum": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "fail_quorum_read_only": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "F504"
+    ]
   }
 }

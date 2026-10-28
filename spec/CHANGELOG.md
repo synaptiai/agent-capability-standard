@@ -65,6 +65,17 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   the schema is B203 (§9.3).
 
 ### Changed — remaining open items (#114)
+- **Wait on `delegate` (§5.13):** a `delegate` step can wait for its
+  delegate's result (matched by the delegation's required `task_id`; the
+  output gains `result`; one `timeout` bounds both phases; `accept_from`
+  and the `identity@1` sender inputs apply to the result). A `retry`
+  delegates again, naming the replaced delegation (`replaces`), so one
+  silent reviewer is replaced alone; a delegation not accepted is R402. A
+  verdict in a reviewer step's `result` counts only for that reviewer. `quorum.verdicts` (§5.16) may be a list
+  of references, one per reviewer step.
+- **Read-only reviewers (§5.15, §5.16):** `delegate` input `read_only`,
+  attested in `effective.read_only`; `quorum.require_read_only` requires it
+  of every reviewer (F504 statically, and uncounted verdicts at run time).
 - **Sender identity (§5.17, `identity@1`, RFC-0004).** An `agent_identity`
   (`schemas/agent_identity_schema.yaml`) the host reports with each event a
   wait receives. `receive`/`synchronize` inputs `sender_check` (accepted

@@ -33,11 +33,14 @@ Delegate a complex task to one or more subagents by defining clear contracts, in
 | `fresh_context` | No | boolean | Start the delegate without this agent's context, e.g. for an independent review (Standard v1.1 `delegation@1`) |
 | `model_family` | No | string | Model family the delegate should run on (`delegation@1`) |
 | `role` | No | string | Role the delegate takes, e.g. `reviewer` (`delegation@1`) |
+| `read_only` | No | boolean | The delegate may read but must not change anything (`delegation@1`); the host attests it in `effective.read_only` |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 The host reports the settings it actually used as `effective` in the
-output; a review quorum (`quorum@1`, on `constrain`) relies on them.
+output; a review quorum (`quorum@1`, on `constrain`) relies on them. With
+`wait` (`wait@1`) the step delegates, then waits for that delegate's
+result, which the output carries as `result`; a `retry` delegates again.
 
 ## Procedure
 

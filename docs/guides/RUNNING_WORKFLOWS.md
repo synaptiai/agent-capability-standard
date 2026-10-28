@@ -58,7 +58,7 @@ a run.
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs` | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` |
+| `InvokeCapability` | runs `capability` with `inputs` (a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |

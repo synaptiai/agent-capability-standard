@@ -6,10 +6,20 @@ use serde_json::{Map, Value};
 
 use super::extensions::Declared;
 use super::{Report, StepLoc};
+use crate::diag::Code;
 
 /// Capability inputs that belong to `delegation@1`.
 const INPUTS: &[(&str, &[&str])] = &[
-    ("delegate", &["fresh_context", "model_family", "role"]),
+    (
+        "delegate",
+        &[
+            "fresh_context",
+            "model_family",
+            "role",
+            "read_only",
+            "accept_from",
+        ],
+    ),
     ("receive", &["accept_from"]),
     ("synchronize", &["accept_from"]),
 ];
@@ -34,6 +44,28 @@ pub(crate) fn check(
             |d| loc.locate(d).at("field", format!("input_bindings.{key}")),
             report,
         );
+    }
+    // Sender filters on a delegate apply to the result it waits for.
+    if loc.capability == "delegate" && !step.get("wait").is_some_and(Value::is_object) {
+        for key in [
+            "accept_from",
+            "sender_check",
+            "accept_trust_classes",
+            "always_ask_trust_classes",
+        ]
+        .iter()
+        .filter(|k| bindings.contains_key(**k))
+        {
+            report.push(
+                loc.diag(
+                    Code::SchemaValidationFailed,
+                    format!(
+                        "'{key}' filters the result a delegate waits for, but this step has no 'wait'"
+                    ),
+                )
+                .at("field", format!("input_bindings.{key}")),
+            );
+        }
     }
 }
 
@@ -60,13 +92,26 @@ mod tests {
 
     #[test]
     fn hints_need_the_declaration() {
-        let hints = json!({"fresh_context": true, "model_family": "m", "role": "reviewer"});
+        let hints = json!({"fresh_context": true, "model_family": "m", "role": "reviewer",
+                           "read_only": true});
         assert!(codes(catalog(json!([delegate(hints.clone())]), &["delegation@1"])).is_empty());
         assert_eq!(
             codes(catalog(json!([delegate(hints)]), &[])),
-            ["V106", "V106", "V106"]
+            ["V106", "V106", "V106", "V106"]
         );
         assert!(codes(catalog(json!([delegate(json!({}))]), &[])).is_empty());
+    }
+
+    #[test]
+    fn sender_filters_on_a_delegate_need_a_wait() {
+        let mut d = delegate(json!({"accept_from": ["a"]}));
+        assert_eq!(
+            codes(catalog(json!([d.clone()]), &["delegation@1"])),
+            ["S303"]
+        );
+        d["timeout"] = json!("1h");
+        d["wait"] = json!({"event_type": "done"});
+        assert!(codes(catalog(json!([d]), &["delegation@1", "wait@1"])).is_empty());
     }
 
     #[test]

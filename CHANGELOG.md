@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Read-only reviewers and per-reviewer waits (#114).** `delegate` takes
+  `read_only` (attested in `effective`), and `quorum.require_read_only`
+  requires it of every reviewer. `wait` is allowed on `delegate`: the step
+  delegates, then waits for that delegation's result, so a `retry` replaces
+  a reviewer that went silent without asking the others again; a quorum's
+  `verdicts` may list one reference per reviewer step. Host or device
+  placement of a delegated step is recorded as an open question in
+  RFC-0003
 - **Agent identity, `identity@1` (RFC-0004, #114).** A new
   `schemas/agent_identity_schema.yaml` says who a party is (principal, kind,
   role, model family, owner, how it was authenticated, trust class).

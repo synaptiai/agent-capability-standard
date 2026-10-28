@@ -1,0 +1,130 @@
+{
+  "description": "A waiting delegate's result from an always-ask class marks what uses it.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ask",
+          "timeout": "1h",
+          "input_bindings": {
+            "task": {
+              "question": "which host?"
+            },
+            "agent": "helper",
+            "always_ask_trust_classes": [
+              "external"
+            ]
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        },
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "act",
+          "input_bindings": {
+            "code": "${ask.result.answer: string}"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1",
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "correlate": {
+          "task_id": "t1"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer",
+          "task_id": "t1"
+        },
+        "identity": {
+          "principal": "mail:someone@example.com",
+          "kind": "human",
+          "authenticated_by": "x-mail-dkim",
+          "trust_class": "external"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "always_ask"
+  ]
+}

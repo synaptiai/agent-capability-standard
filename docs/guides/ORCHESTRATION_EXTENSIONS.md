@@ -181,7 +181,9 @@ A `receive` step with `wait` pauses the run until a matching event arrives
 or the step's `timeout` lapses (R401), or its source stops answering
 (R406, with `liveness`); the event arrives in the step's
 output (`data`). A `synchronize` step can wait too, when its `agents` input
-is a literal list of at least two agents.
+is a literal list of at least two agents, and so can a `delegate` step: it
+delegates, then waits for that delegate's result (see
+[Review quorums](#review-quorums-quorum1)).
 
 ```yaml
 - capability: receive
@@ -316,7 +318,11 @@ reports what it actually used as `effective`:
     fresh_context: true      # start without this agent's context
     model_family: claude     # run on this model family
     role: reviewer
+    read_only: true          # may read, must not change anything
 ```
+
+How a host keeps a delegate read-only is up to it (a read-only token, a
+sandbox); `effective.read_only` says whether it did.
 
 `receive` and `synchronize` take `accept_from`, a list of principals:
 items from anyone else are dropped (and counted), and each kept item
@@ -449,6 +455,49 @@ that sees the earlier rounds and a fresh reviewer that must not:
       fresh_review: [author_notes, prior_rounds]
     min_full: 1                           # one pass must be a full sweep
 ```
+
+To make sure reviewers only read, bind `read_only: true` on each reviewer
+and set `require_read_only: true`: a reviewer that does not bind it is
+F504, and a verdict from a reviewer the host did not attest read-only is
+not counted.
+
+**Replacing a reviewer that hangs.** Make each reviewer a `delegate` step
+that waits for its own result, with a `retry`. If reviewer B goes silent
+(R406) or runs out of time (R401), its step delegates again; reviewer A is
+not asked again. Collect the results with a list of references:
+
+```yaml
+- capability: delegate
+  purpose: Ask reviewer B for a review and wait for it.
+  store_as: review_b
+  timeout: 2h
+  retry: {max: 1, backoff: none}     # a silent reviewer is replaced once
+  input_bindings:
+    task: {review: "${change}"}
+    agent: reviewer-b
+    read_only: true
+  wait:
+    event_type: review.done          # matched by the delegation's task_id
+    liveness: {mode: push, interval: 10m, failure_threshold: 3}
+# ... review_a alike, then:
+- capability: constrain
+  # ...
+  quorum:
+    verdicts: ["${review_a.result: object}", "${review_b.result: object}"]
+    reviewers: [review_a, review_b]
+    require_read_only: true
+    # ...
+```
+
+The delegation must return a `task_id`: it is how the result is matched to
+it, and a retry tells your host which delegation it replaces (`replaces` on
+the new call) so you can cancel it. One `timeout` covers delegating and
+waiting. A waiting delegate can also bind `accept_from` and, with
+`identity@1`, the sender inputs, which apply to its result. A verdict in a
+reviewer step's `result` counts only for that reviewer.
+
+Placing a delegated step on a particular host or device is not part of
+the standard; RFC-0003 records it as an open question.
 
 ## Durations
 

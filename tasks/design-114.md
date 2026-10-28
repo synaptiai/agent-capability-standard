@@ -347,8 +347,20 @@ step `timeout`: invalid → W614.
 `wait: {event_type, source_kind?, correlate?: {k: ref}, liveness?: {mode:
 push|probe, interval, failure_threshold (default 3)}}`
 
-* Only on `receive`, or `synchronize` whose literal `agents` list has ≥ 2
-  entries (else S303).
+* Only on `receive`, `delegate`, or `synchronize` whose literal `agents`
+  list has ≥ 2 entries (else S303). A waiting `delegate` delegates first
+  (InvokeCapability; `StepState.delegated` holds its output; `accepted`
+  not true, or no string `task_id` → R402), then awaits the result with
+  `task_id` added to `correlate` (an authored `correlate.task_id` is S303);
+  `StepState.deadline` keeps the delegation's deadline for the wait. The
+  output is the delegation's output plus `result`. A retry clears
+  `delegated` and sets `replaces` (the old `task_id`, sent on the next
+  InvokeCapability), so it delegates again. `accept_from` and the
+  `identity@1` inputs may be bound on a waiting delegate only (S303
+  otherwise) and filter its result; always-ask reads
+  `result.sender_identity`. W608 treats a waiting delegate as acting
+  before its wait. A quorum verdict read from a reviewer store's result
+  counts only for that reviewer.
 * `event_type` required (S304); `source_kind` checked against the event
   schema's `source.kind` enum (S301 if it cannot be loaded); `correlate`
   is a mapping whose references are checked for existence; unknown fields
@@ -435,12 +447,14 @@ reask)}, expires?, when_unattended: defer_to_queue|skip|fail (default fail)}`
 
 ## 15. Quorum (E4)
 
-`quorum: {verdicts: ref, reviewers: [store_as], vocabulary: [str],
+`quorum: {verdicts: ref | [ref], reviewers: [store_as], vocabulary: [str],
 pass_values: [str], blocking_values?: [str], min_pass: int, pinned_to: ref,
 forbidden_inputs?: [store_as] | {reviewer: [store_as]},
-require_fresh_context?: bool, require_model_families?: [str],
-min_full?: int}` (the mapping form and `min_full` were added after the
-porting feedback)
+require_fresh_context?: bool, require_read_only?: bool,
+require_model_families?: [str], min_full?: int}` (the mapping form,
+`min_full`, `require_read_only` and a list of verdict references were added
+after the porting feedback; each listed reference resolves to a verdict or
+a list of them)
 
 * Only on `constrain` with literal `action_on_violation: block` (S303).
   Required keys (S304): verdicts, reviewers, vocabulary, pass_values,
@@ -455,8 +469,9 @@ porting feedback)
   S303.
 * Independence (F504): no reviewer's bindings depend, directly or
   transitively, on one of its forbidden stores or inputs (the list, or its
-  own entry in the mapping); require_fresh_context → each
-  reviewer binds literal `fresh_context: true`; require_model_families →
+  own entry in the mapping); require_fresh_context / require_read_only →
+  each reviewer binds literal `fresh_context: true` / `read_only: true`
+  (and at run time a verdict counts only if `effective` attests it); require_model_families →
   literal model families cover the set (any non-literal → checked at
   runtime). Dependencies (validate/quorum.rs `Independence`): a reverse
   "who reads what" graph is built once per workflow from every step's

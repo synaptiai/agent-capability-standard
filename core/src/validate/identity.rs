@@ -68,7 +68,7 @@ pub(crate) fn check(
     declared: &Declared,
     report: &mut Report,
 ) {
-    if !matches!(loc.capability, "receive" | "synchronize") {
+    if !matches!(loc.capability, "receive" | "synchronize" | "delegate") {
         return;
     }
     let Some(Value::Object(bindings)) = step.get("input_bindings") else {

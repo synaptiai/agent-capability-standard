@@ -1,0 +1,60 @@
+# Standard version: 1.1.0
+# Positive fixture (STANDARD v1.1 §5.13, §5.15, §5.16): each reviewer is one
+# delegate step that waits for its result, so a retry replaces only the
+# reviewer that went silent; both are attested read-only, and the quorum
+# counts the result of each.
+two_reviewers:
+  goal: Approve a change with two independent, read-only reviews.
+  risk: medium
+  workflow_extensions:
+    requires: [wait@1, delegation@1, quorum@1]
+  inputs:
+    change:
+      type: string
+      required: true
+  steps:
+  - capability: delegate
+    purpose: Ask reviewer A for a review and wait for it.
+    store_as: review_a
+    timeout: 2h
+    retry: {max: 1, backoff: none}
+    input_bindings:
+      task: {review: "${change}"}
+      agent: reviewer-a
+      fresh_context: true
+      read_only: true
+    wait:
+      event_type: review.done
+      liveness: {mode: push, interval: 10m, failure_threshold: 3}
+  - capability: delegate
+    purpose: Ask reviewer B for a review and wait for it.
+    store_as: review_b
+    timeout: 2h
+    retry: {max: 1, backoff: none}
+    input_bindings:
+      task: {review: "${change}"}
+      agent: reviewer-b
+      fresh_context: true
+      read_only: true
+    wait:
+      event_type: review.done
+      liveness: {mode: push, interval: 10m, failure_threshold: 3}
+  - capability: constrain
+    purpose: Require two read-only approvals.
+    store_as: gate
+    input_bindings:
+      target: "${change}"
+      constraints: [two_independent_approvals]
+      action_on_violation: block
+    quorum:
+      verdicts: ["${review_a.result: object}", "${review_b.result: object}"]
+      reviewers: [review_a, review_b]
+      vocabulary: [approve, request_changes]
+      pass_values: [approve]
+      blocking_values: [request_changes]
+      min_pass: 2
+      pinned_to: ${change}
+      require_fresh_context: true
+      require_read_only: true
+  success:
+  - Two read-only approvals of the same change

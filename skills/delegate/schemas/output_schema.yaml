@@ -30,5 +30,11 @@ output_schema:
           type: string
         role:
           type: string
+        read_only:
+          type: boolean
+    result:
+      type: object
+      description: "The delegate's result, when the step waits for it (wait@1, STANDARD\
+        \ v1.1 \xA75.13), with its sender (and, with identity@1, its sender_identity)"
     evidence_anchors:
       type: array

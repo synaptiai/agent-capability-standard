@@ -504,9 +504,9 @@ waiting or approval semantics.
 | `recovery@1` | step `handler`; recovery `on_exhausted`; failure-mode `action: escalate` (§5.11, §5.12) |
 | `wait@1` | step `wait` (§5.13) |
 | `approval@1` | step `approval` (§5.14) |
-| `delegation@1` | bindings of `delegate.fresh_context`, `.model_family`, `.role` and `receive`/`synchronize` `accept_from` (§5.15) |
+| `delegation@1` | bindings of `delegate.fresh_context`, `.model_family`, `.role`, `.read_only` and `receive`/`synchronize`/`delegate` `accept_from` (§5.15) |
 | `quorum@1` | step `quorum` (§5.16) |
-| `identity@1` | bindings of `receive`/`synchronize` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes` (§5.17) |
+| `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes` (§5.17) |
 
 `failure_modes[].when` and `.on_error` are part of base 1.1, not an
 extension: a consumer that ignores them only loses an optional trigger.
@@ -643,8 +643,8 @@ whether or not the failure mode's action is allowed.
 | `correlate` | A mapping of event keys to references (each a `${...}` reference, else S303); the event's values must equal theirs |
 | `liveness` | `mode` (`push`: the source sends heartbeats; `probe`: the runtime polls it) and `interval` (a duration longer than zero), both required (S304); `failure_threshold` (integer ≥ 1, default 3) |
 
-`wait` is allowed only on `receive`, or on `synchronize` whose literal
-`agents` list has at least two entries (else S303). The step MUST declare a
+`wait` is allowed only on `receive`, on `delegate`, or on `synchronize`
+whose literal `agents` list has at least two entries (else S303). The step MUST declare a
 `timeout` (S304) that parses as a duration (S303; the W614 leniency for
 legacy timeouts does not apply to a wait, which must end). Liveness MUST
 be able to fail before the timeout: `interval × failure_threshold` less than
@@ -657,8 +657,10 @@ since the wait had already lapsed. To re-check a silent source, loop back
 to the wait itself (`goto_step` naming its own `store_as`, §5.12) with a
 bounded `max_loops`, and escalate on R401 or `on_exhausted`. A wait run
 again by a loop or a `retry` starts a new `timeout`, so the whole wait can
-last up to `timeout` × (`retry.max` + 1) × (`max_loops` + 1). For a wait
-stored as `result_out` and a handler stored as `page_out`:
+last up to `timeout` × (`retry.max` + 1) × (`max_loops` + 1).
+
+For a wait stored as `result_out` and a handler
+stored as `page_out`:
 
 ```yaml
 failure_modes:
@@ -671,6 +673,24 @@ failure_modes:
     action: escalate
     recovery: {goto_step: page_out}
 ```
+
+A `delegate` step that waits first delegates (an ordinary capability call),
+then waits for that delegate's result. The delegation MUST return a string
+`task_id` (else R402), and the wait's `correlate` gains it, so only that
+delegation's result matches; the author may not correlate on `task_id`
+(S303). One `timeout` bounds both phases. A waiting delegate may bind
+`accept_from` (§5.15) and, with `identity@1`, the sender inputs of §5.17,
+which apply to its result; on a delegate that does not wait they are S303.
+The step's output is the delegation's output with the matching event as
+`result`. A delegation the host did not accept (`accepted` not `true`) is
+R402. A `retry` of the step delegates again, and the new capability call
+names the delegation it replaces (`replaces`, its `task_id`) so the host
+can cancel it; a delegate that went silent (R406) or ran out of time (R401)
+is replaced, and only that one: give each reviewer of a quorum (§5.16) its
+own waiting `delegate` step to replace a hung reviewer without asking the
+others again. A retry does not ask for approval again, as for any step; a
+recovery loop back to a waiting delegate delegates again too. For W608, a
+waiting delegate acts (delegates) before its own wait.
 
 A step that requires a checkpoint (`mutate`, `send`, or a raised
 `requires_checkpoint`) whose latest checkpoint runs before a `wait` is
@@ -785,8 +805,11 @@ when it was deferred).
 ```
 
 `delegate` accepts `fresh_context` (start the delegate without the
-delegator's context), `model_family` and `role`, and reports the values the
-host actually used as `effective`. `receive` and `synchronize` accept
+delegator's context), `model_family`, `role` and `read_only` (the delegate
+may read but must not change anything: files, repositories, external
+state), and reports the values the host actually used as `effective`; the
+standard does not say how a host enforces `read_only`, only that
+`effective.read_only` attests it. `receive` and `synchronize` accept
 `accept_from` (a list of principals): received items from other principals
 are dropped and counted, and each kept item's `sender` is the
 host-authenticated principal.
@@ -829,7 +852,7 @@ drops it. The identity behind a principal, and checks on it, are §5.17
 
 | Field | Description |
 |-------|-------------|
-| `verdicts` | Required: reference to the reviews (`review_verdict_schema.yaml#/review_verdict` items) |
+| `verdicts` | Required: reference to the reviews (`review_verdict_schema.yaml#/review_verdict` items), or a non-empty list of references, each to a verdict or a list of them (e.g. the `result` of each reviewer's waiting `delegate` step, §5.13) |
 | `reviewers` | Required: `store_as` names of `delegate` steps that run before this one (else V107), delegating to distinct agents when the agents are literal (else F504) |
 | `vocabulary` | Required: at least two distinct verdict values |
 | `pass_values` | Required: a non-empty subset of the vocabulary |
@@ -838,6 +861,7 @@ drops it. The identity behind a principal, and checks on it, are §5.17
 | `pinned_to` | Required: reference every counted verdict must be pinned to (e.g. the commit reviewed) |
 | `forbidden_inputs` | Stores or inputs a reviewer may not depend on, directly or transitively through bindings — including context a recovery loop injects (`${_recovery.*}`). A list applies to every reviewer; a mapping gives each reviewer its own list (keys that are not reviewers: V107; a reviewer it omits has none). Names that are neither inputs nor stores of steps running before the quorum step: V107; a dependency: F504 |
 | `require_fresh_context` | Every reviewer binds `fresh_context: true` (F504 otherwise) |
+| `require_read_only` | Every reviewer binds `read_only: true` (F504 otherwise) |
 | `require_model_families` | Families the reviewers must cover; F504 when every reviewer binds a literal family and they do not cover the set (otherwise checked at runtime) |
 | `min_full` | Passing verdicts whose `scope` is `full` needed: 1 ≤ `min_full` ≤ number of reviewers. These are passes too, so a `min_full` above `min_pass` raises the passes needed |
 
@@ -847,7 +871,10 @@ A missing required field is S304; a malformed value is S303; `verdicts` and
 A verdict counts once per reviewer: only if its `reviewer_id` is a
 reviewer delegate's agent, its `pinned` equals the resolved `pinned_to`,
 its value is in the vocabulary, it is the first from that reviewer, and
-(when required) the delegate's `effective` settings show a fresh context.
+(when required) the delegate's `effective` settings show a fresh context
+and read-only. A verdict read through a reference to a reviewer step's own
+output (its `result`) is that reviewer's: it counts only if its
+`reviewer_id` is that step's agent.
 A verdict's `scope` (`review_verdict_schema.yaml` 1.1.0) is `full` (it
 swept the whole pinned change) or `delta` (only what changed since an
 earlier round); absent or any other value, it counts as `delta`, so it
@@ -882,7 +909,8 @@ the host authenticated it: `session_id`, `chat_user_id`, `code_host_login`,
 fills it in; the standard does not say how a party is authenticated or
 classified. It records no reliability: that is RFC-0002's subject.
 
-With `identity@1` declared, `receive` and `synchronize` accept three inputs,
+With `identity@1` declared, `receive`, `synchronize` and a waiting `delegate`
+(for its result, §5.13) accept three inputs,
 each a list of values from the vocabularies above (`sender_check` and
 `accept_trust_classes` non-empty). Binding any of them otherwise is V106;
 a literal that is not such a list is S303; a reference
@@ -1565,8 +1593,9 @@ Field names starting with `x-` are reserved for vendor extensions.
   1.1.0 also adds `ActionRecord.actor_identity` and
   `ProvenanceRecord.agent_identity`; `authority_trust_model.yaml` 1.1.0 adds
   `trust_classes` (§8.3)
-- Ontology: `delegate` inputs `fresh_context`, `model_family`, `role` and
-  output `effective`; `receive`/`synchronize` inputs `accept_from`,
+- Ontology: `delegate` inputs `fresh_context`, `model_family`, `role`,
+  `read_only`, and outputs `effective` and `result` (a waiting delegate,
+  §5.13); `receive`/`synchronize` inputs `accept_from`,
   `sender_check`, `accept_trust_classes` and `always_ask_trust_classes`
   (§5.17); received items' `sender` and `sender_identity`, and on
   `synchronize` the same beside the agreed state; `constrain` output `tally` (§5.15, §5.16); optional
