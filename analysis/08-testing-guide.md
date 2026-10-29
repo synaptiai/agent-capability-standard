@@ -692,7 +692,7 @@ Evidence store performance tests added covering:
 
 #### ~~No tests for validator tools~~ — **RESOLVED** (PR #92)
 
-Validator tools are now tested both directly and via the expanded conformance suite (83 workflow fixtures, and 163 runtime fixtures in `tests/conformance/runtime/`). The validation logic itself lives in the Rust core and is also covered by `cargo test` (CI `rust-core` job). All validators run in CI.
+Validator tools are now tested both directly and via the expanded conformance suite (83 workflow fixtures, and 164 runtime fixtures in `tests/conformance/runtime/`). The validation logic itself lives in the Rust core and is also covered by `cargo test` (CI `rust-core` job). All validators run in CI.
 
 #### ~~No fuzz testing for regex patterns~~ — **RESOLVED** (PR #91)
 

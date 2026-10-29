@@ -3247,6 +3247,86 @@ add(
 )
 
 add(
+    "delegate_wait_replaced_per_run",
+    "Replacement is per run: a parent loop that runs an invoke again starts a"
+    " new child run, whose waiting delegate delegates afresh without naming"
+    " the old run's delegation (no `replaces`).",
+    {
+        "w": wf(
+            [
+                st(
+                    "invoke",
+                    "i",
+                    workflow_id="child",
+                    input_bindings={"workflow": "child", "input": {}},
+                ),
+                st(
+                    "verify",
+                    "v",
+                    input_bindings={"target": "${i.result}", "conditions": ["ok"]},
+                    failure_modes=[
+                        {
+                            "condition": "not verified",
+                            "action": "request_more_context",
+                            "when": "${v.passed} == false",
+                            "recovery": {"goto_step": "i", "max_loops": 1},
+                        }
+                    ],
+                ),
+            ]
+        ),
+        "child": wf(
+            [
+                st(
+                    "delegate",
+                    "d",
+                    timeout="2h",
+                    input_bindings={"task": {"review": "x"}, "agent": "a"},
+                    wait={"event_type": "review.done"},
+                )
+            ],
+            requires=["wait@1"],
+        ),
+    },
+    [
+        {
+            "expect": inv("delegate", step=0, frame=["w", "child"]),
+            "respond": out(accepted=True, task_id="t1"),
+        },
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "frame": ["w", "child"],
+                "correlate": {"task_id": "t1"},
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "review.done", "task_id": "t1"},
+            },
+        },
+        {"expect": inv("verify", step=1), "respond": out(passed=False, confidence=0.9)},
+        {
+            "expect": inv("delegate", step=0, frame=["w", "child"]),
+            "respond": out(accepted=True, task_id="t2"),
+        },
+        {
+            "expect": {
+                "kind": "AwaitEvent",
+                "frame": ["w", "child"],
+                "correlate": {"task_id": "t2"},
+            },
+            "respond": {
+                "kind": "Event",
+                "event": {"event_type": "review.done", "task_id": "t2"},
+            },
+        },
+        {"expect": inv("verify", step=1), "respond": out(passed=True, confidence=0.9)},
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["invoke_started", "loop", "delegated"],
+)
+
+add(
     "delegate_wait_not_accepted",
     "A delegation the host did not accept is an R402, retried like any other:"
     " the step delegates again before it waits.",

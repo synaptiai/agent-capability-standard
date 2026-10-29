@@ -91,6 +91,24 @@ def test_runtime_fixture(validator: _core.Validator, path: Path) -> None:
     assert set(f["trace_kinds"]) <= kinds
 
 
+def test_replacement_is_per_run(validator: _core.Validator) -> None:
+    """A parent loop that runs an invoke again starts a new child run: its
+    waiting delegate does not name the old run's delegation (§5.13). Fixture
+    matching is by subset, so the absent key is checked here."""
+    f = json.loads((RUNTIME / "delegate_wait_replaced_per_run.json").read_text())
+    run = _core.Run.start(
+        validator, f["catalog"], f["workflow"], f["inputs"], run_id="run-1", now_ms=0
+    )
+    delegations = []
+    for entry in f["script"]:
+        action = run.next()
+        if action["kind"] == "InvokeCapability" and action["capability"] == "delegate":
+            delegations.append(action)
+        run.submit(action["id"], fill(entry["respond"], action), 0)
+    assert len(delegations) == 2
+    assert all("replaces" not in d for d in delegations)
+
+
 # ---------------------------------------------------------------------------
 # WorkflowRunner with a host
 # ---------------------------------------------------------------------------

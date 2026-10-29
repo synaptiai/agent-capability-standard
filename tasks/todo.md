@@ -528,3 +528,14 @@ the gap fixtures verbatim.
   at 3 and 6 minutes, re-check deadline 1h3m; gap5's content claims
   another sender, the item's sender is the principal); checked by hand.
 
+# H6: open items after #114 (user, 2026-10-29)
+Decisions (AskUserQuestion): one PR now; version decided at merge;
+replacement documented per run; delegate identity in `effective` to be
+evaluated properly (maintainers' call, demand from #114 and internally).
+- [x] §5.13: replacement is per run (a parent loop's new child run names
+  none of the old run's delegations); fixture
+  `delegate_wait_replaced_per_run` and a test that the key is absent.
+- [ ] Open the PR to main (closes #114, #115).
+- [ ] Evaluate `effective` delegate identity (RFC-0003 open question):
+  options, threat model, interplay with identity@1 and quorum; decide.
+

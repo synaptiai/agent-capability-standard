@@ -194,7 +194,9 @@ gaps on the standard's side (RFC-0003, amendments):
 - **Replacing delegations on a loop (§5.13)** is stated for every waiting
   delegate from the loop's target to the step whose failure mode loops,
   even one that finished; the reference executor named only the looping
-  step's own.
+  step's own. Replacement is per run: a parent loop that runs an `invoke`
+  again starts a new child run, which names none of the old run's
+  delegations.
 
 ### Changed — whole-branch review (#114)
 - **Literal bindings are typed (§5.4).** A literal or template bound to a

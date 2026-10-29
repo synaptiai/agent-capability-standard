@@ -153,7 +153,8 @@ ontology contract requires, or the step fails (R402).
   `${_recovery.*}` context (up to `max_loops`, then `on_exhausted` or
   R404); when a loop runs a waiting `delegate` again (it is the target,
   or comes after it), that delegation names the one it replaces in
-  `replaces`. It can also escalate to a handler (the run ends `escalated`), or end the run
+  `replaces`; a loop that runs an `invoke` again starts a new child run,
+  whose delegations replace none of the old run's. It can also escalate to a handler (the run ends `escalated`), or end the run
   with the step's code — R402 when `when` fired on a step that did not fail
   ([STANDARD §5.12](../../spec/STANDARD-v1.1.0.md#512-recovery-and-escalation)).
 - **Invocations.** An `invoke` step runs its workflow as a nested run, at

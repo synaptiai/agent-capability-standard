@@ -768,7 +768,10 @@ others again. A retry does not ask for approval again, as for any step. A
 recovery loop also replaces: every waiting delegate from the loop's target
 to the step whose failure mode loops (a quorum's, say) runs again, and
 when it next delegates, its call names the delegation it replaces, even
-one that finished. For W608, a
+one that finished. Replacement is per run: a loop in a calling workflow
+that runs an `invoke` again starts a new run of the invoked workflow,
+whose delegations name none of the earlier run's; the host ends those
+with the run they belong to. For W608, a
 waiting delegate acts (delegates) before its own wait.
 
 A step that requires a checkpoint (`mutate`, `send`, or a raised
