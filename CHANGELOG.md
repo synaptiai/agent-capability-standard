@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Delegate identity (#114, RFC-0004 amendment).** With `identity@1` a
+  host may attest who took a delegation (`effective.identity`); a waiting
+  delegate keeps only results from that principal (others dropped as
+  `delegate_identity`), a malformed or contradicting identity is R402, and
+  `quorum.require_distinct_identities` counts one verdict per attested
+  principal. Quorum model families now count only as attested. Validator,
+  executor, schema, eleven runtime fixtures and docs
 - **Standard changes from the orchestrator fixtures (#114).** Gates can
   `end` a run successfully (`RunResult.ended`); a step can `delay` before
   it goes on (`wait@1`), without a fake event to wait on; an `accept_from`

@@ -1526,6 +1526,10 @@ nodes:
             type: string
           read_only:
             type: boolean
+          identity:
+            type: object
+            description: The agent_identity of the party that took the delegation
+              (identity@1); a waiting delegate keeps only its results
       result:
         type: object
         description: The delegate's result, when the step waits for it (wait@1, STANDARD

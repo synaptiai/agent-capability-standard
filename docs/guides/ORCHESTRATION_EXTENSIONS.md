@@ -434,6 +434,15 @@ with each event a step waits for (`schemas/agent_identity_schema.yaml`):
 - On a step that does not wait, your host receives the inputs, applies
   them to what it returns, and must put the `sender_identity` it applied
   them to on each item it returns: the executor marks from it.
+- **Who took a delegation.** Your host may report it as
+  `effective.identity` (an `agent_identity`) when it delegates. A waiting
+  delegate then keeps only results from that principal: anything else is
+  dropped and counted (`delegate_identity`), and the `AwaitEvent` names
+  the principal as `delegate_principal`. A malformed identity, or one
+  whose `model_family` or `role` contradicts `effective`'s, fails the step
+  (R402). It is your host's attestation, not a credential: it catches a
+  task routed to the wrong party or a peer answering in its place, not a
+  host that lies.
 
 To record who ran a workflow, start the run with an actor identity
 (`WorkflowRunner.run(..., actor_identity=agent.identity())`); every action
@@ -534,7 +543,14 @@ it, and a retry tells your host which delegation it replaces (`replaces` on
 the new call) so you can cancel it. One `timeout` covers delegating and
 waiting. A waiting delegate can also bind `accept_from` and, with
 `identity@1`, the sender inputs, which apply to its result. A verdict in a
-reviewer step's `result` counts only for that reviewer.
+reviewer step's `result` counts only for that reviewer. With `identity@1`,
+`require_distinct_identities: true` counts a verdict only if it comes from
+its reviewer's own `result` and that reviewer's host attested an identity
+whose principal no other counted reviewer has: two agent names your host
+maps to one party count once. Each reviewer must then be a waiting
+delegate, and `verdicts` must reference only their results. A
+model family counts toward `require_model_families` only when the host
+attests it.
 
 Placing a delegated step on a particular host or device is not part of
 the standard; RFC-0003 records it as an open question.

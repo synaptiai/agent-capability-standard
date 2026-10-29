@@ -518,6 +518,7 @@
         "min_full": { "type": "integer", "minimum": 1, "description": "Passing verdicts with scope: full needed; at most the number of reviewers." },
         "require_fresh_context": { "type": "boolean", "description": "Every reviewer binds fresh_context: true." },
         "require_read_only": { "type": "boolean", "description": "Every reviewer binds read_only: true, and a verdict counts only if the host attested it." },
+        "require_distinct_identities": { "type": "boolean", "description": "identity@1: every reviewer waits for its result, and a verdict counts only if its host attested an identity whose principal no other counted reviewer has." },
         "require_model_families": {
           "type": "array",
           "uniqueItems": true,

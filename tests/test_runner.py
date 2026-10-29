@@ -109,6 +109,24 @@ def test_replacement_is_per_run(validator: _core.Validator) -> None:
     assert all("replaces" not in d for d in delegations)
 
 
+def test_no_binding_without_identity(validator: _core.Validator) -> None:
+    """Without identity@1 a waiting delegate's wait carries no
+    delegate_principal (§5.17); fixture matching is by subset, so the absent
+    key is checked here."""
+    name = "delegate_identity_needs_identity_extension.json"
+    f = json.loads((RUNTIME / name).read_text())
+    run = _core.Run.start(
+        validator, f["catalog"], f["workflow"], f["inputs"], run_id="run-1", now_ms=0
+    )
+    waits = []
+    for entry in f["script"]:
+        action = run.next()
+        if action["kind"] == "AwaitEvent":
+            waits.append(action)
+        run.submit(action["id"], fill(entry["respond"], action), 0)
+    assert waits and all("delegate_principal" not in w for w in waits)
+
+
 # ---------------------------------------------------------------------------
 # WorkflowRunner with a host
 # ---------------------------------------------------------------------------

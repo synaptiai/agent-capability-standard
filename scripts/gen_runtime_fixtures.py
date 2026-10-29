@@ -3326,6 +3326,354 @@ add(
     ["invoke_started", "loop", "delegated"],
 )
 
+
+def bound_reviewer(**kw):
+    """One waiting reviewer under identity@1, whose host attests who took it."""
+    return {
+        "w": wf(
+            [waiting_reviewer("ra", "a", **kw)],
+            inputs={"change": {"type": "string", "required": True}},
+            requires=["wait@1", "delegation@1", "identity@1"],
+        )
+    }
+
+
+def attested(task, principal, agent="a", **effective):
+    """A delegation whose host attests the principal that took it."""
+    effective.setdefault("read_only", True)
+    effective["identity"] = {"principal": principal, "kind": "agent"} | effective.pop(
+        "identity", {}
+    )
+    return out(accepted=True, task_id=task, agent=agent, effective=effective)
+
+
+def from_principal(task, principal):
+    event = review_done(task, "a")
+    event["principal"] = principal
+    return event
+
+
+add(
+    "delegate_identity_binds_result",
+    "identity@1: a waiting delegate keeps only results from the principal its"
+    " host attested for the delegation (effective.identity); another sender's"
+    " result is dropped and the wait goes on.",
+    bound_reviewer(),
+    [
+        {"expect": inv("delegate", step=0), "respond": attested("t1", "rev-a")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0, "delegate_principal": "rev-a"},
+            "respond": from_principal("t1", "intruder"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0, "delegate_principal": "rev-a"},
+            "respond": from_principal("t1", "rev-a"),
+        },
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {"ra": {"result": {"sender": "rev-a"}}},
+    },
+    ["delegated", "event_dropped", "event_received"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "delegate_identity_malformed",
+    "identity@1: an attested identity without a principal is not an"
+    " agent_identity, so the delegation fails (R402), on its retry too.",
+    bound_reviewer(),
+    [
+        {
+            "expect": inv("delegate", step=0, attempt=attempt),
+            "respond": out(
+                accepted=True,
+                task_id=f"t{attempt}",
+                effective={"identity": {"kind": "agent"}},
+            ),
+        }
+        for attempt in (1, 2)
+    ],
+    {
+        "kind": "Failed",
+        "code": "R402",
+        "step": 0,
+        "message": "effective.identity: an identity needs a string principal",
+    },
+    ["retry", "step_failed"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "delegate_identity_not_object",
+    "identity@1: an attested identity that is not an object fails the"
+    " delegation (R402).",
+    bound_reviewer(),
+    [
+        {
+            "expect": inv("delegate", step=0, attempt=attempt),
+            "respond": out(
+                accepted=True, task_id=f"t{attempt}", effective={"identity": "rev-a"}
+            ),
+        }
+        for attempt in (1, 2)
+    ],
+    {
+        "kind": "Failed",
+        "code": "R402",
+        "step": 0,
+        "message": "effective.identity: an identity must be an object",
+    },
+    ["retry", "step_failed"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "delegate_identity_contradiction",
+    "identity@1: an attested identity whose model_family contradicts the one"
+    " effective attests beside it fails the delegation (R402).",
+    bound_reviewer(),
+    [
+        {
+            "expect": inv("delegate", step=0, attempt=attempt),
+            "respond": attested(
+                f"t{attempt}",
+                "rev-a",
+                model_family="gpt",
+                identity={"model_family": "claude"},
+            ),
+        }
+        for attempt in (1, 2)
+    ],
+    {
+        "kind": "Failed",
+        "code": "R402",
+        "step": 0,
+        "message": 'effective.identity.model_family "claude" contradicts effective.model_family "gpt"',
+    },
+    ["retry", "step_failed"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "delegate_identity_role_contradiction",
+    "identity@1: an attested identity whose role contradicts effective.role"
+    " fails the delegation (R402).",
+    bound_reviewer(),
+    [
+        {
+            "expect": inv("delegate", step=0, attempt=attempt),
+            "respond": attested(
+                f"t{attempt}", "rev-a", role="author", identity={"role": "reviewer"}
+            ),
+        }
+        for attempt in (1, 2)
+    ],
+    {
+        "kind": "Failed",
+        "code": "R402",
+        "step": 0,
+        "message": 'effective.identity.role "reviewer" contradicts effective.role "author"',
+    },
+    ["retry", "step_failed"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "delegate_identity_needs_identity_extension",
+    "Without identity@1 an attested identity is not read: the wait carries no"
+    " delegate_principal, and a correlated result from another principal is kept.",
+    {
+        "w": wf(
+            [waiting_reviewer("ra", "a")],
+            inputs={"change": {"type": "string", "required": True}},
+            requires=["wait@1", "delegation@1"],
+        )
+    },
+    [
+        {
+            "expect": inv("delegate", step=0),
+            "respond": attested("t1", "rev-a"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0},
+            "respond": from_principal("t1", "anyone"),
+        },
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {"ra": {"result": {"sender": "anyone"}}},
+    },
+    ["delegated", "event_received"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "delegate_identity_retry_rebinds",
+    "A retry delegates again, and the new delegation binds its own attested"
+    " principal: a result from the replaced party is dropped, the"
+    " replacement's is kept.",
+    bound_reviewer(),
+    [
+        {
+            "expect": inv("delegate", step=0, attempt=1),
+            "respond": attested("t1", "rev-a"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0, "delegate_principal": "rev-a"},
+            "respond": {"kind": "LivenessLost"},
+        },
+        {
+            "expect": inv("delegate", step=0, attempt=2, replaces="t1"),
+            "respond": attested("t2", "rev-a2"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0, "delegate_principal": "rev-a2"},
+            "respond": from_principal("t2", "rev-a"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0, "delegate_principal": "rev-a2"},
+            "respond": from_principal("t2", "rev-a2"),
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed", "outputs": {"ra": {"task_id": "t2"}}},
+    ["retry", "delegated", "event_dropped", "event_received"],
+    inputs={"change": "c1"},
+)
+
+
+def distinct_quorum(**q):
+    catalog = waiting_quorum()
+    w = catalog["w"]
+    w["workflow_extensions"]["requires"].append("identity@1")
+    w["steps"][2]["quorum"].update({"require_distinct_identities": True} | q)
+    return catalog
+
+
+def reviewer_pair(principal_a, principal_b):
+    return [
+        {"expect": inv("delegate", step=0), "respond": attested("t1", principal_a)},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0},
+            "respond": review_done("t1", "a") | {"principal": principal_a},
+        },
+        {
+            "expect": inv("delegate", step=1),
+            "respond": attested("t2", principal_b, "b"),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 1},
+            "respond": review_done("t2", "b") | {"principal": principal_b},
+        },
+    ]
+
+
+add(
+    "quorum_distinct_identities_met",
+    "require_distinct_identities: two reviewers whose hosts attest different"
+    " principals both count.",
+    distinct_quorum(),
+    reviewer_pair("rev-a", "rev-b"),
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {"gate": {"compliant": True, "tally": {"passes": 2}}},
+    },
+    ["quorum"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "quorum_distinct_identities_same_party",
+    "require_distinct_identities: reviewers a and b were attested as one"
+    " principal, so the second verdict does not count and two passes are not"
+    " met (F504).",
+    distinct_quorum(),
+    reviewer_pair("rev-x", "rev-x"),
+    {
+        "kind": "Failed",
+        "code": "F504",
+        "step": 2,
+        "message": "the review quorum is not met: 1 pass(es), 2 needed",
+    },
+    ["quorum"],
+    inputs={"change": "c1"},
+)
+
+add(
+    "quorum_distinct_identities_unattested",
+    "require_distinct_identities fails closed: a reviewer whose host attests"
+    " no identity does not count (F504).",
+    distinct_quorum(),
+    [
+        {"expect": inv("delegate", step=0), "respond": delegated("t1", "a")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0},
+            "respond": review_done("t1", "a"),
+        },
+        {"expect": inv("delegate", step=1), "respond": attested("t2", "rev-b", "b")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 1},
+            "respond": review_done("t2", "b") | {"principal": "rev-b"},
+        },
+    ],
+    {
+        "kind": "Failed",
+        "code": "F504",
+        "step": 2,
+        "message": "the review quorum is not met: 1 pass(es), 2 needed",
+    },
+    ["quorum"],
+    inputs={"change": "c1"},
+)
+
+
+def family_quorum():
+    catalog = waiting_quorum()
+    w = catalog["w"]
+    for step, family in ((0, "claude"), (1, "gpt")):
+        w["steps"][step]["input_bindings"]["model_family"] = family
+    w["steps"][2]["quorum"]["require_model_families"] = ["claude", "gpt"]
+    return catalog
+
+
+add(
+    "quorum_family_requested_not_attested",
+    "A model family counts only when the host attests it: reviewer b asked for"
+    " gpt, but its delegation attests no family, so gpt is not covered (F504).",
+    family_quorum(),
+    [
+        {
+            "expect": inv("delegate", step=0),
+            "respond": out(
+                accepted=True,
+                task_id="t1",
+                agent="a",
+                effective={"read_only": True, "model_family": "claude"},
+            ),
+        },
+        {
+            "expect": {"kind": "AwaitEvent", "step": 0},
+            "respond": review_done("t1", "a"),
+        },
+        {"expect": inv("delegate", step=1), "respond": delegated("t2", "b")},
+        {
+            "expect": {"kind": "AwaitEvent", "step": 1},
+            "respond": review_done("t2", "b"),
+        },
+    ],
+    {
+        "kind": "Failed",
+        "code": "F504",
+        "step": 2,
+        "message": "the review quorum is not met: no counted verdict from model family gpt",
+    },
+    ["quorum"],
+    inputs={"change": "c1"},
+)
+
 add(
     "delegate_wait_not_accepted",
     "A delegation the host did not accept is an R402, retried like any other:"

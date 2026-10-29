@@ -65,7 +65,7 @@ JSON data, also raise `RunStartError` (with no diagnostics).
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
-| `AwaitEvent` | waits for a matching event until `deadline` | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's), `{"kind": "LivenessLost"}` (R406), or `{"kind": "Error", "code": "R401"/"R402"/"R406", "message": ...}` (any other code is read as R402) |
+| `AwaitEvent` | waits for a matching event until `deadline` (a waiting delegate whose host attested who took it names that principal as `delegate_principal`: only its results count) | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's), `{"kind": "LivenessLost"}` (R406), or `{"kind": "Error", "code": "R401"/"R402"/"R406", "message": ...}` (any other code is read as R402) |
 | `Sleep` | waits until `until` (retry backoff, or a step's `delay`) | — (the runner calls `tick`) |
 | `Completed` / `Failed` | — | the run is over (`Completed` carries `ended` when a gate ended it) |
 
@@ -166,7 +166,9 @@ ontology contract requires, or the step fails (R402).
   host.
 - **Quorums.** A `constrain` step with a `quorum` counts the verdicts
   itself: one per reviewer whose delegate step ran, pinned to `pinned_to`,
-  using the vocabulary, from fresh-context reviewers when required. Any
+  using the vocabulary, from fresh-context reviewers when required, and,
+  with `require_distinct_identities`, one per attested principal. Model
+  families count only as the host attests them. Any
   blocking verdict, too few passes, too few full-sweep passes (`min_full`)
   or uncovered model families fail the step with F504.
 

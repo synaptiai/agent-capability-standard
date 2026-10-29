@@ -23,6 +23,7 @@ const QUORUM_KEYS: &[&str] = &[
     "forbidden_inputs",
     "require_fresh_context",
     "require_read_only",
+    "require_distinct_identities",
     "require_model_families",
     "min_full",
 ];
@@ -490,6 +491,62 @@ pub(crate) fn check(
         }
     }
 
+    // Distinct attested identities (identity@1): a verdict is bound to the
+    // party a reviewer's host attested only when the reviewer waits for its
+    // own result and the verdict is read from that result.
+    let field = "quorum.require_distinct_identities";
+    match q.get("require_distinct_identities") {
+        None | Some(Value::Bool(false)) => {}
+        Some(Value::Bool(true)) => {
+            if declared.require(
+                "identity@1",
+                "'quorum.require_distinct_identities'",
+                |d| loc.locate(d).at("field", field),
+                report,
+            ) {
+                for (r, s) in &delegates {
+                    // A `wait` without wait@1 is V106 already.
+                    if !s.contains_key("wait") {
+                        report.push(s303(
+                            &at,
+                            field,
+                            format!(
+                                "reviewer '{r}' does not wait for its result, so its verdict is not bound to the identity its host attests"
+                            ),
+                        ));
+                    }
+                }
+                let refs: Vec<&Value> = match q.get("verdicts") {
+                    Some(Value::Array(items)) => items.iter().collect(),
+                    Some(v) => vec![v],
+                    None => Vec::new(),
+                };
+                for v in refs {
+                    let root = v
+                        .as_str()
+                        .and_then(|s| match refs::find_refs(s).as_slice() {
+                            [one] => one.parsed.as_ref().ok().map(|p| p.root.clone()),
+                            _ => None,
+                        });
+                    if let Some(root) = root.filter(|r| !reviewers.contains(&r.as_str())) {
+                        report.push(s303(
+                            &at,
+                            field,
+                            format!(
+                                "quorum.verdicts reads '{root}', not a reviewer's own result: anyone could supply such a verdict under a reviewer's name"
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        Some(other) => report.push(s303(
+            &at,
+            field,
+            format!("{field} must be a boolean, found {}", yaml::kind_of(other)),
+        )),
+    }
+
     if let Some(families) = strings(q, "require_model_families", &at, report) {
         // Literal model families can be checked now; any other reviewer's
         // family is only known at runtime.
@@ -824,6 +881,63 @@ mod tests {
             ["F504"]
         );
         assert_eq!(run(with(json!({"require_read_only": "yes"}))), ["S303"]);
+    }
+
+    #[test]
+    fn distinct_identities() {
+        let own = json!({"require_distinct_identities": true,
+                         "verdicts": ["${ra.result: object}", "${rb.result: object}"]});
+        let all = ["delegation@1", "quorum@1", "wait@1", "identity@1"];
+        let waiting = |store: &str, agent: &str, family: &str| {
+            let mut r = reviewer(store, agent, family, json!({}));
+            r["timeout"] = json!("1h");
+            r["wait"] = json!({"event_type": "review.done"});
+            r
+        };
+        let both = |q: Value, requires: &[&str]| {
+            codes(catalog(
+                steps(
+                    waiting("ra", "a", "claude"),
+                    waiting("rb", "b", "gpt"),
+                    with(q),
+                ),
+                requires,
+            ))
+        };
+        // Reviewers that wait, read from their own results: bound.
+        assert!(both(own.clone(), &all).is_empty());
+        // Each reviewer must wait for its own result...
+        assert_eq!(
+            codes(catalog(
+                steps(
+                    reviewer("ra", "a", "claude", json!({})),
+                    reviewer("rb", "b", "gpt", json!({})),
+                    with(own.clone())
+                ),
+                &all
+            )),
+            ["S303", "S303"]
+        );
+        // ...and every verdict must be read from one: a verdict from a
+        // shared inbox or an input could claim any reviewer's name.
+        assert_eq!(
+            both(json!({"require_distinct_identities": true}), &all),
+            ["S303"]
+        );
+        // It belongs to identity@1 (a wait without wait@1 is V106 only),
+        // and is a boolean.
+        assert_eq!(
+            both(own.clone(), &["delegation@1", "quorum@1", "wait@1"]),
+            ["V106"]
+        );
+        assert_eq!(
+            both(own, &["delegation@1", "quorum@1", "identity@1"]),
+            ["V106", "V106"]
+        );
+        assert_eq!(
+            run(with(json!({"require_distinct_identities": "yes"}))),
+            ["S303"]
+        );
     }
 
     #[test]

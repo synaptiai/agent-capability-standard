@@ -188,6 +188,17 @@ gaps on the standard's side (RFC-0003, amendments):
   2.1.0, §4.3): a retrieved source or a search result is evidence to
   ground a claim in, alongside observe, detect, predict, attribute and
   explain.
+- **Delegate identity (§5.15–§5.17, RFC-0004 amendment):** with
+  `identity@1`, `effective.identity` attests who took a delegation; a
+  waiting delegate keeps only results from that principal (dropped and
+  counted otherwise, reason `delegate_identity`; `AwaitEvent` carries
+  `delegate_principal`); a malformed identity, or one contradicting
+  `effective.model_family`/`role`, is R402. `quorum.require_distinct_identities`
+  (V106 without `identity@1`; S303 for a reviewer that does not wait, or
+  a `verdicts` reference that is not a reviewer's own result) counts one
+  verdict per attested principal, read from that reviewer's result,
+  fail-closed. A quorum's model
+  families count only as attested, no longer as requested.
 - **W608 through `invoke` (§5.13):** an `invoke` of a catalog workflow
   that can wait counts as a wait, since the run it invokes invalidates the
   caller's checkpoints.

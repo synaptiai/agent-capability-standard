@@ -919,7 +919,8 @@ delegator's context), `model_family`, `role` and `read_only` (the delegate
 may read but must not change anything: files, repositories, external
 state), and reports the values the host actually used as `effective`; the
 standard does not say how a host enforces `read_only`, only that
-`effective.read_only` attests it. `receive` and `synchronize` accept
+`effective.read_only` attests it. With `identity@1`, `effective` may also
+attest who took the delegation, as `identity` (§5.17). `receive` and `synchronize` accept
 `accept_from` (a list of principals): received items from other principals
 are dropped and counted, and each kept item's `sender` is the
 host-authenticated principal. A literal empty `accept_from` accepts no one
@@ -976,7 +977,8 @@ drops it. The identity behind a principal, and checks on it, are §5.17
 | `forbidden_inputs` | Stores or inputs a reviewer may not depend on, directly or transitively through bindings — including context a recovery loop injects (`${_recovery.*}`). A list applies to every reviewer; a mapping gives each reviewer its own list (keys that are not reviewers: V107; a reviewer it omits has none). Names that are neither inputs nor stores of steps running before the quorum step: V107; a dependency: F504 |
 | `require_fresh_context` | Every reviewer binds `fresh_context: true` (F504 otherwise) |
 | `require_read_only` | Every reviewer binds `read_only: true` (F504 otherwise) |
-| `require_model_families` | Families the reviewers must cover; F504 when every reviewer binds a literal family and they do not cover the set (otherwise checked at runtime) |
+| `require_distinct_identities` | `identity@1` (else V106): every reviewer waits for its own result and every `verdicts` reference reads a reviewer's own result (else S303: a verdict from a shared inbox or an input could claim any reviewer's name), and a verdict counts only if it was read so and its reviewer's host attested an identity (`effective.identity`, §5.17) whose principal no other counted reviewer has |
+| `require_model_families` | Families the reviewers must cover; F504 when every reviewer binds a literal family and they do not cover the set (otherwise checked at runtime). Only an attested family covers one: `effective.model_family`, or the attested identity's; a family a reviewer asks for that its host does not attest covers nothing |
 | `min_full` | Passing verdicts whose `scope` is `full` needed: 1 ≤ `min_full` ≤ number of reviewers. These are passes too, so a `min_full` above `min_pass` raises the passes needed |
 
 A missing required field is S304; a malformed value is S303; `verdicts` and
@@ -986,7 +988,10 @@ A verdict counts once per reviewer: only if its `reviewer_id` is a
 reviewer delegate's agent, its `pinned` equals the resolved `pinned_to`,
 its value is in the vocabulary, it is the first from that reviewer, and
 (when required) the delegate's `effective` settings show a fresh context
-and read-only. A verdict read through a reference to a reviewer step's own
+and read-only and, with `require_distinct_identities`, an attested
+identity whose principal is not another counted reviewer's (the first
+counted keeps it): distinct agent names may be one party. A verdict read
+through a reference to a reviewer step's own
 output (its `result`) is that reviewer's: it counts only if its
 `reviewer_id` is that step's agent.
 A verdict's `scope` (`review_verdict_schema.yaml` 1.1.0) is `full` (it
@@ -1054,6 +1059,20 @@ them beside the agreed state. On a step that does not wait, the host
 receives these inputs with the step and applies them to what it returns,
 and each item it returns MUST carry the `sender_identity` it applied them
 to: the executor reads the always-ask classes from it.
+
+**Delegation.** A delegation's host may attest who took it:
+`effective.identity`, an `agent_identity`. Read only with `identity@1`
+declared, it MUST be one (else R402, and the delegation fails as any
+step does), and its `model_family` and `role`, where given, MUST equal
+`effective.model_family` and `effective.role` (else R402). A waiting
+`delegate` (§5.13) then keeps only results whose principal is that
+identity's: any other is dropped and counted (reason `delegate_identity`),
+and the wait goes on; the wait's `AwaitEvent` names the principal as
+`delegate_principal`. A retry's new delegation binds its own. A host that
+attests no identity is not bound, as before. This catches a host that
+routes the task to another party than it reports, and a peer that answers
+in the delegate's place; it does not protect against a host that lies,
+since the identity is the host's attestation, not a credential (§8.3).
 
 **Always ask.** A step is *marked* when its output holds an always-ask
 item, when it reads a marked store or input (a reference in any of its
@@ -1747,6 +1766,10 @@ either is W609 (§5.12).
   targets 1.1, and declaring 1.0 is W616 (§11.5)
 - Diagnostic severities and warning codes W601–W616 (§9.1, §9.7); codes
   V106–V109, B206, R405, R406
+- With `identity@1`, a delegation's attested identity
+  (`effective.identity`), which binds a waiting delegate's result, and
+  quorum `require_distinct_identities` (§5.16, §5.17); a quorum's model
+  families count only as attested (§5.16)
 - Orchestration extensions and their declaration: triggers, handler steps,
   recovery and escalation, wait, approval, delegation, quorum, sender
   identity (§5.9–§5.17)

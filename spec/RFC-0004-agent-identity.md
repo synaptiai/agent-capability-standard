@@ -202,9 +202,40 @@ before; per §11.4 this is a MINOR change, made in the v1.1.0 candidate.
   but a step that acts on a summary of the item (a `generate` in between)
   would escape it. Following the data through stores catches that.
 
+## Amendment: the delegate's identity
+
+Asked for by the #114 author (E2's `agent_id`) and internally. Without it a
+workflow could not bind a delegation's result to the party that took it:
+`agent` is a target name, not a principal; a quorum counted reviewers by
+name and self-reported `reviewer_id`, so two names one host maps to one
+agent counted twice; and a result from a misrouted delegate was kept
+unless an `accept_from` happened to name the right principal.
+
+- With `identity@1`, a delegation may attest `effective.identity` (an
+  `agent_identity`); a malformed one, or one whose `model_family` or
+  `role` contradicts `effective`'s, is R402.
+- A waiting delegate keeps only results whose principal is the attested
+  one; others are dropped and counted (`delegate_identity`), like
+  `accept_from`, so a peer that injects a correlated event cannot end the
+  step. A retry binds its new delegation's identity.
+- `quorum.require_distinct_identities` counts a verdict only if it is read
+  from its reviewer's own result (the reviewer waits for it; `verdicts`
+  may reference nothing else) and the reviewer has an attested principal no
+  other counted reviewer has. Fail-closed, like `require_read_only`.
+- A quorum's model families count only as attested (`effective`, or the
+  identity's), no longer as requested.
+
+Host attestation detects an honest host's error (fallback routing, a name
+mapped to the wrong session, a retry sent elsewhere) and a peer answering
+in the delegate's place, and makes the host accountable for what it
+reports. It does not protect against a host that lies: that needs a
+host-signed delegation receipt and results signed by a key bound to the
+principal, which stay out of scope (Non-goals). "Distinct principals" is
+not "distinct models or operators".
+
 ## Open questions
 - Whether a future MAJOR replaces `ActionRecord.actor` and
   `ProvenanceRecord.agent` with identities outright.
-- Whether delegation should also attest the delegate's identity in
-  `effective` (today it attests `fresh_context`, `model_family`, `role` and
-  `read_only`).
+- Whether a delegation should be refused up front when the assignee's
+  attested `trust_class` is not acceptable (an `accept_trust_classes` for
+  the assignee, at delegation time).

@@ -1,0 +1,120 @@
+{
+  "description": "identity@1: an attested identity whose model_family contradicts the one effective attests beside it fails the delegation (R402).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "timeout": "2h",
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          },
+          "input_bindings": {
+            "task": {
+              "review": "${change}"
+            },
+            "agent": "a",
+            "read_only": true
+          },
+          "wait": {
+            "event_type": "review.done",
+            "liveness": {
+              "mode": "push",
+              "interval": "10m",
+              "failure_threshold": 3
+            }
+          }
+        }
+      ],
+      "inputs": {
+        "change": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "change": "c1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "agent": "a",
+          "effective": {
+            "model_family": "gpt",
+            "read_only": true,
+            "identity": {
+              "principal": "rev-a",
+              "kind": "agent",
+              "model_family": "claude"
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "agent": "a",
+          "effective": {
+            "model_family": "gpt",
+            "read_only": true,
+            "identity": {
+              "principal": "rev-a",
+              "kind": "agent",
+              "model_family": "claude"
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0,
+    "message": "effective.identity.model_family \"claude\" contradicts effective.model_family \"gpt\""
+  },
+  "trace_kinds": [
+    "retry",
+    "step_failed"
+  ]
+}

@@ -21,6 +21,8 @@ struct Reviewer {
     family: Option<String>,
     fresh: bool,
     read_only: bool,
+    /// The principal its host attested (`effective.identity`, identity@1).
+    principal: Option<String>,
 }
 
 /// The values a frame's references read (as in the step algorithm).
@@ -47,7 +49,9 @@ fn strings(q: &Map<String, Value>, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
+/// `identities`: the workflow declares identity@1, so a reviewer's attested
+/// identity is read.
+pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame, identities: bool) -> Verdict {
     let b = Read(frame);
     // One reference, or a list of them (one per reviewer step that waited
     // for its result): each a verdict or a list of verdicts. A verdict read
@@ -86,6 +90,8 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
     let min_full = q.get("min_full").and_then(count).unwrap_or(0);
     let need_fresh = q.get("require_fresh_context") == Some(&Value::Bool(true));
     let need_read_only = q.get("require_read_only") == Some(&Value::Bool(true));
+    let need_distinct =
+        identities && q.get("require_distinct_identities") == Some(&Value::Bool(true));
     let families: BTreeSet<String> = strings(q, "require_model_families").into_iter().collect();
 
     // Reviewer delegates: the agent each was bound to, and what the host
@@ -105,9 +111,18 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
             .or_else(|| out.and_then(|o| o.get("agent")))
             .and_then(Value::as_str)
             .map(str::to_string);
+        // Only what the host attests counts, as for fresh_context and
+        // read_only: a requested family is the workflow's own claim.
+        let identity = effective
+            .and_then(|e| e.get("identity"))
+            .filter(|_| identities);
         let family = effective
             .and_then(|e| e.get("model_family"))
-            .or_else(|| bound.get("model_family"))
+            .or_else(|| identity.and_then(|i| i.get("model_family")))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let principal = identity
+            .and_then(|i| i.get("principal"))
             .and_then(Value::as_str)
             .map(str::to_string);
         let attested = |key: &str| {
@@ -123,6 +138,7 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
                 family,
                 fresh: attested("fresh_context"),
                 read_only: attested("read_only"),
+                principal,
             },
         );
     }
@@ -132,6 +148,7 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
         .collect();
 
     let mut counted: BTreeSet<String> = BTreeSet::new();
+    let mut principals: BTreeSet<String> = BTreeSet::new();
     let (mut passes, mut blocks, mut abstains, mut full_passes) = (0u64, 0u64, 0u64, 0u64);
     let mut covered: BTreeSet<String> = BTreeSet::new();
     let mut violations: Vec<Value> = Vec::new();
@@ -182,10 +199,38 @@ pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame) -> Verdict {
             violations.push(reject("the reviewer was not attested read-only"));
             continue;
         }
-        if !counted.insert(id.to_string()) {
+        if counted.contains(id) {
             violations.push(reject("a second verdict from the same reviewer"));
             continue;
         }
+        // Distinct reviewer names may be one party: with
+        // require_distinct_identities, each counted reviewer needs an
+        // attested identity of its own.
+        if need_distinct {
+            // Only a verdict read from the reviewer's own result is bound to
+            // the party its host attested; the validator refuses others, and
+            // so does this, fail-closed.
+            if source.is_none() {
+                violations.push(reject("it is not read from its reviewer's own result"));
+                continue;
+            }
+            match &reviewer.principal {
+                None => {
+                    violations.push(reject("the reviewer has no attested identity"));
+                    continue;
+                }
+                Some(p) if principals.contains(p) => {
+                    violations.push(reject(
+                        "its attested identity is another counted reviewer's",
+                    ));
+                    continue;
+                }
+                Some(p) => {
+                    principals.insert(p.clone());
+                }
+            }
+        }
+        counted.insert(id.to_string());
         if let Some(f) = &reviewer.family {
             covered.insert(f.clone());
         }

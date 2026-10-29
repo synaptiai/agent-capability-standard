@@ -1235,6 +1235,15 @@ impl<'a> Machine<'a> {
                 let accept_from = string_list(inputs, "accept_from");
                 let sender_check = string_list(inputs, "sender_check");
                 let accept_trust_classes = string_list(inputs, "accept_trust_classes");
+                let delegate_principal = if wf.extension("identity@1") {
+                    self.frame_ref()
+                        .cur
+                        .delegated
+                        .as_ref()
+                        .and_then(super::delegate_principal)
+                } else {
+                    None
+                };
                 return self.emit(
                     Body::AwaitEvent {
                         step: index,
@@ -1251,6 +1260,7 @@ impl<'a> Machine<'a> {
                         accept_from,
                         sender_check,
                         accept_trust_classes,
+                        delegate_principal,
                         liveness: wait.get("liveness").cloned(),
                         deadline,
                     },
@@ -1264,7 +1274,9 @@ impl<'a> Machine<'a> {
         }
         if step.capability == "constrain" && wf.extension("quorum@1") {
             if let Some(Value::Object(q)) = step.raw.get("quorum") {
-                let result = quorum::evaluate(q, self.frame_ref());
+                let identities =
+                    self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
+                let result = quorum::evaluate(q, self.frame_ref(), identities);
                 self.trace_step("quorum", json!({"tally": result.output["tally"]}));
                 self.frame().cur.output = Some(result.output);
                 if !result.compliant {
@@ -1411,9 +1423,19 @@ impl<'a> Machine<'a> {
                 format!("{detail}, which the '{capability}' contract requires"),
             );
         }
+        let wf = &self.program.workflows[&self.frame_ref().workflow];
+        // A delegation's attested identity is read under identity@1 only.
         if step.capability == "delegate"
             && self.frame_ref().cur.delegated.is_none()
-            && self.program.workflows[&self.frame_ref().workflow].extension("wait@1")
+            && wf.extension("identity@1")
+        {
+            if let Some(e) = super::delegate_identity_error(&value) {
+                return self.exec_error("R402", e);
+            }
+        }
+        if step.capability == "delegate"
+            && self.frame_ref().cur.delegated.is_none()
+            && wf.extension("wait@1")
             && step.raw.get("wait").is_some_and(Value::is_object)
         {
             if value.get("accepted") != Some(&Value::Bool(true)) {
@@ -1426,7 +1448,13 @@ impl<'a> Machine<'a> {
                     "a delegation the step waits on needs a task_id to match its result",
                 );
             }
-            self.trace_step("delegated", json!({"task_id": value.get("task_id")}));
+            let mut traced = json!({"task_id": value.get("task_id")});
+            if wf.extension("identity@1") {
+                if let Some(p) = super::delegate_principal(&value) {
+                    traced["principal"] = json!(p);
+                }
+            }
+            self.trace_step("delegated", traced);
             let f = self.frame();
             f.replaces.retain(|r| r.step != step.index);
             f.cur.delegated = Some(value);
@@ -1518,8 +1546,19 @@ impl<'a> Machine<'a> {
             return self.fail_run("R402", "an event answered an action that awaits none");
         };
         // Without identity@1 the run is as before: no identity is kept.
-        let identity = identity
-            .filter(|_| self.program.workflows[&self.frame_ref().workflow].extension("identity@1"));
+        let identities = self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
+        let identity = identity.filter(|_| identities);
+        // A waiting delegate's binding comes from its delegation, not from
+        // the action, which only tells the host.
+        let delegate_principal = identities
+            .then(|| {
+                self.frame_ref()
+                    .cur
+                    .delegated
+                    .as_ref()
+                    .and_then(super::delegate_principal)
+            })
+            .flatten();
         // An identity names its principal; the response may give it once.
         let principal = principal.or_else(|| {
             identity
@@ -1560,6 +1599,13 @@ impl<'a> Machine<'a> {
             .is_some_and(|a| !principal.as_ref().is_some_and(|p| a.contains(p)))
         {
             Some("accept_from".to_string())
+        } else if delegate_principal
+            .as_ref()
+            .is_some_and(|d| principal.as_ref() != Some(d))
+        {
+            // A waiting delegate keeps only what the party its host
+            // attested sends (§5.17).
+            Some("delegate_identity".to_string())
         } else if !listed(sender_check, &identity, "authenticated_by") {
             Some("sender_check".to_string())
         } else if !listed(accept_trust_classes, &identity, "trust_class") {

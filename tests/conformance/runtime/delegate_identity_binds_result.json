@@ -1,0 +1,133 @@
+{
+  "description": "identity@1: a waiting delegate keeps only results from the principal its host attested for the delegation (effective.identity); another sender's result is dropped and the wait goes on.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "timeout": "2h",
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          },
+          "input_bindings": {
+            "task": {
+              "review": "${change}"
+            },
+            "agent": "a",
+            "read_only": true
+          },
+          "wait": {
+            "event_type": "review.done",
+            "liveness": {
+              "mode": "push",
+              "interval": "10m",
+              "failure_threshold": 3
+            }
+          }
+        }
+      ],
+      "inputs": {
+        "change": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "change": "c1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "agent": "a",
+          "effective": {
+            "read_only": true,
+            "identity": {
+              "principal": "rev-a",
+              "kind": "agent"
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "delegate_principal": "rev-a"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t1",
+          "reviewer_id": "a",
+          "value": "approve",
+          "pinned": "c1"
+        },
+        "principal": "intruder"
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "delegate_principal": "rev-a"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t1",
+          "reviewer_id": "a",
+          "value": "approve",
+          "pinned": "c1"
+        },
+        "principal": "rev-a"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "ra": {
+        "result": {
+          "sender": "rev-a"
+        }
+      }
+    }
+  },
+  "trace_kinds": [
+    "delegated",
+    "event_dropped",
+    "event_received"
+  ]
+}

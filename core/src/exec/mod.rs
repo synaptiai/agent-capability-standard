@@ -145,6 +145,11 @@ pub enum Body {
         sender_check: Option<Vec<String>>,
         #[serde(default)]
         accept_trust_classes: Option<Vec<String>>,
+        /// `identity@1`: the principal a waiting delegate's host attested
+        /// for the delegation (`effective.identity`); only its results are
+        /// kept (§5.17).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delegate_principal: Option<String>,
         liveness: Option<Value>,
         deadline: Option<u64>,
     },
@@ -885,6 +890,38 @@ impl Frame {
             replaces: Vec::new(),
         }
     }
+}
+
+/// What is wrong with a delegation's attested identity
+/// (`effective.identity`, `identity@1`, §5.17), if anything: it must be an
+/// `agent_identity`, and its `model_family` and `role` must agree with the
+/// ones `effective` attests beside it.
+pub(crate) fn delegate_identity_error(delegation: &Value) -> Option<String> {
+    let effective = delegation.get("effective")?;
+    let identity = effective.get("identity").filter(|v| !v.is_null())?;
+    if let Some(e) = identity_error(identity) {
+        return Some(format!("effective.identity: {e}"));
+    }
+    for key in ["model_family", "role"] {
+        if let (Some(a), Some(b)) = (identity.get(key), effective.get(key)) {
+            if a != b {
+                return Some(format!(
+                    "effective.identity.{key} {a} contradicts effective.{key} {b}"
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// The principal a delegation's host attested (`effective.identity`).
+pub(crate) fn delegate_principal(delegation: &Value) -> Option<String> {
+    delegation
+        .get("effective")?
+        .get("identity")?
+        .get("principal")?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// Why `v` is not an `agent_identity` (`schemas/agent_identity_schema.yaml`),

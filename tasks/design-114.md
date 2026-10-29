@@ -682,8 +682,9 @@ with `require_fresh_context` — whose delegate output's
 `effective.fresh_context` is true. Its `scope` only decides whether a pass
 is a full sweep (`full`; anything else is a delta). With
 `require_model_families`, the
-families of counted reviewers (`effective.model_family`, else the bound
-`model_family`) must cover the set. Compliant iff no counted verdict is a
+families of counted reviewers (`effective.model_family`, or the attested
+identity's; since H6b no longer the bound `model_family`) must cover the
+set. Compliant iff no counted verdict is a
 blocking value, passes ≥ `min_pass`, passes with scope `full` ≥ `min_full`
 and coverage holds. Output:
 `{compliant, violations, tally: {passes, blocks, abstains, full_passes, voters},

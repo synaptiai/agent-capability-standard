@@ -535,7 +535,22 @@ evaluated properly (maintainers' call, demand from #114 and internally).
 - [x] §5.13: replacement is per run (a parent loop's new child run names
   none of the old run's delegations); fixture
   `delegate_wait_replaced_per_run` and a test that the key is absent.
-- [ ] Open the PR to main (closes #114, #115).
-- [ ] Evaluate `effective` delegate identity (RFC-0003 open question):
-  options, threat model, interplay with identity@1 and quorum; decide.
+- [x] Open the PR to main (closes #114, #115): #116.
+- [x] Evaluate `effective` delegate identity (RFC-0003 open question).
+  Independent evaluation (gap, trust model, three designs); user chose the
+  enforced binding, and family counted only as attested. Implemented:
+  `effective.identity` (identity@1; R402 if malformed or contradicting
+  model_family/role); a waiting delegate keeps only results from the
+  attested principal (`delegate_identity` drops; `AwaitEvent.delegate_principal`);
+  `quorum.require_distinct_identities` (V106, S303 for a reviewer that
+  does not wait; fail-closed at run time); quorum families attested only.
+  Spec §5.15–§5.17, Appendix C, RFC-0004 amendment, RFC-0003 question
+  closed, ontology, JSON schema, guides, changelogs; eleven runtime
+  fixtures, a validator unit test and an absence test.
+  Review fixes: `require_distinct_identities` could be met by verdicts not
+  read from a reviewer's own result (an input, a shared inbox): now S303
+  statically and refused at run time; the binding is taken from the
+  delegation, not the pending action (a forged unsigned snapshot could
+  drop it); the no-extension fixture now proves the binding is off; a
+  redundant S303 beside V106 dropped; messages pinned; design note.
 

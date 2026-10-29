@@ -1,0 +1,168 @@
+{
+  "description": "A retry delegates again, and the new delegation binds its own attested principal: a result from the replaced party is dropped, the replacement's is kept.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "timeout": "2h",
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          },
+          "input_bindings": {
+            "task": {
+              "review": "${change}"
+            },
+            "agent": "a",
+            "read_only": true
+          },
+          "wait": {
+            "event_type": "review.done",
+            "liveness": {
+              "mode": "push",
+              "interval": "10m",
+              "failure_threshold": 3
+            }
+          }
+        }
+      ],
+      "inputs": {
+        "change": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "change": "c1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "agent": "a",
+          "effective": {
+            "read_only": true,
+            "identity": {
+              "principal": "rev-a",
+              "kind": "agent"
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "delegate_principal": "rev-a"
+      },
+      "respond": {
+        "kind": "LivenessLost"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 2,
+        "replaces": "t1"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "agent": "a",
+          "effective": {
+            "read_only": true,
+            "identity": {
+              "principal": "rev-a2",
+              "kind": "agent"
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "delegate_principal": "rev-a2"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t2",
+          "reviewer_id": "a",
+          "value": "approve",
+          "pinned": "c1"
+        },
+        "principal": "rev-a"
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "delegate_principal": "rev-a2"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t2",
+          "reviewer_id": "a",
+          "value": "approve",
+          "pinned": "c1"
+        },
+        "principal": "rev-a2"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "ra": {
+        "task_id": "t2"
+      }
+    }
+  },
+  "trace_kinds": [
+    "retry",
+    "delegated",
+    "event_dropped",
+    "event_received"
+  ]
+}
