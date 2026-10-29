@@ -1,11 +1,11 @@
 # Standard version: 1.1.0
 # The nine orchestrator workflows the author of #114 ported to the v1.1
-# candidate (reduced, generic names), revision 1.1d (gate `end`, step
+# candidate (reduced, generic names), revision 1.1e (gate `end`, step
 # `delay`, `after_deferral`, a waiting `delegate` per reviewer, annotated
-# `transform.output` references), kept as contributed. They validate with
-# one warning: W608 on checkin_recovery's mutate, whose checkpoint comes
-# before the escalation, an invoke of a workflow that waits. The runtime
-# fixtures named orchestrator_* script runs of these workflows.
+# `transform.output` references, a checkpoint after checkin_recovery's
+# escalation), kept as contributed. They validate `--strict` with no
+# warnings. The runtime fixtures named orchestrator_* script runs of these
+# workflows.
 intake_triage:
   goal: Turn one incoming item (owner request, mention, GitHub event, mail, thread report) into exactly
     one routed next action on the board.
@@ -2079,6 +2079,17 @@ checkin_recovery:
           topic: checkin_stalled_rows
           context: ${rows_out}
     after_deferral: run
+  - capability: checkpoint
+    purpose: 'Snapshot state.json and the board again before the next check-in is scheduled. The escalation
+      waits for the owner, so the first checkpoint no longer covers the mutate (W608). Runs after a deferred
+      reminder (after_deferral: run): The mutate reads it.'
+    risk: low
+    mutation: true
+    store_as: schedule_checkpoint_out
+    input_bindings:
+      scope: memory_folder
+      label: next_checkin
+    after_deferral: run
   - capability: mutate
     purpose: 'Schedule the next check-in for work still running (schedule), instead of waiting passively.
       Runs after a deferred reminder (after_deferral: run): The next check-in is due whether or not a
@@ -2093,7 +2104,7 @@ checkin_recovery:
       operation:
         kind: schedule
         plan: '${recovery_plan_out.steps: array<object>}'
-      checkpoint_id: ${checkpoint_out.checkpoint_id}
+      checkpoint_id: ${schedule_checkpoint_out.checkpoint_id}
     approval:
       approver:
         kind: standing_mandate

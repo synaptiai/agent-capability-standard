@@ -1,5 +1,5 @@
 {
-  "description": "A relayed answer is dropped, then the owner's own answer is kept.",
+  "description": "A relayed answer is dropped, then the owner's own answer is kept. The owner's item claims sender content-claim in its content; the item's sender is the principal, owner.",
   "catalog": {
     "w": {
       "goal": "g",
@@ -77,7 +77,7 @@
             "kind": "human"
           },
           "canonical": {
-            "sender": "owner",
+            "sender": "content-claim",
             "text": "yes"
           }
         },
@@ -95,7 +95,7 @@
           {
             "sender": "owner",
             "canonical": {
-              "sender": "owner"
+              "sender": "content-claim"
             }
           }
         ]

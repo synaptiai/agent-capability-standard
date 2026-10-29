@@ -5731,7 +5731,7 @@ orchestrator(
 
 orchestrator(
     "orchestrator_checkin_sweep",
-    "An unattended sweep waits its one-minute sample delay, skips restarts the policy refuses and defers the reminder's send and the invoke that ran it; the escalation (owner_decision queues the question and ends: not an interrupt), the next check-in, verify and the audit run (after_deferral: run).",
+    "An unattended sweep waits its one-minute sample delay, skips restarts the policy refuses and defers the reminder's send and the invoke that ran it; the escalation (owner_decision queues the question and ends: not an interrupt), the checkpoint after it, the next check-in, verify and the audit run (after_deferral: run).",
     "checkin_recovery",
     [
         *orch_steps(["checkin_recovery"], (0, "recall"), (1, "observe")),
@@ -5773,10 +5773,14 @@ orchestrator(
             (6, "constrain", {"compliant": False}),
             (7, "persist"),
         ),
+        *orch_steps(
+            ["checkin_recovery"],
+            (12, "checkpoint", {"checkpoint_id": "cp-schedule_checkpoint_out"}),
+        ),
         {
             "expect": {
                 "kind": "RequestApproval",
-                "step": 12,
+                "step": 13,
                 "frame": ["checkin_recovery"],
                 "approver": {"kind": "standing_mandate", "mandate_ref": "mandates"},
             },
@@ -5784,10 +5788,10 @@ orchestrator(
         },
         *orch_steps(
             ["checkin_recovery"],
-            (12, "mutate"),
-            (13, "verify"),
-            (14, "persist"),
-            (15, "audit"),
+            (13, "mutate"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
         ),
     ],
     {
@@ -5814,7 +5818,7 @@ orchestrator(
 
 orchestrator(
     "orchestrator_checkin_escalation_owner",
-    "An unattended sweep interrupts the owner: the escalation asks, the answer wait correlates on the question's topic (checkin_stalled_rows), the owner's answer is applied through delegate_to_thread, and the next check-in takes a fresh checkpoint, since the escalation's waits invalidated the earlier ones; only the reminder chain is deferred.",
+    "An unattended sweep interrupts the owner: the escalation asks, the answer wait correlates on the question's topic (checkin_stalled_rows), and the owner's answer is applied through delegate_to_thread. The checkpoint after the escalation authorises the next check-in, so no new one is asked for; only the reminder chain is deferred.",
     "checkin_recovery",
     [
         *orch_steps(["checkin_recovery"], (0, "recall"), (1, "observe")),
@@ -5926,29 +5930,25 @@ orchestrator(
         *orch_steps(
             ["checkin_recovery", "owner_decision"], (14, "verify"), (15, "audit")
         ),
+        *orch_steps(
+            ["checkin_recovery"],
+            (12, "checkpoint", {"checkpoint_id": "cp-schedule_checkpoint_out"}),
+        ),
         {
             "expect": {
                 "kind": "RequestApproval",
-                "step": 12,
+                "step": 13,
                 "frame": ["checkin_recovery"],
                 "approver": {"kind": "standing_mandate", "mandate_ref": "mandates"},
             },
             "respond": approve("d1", who=("mandate",)),
         },
-        {
-            "expect": {
-                "kind": "CreateCheckpoint",
-                "step": 12,
-                "frame": ["checkin_recovery"],
-            },
-            "respond": {"kind": "Checkpoint", "checkpoint_id": "cp1"},
-        },
         *orch_steps(
             ["checkin_recovery"],
-            (12, "mutate"),
-            (13, "verify"),
-            (14, "persist"),
-            (15, "audit"),
+            (13, "mutate"),
+            (14, "verify"),
+            (15, "persist"),
+            (16, "audit"),
         ),
     ],
     {

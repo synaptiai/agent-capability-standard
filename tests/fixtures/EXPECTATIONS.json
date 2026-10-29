@@ -605,10 +605,7 @@
   "pass_orchestrator_port": {
     "should_pass": true,
     "level": "L4",
-    "category": "advanced",
-    "expected_warning_codes": [
-      "W608"
-    ]
+    "category": "advanced"
   },
   "pass_end_delay_after_deferral": {
     "should_pass": true,

@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   warns once per feature, so a forgotten version bump no longer passes
   silently
 - **The #114 author's orchestrator workflows as conformance fixtures.** The
-  nine workflows they ported to the v1.1 candidate (revision 1.1d, which
+  nine workflows they ported to the v1.1 candidate (revision 1.1e, which
   uses gate `end`, `delay`, `after_deferral` and a waiting `delegate` per
   reviewer) are a static fixture (`pass_orchestrator_port`, kept as
   contributed), and fifteen runtime fixtures (`orchestrator_*`) script runs of
@@ -294,8 +294,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **W608 sees waits in invoked workflows.** An `invoke` of a catalog
   workflow that can wait (any of its steps, handlers included, or one it
   invokes) counts as a wait, so a checkpoint taken before it no longer silently covers a later
-  `mutate` or `send`. The #114 port's checkin_recovery mutate is the first
-  case found.
+  `mutate` or `send`. The #114 port's checkin_recovery mutate was the first
+  case found; revision 1.1e checkpoints again after the escalation.
 - **A recovery loop replaces every waiting delegate it runs again.** A loop
   from a later step (a blocked quorum, say) back to before the reviewers
   delegated them again without `replaces`, so the host could not cancel

@@ -62,7 +62,7 @@ the Rust core in `core/`).
   `cargo test --test runtime` (each also replayed through a snapshot and
   restore before every step) and `tests/test_runner.py`. Fifteen of them
   (`orchestrator_*`) script runs of the workflows an adopter ported to the
-  candidate (reduced from production, generic names; revision 1.1d), kept
+  candidate (reduced from production, generic names; revision 1.1e), kept
   as contributed
   (`tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`). The
   `domain_*` ones run reference domain workflows. Twenty (`gap*`) are an

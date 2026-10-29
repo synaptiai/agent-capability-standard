@@ -86,7 +86,7 @@
       "respond": {
         "kind": "LivenessLost"
       },
-      "at": 60000
+      "at": 180000
     }
   ],
   "end": {

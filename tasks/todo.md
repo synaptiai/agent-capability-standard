@@ -517,3 +517,14 @@ the gap fixtures verbatim.
   to checkpoint after the invoke; §5.13 says the check is conservative (a
   checkpoint the child takes after its last wait would cover the caller).
 
+#### H5e: revision 1.1e and four fixed gap fixtures (#114 comment 6491392625)
+- [x] `pass_orchestrator_port` is 1.1e: checkin_recovery checkpoints again
+  after the escalation (step 12, `after_deferral: run`) and the mutate
+  binds it; no W608 now, so EXPECTATIONS expects none.
+- [x] `orchestrator_checkin_sweep` and `orchestrator_checkin_escalation_owner`
+  re-recorded and checked by hand: the step-12 checkpoint authorises the
+  mutate, so the owner path no longer asks for a new one; ends unchanged.
+- [x] The four fixed contrib fixtures replace theirs (gap3 liveness lost
+  at 3 and 6 minutes, re-check deadline 1h3m; gap5's content claims
+  another sender, the item's sender is the principal); checked by hand.
+

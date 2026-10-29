@@ -1,5 +1,5 @@
 {
-  "description": "An unattended sweep interrupts the owner: the escalation asks, the answer wait correlates on the question's topic (checkin_stalled_rows), the owner's answer is applied through delegate_to_thread, and the next check-in takes a fresh checkpoint, since the escalation's waits invalidated the earlier ones; only the reminder chain is deferred.",
+  "description": "An unattended sweep interrupts the owner: the escalation asks, the answer wait correlates on the question's topic (checkin_stalled_rows), and the owner's answer is applied through delegate_to_thread. The checkpoint after the escalation authorises the next check-in, so no new one is asked for; only the reminder chain is deferred.",
   "catalog": {
     "delegate_to_thread": {
       "goal": "Give one task to one thread with a self-contained brief, prove the thread is alive, and accept its result only after checking it at the source.",
@@ -1346,6 +1346,18 @@
           "after_deferral": "run"
         },
         {
+          "capability": "checkpoint",
+          "purpose": "Snapshot state.json and the board again before the next check-in is scheduled. The escalation waits for the owner, so the first checkpoint no longer covers the mutate (W608). Runs after a deferred reminder (after_deferral: run): The mutate reads it.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "schedule_checkpoint_out",
+          "input_bindings": {
+            "scope": "memory_folder",
+            "label": "next_checkin"
+          },
+          "after_deferral": "run"
+        },
+        {
           "capability": "mutate",
           "purpose": "Schedule the next check-in for work still running (schedule), instead of waiting passively. Runs after a deferred reminder (after_deferral: run): The next check-in is due whether or not a reminder went out.",
           "risk": "high",
@@ -1359,7 +1371,7 @@
               "kind": "schedule",
               "plan": "${recovery_plan_out.steps: array<object>}"
             },
-            "checkpoint_id": "${checkpoint_out.checkpoint_id}"
+            "checkpoint_id": "${schedule_checkpoint_out.checkpoint_id}"
           },
           "approval": {
             "approver": {
@@ -2456,8 +2468,25 @@
     },
     {
       "expect": {
-        "kind": "RequestApproval",
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
         "step": 12,
+        "frame": [
+          "checkin_recovery"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp-schedule_checkpoint_out",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 13,
         "frame": [
           "checkin_recovery"
         ],
@@ -2478,22 +2507,9 @@
     },
     {
       "expect": {
-        "kind": "CreateCheckpoint",
-        "step": 12,
-        "frame": [
-          "checkin_recovery"
-        ]
-      },
-      "respond": {
-        "kind": "Checkpoint",
-        "checkpoint_id": "cp1"
-      }
-    },
-    {
-      "expect": {
         "kind": "InvokeCapability",
         "capability": "mutate",
-        "step": 12,
+        "step": 13,
         "frame": [
           "checkin_recovery"
         ]
@@ -2510,7 +2526,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "verify",
-        "step": 13,
+        "step": 14,
         "frame": [
           "checkin_recovery"
         ]
@@ -2528,7 +2544,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "persist",
-        "step": 14,
+        "step": 15,
         "frame": [
           "checkin_recovery"
         ]
@@ -2545,7 +2561,7 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "audit",
-        "step": 15,
+        "step": 16,
         "frame": [
           "checkin_recovery"
         ]

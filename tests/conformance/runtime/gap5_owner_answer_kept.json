@@ -1,5 +1,5 @@
 {
-  "description": "The owner's own answer (principal owner) is kept; the item's sender is the principal.",
+  "description": "The owner's own answer (principal owner) is kept. Its content claims sender content-claim; the item's sender is the principal, owner.",
   "catalog": {
     "w": {
       "goal": "g",
@@ -52,7 +52,7 @@
             "kind": "human"
           },
           "canonical": {
-            "sender": "owner",
+            "sender": "content-claim",
             "text": "yes"
           }
         },
@@ -70,7 +70,7 @@
           {
             "sender": "owner",
             "canonical": {
-              "sender": "owner"
+              "sender": "content-claim"
             }
           }
         ]
