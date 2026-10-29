@@ -1,7 +1,7 @@
 ---
 name: recall
 description: Retrieve prior decisions, rationale, and learned patterns from memory to apply consistently. Use when needing context from previous interactions, looking up past decisions, or ensuring consistency with prior reasoning.
-argument-hint: "[query] [memory_scope session|project|global] [time_range]"
+argument-hint: "[key] [default]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -26,16 +26,15 @@ Execute **recall** to retrieve relevant prior decisions, rationale, and patterns
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `query` | Yes | string | What to recall: topic, decision type, or pattern name |
-| `memory_scope` | No | enum | Where to search: `session` (current), `project` (CLAUDE.md), `global` (all). Default: `project` |
-| `time_range` | No | object | Filter by time: `{ after: "2024-01-01", before: "2024-01-31" }` |
-| `include_rationale` | No | boolean | Whether to include decision rationale. Default: true |
-| `similarity_threshold` | No | number | Minimum relevance score (0.0-1.0). Default: 0.5 |
+| `key` | Yes | string | Storage key |
+| `default` | No | any | Default if not found |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
-1) **Parse query intent**: Understand what is being recalled
-   - Identify if query is about a decision, pattern, fact, or context
+1) **Parse query intent**: Understand what the `key` asks to recall
+   - Identify if it is about a decision, pattern, fact, or context
    - Extract key terms for memory search
    - Determine if exact match or semantic similarity needed
 
@@ -54,7 +53,7 @@ Execute **recall** to retrieve relevant prior decisions, rationale, and patterns
    - Relevance to query terms
    - Recency (more recent = higher weight unless historical needed)
    - Authority (explicit decisions > implicit patterns)
-   - Filter below similarity_threshold
+   - Filter out matches below a similarity threshold
 
 5) **Extract rationale**: For each recalled item, capture reasoning
    - Original decision context
@@ -72,7 +71,9 @@ Execute **recall** to retrieve relevant prior decisions, rationale, and patterns
 Return a structured object:
 
 ```yaml
-recalled:
+found: boolean  # Whether anything matched the key; when false, data is the `default` input
+stored_at: string | null  # ISO 8601 date-time the top match was recorded
+data:  # Recalled items, best match first
   - id: string  # Unique identifier for this memory
     type: decision | pattern | fact | context
     content: string  # The recalled information
@@ -102,12 +103,16 @@ assumptions: array[string]  # Assumptions about memory validity
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `recalled` | array[object] | List of retrieved memories |
-| `recalled[].type` | enum | Kind of memory: decision, pattern, fact, or context |
-| `recalled[].rationale` | string | Explanation for why decision was made |
-| `recalled[].relevance_score` | number | How well this matches the query |
+| `data` | any | The recalled memories (here a list, best match first), or the `default` input when nothing matched |
+| `found` | boolean | Whether anything matched the key |
+| `stored_at` | string | ISO 8601 date-time the top match was originally recorded |
+| `data[].type` | enum | Kind of memory: decision, pattern, fact, or context |
+| `data[].rationale` | string | Explanation for why decision was made |
+| `data[].relevance_score` | number | How well this matches the query |
 | `consistency_check` | object | Whether recalled items contradict each other |
 | `confidence` | number | Overall confidence in recall quality |
+| `evidence_anchors` | array | Sources for recalled items |
+| `assumptions` | array | Assumptions about memory validity |
 
 ## Examples
 
@@ -115,14 +120,14 @@ assumptions: array[string]  # Assumptions about memory validity
 
 **Input:**
 ```yaml
-query: "error handling approach"
-memory_scope: project
-include_rationale: true
+key: "error handling approach"
 ```
 
 **Output:**
 ```yaml
-recalled:
+found: true
+stored_at: "2024-01-10T09:15:00Z"
+data:
   - id: "decision_err_001"
     type: decision
     content: "Use Result<T, Error> pattern for all fallible operations; avoid exceptions"
@@ -171,15 +176,16 @@ assumptions:
 
 **Input:**
 ```yaml
-query: "user's preferred output format"
-memory_scope: session
-time_range:
-  after: "2024-01-16T00:00:00Z"
+key: "user's preferred output format"
 ```
+
+Search session memory only, from 2024-01-16 onward.
 
 **Output:**
 ```yaml
-recalled:
+found: true
+stored_at: "2024-01-16T10:30:00Z"
+data:
   - id: "ctx_fmt_001"
     type: context
     content: "User prefers YAML output over JSON for configuration files"
@@ -216,14 +222,14 @@ assumptions:
 
 **Input:**
 ```yaml
-query: "database choice"
-memory_scope: project
-include_rationale: true
+key: "database choice"
 ```
 
 **Output:**
 ```yaml
-recalled:
+found: true
+stored_at: "2024-01-05T14:00:00Z"
+data:
   - id: "decision_db_001"
     type: decision
     content: "Use PostgreSQL for all persistent storage"
@@ -291,7 +297,7 @@ next_actions:
 - Do not recall or expose credentials, secrets, or PII from memory
 - Respect memory scope boundaries; do not access global when session requested
 - Flag stale memories (>30 days) with lower confidence
-- Do not fabricate memories; return empty if nothing found
+- Do not fabricate memories; if nothing is found return `found: false` with `data` set to the `default` input (or null)
 
 ## Composition Patterns
 

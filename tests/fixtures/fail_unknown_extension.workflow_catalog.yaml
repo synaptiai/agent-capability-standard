@@ -1,0 +1,13 @@
+# Standard version: 1.1.0
+# An extension the validator does not implement (STANDARD v1.1 §5.9): V106.
+needs_teleport:
+  goal: Depend on an extension nobody implements.
+  risk: low
+  workflow_extensions:
+    requires: [teleport@1, wait@2]
+  steps:
+  - capability: observe
+    purpose: Observe.
+    store_as: observe_out
+    input_bindings:
+      target: "system"

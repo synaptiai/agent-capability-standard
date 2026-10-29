@@ -1,0 +1,45 @@
+# Standard version: 1.1.0
+# Lost liveness (R406) and an expired wait (R401) are distinct codes, so a
+# workflow can re-check a silent worker (a recovery loop back to the wait
+# itself) and escalate only when the wait expires or re-checks run out.
+watch_worker:
+  goal: Wait for a worker's result; re-check it once if it goes quiet.
+  risk: low
+  workflow_extensions:
+    requires: [wait@1, recovery@1]
+  steps:
+  - capability: receive
+    purpose: Wait for the worker to report its result.
+    store_as: result_out
+    timeout: 2h
+    wait:
+      event_type: job.done
+      liveness: {mode: push, interval: 5m, failure_threshold: 3}
+    failure_modes:
+    - condition: The worker stopped sending heartbeats.
+      on_error: R406
+      action: request_more_context
+      recovery:
+        goto_step: result_out
+        max_loops: 1
+        on_exhausted: {goto_step: page_out}
+    - condition: The worker did not finish in time.
+      on_error: R401
+      action: escalate
+      recovery: {goto_step: page_out}
+  - capability: invoke
+    purpose: Hand the job to the on-call engineer.
+    store_as: page_out
+    handler: true
+    workflow_id: page_oncall
+    input_bindings:
+      workflow: page_oncall
+page_oncall:
+  goal: Ask the on-call engineer to take over a job.
+  risk: low
+  steps:
+  - capability: inquire
+    purpose: Ask the on-call engineer to take over.
+    store_as: ask_out
+    input_bindings:
+      ambiguous_input: A worker stopped responding.

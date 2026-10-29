@@ -148,7 +148,8 @@ async def main():
     print("""
 Key Points:
 1. High-risk mutations (Write, Edit, rm, etc.) REQUIRE checkpoints
-2. Checkpoints are consumed after use - one per mutation batch
+2. Checkpoints are consumed after use - one per checkpoint-gated tool call
+   (each call reserves the checkpoint under its tool_use_id)
 3. Read-only operations (Read, Grep, ls) ALWAYS allowed
 4. In strict_mode=False, mutations warn but proceed
 """)

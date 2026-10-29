@@ -1,0 +1,130 @@
+{
+  "description": "A failure mode loops back with injected context, then exhausts (R404).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "plan",
+          "purpose": "plan step",
+          "store_as": "p",
+          "input_bindings": {
+            "goal": "g",
+            "constraints": {
+              "why": "${_recovery.why: boolean}"
+            }
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "conditions": [
+              "ok"
+            ]
+          },
+          "failure_modes": [
+            {
+              "condition": "verification failed",
+              "action": "request_more_context",
+              "when": "${v.passed} == false",
+              "recovery": {
+                "goto_step": "p",
+                "inject_context": {
+                  "why": "${v.passed}"
+                },
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "inputs": {
+          "goal": "g",
+          "constraints": {
+            "why": null
+          }
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "inputs": {
+          "goal": "g",
+          "constraints": {
+            "why": false
+          }
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R404"
+  },
+  "trace_kinds": [
+    "failure_mode_fired",
+    "loop",
+    "recovery_exhausted"
+  ]
+}

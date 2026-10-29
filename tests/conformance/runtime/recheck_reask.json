@@ -1,0 +1,210 @@
+{
+  "description": "A changed source asks again; the first approval lapses.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "plan",
+          "purpose": "plan step",
+          "store_as": "p",
+          "input_bindings": {
+            "goal": "g"
+          }
+        },
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "recheck": {
+              "source": "${p.steps}",
+              "on_change": "reask"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [
+            1
+          ],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval"
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "RecheckSource",
+        "source": "${p.steps}",
+        "compare": "digest"
+      },
+      "respond": {
+        "kind": "Current",
+        "value": [
+          2
+        ]
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "shown": [
+          {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          {
+            "recheck": {
+              "previous": [
+                1
+              ],
+              "current": [
+                2
+              ]
+            }
+          }
+        ]
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "RecheckSource"
+      },
+      "respond": {
+        "kind": "Current",
+        "value": [
+          2
+        ]
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "status": "expired"
+      },
+      {
+        "status": "executed"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "recheck"
+  ]
+}

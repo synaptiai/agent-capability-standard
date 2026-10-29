@@ -1,0 +1,121 @@
+{
+  "description": "An invoke step runs its target as a nested run; its outputs are the result.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child",
+            "input": {
+              "topic": "${topic}"
+            }
+          }
+        },
+        {
+          "capability": "transform",
+          "purpose": "transform step",
+          "store_as": "t",
+          "input_bindings": {
+            "input": "${i.result}",
+            "target_format": "f"
+          }
+        }
+      ],
+      "inputs": {
+        "topic": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "${topic}"
+          }
+        }
+      ],
+      "inputs": {
+        "topic": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "topic": "rust"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "frame": [
+          "w",
+          "child"
+        ],
+        "inputs": {
+          "target": "rust"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 7,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "transform",
+        "frame": [
+          "w"
+        ],
+        "inputs": {
+          "input": {
+            "r": {
+              "data": 7
+            }
+          }
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "output": "ok",
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "invoke_started",
+    "invoke_returned"
+  ]
+}

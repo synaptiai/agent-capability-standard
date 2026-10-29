@@ -1,0 +1,563 @@
+{
+  "description": "digital_twin_sync_loop with an empty batch: the receive step's after-gate ends the run, completed, before anything is searched or changed.",
+  "catalog": {
+    "digital_twin_sync_loop": {
+      "goal": "Synchronize digital twin state with incoming signals, detect drift, decide and execute safe actions, and record provenance.",
+      "risk": "high",
+      "success": [
+        "Twin snapshot updated and grounded",
+        "Drift assessed with risk score",
+        "Any actions are approved/checkpointed/verified",
+        "Audit trail produced"
+      ],
+      "data_flow": {
+        "pattern": "step_outputs_are_addressable",
+        "rule": "Each step output stored as `store_as`; later steps may reference it."
+      },
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "Ingest new signals/events from sources (logs/APIs/messages).",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": {
+            "max": 3,
+            "backoff": "exponential"
+          },
+          "store_as": "receive_out",
+          "failure_modes": [
+            {
+              "condition": "Receiving failed (timed out or errored after its retries)",
+              "on_error": [
+                "R401",
+                "R402"
+              ],
+              "action": "stop",
+              "recovery": "The run ends with the receive error; confirm the source configuration."
+            }
+          ],
+          "input_bindings": {},
+          "gates": [
+            {
+              "when": "${receive_out.data} == []",
+              "phase": "after",
+              "action": "end",
+              "message": "No new signals or events; the twin is unchanged."
+            }
+          ]
+        },
+        {
+          "capability": "search",
+          "purpose": "Parallel enrichment: search for existing twin snapshot or relevant context while ingesting events.",
+          "parallel_group": "context_gathering",
+          "join": "all_complete",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "search_out",
+          "input_bindings": {
+            "query": "${receive_out.source}"
+          },
+          "failure_modes": []
+        },
+        {
+          "capability": "transform",
+          "purpose": "Normalize raw signals into canonical events compatible with state.observations.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "transform_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "input": "${receive_out.data}",
+            "target_format": "canonical_event"
+          },
+          "gates": [],
+          "mapping_ref": "schemas/transforms/transform_mapping_rawlog_to_observation.yaml"
+        },
+        {
+          "capability": "integrate",
+          "purpose": "Merge canonical events with existing twin snapshot; resolve conflicts via strategy.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "integrate_out",
+          "input_bindings": {
+            "sources": [
+              "${transform_out.output: array<object>}",
+              "${previous_world_state}"
+            ],
+            "conflict_resolution": "prefer_authoritative_sources"
+          },
+          "gates": [],
+          "resolution_strategy": "prefer_authoritative_sources",
+          "conflict_resolution_strategies": [
+            "prefer_authoritative_sources",
+            "prefer_recent",
+            "prefer_high_confidence",
+            "merge_with_uncertainty",
+            "escalate_to_human"
+          ]
+        },
+        {
+          "capability": "detect",
+          "purpose": "Detect entities in integrated data.",
+          "domain": "entity",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "detect_entity_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "data": "${integrate_out.merged: object}",
+            "pattern": "entity"
+          },
+          "gates": []
+        },
+        {
+          "capability": "classify",
+          "purpose": "Classify and resolve entity identities.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "classify_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "item": "${detect_entity_out.matches: array<object>}"
+          },
+          "gates": []
+        },
+        {
+          "capability": "state",
+          "purpose": "Produce updated canonical world-state snapshot with uncertainty + provenance.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "state_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "observations": "${integrate_out.merged.observations: array<object>}",
+            "scope": "${integrate_out.merged.meta.world_id}"
+          },
+          "gates": []
+        },
+        {
+          "capability": "compare",
+          "purpose": "Compute diff between previous snapshot and updated snapshot.",
+          "domain": "state_diff",
+          "store_as": "compare_state_out",
+          "input_bindings": {
+            "options": [
+              "${previous_world_state: object}",
+              "${state_out.state: object}"
+            ]
+          },
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "failure_modes": []
+        },
+        {
+          "capability": "transition",
+          "purpose": "Apply transition rules triggered by new observations; compute next states.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "transition_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "from_state": "${state_out.state: object}"
+          },
+          "gates": []
+        },
+        {
+          "capability": "detect",
+          "purpose": "Detect drift/anomalies between expected and observed state.",
+          "domain": "anomaly",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "detect_anomaly_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "data": {
+              "observed": "${state_out.state: object}",
+              "expected": "${transition_out.effects: array<object>}",
+              "diff": "${compare_state_out: object}"
+            },
+            "pattern": "drift"
+          },
+          "gates": []
+        },
+        {
+          "capability": "measure",
+          "purpose": "Estimate risk impact/probability from drift and transitions.",
+          "domain": "risk",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "measure_risk_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "target": "${detect_anomaly_out}",
+            "metric": "risk"
+          },
+          "gates": []
+        },
+        {
+          "capability": "predict",
+          "purpose": "Forecast near-term risk trajectory and triggers.",
+          "domain": "risk",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "predict_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "target": "near_term_risk",
+            "conditions": {
+              "risk": "${measure_risk_out.value}",
+              "risk_interval": "${measure_risk_out.uncertainty: object}",
+              "drift_detected": "${detect_anomaly_out.detected}",
+              "drift": "${detect_anomaly_out.matches: array<object>}",
+              "transitions": "${transition_out.rules: array<object>}"
+            }
+          },
+          "gates": []
+        },
+        {
+          "capability": "plan",
+          "purpose": "Plan safe action(s) to reduce risk, with verification criteria and rollback plan.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "plan_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "context": {
+              "forecast": "${predict_out: object}",
+              "state_diff": "${compare_state_out: object}",
+              "entities": "${classify_out.labels: array<object>}",
+              "related_context": "${search_out.results: array<object>}"
+            },
+            "goal": "Reduce the detected drift and risk"
+          },
+          "gates": []
+        },
+        {
+          "capability": "constrain",
+          "purpose": "Enforce policy and least privilege for planned actions.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "constrain_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "target": "${plan_out.steps: array<object>}",
+            "constraints": [
+              "least_privilege",
+              "change_policy"
+            ]
+          },
+          "gates": []
+        },
+        {
+          "capability": "checkpoint",
+          "purpose": "Create checkpoint marker before any mutation/side-effect step.",
+          "risk": "medium",
+          "mutation": true,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "checkpoint_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "scope": "twin_state"
+          },
+          "gates": []
+        },
+        {
+          "capability": "mutate",
+          "purpose": "Execute mutations from action plan (if approved).",
+          "risk": "high",
+          "mutation": true,
+          "requires_checkpoint": true,
+          "requires_approval": true,
+          "timeout": "5m",
+          "retry": null,
+          "store_as": "mutate_out",
+          "failure_modes": [
+            {
+              "condition": "The mutation failed or timed out",
+              "on_error": [
+                "R401",
+                "R402"
+              ],
+              "action": "rollback",
+              "recovery": "Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and no audit is recorded."
+            }
+          ],
+          "input_bindings": {
+            "target": "twin_state",
+            "operation": {
+              "apply": "${plan_out.steps: array<object>}"
+            }
+          },
+          "gates": [
+            {
+              "when": "${checkpoint_out.checkpoint_id} == null",
+              "action": "stop",
+              "message": "No checkpoint created. Do not mutate."
+            }
+          ],
+          "condition": "${constrain_out.compliant} == true",
+          "skip_if_false": true
+        },
+        {
+          "capability": "execute",
+          "purpose": "Run verification tests and commands.",
+          "risk": "medium",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": true,
+          "timeout": "5m",
+          "retry": null,
+          "store_as": "execute_out",
+          "failure_modes": [
+            {
+              "condition": "The verification suite failed or timed out",
+              "on_error": [
+                "R401",
+                "R402"
+              ],
+              "action": "rollback",
+              "recovery": "Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and no audit is recorded."
+            }
+          ],
+          "input_bindings": {
+            "code": "run_verification_suite"
+          },
+          "gates": [
+            {
+              "when": "${mutate_out} == null",
+              "action": "skip",
+              "message": "No mutation was applied, so there is nothing to verify."
+            }
+          ]
+        },
+        {
+          "capability": "verify",
+          "purpose": "Verify outcome: PASS/FAIL with evidence.",
+          "risk": "medium",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": "5m",
+          "retry": {
+            "max": 3,
+            "backoff": "exponential"
+          },
+          "store_as": "verify_out",
+          "failure_modes": [
+            {
+              "condition": "Verification could not run (timed out or failed after its retries)",
+              "on_error": [
+                "R401",
+                "R402"
+              ],
+              "action": "rollback",
+              "recovery": "Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and no audit is recorded."
+            }
+          ],
+          "input_bindings": {
+            "target": "${execute_out: object}",
+            "conditions": [
+              "drift_resolved",
+              "no_policy_violation"
+            ]
+          },
+          "gates": [
+            {
+              "when": "${mutate_out} == null",
+              "action": "skip",
+              "message": "No mutation was applied, so there is nothing to verify."
+            }
+          ]
+        },
+        {
+          "capability": "rollback",
+          "purpose": "If a mutation was applied and verify FAILs, roll back to the checkpoint.",
+          "risk": "medium",
+          "mutation": true,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "rollback_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "checkpoint_id": "${checkpoint_out.checkpoint_id}"
+          },
+          "gates": [
+            {
+              "when": "${mutate_out} == null || ${verify_out.passed} == true",
+              "action": "skip",
+              "message": "No mutation was applied, or the twin passed verification. No rollback needed."
+            }
+          ]
+        },
+        {
+          "capability": "audit",
+          "purpose": "Record provenance, tool usage, diffs, decision rationale, and any rollback.",
+          "risk": "medium",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "audit_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "event": {
+              "type": "digital_twin_sync",
+              "mutated": "${mutate_out.success}",
+              "verified": "${verify_out.passed}",
+              "rolled_back": "${rollback_out.restored}"
+            }
+          },
+          "gates": []
+        },
+        {
+          "capability": "explain",
+          "purpose": "Produce decision-ready sync report: drift, actions, verification, next steps.",
+          "risk": "low",
+          "mutation": false,
+          "requires_checkpoint": false,
+          "requires_approval": false,
+          "timeout": null,
+          "retry": null,
+          "store_as": "explain_out",
+          "failure_modes": [],
+          "input_bindings": {
+            "conclusion": {
+              "drift_detected": "${detect_anomaly_out.detected}",
+              "risk": "${measure_risk_out.value}",
+              "forecast": "${predict_out.prediction: object}",
+              "actions": "${plan_out.steps: array<object>}",
+              "mutated": "${mutate_out.success}",
+              "verified": "${verify_out.passed}",
+              "rolled_back": "${rollback_out.restored}"
+            }
+          },
+          "gates": []
+        }
+      ],
+      "workflow_extensions": {
+        "supports_input_bindings": true,
+        "supports_conditions": true,
+        "supports_parallel_groups": true,
+        "supports_recovery_loops": false,
+        "supports_gates": true
+      },
+      "inputs": {
+        "user_input": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "object"
+            }
+          }
+        },
+        "previous_world_state": {
+          "type": "object",
+          "ref": "schemas/world_state_schema.yaml#/world_state"
+        },
+        "world_state_out": {
+          "type": "object",
+          "ref": "schemas/world_state_schema.yaml#/world_state"
+        }
+      }
+    }
+  },
+  "workflow": "digital_twin_sync_loop",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "receive",
+        "step": 0,
+        "frame": [
+          "digital_twin_sync_loop"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [],
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "ended": {
+      "step": 0,
+      "message": "No new signals or events; the twin is unchanged."
+    }
+  },
+  "trace_kinds": [
+    "gate_fired",
+    "run_ended"
+  ]
+}

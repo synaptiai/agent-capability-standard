@@ -9,7 +9,11 @@ This script validates the capability ontology by:
 2. Validating symmetric edge types have bidirectional edges
 3. Detecting cycles in hard dependency edges (requires, precedes)
 4. Validating all edge references point to valid capabilities
-5. Optionally checking for multiple edge types between capability pairs
+5. Checking ``mutation_overridable`` appears only on nodes with
+   ``mutation: true``, ``risk: low`` and neither ``requires_checkpoint`` nor
+   ``requires_approval``
+6. Detecting the same (from, to, type) edge listed twice
+7. Optionally checking for multiple edge types between capability pairs
 """
 
 import argparse
@@ -68,7 +72,9 @@ def validate_edge_references(edges: list[dict], capability_ids: set[str]) -> lis
     return errors
 
 
-def validate_symmetric_edges(edges: list[dict], symmetric_types: list[str]) -> list[str]:
+def validate_symmetric_edges(
+    edges: list[dict], symmetric_types: list[str]
+) -> list[str]:
     """Check that symmetric edge types have bidirectional edges."""
     warnings = []
 
@@ -90,6 +96,42 @@ def validate_symmetric_edges(edges: list[dict], symmetric_types: list[str]) -> l
                 )
 
     return warnings
+
+
+def validate_mutation_overridable(nodes: list[dict]) -> list[str]:
+    """`mutation_overridable` is allowed only where overriding is harmless.
+
+    A step may declare `mutation: false` for such a capability (STANDARD v1.1
+    §5.2), so it must be low risk and need neither a checkpoint nor approval;
+    otherwise the override would hide a mutation those controls protect.
+    """
+    errors = []
+    for node in nodes:
+        if not node.get("mutation_overridable"):
+            continue
+        cap = node.get("id", "?")
+        if not node.get("mutation"):
+            errors.append(f"'{cap}': mutation_overridable without mutation: true")
+        if node.get("risk", "low") != "low":
+            errors.append(f"'{cap}': mutation_overridable requires risk: low")
+        if node.get("requires_checkpoint") or node.get("requires_approval"):
+            errors.append(
+                f"'{cap}': mutation_overridable is not allowed with "
+                "requires_checkpoint or requires_approval"
+            )
+    return errors
+
+
+def find_repeated_edges(edges: list[dict]) -> list[str]:
+    """The same (from, to, type) edge listed twice."""
+    seen: set[tuple[str, str, str]] = set()
+    errors = []
+    for edge in edges:
+        key = (edge["from"], edge["to"], edge["type"])
+        if key in seen:
+            errors.append(f"Edge listed twice: {key[0]} -> {key[1]} ({key[2]})")
+        seen.add(key)
+    return errors
 
 
 def check_duplicate_edges(edges: list[dict]) -> list[str]:
@@ -141,7 +183,9 @@ def detect_cycles(edges: list[dict], cycle_types: list[str]) -> list[list[str]]:
         return False
 
     # Check all nodes
-    all_nodes = set(graph.keys()) | {n for neighbors in graph.values() for n in neighbors}
+    all_nodes = set(graph.keys()) | {
+        n for neighbors in graph.values() for n in neighbors
+    }
     for node in all_nodes:
         if color[node] == WHITE:
             dfs(node)
@@ -151,16 +195,18 @@ def detect_cycles(edges: list[dict], cycle_types: list[str]) -> list[list[str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate capability ontology graph")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed output")
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed output"
+    )
     parser.add_argument(
         "--check-duplicates",
         action="store_true",
-        help="Warn about multiple edge types between the same capability pair"
+        help="Warn about multiple edge types between the same capability pair",
     )
     parser.add_argument(
         "--ontology",
         default="schemas/capability_ontology.yaml",
-        help="Path to ontology file"
+        help="Path to ontology file",
     )
     args = parser.parse_args()
 
@@ -205,7 +251,11 @@ def main() -> int:
     for cycle in cycles:
         errors.append(f"Cycle detected in {cycle_types} edges: {' -> '.join(cycle)}")
 
-    # 5. Check for duplicate edges (optional)
+    # 5. Overridable mutation flags and repeated edges
+    errors.extend(validate_mutation_overridable(ontology.get("nodes", [])))
+    errors.extend(find_repeated_edges(edges))
+
+    # 6. Check for duplicate edges (optional)
     if args.check_duplicates:
         dup_warnings = check_duplicate_edges(edges)
         warnings.extend(dup_warnings)
@@ -240,8 +290,12 @@ def main() -> int:
     caps_with_incoming = len([c for c in capability_ids if c in incoming])
 
     print("Graph statistics:")
-    print(f"  - Capabilities with outgoing edges: {caps_with_outgoing}/{len(capability_ids)}")
-    print(f"  - Capabilities with incoming edges: {caps_with_incoming}/{len(capability_ids)}")
+    print(
+        f"  - Capabilities with outgoing edges: {caps_with_outgoing}/{len(capability_ids)}"
+    )
+    print(
+        f"  - Capabilities with incoming edges: {caps_with_incoming}/{len(capability_ids)}"
+    )
     print(f"  - Orphan capabilities: {len(orphans)}")
     print()
     print("VALIDATION PASSED")

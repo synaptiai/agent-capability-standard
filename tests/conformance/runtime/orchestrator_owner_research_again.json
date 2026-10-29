@@ -1,0 +1,866 @@
+{
+  "description": "A question that is not ready ends the run at the policy check (gate end), completed: nothing is asked or applied.",
+  "catalog": {
+    "delegate_to_thread": {
+      "goal": "Give one task to one thread with a self-contained brief, prove the thread is alive, and accept its result only after checking it at the source.",
+      "risk": "medium",
+      "description": "The orchestrator does not do the work. It checks whether the work already\nexists, chooses placement (remote host by default for repo-only work), writes a brief\nthat stands alone, spawns the thread, checks liveness by evidence, waits durably\nfor the report, and checks every claim in the report (SHAs, CI, verdicts) at the\nsource before it moves the board.\n",
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1",
+          "triggers@1",
+          "wait@1"
+        ]
+      },
+      "triggers": [
+        {
+          "kind": "invoke",
+          "attendance": "attended"
+        }
+      ],
+      "inputs": {
+        "task": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "goal": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "constraints": {
+              "type": "object"
+            },
+            "done_criteria": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "brief_rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "placement_rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "Read the issue's last comment and all PRs that name it (any state) - the work may be done, parked or owned.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "prior_work_out",
+          "input_bindings": {
+            "target": "${task.repo}",
+            "format": "issue_last_comment+prs_all_states"
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "Find a running or idle thread that already owns this work.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "existing_threads_out",
+          "input_bindings": {
+            "query": "${task.goal}",
+            "scope": "sessions_active",
+            "limit": 10
+          }
+        },
+        {
+          "capability": "compare",
+          "purpose": "Decide new thread, message the existing owner thread, or stop because it is done.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "route_out",
+          "input_bindings": {
+            "options": [
+              "new_thread",
+              "message_existing_thread",
+              "already_done"
+            ],
+            "criteria": [
+              "prior_work",
+              "thread_liveness",
+              "scope_fit"
+            ]
+          }
+        },
+        {
+          "capability": "decompose",
+          "purpose": "Split the goal only when parts are independent; otherwise one thread per complete feature.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "parts_out",
+          "input_bindings": {
+            "problem": "${task.goal}",
+            "max_depth": 1,
+            "strategy": "one_complete_feature_per_thread"
+          }
+        },
+        {
+          "capability": "plan",
+          "purpose": "Choose agent, project and worktree, placement (remote host default; local for UI, keychain, AWS, browser, notes), pipeline (review pipeline) and the first check-in time.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "plan_out",
+          "input_bindings": {
+            "goal": "${task.goal}",
+            "constraints": {
+              "placement_rules": "${profile.placement_rules: array<string>}",
+              "parts": "${parts_out.subproblems: array<object>}",
+              "route": "${route_out.recommendation}"
+            }
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "Set the brief rules before drafting - repo, evidence (file:line, logs, links), constraints, done criteria, GH_HOST, \"report back with send_message when done or blocked\".",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "brief_policy_out",
+          "input_bindings": {
+            "target": "${plan_out}",
+            "constraints": "${profile.brief_rules: array<string>}"
+          }
+        },
+        {
+          "capability": "generate",
+          "purpose": "Write the brief. It must stand alone; the thread cannot see this conversation.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "brief_out",
+          "input_bindings": {
+            "specification": {
+              "task": "${task}",
+              "plan": "${plan_out.steps: array<object>}"
+            },
+            "format": "thread_brief"
+          },
+          "gates": [
+            {
+              "when": "${route_out.recommendation} == \"already_done\"",
+              "action": "stop",
+              "message": "The work exists or is done. Update the board instead of starting a thread."
+            },
+            {
+              "when": "${brief_policy_out.compliant} == false",
+              "action": "stop",
+              "message": "The plan breaks a brief rule (placement, agent, scope). Plan again."
+            }
+          ]
+        },
+        {
+          "capability": "constrain",
+          "purpose": "Check the written brief against the brief rules (each rule present, no secret, no <classification label> quote).",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "brief_check_out",
+          "input_bindings": {
+            "target": "${brief_out.content: object}",
+            "constraints": "${profile.brief_rules: array<string>}",
+            "action_on_violation": "block"
+          }
+        },
+        {
+          "capability": "checkpoint",
+          "purpose": "Record the in-flight state before the spawn (profile before_delegation always).",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "checkpoint_out",
+          "input_bindings": {
+            "scope": "state.json",
+            "label": "delegate"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "Spawn the thread with the brief.",
+          "risk": "medium",
+          "mutation": false,
+          "store_as": "delegate_out",
+          "input_bindings": {
+            "task": {
+              "brief": "${brief_out.content: object}",
+              "task_id": "${task.id}"
+            },
+            "agent": "author-agent",
+            "constraints": {
+              "placement": "${plan_out.steps: array<object>}"
+            },
+            "fresh_context": true,
+            "role": "author"
+          },
+          "gates": [
+            {
+              "when": "${brief_check_out.compliant} == false",
+              "action": "stop",
+              "message": "The brief breaks a brief rule. Fix the brief first."
+            },
+            {
+              "when": "${delegate_out.task_id} == null",
+              "phase": "after",
+              "action": "stop",
+              "message": "The host returned no task id, so no report can be matched to this thread. Do not record or wait."
+            }
+          ],
+          "failure_modes": [
+            {
+              "condition": "remote host start fails (capacity or unavailable)",
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "plan_out",
+                "inject_context": {
+                  "failure": "remote_start_failed"
+                },
+                "max_loops": 1
+              },
+              "on_error": [
+                "R402"
+              ]
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Add the thread to state.json items (thread id, brief summary, check-in time).",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "inflight_out",
+          "input_bindings": {
+            "data": "${delegate_out}",
+            "key": "state.json"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "Liveness check about a minute after the spawn - running true, or entry count grows, or a pending tool_use. Never report \"working\" before this.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "liveness_out",
+          "input_bindings": {
+            "target": "${delegate_out.task_id}",
+            "aspects": [
+              "running",
+              "entry_count",
+              "last_entry_kind"
+            ]
+          }
+        },
+        {
+          "capability": "receive",
+          "purpose": "Read the thread's report from the mailbox; accept it only from the thread's own session id.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "report_out",
+          "input_bindings": {
+            "channel": "mailbox",
+            "filter": {
+              "from_session": "${delegate_out.task_id}"
+            },
+            "accept_from": [
+              "${delegate_out.task_id}"
+            ]
+          },
+          "timeout": "4h",
+          "wait": {
+            "event_type": "thread.turn_end",
+            "source_kind": "agent",
+            "correlate": {
+              "task_id": "${delegate_out.task_id}"
+            },
+            "liveness": {
+              "mode": "probe",
+              "interval": "10m",
+              "failure_threshold": 3
+            }
+          },
+          "failure_modes": [
+            {
+              "condition": "No liveness signal for 30 min (R406). Check the evidence again, then wait again. A report that is late past the timeout (R401) is not handled here and ends the run; the scheduled sweep finds it.",
+              "on_error": [
+                "R406"
+              ],
+              "action": "pause_and_checkpoint",
+              "recovery": {
+                "goto_step": "liveness_out",
+                "max_loops": 2
+              }
+            }
+          ]
+        },
+        {
+          "capability": "ground",
+          "purpose": "Check each claim in the report at the source (PR head SHA, CI conclusions, posted verdicts, merged state). A thread report is a derived claim, not evidence.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "ground_out",
+          "input_bindings": {
+            "claim": "${task.goal}",
+            "sources": [
+              "${report_out.data: array<object>}",
+              "${prior_work_out.evidence_anchors: array<object>}",
+              "${liveness_out.evidence_anchors: array<object>}"
+            ],
+            "required_strength": "strong"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "Check the done criteria against the grounded evidence.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "done_out",
+          "input_bindings": {
+            "target": "${ground_out}",
+            "conditions": "${task.done_criteria}",
+            "strict": true
+          },
+          "failure_modes": [
+            {
+              "condition": "Done criteria not met or a claim not grounded",
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "report_out",
+                "inject_context": {
+                  "gaps": "${ground_out.gaps}"
+                },
+                "max_loops": 2
+              },
+              "when": "${done_out.passed} == false"
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Move the board row and the in-flight item with the evidence link.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "board_out",
+          "input_bindings": {
+            "data": "${done_out}",
+            "key": "board"
+          }
+        },
+        {
+          "capability": "audit",
+          "purpose": "Record the delegation, liveness evidence, report and the checks.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "audit_out",
+          "input_bindings": {
+            "event": {
+              "type": "delegate_to_thread",
+              "task_id": "${task.id}",
+              "thread": "${delegate_out.task_id}",
+              "grounded": "${ground_out.grounded}",
+              "done": "${done_out.passed}"
+            }
+          }
+        }
+      ],
+      "success": [
+        "No thread starts for work that exists or is done",
+        "The brief passes every brief rule",
+        "Liveness proven by evidence before any \"working\" claim",
+        "Every relayed claim was read at its source"
+      ],
+      "risk_propagation": {
+        "strategy": "max_step_risk",
+        "computed_risk": "medium"
+      }
+    },
+    "owner_decision": {
+      "goal": "Settle one open question - decide it when the owner's rules cover it, otherwise ask the owner one question with three researched options (recommended first), take only the owner's answer, and apply it.",
+      "risk": "medium",
+      "description": "A question to the owner is `inquire` then `receive`, not `send`: it goes to the\nowner's own session as a ask_card card, so it is not a message in the owner's\nname (ontology: inquire soft_requires receive). Questions outside\nescalate_to_owner are decided by the orchestrator and logged in unknowns.\nAn interrupt outside the brief and digest needs the interrupt policy.\n",
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1",
+          "triggers@1",
+          "wait@1"
+        ]
+      },
+      "triggers": [
+        {
+          "kind": "invoke",
+          "attendance": "attended"
+        }
+      ],
+      "inputs": {
+        "question": {
+          "type": "object",
+          "properties": {
+            "topic": {
+              "type": "string"
+            },
+            "context": {
+              "type": "object"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "deadline": {
+              "type": "string"
+            },
+            "blocking_ref": {
+              "type": "string"
+            }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "escalate_to_owner": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "question_rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "interrupt_rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "capability": "classify",
+          "purpose": "Route the topic - owner only (product taste, compliance, access, prod release, go for a feature or initiative, personal or social), another decision person, or decide self.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "route_out",
+          "input_bindings": {
+            "item": "${question}",
+            "taxonomy": [
+              "owner_only",
+              "other_decision_person",
+              "decide_self"
+            ],
+            "multi_label": false
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "Explore first - the codebase, docs, board history and earlier decisions may answer it.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "evidence_out",
+          "input_bindings": {
+            "query": "${question.topic}",
+            "scope": "code+docs+board_history+decision_log",
+            "limit": 20
+          }
+        },
+        {
+          "capability": "retrieve",
+          "purpose": "Read what the other orchestrators and team already said on the topic (ask them first when the answer needs them).",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "peers_out",
+          "input_bindings": {
+            "target": "${question.topic}",
+            "format": "agent_channel_and_threads"
+          }
+        },
+        {
+          "capability": "plan",
+          "purpose": "Build three researched options, each with its concrete consequence.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "options_out",
+          "input_bindings": {
+            "goal": "${question.topic}",
+            "constraints": {
+              "evidence": "${evidence_out.results: array<object>}",
+              "peers": "${peers_out.data: object}",
+              "question": "${question}"
+            }
+          }
+        },
+        {
+          "capability": "critique",
+          "purpose": "Check the question and its options - one decision, no hidden second question, facts complete, not answered already, each option researched with a real consequence.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "question_check_out",
+          "input_bindings": {
+            "target": "${options_out}",
+            "criteria": [
+              "one_decision",
+              "facts_complete",
+              "not_answered_already",
+              "options_researched"
+            ]
+          }
+        },
+        {
+          "capability": "compare",
+          "purpose": "Rank the options by consequence, cost, reversibility and user impact; the best one becomes the recommendation.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "ranking_out",
+          "input_bindings": {
+            "options": "${options_out.steps: array<object>}",
+            "criteria": [
+              "consequence",
+              "cost",
+              "reversibility",
+              "user_impact"
+            ]
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "Format and timing rules - exactly 3 options, recommended first and marked, labels under 60 characters with a one-line consequence; interrupt now only if a decision person waits with a deadline today, the topic is in escalate_to_owner or attention \"tell me at once\", inside working hours, under the daily cap; else queue for the brief.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "ask_policy_out",
+          "input_bindings": {
+            "target": "${ranking_out}",
+            "constraints": "${profile.question_rules: array<string>}",
+            "action_on_violation": "log"
+          },
+          "gates": [
+            {
+              "when": "${question_check_out.confidence} < 0.7",
+              "action": "end",
+              "message": "The question or its options are not ready (two decisions in one, facts missing, already answered). Research again."
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Queue the question with its three options for the next brief, when it is not an interrupt.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "queued_out",
+          "condition": "${ask_policy_out.compliant} == false && !(${route_out.confidence} > 0.85 && ${route_out.labels} == [\"decide_self\"])",
+          "skip_if_false": true,
+          "input_bindings": {
+            "data": {
+              "question": "${question}",
+              "ranking": "${ranking_out.ranking: array<object>}",
+              "recommendation": "${ranking_out.recommendation}"
+            },
+            "key": "brief_queue"
+          }
+        },
+        {
+          "capability": "inquire",
+          "purpose": "Present the question as a ask_card card in the owner's session.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "inquiry_out",
+          "input_bindings": {
+            "ambiguous_input": "${question.topic}",
+            "context": {
+              "ranking": "${ranking_out.ranking: array<object>}",
+              "recommendation": "${ranking_out.recommendation}"
+            },
+            "max_questions": 1
+          },
+          "gates": [
+            {
+              "when": "${route_out.confidence} > 0.85 && ${route_out.labels} == [\"decide_self\"]",
+              "action": "skip",
+              "message": "The owner's rules cover it. Decide and log in unknowns."
+            },
+            {
+              "when": "${ask_policy_out.compliant} == false",
+              "action": "end",
+              "message": "Not an interrupt. The question waits in the next brief; nothing is applied now."
+            }
+          ]
+        },
+        {
+          "capability": "receive",
+          "purpose": "Take the answer only from the owner (a peer or a thread can never answer a ask_card); a free-text answer counts.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "answer_out",
+          "condition": "${inquiry_out.confidence} != null && ${inquiry_out.confidence} > 0",
+          "skip_if_false": true,
+          "input_bindings": {
+            "channel": "owner_session",
+            "filter": {
+              "question": "${question.topic}"
+            },
+            "accept_from": [
+              "owner"
+            ]
+          },
+          "timeout": "1d",
+          "wait": {
+            "event_type": "owner.answer",
+            "source_kind": "human",
+            "correlate": {
+              "question": "${question.topic}"
+            }
+          }
+        },
+        {
+          "capability": "integrate",
+          "purpose": "Merge the answer (or the self-decision) with the chosen option into one decision record.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "decision_out",
+          "input_bindings": {
+            "sources": [
+              "${answer_out.data: nullable<array<object>>}",
+              "${ranking_out.ranking: array<object>}"
+            ],
+            "strategy": "answer_overrides_recommendation",
+            "conflict_resolution": "escalate_to_human"
+          },
+          "gates": [
+            {
+              "when": "${inquiry_out} != null && ${answer_out} == null",
+              "action": "stop",
+              "message": "The owner was asked but no answer was received. Do not apply the recommendation."
+            }
+          ]
+        },
+        {
+          "capability": "checkpoint",
+          "purpose": "Snapshot the memory folder before recording the decision.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "checkpoint_out",
+          "input_bindings": {
+            "scope": "memory_folder",
+            "label": "decision"
+          }
+        },
+        {
+          "capability": "persist",
+          "purpose": "Record the decision on the board row (owner decisions) or in unknowns (self-decisions), with the source.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "record_out",
+          "input_bindings": {
+            "data": "${decision_out.merged}",
+            "key": "board|unknowns"
+          }
+        },
+        {
+          "capability": "invoke",
+          "purpose": "Apply the decision through the workflow it names (delegate, outbound message, merge).",
+          "risk": "medium",
+          "mutation": false,
+          "store_as": "apply_out",
+          "input_bindings": {
+            "workflow": "delegate_to_thread",
+            "input": {
+              "task": "${decision_out.merged}"
+            }
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "Check the decision is applied - the board row moved and the next step started.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "applied_out",
+          "input_bindings": {
+            "target": "${apply_out.result}",
+            "conditions": [
+              "row_moved",
+              "next_step_started"
+            ]
+          }
+        },
+        {
+          "capability": "audit",
+          "purpose": "Record question, options, recommendation, who decided, and the result.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "audit_out",
+          "input_bindings": {
+            "event": {
+              "type": "owner_decision",
+              "topic": "${question.topic}",
+              "recommendation": "${ranking_out.recommendation}",
+              "applied": "${applied_out.passed}"
+            }
+          }
+        }
+      ],
+      "success": [
+        "The owner is asked only about escalate_to_owner topics, once, with 3 options",
+        "Only the owner's answer is accepted",
+        "The decision is recorded and applied"
+      ],
+      "risk_propagation": {
+        "strategy": "max_step_risk",
+        "computed_risk": "medium"
+      }
+    }
+  },
+  "workflow": "owner_decision",
+  "inputs": {
+    "question": {
+      "topic": "release-date"
+    }
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "classify",
+        "step": 0,
+        "frame": [
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "labels": [
+            "owner_only"
+          ],
+          "evidence_anchors": [],
+          "confidence": 0.9
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 1,
+        "frame": [
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 2,
+        "frame": [
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "step": 3,
+        "frame": [
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "critique",
+        "step": 4,
+        "frame": [
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "issues": [],
+          "evidence_anchors": [],
+          "confidence": 0.5
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "compare",
+        "step": 5,
+        "frame": [
+          "owner_decision"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "ranking": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "ended": {
+      "step": 6
+    }
+  },
+  "trace_kinds": [
+    "gate_fired",
+    "run_ended"
+  ]
+}

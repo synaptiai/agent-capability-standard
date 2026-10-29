@@ -1,0 +1,61 @@
+{
+  "description": "A nested run missing a required input fails the invoke step (R402). The input is computed, so only the executor can check it.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child",
+            "input": "${payload}"
+          }
+        }
+      ],
+      "inputs": {
+        "payload": {
+          "type": "object",
+          "required": true
+        }
+      }
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "${topic}"
+          }
+        }
+      ],
+      "inputs": {
+        "topic": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "payload": {}
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [],
+  "end": {
+    "kind": "Failed",
+    "code": "R402"
+  },
+  "trace_kinds": []
+}

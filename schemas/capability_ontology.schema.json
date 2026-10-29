@@ -108,6 +108,19 @@
       "type": "object",
       "required": ["id", "layer", "description"],
       "additionalProperties": true,
+      "if": {
+        "properties": { "mutation_overridable": { "const": true } },
+        "required": ["mutation_overridable"]
+      },
+      "then": {
+        "required": ["mutation"],
+        "properties": {
+          "mutation": { "const": true },
+          "risk": { "const": "low" },
+          "requires_checkpoint": { "const": false },
+          "requires_approval": { "const": false }
+        }
+      },
       "properties": {
         "id": {
           "type": "string",
@@ -140,6 +153,10 @@
         "mutation": {
           "type": "boolean",
           "description": "Whether this capability modifies persistent state."
+        },
+        "mutation_overridable": {
+          "type": "boolean",
+          "description": "A workflow step may declare mutation: false for this capability (STANDARD v1.1 §5.2). Only for low-risk capabilities without checkpoint or approval requirements."
         },
         "requires_checkpoint": {
           "type": "boolean",

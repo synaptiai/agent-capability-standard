@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 gated:
   goal: Workflow with gate conditionals.
   risk: medium
@@ -11,6 +12,8 @@ gated:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: checkpoint
     purpose: Create checkpoint.
@@ -21,16 +24,21 @@ gated:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
     failure_modes: []
   - capability: mutate
     purpose: Mutate with gate.
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: null
     retry: null
     store_as: mutate_out
+    input_bindings:
+      target: "system"
+      operation: {"set": true}
     gates:
     - when: ${checkpoint_out.checkpoint_id} == null
       action: stop

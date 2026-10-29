@@ -30,7 +30,8 @@ Forecast future states or outcomes for a target based on current state, historic
 | `target` | Yes | string | What to predict (metric, state, outcome, event) |
 | `horizon` | No | string | Prediction timeframe (e.g., "1 week", "next release", "end of sprint") |
 | `conditions` | No | object | Assumed conditions for prediction |
-| `method` | No | string | Prediction approach (trend, model, heuristic) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -71,8 +72,8 @@ Return a structured object:
 ```yaml
 prediction:
   outcome: any  # Predicted value, state, or event
-  probability: number  # 0.0-1.0 likelihood of this outcome
   horizon: string  # When this prediction applies
+probability: number  # 0.0-1.0 likelihood of the predicted outcome
 alternatives:
   - outcome: any  # Alternative outcome
     probability: number  # Likelihood
@@ -91,13 +92,15 @@ invalidation_conditions: []  # What would invalidate this prediction
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `prediction.outcome` | any | The predicted future state or value |
-| `prediction.probability` | number | Likelihood of primary outcome |
-| `prediction.horizon` | string | Timeframe for prediction |
+| `prediction` | any | The prediction: `outcome` (predicted future state or value) and `horizon` (timeframe) |
+| `probability` | number | 0.0-1.0 likelihood of the predicted outcome |
 | `alternatives` | array | Other possible outcomes with triggers |
 | `trajectory` | array | Path from current to predicted state |
 | `reasoning` | string | Explanation of prediction logic |
 | `invalidation_conditions` | array | What would make prediction invalid |
+| `confidence` | number | 0.0-1.0 confidence in the prediction methodology (distinct from `probability`) |
+| `evidence_anchors` | array | References to the data the prediction rests on |
+| `assumptions` | array | Critical assumptions |
 
 ## Examples
 
@@ -116,8 +119,8 @@ conditions:
 ```yaml
 prediction:
   outcome: "7 of 10 stories completed (70%)"
-  probability: 0.65
   horizon: "end of sprint (5 days)"
+probability: 0.65
 alternatives:
   - outcome: "10 of 10 stories completed (100%)"
     probability: 0.15
@@ -161,8 +164,8 @@ conditions:
 ```yaml
 prediction:
   outcome: "Disk will reach 95% capacity"
-  probability: 0.85
   horizon: "18-22 days"
+probability: 0.85
 alternatives:
   - outcome: "Disk reaches 100% (service outage)"
     probability: 0.60

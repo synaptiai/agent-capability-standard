@@ -1,7 +1,7 @@
 ---
 name: transform
 description: Convert data between formats, schemas, or representations with explicit loss accounting and validation. Use when reformatting data, mapping between schemas, normalizing inputs, or translating structures.
-argument-hint: "[source] [target_schema] [mapping]"
+argument-hint: "[input] [target_format] [source_format]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -56,12 +56,12 @@ Transform data from one format or schema to another while tracking what informat
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `source` | Yes | string or object | Input data to transform |
-| `target_schema` | Yes | string or object | Schema or format specification for output |
-| `mapping` | No | object | Explicit field mappings (source -> target) |
-| `preserve_unknown` | No | boolean | Keep fields not in mapping (default: false) |
-| `strict` | No | boolean | Fail on any mapping ambiguity (default: false) |
-| `default_values` | No | object | Defaults for missing required fields |
+| `input` | Yes | any | Data to transform |
+| `source_format` | No | string | Input format |
+| `target_format` | Yes | string | Output format |
+| `options` | No | object | Transformation options |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -72,13 +72,13 @@ Transform data from one format or schema to another while tracking what informat
    - Record source structure for provenance
 
 2) **Analyze target schema**: Understand destination requirements
-   - Load target schema specification
+   - Load target schema specification (`options.schema`, if given)
    - Identify required vs optional fields
    - Note type constraints and validations
    - Map nested structures
 
 3) **Build transformation map**: Match source to target
-   - Apply explicit mappings if provided
+   - Apply explicit mappings if provided (`options.mapping`)
    - Infer mappings for matching field names
    - Identify fields requiring type conversion
    - Flag unmappable source fields
@@ -111,10 +111,10 @@ Transform data from one format or schema to another while tracking what informat
 Return a structured object:
 
 ```yaml
-transformed:
+output: object|array  # Transformed data, a mapping or a list of records
+transformation:
   input_type: string  # Format of source data
   output_type: string  # Format of output data
-  content: object  # Transformed data
   mapping_applied: string  # Reference to mapping specification
 validation:
   input_valid: boolean  # Was source valid?
@@ -125,7 +125,7 @@ losses:
   - field: string  # Source field that was lost
     reason: string  # Why it was not preserved
     severity: info | warning | error  # Impact level
-conversions:
+changes:  # Applied transformations
   - source_field: string
     target_field: string
     conversion: string  # What transformation was applied
@@ -139,10 +139,11 @@ assumptions: []  # Explicit assumptions
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `transformed` | object | Result of transformation |
+| `output` | object | The transformed data |
+| `transformation` | object | Source and target formats and the mapping applied |
 | `validation` | object | Input and output validation results |
 | `losses` | array | Fields or data not preserved |
-| `conversions` | array | Type/format conversions applied |
+| `changes` | array | Field-level transformations applied (type/format conversions, defaults) |
 | `confidence` | number | 0.0-1.0 based on mapping completeness |
 | `evidence_anchors` | array | Source references and schema rules |
 | `assumptions` | array | Assumptions made during transformation |
@@ -153,7 +154,7 @@ assumptions: []  # Explicit assumptions
 
 **Input:**
 ```yaml
-source:
+input:
   user_id: 12345
   user_name: "john_doe"
   email_address: "john@example.com"
@@ -161,33 +162,36 @@ source:
   metadata:
     source: "api"
     version: "2.1"
-target_schema:
-  type: object
-  required: [id, name, email, created_at]
-  properties:
-    id: { type: integer }
-    name: { type: string }
-    email: { type: string, format: email }
-    created_at: { type: string, format: date-time }
-    tags: { type: array, items: { type: string } }
-mapping:
-  user_id: id
-  user_name: name
-  email_address: email
-  created_timestamp: created_at
+source_format: json
+target_format: yaml
+options:
+  schema:
+    type: object
+    required: [id, name, email, created_at]
+    properties:
+      id: { type: integer }
+      name: { type: string }
+      email: { type: string, format: email }
+      created_at: { type: string, format: date-time }
+      tags: { type: array, items: { type: string } }
+  mapping:
+    user_id: id
+    user_name: name
+    email_address: email
+    created_timestamp: created_at
 ```
 
 **Output:**
 ```yaml
-transformed:
+output:
+  id: 12345
+  name: "john_doe"
+  email: "john@example.com"
+  created_at: "2024-01-15T10:00:00Z"
+  tags: []
+transformation:
   input_type: "json"
   output_type: "yaml"
-  content:
-    id: 12345
-    name: "john_doe"
-    email: "john@example.com"
-    created_at: "2024-01-15T10:00:00Z"
-    tags: []
   mapping_applied: "explicit_mapping_v1"
 validation:
   input_valid: true
@@ -201,7 +205,7 @@ losses:
   - field: "metadata.version"
     reason: "No mapping to target schema"
     severity: info
-conversions:
+changes:
   - source_field: "created_timestamp"
     target_field: "created_at"
     conversion: "unix_epoch to ISO8601 datetime"
@@ -228,33 +232,40 @@ assumptions:
 
 **Input:**
 ```yaml
-source: "name,age,city\nAlice,30,NYC\nBob,25,LA"
-target_schema:
-  type: array
-  items:
+input: "name,age,city\nAlice,30,NYC\nBob,25,LA"
+source_format: csv
+target_format: json
+options:
+  schema:
     type: object
     properties:
-      full_name: { type: string }
-      age_years: { type: integer }
-      location: { type: string }
-mapping:
-  name: full_name
-  age: age_years
-  city: location
+      records:
+        type: array
+        items:
+          type: object
+          properties:
+            full_name: { type: string }
+            age_years: { type: integer }
+            location: { type: string }
+  mapping:
+    name: full_name
+    age: age_years
+    city: location
 ```
 
 **Output:**
 ```yaml
-transformed:
-  input_type: "csv"
-  output_type: "json_array"
-  content:
+output:
+  records:
     - full_name: "Alice"
       age_years: 30
       location: "NYC"
     - full_name: "Bob"
       age_years: 25
       location: "LA"
+transformation:
+  input_type: "csv"
+  output_type: "json"
   mapping_applied: "csv_to_object_mapping"
 validation:
   input_valid: true
@@ -262,10 +273,14 @@ validation:
   schema_ref: "person_array_schema"
   errors: []
 losses: []
-conversions:
+changes:
   - source_field: "age"
-    target_field: "age_years"
+    target_field: "records[].age_years"
     conversion: "string to integer"
+    reversible: true
+  - source_field: "(rows)"
+    target_field: "records"
+    conversion: "CSV rows wrapped as an array under records"
     reversible: true
 confidence: 0.95
 evidence_anchors:

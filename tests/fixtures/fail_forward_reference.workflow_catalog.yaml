@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 forward_ref:
   goal: Workflow with forward reference that doesnt exist yet.
   risk: low
@@ -12,7 +13,7 @@ forward_ref:
     retry: null
     store_as: observe_out
     input_bindings:
-      data: ${future_out}
+      target: ${future_out}
     failure_modes: []
   - capability: search
     purpose: Produces future_out.
@@ -23,6 +24,8 @@ forward_ref:
     timeout: null
     retry: null
     store_as: future_out
+    input_bindings:
+      query: "status"
     failure_modes: []
   success:
   - Should fail

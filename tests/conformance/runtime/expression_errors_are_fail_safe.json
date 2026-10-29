@@ -1,0 +1,64 @@
+{
+  "description": "A condition that errors is false (skip); a failure-mode when that errors does not fire.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          },
+          "failure_modes": [
+            {
+              "condition": "c",
+              "action": "stop",
+              "when": "${r.data: number} > 1"
+            }
+          ]
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "condition": "${r.data: number} > 1",
+          "input_bindings": {
+            "target": "y"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": "text",
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "expression_error",
+    "step_skipped"
+  ]
+}

@@ -1,7 +1,7 @@
 ---
 name: persist
 description: Write stable learnings, decisions, and patterns to durable storage like CLAUDE.md or knowledge files. Use when saving project decisions, recording patterns, or updating long-term memory.
-argument-hint: "[content] [destination CLAUDE.md|file] [section]"
+argument-hint: "[data] [key] [ttl]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Edit
@@ -73,11 +73,11 @@ Execute **persist** to write stable learnings, decisions, and patterns to durabl
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `content` | Yes | string\|object | What to persist: decision, pattern, fact, or structured knowledge |
-| `destination` | No | string | Where to write: `CLAUDE.md`, file path, or `auto` (determine best location). Default: `CLAUDE.md` |
-| `section` | No | string | Section within destination to write to (e.g., "Decisions", "Patterns", "Facts") |
-| `content_type` | No | enum | Type of content: `decision`, `pattern`, `fact`, `context`. Default: auto-detect |
-| `merge_strategy` | No | enum | How to handle existing content: `append`, `replace`, `merge`. Default: `append` |
+| `data` | Yes | any | Data to store |
+| `key` | No | string | Storage key |
+| `ttl` | No | string | Time to live |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -87,7 +87,7 @@ Execute **persist** to write stable learnings, decisions, and patterns to durabl
    - Ensure no sensitive data (credentials, PII) is being persisted
    - Validate content structure if object
 
-2) **Determine destination**: Select where to write
+2) **Determine destination**: Select where to write (from `key`, if given)
    - `CLAUDE.md`: Project-level decisions and patterns
    - Specific file: Domain or feature-specific knowledge
    - `auto`: Choose based on content type and scope
@@ -127,12 +127,14 @@ Execute **persist** to write stable learnings, decisions, and patterns to durabl
 Return a structured object:
 
 ```yaml
+stored: boolean  # true when the data is in the store after this step (written, merged, or already present)
+key: string  # Storage key (destination and section, e.g. "CLAUDE.md#Patterns")
+timestamp: string  # ISO 8601 date-time of persistence
 persisted:
   content_type: decision | pattern | fact | context
   content_id: string  # Unique identifier for this persisted item
   destination: string  # File path where content was written
   section: string | null  # Section within file
-  timestamp: string  # ISO timestamp of persistence
 write_operation:
   strategy: append | replace | merge
   bytes_written: integer
@@ -159,12 +161,17 @@ assumptions: array[string]  # Explicit assumptions
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `stored` | boolean | Whether the data is in the store after this step (written, merged, or already present as a duplicate) |
+| `key` | string | Storage key the data lives under (destination and section) |
+| `timestamp` | string | ISO 8601 date-time of persistence |
 | `persisted.content_id` | string | Unique ID for retrieval with `recall` |
 | `persisted.destination` | string | File path of storage location |
 | `write_operation` | object | Details of the write performed |
 | `verification.write_confirmed` | boolean | Whether write was verified |
 | `duplicates_found` | array | Any duplicate/similar entries detected |
 | `confidence` | number | 1.0 if verified; lower if issues |
+| `evidence_anchors` | array | References to the written location and its verification |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 
@@ -172,26 +179,27 @@ assumptions: array[string]  # Explicit assumptions
 
 **Input:**
 ```yaml
-content:
+data:
+  content_type: decision
   decision: "Use PostgreSQL for all persistent storage"
   rationale: "Strong ACID guarantees, mature ecosystem, team familiarity"
   context: "Evaluated PostgreSQL, MySQL, and MongoDB for new backend service"
   constraints:
     - "Must support complex queries"
     - "Team has PostgreSQL experience"
-destination: CLAUDE.md
-section: "Architecture Decisions"
-content_type: decision
+key: "CLAUDE.md#Architecture Decisions"
 ```
 
 **Output:**
 ```yaml
+stored: true
+key: "CLAUDE.md#Architecture Decisions"
+timestamp: "2024-01-16T10:00:00Z"
 persisted:
   content_type: decision
   content_id: "decision_db_20240116"
   destination: "CLAUDE.md"
   section: "Architecture Decisions"
-  timestamp: "2024-01-16T10:00:00Z"
 write_operation:
   strategy: append
   bytes_written: 256
@@ -238,22 +246,23 @@ assumptions:
 
 **Input:**
 ```yaml
-content:
+data:
+  content_type: pattern
   pattern: "Wrap external API errors with domain-specific error types"
   rationale: "Prevents leaking implementation details"
-destination: CLAUDE.md
-section: "Patterns"
-content_type: pattern
+key: "CLAUDE.md#Patterns"
 ```
 
 **Output:**
 ```yaml
+stored: true  # Already present as pattern_err_001; nothing new written
+key: "CLAUDE.md#Patterns"
+timestamp: "2024-01-16T11:00:00Z"
 persisted:
   content_type: pattern
   content_id: null
   destination: "CLAUDE.md"
   section: "Patterns"
-  timestamp: "2024-01-16T11:00:00Z"
 write_operation:
   strategy: append
   bytes_written: 0
@@ -287,23 +296,25 @@ next_actions:
 
 **Input:**
 ```yaml
-content:
+data:
+  content_type: fact
   fact: "API rate limit is 1000 requests per minute"
   source: "API documentation v2.3"
-destination: "docs/api-notes.md"
-section: "Rate Limits"
-content_type: fact
-merge_strategy: merge
+key: "docs/api-notes.md#Rate Limits"
 ```
+
+Merge with the existing entry rather than appending a duplicate.
 
 **Output:**
 ```yaml
+stored: true
+key: "docs/api-notes.md#Rate Limits"
+timestamp: "2024-01-16T12:00:00Z"
 persisted:
   content_type: fact
   content_id: "fact_rate_limit_20240116"
   destination: "docs/api-notes.md"
   section: "Rate Limits"
-  timestamp: "2024-01-16T12:00:00Z"
 write_operation:
   strategy: merge
   bytes_written: 64
@@ -345,7 +356,7 @@ assumptions:
 - `mutation`: true
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: medium
+- `risk`: low
 
 **Capability-specific rules:**
 - NEVER persist credentials, API keys, or secrets

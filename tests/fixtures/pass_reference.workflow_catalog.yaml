@@ -1,3 +1,4 @@
+# Standard version: 1.1.0
 # Workflow Catalog (36-capability model)
 # Maps to capability_ontology.yaml
 
@@ -14,6 +15,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes:
     - condition: No relevant signals found
       action: request_more_context
@@ -27,6 +30,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: search_out
+    input_bindings:
+      query: "status"
     failure_modes: []
   - capability: attribute
     purpose: Build dependency graph and identify causal relationships around failing component.
@@ -38,6 +43,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "observed failure"
     failure_modes: []
   - capability: constrain
     purpose: Define invariants/spec expectations for the component.
@@ -48,6 +55,9 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: constrain_out
+    input_bindings:
+      target: "system"
+      constraints: ["policy"]
     failure_modes: []
   - capability: critique
     purpose: List likely failure modes + edge cases.
@@ -58,6 +68,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: critique_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: plan
     purpose: Produce minimal fix plan with checkpoints.
@@ -68,6 +80,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: plan_out
+    input_bindings:
+      goal: "resolve the request"
     failure_modes: []
   - capability: checkpoint
     purpose: Create checkpoint before mutation.
@@ -78,16 +92,20 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
     failure_modes: []
   - capability: execute
     purpose: Apply fix, run tests, and produce diff summary.
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: execute_out
+    input_bindings:
+      code: "make test"
     failure_modes:
     - condition: Unexpected side effects
       action: pause_and_checkpoint
@@ -103,6 +121,8 @@ debug_code_change:
       max: 3
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      conditions: ["checks_pass"]
     failure_modes:
     - condition: Verdict == FAIL
       action: rollback
@@ -116,6 +136,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event: {"type": "fixture_event"}
     failure_modes: []
   - capability: rollback
     purpose: If verify FAIL, revert safely.
@@ -126,6 +148,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
     failure_modes: []
   success:
   - Bug fixed or root cause isolated
@@ -165,6 +189,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: retrieve_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: observe
     purpose: Observe current system/world artifacts (docs, logs, sensors).
@@ -175,6 +201,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes:
     - condition: No relevant signals found
       action: request_more_context
@@ -189,6 +217,9 @@ world_model_build:
     timeout: null
     retry: null
     store_as: detect_out
+    input_bindings:
+      data: "sample"
+      pattern: "anomaly"
     failure_modes: []
   - capability: classify
     purpose: Classify detected entities and resolve types.
@@ -199,6 +230,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: classify_out
+    input_bindings:
+      item: "sample"
     failure_modes: []
   - capability: integrate
     purpose: Merge entity data and resolve identity across sources.
@@ -209,6 +242,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: integrate_out
+    input_bindings:
+      sources: ["a", "b"]
     failure_modes: []
   - capability: state
     purpose: Define state variables and current estimates.
@@ -219,6 +254,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: state_out
+    input_bindings:
+      scope: "workspace"
     failure_modes: []
   - capability: transition
     purpose: 'Define dynamics: transitions, triggers, guards.'
@@ -229,6 +266,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: transition_out
+    input_bindings:
+      from_state: {"status": "initial"}
     failure_modes: []
   - capability: attribute
     purpose: Define causal assumptions and intervention effects.
@@ -240,6 +279,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "observed failure"
     failure_modes: []
   - capability: measure
     purpose: Attach uncertainty types and confidence.
@@ -251,6 +292,9 @@ world_model_build:
     timeout: null
     retry: null
     store_as: measure_out
+    input_bindings:
+      target: "system"
+      metric: "quality"
     failure_modes: []
   - capability: audit
     purpose: Establish lineage for claims and transformations.
@@ -261,6 +305,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event: {"type": "fixture_event"}
     failure_modes: []
   - capability: ground
     purpose: Anchor each model element to evidence references.
@@ -271,6 +317,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: ground_out
+    input_bindings:
+      claim: "the result holds"
     failure_modes: []
   - capability: simulate
     purpose: Run scenarios to stress-test model and identify fragility.
@@ -281,6 +329,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: simulate_out
+    input_bindings:
+      scenario: {"change": "baseline"}
     failure_modes: []
   - capability: explain
     purpose: Produce a decision-ready world model brief.
@@ -291,6 +341,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: explain_out
+    input_bindings:
+      conclusion: "result"
     failure_modes: []
   success:
   - Model is structured (YAML/JSON)
@@ -331,6 +383,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes:
     - condition: No relevant signals found
       action: request_more_context
@@ -345,6 +399,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "observed failure"
     failure_modes: []
   - capability: discover
     purpose: Find hidden dependencies or unmodeled interactions.
@@ -355,6 +411,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: discover_out
+    input_bindings:
+      data: "sample"
     failure_modes: []
   - capability: compare
     purpose: Compare alternative skill architectures.
@@ -366,6 +424,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: compare_architecture_out
+    input_bindings:
+      options: ["a", "b"]
     failure_modes: []
   - capability: compare
     purpose: Rank missing capabilities by leverage and risk reduction.
@@ -377,6 +437,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: compare_priority_out
+    input_bindings:
+      options: ["a", "b"]
     failure_modes: []
   - capability: generate
     purpose: Generate an implementation plan for new skills.
@@ -388,6 +450,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: generate_out
+    input_bindings:
+      specification: "summary"
     failure_modes: []
   - capability: audit
     purpose: Record rationale + decision lineage.
@@ -398,6 +462,8 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event: {"type": "fixture_event"}
     failure_modes: []
   success:
   - Missing capability list
@@ -465,7 +531,7 @@ digital_twin_sync_loop:
     retry: null
     store_as: search_out
     input_bindings:
-      target: ${receive_out.source}
+      query: ${receive_out.source}
     failure_modes: []
   - capability: transform
     purpose: Normalize raw signals into canonical events compatible with state.observations.
@@ -478,8 +544,8 @@ digital_twin_sync_loop:
     store_as: transform_out
     failure_modes: []
     input_bindings:
-      source: '${receive_out.data}'
-      target_schema: canonical_event
+      input: '${receive_out.data}'
+      target_format: canonical_event
     gates: []
     mapping_ref: schemas/transforms/transform_mapping_rawlog_to_observation.yaml
     output_conforms_to: schemas/event_schema.yaml#/event
@@ -498,9 +564,9 @@ digital_twin_sync_loop:
       recovery: Ask for resolution strategy or authoritative source preference.
     input_bindings:
       sources:
-      - '${transform_out.output}'
+      - '${transform_out.output: array<object>}'
       - '${previous_world_state}'
-      resolution_strategy: prefer_authoritative_sources
+      conflict_resolution: prefer_authoritative_sources
     gates: []
     resolution_strategy: prefer_authoritative_sources
     conflict_resolution_strategies:
@@ -520,7 +586,9 @@ digital_twin_sync_loop:
     retry: null
     store_as: detect_entity_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      data: "sample"
+      pattern: "anomaly"
     gates: []
   - capability: classify
     purpose: Classify and resolve entity identities.
@@ -532,7 +600,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: classify_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      item: "sample"
     gates: []
   - capability: state
     purpose: Produce updated canonical world-state snapshot with uncertainty + provenance.
@@ -546,7 +615,7 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       observations: '${integrate_out.merged.observations: array<object>}'
-      domain: ${integrate_out.merged.meta.world_id}
+      scope: ${integrate_out.merged.meta.world_id}
     gates: []
     output_conforms_to: schemas/world_state_schema.yaml#/world_state
   - capability: compare
@@ -554,8 +623,9 @@ digital_twin_sync_loop:
     domain: state_diff
     store_as: compare_state_out
     input_bindings:
-      state_a: '${previous_world_state: object}'
-      state_b: '${state_out: object}'
+      options:
+      - '${previous_world_state: object}'
+      - '${state_out: object}'
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -573,7 +643,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: transition_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      from_state: {"status": "initial"}
     gates: []
   - capability: detect
     purpose: Detect drift/anomalies between expected and observed state.
@@ -587,7 +658,8 @@ digital_twin_sync_loop:
     store_as: detect_anomaly_out
     failure_modes: []
     input_bindings:
-      context: ${state_out}
+      data: ${state_out}
+      pattern: "anomaly"
     gates: []
   - capability: measure
     purpose: Estimate risk impact/probability from drift and transitions.
@@ -601,7 +673,8 @@ digital_twin_sync_loop:
     store_as: measure_risk_out
     failure_modes: []
     input_bindings:
-      context: ${detect_anomaly_out}
+      target: ${detect_anomaly_out}
+      metric: "quality"
     gates: []
   - capability: predict
     purpose: Forecast near-term risk trajectory and triggers.
@@ -614,7 +687,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: predict_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      target: "system"
     gates: []
   - capability: plan
     purpose: Plan safe action(s) to reduce risk, with verification criteria and rollback plan.
@@ -628,6 +702,7 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       context: ${predict_out}
+      goal: "resolve the request"
     gates: []
   - capability: constrain
     purpose: Enforce policy and least privilege for planned actions.
@@ -639,7 +714,9 @@ digital_twin_sync_loop:
     retry: null
     store_as: constrain_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      target: "system"
+      constraints: ["policy"]
     gates: []
   - capability: checkpoint
     purpose: Create checkpoint marker before any mutation/side-effect step.
@@ -651,7 +728,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: checkpoint_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      scope: "workspace"
     gates: []
   - capability: mutate
     purpose: Execute mutations from action plan (if approved).
@@ -666,7 +744,9 @@ digital_twin_sync_loop:
     - condition: Unexpected side effects
       action: pause_and_checkpoint
       recovery: Require human approval to proceed.
-    input_bindings: {}
+    input_bindings:
+      target: "system"
+      operation: {"set": true}
     gates:
     - when: ${checkpoint_out.checkpoint_id} == null
       action: stop
@@ -678,12 +758,13 @@ digital_twin_sync_loop:
     risk: medium
     mutation: false
     requires_checkpoint: false
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: execute_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      code: "make test"
     gates: []
   - capability: verify
     purpose: 'Verify outcome: PASS/FAIL with evidence.'
@@ -698,15 +779,18 @@ digital_twin_sync_loop:
     store_as: verify_out
     failure_modes:
     - condition: Verdict == FAIL
+      when: ${verify_out.passed} == false
       action: rollback
       recovery:
-        goto_step: plan
+        goto_step: plan_out
         inject_context:
           failure_evidence: ${verify_out.violations}
         max_loops: 3
-    input_bindings: {}
+    input_bindings:
+      conditions: ["checks_pass"]
     gates:
     - when: ${verify_out.passed} == false
+      phase: after
       action: rollback
       message: Verification failed. Rolling back.
   - capability: audit
@@ -719,7 +803,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: audit_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      event: {"type": "fixture_event"}
     gates: []
   - capability: rollback
     purpose: If verify FAIL or side effects detected, rollback to checkpoint.
@@ -731,7 +816,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: rollback_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
     gates: []
   - capability: explain
     purpose: 'Produce decision-ready sync report: drift, actions, verification, next steps.'
@@ -743,7 +829,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: explain_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      conclusion: "result"
     gates: []
   workflow_extensions:
     supports_input_bindings: true
@@ -781,9 +868,8 @@ digital_twin_bootstrap:
     condition: ${world_state_out} == null
     skip_if_false: true
     input_bindings:
-      inputs:
-        domain: ${user_input.domain}
-        constraints: ${user_input.constraints}
+      input:
+        user_input: ${user_input}
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -796,9 +882,10 @@ digital_twin_bootstrap:
     workflow_id: digital_twin_sync_loop
     store_as: sync_out
     input_bindings:
-      inputs:
-        # Note: result contains nested workflow output where state_out was stored
-        world_state: ${world_model_out.result}
+      input:
+        user_input: ${user_input}
+        # result holds the invoked workflow's stores; its state_out is the baseline
+        previous_world_state: '${world_model_out.result.state_out: object}'
     risk: medium
     mutation: false
     requires_checkpoint: false

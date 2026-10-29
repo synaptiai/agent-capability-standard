@@ -109,7 +109,7 @@ These OASF skills are inherently multi-step processes best represented as compos
 | **Chain-of-Thought Reasoning** | `chain_of_thought` | decompose → explain → verify (iterative) |
 | **Long-horizon Planning** | `strategic_planning` | state → predict → plan → simulate → critique |
 | **Negotiation/Conflict Resolution** | `negotiation` | inquire → compare → plan → delegate → synchronize |
-| **CI/CD Pipeline** | `cicd_workflow` | observe → verify → checkpoint → execute → verify → audit |
+| **CI/CD Pipeline** | `cicd_workflow` | observe → constrain → checkpoint → execute → verify → audit |
 | **Model Versioning** | `model_versioning` | checkpoint → mutate → verify → persist → audit |
 | **Infrastructure Provisioning** | `infrastructure_provision` | plan → constrain → checkpoint → execute → verify |
 | **Vulnerability Assessment** | `vulnerability_assessment` | search → detect → measure → critique → explain |
@@ -328,8 +328,8 @@ model_deployment:
   goal: Safely deploy ML model to production
   risk: high
   steps:
-  - capability: verify
-    purpose: Validate model artifacts
+  - capability: constrain
+    purpose: Check model artifacts before deployment
   - capability: constrain
     purpose: Check deployment policies
   - capability: checkpoint
@@ -343,9 +343,8 @@ model_deployment:
     purpose: Check model performance
   - capability: audit
     purpose: Record deployment event
-  gates:
-  - when: ${verify_out.passed} == false
-    action: rollback
+  - capability: rollback
+    purpose: Revert to the checkpoint if deployment verification failed
 ```
 
 ---

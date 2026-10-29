@@ -1,7 +1,7 @@
 ---
 name: critique
 description: Find failure modes, edge cases, ambiguities, and exploit paths in plans, code, or designs. Use when reviewing proposals, auditing security, stress-testing logic, or validating assumptions.
-argument-hint: "[target] [focus_areas] [severity_threshold]"
+argument-hint: "[target] [criteria] [severity_threshold]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -18,7 +18,7 @@ Systematically analyze a target (plan, code, design, document) to identify failu
 - Edge cases documented with reproduction scenarios
 - Ambiguities flagged with clarification requests
 - Security/exploit risks rated appropriately
-- Each finding has actionable recommendation
+- Each issue has an actionable suggestion
 
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
@@ -27,11 +27,12 @@ Systematically analyze a target (plan, code, design, document) to identify failu
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `target` | Yes | string or object | Plan, code, design, or document to critique |
-| `focus_areas` | No | array | Specific areas to examine (security, performance, logic, etc.) |
+| `target` | Yes | any | Plan, code, design, or document to critique |
+| `criteria` | No | array | Evaluation criteria |
 | `severity_threshold` | No | string | Minimum severity to report: low, medium, high, critical |
-| `context` | No | object | Additional context about the target |
-| `adversarial` | No | boolean | Enable adversarial/red-team thinking (default: true) |
+| `context` | No | any | Additional context about the target |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -65,13 +66,14 @@ Systematically analyze a target (plan, code, design, document) to identify failu
    - Data exposure risks
    - Privilege escalation opportunities
 
-6) **Rate severity**: Classify each finding
+6) **Rate severity**: Classify each issue (recorded per issue and in the `severity` map)
    - CRITICAL: System compromise or data loss
    - HIGH: Significant functionality or security impact
    - MEDIUM: Moderate impact, workarounds exist
    - LOW: Minor issues, cosmetic or edge-case
+   - Report in `issues` only those at or above `severity_threshold`
 
-7) **Recommend mitigations**: Provide actionable fixes
+7) **Recommend mitigations**: Provide actionable fixes as `suggestions`
    - Specific changes to address each finding
    - Priority ordering for fixes
    - Estimated effort for each mitigation
@@ -81,7 +83,7 @@ Systematically analyze a target (plan, code, design, document) to identify failu
 Return a structured object:
 
 ```yaml
-findings:
+issues:
   - id: string  # Unique finding identifier
     type: failure_mode | edge_case | ambiguity | exploit | gap
     description: string  # Clear description of the issue
@@ -90,25 +92,27 @@ findings:
     evidence: string  # Supporting evidence
     reproduction: string | null  # How to reproduce
     recommendation: string  # Suggested fix
+severity:  # Issue severities, keyed by issue id
+  <issue_id>: low | medium | high | critical
 risk_summary:
   overall_risk: low | medium | high | critical
   mitigations_possible: boolean
-  urgent_issues: array[string]  # Finding IDs requiring immediate attention
+  urgent_issues: array[string]  # Issue IDs requiring immediate attention
   risk_distribution:
     critical: integer
     high: integer
     medium: integer
     low: integer
-recommendations:
-  - finding_ref: string  # Finding ID
+suggestions:
+  - issue_ref: string  # Issue ID
     suggestion: string  # Detailed fix suggestion
     effort: low | medium | high
     priority: integer  # 1 = highest priority
 patterns_identified:
   - pattern: string  # Recurring issue pattern
-    affected_findings: array[string]
+    affected_issues: array[string]
     systemic_fix: string  # How to address pattern
-confidence: 0..1
+confidence: number  # 0.0-1.0
 evidence_anchors: ["file:line", "section:name"]
 assumptions: []
 ```
@@ -117,9 +121,10 @@ assumptions: []
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `findings` | array | Individual issues discovered |
+| `issues` | array | Weaknesses found at or above `severity_threshold` (empty when none; workflows gate on `${<step>.issues} == []`) |
+| `severity` | object | Issue severities, keyed by issue id |
 | `risk_summary` | object | Overall risk assessment |
-| `recommendations` | array | Prioritized fix suggestions |
+| `suggestions` | array<object> | Prioritized improvement suggestions, each referencing an issue |
 | `patterns_identified` | array | Recurring issues with systemic fixes |
 | `confidence` | number | 0.0-1.0 based on analysis completeness |
 | `evidence_anchors` | array | References to target locations |
@@ -141,12 +146,12 @@ target:
       action: "Deploy new auth service"
     - id: "step-3"
       action: "Run smoke tests"
-focus_areas: ["availability", "rollback", "security"]
+criteria: ["availability", "rollback", "security"]
 ```
 
 **Output:**
 ```yaml
-findings:
+issues:
   - id: "CRT-001"
     type: failure_mode
     description: "Zero-downtime deployment not guaranteed. Stopping old service before new is verified creates outage window."
@@ -179,6 +184,11 @@ findings:
     evidence: "No step validates auth service security posture"
     reproduction: "Deploy service with open admin endpoint; not caught by smoke tests"
     recommendation: "Add security scan step before traffic routing"
+severity:
+  CRT-001: high
+  CRT-002: critical
+  CRT-003: medium
+  CRT-004: high
 risk_summary:
   overall_risk: critical
   mitigations_possible: true
@@ -188,26 +198,26 @@ risk_summary:
     high: 2
     medium: 1
     low: 0
-recommendations:
-  - finding_ref: "CRT-002"
+suggestions:
+  - issue_ref: "CRT-002"
     suggestion: "Add rollback step with automatic trigger on smoke test failure"
     effort: low
     priority: 1
-  - finding_ref: "CRT-001"
+  - issue_ref: "CRT-001"
     suggestion: "Rewrite as blue-green deployment with health check before cutover"
     effort: medium
     priority: 2
-  - finding_ref: "CRT-004"
+  - issue_ref: "CRT-004"
     suggestion: "Add security scan after deployment, before enabling traffic"
     effort: medium
     priority: 3
-  - finding_ref: "CRT-003"
+  - issue_ref: "CRT-003"
     suggestion: "Define smoke test checklist with pass/fail criteria"
     effort: low
     priority: 4
 patterns_identified:
   - pattern: "Missing safety gates"
-    affected_findings: ["CRT-001", "CRT-002", "CRT-004"]
+    affected_issues: ["CRT-001", "CRT-002", "CRT-004"]
     systemic_fix: "Adopt CAVR pattern: checkpoint before each mutation, verify after each step"
 confidence: 0.9
 evidence_anchors:
@@ -218,7 +228,7 @@ assumptions:
   - "Downtime of auth service blocks all authenticated requests"
 ```
 
-**Evidence pattern:** Each finding references specific plan location; recommendations are actionable.
+**Evidence pattern:** Each issue references specific plan location; suggestions are actionable.
 
 ---
 
@@ -234,13 +244,14 @@ target:
         if user and user.password == password:
             return create_token(user.id)
         return None
-focus_areas: ["security"]
-adversarial: true
+criteria: ["security"]
 ```
+
+Review adversarially: probe the code as an attacker would.
 
 **Output:**
 ```yaml
-findings:
+issues:
   - id: "CRT-001"
     type: exploit
     description: "SQL injection vulnerability. Username is interpolated directly into query string."
@@ -273,6 +284,11 @@ findings:
     evidence: "No input validation at function entry"
     reproduction: "login('', '') - behavior undefined"
     recommendation: "Add input validation: if not username or not password: return None"
+severity:
+  CRT-001: critical
+  CRT-002: critical
+  CRT-003: high
+  CRT-004: low
 risk_summary:
   overall_risk: critical
   mitigations_possible: true
@@ -282,26 +298,26 @@ risk_summary:
     high: 1
     medium: 0
     low: 1
-recommendations:
-  - finding_ref: "CRT-001"
+suggestions:
+  - issue_ref: "CRT-001"
     suggestion: "IMMEDIATE: Replace f-string query with parameterized query"
     effort: low
     priority: 1
-  - finding_ref: "CRT-002"
+  - issue_ref: "CRT-002"
     suggestion: "IMMEDIATE: Migrate to bcrypt password hashing"
     effort: medium
     priority: 2
-  - finding_ref: "CRT-003"
+  - issue_ref: "CRT-003"
     suggestion: "Add rate limiting middleware before login endpoint"
     effort: medium
     priority: 3
-  - finding_ref: "CRT-004"
+  - issue_ref: "CRT-004"
     suggestion: "Add input validation decorator"
     effort: low
     priority: 4
 patterns_identified:
   - pattern: "OWASP Top 10 violations"
-    affected_findings: ["CRT-001", "CRT-002"]
+    affected_issues: ["CRT-001", "CRT-002"]
     systemic_fix: "Security code review and SAST integration in CI"
 confidence: 0.95
 evidence_anchors:
@@ -314,9 +330,9 @@ assumptions:
 
 ## Verification
 
-- [ ] All focus areas were examined
+- [ ] All criteria were examined
 - [ ] Severity ratings are justified
-- [ ] Each finding has a recommendation
+- [ ] Each issue has a suggestion
 - [ ] Critical issues are highlighted
 - [ ] Patterns are identified for systemic fixes
 
@@ -344,14 +360,14 @@ assumptions:
 - `retrieve` - Gather context for critique
 
 **Commonly precedes:**
-- `plan` - Revise plan based on critique findings
+- `plan` - Revise plan based on critique issues and suggestions
 - `mitigate` - Address identified risks
 - `verify` - Validate fixes for findings
 - `audit` - Record critique and responses
 
 **Anti-patterns:**
 - Never skip critique for high-risk plans
-- Never proceed with critical findings unaddressed
+- Never proceed with critical issues unaddressed
 - Avoid superficial critique of security-sensitive targets
 
 **Workflow references:**

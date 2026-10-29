@@ -1,7 +1,7 @@
 ---
 name: discover
 description: Find latent patterns, relationships, anomalies, or insights not explicitly specified. Use when exploring unknown structure, finding hidden connections, or uncovering emergent phenomena.
-argument-hint: "[search-space] [discovery-type] [constraints]"
+argument-hint: "[data] [constraints] [method]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -26,10 +26,11 @@ Explore data or systems to find patterns, relationships, or anomalies that were 
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `search_space` | Yes | string\|object | Where to look (files, data, systems, domains) |
-| `discovery_type` | No | string | What kind of discovery: relationship, pattern, anomaly, gap, opportunity |
+| `data` | Yes | any | Data to explore |
 | `constraints` | No | object | Bounds on exploration (time, scope, depth) |
-| `seed_observations` | No | array | Initial observations that may hint at discoveries |
+| `method` | No | string | Discovery approach |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -70,13 +71,25 @@ Explore data or systems to find patterns, relationships, or anomalies that were 
 Return a structured object:
 
 ```yaml
-discoveries:
-  - type: string  # relationship, pattern, anomaly, gap, opportunity
+patterns:  # Discovered patterns (also gaps and opportunities)
+  - type: pattern | gap | opportunity
     description: string  # What was discovered
     significance: low | medium | high
     novelty: known | suspected | surprising
     entities_involved: array[string]
     location: string  # Where found (file:line, path, or reference)
+relationships:  # Found relationships between entities (same item shape, without type)
+  - description: string
+    significance: low | medium | high
+    novelty: known | suspected | surprising
+    entities_involved: array[string]
+    location: string
+anomalies:  # Unusual findings (same item shape, without type)
+  - description: string
+    significance: low | medium | high
+    novelty: known | suspected | surprising
+    entities_involved: array[string]
+    location: string
 methodology: string  # How discovery was conducted
 search_space: string  # What was explored
 confidence: number  # 0.0-1.0 confidence in discoveries
@@ -88,10 +101,12 @@ assumptions: array[string]  # Conditions that affect findings
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `discoveries` | array | List of findings with metadata |
-| `discoveries[].type` | string | Category of discovery |
-| `discoveries[].significance` | enum | Importance level |
-| `discoveries[].novelty` | enum | How unexpected the finding is |
+| `patterns` | array<object> | Discovered patterns, gaps and opportunities (empty when none) |
+| `patterns[].type` | enum | `pattern`, `gap` or `opportunity` |
+| `relationships` | array<object> | Connections found between entities |
+| `anomalies` | array<object> | Outliers, inconsistencies, unusual structures |
+| `*[].significance` | enum | Importance level (every discovery) |
+| `*[].novelty` | enum | How unexpected the finding is (every discovery) |
 | `methodology` | string | Exploration approach used |
 | `search_space` | string | Scope of exploration |
 | `confidence` | number | 0.0-1.0 overall discovery confidence |
@@ -104,8 +119,8 @@ assumptions: array[string]  # Conditions that affect findings
 
 **Input:**
 ```yaml
-search_space: "src/"
-discovery_type: "relationship"
+data: "src/"
+method: "relationship"
 constraints:
   max_depth: 3
   focus: "imports and function calls"
@@ -113,15 +128,7 @@ constraints:
 
 **Output:**
 ```yaml
-discoveries:
-  - type: "relationship"
-    description: "Circular dependency between UserService and AuthService"
-    significance: high
-    novelty: surprising
-    entities_involved:
-      - "src/services/UserService.ts"
-      - "src/services/AuthService.ts"
-    location: "src/services/UserService.ts:12 imports AuthService; src/services/AuthService.ts:8 imports UserService"
+patterns:
   - type: "pattern"
     description: "All repository classes follow identical initialization pattern with DI container lookup"
     significance: medium
@@ -129,13 +136,6 @@ discoveries:
     entities_involved:
       - "src/repositories/*.ts"
     location: "src/repositories/"
-  - type: "anomaly"
-    description: "PaymentService bypasses standard error handling pattern used by all other services"
-    significance: high
-    novelty: suspected
-    entities_involved:
-      - "src/services/PaymentService.ts"
-    location: "src/services/PaymentService.ts:45-78"
   - type: "gap"
     description: "No unit tests for critical OrderValidation module"
     significance: high
@@ -143,6 +143,21 @@ discoveries:
     entities_involved:
       - "src/validation/OrderValidation.ts"
     location: "tests/ - no corresponding test file"
+relationships:
+  - description: "Circular dependency between UserService and AuthService"
+    significance: high
+    novelty: surprising
+    entities_involved:
+      - "src/services/UserService.ts"
+      - "src/services/AuthService.ts"
+    location: "src/services/UserService.ts:12 imports AuthService; src/services/AuthService.ts:8 imports UserService"
+anomalies:
+  - description: "PaymentService bypasses standard error handling pattern used by all other services"
+    significance: high
+    novelty: suspected
+    entities_involved:
+      - "src/services/PaymentService.ts"
+    location: "src/services/PaymentService.ts:45-78"
 methodology: "Static analysis of import statements, grep for class instantiation patterns, comparison against test file naming conventions"
 search_space: "src/ directory (156 TypeScript files)"
 confidence: 0.85
@@ -165,15 +180,15 @@ assumptions:
 
 **Input:**
 ```yaml
-search_space: "entire codebase"
-discovery_type: "pattern"
-seed_observations:
-  - "Some endpoints seem to share similar structure"
+data: "entire codebase"
+method: "pattern"
 ```
+
+Seed observation: some endpoints seem to share similar structure.
 
 **Output:**
 ```yaml
-discoveries:
+patterns:
   - type: "pattern"
     description: "Three distinct architectural styles coexist: MVC in /admin, DDD in /core, and script-style in /legacy"
     significance: high
@@ -183,13 +198,6 @@ discoveries:
       - "/core/*"
       - "/legacy/*"
     location: "Repository-wide directory structure"
-  - type: "relationship"
-    description: "DDD bounded contexts in /core share a common anti-corruption layer for legacy integration"
-    significance: medium
-    novelty: surprising
-    entities_involved:
-      - "/core/adapters/legacy/"
-    location: "/core/adapters/legacy/*.ts"
   - type: "opportunity"
     description: "MVC controllers in /admin could be consolidated - 12 controllers have nearly identical CRUD patterns"
     significance: medium
@@ -197,6 +205,14 @@ discoveries:
     entities_involved:
       - "/admin/controllers/*.ts"
     location: "/admin/controllers/"
+relationships:
+  - description: "DDD bounded contexts in /core share a common anti-corruption layer for legacy integration"
+    significance: medium
+    novelty: surprising
+    entities_involved:
+      - "/core/adapters/legacy/"
+    location: "/core/adapters/legacy/*.ts"
+anomalies: []
 methodology: "Directory structure analysis, pattern matching on file organization, code similarity detection"
 search_space: "Full repository (312 files, 4 top-level directories)"
 confidence: 0.75
@@ -211,7 +227,7 @@ assumptions:
 
 ## Verification
 
-- [ ] Each discovery has type, significance, and novelty classified
+- [ ] Each discovery is filed under `patterns`, `relationships` or `anomalies`, with significance and novelty classified
 - [ ] At least one discovery has evidence_anchors
 - [ ] Methodology is documented and reproducible
 - [ ] Search space boundaries are clearly defined
@@ -228,7 +244,7 @@ assumptions:
 
 **Capability-specific rules:**
 - Do not modify any files during discovery
-- Respect scope boundaries - do not explore outside search_space
+- Respect scope boundaries - do not explore outside the bounds set by `data` and `constraints`
 - Flag discoveries that may reveal sensitive information
 - Report uncertainty when findings could be coincidental
 

@@ -1,7 +1,7 @@
 ---
 name: verify
 description: Check correctness against tests, specs, or invariants; produce pass/fail evidence. Use when validating changes, testing hypotheses, checking invariants, or confirming behavior matches expectations.
-argument-hint: "[spec|tests] [artifact|target] [constraints]"
+argument-hint: "[conditions] [target] [strict]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep
@@ -23,7 +23,7 @@ Before verification, gather current state:
 Execute **verify** to determine whether an artifact (code, configuration, state, output) conforms to a specification, passes tests, or satisfies declared invariants.
 
 **Success criteria:**
-- Clear PASS or FAIL verdict with supporting evidence
+- Clear pass/fail result (`passed`) with supporting evidence
 - Every check is grounded to observable output or file content
 - Failures include actionable fix suggestions
 - All assumptions about expected behavior are explicit
@@ -35,19 +35,20 @@ Execute **verify** to determine whether an artifact (code, configuration, state,
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `spec` | Yes | string\|object | The specification, test suite, or invariants to check against |
-| `artifact` | Yes | string\|object | The target being verified (file path, function, API endpoint, state) |
-| `constraints` | No | object | Verification constraints: timeout, test filter, coverage threshold |
-| `check_types` | No | array | Types of checks: assertion, invariant, regression, schema |
+| `target` | No | any | What to verify |
+| `conditions` | Yes | array | Conditions to check |
+| `strict` | No | boolean | Fail on first violation |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
-1) **Load specification**: Read the spec/test/invariant definition
-   - Identify testable assertions from the spec
+1) **Load conditions**: Read the test/invariant definitions in `conditions`
+   - Identify testable assertions from the conditions
    - Parse test commands or invariant expressions
    - Note any preconditions required for verification
 
-2) **Examine artifact**: Inspect the target being verified
+2) **Examine target**: Inspect the target being verified
    - Read relevant code, config, or state
    - Identify the specific behavior/properties to check
    - Check preconditions are met before running tests
@@ -58,10 +59,10 @@ Execute **verify** to determine whether an artifact (code, configuration, state,
    - For schema validation: compare structure against schema
    - Record timing and resource usage if relevant
 
-4) **Analyze results**: Determine verdict from check outcomes
-   - PASS: All checks succeed
-   - FAIL: One or more checks fail
-   - INCONCLUSIVE: Unable to determine due to errors or missing data
+4) **Analyze results**: Determine `passed` from check outcomes
+   - `passed: true`: All checks succeed
+   - `passed: false`: One or more checks fail (each listed in `violations`)
+   - Inconclusive (errors or missing data): `passed: false` with `inconclusive: true`
 
 5) **Ground claims**: Attach evidence anchors to all findings
    - Format: `file:line`, `tool:bash:<command>`, or `test:<test_name>`
@@ -76,20 +77,21 @@ Execute **verify** to determine whether an artifact (code, configuration, state,
 Return a structured object:
 
 ```yaml
-verdict: PASS | FAIL | INCONCLUSIVE
-checks_run:
+passed: boolean  # true only when every check passed
+inconclusive: boolean  # true when checks could not run (passed is then false)
+results:  # Per-condition results
   - name: string  # Check identifier
     type: assertion | invariant | regression | schema
     target: string  # What was checked
-    result: PASS | FAIL
+    passed: boolean
     evidence: string  # Output or file reference
-failures:
+violations:  # Failed conditions
   - check: string  # Which check failed
     expected: string  # What was expected
     actual: string  # What was observed
     severity: low | medium | high | critical
 fix_suggestions:
-  - failure_ref: string  # Reference to failure
+  - violation_ref: string  # Which violation (by check name)
     suggestion: string  # How to fix
     confidence: number  # 0.0-1.0 for suggestion quality
 coverage:
@@ -105,10 +107,11 @@ assumptions: []  # Explicit assumptions made
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `verdict` | enum | Overall verification result |
-| `checks_run` | array | List of all checks executed with results |
-| `failures` | array | Details of failed checks |
-| `fix_suggestions` | array | Actionable suggestions to fix failures |
+| `passed` | boolean | Overall result: true only when every check passed |
+| `inconclusive` | boolean | True when checks could not be run; `passed` is then false |
+| `results` | array | Per-condition results for every check executed |
+| `violations` | array | Failed conditions with expected vs. actual |
+| `fix_suggestions` | array | Actionable suggestions to fix violations |
 | `coverage` | object | Metrics about verification coverage |
 | `confidence` | number | 0.0-1.0 based on evidence quality and check coverage |
 | `evidence_anchors` | array | File:line, URLs, or tool output references |
@@ -120,34 +123,33 @@ assumptions: []  # Explicit assumptions made
 
 **Input:**
 ```yaml
-spec: "pytest tests/test_calculator.py -v"
-artifact: "src/calculator.py"
-constraints:
-  timeout: "60s"
-  check_types: ["regression", "assertion"]
+target: "src/calculator.py"
+conditions:
+  - "pytest tests/test_calculator.py -v passes"
 ```
 
 **Output:**
 ```yaml
-verdict: FAIL
-checks_run:
+passed: false
+inconclusive: false
+results:
   - name: test_add_positive
     type: assertion
     target: Calculator.add
-    result: PASS
+    passed: true
     evidence: "tool:bash:pytest - PASSED"
   - name: test_divide_by_zero
     type: assertion
     target: Calculator.divide
-    result: FAIL
+    passed: false
     evidence: "tool:bash:pytest - AssertionError: Expected ZeroDivisionError"
-failures:
+violations:
   - check: test_divide_by_zero
     expected: "ZeroDivisionError raised"
     actual: "Returns infinity"
     severity: high
 fix_suggestions:
-  - failure_ref: test_divide_by_zero
+  - violation_ref: test_divide_by_zero
     suggestion: "Add check for divisor == 0 before division in Calculator.divide()"
     confidence: 0.9
 coverage:
@@ -171,22 +173,23 @@ assumptions:
 
 **Input:**
 ```yaml
-spec:
-  type: schema
-  schema_path: "schemas/config.json"
-artifact: "config/production.yaml"
+target: "config/production.yaml"
+conditions:
+  - type: schema
+    schema_path: "schemas/config.json"
 ```
 
 **Output:**
 ```yaml
-verdict: PASS
-checks_run:
+passed: true
+inconclusive: false
+results:
   - name: schema_validation
     type: schema
     target: config/production.yaml
-    result: PASS
+    passed: true
     evidence: "All 12 required fields present, types valid"
-failures: []
+violations: []
 fix_suggestions: []
 coverage:
   checked: 1
@@ -204,10 +207,10 @@ assumptions:
 
 Apply the following verification patterns:
 
-- [ ] **Evidence Grounding**: All verdicts anchored to test output or file content
+- [ ] **Evidence Grounding**: All results anchored to test output or file content
 - [ ] **Contract Validation**: Output matches schema with required fields
-- [ ] **Idempotency Check**: Re-running verify produces same verdict (given unchanged inputs)
-- [ ] **Coverage Tracking**: checks_run.length == coverage.total
+- [ ] **Idempotency Check**: Re-running verify produces the same `passed` result (given unchanged inputs)
+- [ ] **Coverage Tracking**: results.length == coverage.total
 
 **Verification tools:** Bash (for test execution), Read (for evidence files)
 
@@ -216,12 +219,12 @@ Apply the following verification patterns:
 - `mutation`: false
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: medium
+- `risk`: low
 
 **Capability-specific rules:**
 - Do not modify the artifact being verified
 - Do not skip failing tests or mask errors
-- Stop and clarify if spec is ambiguous or missing
+- Stop and clarify if conditions are ambiguous or missing
 - Timeout all external test execution (default 5 minutes)
 - Do not access paths outside the workspace for verification
 
@@ -260,19 +263,19 @@ Located at: `scripts/verify-state.sh`
 ## Composition Patterns
 
 **Commonly follows:**
-- `model-schema` - Provides the invariants/spec to verify against (REQUIRED)
-- `act-plan` - Verify the outcome of executed changes
+- `constrain` - Provides the invariants/spec to verify against
+- `execute` / `mutate` - Verify the outcome of executed changes (they must precede verify)
 - `plan` - Provides expected postconditions to verify
 
 **Commonly precedes:**
 - `audit` - Record verification results for compliance
-- `rollback` - If verify FAIL, trigger rollback (CAVR pattern)
+- `rollback` - If `passed` is false, trigger rollback (CAVR pattern)
 - `critique` - Analyze root cause of failures
 
 **Anti-patterns:**
-- Never verify without a spec (model-schema is required dependency)
+- Never verify without a spec (`constrain` invariants or explicit `conditions`)
 - Never modify artifact during verification (breaks idempotency)
-- Never ignore FAIL verdicts and proceed with mutations
+- Never ignore `passed: false` and proceed with mutations
 
 **Workflow references:**
 - See `reference/composition_patterns.md#debug-code-change` for CAVR pattern

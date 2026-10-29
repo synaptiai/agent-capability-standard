@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 safe_mutation:
   goal: Workflow demonstrating checkpoint-before-mutate safety pattern.
   risk: high
@@ -11,6 +12,8 @@ safe_mutation:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: plan
     purpose: Plan the mutation.
@@ -21,6 +24,8 @@ safe_mutation:
     timeout: null
     retry: null
     store_as: plan_out
+    input_bindings:
+      goal: "resolve the request"
     failure_modes: []
   - capability: checkpoint
     purpose: Create checkpoint before mutation.
@@ -31,16 +36,21 @@ safe_mutation:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
     failure_modes: []
   - capability: mutate
     purpose: Apply planned mutation safely.
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: mutate_out
+    input_bindings:
+      target: "system"
+      operation: {"set": true}
     failure_modes:
     - condition: Unexpected side effects
       action: rollback
@@ -56,6 +66,8 @@ safe_mutation:
       max: 3
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      conditions: ["checks_pass"]
     failure_modes:
     - condition: Verdict == FAIL
       action: rollback
@@ -69,6 +81,8 @@ safe_mutation:
     timeout: null
     retry: null
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
     failure_modes: []
   - capability: audit
     purpose: Record mutation audit trail.
@@ -79,6 +93,8 @@ safe_mutation:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event: {"type": "fixture_event"}
     failure_modes: []
   success:
   - Mutation applied safely with checkpoint

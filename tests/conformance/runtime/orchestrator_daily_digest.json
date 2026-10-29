@@ -1,0 +1,548 @@
+{
+  "description": "A brief reads the calendar; the text is checked, grounded and verified, then saved.",
+  "catalog": {
+    "daily_digest": {
+      "goal": "Give the owner a short, true picture - what moved, what waits on them (approvals first), what is at risk - where every line names its source or says not verified.",
+      "risk": "low",
+      "description": "One workflow, two kinds: the 16:30 digest and the brief at the end of the\nmorning sweep. The result goes only to the owner's own assistant session, so it is\nthe workflow's output, not a `send`. System-of-record state wins over memory\n(integrate with prefer_authoritative_sources). Unattended: it never sends\nanything outward; planned ActionRecords are listed for approval.\n",
+      "workflow_extensions": {
+        "requires": [
+          "triggers@1"
+        ]
+      },
+      "triggers": [
+        {
+          "kind": "schedule",
+          "schedule": {
+            "cron": "30 16 * * MON-FRI",
+            "timezone": "UTC",
+            "overlap": "skip"
+          },
+          "attendance": "unattended"
+        }
+      ],
+      "inputs": {
+        "board": {
+          "type": "object",
+          "ref": "schemas/world_state_schema.yaml#/world_state"
+        },
+        "report": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "digest",
+                "brief"
+              ]
+            },
+            "since": {
+              "type": "string"
+            },
+            "max_lines": {
+              "type": "number"
+            }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "format_rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "calendar_ref": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "capability": "recall",
+          "purpose": "Load the board, state.json and new lines in unknowns since the last report.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "memory_out",
+          "input_bindings": {
+            "key": "board+state.json+unknowns"
+          }
+        },
+        {
+          "capability": "retrieve",
+          "purpose": "Read the systems of record for the period - merged PRs, closed issues, sent items, posted verdicts.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "records_out",
+          "input_bindings": {
+            "target": "${report.since}",
+            "format": "merged_prs+closed_issues+sent_items+reviews"
+          }
+        },
+        {
+          "capability": "retrieve",
+          "purpose": "Brief only - today's meetings that need preparation or have a conflict.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "calendar_out",
+          "condition": "${report.kind} == \"brief\"",
+          "skip_if_false": true,
+          "input_bindings": {
+            "target": "${profile.calendar_ref}",
+            "format": "today_events"
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "List planned ActionRecords (approvals that wait) and rows waiting for the owner's \"yes\".",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "approvals_out",
+          "input_bindings": {
+            "query": {
+              "status": "planned"
+            },
+            "scope": "state.json+board"
+          }
+        },
+        {
+          "capability": "integrate",
+          "purpose": "Merge memory with the systems of record; the system of record wins, conflicts are listed.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "merged_out",
+          "input_bindings": {
+            "sources": [
+              "${memory_out.data: object}",
+              "${records_out.data: object}",
+              "${approvals_out.results: array<object>}"
+            ],
+            "strategy": "by_board_row",
+            "conflict_resolution": "prefer_authoritative_sources"
+          }
+        },
+        {
+          "capability": "classify",
+          "purpose": "Sort items into approvals waiting, needs you today, moved, done awaiting yes, risks, stale.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "items_out",
+          "input_bindings": {
+            "item": "${merged_out.merged}",
+            "taxonomy": [
+              "approval_waiting",
+              "needs_owner",
+              "moved",
+              "done_awaiting_yes",
+              "risk",
+              "stale"
+            ],
+            "multi_label": false
+          }
+        },
+        {
+          "capability": "measure",
+          "purpose": "Count interrupts today and rows waiting on the owner; recompute each count with a second method.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "counts_out",
+          "input_bindings": {
+            "target": "${items_out}",
+            "metric": "interrupts_today"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "Format rules before writing - at most max_lines; approvals first; links, not quotes, for <classification label>; work items, not people (no per-person metrics).",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "format_policy_out",
+          "input_bindings": {
+            "target": "${report}",
+            "constraints": "${profile.format_rules: array<string>}"
+          }
+        },
+        {
+          "capability": "generate",
+          "purpose": "Write the digest or brief (done / needs you / risks), each line with its source.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "text_out",
+          "gates": [
+            {
+              "when": "${format_policy_out.compliant} == false",
+              "action": "stop",
+              "message": "The report request breaks a format rule (line cap, classification). Fix the request."
+            }
+          ],
+          "input_bindings": {
+            "specification": {
+              "items": "${items_out.labels: array<string>}",
+              "provenance": "${merged_out.provenance: object}",
+              "counts": "${counts_out.value: number}",
+              "calendar": "${calendar_out.data: nullable<object>}"
+            },
+            "format": "${report.kind}"
+          }
+        },
+        {
+          "capability": "ground",
+          "purpose": "Check the written text line by line against the sources; a line without a source must say \"not verified\".",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "ground_out",
+          "input_bindings": {
+            "claim": "${text_out.content: string}",
+            "sources": [
+              "${merged_out.provenance: object}",
+              "${records_out.evidence_anchors: array<object>}"
+            ],
+            "required_strength": "strong"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "Check the written text against the format rules and that no line lacks a source or a \"not verified\" mark.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "text_check_out",
+          "input_bindings": {
+            "target": "${text_out.content: object}",
+            "constraints": "${profile.format_rules: array<string>}",
+            "action_on_violation": "block"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "Spot-check claims against the source (the checker sample uses the same check).",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "verify_out",
+          "input_bindings": {
+            "target": "${text_out.content: object}",
+            "conditions": [
+              "every_line_sourced_or_marked",
+              "counts_recomputed",
+              "approvals_first"
+            ],
+            "strict": true
+          },
+          "gates": [
+            {
+              "when": "${text_check_out.compliant} == false",
+              "action": "stop",
+              "message": "The text breaks a format rule. Rewrite before delivery."
+            },
+            {
+              "when": "${ground_out.grounded} == false",
+              "action": "stop",
+              "message": "A line has no source and no \"not verified\" mark. Rewrite before delivery."
+            }
+          ]
+        },
+        {
+          "capability": "persist",
+          "purpose": "Save the delivered text and the time of the last report.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "saved_out",
+          "input_bindings": {
+            "data": "${text_out.content: object}",
+            "key": "reports/last"
+          }
+        },
+        {
+          "capability": "audit",
+          "purpose": "Record the report, its sources and the counts.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "audit_out",
+          "input_bindings": {
+            "event": {
+              "type": "daily_digest",
+              "kind": "${report.kind}",
+              "verified": "${verify_out.passed}"
+            }
+          }
+        }
+      ],
+      "success": [
+        "Approvals that wait come first",
+        "Every line has a source or says not verified",
+        "Within the line limit, with recomputed counts"
+      ],
+      "risk_propagation": {
+        "strategy": "max_step_risk",
+        "computed_risk": "low"
+      }
+    }
+  },
+  "workflow": "daily_digest",
+  "inputs": {
+    "report": {
+      "kind": "brief"
+    }
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "recall",
+        "step": 0,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 1,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 2,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 3,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "integrate",
+        "step": 4,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "merged": {},
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "classify",
+        "step": 5,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "labels": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "measure",
+        "step": 6,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "value": 1.0,
+          "uncertainty": {},
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 7,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "generate",
+        "step": 8,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "content": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "ground",
+        "step": 9,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "grounded": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 10,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 11,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 12,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit",
+        "step": 13,
+        "frame": [
+          "daily_digest"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "step_completed",
+    "run_finished"
+  ]
+}

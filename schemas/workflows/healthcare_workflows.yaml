@@ -1,3 +1,4 @@
+# Standard version: 1.1.0
 # Healthcare Domain Workflows
 # Composed from 36 atomic capabilities
 # Profile: schemas/profiles/healthcare.yaml
@@ -50,8 +51,8 @@ patient_monitoring:
       mutation: false
       store_as: normalized_vitals_out
       input_bindings:
-        source: ${vitals_out.data}
-        target_schema: hl7_vital_signs
+        input: ${vitals_out.data}
+        target_format: hl7_vital_signs
 
     - capability: state
       purpose: Build current patient physiological state.
@@ -60,7 +61,7 @@ patient_monitoring:
       store_as: patient_state_out
       input_bindings:
         scope: patient_physiology
-        observations: ${normalized_vitals_out.output}
+        observations: "${normalized_vitals_out.output: array<object>}"
 
     - capability: compare
       purpose: Compare current vitals to patient baseline.
@@ -71,7 +72,7 @@ patient_monitoring:
       input_bindings:
         options:
           - ${patient_state_out.state}
-          - ${patient_context_out.data.baseline_vitals}
+          - "${patient_context_out.data.baseline_vitals: object}"
         criteria:
           - deviation_from_baseline
           - rate_of_change
@@ -85,7 +86,8 @@ patient_monitoring:
       store_as: pattern_detection_out
       input_bindings:
         data: ${patient_state_out.state}
-        pattern: ${clinical_patterns}  # e.g., early warning scores
+        pattern:
+          any_of: ${clinical_patterns}  # e.g., early warning scores
         threshold: ${alert_threshold}
 
     - capability: predict
@@ -104,23 +106,24 @@ patient_monitoring:
       risk: low
       mutation: false
       store_as: severity_out
+      # This step and the next three run only when a pattern was detected;
+      # with vitals within expected parameters they are skipped and the
+      # audit still runs.
+      condition: ${pattern_detection_out.detected} == true
       input_bindings:
         item:
-          patterns: ${pattern_detection_out.matches}
-          trajectory: ${trajectory_out.prediction}
+          patterns: "${pattern_detection_out.matches: array<object>}"
+          trajectory: "${trajectory_out.prediction: object}"
         taxonomy: [routine, elevated, urgent, critical]
-      gates:
-        - when: ${pattern_detection_out.detected} == false
-          action: stop
-          message: Vitals within expected parameters.
 
     - capability: ground
       purpose: Anchor alert to clinical evidence.
       risk: low
       mutation: false
       store_as: grounded_alert_out
+      condition: ${pattern_detection_out.detected} == true
       input_bindings:
-        claim: ${severity_out.labels[0]}
+        claim: "${severity_out.labels[0].label: string}"
         sources:
           - ${vitals_out}
           - ${patient_context_out}
@@ -133,17 +136,18 @@ patient_monitoring:
       risk: low
       mutation: false
       store_as: alert_out
+      condition: ${pattern_detection_out.detected} == true
       input_bindings:
         specification:
           type: clinical_alert
           patient_id: ${patient.id}
-          severity: ${severity_out.labels[0]}
+          severity: "${severity_out.labels[0]: object}"
           current_vitals: ${patient_state_out.state}
           baseline_deviation: ${baseline_comparison_out}
-          detected_patterns: ${pattern_detection_out.matches}
-          trajectory: ${trajectory_out.prediction}
-          evidence: ${grounded_alert_out.evidence}
-          recommended_review_focus: ${pattern_detection_out.matches[0]}
+          detected_patterns: "${pattern_detection_out.matches: array<object>}"
+          trajectory: "${trajectory_out.prediction: object}"
+          evidence: "${grounded_alert_out.evidence: array<object>}"
+          recommended_review_focus: "${pattern_detection_out.matches[0]: object}"
         constraints:
           include_disclaimer: true
           disclaimer: "For clinical decision support only. All decisions must be made by licensed healthcare professionals."
@@ -153,9 +157,10 @@ patient_monitoring:
       risk: low
       mutation: true
       store_as: checkpoint_out
+      condition: ${pattern_detection_out.detected} == true
       input_bindings:
         scope: clinical_alert
-        label: "ALERT-${patient.id}-${timestamp}"
+        label: "ALERT-${patient.id}"
 
     - capability: audit
       purpose: Record monitoring cycle with full clinical audit trail.
@@ -168,8 +173,8 @@ patient_monitoring:
           patient_id: ${patient.id}
           vitals_captured: ${vitals_out.data}
           patterns_detected: ${pattern_detection_out.detected}
-          alert_generated: ${alert_out.content}
-          severity: ${severity_out.labels[0]}
+          alert_generated: "${alert_out.content: object}"
+          severity: "${severity_out.labels[0]: object}"
           checkpoint_id: ${checkpoint_out.checkpoint_id}
         retention: 2555d  # 7 years for medical records
 
@@ -181,6 +186,7 @@ patient_monitoring:
         id: {type: string}
     clinical_patterns:
       type: array
+      items: {type: string}
       description: Clinical patterns to detect (e.g., Early Warning Score)
       default: [mews, news2, sepsis_screen]
     alert_threshold:
@@ -246,21 +252,12 @@ clinical_alert_triage:
       store_as: historical_comparison_out
       input_bindings:
         options:
-          - ${alert_context_out.data}
-          - ${alert_history_out.results}
+          - "${alert_context_out.data: object}"
+          - "${alert_history_out.results: array<object>}"
         criteria:
           - severity_vs_history
           - response_patterns
           - escalation_history
-
-    - capability: classify
-      purpose: Classify alert acuity level.
-      risk: low
-      mutation: false
-      store_as: acuity_out
-      input_bindings:
-        item: ${alert_context_out.data}
-        taxonomy: [immediate, emergent, urgent, less_urgent, non_urgent]
 
     - capability: detect
       purpose: Detect alert fatigue risk indicators.
@@ -270,9 +267,18 @@ clinical_alert_triage:
       store_as: fatigue_risk_out
       input_bindings:
         data:
-          alert: ${alert_context_out.data}
-          history: ${alert_history_out.results}
+          alert: "${alert_context_out.data: object}"
+          history: "${alert_history_out.results: array<object>}"
         pattern: alert_fatigue_indicators
+
+    - capability: classify
+      purpose: Classify alert acuity level.
+      risk: low
+      mutation: false
+      store_as: acuity_out
+      input_bindings:
+        item: "${alert_context_out.data: object}"
+        taxonomy: [immediate, emergent, urgent, less_urgent, non_urgent]
 
     - capability: compare
       purpose: Rank potential responders by appropriateness.
@@ -281,7 +287,7 @@ clinical_alert_triage:
       mutation: false
       store_as: responder_ranking_out
       input_bindings:
-        options: ${care_plan_out.data.care_team}
+        options: "${care_plan_out.data.care_team: array<object>}"
         criteria:
           - role_match
           - current_availability
@@ -296,9 +302,9 @@ clinical_alert_triage:
       input_bindings:
         goal: appropriate_alert_response
         constraints:
-          acuity: ${acuity_out.labels[0]}
+          acuity: "${acuity_out.labels[0]: object}"
           fatigue_risk: ${fatigue_risk_out.detected}
-          available_responders: ${responder_ranking_out.ranking}
+          available_responders: "${responder_ranking_out.ranking: array<object>}"
 
     - capability: generate
       purpose: Create routing recommendation and notification draft.
@@ -309,9 +315,9 @@ clinical_alert_triage:
       input_bindings:
         specification:
           type: alert_routing_recommendation
-          alert: ${alert_context_out.data}
+          alert: "${alert_context_out.data: object}"
           recommended_responder: ${responder_ranking_out.recommendation}
-          acuity: ${acuity_out.labels[0]}
+          acuity: "${acuity_out.labels[0]: object}"
           routing_rationale: ${routing_plan_out}
         constraints:
           include_disclaimer: true
@@ -323,7 +329,7 @@ clinical_alert_triage:
       store_as: checkpoint_out
       input_bindings:
         scope: alert_triage
-        label: "TRIAGE-${alert.id}-${timestamp}"
+        label: "TRIAGE-${alert.id}"
 
     - capability: audit
       purpose: Record triage decision with full trail.
@@ -335,9 +341,9 @@ clinical_alert_triage:
           type: alert_triage
           alert_id: ${alert.id}
           patient_id: ${alert.patient_id}
-          acuity_classification: ${acuity_out.labels[0]}
+          acuity_classification: "${acuity_out.labels[0]: object}"
           recommended_responder: ${responder_ranking_out.recommendation}
-          routing_plan: ${routing_plan_out.steps}
+          routing_plan: "${routing_plan_out.steps: array<object>}"
           checkpoint_id: ${checkpoint_out.checkpoint_id}
         retention: 2555d
 
@@ -399,7 +405,8 @@ care_plan_review:
       input_bindings:
         target: ${patient.id}
         format: lab_results
-        range: ${review_window}
+        filter:
+          time_range: ${review_window}
 
     - capability: retrieve
       purpose: Get current medications.
@@ -417,10 +424,10 @@ care_plan_review:
       store_as: integrated_view_out
       input_bindings:
         sources:
-          - ${care_plan_out.data}
-          - ${notes_out.results}
-          - ${labs_out.data}
-          - ${medications_out.data}
+          - "${care_plan_out.data: object}"
+          - "${notes_out.results: array<object>}"
+          - "${labs_out.data: array<object>}"
+          - "${medications_out.data: array<object>}"
         strategy: temporal_merge
         conflict_resolution: prefer_recent
 
@@ -431,7 +438,7 @@ care_plan_review:
       mutation: false
       store_as: interactions_out
       input_bindings:
-        data: ${medications_out.data}
+        data: "${medications_out.data: array<object>}"
         pattern: interaction_risk
 
     - capability: compare
@@ -442,8 +449,8 @@ care_plan_review:
       store_as: alignment_out
       input_bindings:
         options:
-          - ${labs_out.data}
-          - ${care_plan_out.data.targets}
+          - "${labs_out.data: array<object>}"
+          - "${care_plan_out.data.targets: object}"
         criteria:
           - target_achievement
           - trend_direction
@@ -456,7 +463,7 @@ care_plan_review:
       mutation: false
       store_as: care_gaps_out
       input_bindings:
-        data: ${care_plan_out.data}
+        data: "${care_plan_out.data: object}"
         pattern: overdue_or_missing
         threshold: ${gap_threshold_days}
 
@@ -466,7 +473,7 @@ care_plan_review:
       mutation: false
       store_as: plan_critique_out
       input_bindings:
-        target: ${care_plan_out.data}
+        target: "${care_plan_out.data: object}"
         criteria:
           - guideline_alignment
           - completeness
@@ -479,11 +486,7 @@ care_plan_review:
       mutation: false
       store_as: grounded_findings_out
       input_bindings:
-        claim:
-          interactions: ${interactions_out}
-          alignment: ${alignment_out}
-          gaps: ${care_gaps_out}
-          critique: ${plan_critique_out}
+        claim: "The interactions, target alignment, care gaps and plan critique found for patient ${patient.id} are supported by the labs, medications and notes"
         sources:
           - ${labs_out}
           - ${medications_out}
@@ -496,7 +499,12 @@ care_plan_review:
       mutation: false
       store_as: summary_out
       input_bindings:
-        conclusion: ${grounded_findings_out}
+        conclusion:
+          interactions: ${interactions_out}
+          alignment: ${alignment_out}
+          gaps: ${care_gaps_out}
+          critique: ${plan_critique_out}
+          grounding: ${grounded_findings_out}
         audience: attending_physician
         depth: comprehensive
         constraints:
@@ -587,7 +595,8 @@ handoff_preparation:
       input_bindings:
         target: ${patient.id}
         format: vital_signs_summary
-        range: ${shift_window}
+        filter:
+          time_range: ${shift_window}
 
     - capability: retrieve
       purpose: Get pending orders and tasks.
@@ -616,23 +625,14 @@ handoff_preparation:
       store_as: integrated_handoff_out
       input_bindings:
         sources:
-          - ${patient_info_out.data}
-          - ${care_plan_out.data}
-          - ${shift_notes_out.results}
-          - ${vitals_out.data}
-          - ${pending_tasks_out.data}
-          - ${events_out.results}
+          - "${patient_info_out.data: object}"
+          - "${care_plan_out.data: object}"
+          - "${shift_notes_out.results: array<object>}"
+          - "${vitals_out.data: object}"
+          - "${pending_tasks_out.data: array<object>}"
+          - "${events_out.results: array<object>}"
         strategy: structured_merge
         conflict_resolution: prefer_recent
-
-    - capability: classify
-      purpose: Classify patient acuity for handoff.
-      risk: low
-      mutation: false
-      store_as: acuity_out
-      input_bindings:
-        item: ${integrated_handoff_out.merged}
-        taxonomy: [stable, guarded, critical]
 
     - capability: detect
       purpose: Identify critical items requiring emphasis.
@@ -644,6 +644,15 @@ handoff_preparation:
         data: ${integrated_handoff_out.merged}
         pattern: critical_for_handoff
 
+    - capability: classify
+      purpose: Classify patient acuity for handoff.
+      risk: low
+      mutation: false
+      store_as: acuity_out
+      input_bindings:
+        item: ${integrated_handoff_out.merged}
+        taxonomy: [stable, guarded, critical]
+
     - capability: compare
       purpose: Rank pending tasks by urgency.
       domain: task_urgency
@@ -651,7 +660,7 @@ handoff_preparation:
       mutation: false
       store_as: task_priority_out
       input_bindings:
-        options: ${pending_tasks_out.data}
+        options: "${pending_tasks_out.data: array<object>}"
         criteria:
           - time_sensitivity
           - clinical_importance
@@ -666,16 +675,16 @@ handoff_preparation:
       input_bindings:
         specification:
           type: sbar_handoff
-          patient: ${patient_info_out.data}
-          situation: ${acuity_out.labels[0]}
-          background: ${care_plan_out.data}
+          patient: "${patient_info_out.data: object}"
+          situation: "${acuity_out.labels[0]: object}"
+          background: "${care_plan_out.data: object}"
           assessment:
-            vitals: ${vitals_out.data}
-            events: ${events_out.results}
-            notes: ${shift_notes_out.results}
+            vitals: "${vitals_out.data: object}"
+            events: "${events_out.results: array<object>}"
+            notes: "${shift_notes_out.results: array<object>}"
           recommendation:
-            critical_items: ${critical_items_out.matches}
-            pending_tasks: ${task_priority_out.ranking}
+            critical_items: "${critical_items_out.matches: array<object>}"
+            pending_tasks: "${task_priority_out.ranking: array<object>}"
         format: sbar
 
     - capability: checkpoint
@@ -685,7 +694,7 @@ handoff_preparation:
       store_as: checkpoint_out
       input_bindings:
         scope: handoff_preparation
-        label: "HANDOFF-${patient.id}-${timestamp}"
+        label: "HANDOFF-${patient.id}"
 
     - capability: audit
       purpose: Record handoff preparation.
@@ -696,9 +705,9 @@ handoff_preparation:
         event:
           type: handoff_preparation
           patient_id: ${patient.id}
-          acuity: ${acuity_out.labels[0]}
-          critical_items_count: ${critical_items_out.matches.length}
-          pending_tasks_count: ${pending_tasks_out.data.length}
+          acuity: "${acuity_out.labels[0]: object}"
+          critical_items: "${critical_items_out.matches: array<object>}"
+          pending_tasks: "${pending_tasks_out.data: array<object>}"
           handoff_from: ${shift_info.outgoing_provider}
           handoff_to: ${shift_info.incoming_provider}
           checkpoint_id: ${checkpoint_out.checkpoint_id}

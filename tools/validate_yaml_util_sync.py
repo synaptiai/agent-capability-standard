@@ -110,7 +110,9 @@ def main() -> int:
 
     for name in sorted(SYNCED_NAMES):
         if name not in canonical_defs:
-            errors.append(f"{name!r} missing from canonical ({CANONICAL.relative_to(ROOT)})")
+            errors.append(
+                f"{name!r} missing from canonical ({CANONICAL.relative_to(ROOT)})"
+            )
         if name not in mirror_defs:
             errors.append(f"{name!r} missing from mirror ({MIRROR.relative_to(ROOT)})")
         if name in canonical_defs and name in mirror_defs:

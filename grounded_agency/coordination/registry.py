@@ -10,6 +10,7 @@ at registration time and supports discovery by capability.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import types
 from dataclasses import dataclass, field
@@ -19,6 +20,29 @@ from typing import Any
 from ..capabilities.registry import CapabilityRegistry
 
 logger = logging.getLogger(__name__)
+
+# agent_identity's vocabularies (schemas/agent_identity_schema.yaml).
+AUTHENTICATION_MECHANISMS = frozenset(
+    {
+        "session_id",
+        "chat_user_id",
+        "code_host_login",
+        "directory_id",
+        "api_key",
+        "signed_token",
+    }
+)
+TRUST_CLASSES = frozenset(
+    {
+        "owner",
+        "decision_person",
+        "system_of_record",
+        "own_subagent_report",
+        "peer_agent",
+        "colleague",
+        "external",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +55,9 @@ class AgentDescriptor:
         trust_score: Trust level in [0.0, 1.0].
         metadata: Arbitrary extra info (model name, version, etc.).
         registered_at: ISO 8601 UTC timestamp of registration.
+
+    ``trust_score`` orders discovery results; it says nothing about who the
+    agent is. For that, see :meth:`identity`.
     """
 
     agent_id: str
@@ -48,6 +75,32 @@ class AgentDescriptor:
             raise ValueError(
                 f"trust_score must be in [0.0, 1.0], got {self.trust_score}"
             )
+
+    def identity(self) -> dict[str, Any]:
+        """The agent's ``agent_identity`` (STANDARD v1.1 §5.17, RFC-0004).
+
+        The principal is ``agent_id``. ``role``, ``model_family``, ``owner``,
+        ``authenticated_by`` and ``trust_class`` are taken from ``metadata``
+        when present there as strings. Pass it as a run's ``actor_identity``,
+        or have a host report it with the events this agent sends.
+
+        Raises ``ValueError`` when ``authenticated_by`` or ``trust_class`` is
+        not one of the identity schema's values.
+        """
+        identity: dict[str, Any] = {"principal": self.agent_id, "kind": "agent"}
+        for key in ("role", "model_family", "owner", "authenticated_by", "trust_class"):
+            value = self.metadata.get(key)
+            if isinstance(value, str):
+                identity[key] = value
+        mechanism = identity.get("authenticated_by")
+        if mechanism is not None and not (
+            mechanism in AUTHENTICATION_MECHANISMS
+            or re.fullmatch(r"x-[a-z0-9][a-z0-9_.-]*", mechanism)
+        ):
+            raise ValueError(f"unknown authenticated_by {mechanism!r}")
+        if identity.get("trust_class", "owner") not in TRUST_CLASSES:
+            raise ValueError(f"unknown trust_class {identity['trust_class']!r}")
+        return identity
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON export."""

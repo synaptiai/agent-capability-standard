@@ -1,6 +1,10 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# The validator and executor live in the Rust crate under core/, compiled into
+# grounded_agency._core. Building from source therefore needs a Rust toolchain
+# (rustc >= 1.86); there is deliberately no pure-Python fallback, so every
+# consumer runs the one implementation.
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
 [project]
 name = "grounded-agency"
@@ -39,10 +43,12 @@ dependencies = [
 
 [project.optional-dependencies]
 sdk = [
-    # Floor is the oldest release whose API this package actually uses; every
-    # symbol imported here exists in 0.1.25. Do not raise it to whatever is
-    # newest -- that excludes working installs for no reason.
-    "claude-agent-sdk>=0.1.25,<0.3",
+    # Floor is the oldest release whose API this package actually uses:
+    # 0.1.52 is the first whose ToolPermissionContext carries tool_use_id,
+    # which keys the checkpoint reservation in can_use_tool (SEC-007). Do not
+    # raise it to whatever is newest -- that excludes working installs for no
+    # reason.
+    "claude-agent-sdk>=0.1.52,<0.3",
 ]
 # Upper bounds are set to the major this repo is verified against, not to the
 # next unreleased major. `mypy>=1.0,<3` would have admitted mypy 2.x, which is
@@ -63,28 +69,26 @@ dev = [
     "types-PyYAML>=6.0,<7",
     "hypothesis>=6.0,<7",
     "jsonschema>=4.0,<5",
-    "claude-agent-sdk>=0.1.25,<0.3",
+    "claude-agent-sdk>=0.1.52,<0.3",
 ]
 all = [
     "grounded-agency[sdk,dev]",
 ]
-
-[project.scripts]
-acs = "tools.scaffold:main"
 
 [project.urls]
 Homepage = "https://github.com/synaptiai/agent-capability-standard"
 Documentation = "https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/claude_agent_sdk.md"
 Repository = "https://github.com/synaptiai/agent-capability-standard"
 
-[tool.hatch.build.targets.wheel]
-packages = ["grounded_agency"]
-
-[tool.hatch.build.targets.sdist]
+[tool.maturin]
+manifest-path = "core/Cargo.toml"
+module-name = "grounded_agency._core"
+python-source = "."
+python-packages = ["grounded_agency"]
+features = ["python"]
 include = [
-    "/grounded_agency",
-    "/schemas",
-    "/skills",
+    { path = "schemas/**/*", format = "sdist" },
+    { path = "skills/**/*", format = "sdist" },
 ]
 
 [tool.pytest.ini_options]

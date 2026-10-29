@@ -1,4 +1,4 @@
-# Standard version: 1.0.0
+# Standard version: 1.1.0
 # Workflow Catalog (36-capability model)
 # Maps to capability_ontology.yaml
 #
@@ -60,8 +60,11 @@ monitor_and_replan:
     timeout: null
     retry: null
     store_as: current_state_out
+    input_bindings:
+      target: "${plan.scope}"
     failure_modes:
     - condition: Unable to observe relevant state
+      on_error: [R401, R402]
       action: request_more_context
       recovery: Request specific state aspects to monitor.
   - capability: state
@@ -75,6 +78,7 @@ monitor_and_replan:
     store_as: world_state_out
     input_bindings:
       scope: ${plan.scope}
+      observations: ${current_state_out.observation}
     failure_modes: []
   - capability: compare
     purpose: Compare current state against plan assumptions.
@@ -88,11 +92,15 @@ monitor_and_replan:
     store_as: comparison_out
     input_bindings:
       options:
-      - ${world_state_out}
+      - ${world_state_out.state}
       - ${plan.assumed_state}
       criteria:
       - assumption_validity
       - state_divergence
+    gates:
+    - when: ${plan.assumed_state} == null
+      action: skip
+      message: The plan records no assumed state to compare against.
     failure_modes: []
   - capability: detect
     purpose: Detect assumption violations that affect plan validity.
@@ -108,9 +116,9 @@ monitor_and_replan:
       data: ${comparison_out}
       pattern: assumption_violation
     gates:
-    - when: ${comparison_out.confidence} > 0.9
-      action: stop
-      message: No significant divergence detected, plan remains valid.
+    - when: ${plan.assumed_state} == null
+      action: skip
+      message: The plan records no assumed state, so no assumption can be violated; the plan remains valid.
     failure_modes: []
   - capability: critique
     purpose: Assess impact of violations on current plan.
@@ -122,11 +130,18 @@ monitor_and_replan:
     retry: null
     store_as: critique_out
     input_bindings:
-      target: ${plan}
+      target:
+        plan: ${plan}
+        violations: "${violations_out.matches: array<object>}"
       criteria:
       - step_validity
       - goal_achievability
       - resource_availability
+      severity_threshold: high
+    gates:
+    - when: ${violations_out} == null || ${violations_out.detected} == false
+      action: skip
+      message: No assumption violation detected; the plan remains valid.
     failure_modes: []
   - capability: plan
     purpose: Generate revised plan incorporating new constraints.
@@ -140,14 +155,16 @@ monitor_and_replan:
     input_bindings:
       goal: ${plan.goal}
       constraints:
-      - ${violations_out.matches: array<object>}
-      - ${critique_out.suggestions: array<string>}
+        violations: "${violations_out.matches: array<object>}"
+        suggestions: "${critique_out.suggestions: array<object>}"
     gates:
-    - when: ${critique_out.severity} == "minor"
+    - when: ${critique_out} == null || ${critique_out.issues} == []
       action: skip
-      message: Minor violation, continue with current plan.
+      message: No violation of high severity or worse; keep the current plan.
     failure_modes:
     - condition: Unable to find viable plan
+      when: ${revised_plan_out.steps} == []
+      on_error: R402
       action: stop
       recovery: Escalate to human with violation details.
   - capability: audit
@@ -206,7 +223,7 @@ clarify_intent:
       - constraint_clarity
     failure_modes: []
   - capability: inquire
-    purpose: Generate clarifying questions for ambiguous elements.
+    purpose: Ask the user clarifying questions about ambiguous elements.
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -216,42 +233,14 @@ clarify_intent:
     store_as: clarification_request_out
     input_bindings:
       ambiguous_input: ${user_request}
-      context: ${conversation_context}
+      context:
+        conversation: ${conversation_context}
+        ambiguities: "${ambiguity_analysis_out.issues: array<object>}"
       max_questions: 3
     gates:
-    - when: ${ambiguity_analysis_out.confidence} > 0.85
+    - when: ${ambiguity_analysis_out.issues} == []
       action: skip
-      message: Request is sufficiently clear, no clarification needed.
-    failure_modes: []
-  - capability: checkpoint
-    purpose: Save state before sending clarification questions to user.
-    risk: low
-    mutation: true
-    requires_checkpoint: false
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: clarify_checkpoint_out
-    input_bindings:
-      scope:
-      - clarification_request_out
-    failure_modes: []
-  - capability: send
-    purpose: Present clarifying questions to user.
-    risk: low
-    mutation: false
-    requires_checkpoint: false
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: sent_questions_out
-    input_bindings:
-      destination: user
-      payload: ${clarification_request_out.questions}
-    gates:
-    - when: ${clarification_request_out.confidence} < 0.5
-      action: skip
-      message: No clarifying questions needed.
+      message: The analysis found no ambiguity; no clarification needed.
     failure_modes: []
   - capability: receive
     purpose: Accept user's clarification response.
@@ -267,13 +256,14 @@ clarify_intent:
       filter:
         type: clarification_response
     gates:
-    - when: ${sent_questions_out} == null
+    - when: ${clarification_request_out} == null || ${clarification_request_out.questions} == []
       action: skip
-      message: No questions were sent, nothing to receive.
+      message: No clarifying questions were asked, nothing to receive.
     failure_modes:
     - condition: Timeout waiting for response
+      on_error: R401
       action: stop
-      recovery: Proceed with best interpretation or escalate.
+      recovery: The run ends with the timeout; the caller proceeds with its best interpretation or escalates.
   - capability: integrate
     purpose: Merge clarification with original request.
     risk: low
@@ -330,8 +320,11 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "${bug.component}"
     failure_modes:
     - condition: No relevant signals found
+      when: "${observe_out.observation} == {}"
       action: request_more_context
       recovery: Ask for reproduction steps or additional artifacts.
   - capability: search
@@ -343,6 +336,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: search_out
+    input_bindings:
+      query: "${bug.symptom}"
     failure_modes: []
   - capability: attribute
     purpose: Build dependency graph and identify causal relationships around failing component.
@@ -354,6 +349,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "${bug.symptom}"
     failure_modes: []
   - capability: constrain
     purpose: Define invariants/spec expectations for the component.
@@ -364,6 +361,9 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: constrain_out
+    input_bindings:
+      target: "${bug.component}"
+      constraints: ["existing_tests_pass", "public_interfaces_unchanged"]
     failure_modes: []
   - capability: critique
     purpose: List likely failure modes + edge cases.
@@ -374,6 +374,8 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: critique_out
+    input_bindings:
+      target: "${attribute_out.causes: array<object>}"
     failure_modes: []
   - capability: plan
     purpose: Produce minimal fix plan with checkpoints.
@@ -384,6 +386,15 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: plan_out
+    input_bindings:
+      goal: "Fix ${bug.symptom} in ${bug.component}"
+      constraints: "${user_input.constraints}"
+      context:
+        observation: "${observe_out.observation}"
+        related_code: "${search_out.results: array<object>}"
+        causes: "${attribute_out.causes: array<object>}"
+        failure_modes: "${critique_out.issues: array<object>}"
+        suggestions: "${critique_out.suggestions: array<object>}"
     failure_modes: []
   - capability: checkpoint
     purpose: Create checkpoint before mutation.
@@ -394,20 +405,29 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "${bug.component}"
     failure_modes: []
   - capability: execute
-    purpose: Apply fix, run tests, and produce diff summary.
+    purpose: Apply the fix with the bug's fix command, run the tests, and produce a diff summary.
     risk: high
     mutation: true
     requires_checkpoint: true
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: execute_out
+    input_bindings:
+      code: "${bug.fix_command}"
+    gates:
+    - when: ${plan_out.steps} == []
+      action: skip
+      message: The fix plan has no steps, so no fix is applied; the run goes on to the audit.
     failure_modes:
-    - condition: Unexpected side effects
-      action: pause_and_checkpoint
-      recovery: Checkpoint and require human approval.
+    - condition: The fix command failed or timed out
+      on_error: [R401, R402]
+      action: rollback
+      recovery: Roll back to the checkpoint taken before the fix; the run then ends with the execute step's error, and no audit is recorded.
   - capability: verify
     purpose: Run targeted verification and return PASS/FAIL.
     risk: medium
@@ -419,12 +439,40 @@ debug_code_change:
       max: 3
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      target:
+        component: "${bug.component}"
+        execution: "${execute_out}"
+      conditions: ["tests_pass", "symptom_resolved", "public_interfaces_unchanged"]
+    gates:
+    - when: ${execute_out} == null
+      action: skip
+      message: No fix was applied, so there is nothing to verify.
+    # A FAIL verdict is handled by the rollback step below, not by a failure
+    # mode: verify itself succeeded, and the run goes on to roll back and audit.
     failure_modes:
-    - condition: Verdict == FAIL
+    - condition: Verification could not run (timed out or failed after its retries)
+      on_error: [R401, R402]
       action: rollback
-      recovery: Rollback, then return to critique/plan with new evidence.
+      recovery: Roll back the unverified fix to the checkpoint; the run then ends with the verify step's error, and no audit is recorded.
+  - capability: rollback
+    purpose: If verify FAIL, revert safely.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    failure_modes: []
+    gates:
+    - when: ${verify_out} == null || ${verify_out.passed} == true
+      action: skip
+      message: No fix was applied, or the fix passed verification. No rollback needed.
   - capability: audit
-    purpose: Record what changed and why.
+    purpose: Record what changed and why, and whether it was rolled back.
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -432,16 +480,15 @@ debug_code_change:
     timeout: null
     retry: null
     store_as: audit_out
-    failure_modes: []
-  - capability: rollback
-    purpose: If verify FAIL, revert safely.
-    risk: medium
-    mutation: true
-    requires_checkpoint: true
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: rollback_out
+    input_bindings:
+      event:
+        type: "debug_code_change"
+        component: "${bug.component}"
+        causes: "${attribute_out.causes: array<object>}"
+        plan: "${plan_out.steps: array<object>}"
+        exit_code: "${execute_out.exit_code}"
+        verified: "${verify_out.passed}"
+        rolled_back: "${rollback_out.restored}"
     failure_modes: []
   success:
   - Bug fixed or root cause isolated
@@ -454,6 +501,17 @@ debug_code_change:
     pattern: step_outputs_are_addressable
     rule: Each step output is stored under store_as and may be referenced by later steps.
   inputs:
+    bug:
+      type: object
+      required: true
+      description: The failure to diagnose and fix
+      properties:
+        component:
+          type: string
+        symptom:
+          type: string
+        fix_command:
+          type: string
     user_input:
       type: object
       properties:
@@ -481,6 +539,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: retrieve_out
+    input_bindings:
+      target: "${user_input.domain}"
     failure_modes: []
   - capability: observe
     purpose: Observe current system/world artifacts (docs, logs, sensors).
@@ -491,8 +551,11 @@ world_model_build:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "${user_input.domain}"
     failure_modes:
     - condition: No relevant signals found
+      when: "${observe_out.observation} == {}"
       action: request_more_context
       recovery: Ask for reproduction steps or additional artifacts.
   - capability: detect
@@ -505,6 +568,9 @@ world_model_build:
     timeout: null
     retry: null
     store_as: detect_out
+    input_bindings:
+      data: "${retrieve_out.data: object}"
+      pattern: "entity"
     failure_modes: []
   - capability: classify
     purpose: Classify detected entities and resolve types.
@@ -515,6 +581,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: classify_out
+    input_bindings:
+      item: "${detect_out.matches: array<object>}"
     failure_modes: []
   - capability: integrate
     purpose: Merge entity data and resolve identity across sources.
@@ -525,6 +593,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: integrate_out
+    input_bindings:
+      sources: ["${detect_out.matches: array<object>}", "${classify_out.labels: array<object>}"]
     failure_modes: []
   - capability: state
     purpose: Define state variables and current estimates.
@@ -535,6 +605,9 @@ world_model_build:
     timeout: null
     retry: null
     store_as: state_out
+    input_bindings:
+      scope: "${user_input.domain}"
+      observations: "${integrate_out.merged: object}"
     failure_modes: []
   - capability: transition
     purpose: 'Define dynamics: transitions, triggers, guards.'
@@ -545,6 +618,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: transition_out
+    input_bindings:
+      from_state: "${state_out.state: object}"
     failure_modes: []
   - capability: attribute
     purpose: Define causal assumptions and intervention effects.
@@ -556,6 +631,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "${transition_out.effects: array<object>}"
     failure_modes: []
   - capability: measure
     purpose: Attach uncertainty types and confidence.
@@ -567,6 +644,9 @@ world_model_build:
     timeout: null
     retry: null
     store_as: measure_out
+    input_bindings:
+      target: "${state_out.state: object}"
+      metric: "uncertainty"
     failure_modes: []
   - capability: audit
     purpose: Establish lineage for claims and transformations.
@@ -577,6 +657,11 @@ world_model_build:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event:
+        type: "world_model_build"
+        domain: "${user_input.domain}"
+        entities: "${state_out.entities: array<object>}"
     failure_modes: []
   - capability: ground
     purpose: Anchor each model element to evidence references.
@@ -587,6 +672,8 @@ world_model_build:
     timeout: null
     retry: null
     store_as: ground_out
+    input_bindings:
+      claim: "The states, transitions and causes of the ${user_input.domain} model are supported by the retrieved sources"
     failure_modes: []
   - capability: simulate
     purpose: Run scenarios to stress-test model and identify fragility.
@@ -597,6 +684,10 @@ world_model_build:
     timeout: null
     retry: null
     store_as: simulate_out
+    input_bindings:
+      scenario:
+        state: "${state_out.state: object}"
+        rules: "${transition_out.rules: array<object>}"
     failure_modes: []
   - capability: explain
     purpose: Produce a decision-ready world model brief.
@@ -607,6 +698,11 @@ world_model_build:
     timeout: null
     retry: null
     store_as: explain_out
+    input_bindings:
+      conclusion:
+        model: "${state_out.state: object}"
+        grounded: "${ground_out.grounded}"
+        scenarios: "${simulate_out.outcomes: array<object>}"
     failure_modes: []
   success:
   - Model is structured (YAML/JSON)
@@ -647,8 +743,11 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "${user_input.domain}"
     failure_modes:
     - condition: No relevant signals found
+      when: "${observe_out.observation} == {}"
       action: request_more_context
       recovery: Ask for reproduction steps or additional artifacts.
   - capability: attribute
@@ -661,9 +760,11 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: attribute_out
+    input_bindings:
+      effect: "${observe_out.observation: object}"
     failure_modes: []
   - capability: discover
-    purpose: Find hidden dependencies or unmodeled interactions.
+    purpose: Find capability gaps, hidden dependencies and unmodeled interactions (patterns of type gap, pattern or opportunity).
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -671,6 +772,9 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: discover_out
+    input_bindings:
+      data: "${attribute_out.causes: array<object>}"
+      method: gap_analysis
     failure_modes: []
   - capability: compare
     purpose: Compare alternative skill architectures.
@@ -682,9 +786,11 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: compare_architecture_out
+    input_bindings:
+      options: "${discover_out.patterns: array<object>}"
     failure_modes: []
   - capability: compare
-    purpose: Rank missing capabilities by leverage and risk reduction.
+    purpose: Rank every pattern discover found (gaps, patterns and opportunities alike) by leverage and risk reduction.
     domain: priority
     risk: low
     mutation: false
@@ -693,6 +799,9 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: compare_priority_out
+    input_bindings:
+      options: "${discover_out.patterns: array<object>}"
+      criteria: ["leverage", "risk_reduction"]
     failure_modes: []
   - capability: generate
     purpose: Generate an implementation plan for new skills.
@@ -704,6 +813,10 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: generate_out
+    input_bindings:
+      specification:
+        gaps: "${compare_priority_out.ranking: array<object>}"
+        architecture: "${compare_architecture_out.recommendation}"
     failure_modes: []
   - capability: audit
     purpose: Record rationale + decision lineage.
@@ -714,6 +827,11 @@ capability_gap_analysis:
     timeout: null
     retry: null
     store_as: audit_out
+    input_bindings:
+      event:
+        type: "capability_gap_analysis"
+        ranking: "${compare_priority_out.ranking: array<object>}"
+        plan: "${generate_out.content: object}"
     failure_modes: []
   success:
   - Missing capability list
@@ -764,11 +882,16 @@ digital_twin_sync_loop:
       backoff: exponential
     store_as: receive_out
     failure_modes:
-    - condition: No messages/events available
+    - condition: Receiving failed (timed out or errored after its retries)
+      on_error: [R401, R402]
       action: stop
-      recovery: Wait for signals or confirm source configuration.
+      recovery: The run ends with the receive error; confirm the source configuration.
     input_bindings: {}
-    gates: []
+    gates:
+    - when: ${receive_out.data} == []
+      phase: after
+      action: end
+      message: No new signals or events; the twin is unchanged.
   - capability: search
     purpose: 'Parallel enrichment: search for existing twin snapshot or relevant context while ingesting events.'
     parallel_group: context_gathering
@@ -781,7 +904,7 @@ digital_twin_sync_loop:
     retry: null
     store_as: search_out
     input_bindings:
-      target: ${receive_out.source}
+      query: ${receive_out.source}
     failure_modes: []
   - capability: transform
     purpose: Normalize raw signals into canonical events compatible with state.observations.
@@ -794,11 +917,13 @@ digital_twin_sync_loop:
     store_as: transform_out
     failure_modes: []
     input_bindings:
-      source: '${receive_out.data}'
-      target_schema: canonical_event
+      input: '${receive_out.data}'
+      target_format: canonical_event
     gates: []
     mapping_ref: schemas/transforms/transform_mapping_rawlog_to_observation.yaml
-    output_conforms_to: schemas/event_schema.yaml#/event
+    # The step's `output` field is one canonical event
+    # (schemas/event_schema.yaml#/event); output_conforms_to would claim the
+    # whole step output is.
   - capability: integrate
     purpose: Merge canonical events with existing twin snapshot; resolve conflicts via strategy.
     risk: low
@@ -808,15 +933,11 @@ digital_twin_sync_loop:
     timeout: null
     retry: null
     store_as: integrate_out
-    failure_modes:
-    - condition: Conflicts exceed threshold
-      action: request_more_context
-      recovery: Ask for resolution strategy or authoritative source preference.
     input_bindings:
       sources:
-      - '${transform_out.output}'
+      - '${transform_out.output: array<object>}'
       - '${previous_world_state}'
-      resolution_strategy: prefer_authoritative_sources
+      conflict_resolution: prefer_authoritative_sources
     gates: []
     resolution_strategy: prefer_authoritative_sources
     conflict_resolution_strategies:
@@ -836,7 +957,9 @@ digital_twin_sync_loop:
     retry: null
     store_as: detect_entity_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      data: "${integrate_out.merged: object}"
+      pattern: "entity"
     gates: []
   - capability: classify
     purpose: Classify and resolve entity identities.
@@ -848,7 +971,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: classify_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      item: "${detect_entity_out.matches: array<object>}"
     gates: []
   - capability: state
     purpose: Produce updated canonical world-state snapshot with uncertainty + provenance.
@@ -862,16 +986,16 @@ digital_twin_sync_loop:
     failure_modes: []
     input_bindings:
       observations: '${integrate_out.merged.observations: array<object>}'
-      domain: ${integrate_out.merged.meta.world_id}
+      scope: ${integrate_out.merged.meta.world_id}
     gates: []
-    output_conforms_to: schemas/world_state_schema.yaml#/world_state
   - capability: compare
     purpose: Compute diff between previous snapshot and updated snapshot.
     domain: state_diff
     store_as: compare_state_out
     input_bindings:
-      state_a: '${previous_world_state: object}'
-      state_b: '${state_out: object}'
+      options:
+      - '${previous_world_state: object}'
+      - '${state_out.state: object}'
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -889,7 +1013,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: transition_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      from_state: "${state_out.state: object}"
     gates: []
   - capability: detect
     purpose: Detect drift/anomalies between expected and observed state.
@@ -903,7 +1028,11 @@ digital_twin_sync_loop:
     store_as: detect_anomaly_out
     failure_modes: []
     input_bindings:
-      context: ${state_out}
+      data:
+        observed: "${state_out.state: object}"
+        expected: "${transition_out.effects: array<object>}"
+        diff: "${compare_state_out: object}"
+      pattern: "drift"
     gates: []
   - capability: measure
     purpose: Estimate risk impact/probability from drift and transitions.
@@ -917,7 +1046,8 @@ digital_twin_sync_loop:
     store_as: measure_risk_out
     failure_modes: []
     input_bindings:
-      context: ${detect_anomaly_out}
+      target: ${detect_anomaly_out}
+      metric: "risk"
     gates: []
   - capability: predict
     purpose: Forecast near-term risk trajectory and triggers.
@@ -930,7 +1060,14 @@ digital_twin_sync_loop:
     retry: null
     store_as: predict_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      target: "near_term_risk"
+      conditions:
+        risk: "${measure_risk_out.value}"
+        risk_interval: "${measure_risk_out.uncertainty: object}"
+        drift_detected: "${detect_anomaly_out.detected}"
+        drift: "${detect_anomaly_out.matches: array<object>}"
+        transitions: "${transition_out.rules: array<object>}"
     gates: []
   - capability: plan
     purpose: Plan safe action(s) to reduce risk, with verification criteria and rollback plan.
@@ -943,7 +1080,12 @@ digital_twin_sync_loop:
     store_as: plan_out
     failure_modes: []
     input_bindings:
-      context: ${predict_out}
+      context:
+        forecast: "${predict_out: object}"
+        state_diff: "${compare_state_out: object}"
+        entities: "${classify_out.labels: array<object>}"
+        related_context: "${search_out.results: array<object>}"
+      goal: "Reduce the detected drift and risk"
     gates: []
   - capability: constrain
     purpose: Enforce policy and least privilege for planned actions.
@@ -955,7 +1097,9 @@ digital_twin_sync_loop:
     retry: null
     store_as: constrain_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      target: "${plan_out.steps: array<object>}"
+      constraints: ["least_privilege", "change_policy"]
     gates: []
   - capability: checkpoint
     purpose: Create checkpoint marker before any mutation/side-effect step.
@@ -967,7 +1111,8 @@ digital_twin_sync_loop:
     retry: null
     store_as: checkpoint_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      scope: "twin_state"
     gates: []
   - capability: mutate
     purpose: Execute mutations from action plan (if approved).
@@ -979,10 +1124,14 @@ digital_twin_sync_loop:
     retry: null
     store_as: mutate_out
     failure_modes:
-    - condition: Unexpected side effects
-      action: pause_and_checkpoint
-      recovery: Require human approval to proceed.
-    input_bindings: {}
+    - condition: The mutation failed or timed out
+      on_error: [R401, R402]
+      action: rollback
+      recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and no audit is recorded.
+    input_bindings:
+      target: "twin_state"
+      operation:
+        apply: "${plan_out.steps: array<object>}"
     gates:
     - when: ${checkpoint_out.checkpoint_id} == null
       action: stop
@@ -994,13 +1143,21 @@ digital_twin_sync_loop:
     risk: medium
     mutation: false
     requires_checkpoint: false
-    requires_approval: false
+    requires_approval: true
     timeout: 5m
     retry: null
     store_as: execute_out
-    failure_modes: []
-    input_bindings: {}
-    gates: []
+    failure_modes:
+    - condition: The verification suite failed or timed out
+      on_error: [R401, R402]
+      action: rollback
+      recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and no audit is recorded.
+    input_bindings:
+      code: "run_verification_suite"
+    gates:
+    - when: ${mutate_out} == null
+      action: skip
+      message: No mutation was applied, so there is nothing to verify.
   - capability: verify
     purpose: 'Verify outcome: PASS/FAIL with evidence.'
     risk: medium
@@ -1013,20 +1170,35 @@ digital_twin_sync_loop:
       backoff: exponential
     store_as: verify_out
     failure_modes:
-    - condition: Verdict == FAIL
+    - condition: Verification could not run (timed out or failed after its retries)
+      on_error: [R401, R402]
       action: rollback
-      recovery:
-        goto_step: plan
-        inject_context:
-          failure_evidence: ${verify_out.violations}
-        max_loops: 3
-    input_bindings: {}
+      recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and no audit is recorded.
+    input_bindings:
+      target: "${execute_out: object}"
+      conditions: ["drift_resolved", "no_policy_violation"]
     gates:
-    - when: ${verify_out.passed} == false
-      action: rollback
-      message: Verification failed. Rolling back.
+    - when: ${mutate_out} == null
+      action: skip
+      message: No mutation was applied, so there is nothing to verify.
+  - capability: rollback
+    purpose: If a mutation was applied and verify FAILs, roll back to the checkpoint.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    failure_modes: []
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    gates:
+    - when: ${mutate_out} == null || ${verify_out.passed} == true
+      action: skip
+      message: No mutation was applied, or the twin passed verification. No rollback needed.
   - capability: audit
-    purpose: Record provenance, tool usage, diffs, and decision rationale.
+    purpose: Record provenance, tool usage, diffs, decision rationale, and any rollback.
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1035,19 +1207,12 @@ digital_twin_sync_loop:
     retry: null
     store_as: audit_out
     failure_modes: []
-    input_bindings: {}
-    gates: []
-  - capability: rollback
-    purpose: If verify FAIL or side effects detected, rollback to checkpoint.
-    risk: medium
-    mutation: true
-    requires_checkpoint: true
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: rollback_out
-    failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      event:
+        type: "digital_twin_sync"
+        mutated: "${mutate_out.success}"
+        verified: "${verify_out.passed}"
+        rolled_back: "${rollback_out.restored}"
     gates: []
   - capability: explain
     purpose: 'Produce decision-ready sync report: drift, actions, verification, next steps.'
@@ -1059,13 +1224,25 @@ digital_twin_sync_loop:
     retry: null
     store_as: explain_out
     failure_modes: []
-    input_bindings: {}
+    input_bindings:
+      conclusion:
+        drift_detected: "${detect_anomaly_out.detected}"
+        risk: "${measure_risk_out.value}"
+        forecast: "${predict_out.prediction: object}"
+        actions: "${plan_out.steps: array<object>}"
+        # mutated and verified are null when no mutation was applied (the
+        # mutate, execute and verify steps were skipped)
+        mutated: "${mutate_out.success}"
+        verified: "${verify_out.passed}"
+        # null when the rollback step was skipped: no mutation was applied,
+        # or the twin passed verification
+        rolled_back: "${rollback_out.restored}"
     gates: []
   workflow_extensions:
     supports_input_bindings: true
     supports_conditions: true
     supports_parallel_groups: true
-    supports_recovery_loops: true
+    supports_recovery_loops: false
     supports_gates: true
   inputs:
     user_input:
@@ -1097,9 +1274,31 @@ digital_twin_bootstrap:
     condition: ${world_state_out} == null
     skip_if_false: true
     input_bindings:
-      inputs:
-        domain: ${user_input.domain}
-        constraints: ${user_input.constraints}
+      input:
+        user_input: ${user_input}
+    risk: medium
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    failure_modes: []
+  # The first sync starts from the baseline just built, or from the world
+  # state passed in (in which case the build step was skipped and has no
+  # output to read).
+  - capability: invoke
+    purpose: Run initial sync loop using the baseline just built
+    workflow_id: digital_twin_sync_loop
+    store_as: sync_out
+    condition: ${world_state_out} == null
+    skip_if_false: true
+    input_bindings:
+      input:
+        user_input: ${user_input}
+        # result holds the invoked workflow's stores; the state step's output
+        # wraps the world state in its `state` field, so this hands the sync
+        # loop a world state, the same shape as world_state_out below
+        previous_world_state: '${world_model_out.result.state_out.state: object}'
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1108,13 +1307,15 @@ digital_twin_bootstrap:
     retry: null
     failure_modes: []
   - capability: invoke
-    purpose: Run initial sync loop using baseline
+    purpose: Run initial sync loop from the world state passed in
     workflow_id: digital_twin_sync_loop
-    store_as: sync_out
+    store_as: sync_existing_out
+    condition: ${world_state_out} != null
+    skip_if_false: true
     input_bindings:
-      inputs:
-        # Note: result contains nested workflow output where state_out was stored
-        world_state: ${world_model_out.result}
+      input:
+        user_input: ${user_input}
+        previous_world_state: '${world_state_out: object}'
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1153,8 +1354,9 @@ rag_pipeline:
   risk: low
   description: |
     Retrieval-Augmented Generation pipeline inspired by OASF Category 6 (RAG).
-    Searches for relevant documents, extracts pertinent passages, anchors the
-    response to retrieved evidence, generates a response, and cites sources.
+    Searches for relevant documents, extracts pertinent passages, generates a
+    response from them, anchors that response to the retrieved evidence, and
+    cites sources.
     This pattern ensures generated content is grounded in retrieved facts rather
     than relying solely on parametric knowledge.
   success:
@@ -1177,6 +1379,7 @@ rag_pipeline:
       query: ${user_query}
     failure_modes:
     - condition: No relevant documents found
+      when: ${search_out.results} == []
       action: request_more_context
       recovery: Broaden search terms or ask user for additional context.
   - capability: retrieve
@@ -1195,8 +1398,9 @@ rag_pipeline:
       references: "${search_out.results: array<object>}"
     failure_modes:
     - condition: Document retrieval fails
+      on_error: [R401, R402]
       action: request_more_context
-      recovery: Try alternative sources or report partial results.
+      recovery: The run ends with the retrieval error; try alternative sources in a new run.
   - capability: detect
     purpose: Extract relevant passages from retrieved documents.
     domain: relevance
@@ -1211,21 +1415,8 @@ rag_pipeline:
       data: "${retrieve_out.data: object}"
       pattern: ${user_query}
     failure_modes: []
-  - capability: ground
-    purpose: Anchor response to retrieved evidence with provenance.
-    risk: low
-    mutation: false
-    requires_checkpoint: false
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: ground_out
-    input_bindings:
-      claim: ${user_query}
-      sources: "${search_out.results: array<object>}"
-    failure_modes: []
   - capability: generate
-    purpose: Produce response synthesized from grounded evidence.
+    purpose: Produce a response synthesized from the relevant passages.
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -1234,11 +1425,27 @@ rag_pipeline:
     retry: null
     store_as: generate_out
     input_bindings:
-      specification: "${ground_out.evidence: array<object>}"
+      specification:
+        question: ${user_query}
+        passages: "${detect_out.matches: array<object>}"
     failure_modes:
     - condition: Insufficient evidence for coherent response
+      when: ${detect_out.matches} == []
       action: stop
       recovery: Report that available evidence is insufficient and cite what was found.
+  - capability: ground
+    purpose: Anchor the generated response to the retrieved evidence with provenance.
+    risk: low
+    mutation: false
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: ground_out
+    input_bindings:
+      claim: "${generate_out.content: string}"
+      sources: "${search_out.results: array<object>}"
+    failure_modes: []
   - capability: explain
     purpose: Cite sources and provide reasoning chain for the response.
     risk: low
@@ -1249,7 +1456,10 @@ rag_pipeline:
     retry: null
     store_as: explain_out
     input_bindings:
-      conclusion: "${generate_out.content: object}"
+      conclusion:
+        response: "${generate_out.content: string}"
+        evidence: "${ground_out.evidence: array<object>}"
+        gaps: "${ground_out.gaps: array<object>}"
     failure_modes: []
   - capability: audit
     # NOTE: audit has mutation: true in the ontology (writes audit log),
@@ -1268,7 +1478,7 @@ rag_pipeline:
         type: rag_pipeline
         query: ${user_query}
         grounded: ${ground_out.grounded}
-        response: "${generate_out.content: object}"
+        response: "${generate_out.content: string}"
     failure_modes: []
   risk_propagation:
     strategy: max_step_risk
@@ -1314,8 +1524,9 @@ security_assessment:
       query: ${assessment_target}
     failure_modes:
     - condition: Unable to access vulnerability databases
+      on_error: [R401, R402]
       action: request_more_context
-      recovery: Fall back to pattern-based detection without CVE lookup.
+      recovery: The run ends with the search error; rerun with pattern-based detection, without CVE lookup.
   - capability: detect
     purpose: Find potential security issues in the target.
     domain: vulnerability
@@ -1329,10 +1540,6 @@ security_assessment:
     input_bindings:
       data: "${search_out.results: array<object>}"
       pattern: vulnerability
-    failure_modes:
-    - condition: No vulnerabilities detected
-      action: stop
-      recovery: Report clean assessment with confidence level.
   - capability: measure
     purpose: Assess severity and risk level of detected vulnerabilities.
     domain: severity
@@ -1451,10 +1658,6 @@ multi_agent_orchestration:
     store_as: decompose_out
     input_bindings:
       problem: ${task.goal}
-    failure_modes:
-    - condition: Task cannot be meaningfully decomposed
-      action: stop
-      recovery: Execute task as a single unit without delegation.
   - capability: plan
     purpose: Create execution plan with subtask dependencies and ordering.
     risk: low
@@ -1479,8 +1682,10 @@ multi_agent_orchestration:
     store_as: delegate_out
     input_bindings:
       task: "${plan_out.dependencies: object}"
+      agent: "${task.agent_pool[0]: string}"
     failure_modes:
     - condition: No suitable agent available for subtask
+      when: ${delegate_out.accepted} == false
       action: request_more_context
       recovery: Queue subtask or request manual agent assignment.
   - capability: synchronize
@@ -1499,8 +1704,9 @@ multi_agent_orchestration:
       state: "${delegate_out: object}"
     failure_modes:
     - condition: State synchronization timeout
+      on_error: R401
       action: pause_and_checkpoint
-      recovery: Checkpoint current state and retry synchronization.
+      recovery: Once the step's retries are spent, take a new checkpoint that records the partly synchronized state for a person to inspect or resume from; nothing is rolled back or retried, and the run then ends with R401.
   - capability: verify
     purpose: Validate subtask results meet acceptance criteria.
     risk: low
@@ -1519,8 +1725,9 @@ multi_agent_orchestration:
       - result_validity
     failure_modes:
     - condition: Subtask result fails validation
+      when: ${verify_out.passed} == false
       action: request_more_context
-      recovery: Return subtask to assigned agent with failure details.
+      recovery: The failed results are not merged and no audit is recorded; the run ends R402 (failure mode fired), and the subtasks can be returned to their agents with the verdict's details before the workflow is run again.
   - capability: integrate
     purpose: Merge results from multiple agents into unified output.
     risk: low
@@ -1535,10 +1742,6 @@ multi_agent_orchestration:
       - "${delegate_out: object}"
       - "${synchronize_out.agreed_state: object}"
       strategy: merge_by_subtask
-    failure_modes:
-    - condition: Conflicting results from agents
-      action: request_more_context
-      recovery: Escalate conflicts for manual resolution.
   - capability: audit
     purpose: Record orchestration decisions, delegations, and results.
     risk: low
@@ -1577,18 +1780,22 @@ multi_agent_orchestration:
 
 data_quality_pipeline:
   goal: Examine, detect, classify, measure, clean, verify, and audit data quality issues.
-  risk: medium
+  risk: low
   description: |
     Data quality pipeline inspired by OASF Category 9 (Data Engineering).
     Examines raw data, detects quality problems, classifies issue types,
-    computes quality metrics, applies cleaning transformations, verifies
-    cleaned data against quality thresholds, and records all transformations
-    applied for reproducibility.
+    computes quality metrics, produces a cleaned copy of the data with
+    cleaning transformations, verifies the cleaned data against quality
+    thresholds, and records all transformations applied and the verdict for
+    reproducibility. No step mutates: the transform returns the cleaned data
+    as its output and leaves the raw data untouched, so the pipeline needs no
+    checkpoint or rollback. Writing the cleaned data anywhere is left to the
+    caller, which should do so only on a PASS verdict.
   success:
   - Raw data examined for quality issues
   - Issues detected and classified
   - Quality metrics computed
-  - Cleaning transformations applied
+  - Cleaned copy of the data produced; raw data left unmodified
   - Cleaned data verified against thresholds
   - All transformations recorded for audit
   steps:
@@ -1605,6 +1812,7 @@ data_quality_pipeline:
       target: ${raw_data.format}
     failure_modes:
     - condition: Unable to read or parse data
+      on_error: R402
       action: stop
       recovery: Report format incompatibility and request data in supported format.
   - capability: detect
@@ -1647,18 +1855,8 @@ data_quality_pipeline:
       target: "${detect_out.matches: array<object>}"
       metric: quality
     failure_modes: []
-  - capability: checkpoint
-    purpose: Save data state before applying cleaning transformations.
-    risk: medium
-    mutation: true
-    requires_checkpoint: false
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: checkpoint_out
-    failure_modes: []
   - capability: transform
-    purpose: Apply cleaning operations to fix detected quality issues.
+    purpose: Produce a cleaned copy of the data that fixes the detected quality issues; the raw data is not modified.
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -1667,12 +1865,11 @@ data_quality_pipeline:
     retry: null
     store_as: transform_out
     input_bindings:
-      input: "${classify_out.labels: array<object>}"
+      input: ${raw_data}
       target_format: cleaned
-    failure_modes:
-    - condition: Transformation produces unexpected results
-      action: pause_and_checkpoint
-      recovery: Review transformation rules and retry with adjusted parameters.
+      options:
+        issues: "${detect_out.matches: array<object>}"
+        issue_types: "${classify_out.labels: array<object>}"
   - capability: verify
     purpose: Validate cleaned data meets quality thresholds.
     risk: low
@@ -1684,12 +1881,18 @@ data_quality_pipeline:
       max: 2
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      conditions: ["quality_thresholds_met"]
+      target: "${transform_out.output: object}"
+    # A FAIL verdict is not a step error: the run goes on to the audit, which
+    # records it. Nothing was written, so there is nothing to roll back.
     failure_modes:
-    - condition: Cleaned data fails quality threshold
-      action: rollback
-      recovery: Rollback to checkpoint, adjust cleaning rules, and retry.
+    - condition: Verification could not run (timed out or failed after its retries)
+      on_error: [R401, R402]
+      action: stop
+      recovery: The raw data was never modified, so nothing is rolled back; the run ends with the verify step's error, and no audit is recorded.
   - capability: audit
-    purpose: Record all transformations applied and quality metrics before/after.
+    purpose: Record all transformations applied, quality metrics, and the verification verdict.
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -1705,23 +1908,9 @@ data_quality_pipeline:
         transformations: "${transform_out.output: object}"
         verification: ${verify_out.passed}
     failure_modes: []
-  - capability: rollback
-    purpose: If verification fails, revert data to pre-cleaning checkpoint.
-    risk: medium
-    mutation: true
-    requires_checkpoint: true
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: rollback_out
-    gates:
-    - when: ${verify_out.passed} == true
-      action: skip
-      message: Cleaned data passed verification. No rollback needed.
-    failure_modes: []
   risk_propagation:
     strategy: max_step_risk
-    computed_risk: medium
+    computed_risk: low
   data_flow:
     pattern: step_outputs_are_addressable
     rule: Each step output is stored under store_as and may be referenced by later steps.
@@ -1745,8 +1934,9 @@ model_deployment:
     Model deployment workflow inspired by OASF Category 12 (DevOps/MLOps).
     Validates model artifacts, checks deployment policies, creates a rollback
     checkpoint, executes deployment scripts, verifies deployment success,
-    measures model performance post-deployment, and records the deployment
-    event. Includes automatic rollback on verification failure.
+    measures model performance post-deployment, rolls back to the checkpoint
+    when verification fails, and records the deployment event, including
+    whether it was rolled back.
   success:
   - Model artifacts validated
   - Deployment policies satisfied
@@ -1756,25 +1946,21 @@ model_deployment:
   - Performance metrics within thresholds
   - Deployment event recorded
   steps:
-  - capability: verify
-    purpose: Validate model artifacts (weights, config, schema compatibility).
+  - capability: constrain
+    purpose: Check model artifacts (weights, config, schema compatibility) before deployment.
     risk: low
     mutation: false
     requires_checkpoint: false
     requires_approval: false
     timeout: 5m
     retry: null
-    store_as: verify_artifacts_out
+    store_as: artifact_constraints_out
     input_bindings:
       target: ${model_package}
-      conditions:
+      constraints:
       - artifact_integrity
       - schema_compatibility
       - version_consistency
-    failure_modes:
-    - condition: Model artifacts invalid or corrupted
-      action: stop
-      recovery: Report validation failures and request corrected artifacts.
   - capability: constrain
     purpose: Check deployment policies (approval gates, resource limits, compliance).
     risk: low
@@ -1790,10 +1976,6 @@ model_deployment:
       - deployment_policy
       - resource_limits
       - compliance_requirements
-    failure_modes:
-    - condition: Policy violation detected
-      action: stop
-      recovery: Report policy violations and required remediation steps.
   - capability: checkpoint
     purpose: Save rollback point before deployment begins.
     risk: medium
@@ -1803,6 +1985,8 @@ model_deployment:
     timeout: null
     retry: null
     store_as: checkpoint_out
+    input_bindings:
+      scope: "${deployment_config.environment}"
     failure_modes: []
   - capability: execute
     purpose: Run deployment scripts to push model to production.
@@ -1816,6 +2000,9 @@ model_deployment:
     input_bindings:
       code: ${deployment_config.deploy_command}
     gates:
+    - when: ${artifact_constraints_out.compliant} == false
+      action: stop
+      message: Deployment blocked by invalid model artifacts.
     - when: ${constrain_out.compliant} == false
       action: stop
       message: Deployment blocked by policy violation.
@@ -1823,9 +2010,10 @@ model_deployment:
       action: stop
       message: No checkpoint created. Do not deploy.
     failure_modes:
-    - condition: Deployment script fails
+    - condition: Deployment script fails or times out
+      on_error: [R401, R402]
       action: rollback
-      recovery: Rollback to checkpoint and report deployment failure.
+      recovery: Roll back to the checkpoint taken before the deployment; the run then ends with the execute step's error, and no audit is recorded.
   - capability: verify
     purpose: Validate deployment success (health checks, endpoint availability).
     risk: medium
@@ -1837,10 +2025,15 @@ model_deployment:
       max: 3
       backoff: exponential
     store_as: verify_deploy_out
+    input_bindings:
+      conditions: ["health_checks_pass", "endpoint_available"]
+    # A FAIL verdict is handled by the rollback step below, not by a failure
+    # mode: verify itself succeeded, and the run goes on to roll back and audit.
     failure_modes:
-    - condition: Deployment health check fails
+    - condition: Health checks could not run (timed out or failed after their retries)
+      on_error: [R401, R402]
       action: rollback
-      recovery: Rollback to checkpoint and investigate deployment issues.
+      recovery: Roll the deployment back to the checkpoint so no unverified deployment stays in place; the run then ends with the verify step's error, and no audit is recorded.
   - capability: measure
     purpose: Check model performance metrics post-deployment.
     domain: performance
@@ -1859,8 +2052,24 @@ model_deployment:
       action: skip
       message: Deployment verification failed. Skipping performance check.
     failure_modes: []
+  - capability: rollback
+    purpose: If verification fails, revert deployment to checkpoint.
+    risk: medium
+    mutation: true
+    requires_checkpoint: false
+    requires_approval: false
+    timeout: null
+    retry: null
+    store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    gates:
+    - when: ${verify_deploy_out.passed} == true
+      action: skip
+      message: Deployment verified successfully. No rollback needed.
+    failure_modes: []
   - capability: audit
-    purpose: Record deployment event with full provenance.
+    purpose: Record deployment event with full provenance, including any rollback.
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -1876,20 +2085,7 @@ model_deployment:
         deployment_result: "${execute_out.result: object}"
         verification: ${verify_deploy_out.passed}
         performance: ${measure_out.value}
-    failure_modes: []
-  - capability: rollback
-    purpose: If verification fails, revert deployment to checkpoint.
-    risk: medium
-    mutation: true
-    requires_checkpoint: true
-    requires_approval: false
-    timeout: null
-    retry: null
-    store_as: rollback_out
-    gates:
-    - when: ${verify_deploy_out.passed} == true
-      action: skip
-      message: Deployment verified successfully. No rollback needed.
+        rolled_back: "${rollback_out.restored}"
     failure_modes: []
   risk_propagation:
     strategy: max_step_risk

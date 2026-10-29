@@ -10,17 +10,18 @@ The standard is designed so **unsafe actions are hard by construction**.
 
 ### 1.1 Mutation Requires Checkpoint
 
-Any step with `mutation: true` MUST be preceded by a valid checkpoint capability. This ensures:
+Any `mutate`, `send` or `rollback` step MUST be preceded by a `checkpoint` step. The requirement follows the ontology's `requires_checkpoint` flag (`mutate`, `send`) and its `requires` edges from `checkpoint` (`mutate`, `send`, `rollback`), not the `mutation` flag: `checkpoint`, `audit` and `persist` are `mutation: true` but need no checkpoint. A step cannot weaken these flags; a weaker declaration is ignored (W602). This ensures:
 - State can be restored if the mutation fails
 - Partial execution can be recovered
 - Audit trail exists for all changes
 
-### 1.2 Actions Require Plans
+### 1.2 Actions Are Ordered
 
-The `act-plan` capability requires:
-- `plan` (hard requirement): A plan must exist before execution
-- `checkpoint` (hard requirement): State must be saved before mutation
-- `verify` (soft requirement): Outcome should be verified
+The action capabilities (`execute`, `mutate`, `send`) are constrained by ontology edges:
+- `checkpoint` (hard requirement, `requires`): State must be saved before `mutate` or `send`
+- `constrain` (soft requirement, `soft_requires`): A policy check should run first; without one the validator warns (W601)
+- `plan` (ordering, `precedes`): When a workflow has a plan, it must come before `execute` and `mutate`
+- `verify` (ordering, `precedes`): A verification must come after the action it checks
 
 ### 1.3 Claims Must Be Grounded
 
@@ -93,7 +94,7 @@ Hard constraints prevent catastrophic entity conflation:
 
 **Mitigations**:
 - World state versioning with parent links
-- Diff-world-state capability detects changes
+- `compare` capability detects changes between world-state versions
 - Retention policies bound state growth
 - Anomaly detection capabilities
 
@@ -122,8 +123,8 @@ Hard constraints prevent catastrophic entity conflation:
 **Scenario**: Mutation is executed without checkpoint, preventing rollback.
 
 **Mitigations**:
-- Validator enforces checkpoint before act-plan
-- Gate can block if checkpoint.created == false
+- Validator rejects `mutate`, `send` and `rollback` without an earlier `checkpoint` step (V102)
+- Gate can block if `${checkpoint_out.checkpoint_id} == null`
 - Hook (pretooluse_require_checkpoint) enforces at runtime
 
 #### 2.2.8 Recovery Loop Exhaustion
@@ -139,7 +140,7 @@ Hard constraints prevent catastrophic entity conflation:
 
 ## 3. Security-Critical Capabilities
 
-### 3.1 SAFETY Layer
+### 3.1 VERIFY Layer
 
 | Capability | Security Function |
 |------------|-------------------|
@@ -153,9 +154,10 @@ Hard constraints prevent catastrophic entity conflation:
 
 | Capability | Required Before | Security Rationale |
 |------------|-----------------|-------------------|
-| `act-plan` | `plan`, `checkpoint` | No blind execution, recovery possible |
-| `rollback` | `checkpoint`, `audit` | Must have state to restore, record why |
-| `verify` | `model-schema` | Must know what to verify against |
+| `mutate`, `send` | `checkpoint` (required); `constrain` (recommended); `plan` (if present) | Recovery possible, no blind execution |
+| `rollback` | `checkpoint` (required) | Must have state to restore |
+| `execute` | `constrain` (recommended); `plan` (if present) | Policy checked before running |
+| `verify` | `execute`, `mutate`, `send` (if present) | Checks results after the fact |
 
 ---
 
@@ -168,7 +170,8 @@ The validator SHOULD:
 - Reject missing prerequisites (V102)
 - Reject invalid bindings (B201, B202)
 - Reject type mismatches (B203)
-- Warn on ambiguous types (B204)
+- Reject ambiguous types (B204)
+- Warn on unmet soft prerequisites (W601) and on safety flags declared weaker than the ontology (W602), which are ignored
 
 ### 4.2 Runtime Security
 

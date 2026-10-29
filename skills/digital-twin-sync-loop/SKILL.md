@@ -1,7 +1,7 @@
 ---
 name: digital-twin-sync-workflow
 description: Run the digital twin sync loop to synchronize real-world signals with a digital model. Use when updating digital twins, detecting drift, managing real-time state synchronization, or maintaining model-reality alignment.
-argument-hint: "[sources] [world_id] [constraints]"
+argument-hint: "[user_input] [previous_world_state]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Web, Bash, Edit, Git
@@ -11,18 +11,17 @@ agent: general-purpose
 
 ## Intent
 
-Synchronize a **digital twin** with real-time signals and keep it **grounded, safe, and auditable**. This workflow maintains alignment between the real world and its digital representation.
+Run the composed workflow **digital_twin_sync_loop** (`reference/workflow_catalog.yaml`) to synchronize a **digital twin** with incoming signals and keep it **grounded, safe, and auditable**: detect drift, decide and execute safe actions, and record provenance.
 
 This workflow is designed to **model both real and digital systems** using the canonical world-state schema:
 - `reference/world_state_schema.yaml`
 
 **Success criteria:**
-- Twin snapshot updated with latest signals
-- All drift and anomalies detected and documented
-- Risk assessed and forecasted with evidence
-- Actions executed only after checkpoint and approval
-- Complete audit trail with provenance
-- Rollback available if verification fails
+- Twin snapshot updated and grounded
+- Drift assessed with risk score
+- Any actions are approved/checkpointed/verified
+- Audit trail produced
+- Rollback runs only when verification fails
 
 **Compatible schemas:**
 - `reference/world_state_schema.yaml`
@@ -33,74 +32,87 @@ This workflow is designed to **model both real and digital systems** using the c
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `sources` | Yes | array | Data sources to ingest (APIs, files, streams, sensors) |
-| `world_id` | Yes | string | Identifier for the digital twin being synchronized |
-| `constraints` | No | object | Policy limits, thresholds, timing constraints |
-| `prior_snapshot` | No | object | Previous twin state for delta computation |
-| `sync_mode` | No | enum | full \| incremental \| delta_only (default: incremental) |
+| `user_input` | No | object | `domain` and `constraints`. The catalog accepts both but no step binds them: the policy check uses the fixed constraints `least_privilege` and `change_policy`, and no drift threshold gates any step |
+| `previous_world_state` | No | object | The twin snapshot before this sync (`reference/world_state_schema.yaml#/world_state`). Merged with the new events and diffed against the updated snapshot; without it there is no baseline (run `/digital-twin-bootstrap` instead) |
 
 ## Preconditions (hard gates)
 
-1. **Policy constraints must exist** (`/constrain`)
-2. **Checkpoint before mutation** (`/checkpoint`)
-3. Any external side effects require explicit approval (do not `send` without approval)
+1. **Policy constraints must pass** (`/constrain`): `mutate` runs only if `${constrain_out.compliant} == true`
+2. **Checkpoint before mutation** (`/checkpoint`): `mutate` stops if `${checkpoint_out.checkpoint_id} == null`
+3. Any external side effects require explicit approval (do not `send` without approval); `mutate` and `execute` require approval
 
 ## Procedure
 
-0) **Ensure baseline exists**: If no twin snapshot exists, start with `/world-model-workflow`
+0) **Ensure baseline exists**: If no twin snapshot exists, run `/digital-twin-bootstrap` instead: it builds the world model and then runs this loop
 
 Then execute the sync loop:
 
-1) **Invoke `/receive`** → store `receive_out`
-   - Ingest signals from configured sources
+1) **Invoke `/receive`** and store output as `receive_out`
+   - Ingest new signals/events from sources (logs/APIs/messages); retry up to 3 times
 
-2) **Invoke `/transform`** to normalize to canonical events → `transform_out`
-   - Convert raw signals to event schema format
+2) **Invoke `/search`** for `receive_out.source` and store output as `search_out`
+   - Parallel enrichment (`parallel_group: context_gathering`): search for the existing twin snapshot or relevant context
 
-3) **Invoke `/integrate`** to merge events with prior twin snapshot → `integrate_out`
-   - Combine new events with existing state
+3) **Invoke `/transform`** on `receive_out.data` to `canonical_event` and store output as `transform_out`
+   - Normalize raw signals into canonical events (`reference/transform_mapping_rawlog_to_observation.yaml`; the step's `output` is one event of `reference/event_schema.yaml#/event`)
 
-4) **Invoke `/identity-resolution`** → `identity_resolution_out`
-   - Resolve entity references across sources
+4) **Invoke `/integrate`** with `transform_out.output` and `previous_world_state`, and store output as `integrate_out`
+   - Merge canonical events with the existing twin snapshot; resolve conflicts with `prefer_authoritative_sources`
 
-5) **Invoke `/world-state`** producing canonical snapshot → `world_state_out`
-   - Generate updated twin representation
+5) **Invoke `/detect`** (domain: entity) on `integrate_out.merged` and store output as `detect_entity_out`
+   - Detect entities in integrated data
 
-6) **Invoke `/state-transition`** apply rules → `state_transition_out`
-   - Apply business rules and state machine logic
+6) **Invoke `/classify`** on `detect_entity_out.matches` and store output as `classify_out`
+   - Classify and resolve entity identities
 
-7) **Invoke `/detect-anomaly`** drift detection → `detect_anomaly_out`
-   - Identify deviations from expected behavior
+7) **Invoke `/state`** with `integrate_out.merged.observations`, scoped to `integrate_out.merged.meta.world_id`, and store output as `state_out`
+   - Produce the updated canonical world-state snapshot with uncertainty + provenance: the output wraps the snapshot (`reference/world_state_schema.yaml#/world_state`) in its `state` field, so later steps read `state_out.state`
 
-8) **Invoke `/estimate-risk`** risk estimate → `estimate_risk_out`
-   - Assess current risk based on anomalies
+8) **Invoke `/compare`** (domain: state_diff) on `previous_world_state` and `state_out.state`, and store output as `compare_state_out`
+   - Compute the diff between the previous and the updated snapshot
 
-9) **Invoke `/forecast-risk`** risk forecast → `forecast_risk_out`
-   - Project future risk trajectory
+9) **Invoke `/transition`** from `state_out.state` and store output as `transition_out`
+   - Apply transition rules triggered by new observations; compute next states
 
-10) **Invoke `/plan`** remediation plan + verification criteria + rollback plan → `plan_out`
-    - Create action plan if intervention needed
+10) **Invoke `/detect`** (domain: anomaly) for `drift` on the observed state (`state_out.state`), the expected effects (`transition_out.effects`) and the diff (`compare_state_out`), and store output as `detect_anomaly_out`
+    - Detect drift/anomalies between expected and observed state
 
-11) **Invoke `/constrain`** enforce policy constraints → `constrain_out`
-    - Validate plan against policy limits
+11) **Invoke `/measure`** (domain: risk) on `detect_anomaly_out` and store output as `measure_risk_out`
+    - Estimate risk impact/probability from drift and transitions
 
-12) **Invoke `/checkpoint`** create mutation gate marker → `checkpoint_out`
-    - Establish restore point before action
+12) **Invoke `/predict`** (domain: risk) for `near_term_risk`, conditioned on the risk score (`measure_risk_out.value`, `.uncertainty`), the drift (`detect_anomaly_out.detected`, `.matches`) and the transition rules (`transition_out.rules`), and store output as `predict_out`
+    - Forecast near-term risk trajectory and triggers
 
-13) **Invoke `/act-plan`** execute if safe/approved → `act_plan_out`
-    - Execute remediation actions
+13) **Invoke `/plan`** with the forecast (`predict_out`), the state diff (`compare_state_out`), the entity labels (`classify_out.labels`) and the search context (`search_out.results`) as context, and store output as `plan_out`
+    - Plan safe action(s) to reduce the detected drift and risk, with verification criteria and rollback plan
 
-14) **Invoke `/verify`** PASS/FAIL → `verify_out`
-    - Confirm actions achieved intended outcome
+14) **Invoke `/constrain`** on `plan_out.steps` (`least_privilege`, `change_policy`) and store output as `constrain_out`
+    - Enforce policy and least privilege for planned actions
 
-15) **Invoke `/audit`** provenance + tool log → `audit_out`
-    - Record complete audit trail
+15) **Invoke `/checkpoint`** on `twin_state` and store output as `checkpoint_out`
+    - Create the checkpoint marker before any mutation/side-effect step
 
-16) **If FAIL or side effects** → `/rollback` → `rollback_out`
-    - Restore previous state if needed
+16) **Invoke `/mutate`** on `twin_state`, applying `plan_out.steps`, if `constrain_out.compliant` is true, and store output as `mutate_out`
+    - Execute mutations from the action plan (if approved); stop if no checkpoint was created
+    - If the mutation fails or times out (R401/R402), roll back to `checkpoint_out` and end the run with that error
 
-17) **Invoke `/summarize`** decision-ready report → `summarize_out`
-    - Generate executive summary
+17) **Invoke `/execute`** with `run_verification_suite` if a mutation was applied (`mutate_out` is not null), and store output as `execute_out`
+    - Run verification tests and commands; skip this step when nothing was mutated
+    - If the verification suite fails or times out (R401/R402), roll back to `checkpoint_out` so the unverified mutation does not stay in place, and end the run with that error (no audit is recorded)
+
+18) **Invoke `/verify`** on `execute_out` (`drift_resolved`, `no_policy_violation`) if a mutation was applied, and store output as `verify_out`
+    - Verify outcome: PASS/FAIL with evidence; skip this step when nothing was mutated. On FAIL, carry on: step 19 rolls back, once, and `audit` records the verdict and the rollback
+    - If verification cannot run (R401/R402 after its retries), roll back to `checkpoint_out` and end the run with that error
+
+19) **Invoke `/rollback`** to `checkpoint_out.checkpoint_id` if a mutation was applied (`mutate_out` is not null) and `verify_out.passed` is false, and store output as `rollback_out`
+    - The step is skipped when nothing was mutated or verification passes
+    - The step does not take a checkpoint of its own (`requires_checkpoint: false`): it restores the one taken at step 15
+
+20) **Invoke `/audit`** and store output as `audit_out`
+    - Record provenance, tool usage, diffs, decision rationale, and whether the twin was rolled back (`rollback_out.restored`; null when the rollback was skipped)
+
+21) **Invoke `/explain`** and store output as `explain_out`
+    - Produce a decision-ready sync report: drift, actions, verification, next steps
 
 ## Output Contract
 
@@ -108,43 +120,87 @@ Return a structured object:
 
 ```yaml
 workflow_id: string  # Unique sync execution ID
-world_id: string  # Digital twin identifier
-sync_timestamp: string  # ISO timestamp of sync
-status: synced | drift_detected | action_taken | rolled_back | failed
-twin_snapshot:
-  version: string
-  state: object  # Canonical world state
-  hash: string  # Integrity hash
-  evidence_anchors: array[string]
-drift_report:
-  anomalies_detected: integer
-  severity: low | medium | high | critical
-  triggers: array[string]
-  evidence_anchors: array[string]
-risk_assessment:
-  current_risk: number  # 0.0-1.0
-  forecasted_risk: number  # 0.0-1.0
-  risk_factors: array[string]
-  evidence_anchors: array[string]
-actions:
-  executed: boolean
-  plan_summary: string
-  changes: array[string]
-  safety_gates_passed: boolean
-  evidence_anchors: array[string]
-verification:
-  result: PASS | FAIL | SKIPPED
-  criteria_met: array[string]
-  evidence_anchors: array[string]
-audit:
-  log_path: string
-  provenance_chain: array[string]
-  evidence_anchors: array[string]
-rollback:
-  available: boolean
-  executed: boolean
-  restore_point: string | null
-  command: string | null
+user_input: object  # The input as given
+status: synced | action_taken | rolled_back | failed
+steps:
+  receive_out:
+    data: array[object]  # Received items, each with its sender
+    source: string
+    evidence_anchors: array[string]
+  search_out:
+    results: array[object]
+    evidence_anchors: array[string]
+  transform_out:
+    output: object  # One canonical event (reference/event_schema.yaml#/event)
+    evidence_anchors: array[string]
+  integrate_out:
+    merged: object  # Includes observations and meta.world_id
+    conflicts: array[object]
+    evidence_anchors: array[string]
+  detect_entity_out:
+    detected: boolean
+    matches: array[object]
+    evidence_anchors: array[string]
+  classify_out:
+    labels: array[object]
+    evidence_anchors: array[string]
+  state_out:
+    state: object  # Canonical world state
+    evidence_anchors: array[string]
+  compare_state_out:
+    ranking: array[object]
+    tradeoffs: array[object]  # Differences between the snapshots
+    evidence_anchors: array[string]
+  transition_out:
+    rules: array[object]
+    effects: array[object]
+    evidence_anchors: array[string]
+  detect_anomaly_out:
+    detected: boolean
+    matches: array[object]
+    evidence_anchors: array[string]
+  measure_risk_out:
+    value: number  # 0.0-1.0
+    uncertainty: object  # lower, upper
+    evidence_anchors: array[string]
+  predict_out:
+    prediction: object
+    probability: number
+    evidence_anchors: array[string]
+  plan_out:
+    steps: array[object]
+    evidence_anchors: array[string]
+  constrain_out:
+    compliant: boolean
+    violations: array[object]
+    evidence_anchors: array[string]
+  checkpoint_out:
+    checkpoint_id: string
+    evidence_anchors: array[string]
+  mutate_out:  # null when the step was skipped (constrain_out.compliant was false)
+    success: boolean
+    previous_state: object
+    new_state: object
+    evidence_anchors: array[string]
+  execute_out:  # null when nothing was mutated (the step was skipped)
+    result: any
+    evidence_anchors: array[string]
+  verify_out:  # null when nothing was mutated (the step was skipped)
+    passed: boolean
+    violations: array[object]
+    evidence_anchors: array[string]
+  rollback_out:  # null when nothing was mutated or verification passed (the step was skipped)
+    restored: boolean
+    evidence_anchors: array[string]
+  audit_out:
+    audit_id: string
+    recorded: boolean
+    evidence_anchors: array[string]
+  explain_out:
+    explanation: string
+    evidence_anchors: array[string]
+verification: PASS | FAIL
+audit_log_pointer: string  # Where the audit step appended its record (.claude/audit/records.jsonl)
 next_sync:
   recommended_interval: string  # e.g., "5m", "1h"
   triggers: array[string]  # Conditions for immediate resync
@@ -158,14 +214,10 @@ assumptions: array[string]
 | Field | Type | Description |
 |-------|------|-------------|
 | `workflow_id` | string | Unique identifier for this sync execution |
-| `world_id` | string | Digital twin being synchronized |
-| `twin_snapshot` | object | Updated canonical world state with integrity hash |
-| `drift_report` | object | Detected anomalies and their severity |
-| `risk_assessment` | object | Current and forecasted risk levels |
-| `actions` | object | What remediation was taken (if any) |
-| `verification` | object | Whether actions achieved intended outcome |
-| `audit` | object | Complete provenance and audit trail |
-| `rollback` | object | Rollback availability and status |
+| `status` | enum | Final workflow status |
+| `steps` | object | Each step's output, keyed by its `store_as`; a skipped step is null |
+| `verification` | enum | Final PASS/FAIL |
+| `audit_log_pointer` | string | Where the audit trail was written |
 | `next_sync` | object | Recommended timing for next synchronization |
 | `confidence` | number | 0.0-1.0 based on evidence quality |
 | `evidence_anchors` | array | All evidence references collected |
@@ -173,91 +225,178 @@ assumptions: array[string]
 
 ## Examples
 
-### Example 1: IoT Sensor Sync with Anomaly Detection
+### Example 1: IoT Sensor Sync with Drift Correction
 
 **Input:**
 ```yaml
-sources:
-  - type: mqtt
-    endpoint: "mqtt://sensors.example.com/floor-3"
-  - type: api
-    endpoint: "https://building.api/hvac/status"
-world_id: "building-floor-3-twin"
-constraints:
-  max_drift_threshold: 0.15
-  require_approval_above_risk: 0.7
-sync_mode: incremental
+user_input:
+  domain: "building floor 3 HVAC"
+previous_world_state:
+  meta:
+    world_id: "building-floor-3-twin"
+    as_of: "2024-01-15T15:55:00Z"
+    timezone: "UTC"
+    version_id: "v46"
+    lineage: []
+  entities:
+    - id: "hvac-unit-3a"
+      type: "hvac_controller"
+  # relationships, state_variables, observations, transition_rules, actions, indexes elided
 ```
 
 **Output:**
 ```yaml
 workflow_id: "sync_20240115_160000_floor3"
-world_id: "building-floor-3-twin"
-sync_timestamp: "2024-01-15T16:00:00Z"
-status: drift_detected
-twin_snapshot:
-  version: "v47"
-  state:
-    entities:
-      - id: "hvac-unit-3a"
-        type: "hvac_controller"
-        temperature: 23.5
-        setpoint: 22.0
-        status: "cooling"
-      - id: "sensor-temp-301"
-        type: "temperature_sensor"
-        reading: 24.1
-        last_updated: "2024-01-15T15:59:45Z"
-    relationships:
-      - subject: "hvac-unit-3a"
-        predicate: "controls"
-        object: "zone-3a"
-  hash: "sha256:abc123def456..."
-  evidence_anchors:
-    - "tool:mqtt:sensors.example.com/floor-3"
-    - "tool:api:building.api/hvac/status"
-drift_report:
-  anomalies_detected: 1
-  severity: medium
-  triggers:
-    - "Temperature 1.5°C above setpoint for >10 minutes"
-  evidence_anchors:
-    - "file:state/floor-3-twin-v46.yaml:temperature_history"
-    - "tool:detect-anomaly:threshold_breach"
-risk_assessment:
-  current_risk: 0.35
-  forecasted_risk: 0.45
-  risk_factors:
-    - "HVAC may be undersized for current load"
-    - "Trending toward comfort threshold breach"
-  evidence_anchors:
-    - "tool:estimate-risk:hvac_capacity"
-    - "tool:forecast-risk:temperature_trend"
-actions:
-  executed: false
-  plan_summary: "Monitor for 15 more minutes before intervention"
-  changes: []
-  safety_gates_passed: true
-  evidence_anchors:
-    - "tool:plan:remediation_decision"
-verification:
-  result: SKIPPED
-  criteria_met: []
-  evidence_anchors: []
-audit:
-  log_path: ".claude/audit/sync_20240115_160000_floor3.log"
-  provenance_chain:
-    - "mqtt://sensors.example.com → receive"
-    - "receive → transform"
-    - "transform → integrate"
-    - "integrate → world-state"
-  evidence_anchors:
-    - "file:.claude/audit/sync_20240115_160000_floor3.log"
-rollback:
-  available: false
-  executed: false
-  restore_point: null
-  command: null
+user_input:
+  domain: "building floor 3 HVAC"
+status: action_taken
+steps:
+  receive_out:
+    data:
+      - sender: "gateway-floor-3"
+        topic: "floor-3/hvac-unit-3a"
+        payload:
+          sensor-temp-301: 24.1
+          hvac-unit-3a: {temperature: 23.5, setpoint: 22.0, status: "cooling"}
+    source: "mqtt://sensors.example.com/floor-3"
+    evidence_anchors:
+      - "tool:mqtt:sensors.example.com/floor-3"
+  search_out:
+    results:
+      - {path: "state/floor-3-twin-v46.yaml", version_id: "v46"}
+    evidence_anchors:
+      - "file:state/floor-3-twin-v46.yaml"
+  transform_out:
+    output:
+      event_id: "evt_7f3a91"
+      timestamp: "2024-01-15T16:00:00Z"
+      source: {kind: "sensor", name: "gateway-floor-3", channel: "floor-3/hvac-unit-3a"}
+      event_type: "hvac_telemetry"
+      entity_refs: [{entity_id: "sensor-temp-301"}, {entity_id: "hvac-unit-3a"}]
+      raw:
+        sensor-temp-301: 24.1
+        hvac-unit-3a: {temperature: 23.5, setpoint: 22.0, status: "cooling"}
+      canonical:
+        readings:
+          - {entity: "sensor-temp-301", variable: "reading", value: 24.1}
+          - {entity: "hvac-unit-3a", variable: "temperature", value: 23.5}
+      anchors: [{ref: "mqtt://sensors.example.com/floor-3", kind: "sensor"}]
+      provenance: {transformer: "transform", transform_version: "1.0.0", ruleset_id: "raw_log_to_observation_event"}
+    evidence_anchors:
+      - "file:reference/transform_mapping_rawlog_to_observation.yaml"
+  integrate_out:
+    merged:
+      meta: {world_id: "building-floor-3-twin"}
+      observations:
+        - event_id: "evt_5c20d4"  # carried over from v46
+          timestamp: "2024-01-15T15:55:00Z"
+          source: "sensor"
+          payload:
+            readings:
+              - {entity: "sensor-temp-301", variable: "reading", value: 23.0}
+              - {entity: "hvac-unit-3a", variable: "temperature", value: 22.4}
+          anchors: [{ref: "file:state/floor-3-twin-v46.yaml", kind: "file"}]
+        - event_id: "evt_7f3a91"  # new, from transform_out.output
+          timestamp: "2024-01-15T16:00:00Z"
+          source: "sensor"
+          payload:
+            readings:
+              - {entity: "sensor-temp-301", variable: "reading", value: 24.1}
+              - {entity: "hvac-unit-3a", variable: "temperature", value: 23.5}
+          anchors: [{ref: "mqtt://sensors.example.com/floor-3", kind: "sensor"}]
+    conflicts: []
+    evidence_anchors:
+      - "file:state/floor-3-twin-v46.yaml"
+  detect_entity_out:
+    detected: true
+    matches: [{id: "hvac-unit-3a"}, {id: "sensor-temp-301"}]
+    evidence_anchors:
+      - "file:state/floor-3-twin-v46.yaml"
+  classify_out:
+    labels:
+      - {id: "hvac-unit-3a", type: "hvac_controller"}
+      - {id: "sensor-temp-301", type: "temperature_sensor"}
+    evidence_anchors:
+      - "file:state/floor-3-twin-v46.yaml"
+  state_out:
+    state:
+      meta: {world_id: "building-floor-3-twin", version_id: "v47", parent_version_id: "v46"}
+    evidence_anchors:
+      - "file:state/floor-3-twin-v47.yaml"
+  compare_state_out:
+    ranking: [{option: "v47", changed_entities: 2}]
+    tradeoffs:
+      - {field: "sensor-temp-301.reading", from: 23.0, to: 24.1}
+      - {field: "hvac-unit-3a.temperature", from: 22.4, to: 23.5}
+    evidence_anchors:
+      - "file:state/floor-3-twin-v46.yaml"
+      - "file:state/floor-3-twin-v47.yaml"
+  transition_out:
+    rules: [{trigger: "temperature > setpoint for 10m", next: "cooling_degraded"}]
+    effects: [{entity: "hvac-unit-3a", status: "cooling_degraded"}]
+    evidence_anchors:
+      - "file:state/floor-3-twin-v47.yaml"
+  detect_anomaly_out:
+    detected: true
+    matches:
+      - entity: "hvac-unit-3a"
+        pattern: "drift"
+        description: "Temperature 1.5°C above setpoint for >10 minutes"
+    evidence_anchors:
+      - "file:state/floor-3-twin-v46.yaml:temperature_history"
+  measure_risk_out:
+    value: 0.35
+    uncertainty: {lower: 0.3, upper: 0.4}
+    evidence_anchors:
+      - "file:state/floor-3-twin-v47.yaml"
+  predict_out:
+    prediction: {risk: 0.45, horizon: "1h", trigger: "comfort threshold breach"}
+    probability: 0.6
+    evidence_anchors:
+      - "file:state/floor-3-twin-v46.yaml:temperature_history"
+  plan_out:
+    steps:
+      - action: "Lower hvac-unit-3a setpoint to 21.5°C"
+        verification: "Zone temperature within 0.5°C of setpoint in 15m"
+        rollback: "Restore setpoint 22.0°C"
+    evidence_anchors:
+      - "file:state/floor-3-twin-v47.yaml"
+  constrain_out:
+    compliant: true
+    violations: []
+    evidence_anchors:
+      - "policy:change_policy:setpoint_bounds"
+  checkpoint_out:
+    checkpoint_id: "chk_20240115_160500"
+    evidence_anchors:
+      - "file:.checkpoints/chk_20240115_160500/manifest.json"
+  mutate_out:
+    success: true
+    previous_state: {setpoint: 22.0}
+    new_state: {setpoint: 21.5}
+    evidence_anchors:
+      - "tool:api:building.api/hvac/hvac-unit-3a/setpoint"
+  execute_out:
+    result: "verification suite: 6 passed"
+    evidence_anchors:
+      - "tool:bash:run_verification_suite"
+  verify_out:
+    passed: true
+    violations: []
+    evidence_anchors:
+      - "tool:bash:run_verification_suite"
+  rollback_out: null  # skipped: verification passed
+  audit_out:
+    audit_id: "audit_20240115_162000"
+    recorded: true
+    evidence_anchors:
+      - "file:.claude/audit/records.jsonl"
+  explain_out:
+    explanation: "Drift of 1.5°C detected on zone 3a; setpoint lowered to 21.5°C after policy check and checkpoint; verification passed"
+    evidence_anchors:
+      - "file:.claude/audit/records.jsonl"
+verification: PASS
+audit_log_pointer: ".claude/audit/records.jsonl"
 next_sync:
   recommended_interval: "5m"
   triggers:
@@ -266,27 +405,26 @@ next_sync:
 confidence: 0.88
 evidence_anchors:
   - "tool:mqtt:sensors.example.com/floor-3"
-  - "tool:api:building.api/hvac/status"
-  - "tool:detect-anomaly:threshold_breach"
-  - "file:.claude/audit/sync_20240115_160000_floor3.log"
+  - "file:state/floor-3-twin-v47.yaml"
+  - "file:.claude/audit/records.jsonl"
 assumptions:
   - "Sensor readings are accurate within ±0.1°C"
   - "MQTT connection is reliable"
   - "Building API returns real-time status"
 ```
 
-**Evidence pattern:** Multi-source signal ingestion, anomaly detection against historical baseline, risk forecasting with trend analysis.
+**Evidence pattern:** Multi-source signal ingestion, anomaly detection against historical baseline, risk forecasting with trend analysis, checkpointed and verified action.
 
 ## Verification
 
-- [ ] **Source Ingestion**: All configured sources successfully polled
-- [ ] **Transform Success**: Events conform to canonical schema
-- [ ] **Identity Resolved**: No unresolved entity references
-- [ ] **Drift Detection**: Anomaly check completed with evidence
-- [ ] **Risk Assessment**: Both current and forecast risk computed
-- [ ] **Policy Compliance**: Constraints checked before any action
-- [ ] **Checkpoint Valid**: Restore point exists if actions taken
-- [ ] **Audit Complete**: Provenance chain documented
+- [ ] **Step Completeness**: All 21 workflow steps executed with output (mutate skipped if not compliant; execute and verify skipped when nothing was mutated; rollback skipped when nothing was mutated or verification passed)
+- [ ] **Transform Success**: `transform_out.output` conforms to the canonical event schema
+- [ ] **Identity Resolved**: No unresolved entity references in `classify_out`
+- [ ] **Drift Detection**: `detect_anomaly_out` completed with evidence
+- [ ] **Risk Assessment**: Both `measure_risk_out` and `predict_out` computed
+- [ ] **Policy Compliance**: `constrain_out` evaluated before `mutate`
+- [ ] **Checkpoint Valid**: `checkpoint_out.checkpoint_id` exists before `mutate`
+- [ ] **Audit Complete**: `audit_out` recorded
 - [ ] **Next Sync Scheduled**: Recommended interval provided
 
 **Verification tools:** Web (for API checks), Bash (for MQTT), Read (for state files)
@@ -295,7 +433,7 @@ assumptions:
 
 - `mutation`: true
 - `requires_checkpoint`: true
-- `requires_approval`: true (for actions above risk threshold)
+- `requires_approval`: true (for `mutate` and `execute`)
 - `risk`: high
 
 **Capability-specific rules:**
@@ -309,11 +447,11 @@ assumptions:
 ## Composition Patterns
 
 **Commonly follows:**
-- `world-model-workflow` - Initial twin creation before first sync
+- `digital-twin-bootstrap` - Initial twin creation and first sync
 - `receive` - When triggered by external event
 
 **Commonly precedes:**
-- `summarize` - Create executive report after sync
+- `explain` - Create executive report after sync
 - `send` - Notify stakeholders of drift or actions
 - Self (recursive) - Next sync iteration
 
@@ -324,6 +462,7 @@ assumptions:
 - Never delete audit logs before retention period
 
 **Workflow references:**
-- See `reference/workflow_catalog.yaml#digital-twin-sync-loop` for step definitions
+- See `reference/workflow_catalog.yaml#digital_twin_sync_loop` for step definitions
 - See `reference/world_state_schema.yaml` for canonical state format
 - See `reference/composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
+- See `reference/composition_patterns.md#digital-twin-sync-loop` for gates, data flow and recovery

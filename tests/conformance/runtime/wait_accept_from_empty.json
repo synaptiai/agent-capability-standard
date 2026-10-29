@@ -1,0 +1,67 @@
+{
+  "description": "An accept_from that resolves to an empty list fails the step (R402) at once, instead of dropping every sender until the timeout.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        },
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "inbox",
+          "timeout": "1h",
+          "input_bindings": {
+            "accept_from": "${r.data: array<string>}"
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 1
+  },
+  "trace_kinds": [
+    "step_failed"
+  ]
+}

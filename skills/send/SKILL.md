@@ -1,7 +1,7 @@
 ---
 name: send
 description: Emit a message or event to an external system with policy enforcement and approval gates. Use when publishing messages, calling APIs, sending notifications, or triggering external workflows. REQUIRES EXPLICIT APPROVAL.
-argument-hint: "[destination] [message] [protocol] [--approved]"
+argument-hint: "[destination] [payload] [protocol]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Bash
@@ -67,23 +67,20 @@ Send a message, event, or payload to an external destination with full policy en
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `destination` | Yes | string | Target endpoint, queue, API, or address |
-| `message` | Yes | object | Payload to send |
-| `protocol` | Yes | string | Communication protocol (http, grpc, smtp, amqp, etc.) |
-| `approval_token` | Yes | string | Token confirming user approved this send (MANDATORY) |
-| `checkpoint_ref` | Yes | string | Reference to checkpoint before send (MANDATORY) |
-| `constraints` | No | object | Rate limits, size limits, allowed destinations |
-| `timeout` | No | integer | Send timeout in milliseconds |
-| `retry_policy` | No | object | Retry configuration on failure |
+| `payload` | Yes | any | Data to send |
+| `protocol` | No | string | Communication protocol (http, grpc, smtp, amqp, etc.) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
 1) **Verify approval**: Confirm explicit user approval exists
-   - Check `approval_token` is valid and recent
+   - Check the approval is valid and recent
    - BLOCK send if approval is missing or expired
    - Log approval verification for audit
 
 2) **Verify checkpoint**: Confirm recovery point exists
-   - Validate `checkpoint_ref` references valid checkpoint
+   - Validate that a checkpoint was created before this send
    - BLOCK send if checkpoint is missing
    - External sends are irreversible - checkpoint is for state recovery
 
@@ -127,15 +124,16 @@ Send a message, event, or payload to an external destination with full policy en
 Return a structured object:
 
 ```yaml
-sent:
+sent: boolean  # true when the transport accepted the message (delivery.status sent or queued)
+response: any  # Recipient's response or delivery receipt, if any
+timestamp: string  # ISO 8601 date-time of send
+message:
   destination: string  # Where message was sent
   payload_type: string  # Type of content sent
   payload_summary: string  # Non-sensitive summary of payload
-  timestamp: string  # ISO timestamp of send
   message_id: string | null  # Tracking ID if available
 delivery:
   status: sent | queued | failed  # Delivery outcome
-  confirmation: string | null  # Delivery receipt or acknowledgment
   retry_count: integer  # Number of retry attempts
   response_code: integer | null  # HTTP status or protocol response
   error: string | null  # Error message if failed
@@ -156,7 +154,10 @@ assumptions: []  # Explicit assumptions
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `sent` | object | Details of what was sent |
+| `sent` | boolean | Whether the message was sent (accepted by the transport) |
+| `response` | any | Recipient's response or delivery receipt, or null |
+| `timestamp` | string | ISO 8601 date-time of send |
+| `message` | object | Details of what was sent (destination, payload type, non-sensitive summary, message ID) |
 | `delivery` | object | Outcome of send operation |
 | `constraints_applied` | array | Policy checks performed |
 | `approval` | object | Approval gate information |
@@ -171,30 +172,29 @@ assumptions: []  # Explicit assumptions
 **Input:**
 ```yaml
 destination: "https://api.partner.com/webhooks/order-updates"
-message:
+payload:
   event: "order.completed"
   order_id: "ORD-12345"
   timestamp: "2024-01-15T10:30:00Z"
   customer_notified: true
 protocol: "http"
-approval_token: "approve-send-2024-01-15-001"
-checkpoint_ref: "checkpoint-2024-01-15-001"
-constraints:
-  rate_limit: "100/hour"
-  allowed_domains: ["api.partner.com"]
 ```
+
+Approval and the checkpoint come from the workflow (an approved step after a `checkpoint` step), not from inputs. A preceding `constrain` step enforces the policy: at most 100 sends per hour, to `api.partner.com` only.
 
 **Output:**
 ```yaml
-sent:
+sent: true
+response:
+  received: true
+timestamp: "2024-01-15T10:30:15Z"
+message:
   destination: "https://api.partner.com/webhooks/order-updates"
   payload_type: "order.completed event"
   payload_summary: "Order completion notification for ORD-12345"
-  timestamp: "2024-01-15T10:30:15Z"
   message_id: "msg-abc123"
 delivery:
   status: sent
-  confirmation: "HTTP 200 OK, body: {\"received\": true}"
   retry_count: 0
   response_code: 200
   error: null
@@ -226,27 +226,25 @@ assumptions:
 **Input:**
 ```yaml
 destination: "smtp://mail.company.com:587"
-message:
+payload:
   to: "user@example.com"
   subject: "Action Required: Review pending"
   body: "You have 3 items awaiting review..."
 protocol: "smtp"
-approval_token: "approve-email-2024-01-15-002"
-checkpoint_ref: "checkpoint-2024-01-15-002"
-timeout: 30000
 ```
 
 **Output:**
 ```yaml
-sent:
+sent: false
+response: null
+timestamp: "2024-01-15T11:00:05Z"
+message:
   destination: "smtp://mail.company.com:587"
   payload_type: "email"
   payload_summary: "Email to user@example.com regarding pending review"
-  timestamp: "2024-01-15T11:00:05Z"
   message_id: null
 delivery:
   status: failed
-  confirmation: null
   retry_count: 3
   response_code: null
   error: "Connection timeout after 30s - SMTP server unreachable"
@@ -304,7 +302,7 @@ Before any send operation, the user must explicitly approve:
 2. Where it will be sent (destination)
 3. Why it is being sent (context)
 
-The approval must be captured with a token that is referenced in this operation.
+The approval must be captured with a token that is recorded in this operation's audit trail.
 
 ## Composition Patterns
 

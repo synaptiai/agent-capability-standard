@@ -1,0 +1,99 @@
+{
+  "description": "An end gate in a handler ends the run escalated, as the handler's own end would, with the cause and the ending step recorded.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "x"
+          },
+          "failure_modes": [
+            {
+              "condition": "observation failed",
+              "action": "escalate",
+              "on_error": "R402",
+              "recovery": {
+                "goto_step": "page"
+              }
+            }
+          ]
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "page",
+          "handler": true,
+          "workflow_id": "oncall",
+          "input_bindings": {
+            "workflow": "oncall",
+            "input": {}
+          },
+          "gates": [
+            {
+              "when": "true",
+              "action": "end",
+              "message": "on-call is paged"
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "recovery@1"
+        ]
+      }
+    },
+    "oncall": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "inquire",
+          "purpose": "inquire step",
+          "store_as": "q",
+          "input_bindings": {
+            "ambiguous_input": "x"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "down"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "escalated",
+    "cause": "R402",
+    "ended": {
+      "step": 1,
+      "message": "on-call is paged"
+    }
+  },
+  "trace_kinds": [
+    "escalated",
+    "run_ended"
+  ]
+}

@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 recovery:
   goal: Workflow with recovery loop.
   risk: medium
@@ -11,6 +12,8 @@ recovery:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: verify
     purpose: Verify with retry.
@@ -23,6 +26,8 @@ recovery:
       max: 3
       backoff: exponential
     store_as: verify_out
+    input_bindings:
+      conditions: ["checks_pass"]
     failure_modes:
     - condition: Verdict == FAIL
       action: rollback

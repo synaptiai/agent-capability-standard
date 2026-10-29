@@ -1,0 +1,147 @@
+{
+  "description": "The mark crosses an invoke: a nested run given an always-ask item asks a person for its own mandate-covered action.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "always_ask_trust_classes": [
+              "external"
+            ]
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "child",
+          "input_bindings": {
+            "workflow": "act_on",
+            "input": {
+              "answer": "${r.data: array<object>}"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1"
+        ]
+      }
+    },
+    "act_on": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "act",
+          "input_bindings": {
+            "code": "apply"
+          },
+          "condition": "${answer} != null",
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            }
+          }
+        }
+      ],
+      "inputs": {
+        "answer": {
+          "type": "array",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "mail:someone@example.com",
+          "kind": "human",
+          "authenticated_by": "x-mail-dkim",
+          "trust_class": "external"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "frame": [
+          "w",
+          "act_on"
+        ],
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "frame": [
+          "w",
+          "act_on"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "always_ask",
+    "invoke_started",
+    "invoke_returned"
+  ]
+}

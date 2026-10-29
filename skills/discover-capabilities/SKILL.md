@@ -146,7 +146,8 @@ workflow:
       domain: pattern
       store_as: detect_out
       input_bindings:
-        source: ${search_out}
+        data: ${search_out}
+        pattern: TODO
   confidence: 0.9
 confidence: 0.9
 ```

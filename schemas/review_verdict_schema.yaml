@@ -1,0 +1,42 @@
+schema:
+  name: review_verdict
+  version: 1.1.0
+  description: One reviewer's verdict for a review quorum (Standard v1.1 §5.16).
+    A constrain step with a quorum counts verdicts of this shape.
+review_verdict:
+  type: object
+  required:
+  - reviewer_id
+  - value
+  - pinned
+  properties:
+    reviewer_id:
+      type: string
+      description: The reviewer's identity; it must equal the agent of one of the
+        quorum's reviewer delegate steps to count.
+    value:
+      type: string
+      description: The verdict, one of the quorum's vocabulary.
+    pinned:
+      type: string
+      description: What was reviewed (e.g. a commit or digest); it must equal the
+        quorum's resolved pinned_to to count.
+    scope:
+      type: string
+      enum:
+      - full
+      - delta
+      description: How much the reviewer covered. full is a sweep of the whole
+        pinned change; delta (the default when absent) covers only what changed
+        since an earlier round. A quorum's min_full counts passing full verdicts.
+        A reviewer emits one of the two; a quorum reading any other value (which
+        this schema rejects) counts it as delta and notes it in its violations
+        (1.1.0).
+    evidence_anchors:
+      type: array
+      items:
+        type: object
+      description: Evidence for the verdict.
+    notes:
+      type: string
+      description: Free-text reasoning.

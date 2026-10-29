@@ -1,0 +1,18 @@
+# Standard version: 1.1.0
+# Negative fixture (STANDARD v1.1 §5.8): `=` is not an operator. V108.
+invalid_expression:
+  goal: Reject a malformed gate expression.
+  risk: low
+  steps:
+  - capability: verify
+    purpose: Verify.
+    store_as: verify_out
+    input_bindings:
+      conditions: []
+    gates:
+    - when: ${verify_out.passed} = false
+      phase: after
+      action: stop
+      message: never parses
+  success:
+  - Never valid

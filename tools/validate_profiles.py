@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
 from pathlib import Path
@@ -55,48 +56,79 @@ VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 # -------------------- Validation Functions --------------------
 
 
-def validate_required_fields(profile: dict[str, Any], errors: list[str], name: str) -> None:
+def _is_number(value: Any) -> bool:
+    """A finite int or float. ``bool`` is an ``int`` subclass, but a YAML
+    ``true``/``yes`` is not a weight, so it is refused; so is ``.nan``,
+    which no range check would catch."""
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def validate_required_fields(
+    profile: dict[str, Any], errors: list[str], name: str
+) -> None:
     """Check that all required fields are present."""
     for field in REQUIRED_FIELDS:
         if field not in profile:
             errors.append(f"[{name}] Missing required field: '{field}'")
 
 
-def validate_version_format(profile: dict[str, Any], errors: list[str], name: str) -> None:
+def validate_version_format(
+    profile: dict[str, Any], errors: list[str], name: str
+) -> None:
     """Check version follows semantic versioning pattern."""
     version = profile.get("version")
     if version is not None:
         if not isinstance(version, str):
-            errors.append(f"[{name}] Field 'version' must be a string, got {type(version).__name__}")
+            errors.append(
+                f"[{name}] Field 'version' must be a string, got {type(version).__name__}"
+            )
         elif not VERSION_PATTERN.match(version):
-            errors.append(f"[{name}] Invalid version format '{version}': expected semantic version (e.g., '1.0.0')")
+            errors.append(
+                f"[{name}] Invalid version format '{version}': expected semantic version (e.g., '1.0.0')"
+            )
 
 
-def validate_trust_weights(profile: dict[str, Any], errors: list[str], name: str) -> None:
+def validate_trust_weights(
+    profile: dict[str, Any], errors: list[str], name: str
+) -> None:
     """Check all trust weight values are between 0.0 and 1.0."""
     trust_weights = profile.get("trust_weights")
     if trust_weights is None:
         return
 
     if not isinstance(trust_weights, dict):
-        errors.append(f"[{name}] Field 'trust_weights' must be an object, got {type(trust_weights).__name__}")
+        errors.append(
+            f"[{name}] Field 'trust_weights' must be an object, got {type(trust_weights).__name__}"
+        )
         return
 
     for key, value in trust_weights.items():
-        if not isinstance(value, (int, float)):
-            errors.append(f"[{name}] trust_weights.{key}: expected number, got {type(value).__name__}")
+        if not _is_number(value):
+            errors.append(
+                f"[{name}] trust_weights.{key}: expected number, got {type(value).__name__}"
+            )
         elif value < 0.0 or value > 1.0:
-            errors.append(f"[{name}] trust_weights.{key}: value {value} is outside valid range [0.0, 1.0]")
+            errors.append(
+                f"[{name}] trust_weights.{key}: value {value} is outside valid range [0.0, 1.0]"
+            )
 
 
-def validate_risk_thresholds(profile: dict[str, Any], errors: list[str], name: str) -> None:
+def validate_risk_thresholds(
+    profile: dict[str, Any], errors: list[str], name: str
+) -> None:
     """Check risk threshold enum values."""
     risk_thresholds = profile.get("risk_thresholds")
     if risk_thresholds is None:
         return
 
     if not isinstance(risk_thresholds, dict):
-        errors.append(f"[{name}] Field 'risk_thresholds' must be an object, got {type(risk_thresholds).__name__}")
+        errors.append(
+            f"[{name}] Field 'risk_thresholds' must be an object, got {type(risk_thresholds).__name__}"
+        )
         return
 
     # Check auto_approve
@@ -140,14 +172,18 @@ def validate_risk_thresholds(profile: dict[str, Any], errors: list[str], name: s
                     )
 
 
-def validate_checkpoint_policy(profile: dict[str, Any], errors: list[str], name: str) -> None:
+def validate_checkpoint_policy(
+    profile: dict[str, Any], errors: list[str], name: str
+) -> None:
     """Check checkpoint policy enum values."""
     checkpoint_policy = profile.get("checkpoint_policy")
     if checkpoint_policy is None:
         return
 
     if not isinstance(checkpoint_policy, dict):
-        errors.append(f"[{name}] Field 'checkpoint_policy' must be an object, got {type(checkpoint_policy).__name__}")
+        errors.append(
+            f"[{name}] Field 'checkpoint_policy' must be an object, got {type(checkpoint_policy).__name__}"
+        )
         return
 
     for key, value in checkpoint_policy.items():
@@ -163,14 +199,18 @@ def validate_checkpoint_policy(profile: dict[str, Any], errors: list[str], name:
             )
 
 
-def validate_evidence_policy(profile: dict[str, Any], errors: list[str], name: str) -> None:
+def validate_evidence_policy(
+    profile: dict[str, Any], errors: list[str], name: str
+) -> None:
     """Check evidence policy structure and values."""
     evidence_policy = profile.get("evidence_policy")
     if evidence_policy is None:
         return
 
     if not isinstance(evidence_policy, dict):
-        errors.append(f"[{name}] Field 'evidence_policy' must be an object, got {type(evidence_policy).__name__}")
+        errors.append(
+            f"[{name}] Field 'evidence_policy' must be an object, got {type(evidence_policy).__name__}"
+        )
         return
 
     # Check required_anchor_types is a list of strings
@@ -192,7 +232,7 @@ def validate_evidence_policy(profile: dict[str, Any], errors: list[str], name: s
     # Check minimum_confidence is between 0.0 and 1.0
     min_confidence = evidence_policy.get("minimum_confidence")
     if min_confidence is not None:
-        if not isinstance(min_confidence, (int, float)):
+        if not _is_number(min_confidence):
             errors.append(
                 f"[{name}] evidence_policy.minimum_confidence: expected number, "
                 f"got {type(min_confidence).__name__}"
@@ -220,19 +260,25 @@ def validate_evidence_policy(profile: dict[str, Any], errors: list[str], name: s
                     )
 
 
-def validate_domain_sources(profile: dict[str, Any], errors: list[str], name: str) -> None:
+def validate_domain_sources(
+    profile: dict[str, Any], errors: list[str], name: str
+) -> None:
     """Check domain_sources structure and enum values."""
     domain_sources = profile.get("domain_sources")
     if domain_sources is None:
         return
 
     if not isinstance(domain_sources, list):
-        errors.append(f"[{name}] Field 'domain_sources' must be an array, got {type(domain_sources).__name__}")
+        errors.append(
+            f"[{name}] Field 'domain_sources' must be an array, got {type(domain_sources).__name__}"
+        )
         return
 
     for i, source in enumerate(domain_sources):
         if not isinstance(source, dict):
-            errors.append(f"[{name}] domain_sources[{i}]: expected object, got {type(source).__name__}")
+            errors.append(
+                f"[{name}] domain_sources[{i}]: expected object, got {type(source).__name__}"
+            )
             continue
 
         # Check type enum
@@ -246,7 +292,7 @@ def validate_domain_sources(profile: dict[str, Any], errors: list[str], name: st
         # Check default_trust is between 0.0 and 1.0
         default_trust = source.get("default_trust")
         if default_trust is not None:
-            if not isinstance(default_trust, (int, float)):
+            if not _is_number(default_trust):
                 errors.append(
                     f"[{name}] domain_sources[{i}].default_trust: expected number, "
                     f"got {type(default_trust).__name__}"
@@ -265,12 +311,16 @@ def validate_workflows(profile: dict[str, Any], errors: list[str], name: str) ->
         return
 
     if not isinstance(workflows, list):
-        errors.append(f"[{name}] Field 'workflows' must be an array, got {type(workflows).__name__}")
+        errors.append(
+            f"[{name}] Field 'workflows' must be an array, got {type(workflows).__name__}"
+        )
         return
 
     for i, item in enumerate(workflows):
         if not isinstance(item, str):
-            errors.append(f"[{name}] workflows[{i}]: expected string, got {type(item).__name__}")
+            errors.append(
+                f"[{name}] workflows[{i}]: expected string, got {type(item).__name__}"
+            )
 
 
 def validate_trust_calibration(
@@ -299,8 +349,12 @@ def validate_trust_calibration(
             )
 
 
-def validate_profile(profile: dict[str, Any], errors: list[str], name: str,
-                     warnings: list[str] | None = None) -> None:
+def validate_profile(
+    profile: dict[str, Any],
+    errors: list[str],
+    name: str,
+    warnings: list[str] | None = None,
+) -> None:
     """Run all validations on a profile."""
     validate_required_fields(profile, errors, name)
     validate_version_format(profile, errors, name)
@@ -328,7 +382,9 @@ def find_profile_files() -> list[Path]:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Validate domain profiles against profile schema")
+    ap = argparse.ArgumentParser(
+        description="Validate domain profiles against profile schema"
+    )
     ap.add_argument("--verbose", "-v", action="store_true", help="Show verbose output")
     args = ap.parse_args()
 

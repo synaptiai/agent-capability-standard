@@ -1,0 +1,12 @@
+# Standard version: 1.1.0
+# soft_requires is a recommendation: execute should be preceded by one of
+# constrain or plan (W601), but the workflow is valid without them.
+unplanned_execute:
+  goal: Run a command with no plan or constraint check.
+  risk: medium
+  steps:
+  - capability: execute
+    purpose: Run the command.
+    store_as: execute_out
+    input_bindings:
+      code: make test

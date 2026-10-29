@@ -1,0 +1,292 @@
+//! Counting a review quorum at run time (STANDARD v1.1 §5.16, design-114
+//! §16.4). The executor evaluates it itself; there is no host call.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde_json::{Map, Value, json};
+
+use super::Frame;
+use super::machine::resolve;
+use crate::expr::eval::{self, Bindings};
+use crate::validate::count;
+
+pub(crate) struct Verdict {
+    pub output: Value,
+    pub compliant: bool,
+    pub message: String,
+}
+
+struct Reviewer {
+    agent: Option<String>,
+    family: Option<String>,
+    fresh: bool,
+    read_only: bool,
+    /// The principal its host attested (`effective.identity`, identity@1).
+    principal: Option<String>,
+}
+
+/// The values a frame's references read (as in the step algorithm).
+struct Read<'a>(&'a Frame);
+
+impl Bindings for Read<'_> {
+    fn get(&self, root: &str) -> Option<&Value> {
+        if root == "_recovery" {
+            return self.0.recovery.as_ref();
+        }
+        self.0.stores.get(root).or_else(|| self.0.inputs.get(root))
+    }
+}
+
+fn strings(q: &Map<String, Value>, key: &str) -> Vec<String> {
+    q.get(key)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `identities`: the workflow declares identity@1, so a reviewer's attested
+/// identity is read.
+pub(crate) fn evaluate(q: &Map<String, Value>, frame: &Frame, identities: bool) -> Verdict {
+    let b = Read(frame);
+    // One reference, or a list of them (one per reviewer step that waited
+    // for its result): each a verdict or a list of verdicts. A verdict read
+    // from a reviewer step's own output is that reviewer's, whatever it
+    // claims: it remembers the step.
+    let reviewer_stores: BTreeSet<String> = strings(q, "reviewers").into_iter().collect();
+    let read = |r: &Value| -> Vec<(Value, Option<String>)> {
+        let source = r.as_str().and_then(|s| {
+            let refs = crate::refs::find_refs(s);
+            match refs.as_slice() {
+                [one] => one.parsed.as_ref().ok().map(|p| p.root.clone()),
+                _ => None,
+            }
+            .filter(|root| reviewer_stores.contains(root))
+        });
+        match resolve(r, &b) {
+            Value::Array(items) => items.into_iter().map(|i| (i, source.clone())).collect(),
+            Value::Null => Vec::new(),
+            one => vec![(one, source)],
+        }
+    };
+    let verdicts: Vec<(Value, Option<String>)> = match q.get("verdicts") {
+        Some(Value::Array(refs)) => refs.iter().flat_map(read).collect(),
+        Some(r) => read(r),
+        None => Vec::new(),
+    };
+    let pinned_to = q
+        .get("pinned_to")
+        .map(|v| resolve(v, &b))
+        .unwrap_or(Value::Null);
+    let vocabulary: BTreeSet<String> = strings(q, "vocabulary").into_iter().collect();
+    let pass: BTreeSet<String> = strings(q, "pass_values").into_iter().collect();
+    let block: BTreeSet<String> = strings(q, "blocking_values").into_iter().collect();
+    // Read as the validator reads them: an integral float is an integer.
+    let min_pass = q.get("min_pass").and_then(count).unwrap_or(1);
+    let min_full = q.get("min_full").and_then(count).unwrap_or(0);
+    let need_fresh = q.get("require_fresh_context") == Some(&Value::Bool(true));
+    let need_read_only = q.get("require_read_only") == Some(&Value::Bool(true));
+    let need_distinct =
+        identities && q.get("require_distinct_identities") == Some(&Value::Bool(true));
+    let families: BTreeSet<String> = strings(q, "require_model_families").into_iter().collect();
+
+    // Reviewer delegates: the agent each was bound to, and what the host
+    // attested it used.
+    let mut reviewers: BTreeMap<String, Reviewer> = BTreeMap::new();
+    for store in strings(q, "reviewers") {
+        // A reviewer counts only if its delegate step ran, judged by the
+        // inputs it ran with.
+        let (Some(out), Some(bound)) = (frame.stores.get(&store), frame.ran_inputs.get(&store))
+        else {
+            continue;
+        };
+        let out = Some(out);
+        let effective = out.and_then(|o| o.get("effective"));
+        let agent = bound
+            .get("agent")
+            .or_else(|| out.and_then(|o| o.get("agent")))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        // Only what the host attests counts, as for fresh_context and
+        // read_only: a requested family is the workflow's own claim.
+        let identity = effective
+            .and_then(|e| e.get("identity"))
+            .filter(|_| identities);
+        let family = effective
+            .and_then(|e| e.get("model_family"))
+            .or_else(|| identity.and_then(|i| i.get("model_family")))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let principal = identity
+            .and_then(|i| i.get("principal"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let attested = |key: &str| {
+            effective
+                .and_then(|e| e.get(key))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        };
+        reviewers.insert(
+            store,
+            Reviewer {
+                agent,
+                family,
+                fresh: attested("fresh_context"),
+                read_only: attested("read_only"),
+                principal,
+            },
+        );
+    }
+    let by_agent: BTreeMap<&str, &Reviewer> = reviewers
+        .values()
+        .filter_map(|r| r.agent.as_deref().map(|a| (a, r)))
+        .collect();
+
+    let mut counted: BTreeSet<String> = BTreeSet::new();
+    let mut principals: BTreeSet<String> = BTreeSet::new();
+    let (mut passes, mut blocks, mut abstains, mut full_passes) = (0u64, 0u64, 0u64, 0u64);
+    let mut covered: BTreeSet<String> = BTreeSet::new();
+    let mut violations: Vec<Value> = Vec::new();
+    for (v, source) in &verdicts {
+        let id = v.get("reviewer_id").and_then(Value::as_str);
+        let value = v.get("value").and_then(Value::as_str);
+        let reject = |why: &str| json!({"reviewer_id": id, "ignored": why});
+        let Some(reviewer) = id.and_then(|i| by_agent.get(i)) else {
+            violations.push(reject("not a reviewer"));
+            continue;
+        };
+        if let Some(store) = source {
+            let owner = reviewers.get(store).and_then(|r| r.agent.as_deref());
+            if owner != id {
+                violations.push(reject(&format!(
+                    "it is in the result of reviewer step '{store}', which is another reviewer's"
+                )));
+                continue;
+            }
+        }
+        let id = id.unwrap_or_default();
+        if !eval::deep_eq(v.get("pinned").unwrap_or(&Value::Null), &pinned_to) {
+            violations.push(reject("pinned to something else"));
+            continue;
+        }
+        let Some(value) = value.filter(|x| vocabulary.contains(*x)) else {
+            violations.push(reject("value outside the vocabulary"));
+            continue;
+        };
+        // A verdict without a scope reviewed only a delta. An unknown scope
+        // is a delta too: it still counts (a blocking verdict still vetoes),
+        // but never as a full sweep.
+        let full = match v.get("scope") {
+            None => false,
+            Some(Value::String(s)) if s == "full" => true,
+            Some(Value::String(s)) if s == "delta" => false,
+            Some(_) => {
+                violations.push(json!({"reviewer_id": id,
+                    "note": "scope is neither full nor delta; counted as delta"}));
+                false
+            }
+        };
+        if need_fresh && !reviewer.fresh {
+            violations.push(reject("the reviewer did not run with a fresh context"));
+            continue;
+        }
+        if need_read_only && !reviewer.read_only {
+            violations.push(reject("the reviewer was not attested read-only"));
+            continue;
+        }
+        if counted.contains(id) {
+            violations.push(reject("a second verdict from the same reviewer"));
+            continue;
+        }
+        // Distinct reviewer names may be one party: with
+        // require_distinct_identities, each counted reviewer needs an
+        // attested identity of its own.
+        if need_distinct {
+            // Only a verdict read from the reviewer's own result is bound to
+            // the party its host attested; the validator refuses others, and
+            // so does this, fail-closed.
+            if source.is_none() {
+                violations.push(reject("it is not read from its reviewer's own result"));
+                continue;
+            }
+            match &reviewer.principal {
+                None => {
+                    violations.push(reject("the reviewer has no attested identity"));
+                    continue;
+                }
+                Some(p) if principals.contains(p) => {
+                    violations.push(reject(
+                        "its attested identity is another counted reviewer's",
+                    ));
+                    continue;
+                }
+                Some(p) => {
+                    principals.insert(p.clone());
+                }
+            }
+        }
+        counted.insert(id.to_string());
+        if let Some(f) = &reviewer.family {
+            covered.insert(f.clone());
+        }
+        if block.contains(value) {
+            blocks += 1;
+        } else if pass.contains(value) {
+            passes += 1;
+            if full {
+                full_passes += 1;
+            }
+        } else {
+            abstains += 1;
+        }
+    }
+    let missing: Vec<&String> = families.difference(&covered).collect();
+    let mut reasons = Vec::new();
+    if blocks > 0 {
+        reasons.push(format!("{blocks} blocking verdict(s)"));
+    }
+    if passes < min_pass {
+        reasons.push(format!("{passes} pass(es), {min_pass} needed"));
+    }
+    if full_passes < min_full {
+        reasons.push(format!(
+            "{full_passes} full-sweep pass(es), {min_full} needed"
+        ));
+    }
+    if !missing.is_empty() {
+        let names: Vec<&str> = missing.iter().map(|s| s.as_str()).collect();
+        reasons.push(format!(
+            "no counted verdict from model family {}",
+            names.join(", ")
+        ));
+    }
+    for r in &reasons {
+        violations.push(json!({"quorum": r}));
+    }
+    let compliant = reasons.is_empty();
+    Verdict {
+        output: json!({
+            "compliant": compliant,
+            "violations": violations,
+            "tally": {
+                "passes": passes,
+                "blocks": blocks,
+                "abstains": abstains,
+                "full_passes": full_passes,
+                "voters": counted.iter().collect::<Vec<_>>(),
+            },
+            "evidence_anchors": [],
+        }),
+        compliant,
+        message: if compliant {
+            String::new()
+        } else {
+            format!("the review quorum is not met: {}", reasons.join("; "))
+        },
+    }
+}

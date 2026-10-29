@@ -5,8 +5,8 @@
 ---
 meta:
   name: Grounded Agency Capability Ontology
-  version: 2.0.0
-  generated_at: '2026-01-26T00:00:00.000Z'
+  version: 2.1.0
+  generated_at: '2026-10-28T00:00:00.000Z'
   description: 36 atomic capabilities derived from first principles
   principles:
   - Capabilities are atomic and composable into workflows
@@ -111,6 +111,15 @@ nodes:
       format:
         type: string
         description: Expected format of retrieved data
+      filter:
+        type: object
+        description: Criteria the retrieved data must meet (e.g. a time range)
+      references:
+        type: array
+        items:
+          type: object
+        description: Further references to retrieve along with the target (e.g.
+          search results)
   output_schema:
     type: object
     required:
@@ -217,6 +226,32 @@ nodes:
       timeout:
         type: string
         description: Wait timeout
+      accept_from:
+        type: array
+        items:
+          type: string
+        description: Principals to accept items from; items from others are dropped
+          and counted (delegation@1, STANDARD v1.1 §5.15)
+      sender_check:
+        type: array
+        items:
+          type: string
+        description: How a sender must have been authenticated (agent_identity
+          authenticated_by values); items whose sender identity says otherwise, or
+          that carry none, are dropped and counted (identity@1, STANDARD v1.1 §5.17)
+      accept_trust_classes:
+        type: array
+        items:
+          type: string
+        description: Trust classes to accept items from; others, and items with no
+          trust class, are dropped and counted (identity@1, STANDARD v1.1 §5.17)
+      always_ask_trust_classes:
+        type: array
+        items:
+          type: string
+        description: Trust classes whose items (and items with no trust class) make
+          any step that requires approval and uses them be asked of a person,
+          whatever mandate would cover it (identity@1, STANDARD v1.1 §5.17)
   output_schema:
     type: object
     required:
@@ -227,6 +262,14 @@ nodes:
         type: array
         items:
           type: object
+          properties:
+            sender:
+              type: string
+              description: The host-authenticated principal that sent the item
+            sender_identity:
+              type: object
+              description: The sender's identity as the host reported it
+                (agent_identity_schema.yaml; identity@1, STANDARD v1.1 §5.17)
         description: Received data/events
       source:
         type: string
@@ -507,6 +550,10 @@ nodes:
       resources:
         type: array
         description: Available resources
+      context:
+        type: any
+        description: Background the plan must take into account (e.g. forecasts,
+          current state)
   output_schema:
     type: object
     required:
@@ -589,6 +636,9 @@ nodes:
       severity_threshold:
         type: string
         description: Minimum severity to report
+      context:
+        type: any
+        description: Background the critique must take into account
   output_schema:
     type: object
     required:
@@ -633,6 +683,9 @@ nodes:
         - brief
         - detailed
         - comprehensive
+      constraints:
+        type: object
+        description: Requirements the explanation must meet (e.g. include a disclaimer)
   output_schema:
     type: object
     required:
@@ -674,6 +727,9 @@ nodes:
       timestamp:
         type: string
         format: date-time
+      observations:
+        type: object|array
+        description: The observation, or list of observations, to build the state from
   output_schema:
     type: object
     required:
@@ -932,8 +988,8 @@ nodes:
     - confidence
     properties:
       output:
-        type: object
-        description: Transformed data
+        type: object|array
+        description: Transformed data, a mapping or a list (such as CSV rows as records)
       changes:
         type: array
         description: Applied transformations
@@ -1257,15 +1313,36 @@ nodes:
       actions_taken:
         type: array
         description: Enforcement actions
+      tally:
+        type: object
+        description: Review quorum count, when the step has a quorum (quorum@1, STANDARD
+          v1.1 §5.16)
+        properties:
+          passes:
+            type: integer
+          blocks:
+            type: integer
+          abstains:
+            type: integer
+          full_passes:
+            type: integer
+            description: Passing verdicts with scope full (min_full)
+          voters:
+            type: array
+            items:
+              type: string
       evidence_anchors:
         type: array
 - id: audit
   layer: VERIFY
   description: Record what happened and why
   risk: low
-  # mutation: true because audit writes to persistent storage, but workflows
-  # may override to false because append-only writes are non-destructive
+  # Audit writes to persistent storage, so it is a mutation; but its writes are
+  # append-only and non-destructive, so a step may declare mutation: false
+  # (STANDARD v1.1 §5.2). Only low-risk capabilities without checkpoint or
+  # approval requirements may be overridable (tools/validate_ontology.py).
   mutation: true
+  mutation_overridable: true
   input_schema:
     type: object
     required:
@@ -1383,6 +1460,46 @@ nodes:
       constraints:
         type: object
         description: Delegation constraints
+      fresh_context:
+        type: boolean
+        description: Start the delegate without this agent's context (delegation@1,
+          STANDARD v1.1 §5.15)
+      model_family:
+        type: string
+        description: Model family the delegate should run on (delegation@1)
+      role:
+        type: string
+        description: Role the delegate takes, e.g. reviewer (delegation@1)
+      read_only:
+        type: boolean
+        description: The delegate may read but must not change anything (files,
+          repositories, external state); the host attests it in effective (delegation@1,
+          STANDARD v1.1 §5.15)
+      accept_from:
+        type: array
+        items:
+          type: string
+        description: For a delegate that waits, principals to accept its result from;
+          others are dropped and counted (delegation@1, STANDARD v1.1 §5.13, §5.15)
+      sender_check:
+        type: array
+        items:
+          type: string
+        description: For a delegate that waits, how the result's sender must have been
+          authenticated (identity@1, STANDARD v1.1 §5.17)
+      accept_trust_classes:
+        type: array
+        items:
+          type: string
+        description: For a delegate that waits, trust classes to accept its result
+          from (identity@1, STANDARD v1.1 §5.17)
+      always_ask_trust_classes:
+        type: array
+        items:
+          type: string
+        description: For a delegate that waits, trust classes whose result (and a
+          result with no trust class) makes any step that requires approval and uses
+          it be asked of a person (identity@1, STANDARD v1.1 §5.17)
   output_schema:
     type: object
     required:
@@ -1397,6 +1514,26 @@ nodes:
       agent:
         type: string
         description: Assigned agent
+      effective:
+        type: object
+        description: The delegation settings actually used, as attested by the host
+        properties:
+          fresh_context:
+            type: boolean
+          model_family:
+            type: string
+          role:
+            type: string
+          read_only:
+            type: boolean
+          identity:
+            type: object
+            description: The agent_identity of the party that took the delegation
+              (identity@1); a waiting delegate keeps only its results
+      result:
+        type: object
+        description: The delegate's result, when the step waits for it (wait@1, STANDARD
+          v1.1 §5.13), with its sender (and, with identity@1, its sender_identity)
       evidence_anchors:
         type: array
 - id: synchronize
@@ -1419,6 +1556,32 @@ nodes:
       timeout:
         type: string
         description: Sync timeout
+      accept_from:
+        type: array
+        items:
+          type: string
+        description: Principals to accept state from (delegation@1, STANDARD v1.1
+          §5.15)
+      sender_check:
+        type: array
+        items:
+          type: string
+        description: How a sender must have been authenticated (agent_identity
+          authenticated_by values); a state update whose sender identity says otherwise,
+          or that carries none, is dropped and counted (identity@1, STANDARD v1.1 §5.17)
+      accept_trust_classes:
+        type: array
+        items:
+          type: string
+        description: Trust classes to accept state from; updates from others, or with
+          no trust class, are dropped and counted (identity@1, STANDARD v1.1 §5.17)
+      always_ask_trust_classes:
+        type: array
+        items:
+          type: string
+        description: Trust classes whose state (and state with no trust class) makes
+          any step that requires approval and uses it be asked of a person,
+          whatever mandate would cover it (identity@1, STANDARD v1.1 §5.17)
   output_schema:
     type: object
     required:
@@ -1433,6 +1596,14 @@ nodes:
       participants:
         type: array
         description: Participating agents
+      sender:
+        type: string
+        description: The host-authenticated principal that delivered the agreed
+          state, when the step waited for it (wait@1)
+      sender_identity:
+        type: object
+        description: The sender's identity as the host reported it
+          (agent_identity_schema.yaml; identity@1, STANDARD v1.1 §5.17)
       evidence_anchors:
         type: array
 - id: invoke
@@ -1536,20 +1707,20 @@ edge_types:
     semantics: Validator MUST reject workflows that violate this ordering
     transitive: false
   soft_requires:
-    description: 'Soft dependency: the ''from'' capability SHOULD be satisfied when available'
-    semantics: Validator SHOULD warn if not satisfied, but workflow is still valid
+    description: 'Soft dependency: one of the ''to'' capability''s incoming soft_requires sources SHOULD run before it (any-of per target)'
+    semantics: Validator MUST warn (W601) if none runs before it; the workflow is still valid
     transitive: false
   enables:
     description: The 'from' capability unlocks or makes possible the 'to' capability
     semantics: Represents capability flow and composition patterns
     transitive: false
   precedes:
-    description: 'Temporal ordering: ''from'' must complete before ''to'' begins in any workflow'
-    semantics: Enforces execution order even when no data dependency exists
+    description: 'Temporal ordering: when a workflow contains both, a ''from'' step must run before every ''to'' step'
+    semantics: Orders capabilities without requiring either to be present (V102); a step in the same parallel_group does not run before another
     transitive: true
   conflicts_with:
-    description: 'Mutual exclusivity: ''from'' and ''to'' cannot both execute in the same workflow'
-    semantics: Validator MUST reject workflows containing both capabilities
+    description: 'No concurrency: ''from'' and ''to'' must not run in the same parallel_group'
+    semantics: Validator MUST reject the pair within one parallel_group (F504); in sequence they are allowed
     transitive: false
     symmetric: true
   alternative_to:
@@ -1631,43 +1802,66 @@ edges:
 - from: observe
   to: ground
   type: soft_requires
+  rationale: Grounding needs a claim to ground; any one of observe, detect, predict, attribute, explain, retrieve or search satisfies it
 - from: detect
   to: ground
   type: soft_requires
+  rationale: Detections are claims to ground
 - from: plan
   to: critique
-  type: soft_requires
-- from: execute
-  to: audit
-  type: soft_requires
+  type: enables
+  rationale: Plans should be critiqued before they are acted on
 - from: mutate
   to: persist
-  type: soft_requires
+  type: enables
+  rationale: Mutated state can be persisted
 - from: predict
   to: ground
   type: soft_requires
+  rationale: Predictions are claims to ground
 - from: attribute
   to: ground
   type: soft_requires
   rationale: Causal claims should be grounded in evidence
 - from: constrain
   to: audit
-  type: soft_requires
+  type: enables
   rationale: Constraint violations should be audited
 - from: explain
   to: ground
   type: soft_requires
   rationale: Explanations should be grounded in evidence
+- from: retrieve
+  to: ground
+  type: soft_requires
+  rationale: Retrieved sources are evidence a claim can be grounded in
+- from: search
+  to: ground
+  type: soft_requires
+  rationale: Search results are evidence a claim can be grounded in
 - from: generate
   to: verify
-  type: soft_requires
+  type: enables
   rationale: Generated artifacts should be verified
 - from: critique
   to: inquire
   type: enables
 - from: inquire
   to: receive
+  type: enables
+  rationale: An inquiry's answer arrives through receive
+- from: constrain
+  to: execute
   type: soft_requires
+  rationale: Policy should be checked before execution (presence; precedes covers order)
+- from: constrain
+  to: mutate
+  type: soft_requires
+  rationale: Policy should be checked before mutation (presence; precedes covers order)
+- from: constrain
+  to: send
+  type: soft_requires
+  rationale: Policy should be checked before external communication (presence; precedes covers order)
 - from: detect
   to: attribute
   type: enables

@@ -1,7 +1,7 @@
 ---
 name: constrain
 description: Enforce policies, guardrails, and permission boundaries; refuse unsafe actions and apply least privilege. Use when evaluating actions against policies, checking permissions, or reducing scope to safe boundaries.
-argument-hint: "[action] [policy_id] [scope] [enforcement_level]"
+argument-hint: "[target] [constraints] [action_on_violation]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -26,11 +26,17 @@ Execute **constrain** to evaluate proposed actions against defined policies, enf
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `action` | Yes | object | The proposed action to evaluate (capability, target, parameters) |
-| `policy_id` | No | string | Specific policy to evaluate against (default: all applicable) |
-| `scope` | No | object | Current permission scope to constrain |
-| `enforcement_level` | No | enum | strict (block), advisory (warn), audit (log only) |
-| `context` | No | object | Additional context for policy evaluation (user, session, etc.) |
+| `target` | Yes | any | What to constrain |
+| `constraints` | Yes | array | Constraints to enforce |
+| `action_on_violation` | No | string | What to do on a violation: `block`, `warn`, or `log` |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
+
+In a workflow, a constrain step that blocks can count independent reviews
+with a `quorum` (Standard v1.1 `quorum@1`): earlier `delegate` steps are
+the reviewers, and the output gains a `tally` of passes, blocks,
+abstentions, full-sweep passes and voters. See
+[ORCHESTRATION_EXTENSIONS.md](../../docs/guides/ORCHESTRATION_EXTENSIONS.md).
 
 ## Procedure
 
@@ -47,7 +53,7 @@ Execute **constrain** to evaluate proposed actions against defined policies, enf
 
 3) **Apply policy rules**: Evaluate each policy condition
    - Parse policy conditions (AND/OR/NOT expressions)
-   - Check each condition against action parameters
+   - Check each condition against the target action's parameters
    - Record which conditions pass and which fail
    - Determine overall policy verdict (allow/deny/conditional)
 
@@ -85,7 +91,18 @@ scope_reduction:
   original_scope: object  # Permissions before constraining
   constrained_scope: object  # Permissions after constraining
   removed_permissions: array[string]  # What was removed
-safe_to_proceed: boolean  # Overall go/no-go
+compliant: boolean  # Overall go/no-go: false when any violation is enforced with `block`
+violations:  # Constraint violations (any enforcement level)
+  - constraint: string  # Which constraint was violated
+    detail: string  # What failed
+    action: block | warn | log  # Enforcement applied
+actions_taken: array[string]  # Enforcement actions performed (block, warn, log, scope reduction)
+tally:  # Only when the step has a quorum (quorum@1)
+  passes: integer
+  blocks: integer
+  abstains: integer
+  full_passes: integer
+  voters: array[string]
 blocked_reason: string | null  # Why blocked (if applicable)
 confidence: number  # 0.0-1.0
 evidence_anchors: ["policy:...", "file:..."]
@@ -99,7 +116,10 @@ assumptions: []
 | `constraints_applied` | array | List of constraints evaluated and their enforcement |
 | `policy_evaluation` | object | Result of primary policy evaluation |
 | `scope_reduction` | object | How permissions were reduced |
-| `safe_to_proceed` | boolean | Overall decision: can action proceed? |
+| `compliant` | boolean | Overall decision: true when no violation is enforced with `block`, so the action can proceed (workflows gate on `${<step>.compliant}`) |
+| `violations` | array | Constraint violations, each with the enforcement applied; `warn`/`log` violations leave `compliant` true |
+| `actions_taken` | array | Enforcement actions performed |
+| `tally` | object | Review quorum count (passes, blocks, abstains, full_passes, voters); present only when the step has a `quorum` |
 | `blocked_reason` | string | Explanation if action is blocked |
 | `confidence` | number | 0.0-1.0 based on policy coverage |
 | `evidence_anchors` | array | References to policies evaluated |
@@ -111,12 +131,13 @@ assumptions: []
 
 **Input:**
 ```yaml
-action:
-  capability: "edit"
+target:
+  capability: "mutate"
   target: "/etc/passwd"
   parameters:
     content: "..."
-enforcement_level: strict
+constraints: ["workspace_boundary", "sensitive_file_protection"]
+action_on_violation: block
 ```
 
 **Output:**
@@ -146,7 +167,17 @@ scope_reduction:
     paths: ["/workspace/**"]
   removed_permissions:
     - "write to system paths"
-safe_to_proceed: false
+compliant: false
+violations:
+  - constraint: "workspace_boundary"
+    detail: "path must be within workspace"
+    action: block
+  - constraint: "sensitive_file_protection"
+    detail: "system files are read-only"
+    action: block
+actions_taken:
+  - "block: mutate /etc/passwd"
+  - "scope reduced to /workspace/**"
 blocked_reason: "Action targets system file outside workspace boundary. Editing /etc/passwd is prohibited."
 confidence: 1.0
 evidence_anchors:
@@ -163,17 +194,17 @@ assumptions: []
 
 **Input:**
 ```yaml
-action:
+target:
   capability: "send"
   target: "https://api.external.com/data"
   parameters:
     method: "POST"
     payload: {...}
-context:
-  session_id: "abc123"
-  requests_this_hour: 95
-enforcement_level: advisory
+constraints: ["external_api_rate_limit", "checkpoint_before_send"]
+action_on_violation: warn
 ```
+
+Session `abc123` has already made 95 requests this hour.
 
 **Output:**
 ```yaml
@@ -205,7 +236,14 @@ scope_reduction:
     burst_allowed: false
   removed_permissions:
     - "burst requests"
-safe_to_proceed: true
+compliant: true
+violations:
+  - constraint: "external_api_rate_limit"
+    detail: "approaching rate limit (95/100 this hour)"
+    action: warn
+actions_taken:
+  - "warn: 95/100 requests used this hour"
+  - "scope reduced: rate limit 5, no burst"
 blocked_reason: null
 confidence: 0.9
 evidence_anchors:
@@ -218,16 +256,17 @@ assumptions:
 
 ---
 
-### Example 3: Constrain Before Act-Plan
+### Example 3: Constrain Before Execute
 
 **Input:**
 ```yaml
-action:
-  capability: "act-plan"
+target:
+  capability: "execute"
   target: "refactor_handlers_plan"
   parameters:
     plan_id: "plan_20240115_refactor"
-enforcement_level: strict
+constraints: ["checkpoint_required"]
+action_on_violation: block
 ```
 
 **Output:**
@@ -235,7 +274,7 @@ enforcement_level: strict
 constraints_applied:
   - name: "checkpoint_required"
     type: policy
-    target: "act-plan"
+    target: "execute"
     enforced: true
     violation_action: block
 policy_evaluation:
@@ -253,8 +292,14 @@ scope_reduction:
     mutation_allowed: false
   removed_permissions:
     - "file mutation (pending checkpoint)"
-safe_to_proceed: false
-blocked_reason: "act-plan requires checkpoint. Call 'checkpoint' first with scope matching the plan."
+compliant: false
+violations:
+  - constraint: "checkpoint_required"
+    detail: "checkpoint not found for scope"
+    action: block
+actions_taken:
+  - "block: execute refactor_handlers_plan until checkpoint exists"
+blocked_reason: "This execute step mutates files (requires_checkpoint: true). Call 'checkpoint' first with scope matching the plan."
 confidence: 1.0
 evidence_anchors:
   - "policy:mutation_safety:checkpoint_gate"
@@ -296,7 +341,7 @@ Apply the following verification patterns:
 **Commonly precedes:**
 - `checkpoint` - After constrain approves, create checkpoint
 - `send` - REQUIRED: constrain before any external communication
-- `act-plan` - Constrain as part of pre-execution checks
+- `execute` / `mutate` - Constrain as part of pre-execution checks (constrain must precede them)
 
 **Anti-patterns:**
 - CRITICAL: Never skip constrain before send (no unchecked external comms)
@@ -307,4 +352,4 @@ Apply the following verification patterns:
 **Workflow references:**
 - See `reference/composition_patterns.md#digital-twin-sync-loop` for constrain-before-act
 - See `reference/composition_patterns.md#risk-assessment` for constrain placement
-- See `reference/verification_patterns.md#safety-boundary` for boundary checks
+- See `reference/verification_patterns.md#pattern-6-safety-boundary-check` for boundary checks

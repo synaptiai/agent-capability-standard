@@ -1,0 +1,43 @@
+{
+  "description": "skip_if_false: false turns a false condition into R403.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "condition": "${flag} == true",
+          "skip_if_false": false,
+          "input_bindings": {
+            "target": "x"
+          }
+        }
+      ],
+      "inputs": {
+        "flag": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "flag": false
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [],
+  "end": {
+    "kind": "Failed",
+    "code": "R403",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed"
+  ]
+}

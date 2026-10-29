@@ -85,8 +85,161 @@ class TestValidateWorkflows:
         )
         assert result.returncode != 0
 
+    def test_warnings_pass_unless_strict(self, tmp_path: Path) -> None:
+        """A warning (W612) passes by default and fails under --strict."""
+        catalog = tmp_path / "warn.workflow_catalog.yaml"
+        catalog.write_text(
+            "w:\n"
+            "  goal: g\n"
+            "  risk: low\n"
+            "  steps:\n"
+            "  - capability: search\n"
+            "    purpose: p\n"
+            "    store_as: s\n"
+            "    input_bindings: {query: q}\n"
+            "  - capability: integrate\n"
+            "    purpose: p\n"
+            "    store_as: i\n"
+            "    input_bindings:\n"
+            "      sources:\n"
+            "      - ${s.results: array<object>}\n"
+        )
+        lenient = run_validator("validate_workflows.py", ["--catalog", str(catalog)])
+        assert lenient.returncode == 0, lenient.stdout
+        assert "W612" in lenient.stdout
+        strict = run_validator(
+            "validate_workflows.py", ["--catalog", str(catalog), "--strict"]
+        )
+        assert strict.returncode == 1
+
+    def test_suggestions_json_shape(self, tmp_path: Path) -> None:
+        """Structured output plus a transform patch for a consumer mismatch."""
+        catalog = tmp_path / "coerce.workflow_catalog.yaml"
+        catalog.write_text(
+            "w:\n"
+            "  goal: g\n"
+            "  risk: low\n"
+            "  steps:\n"
+            "  - capability: search\n"
+            "    purpose: p\n"
+            "    store_as: s\n"
+            "    input_bindings: {query: q}\n"
+            "  - capability: search\n"
+            "    purpose: p\n"
+            "    store_as: t\n"
+            "    input_bindings: {query: q, scope: '${s.total_count}'}\n"
+        )
+        result = run_validator(
+            "validate_workflows.py", ["--catalog", str(catalog), "--emit-patch"]
+        )
+        assert result.returncode == 1
+        data = json.loads((ROOT / "tools" / "validator_suggestions.json").read_text())
+        assert set(data) >= {
+            "errors",
+            "warnings",
+            "structured_errors",
+            "structured_warnings",
+            "suggestions",
+        }
+        assert all(e["severity"] == "error" for e in data["structured_errors"])
+        (suggestion,) = data["suggestions"]
+        assert suggestion["kind"] == "consumer_input_type_mismatch"
+        assert (suggestion["from_type"], suggestion["to_type"]) == ("integer", "string")
+        diff = (ROOT / "tools" / "validator_patch.diff").read_text()
+        assert "capability: transform" in diff
+
+
+def test_patch_application_handles_two_transforms_for_one_step() -> None:
+    """Both transforms go before the consumer, and both updates land on it."""
+    import importlib.util
+
+    sys.path.insert(0, str(ROOT / "tools"))  # for its `yaml_util` import
+    spec = importlib.util.spec_from_file_location(
+        "validate_workflows", ROOT / "tools" / "validate_workflows.py"
+    )
+    assert spec is not None and spec.loader is not None
+    validate_workflows = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validate_workflows)
+
+    workflows = {
+        "w": {
+            "steps": [
+                {"capability": "search", "store_as": "s"},
+                {"capability": "search", "store_as": "t", "input_bindings": {}},
+            ]
+        }
+    }
+
+    def patch(key: str) -> dict:
+        return {
+            "kind": "consumer_input_type_mismatch",
+            "workflow": "w",
+            "patch": {
+                "insert_at_step_index": 1,
+                "new_step": {"capability": "transform", "store_as": f"coerce_{key}"},
+                "update_step": {
+                    "step_index": 1,
+                    "input_bindings_update": {key: f"${{coerce_{key}.transformed}}"},
+                },
+            },
+        }
+
+    import yaml
+
+    out = yaml.safe_load(
+        validate_workflows.apply_patch_suggestions_to_yaml(
+            workflows, [patch("scope"), patch("query")]
+        )
+    )
+    steps = out["w"]["steps"]
+    assert [s["capability"] for s in steps] == [
+        "search",
+        "transform",
+        "transform",
+        "search",
+    ]
+    assert steps[3]["input_bindings"] == {
+        "scope": "${coerce_scope.transformed}",
+        "query": "${coerce_query.transformed}",
+    }
+
 
 # ─── Profile Validator ───
+
+
+def test_example_catalog_matches_the_reference_catalog() -> None:
+    """examples/digital_twin_sync_loop copies its workflows verbatim from the
+    reference catalog; an edit to one must be made to both."""
+    import yaml
+
+    example = yaml.safe_load(
+        (ROOT / "examples" / "digital_twin_sync_loop.workflow_catalog.yaml").read_text()
+    )
+    reference = yaml.safe_load((ROOT / "schemas" / "workflow_catalog.yaml").read_text())
+    assert set(example) == {
+        "world_model_build",
+        "digital_twin_sync_loop",
+        "digital_twin_bootstrap",
+    }
+    for name, workflow in example.items():
+        assert workflow == reference[name], name
+
+
+def test_w615_only_where_expected() -> None:
+    """The fixtures bind every required input, so W615 appears only in those
+    that expect it. The core's unit tests filter W615 out of their code
+    lists; this catches a W615 raised where it should not be."""
+    from grounded_agency import _core
+
+    validator = _core.Validator(ROOT / "schemas" / "capability_ontology.yaml", ROOT)
+    expectations = json.loads(
+        (ROOT / "tests" / "fixtures" / "EXPECTATIONS.json").read_text()
+    )
+    for name, meta in expectations.items():
+        path = ROOT / "tests" / "fixtures" / f"{name}.workflow_catalog.yaml"
+        emitted = {d["code"] for d in validator.validate_file(path)["diagnostics"]}
+        expected = "W615" in meta.get("expected_warning_codes", [])
+        assert ("W615" in emitted) == expected, name
 
 
 class TestValidateProfiles:
@@ -100,6 +253,35 @@ class TestValidateProfiles:
         result = run_validator("validate_profiles.py", ["--verbose"])
         assert result.returncode == 0
         assert "Validating:" in result.stdout
+
+    def test_boolean_weights_are_refused(self) -> None:
+        """YAML ``true`` is an int in Python, but not a weight."""
+        import importlib.util
+
+        sys.path.insert(0, str(ROOT / "tools"))  # for its `yaml_util` import
+        spec = importlib.util.spec_from_file_location(
+            "validate_profiles", ROOT / "tools" / "validate_profiles.py"
+        )
+        assert spec is not None and spec.loader is not None
+        vp = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vp)
+
+        errors: list[str] = []
+        vp.validate_trust_weights({"trust_weights": {"a": True, "b": 0.5}}, errors, "p")
+        vp.validate_evidence_policy(
+            {"evidence_policy": {"minimum_confidence": False}}, errors, "p"
+        )
+        vp.validate_domain_sources(
+            {"domain_sources": [{"name": "s", "default_trust": True}]}, errors, "p"
+        )
+        assert any("trust_weights.a" in e for e in errors), errors
+        assert any("minimum_confidence" in e for e in errors), errors
+        assert any("default_trust" in e for e in errors), errors
+        assert not any("trust_weights.b" in e for e in errors), errors
+
+        nan: list[str] = []
+        vp.validate_trust_weights({"trust_weights": {"a": float("nan")}}, nan, "p")
+        assert any("trust_weights.a" in e for e in nan), nan
 
     def test_no_trust_calibration_warnings(self) -> None:
         """SEC-009: All profiles have trust_model_reviewed: true — no warnings."""
@@ -159,83 +341,56 @@ class TestConformanceHelpers:
 
     def test_read_emitted_codes_missing_file(self, tmp_path: Path) -> None:
         """Returns empty set when suggestions JSON does not exist."""
-        # Import the helper by manipulating its module-level constant
         import scripts.run_conformance as rc
 
-        original = rc.SUGGESTIONS_JSON
-        try:
-            rc.SUGGESTIONS_JSON = tmp_path / "nonexistent.json"
-            assert rc._read_emitted_codes() == set()
-        finally:
-            rc.SUGGESTIONS_JSON = original
+        missing = tmp_path / "nonexistent.json"
+        assert rc._read_emitted_codes(missing, "structured_errors") == set()
 
     def test_read_emitted_codes_valid_json(self, tmp_path: Path) -> None:
-        """Returns correct codes from well-formed suggestions JSON."""
+        """Returns the codes under the requested key."""
         import scripts.run_conformance as rc
 
-        original = rc.SUGGESTIONS_JSON
-        try:
-            f = tmp_path / "suggestions.json"
-            f.write_text(
-                json.dumps(
-                    {
-                        "structured_errors": [
-                            {
-                                "code": "V101",
-                                "name": "UNKNOWN_CAPABILITY",
-                                "message": "test",
-                            },
-                            {
-                                "code": "V104",
-                                "name": "DUPLICATE_STORE_AS",
-                                "message": "test",
-                            },
-                        ]
-                    }
-                )
+        f = tmp_path / "suggestions.json"
+        f.write_text(
+            json.dumps(
+                {
+                    "structured_errors": [
+                        {"code": "V101", "name": "UNKNOWN_CAPABILITY", "message": "t"},
+                        {"code": "V104", "name": "DUPLICATE_STORE_AS", "message": "t"},
+                    ],
+                    "structured_warnings": [
+                        {"code": "W601", "name": "SOFT_REQUIRES", "message": "t"}
+                    ],
+                }
             )
-            rc.SUGGESTIONS_JSON = f
-            assert rc._read_emitted_codes() == {"V101", "V104"}
-        finally:
-            rc.SUGGESTIONS_JSON = original
+        )
+        assert rc._read_emitted_codes(f, "structured_errors") == {"V101", "V104"}
+        assert rc._read_emitted_codes(f, "structured_warnings") == {"W601"}
 
     def test_read_emitted_codes_malformed_json(self, tmp_path: Path) -> None:
         """Returns empty set on malformed JSON."""
         import scripts.run_conformance as rc
 
-        original = rc.SUGGESTIONS_JSON
-        try:
-            f = tmp_path / "bad.json"
-            f.write_text("{not valid json")
-            rc.SUGGESTIONS_JSON = f
-            assert rc._read_emitted_codes() == set()
-        finally:
-            rc.SUGGESTIONS_JSON = original
+        f = tmp_path / "bad.json"
+        f.write_text("{not valid json")
+        assert rc._read_emitted_codes(f, "structured_errors") == set()
 
-    def test_clear_suggestions_removes_file(self, tmp_path: Path) -> None:
-        """_clear_suggestions deletes the file if it exists."""
-        import scripts.run_conformance as rc
-
-        original = rc.SUGGESTIONS_JSON
-        try:
-            f = tmp_path / "suggestions.json"
-            f.write_text("{}")
-            rc.SUGGESTIONS_JSON = f
-            rc._clear_suggestions()
-            assert not f.exists()
-        finally:
-            rc.SUGGESTIONS_JSON = original
-
-    def test_clear_suggestions_noop_when_missing(self, tmp_path: Path) -> None:
-        """_clear_suggestions is a no-op when file doesn't exist."""
-        import scripts.run_conformance as rc
-
-        original = rc.SUGGESTIONS_JSON
-        try:
-            rc.SUGGESTIONS_JSON = tmp_path / "nonexistent.json"
-            rc._clear_suggestions()  # should not raise
-        finally:
-            rc.SUGGESTIONS_JSON = original
+    def test_suggestions_out_writes_where_asked(self, tmp_path: Path) -> None:
+        """--suggestions-out writes the report to the given path."""
+        out = tmp_path / "out.json"
+        fixture = (
+            ROOT
+            / "tests"
+            / "fixtures"
+            / "fail_unknown_capability.workflow_catalog.yaml"
+        )
+        result = run_validator(
+            "validate_workflows.py",
+            ["--catalog", str(fixture), "--suggestions-out", str(out)],
+        )
+        assert result.returncode == 1
+        data = json.loads(out.read_text())
+        assert {d["code"] for d in data["structured_errors"]} == {"V101"}
 
 
 # ─── Transform Refs Validator ───
@@ -339,6 +494,143 @@ class TestJsonSchemaValidation:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(bad, ontology_schema)
 
+    def test_passing_fixtures_validate_against_schema(self, workflow_schema) -> None:
+        """Every catalog the validator accepts is valid under the JSON Schema,
+        so the schema never requires what STANDARD §5 leaves optional."""
+        import jsonschema
+        import yaml
+
+        expectations = json.loads(
+            (ROOT / "tests" / "fixtures" / "EXPECTATIONS.json").read_text()
+        )
+        passing = [n for n, meta in expectations.items() if meta["should_pass"]]
+        assert passing
+        for name in passing:
+            path = ROOT / "tests" / "fixtures" / f"{name}.workflow_catalog.yaml"
+            jsonschema.validate(yaml.safe_load(path.read_text()), workflow_schema)
+
+    def test_workflow_schema_allows_inherited_flags(self, workflow_schema) -> None:
+        """Safety flags, risk and failure_modes may be omitted: they inherit
+        from the ontology (STANDARD v1.1 §5.2)."""
+        import jsonschema
+
+        minimal = {
+            "w": {
+                "goal": "g",
+                "risk": "low",
+                "steps": [{"capability": "retrieve", "purpose": "p", "store_as": "r"}],
+            }
+        }
+        jsonschema.validate(minimal, workflow_schema)
+
+    @pytest.mark.parametrize(
+        "step_patch",
+        [
+            {"purpose": None},
+            {"gates": [{"when": "true", "action": "skip", "phase": "after"}]},
+            {"gates": [{"when": "true", "action": "halt"}]},
+            {"gates": [{"when": "true", "action": "stop", "phase": "during"}]},
+            {"failure_modes": [{"condition": "c", "action": "stop", "when": 1}]},
+            {"handler": True},
+            {"failure_modes": [{"condition": "c", "action": "escalate"}]},
+            {
+                "failure_modes": [
+                    {
+                        "condition": "c",
+                        "action": "escalate",
+                        "recovery": {"goto_step": "h", "max_loops": 2},
+                    }
+                ]
+            },
+            {"store_as": "_recovery"},
+            {"wait": {"source_kind": "api"}},
+            {"wait": {"event_type": "e"}},
+            {
+                "quorum": {
+                    "verdicts": "${v}",
+                    "reviewers": ["r"],
+                    "vocabulary": ["ok"],
+                    "pass_values": ["ok"],
+                    "min_pass": 1,
+                    "pinned_to": "${p}",
+                }
+            },
+            {
+                "wait": {
+                    "event_type": "e",
+                    "liveness": {"mode": "push", "interval": "0s"},
+                }
+            },
+            {"approval": {"approver": {"kind": "standing_mandate"}}},
+            {"approval": {"approver": {"kind": "human", "mandate_ref": "m"}}},
+            {"approval": {"approver": {"kind": "human"}, "expires": "PT0S"}},
+        ],
+        ids=[
+            "missing-purpose",
+            "after-gate-skip",
+            "bad-gate-action",
+            "bad-gate-phase",
+            "non-string-failure-when",
+            "handler-not-invoke",
+            "escalate-without-target",
+            "escalate-with-loop-fields",
+            "reserved-store-as",
+            "wait-without-event-type",
+            "wait-without-timeout",
+            "quorum-one-word-vocabulary",
+            "zero-liveness-interval",
+            "mandate-without-ref",
+            "human-with-mandate-ref",
+            "zero-expiry",
+        ],
+    )
+    def test_workflow_schema_rejects_bad_steps(
+        self, workflow_schema, step_patch: dict
+    ) -> None:
+        import jsonschema
+
+        step: dict = {"capability": "retrieve", "purpose": "p", "store_as": "r"}
+        for key, value in step_patch.items():
+            if value is None:
+                del step[key]
+            else:
+                step[key] = value
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {"w": {"goal": "g", "risk": "low", "steps": [step]}}, workflow_schema
+            )
+
+    def test_review_verdict_schema_matches_the_executor(self) -> None:
+        """Quorum verdicts (STANDARD v1.1 §5.16): the fields the executor
+        counts are the schema's required ones."""
+        import yaml
+
+        schema = yaml.safe_load(
+            (ROOT / "schemas" / "review_verdict_schema.yaml").read_text()
+        )
+        verdict = schema["review_verdict"]
+        assert verdict["type"] == "object"
+        assert verdict["required"] == ["reviewer_id", "value", "pinned"]
+        assert set(verdict["properties"]) >= {
+            "reviewer_id",
+            "value",
+            "pinned",
+            "scope",
+            "evidence_anchors",
+            "notes",
+        }
+        # The executor counts full sweeps by these two values only.
+        assert verdict["properties"]["scope"]["enum"] == ["full", "delta"]
+
+    def test_workflow_schema_rejects_malformed_spec_version(
+        self, workflow_schema
+    ) -> None:
+        import jsonschema
+
+        bad = {"w": {"goal": "g", "risk": "low", "steps": [], "spec_version": "v1"}}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, workflow_schema)
+
 
 # ─── Canonical Schema Validator ───
 
@@ -439,6 +731,53 @@ class TestValidateCanonicalSchemas:
             "authority_trust_model.yaml",
             "    human_note: 0.55",
             "    human_note: 0.55\n    ghost_source: 0.5",
+        )
+
+    def test_catches_trust_class_without_weight(self, tmp_path: Path) -> None:
+        """Every agent_identity trust class has a default weight (RFC-0004)."""
+        self._assert_drift_is_caught(
+            tmp_path, "authority_trust_model.yaml", "    external: 0.35\n", ""
+        )
+
+    def test_catches_unknown_trust_class(self, tmp_path: Path) -> None:
+        self._assert_drift_is_caught(
+            tmp_path,
+            "authority_trust_model.yaml",
+            "    external: 0.35",
+            "    external: 0.35\n    stranger: 0.1",
+        )
+
+    @pytest.mark.parametrize(
+        ("filename", "old", "new"),
+        [
+            (
+                "authority_trust_model.yaml",
+                "    human_note: 0.55",
+                "    human_note: true",
+            ),
+            ("authority_trust_model.yaml", "    external: 0.35", "    external: true"),
+            ("authority_trust_model.yaml", "min_trust: 0.25", "min_trust: true"),
+            (
+                "identity_resolution_policy.yaml",
+                "    weight: 1.0\n    rule: id string equality",
+                "    weight: true\n    rule: id string equality",
+            ),
+        ],
+        ids=["source-weight", "trust-class-weight", "min-trust", "alias-feature"],
+    )
+    def test_catches_boolean_weights(
+        self, tmp_path: Path, filename: str, old: str, new: str
+    ) -> None:
+        """``true`` is an int in Python (== 1), but not a weight."""
+        self._assert_drift_is_caught(tmp_path, filename, old, new)
+
+    def test_catches_identity_type_drift(self, tmp_path: Path) -> None:
+        """The world state's AgentIdentity copies agent_identity exactly."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "agent_identity_schema.yaml",
+            "      - service\n",
+            "      - service\n      - robot\n",
         )
 
     def test_catches_out_of_range_min_trust(self, tmp_path: Path) -> None:
@@ -576,54 +915,63 @@ class TestValidateCanonicalSchemas:
 class TestSyncSkillSchemas:
     """Tests for tools/sync_skill_schemas.py (issue #107)."""
 
-    def test_sync_is_idempotent(self) -> None:
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        """A copy of everything the sync reads and writes."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_sync_deps", ROOT / "tools" / "sync_skill_schemas.py"
+        )
+        assert spec and spec.loader
+        sys.path.insert(0, str(ROOT / "tools"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for rel in (
+            "schemas/capability_ontology.yaml",
+            "schemas/workflow_catalog.yaml",
+            *module.WORKFLOW_CATALOG_TRANSITIVE_DEPS,
+        ):
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(ROOT / rel, tmp_path / rel)
+        shutil.copytree(ROOT / "skills", tmp_path / "skills")
+        return tmp_path
+
+    @staticmethod
+    def _sync(root: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "tools" / "sync_skill_schemas.py"),
+                "--root",
+                str(root),
+                *flags,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_sync_is_idempotent(self, tmp_path: Path) -> None:
         """Re-running the sync on a synced tree must change nothing.
 
         The comment rewrite `schemas/workflows/` -> `(repo-level)
         schemas/workflows/` used to reapply itself to already-rewritten text,
         so each run stacked another `(repo-level)` prefix onto the 17 bundled
-        catalogs. CLAUDE.md documents this command, so following the project's
-        own instructions corrupted those files.
+        catalogs. Runs on a copy, so the test never touches the tree (or
+        repairs drift that test_check_passes_on_the_tree must see).
         """
-        catalogs = sorted((ROOT / "skills").glob("*/reference/workflow_catalog.yaml"))
-        assert catalogs, "expected bundled workflow catalogs"
-        before = {path: path.read_text() for path in catalogs}
+        root = self._tree(tmp_path)
+        assert self._sync(root).returncode == 0
+        generated = sorted((root / "skills").rglob("*.yaml"))
+        before = {path: path.read_bytes() for path in generated}
+        second = self._sync(root)
+        assert second.returncode == 0, second.stdout + second.stderr
+        assert "SYNC COMPLETE: 0 of" in second.stdout
+        assert {p: p.read_bytes() for p in generated} == before
 
-        # The sync writes to the tracked tree, so anything it changes is
-        # restored before this test returns. Without that, a failure -- or a
-        # concurrent checkout of a branch whose sync tool predates the
-        # idempotency fix -- leaves the repository dirty.
-        try:
-            result = subprocess.run(
-                [sys.executable, str(ROOT / "tools" / "sync_skill_schemas.py")],
-                cwd=str(ROOT),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            assert result.returncode == 0, result.stdout + result.stderr
-
-            drifted = [
-                path.relative_to(ROOT)
-                for path, original in before.items()
-                if path.read_text() != original
-            ]
-            assert not drifted, (
-                f"{drifted} changed on a no-op sync; "
-                f"sync_skill_schemas.py is not idempotent"
-            )
-        finally:
-            for path, original in before.items():
-                if path.read_text() != original:
-                    path.write_text(original)
-
-    def test_rewrite_heals_already_doubled_prefixes(self) -> None:
-        """The rewrite must collapse existing stacking, not merely stop adding.
-
-        Replacing one layer then re-applying makes double-prefixed content a
-        fixed point: the sync would preserve corruption a previous run wrote
-        rather than repairing it.
-        """
+    @staticmethod
+    def _module():
         import importlib.util
 
         sys.path.insert(0, str(ROOT / "tools"))
@@ -634,7 +982,16 @@ class TestSyncSkillSchemas:
         module = importlib.util.module_from_spec(spec)
         sys.modules["sync_skill_schemas"] = module
         spec.loader.exec_module(module)
+        return module
 
+    def test_rewrite_heals_already_doubled_prefixes(self) -> None:
+        """The rewrite must collapse existing stacking, not merely stop adding.
+
+        Replacing one layer then re-applying makes double-prefixed content a
+        fixed point: the sync would preserve corruption a previous run wrote
+        rather than repairing it.
+        """
+        module = self._module()
         old_prefix, new_prefix = next(
             iter(module.WORKFLOW_CATALOG_COMMENT_REWRITES.items())
         )
@@ -642,17 +999,113 @@ class TestSyncSkillSchemas:
         expected = f"#   - {new_prefix}x.yaml"
 
         for layers in (0, 1, 2, 3):
-            content = f"#   - {note * layers}{old_prefix}x.yaml"
-
-            # The rewrite as implemented in bundle_workflow_catalog_deps.
-            while new_prefix in content:
-                content = content.replace(new_prefix, old_prefix)
-            content = content.replace(old_prefix, new_prefix)
-
+            content = module.rewrite_paths(f"#   - {note * layers}{old_prefix}x.yaml")
             assert content == expected, (
                 f"{layers} stacked note(s) collapsed to {content!r}, "
                 f"expected {expected!r}"
             )
+
+    def test_check_passes_on_the_tree(self) -> None:
+        """Every generated file in the repository matches its source."""
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "sync_skill_schemas.py"), "--check"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @staticmethod
+    def _source_header() -> str:
+        return (ROOT / "schemas" / "workflow_catalog.yaml").read_text().splitlines()[0]
+
+    def test_check_reports_a_drifted_catalog_and_sync_repairs_it(
+        self, tmp_path: Path
+    ) -> None:
+        """A vendored catalog edited by hand (or left behind when the source
+        changed) fails --check; a sync regenerates it from the source."""
+        root = self._tree(tmp_path)
+        vendored = root / "skills" / "observe" / "reference" / "workflow_catalog.yaml"
+        header = self._source_header()
+        vendored.write_text(vendored.read_text().replace(header, "# edited", 1))
+
+        check = self._sync(root, "--check")
+        assert check.returncode == 1
+        assert "skills/observe/reference/workflow_catalog.yaml" in check.stdout
+        assert self._sync(root).returncode == 0
+        assert self._sync(root, "--check").returncode == 0
+        assert vendored.read_text().startswith(header + "\n")
+
+    def test_orphaned_output_schema_is_reported_and_removed(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._tree(tmp_path)
+        orphan_dir = root / "skills" / "retired" / "schemas"
+        orphan_dir.mkdir(parents=True)
+        orphan = orphan_dir / "output_schema.yaml"
+        shutil.copy(
+            root / "skills" / "observe" / "schemas" / "output_schema.yaml", orphan
+        )
+        hand_written = orphan_dir.parent / "notes.yaml"
+        hand_written.write_text("kept: true\n")
+
+        check = self._sync(root, "--check")
+        assert check.returncode == 1
+        assert "skills/retired/schemas/output_schema.yaml" in check.stdout
+        assert self._sync(root).returncode == 0
+        assert not orphan.exists() and hand_written.exists()
+        assert self._sync(root, "--check").returncode == 0
+
+    def test_unbundled_vendored_copy_is_maintained(self, tmp_path: Path) -> None:
+        """A skill that vendors a schema without bundling a catalog (receive)
+        gets its copy kept current too, instead of drifting unnoticed (#107)."""
+        root = self._tree(tmp_path)
+        copy = root / "skills" / "receive" / "reference" / "event_schema.yaml"
+        assert copy.exists()
+        assert not (copy.parent / "workflow_catalog.yaml").exists()
+        copy.write_text(copy.read_text() + "# stale\n")
+
+        check = self._sync(root, "--check")
+        assert check.returncode == 1
+        assert "skills/receive/reference/event_schema.yaml" in check.stdout
+        assert self._sync(root).returncode == 0
+        assert (
+            copy.read_bytes() == (root / "schemas" / "event_schema.yaml").read_bytes()
+        )
+
+    def test_vendored_ontology_copies_are_maintained(self, tmp_path: Path) -> None:
+        """Every skills/*/reference/capability_ontology.yaml is a verbatim
+        copy of the ontology; a stale one fails --check and a sync repairs
+        it."""
+        root = self._tree(tmp_path)
+        copies = sorted((root / "skills").glob("*/reference/capability_ontology.yaml"))
+        assert copies, "expected skills that vendor the ontology"
+        stale = copies[0]
+        stale.write_text(stale.read_text() + "# stale\n")
+
+        check = self._sync(root, "--check")
+        assert check.returncode == 1
+        assert str(stale.relative_to(root)) in check.stdout
+        assert self._sync(root).returncode == 0
+        source = (root / "schemas" / "capability_ontology.yaml").read_bytes()
+        assert all(copy.read_bytes() == source for copy in copies)
+
+    def test_crlf_checkout_is_not_drift(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path)
+        for path in (root / "skills").rglob("*.yaml"):
+            path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        assert self._sync(root, "--check").returncode == 0
+
+    def test_vendored_catalog_carries_the_source_version(self) -> None:
+        module = self._module()
+        rendered = module.render_vendored_catalog(
+            (ROOT / "schemas" / "workflow_catalog.yaml").read_text()
+        )
+        first, second = rendered.splitlines()[:2]
+        assert first == self._source_header()
+        assert first.startswith("# Standard version: ")
+        assert second.startswith("# Vendored copy of schemas/workflow_catalog.yaml")
 
     def test_sync_does_not_stack_the_repo_level_note(self) -> None:
         for path in sorted((ROOT / "skills").glob("*/reference/workflow_catalog.yaml")):

@@ -1,7 +1,7 @@
 ---
 name: delegate
 description: Split work across subagents with explicit contracts, interfaces, and merge strategies. Use when parallelizing tasks, distributing workload, or orchestrating multi-agent workflows.
-argument-hint: "[task] [agents] [contracts]"
+argument-hint: "[task] [agent] [constraints]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -27,11 +27,20 @@ Delegate a complex task to one or more subagents by defining clear contracts, in
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `task` | Yes | string or object | The overall task to delegate |
-| `agents` | No | array | Available agents/workers for delegation |
+| `task` | Yes | object | The overall task to delegate |
+| `agent` | Yes | string | Target agent |
 | `constraints` | No | object | Global constraints (timeout, resource limits) |
-| `merge_strategy` | No | string | How to combine results (first_wins, consensus, aggregate) |
-| `failure_policy` | No | string | What to do on subtask failure (abort, continue, retry) |
+| `fresh_context` | No | boolean | Start the delegate without this agent's context, e.g. for an independent review (Standard v1.1 `delegation@1`) |
+| `model_family` | No | string | Model family the delegate should run on (`delegation@1`) |
+| `role` | No | string | Role the delegate takes, e.g. `reviewer` (`delegation@1`) |
+| `read_only` | No | boolean | The delegate may read but must not change anything (`delegation@1`); the host attests it in `effective.read_only` |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
+
+The host reports the settings it actually used as `effective` in the
+output; a review quorum (`quorum@1`, on `constrain`) relies on them. With
+`wait` (`wait@1`) the step delegates, then waits for that delegate's
+result, which the output carries as `result`; a `retry` delegates again.
 
 ## Procedure
 
@@ -82,6 +91,15 @@ Delegate a complex task to one or more subagents by defining clear contracts, in
 Return a structured object:
 
 ```yaml
+accepted: boolean  # Whether the target agent accepted the task
+task_id: string  # Delegated task ID
+agent: string  # Assigned agent (the `agent` input)
+effective:  # Delegation settings actually used, as attested by the host
+  fresh_context: boolean
+  model_family: string
+  role: string
+  read_only: boolean
+result: object | null  # The delegate's result (with its sender) when the step waits for it (wait@1)
 delegation:
   task: string  # Original task description
   delegated_to: array  # List of agents/subtasks
@@ -122,6 +140,11 @@ assumptions: []
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `accepted` | boolean | Whether the target agent accepted the task |
+| `task_id` | string | Identifier of the delegated task |
+| `agent` | string | The agent the task was assigned to |
+| `effective` | object | Settings the host actually used (`fresh_context`, `model_family`, `role`, `read_only`); a review quorum relies on them |
+| `result` | object | The delegate's result, with its `sender` (and `sender_identity` under identity@1), when the step waits for it; otherwise null |
 | `delegation` | object | Overall delegation summary |
 | `subtasks` | array | Individual subtask definitions with contracts |
 | `interfaces` | array | Data flow between subtasks |
@@ -136,16 +159,21 @@ assumptions: []
 
 ### Example 1: Parallel Code Review
 
+`agent` names who receives the task: here a review pool that fans it out to
+the agents the task lists.
+
 **Input:**
 ```yaml
-task: "Review pull request #123 for security, performance, and style"
-agents:
-  - id: "security-agent"
-    capabilities: ["security-analysis", "vulnerability-detection"]
-  - id: "perf-agent"
-    capabilities: ["performance-analysis", "profiling"]
-  - id: "style-agent"
-    capabilities: ["lint", "style-check"]
+agent: "review-pool"
+task:
+  description: "Review pull request #123 for security, performance, and style"
+  agents:
+    - id: "security-agent"
+      capabilities: ["security-analysis", "vulnerability-detection"]
+    - id: "perf-agent"
+      capabilities: ["performance-analysis", "profiling"]
+    - id: "style-agent"
+      capabilities: ["lint", "style-check"]
 constraints:
   timeout: "10m"
   max_issues_per_category: 20
@@ -153,6 +181,14 @@ constraints:
 
 **Output:**
 ```yaml
+accepted: true
+task_id: "deleg-pr123-review"
+agent: "review-pool"
+effective:
+  fresh_context: false
+  role: "reviewer"
+  read_only: true
+result: null  # Step does not wait; subtasks are still pending
 delegation:
   task: "Review pull request #123"
   delegated_to: ["security-agent", "perf-agent", "style-agent"]
@@ -251,16 +287,25 @@ assumptions:
 
 **Input:**
 ```yaml
-task: "Process customer data: validate, enrich, and store"
-agents:
-  - id: "validator"
-  - id: "enricher"
-  - id: "persister"
-merge_strategy: "sequential"
+agent: "pipeline-runner"
+task:
+  description: "Process customer data: validate, enrich, and store"
+  agents:
+    - id: "validator"
+    - id: "enricher"
+    - id: "persister"
+  merge_strategy: "sequential"
 ```
 
 **Output:**
 ```yaml
+accepted: true
+task_id: "deleg-batch-2024-01-15"
+agent: "pipeline-runner"
+effective:
+  fresh_context: false
+  read_only: false
+result: null
 delegation:
   task: "Process customer data pipeline"
   delegated_to: ["validator", "enricher", "persister"]
@@ -355,7 +400,7 @@ assumptions:
 - `mutation`: false
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: low
+- `risk`: medium
 
 **Capability-specific rules:**
 - Never delegate without explicit contracts

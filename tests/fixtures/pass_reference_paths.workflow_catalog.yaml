@@ -1,0 +1,33 @@
+# Standard version: 1.1.0
+# Positive fixture (STANDARD v1.1 §5.3): index and slice segments, an
+# annotation written without a space after ':', an integer-typed field used
+# without an annotation, and a vendor `x-` key, which validators ignore.
+x-conformance-notes:
+  purpose: Vendor data at the top level of a catalog is not a workflow.
+reference_paths:
+  goal: Resolve index, slice and integer references against producer schemas.
+  risk: low
+  inputs:
+    request:
+      type: string
+  steps:
+  - capability: inquire
+    purpose: Ask clarifying questions about the request.
+    store_as: inquire_out
+    input_bindings:
+      ambiguous_input: ${request}
+  - capability: search
+    purpose: Search for the first clarifying question.
+    store_as: search_out
+    input_bindings:
+      query: ${inquire_out.questions[0].question}
+      scope: ${inquire_out.questions[0].parameter}
+  - capability: compare
+    purpose: Compare the first five results.
+    store_as: compare_out
+    input_bindings:
+      options: ${search_out.results[0:5]:array<object>}
+      weights:
+        total: ${search_out.total_count}
+  success:
+  - References resolve

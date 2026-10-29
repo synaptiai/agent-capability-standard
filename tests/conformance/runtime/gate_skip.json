@@ -1,0 +1,88 @@
+{
+  "description": "A before-gate with action skip skips the step; later steps run and read null.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "y"
+          },
+          "gates": [
+            {
+              "when": "${r.data} == 0",
+              "action": "skip"
+            }
+          ]
+        },
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "${o.observation}"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 0,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 2,
+        "inputs": {
+          "query": null
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "gate_fired",
+    "step_skipped"
+  ]
+}

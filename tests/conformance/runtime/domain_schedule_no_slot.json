@@ -1,0 +1,393 @@
+{
+  "description": "schedule_management with no free slot: ranking, planning and drafting are skipped, and the run still explains why and audits the request.",
+  "catalog": {
+    "schedule_management": {
+      "goal": "Analyze scheduling requests, resolve conflicts, and propose calendar changes.",
+      "risk": "low",
+      "domain": "personal-assistant",
+      "profile": "schemas/profiles/personal_assistant.yaml",
+      "description": "Schedule management workflow for personal assistants. Analyzes user requests,\nchecks for conflicts, suggests optimal times, and prepares calendar updates.\nAll calendar changes require user confirmation.\n",
+      "success": [
+        "User request interpreted correctly",
+        "Conflicts identified and resolved",
+        "Optimal time slots proposed",
+        "Calendar update prepared for approval"
+      ],
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "Get user's current calendar for the relevant time range.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "calendar_out",
+          "input_bindings": {
+            "target": "user_calendar",
+            "format": "calendar_events",
+            "filter": {
+              "time_range": "${request.date_range}"
+            }
+          }
+        },
+        {
+          "capability": "critique",
+          "purpose": "Analyze request for ambiguity or missing information.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "request_analysis_out",
+          "input_bindings": {
+            "target": "${request.content}",
+            "criteria": [
+              "time_specificity",
+              "duration_clarity",
+              "participant_identification",
+              "location_requirements"
+            ]
+          }
+        },
+        {
+          "capability": "inquire",
+          "purpose": "Generate clarifying questions if request is ambiguous.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "clarification_out",
+          "input_bindings": {
+            "ambiguous_input": "${request.content}",
+            "context": {
+              "calendar": "${calendar_out.data: object}",
+              "ambiguities": "${request_analysis_out.issues: array<object>}"
+            },
+            "max_questions": 2
+          },
+          "gates": [
+            {
+              "when": "${request_analysis_out.issues} == []",
+              "action": "skip",
+              "message": "The analysis found no ambiguity; no clarification needed."
+            }
+          ]
+        },
+        {
+          "capability": "detect",
+          "purpose": "Identify scheduling conflicts in proposed time.",
+          "domain": "conflict",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "conflicts_out",
+          "input_bindings": {
+            "data": "${calendar_out.data: object}",
+            "pattern": "time_overlap",
+            "threshold": 0
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "Find available time slots that match request.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "available_slots_out",
+          "input_bindings": {
+            "query": {
+              "duration": "${request.duration}",
+              "preferences": "${user_preferences.scheduling}",
+              "constraints": "${request.constraints}"
+            },
+            "scope": "user_calendar"
+          }
+        },
+        {
+          "capability": "compare",
+          "purpose": "Rank available slots by user preference alignment.",
+          "domain": "scheduling_preference",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "ranked_slots_out",
+          "input_bindings": {
+            "options": "${available_slots_out.results: array<object>}",
+            "criteria": [
+              "time_of_day_preference",
+              "buffer_time",
+              "travel_time",
+              "focus_time_protection"
+            ],
+            "weights": "${user_preferences.weights}"
+          },
+          "gates": [
+            {
+              "when": "${available_slots_out.results} == []",
+              "action": "skip",
+              "message": "No free slot matches the request; there is nothing to rank."
+            }
+          ]
+        },
+        {
+          "capability": "plan",
+          "purpose": "Create calendar modification plan.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "calendar_plan_out",
+          "gates": [
+            {
+              "when": "${ranked_slots_out} == null",
+              "action": "skip",
+              "message": "No slot was ranked; there is nothing to schedule. The explanation tells the user."
+            }
+          ],
+          "input_bindings": {
+            "goal": "schedule_event",
+            "constraints": {
+              "preferred_slot": "${ranked_slots_out.recommendation}",
+              "conflicts_to_resolve": "${conflicts_out.matches: array<object>}",
+              "user_preferences": "${user_preferences}"
+            }
+          }
+        },
+        {
+          "capability": "generate",
+          "purpose": "Create calendar event draft for user approval.",
+          "domain": "calendar_event",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "event_draft_out",
+          "gates": [
+            {
+              "when": "${clarification_out.questions} != null && ${clarification_out.questions} != []",
+              "action": "skip",
+              "message": "Clarifying questions are open; ask them before drafting the event."
+            },
+            {
+              "when": "${calendar_plan_out} == null",
+              "action": "skip",
+              "message": "No slot was found, so there is no event to draft."
+            }
+          ],
+          "input_bindings": {
+            "specification": {
+              "type": "calendar_event",
+              "title": "${request.title}",
+              "time": "${calendar_plan_out.steps[0].time: string}",
+              "duration": "${request.duration}",
+              "participants": "${request.participants}",
+              "location": "${request.location}"
+            }
+          }
+        },
+        {
+          "capability": "explain",
+          "purpose": "Summarize the scheduling decision for the user, or why no slot was found and which conflicts they must resolve themselves.",
+          "risk": "low",
+          "mutation": false,
+          "store_as": "explanation_out",
+          "input_bindings": {
+            "conclusion": {
+              "draft": "${event_draft_out}",
+              "open_questions": "${clarification_out.questions: array<object>}",
+              "available_slots": "${available_slots_out.results: array<object>}",
+              "conflicts": "${conflicts_out.matches: array<object>}"
+            },
+            "audience": "user",
+            "depth": "brief"
+          }
+        },
+        {
+          "capability": "audit",
+          "purpose": "Record scheduling interaction.",
+          "risk": "low",
+          "mutation": true,
+          "store_as": "audit_out",
+          "input_bindings": {
+            "event": {
+              "type": "scheduling_request",
+              "original_request": "${request.content}",
+              "conflicts_found": "${conflicts_out.detected}",
+              "open_questions": "${clarification_out.questions: array<object>}",
+              "proposed_time": "${event_draft_out.content.time: string}"
+            }
+          }
+        }
+      ],
+      "inputs": {
+        "request": {
+          "type": "object",
+          "required": true,
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "date_range": {
+              "type": "object"
+            },
+            "duration": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "location": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "object"
+            }
+          }
+        },
+        "user_preferences": {
+          "type": "object",
+          "description": "User's scheduling preferences",
+          "properties": {
+            "scheduling": {
+              "type": "object"
+            },
+            "weights": {
+              "type": "object"
+            }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "ref": "schemas/profiles/personal_assistant.yaml"
+        }
+      }
+    }
+  },
+  "workflow": "schedule_management",
+  "inputs": {
+    "request": {
+      "content": "30 minutes with Sam tomorrow"
+    }
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0,
+        "frame": [
+          "schedule_management"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "critique",
+        "step": 1,
+        "frame": [
+          "schedule_management"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "issues": [],
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "detect",
+        "step": 3,
+        "frame": [
+          "schedule_management"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "detected": true,
+          "evidence_anchors": [],
+          "confidence": 1.0,
+          "matches": [
+            {
+              "title": "standup"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 4,
+        "frame": [
+          "schedule_management"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "evidence_anchors": [],
+          "confidence": 1.0,
+          "total_count": 0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "explain",
+        "step": 8,
+        "frame": [
+          "schedule_management"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "explanation": "x",
+          "evidence_anchors": [],
+          "confidence": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit",
+        "step": 9,
+        "frame": [
+          "schedule_management"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "explanation_out": {},
+      "audit_out": {}
+    }
+  },
+  "trace_kinds": [
+    "step_skipped",
+    "run_finished"
+  ]
+}

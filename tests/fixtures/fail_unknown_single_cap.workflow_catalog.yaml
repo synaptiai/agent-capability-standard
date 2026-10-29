@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 bad_single:
   goal: Minimal workflow with a single unknown capability.
   risk: low

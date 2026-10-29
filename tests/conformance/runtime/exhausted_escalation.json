@@ -1,0 +1,173 @@
+{
+  "description": "An exhausted loop escalates to its on_exhausted handler; the cause is R404.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "plan",
+          "purpose": "plan step",
+          "store_as": "p",
+          "input_bindings": {
+            "goal": "g"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "conditions": [
+              "ok"
+            ]
+          },
+          "failure_modes": [
+            {
+              "condition": "verification failed",
+              "action": "stop",
+              "when": "${v.passed} == false",
+              "recovery": {
+                "goto_step": "p",
+                "max_loops": 1,
+                "on_exhausted": {
+                  "goto_step": "page"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "page",
+          "handler": true,
+          "workflow_id": "oncall",
+          "input_bindings": {
+            "workflow": "oncall",
+            "input": {
+              "why": "verification failed"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "recovery@1"
+        ]
+      }
+    },
+    "oncall": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "inquire",
+          "purpose": "inquire step",
+          "store_as": "q",
+          "input_bindings": {
+            "ambiguous_input": "${why}"
+          }
+        }
+      ],
+      "inputs": {
+        "why": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "inquire",
+        "frame": [
+          "w",
+          "oncall"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "questions": [],
+          "ambiguity_analysis": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "escalated",
+    "cause": "R404"
+  },
+  "trace_kinds": [
+    "recovery_exhausted",
+    "escalated"
+  ]
+}

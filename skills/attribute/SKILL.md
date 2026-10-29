@@ -30,7 +30,8 @@ Establish causal relationships between observed effects and potential causes. Th
 | `effect` | Yes | any | The observed effect to attribute |
 | `candidates` | No | array | Potential causes to evaluate |
 | `context` | No | object | Situational context for attribution |
-| `depth` | No | string | Analysis depth: immediate, chain, comprehensive |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -76,6 +77,7 @@ causes:
     mechanism: string  # How cause produces effect
     evidence: array[string]  # Supporting evidence
     type: string  # direct, contributing, enabling
+mechanism: string  # Overall causal mechanism: how the primary cause produces the effect
 strengths:  # Comparative strengths
   cause_1: number
   cause_2: number
@@ -99,8 +101,13 @@ assumptions: []
 | `causes[].strength` | number | Causal strength (0-1) |
 | `causes[].mechanism` | string | Explanation of causal pathway |
 | `causes[].type` | string | Direct, contributing, or enabling cause |
+| `mechanism` | string | Overall causal mechanism linking the primary cause to the effect |
 | `causal_chain` | array | Steps from cause to effect |
 | `alternatives_ruled_out` | array | Rejected alternatives with reasons |
+| `strengths` | object | Causal strength per cause, for comparison |
+| `confidence` | number | 0.0-1.0 confidence in the attribution |
+| `evidence_anchors` | array | References to logs, code, or data supporting each cause |
+| `assumptions` | array | Assumptions the attribution depends on |
 
 ## Examples
 
@@ -136,6 +143,7 @@ causes:
       - "Pool utilization at 95%"
       - "Connection wait time increased"
     type: "contributing"
+mechanism: "The deployment removed eager loading, multiplying queries per request (2 to 50+); the database overloads and responses slow from 200ms to 2000ms"
 strengths:
   n_plus_1_query: 0.85
   connection_pool: 0.40
@@ -191,6 +199,7 @@ causes:
       - "Test fails when run after create_user_test"
       - "No database_cleaner configuration"
     type: "direct"
+mechanism: "A user created by an earlier test is never cleaned up, so a later create of the same email fails the uniqueness validation"
 strengths:
   test_pollution: 0.90
   code_change: 0.05

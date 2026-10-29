@@ -1,0 +1,36 @@
+# Standard version: 1.1.0
+# Triggers (STANDARD v1.1 §5.10): a schedule, an event and a manual start,
+# declared through workflow_extensions.requires.
+nightly_report:
+  goal: Summarise the day's deployments.
+  risk: low
+  workflow_extensions:
+    requires: [triggers@1]
+  triggers:
+  - kind: schedule
+    schedule:
+      cron: "30 23 * * MON-FRI"
+      timezone: Europe/Lisbon
+      overlap: skip
+  - kind: schedule
+    schedule:
+      every: PT6H
+  - kind: event
+    attendance: unattended
+    event:
+      event_type: deploy.finished
+      source_kind: agent
+      delivers_to: deploy_event
+  - kind: manual
+  inputs:
+    deploy_event:
+      type: object
+      required: false
+      ref: schemas/event_schema.yaml#/event
+  steps:
+  - capability: observe
+    purpose: Observe the deployment state.
+    store_as: observe_out
+    input_bindings:
+      target: "system"
+    timeout: 5m

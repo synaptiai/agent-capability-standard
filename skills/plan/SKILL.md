@@ -30,10 +30,11 @@ Create a structured, executable plan that decomposes a goal into ordered steps w
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `goal` | Yes | string | Clear statement of what the plan should achieve |
-| `context` | No | object | Current state, available resources, constraints |
 | `constraints` | No | object | Time limits, resource bounds, policy restrictions |
-| `risk_tolerance` | No | string | low, medium, high - affects checkpoint frequency |
-| `max_steps` | No | integer | Maximum number of steps to generate |
+| `resources` | No | array | Available resources |
+| `context` | No | any | Current state, available resources, constraints |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -75,6 +76,7 @@ Create a structured, executable plan that decomposes a goal into ordered steps w
    - Identify steps that cannot be rolled back
 
 8) **Assess risk**: Evaluate overall plan risk
+   - List each identified risk in `risks` with a mitigation
    - Count mutating operations
    - Consider blast radius of failures
    - Factor in rollback complexity
@@ -84,23 +86,29 @@ Create a structured, executable plan that decomposes a goal into ordered steps w
 Return a structured object:
 
 ```yaml
-plan:
-  id: string  # Unique plan identifier
-  goal: string  # What this plan achieves
-  steps:
-    - id: string  # Step identifier (e.g., "step-1")
-      action: string  # Type of action (edit, bash, git, etc.)
-      target: string  # Resource being modified
-      description: string  # Human-readable explanation
-      dependencies: array[string]  # Step IDs this depends on
-      verification_criteria: string  # How to verify success
-      rollback_action: string | null  # How to undo (null if not reversible)
-      estimated_risk: low | medium | high
-  checkpoints:
-    - after_step: string  # Step ID to checkpoint after
-      type: git_stash | file_backup | state_snapshot
-      reason: string  # Why checkpoint here
-  estimated_risk: low | medium | high  # Overall plan risk
+plan_id: string  # Unique plan identifier
+goal: string  # What this plan achieves
+steps:
+  - id: string  # Step identifier (e.g., "step-1")
+    action: string  # Type of action (edit, bash, git, etc.)
+    target: string  # Resource being modified
+    description: string  # Human-readable explanation
+    dependencies: array[string]  # Step IDs this depends on
+    verification_criteria: string  # How to verify success
+    rollback_action: string | null  # How to undo (null if not reversible)
+    estimated_risk: low | medium | high
+checkpoints:
+  - after_step: string  # Step ID to checkpoint after
+    type: git_stash | file_backup | state_snapshot
+    reason: string  # Why checkpoint here
+estimated_risk: low | medium | high  # Overall plan risk
+dependencies:  # Step dependencies: step ID -> step IDs it depends on
+  <step_id>: array[string]
+risks:  # Identified risks
+  - description: string
+    step: string | null  # Step ID, or null for plan-wide
+    severity: low | medium | high
+    mitigation: string
 validation:
   preconditions: array[string]  # Must be true before execution
   postconditions: array[string]  # Must be true after execution
@@ -115,11 +123,13 @@ assumptions: []  # Explicit assumptions made
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `plan.id` | string | Unique identifier for this plan |
-| `plan.goal` | string | Clear statement of objective |
-| `plan.steps` | array | Ordered list of execution steps |
-| `plan.checkpoints` | array | Recovery points in execution |
-| `plan.estimated_risk` | enum | Overall risk assessment |
+| `plan_id` | string | Unique identifier for this plan |
+| `goal` | string | Clear statement of objective |
+| `steps` | array<object> | Ordered list of execution steps |
+| `checkpoints` | array | Recovery points in execution |
+| `estimated_risk` | enum | Overall risk assessment |
+| `dependencies` | object | Step dependencies: each step ID mapped to the step IDs it depends on |
+| `risks` | array | Identified risks, each with severity and mitigation |
 | `validation` | object | Pre/post conditions and invariants |
 | `alternatives_considered` | array | Other approaches evaluated |
 | `confidence` | number | 0.0-1.0 based on analysis completeness |
@@ -144,39 +154,47 @@ constraints:
 
 **Output:**
 ```yaml
-plan:
-  id: "fix-npe-userservice-001"
-  goal: "Fix null pointer exception in UserService.getEmail()"
-  steps:
-    - id: "step-1"
-      action: "edit"
-      target: "src/services/UserService.ts"
-      description: "Add null check before accessing user.email at line 42"
-      dependencies: []
-      verification_criteria: "File contains null check pattern 'if (user != null)' or 'user?.email'"
-      rollback_action: "git checkout src/services/UserService.ts"
-      estimated_risk: low
-    - id: "step-2"
-      action: "bash"
-      target: "npm test -- --grep UserService"
-      description: "Run UserService unit tests"
-      dependencies: ["step-1"]
-      verification_criteria: "Exit code 0, all tests pass"
-      rollback_action: null
-      estimated_risk: low
-    - id: "step-3"
-      action: "bash"
-      target: "npm run lint src/services/UserService.ts"
-      description: "Verify code style compliance"
-      dependencies: ["step-1"]
-      verification_criteria: "Exit code 0, no lint errors"
-      rollback_action: null
-      estimated_risk: low
-  checkpoints:
-    - after_step: "step-0"
-      type: git_stash
-      reason: "Preserve state before any file modifications"
-  estimated_risk: low
+plan_id: "fix-npe-userservice-001"
+goal: "Fix null pointer exception in UserService.getEmail()"
+steps:
+  - id: "step-1"
+    action: "edit"
+    target: "src/services/UserService.ts"
+    description: "Add null check before accessing user.email at line 42"
+    dependencies: []
+    verification_criteria: "File contains null check pattern 'if (user != null)' or 'user?.email'"
+    rollback_action: "git checkout src/services/UserService.ts"
+    estimated_risk: low
+  - id: "step-2"
+    action: "bash"
+    target: "npm test -- --grep UserService"
+    description: "Run UserService unit tests"
+    dependencies: ["step-1"]
+    verification_criteria: "Exit code 0, all tests pass"
+    rollback_action: null
+    estimated_risk: low
+  - id: "step-3"
+    action: "bash"
+    target: "npm run lint src/services/UserService.ts"
+    description: "Verify code style compliance"
+    dependencies: ["step-1"]
+    verification_criteria: "Exit code 0, no lint errors"
+    rollback_action: null
+    estimated_risk: low
+checkpoints:
+  - after_step: "step-0"
+    type: git_stash
+    reason: "Preserve state before any file modifications"
+estimated_risk: low
+dependencies:
+  step-1: []
+  step-2: ["step-1"]
+  step-3: ["step-1"]
+risks:
+  - description: "Null check could mask an upstream bug that produces null users"
+    step: "step-1"
+    severity: low
+    mitigation: "Log a warning when user is null so the source can be traced"
 validation:
   preconditions:
     - "src/services/UserService.ts exists"
@@ -219,42 +237,54 @@ constraints:
 
 **Output:**
 ```yaml
-plan:
-  id: "add-preferences-column-001"
-  goal: "Add preferences JSONB column to users table"
-  steps:
-    - id: "step-1"
-      action: "bash"
-      target: "pg_dump users > backup_users.sql"
-      description: "Create backup of users table"
-      dependencies: []
-      verification_criteria: "Backup file exists and is non-empty"
-      rollback_action: null
-      estimated_risk: low
-    - id: "step-2"
-      action: "bash"
-      target: "psql -c 'ALTER TABLE users ADD COLUMN preferences JSONB DEFAULT '{}';'"
-      description: "Add new column with default"
-      dependencies: ["step-1"]
-      verification_criteria: "Column exists in schema, no errors"
-      rollback_action: "psql -c 'ALTER TABLE users DROP COLUMN preferences;'"
-      estimated_risk: high
-    - id: "step-3"
-      action: "bash"
-      target: "psql -c 'SELECT COUNT(*) FROM users WHERE preferences IS NOT NULL;'"
-      description: "Verify default applied to all rows"
-      dependencies: ["step-2"]
-      verification_criteria: "Count matches total row count"
-      rollback_action: null
-      estimated_risk: low
-  checkpoints:
-    - after_step: "step-1"
-      type: state_snapshot
-      reason: "Backup created - recovery point before schema change"
-    - after_step: "step-2"
-      type: state_snapshot
-      reason: "Schema modified - capture for validation"
-  estimated_risk: high
+plan_id: "add-preferences-column-001"
+goal: "Add preferences JSONB column to users table"
+steps:
+  - id: "step-1"
+    action: "bash"
+    target: "pg_dump users > backup_users.sql"
+    description: "Create backup of users table"
+    dependencies: []
+    verification_criteria: "Backup file exists and is non-empty"
+    rollback_action: null
+    estimated_risk: low
+  - id: "step-2"
+    action: "bash"
+    target: "psql -c 'ALTER TABLE users ADD COLUMN preferences JSONB DEFAULT '{}';'"
+    description: "Add new column with default"
+    dependencies: ["step-1"]
+    verification_criteria: "Column exists in schema, no errors"
+    rollback_action: "psql -c 'ALTER TABLE users DROP COLUMN preferences;'"
+    estimated_risk: high
+  - id: "step-3"
+    action: "bash"
+    target: "psql -c 'SELECT COUNT(*) FROM users WHERE preferences IS NOT NULL;'"
+    description: "Verify default applied to all rows"
+    dependencies: ["step-2"]
+    verification_criteria: "Count matches total row count"
+    rollback_action: null
+    estimated_risk: low
+checkpoints:
+  - after_step: "step-1"
+    type: state_snapshot
+    reason: "Backup created - recovery point before schema change"
+  - after_step: "step-2"
+    type: state_snapshot
+    reason: "Schema modified - capture for validation"
+estimated_risk: high
+dependencies:
+  step-1: []
+  step-2: ["step-1"]
+  step-3: ["step-2"]
+risks:
+  - description: "ALTER TABLE takes an ACCESS EXCLUSIVE lock on a ~1M row table"
+    step: "step-2"
+    severity: high
+    mitigation: "PostgreSQL 14 adds a column with a constant default without a table rewrite; run in a low-traffic window"
+  - description: "Backup may be stale if writes continue after step-1"
+    step: "step-1"
+    severity: medium
+    mitigation: "Pause writers or take the backup inside the migration window"
 validation:
   preconditions:
     - "users table exists"
@@ -305,31 +335,31 @@ assumptions:
 - Never generate plans that bypass safety constraints
 - Plans with confidence < 0.5 should request clarification
 
-**CRITICAL: Plan is the gateway to act-plan**
-- No `act-plan` execution should occur without a validated plan
+**CRITICAL: Plan is the gateway to execute and mutate**
+- No `execute` or `mutate` step should occur without a validated plan
 - Plans must be complete before execution begins
 - Incomplete plans should be marked as draft
 
 ## Composition Patterns
 
 **Commonly follows:**
-- `inspect` - Understand current state before planning
+- `observe` - Understand current state before planning
 - `decompose` - Break complex goals into subgoals
 - `critique` - Identify potential issues before finalizing
 - `search` - Find relevant code/config to inform plan
 
 **Commonly precedes:**
 - `checkpoint` - Create safety checkpoint before execution
-- `act-plan` - Execute the plan (REQUIRES this capability)
+- `execute` / `mutate` - Carry out the plan (`plan` precedes both)
 - `verify` - Validate plan structure before execution
 - `constrain` - Apply policy limits to plan
 
 **Anti-patterns:**
-- Never call `act-plan` without a validated plan
+- Never call `execute` or `mutate` without a validated plan
 - Never skip `critique` for high-risk plans
 - Never execute plans with unresolved ambiguity
 
 **Workflow references:**
 - See `reference/composition_patterns.md#debug-code-change` for bug fix workflow
 - See `reference/composition_patterns.md#capability-gap-analysis` for planning context
-- See `reference/composition_patterns.md#oma-pattern` for Observe-Model-Act flow
+- See `reference/composition_patterns.md#observe-model-act` for Observe-Model-Act flow

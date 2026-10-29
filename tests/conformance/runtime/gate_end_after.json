@@ -1,0 +1,75 @@
+{
+  "description": "An after-gate with action end keeps the step's output and ends the run; later steps are not run.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          },
+          "gates": [
+            {
+              "when": "${r.data} == 0",
+              "action": "end",
+              "message": "nothing to do",
+              "phase": "after"
+            }
+          ]
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "y"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 0,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "ended": {
+      "step": 0,
+      "message": "nothing to do"
+    },
+    "outputs": {
+      "r": {
+        "data": 0
+      }
+    }
+  },
+  "trace_kinds": [
+    "step_completed",
+    "gate_fired",
+    "run_ended"
+  ]
+}

@@ -70,7 +70,7 @@ def verify_evidence_grounding(output):
 
 ## Pattern 2: State Assertion
 
-**Applies to:** `inspect`, `world-state`, `checkpoint`, `rollback`, state-modifying capabilities
+**Applies to:** `observe`, `state`, `checkpoint`, `rollback`, state-modifying capabilities
 
 **Purpose:** Verify state before and after operations to detect unintended changes.
 
@@ -142,7 +142,7 @@ def verify_state_assertion(pre_state, post_state, capability, expected_changes=N
 
 ## Pattern 3: Idempotency Check
 
-**Applies to:** `detect`, `identify`, `estimate`, `forecast`, `compare`, `discover`, all read-only capabilities
+**Applies to:** `detect`, `classify`, `measure`, `predict`, `compare`, `discover`, all read-only capabilities
 
 **Purpose:** Ensure repeated execution with same input produces same output.
 
@@ -203,7 +203,7 @@ def verify_idempotency(capability_fn, input_data, runs=2):
 
 ## Pattern 4: Rollback Verification
 
-**Applies to:** `act-plan`, `rollback`, any mutating capability
+**Applies to:** `mutate`, `rollback`, any mutation a checkpoint can restore (not `send`: a sent message cannot be recalled)
 
 **Purpose:** Verify that rollback restores state exactly to the checkpoint.
 
@@ -213,7 +213,7 @@ def verify_idempotency(capability_fn, input_data, runs=2):
 pattern: rollback_verification
 steps:
   1. Capture pre-action state (or use checkpoint)
-  2. Execute action (act-plan)
+  2. Execute action (mutate)
   3. Verify action succeeded
   4. Execute rollback
   5. Assert: post-rollback state == pre-action state
@@ -440,20 +440,20 @@ def verify_safety_boundaries(capability, operations, workspace_root):
 ```yaml
 pattern: composition_validity
 checks:
-  - name: no_act_without_checkpoint
-    condition: act-plan always preceded by checkpoint
+  - name: no_mutation_without_checkpoint
+    condition: mutate and send always preceded by checkpoint
     severity: critical
-    message: "act-plan without checkpoint"
+    message: "mutate/send without checkpoint"
 
   - name: no_rollback_without_checkpoint
     condition: rollback always has valid checkpoint reference
     severity: critical
     message: "rollback without checkpoint"
 
-  - name: verify_after_act
-    condition: act-plan followed by verify
+  - name: verify_after_mutation
+    condition: mutate, execute and send followed by verify
     severity: high
-    message: "act-plan not verified"
+    message: "mutation not verified"
 
   - name: dependencies_satisfied
     condition: capability.requires all executed before
@@ -465,7 +465,7 @@ checks:
 
 | Anti-Pattern | Risk | Prevention |
 |--------------|------|------------|
-| act-plan without checkpoint | critical | Always checkpoint first |
+| mutate/send without checkpoint | critical | Always checkpoint first |
 | rollback without checkpoint | critical | Verify checkpoint exists |
 | send without constrain | high | Apply constrain before send |
 | verify without evidence | medium | Ensure evidence_anchors populated |
@@ -478,16 +478,19 @@ def verify_composition(workflow_steps):
     errors = []
 
     checkpoint_created = False
-    act_plan_verified = True
+    effect_verified = True
 
     for i, step in enumerate(workflow_steps):
         cap_id = step.get('capability')
 
-        # Check act-plan has checkpoint
-        if cap_id == 'act-plan':
+        # Check mutate/send has checkpoint
+        if cap_id in ('mutate', 'send'):
             if not checkpoint_created:
-                errors.append(f"Step {i}: act-plan without prior checkpoint")
-            act_plan_verified = False
+                errors.append(f"Step {i}: {cap_id} without prior checkpoint")
+
+        # Any side-effecting step must be verified afterwards
+        if cap_id in ('mutate', 'execute', 'send'):
+            effect_verified = False
 
         # Track checkpoint creation
         if cap_id == 'checkpoint':
@@ -498,12 +501,12 @@ def verify_composition(workflow_steps):
             if not checkpoint_created:
                 errors.append(f"Step {i}: rollback without checkpoint")
 
-        # Check verify follows act-plan
+        # Check verify follows the side effect
         if cap_id == 'verify':
-            act_plan_verified = True
+            effect_verified = True
 
-    if not act_plan_verified:
-        errors.append("act-plan not followed by verify")
+    if not effect_verified:
+        errors.append("mutate/execute/send not followed by verify")
 
     return len(errors) == 0, errors
 ```

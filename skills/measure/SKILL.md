@@ -30,7 +30,8 @@ Quantify a specific metric for a target, providing a numerical value with explic
 | `target` | Yes | any | What to measure (system, code, entity, process) |
 | `metric` | Yes | string | The metric to quantify (risk, complexity, effort, size, etc.) |
 | `unit` | No | string | Unit of measurement (optional, inferred if not provided) |
-| `method` | No | string | Measurement approach (heuristic, statistical, model-based) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -91,6 +92,9 @@ assumptions: []
 | `metric` | string | Name of measured property |
 | `method` | string | Measurement methodology used |
 | `breakdown` | array | Optional decomposition of measurement |
+| `confidence` | number | 0.0-1.0 confidence in measurement accuracy |
+| `evidence_anchors` | array | References to the data the measurement was taken from |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 
@@ -134,7 +138,6 @@ assumptions:
 ```yaml
 target: "database migration: add user_preferences column"
 metric: "risk"
-method: "probability_impact"
 ```
 
 **Output:**

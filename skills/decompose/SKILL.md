@@ -1,7 +1,7 @@
 ---
 name: decompose
 description: Break a goal into subgoals, constraints, and acceptance criteria. Use when planning complex work, creating work breakdown structures, or defining requirements.
-argument-hint: "[goal] [depth] [constraints]"
+argument-hint: "[problem] [max_depth] [strategy]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -11,11 +11,11 @@ agent: explore
 
 ## Intent
 
-Break down a complex goal into smaller, manageable subgoals with clear boundaries, dependencies, and acceptance criteria. Enable parallel work and incremental progress.
+Break down a complex goal into smaller, manageable subproblems with clear boundaries, dependencies, and acceptance criteria. Enable parallel work and incremental progress.
 
 **Success criteria:**
 - Goal fully decomposed (no gaps)
-- Subgoals are independently verifiable
+- Subproblems are independently verifiable
 - Dependencies are explicit
 - Acceptance criteria are testable
 - Decomposition depth is appropriate
@@ -27,16 +27,16 @@ Break down a complex goal into smaller, manageable subgoals with clear boundarie
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `goal` | Yes | string or object | The goal to decompose |
-| `depth` | No | integer | Maximum decomposition depth (default: 3) |
-| `constraints` | No | object | Boundaries, limitations, scope |
-| `granularity` | No | string | Target size: epic, story, task (default: story) |
-| `context` | No | object | Background information |
+| `problem` | Yes | string | Problem to decompose |
+| `max_depth` | No | integer | Maximum decomposition depth |
+| `strategy` | No | string | Decomposition strategy |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
 1) **Understand the goal**: Clarify what needs to be achieved
-   - Parse the goal statement
+   - Parse the problem statement
    - Identify success criteria
    - Note implicit requirements
    - Determine scope boundaries
@@ -47,17 +47,17 @@ Break down a complex goal into smaller, manageable subgoals with clear boundarie
    - User journeys
    - Technical layers
 
-3) **Create subgoals**: Define each component
+3) **Create subproblems**: Define each component
    - Clear, specific objective
    - Bounded scope
    - Measurable outcome
    - Independent when possible
 
 4) **Define dependencies**: Map relationships
-   - Which subgoals block others?
+   - Which subproblems block others?
    - Which can proceed in parallel?
    - Are there shared resources?
-   - Create dependency graph
+   - Create dependency graph (`dependencies`, one edge per blocking pair)
 
 5) **Add acceptance criteria**: Specify done conditions
    - Testable conditions
@@ -66,14 +66,14 @@ Break down a complex goal into smaller, manageable subgoals with clear boundarie
    - Edge case handling
 
 6) **Validate completeness**: Check coverage
-   - Do subgoals cover entire goal?
+   - Do subproblems cover entire goal?
    - Any gaps or overlaps?
    - Are boundaries clear?
    - Is granularity consistent?
 
-7) **Recurse if needed**: Decompose large subgoals
+7) **Recurse if needed**: Decompose large subproblems
    - Check against target granularity
-   - Decompose subgoals that are too large
+   - Decompose subproblems that are too large
    - Maintain consistent depth
    - Stop when atomic enough
 
@@ -85,13 +85,13 @@ Return a structured object:
 decomposition:
   goal: string  # Original goal
   depth: integer  # Levels of decomposition
-  total_subgoals: integer
+  total_subproblems: integer
   granularity: epic | story | task
-subgoals:
+subproblems:
   - id: string
     name: string
     description: string
-    parent: string | null  # Parent subgoal ID
+    parent: string | null  # Parent subproblem ID
     level: integer  # Depth in tree
     dependencies: array[string]
     acceptance_criteria:
@@ -100,19 +100,24 @@ subgoals:
         priority: required | optional
     estimated_effort: string | null
     parallelizable: boolean
-hierarchy:
-  - id: string
-    name: string
-    children: array  # Nested subgoals
+structure:  # Problem hierarchy
+  goal: string  # Root of the tree
+  children:
+    - id: string
+      name: string
+      children: array  # Nested subproblems
+dependencies:  # Subproblem dependencies (edges of the DAG)
+  - from: string  # Subproblem that must finish first
+    to: string  # Subproblem that depends on it
 constraints:
   - type: scope | time | resource | technical
     description: string
-    affects: array[string]  # Subgoal IDs
+    affects: array[string]  # Subproblem IDs
 gaps:
   - description: string
     suggestion: string
 overlaps:
-  - subgoals: array[string]
+  - subproblems: array[string]
     description: string
     resolution: string
 confidence: 0..1
@@ -125,12 +130,15 @@ assumptions: []
 | Field | Type | Description |
 |-------|------|-------------|
 | `decomposition` | object | Summary of decomposition |
-| `subgoals` | array | Flat list of all subgoals |
-| `hierarchy` | array | Tree structure of subgoals |
-| `constraints` | array | Boundaries affecting subgoals |
+| `subproblems` | array<object> | Flat list of all subproblems |
+| `structure` | object | Problem hierarchy: the goal and its tree of subproblems |
+| `dependencies` | array<object> | Subproblem dependency edges (`from` must finish before `to`) |
+| `constraints` | array | Boundaries affecting subproblems |
 | `gaps` | array | Missing coverage identified |
 | `overlaps` | array | Redundant coverage identified |
 | `confidence` | number | 0.0-1.0 based on completeness |
+| `evidence_anchors` | array | References to requirements or sources the decomposition rests on |
+| `assumptions` | array | Assumptions that affect the decomposition |
 
 ## Examples
 
@@ -138,21 +146,20 @@ assumptions: []
 
 **Input:**
 ```yaml
-goal: "Implement user authentication system"
-granularity: story
-constraints:
-  scope: "Web application only"
-  timeline: "4 weeks"
+problem: "Implement user authentication system"
+strategy: "by user story"
 ```
+
+The work is scoped to the web application only, on a 4-week timeline.
 
 **Output:**
 ```yaml
 decomposition:
   goal: "Implement user authentication system"
   depth: 2
-  total_subgoals: 8
+  total_subproblems: 8
   granularity: story
-subgoals:
+subproblems:
   - id: "SG-1"
     name: "User Registration"
     description: "Allow new users to create accounts"
@@ -294,31 +301,50 @@ subgoals:
         priority: required
     estimated_effort: "3d"
     parallelizable: false
-hierarchy:
-  - id: "SG-1"
-    name: "User Registration"
-    children: []
-  - id: "SG-2"
-    name: "User Login"
-    children: []
-  - id: "SG-3"
-    name: "Password Reset"
-    children: []
-  - id: "SG-4"
-    name: "Session Management"
-    children: []
-  - id: "SG-5"
-    name: "OAuth2 Integration"
-    children: []
-  - id: "SG-6"
-    name: "Rate Limiting"
-    children: []
-  - id: "SG-7"
-    name: "Security Audit Logging"
-    children: []
-  - id: "SG-8"
-    name: "Two-Factor Authentication"
-    children: []
+structure:
+  goal: "Implement user authentication system"
+  children:
+    - id: "SG-1"
+      name: "User Registration"
+      children: []
+    - id: "SG-2"
+      name: "User Login"
+      children: []
+    - id: "SG-3"
+      name: "Password Reset"
+      children: []
+    - id: "SG-4"
+      name: "Session Management"
+      children: []
+    - id: "SG-5"
+      name: "OAuth2 Integration"
+      children: []
+    - id: "SG-6"
+      name: "Rate Limiting"
+      children: []
+    - id: "SG-7"
+      name: "Security Audit Logging"
+      children: []
+    - id: "SG-8"
+      name: "Two-Factor Authentication"
+      children: []
+dependencies:
+  - from: "SG-1"
+    to: "SG-2"
+  - from: "SG-1"
+    to: "SG-3"
+  - from: "SG-2"
+    to: "SG-4"
+  - from: "SG-2"
+    to: "SG-5"
+  - from: "SG-2"
+    to: "SG-6"
+  - from: "SG-2"
+    to: "SG-7"
+  - from: "SG-2"
+    to: "SG-8"
+  - from: "SG-4"
+    to: "SG-8"
 constraints:
   - type: scope
     description: "Web application only, no mobile"
@@ -337,7 +363,7 @@ assumptions:
   - "No existing user database to migrate"
 ```
 
-**Evidence pattern:** Each subgoal has testable acceptance criteria, dependencies mapped.
+**Evidence pattern:** Each subproblem has testable acceptance criteria, dependencies mapped.
 
 ## Verification
 
@@ -371,10 +397,10 @@ assumptions:
 - `explain` - Clarify goal before decomposing
 
 **Commonly precedes:**
-- `plan` - Plan decomposed subgoals (REQUIRED by plan)
-- `prioritize` - Order subgoals
-- `schedule` - Time-order subgoals
-- `delegate` - Assign subgoals
+- `plan` - Plan decomposed subproblems (REQUIRED by plan)
+- `prioritize` - Order subproblems
+- `schedule` - Time-order subproblems
+- `delegate` - Assign subproblems
 
 **Anti-patterns:**
 - Never decompose without understanding goal

@@ -30,7 +30,9 @@ def run_hook(
     if env_override:
         env.update(env_override)
 
-    # PreToolUse hooks receive payload as $1; PostToolUse reads from stdin
+    # These PreToolUse tests pass the payload as $1 (the hook also reads
+    # Claude Code's JSON from stdin when no argument is given); PostToolUse
+    # reads from stdin
     if script == PRETOOLUSE_HOOK:
         args = [str(script)]
         if payload is not None:
@@ -72,14 +74,14 @@ class TestPreToolUseExitCodes:
         result = run_hook(PRETOOLUSE_HOOK, "Read some file")
         assert result.returncode == 0
 
-    def test_exit_1_missing_marker(self, tmp_path: Path) -> None:
-        """Mutation without marker should fail (exit 1)."""
+    def test_exit_2_missing_marker(self, tmp_path: Path) -> None:
+        """Mutation without marker should be blocked (exit 2)."""
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
         result = run_hook(PRETOOLUSE_HOOK, "Write to file", env)
-        assert result.returncode == 1
+        assert result.returncode == 2
         assert (
-            "missing checkpoint marker" in result.stdout.lower()
-            or "blocked" in result.stdout.lower()
+            "missing checkpoint marker" in result.stderr.lower()
+            or "blocked" in result.stderr.lower()
         )
 
     def test_exit_0_with_valid_marker(self, tmp_path: Path) -> None:
@@ -101,8 +103,8 @@ class TestPreToolUseExitCodes:
         result = run_hook(PRETOOLUSE_HOOK, "Write to file", env)
         assert result.returncode == 0
 
-    def test_exit_1_symlink_marker(self, tmp_path: Path) -> None:
-        """Symlinked marker should be rejected (exit 1)."""
+    def test_exit_2_symlink_marker(self, tmp_path: Path) -> None:
+        """Symlinked marker should be rejected (exit 2)."""
         marker_dir = tmp_path / ".claude"
         marker_dir.mkdir()
 
@@ -116,10 +118,10 @@ class TestPreToolUseExitCodes:
 
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
         result = run_hook(PRETOOLUSE_HOOK, "Write to file", env)
-        assert result.returncode == 1
-        assert "symlink" in result.stdout.lower()
+        assert result.returncode == 2
+        assert "symlink" in result.stderr.lower()
 
-    def test_exit_1_empty_marker(self, tmp_path: Path) -> None:
+    def test_exit_2_empty_marker(self, tmp_path: Path) -> None:
         """Empty marker file should fail."""
         marker_dir = tmp_path / ".claude"
         marker_dir.mkdir()
@@ -127,9 +129,9 @@ class TestPreToolUseExitCodes:
 
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
         result = run_hook(PRETOOLUSE_HOOK, "Edit something", env)
-        assert result.returncode == 1
+        assert result.returncode == 2
 
-    def test_exit_1_expired_marker(self, tmp_path: Path) -> None:
+    def test_exit_2_expired_marker(self, tmp_path: Path) -> None:
         """Expired checkpoint should fail."""
         marker_dir = tmp_path / ".claude"
         marker_dir.mkdir()
@@ -142,8 +144,8 @@ class TestPreToolUseExitCodes:
 
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
         result = run_hook(PRETOOLUSE_HOOK, "Write something", env)
-        assert result.returncode == 1
-        assert "expired" in result.stdout.lower()
+        assert result.returncode == 2
+        assert "expired" in result.stderr.lower()
 
     def test_empty_payload_passes(self) -> None:
         """Empty payload (no arg) should pass — not a mutation."""
@@ -246,7 +248,7 @@ class TestPostToolUseExitCodes:
 
 
 # Shell hook regex extracted for testing (must stay in sync with
-# hooks/pretooluse_require_checkpoint.sh line 19).
+# mutation_re in hooks/pretooluse_require_checkpoint.sh).
 _SHELL_HOOK_REGEX = (
     r"(Write\b|Edit\b|MultiEdit\b|NotebookEdit\b|Bash\b|Git\b|"
     r"rm\b|mv\b|sed\b|perl\b|curl\b|docker\b|kubectl\b|scp\b|"

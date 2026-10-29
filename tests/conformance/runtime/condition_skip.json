@@ -1,0 +1,69 @@
+{
+  "description": "A false condition skips the step; later references to its output read null.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "condition": "${flag} == true",
+          "input_bindings": {
+            "target": "x"
+          }
+        },
+        {
+          "capability": "transform",
+          "purpose": "transform step",
+          "store_as": "t",
+          "input_bindings": {
+            "input": "${r.data: object}",
+            "target_format": "f"
+          }
+        }
+      ],
+      "inputs": {
+        "flag": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "flag": false
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "transform",
+        "step": 1,
+        "inputs": {
+          "input": null
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "output": "s",
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "step_skipped"
+  ]
+}

@@ -27,9 +27,11 @@ Generate targeted clarifying questions when a user request is ambiguous or under
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `ambiguous_input` | Yes | string\|object | The underspecified request or goal to clarify |
+| `ambiguous_input` | Yes | any | The underspecified request or goal to clarify |
 | `context` | No | object | Previous conversation or domain context for better question generation |
 | `max_questions` | No | integer | Maximum clarifying questions to generate (default: 3) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 

@@ -1,0 +1,192 @@
+{
+  "description": "Replacement is per run: a parent loop that runs an invoke again starts a new child run, whose waiting delegate delegates afresh without naming the old run's delegation (no `replaces`).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child",
+            "input": {}
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "${i.result}",
+            "conditions": [
+              "ok"
+            ]
+          },
+          "failure_modes": [
+            {
+              "condition": "not verified",
+              "action": "request_more_context",
+              "when": "${v.passed} == false",
+              "recovery": {
+                "goto_step": "i",
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "timeout": "2h",
+          "input_bindings": {
+            "task": {
+              "review": "x"
+            },
+            "agent": "a"
+          },
+          "wait": {
+            "event_type": "review.done"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "frame": [
+          "w",
+          "child"
+        ],
+        "correlate": {
+          "task_id": "t1"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t1"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 0.9,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "frame": [
+          "w",
+          "child"
+        ],
+        "correlate": {
+          "task_id": "t2"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t2"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "confidence": 0.9,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "invoke_started",
+    "loop",
+    "delegated"
+  ]
+}

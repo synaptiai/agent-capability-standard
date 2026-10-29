@@ -1,0 +1,85 @@
+{
+  "description": "retry covers R406 as it covers R401 and R402: after the backoff the wait starts again, with a new deadline.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "retry": {
+            "max": 1,
+            "backoff": "linear"
+          },
+          "wait": {
+            "event_type": "job.done",
+            "liveness": {
+              "mode": "push",
+              "interval": "1m"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "deadline": 3600000
+      },
+      "respond": {
+        "kind": "LivenessLost"
+      },
+      "at": 60000
+    },
+    {
+      "expect": {
+        "kind": "Sleep",
+        "until": 61000
+      }
+    },
+    {
+      "tick": 61000
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "deadline": 3661000
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "job.done",
+          "canonical": {
+            "job": "j1"
+          }
+        }
+      },
+      "at": 90000
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "retry",
+    "event_received"
+  ]
+}

@@ -51,7 +51,7 @@ The **Agent Capability Standard** (Grounded Agency) addresses all three gaps thr
 | Reference workflows | 12 production-ready patterns with typed bindings |
 | Domain profiles | 7 profiles (healthcare, manufacturing, audio, vision, multimodal, data analysis, personal assistant) |
 | OASF interoperability | 15 OASF categories mapped with bidirectional translation |
-| Formal standard | v1.0.0 published with RFC 2119 normative language |
+| Formal standard | v1.0.0 published with RFC 2119 normative language; v1.1.0 a Candidate Standard (accepted by RFC-0003 and RFC-0004, `spec/STANDARD-v1.1.0.md`) |
 | Governance | SemVer, RFC process, compatibility rules, security policy |
 
 ---

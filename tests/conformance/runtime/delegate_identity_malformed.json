@@ -1,0 +1,110 @@
+{
+  "description": "identity@1: an attested identity without a principal is not an agent_identity, so the delegation fails (R402), on its retry too.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "timeout": "2h",
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          },
+          "input_bindings": {
+            "task": {
+              "review": "${change}"
+            },
+            "agent": "a",
+            "read_only": true
+          },
+          "wait": {
+            "event_type": "review.done",
+            "liveness": {
+              "mode": "push",
+              "interval": "10m",
+              "failure_threshold": 3
+            }
+          }
+        }
+      ],
+      "inputs": {
+        "change": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "change": "c1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {
+            "identity": {
+              "kind": "agent"
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "effective": {
+            "identity": {
+              "kind": "agent"
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0,
+    "message": "effective.identity: an identity needs a string principal"
+  },
+  "trace_kinds": [
+    "retry",
+    "step_failed"
+  ]
+}

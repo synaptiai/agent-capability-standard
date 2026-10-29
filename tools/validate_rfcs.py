@@ -32,7 +32,9 @@ DEFAULT_RFC_DIR = ROOT / "spec"
 
 FILENAME_PATTERN = re.compile(r"^RFC-(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
 TITLE_PATTERN = re.compile(r"^# RFC-(\d{4}):\s*\S")
-STATUS_PATTERN = re.compile(r"^\*\*Status:\*\*\s*(Draft|Accepted|Rejected|Superseded)\s*$")
+STATUS_PATTERN = re.compile(
+    r"^\*\*Status:\*\*\s*(Draft|Accepted|Rejected|Superseded)\s*$"
+)
 TARGET_PATTERN = re.compile(r"^\*\*Target:\*\*\s*\S")
 DATE_PATTERN = re.compile(r"^\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})\s*$")
 
@@ -62,6 +64,7 @@ FENCE_PATTERN = re.compile(r"^(?P<fence>```+|~~~+).*?^(?P=fence)\s*$", re.M | re
 
 def strip_fenced_blocks(text: str) -> str:
     """Blank out fenced code blocks, preserving line numbering."""
+
     def blank(match: re.Match[str]) -> str:
         return "\n" * match.group(0).count("\n")
 

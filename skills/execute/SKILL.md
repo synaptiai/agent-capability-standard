@@ -32,6 +32,8 @@ Execute code or commands in a controlled manner, capturing output for verificati
 | `timeout` | No | string | Maximum execution time (default: "60s") |
 | `environment` | No | object | Environment variables to set |
 
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
+
 ## Procedure
 
 1) **Validate execution request**: Ensure code is safe to run
@@ -72,10 +74,10 @@ Return a structured object:
 ```yaml
 result:
   success: boolean  # Exit code == 0
-  exit_code: integer  # Process exit code
-  stdout: string  # Standard output
-  stderr: string  # Standard error
   duration: string  # Execution time
+exit_code: integer  # Process exit code
+stdout: string  # Standard output
+stderr: string  # Standard error
 execution:
   command: string  # What was executed
   language: string  # Execution environment
@@ -92,13 +94,15 @@ evidence_anchors: ["command:output"]
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `result` | any | Execution result: here `success` and `duration` |
 | `result.success` | boolean | Whether execution succeeded |
-| `result.exit_code` | integer | Process exit code |
-| `result.stdout` | string | Standard output |
-| `result.stderr` | string | Standard error |
 | `result.duration` | string | How long execution took |
+| `exit_code` | integer | Process exit code |
+| `stdout` | string | Standard output |
+| `stderr` | string | Standard error |
 | `execution` | object | Execution metadata |
 | `analysis` | object | Interpreted results |
+| `evidence_anchors` | array | References to the command and its output |
 
 ## Examples
 
@@ -115,21 +119,21 @@ timeout: "120s"
 ```yaml
 result:
   success: true
-  exit_code: 0
-  stdout: |
-    > project@1.0.0 test
-    > jest --grep 'UserService'
-
-    PASS src/services/__tests__/UserService.test.ts
-      UserService
-        ✓ creates user with valid data (45ms)
-        ✓ validates email format (12ms)
-        ✓ hashes password on save (23ms)
-
-    Test Suites: 1 passed, 1 total
-    Tests:       3 passed, 3 total
-  stderr: ""
   duration: "2.3s"
+exit_code: 0
+stdout: |
+  > project@1.0.0 test
+  > jest --grep 'UserService'
+
+  PASS src/services/__tests__/UserService.test.ts
+    UserService
+      ✓ creates user with valid data (45ms)
+      ✓ validates email format (12ms)
+      ✓ hashes password on save (23ms)
+
+  Test Suites: 1 passed, 1 total
+  Tests:       3 passed, 3 total
+stderr: ""
 execution:
   command: "npm test -- --grep 'UserService'"
   language: "bash"
@@ -157,14 +161,14 @@ environment:
 ```yaml
 result:
   success: true
-  exit_code: 0
-  stdout: |
-    user_count
-    ----------
-    15423
-    (1 row)
-  stderr: ""
   duration: "0.15s"
+exit_code: 0
+stdout: |
+  user_count
+  ----------
+  15423
+  (1 row)
+stderr: ""
 execution:
   command: "psql -c \"SELECT COUNT(*)...\""
   language: "sql"
@@ -190,13 +194,13 @@ language: "bash"
 ```yaml
 result:
   success: false
-  exit_code: 1
-  stdout: ""
-  stderr: |
-    Traceback (most recent call last):
-      File "<string>", line 1, in <module>
-    ModuleNotFoundError: No module named 'nonexistent_module'
   duration: "0.05s"
+exit_code: 1
+stdout: ""
+stderr: |
+  Traceback (most recent call last):
+    File "<string>", line 1, in <module>
+  ModuleNotFoundError: No module named 'nonexistent_module'
 execution:
   command: "python -c 'import nonexistent_module'"
   language: "bash"

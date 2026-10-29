@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+env:
+  # One Rust toolchain for every job, for the same reason constraints.txt pins
+  # ruff: a newer rustc, rustfmt or clippy can turn a green build red with no
+  # source change. RUSTUP_TOOLCHAIN makes the maturin builds behind
+  # `pip install -e` use it too. Bump deliberately.
+  RUST_TOOLCHAIN: "1.97.0"
+  RUSTUP_TOOLCHAIN: "1.97.0"
+  # Oldest rustc the crate supports (core/Cargo.toml `rust-version`).
+  RUST_MSRV: "1.86.0"
+
 jobs:
   validate-schemas:
     name: Validate YAML schemas
@@ -21,14 +31,33 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
+
       - name: Install dependencies
-        run: pip install -e "."
+        run: pip install -e "." -c constraints.txt
 
       - name: Validate ontology graph
         run: python tools/validate_ontology.py
 
       - name: Validate workflows
-        run: python tools/validate_workflows.py
+        run: python tools/validate_workflows.py --strict
+
+      - name: Validate domain workflow catalogs and examples
+        run: |
+          for catalog in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do
+            echo "== $catalog"
+            python tools/validate_workflows.py --catalog "$catalog" --strict
+          done
 
       - name: Validate domain profiles
         run: python tools/validate_profiles.py
@@ -48,6 +77,63 @@ jobs:
       - name: Validate documentation links
         run: python tools/validate_doc_links.py
 
+      - name: Validate YAML utility sync
+        run: python tools/validate_yaml_util_sync.py
+
+      - name: Validate transform mapping references
+        run: python tools/validate_transform_refs.py
+
+      - name: Check generated skill files are in sync
+        run: python tools/sync_skill_schemas.py --check
+
+      - name: Check runtime fixtures are generated
+        run: python scripts/gen_runtime_fixtures.py --check
+
+  rust-core:
+    name: Rust core (fmt, clippy, tests, MSRV)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt,clippy
+
+      - name: Rustfmt
+        run: cargo +"$RUST_TOOLCHAIN" fmt --check
+
+      - name: Clippy (library and CLI)
+        run: cargo +"$RUST_TOOLCHAIN" clippy --locked --all-targets -- -D warnings
+
+      - name: Clippy (Python extension)
+        run: cargo +"$RUST_TOOLCHAIN" clippy --locked --all-targets --features python -- -D warnings
+
+      - name: Tests
+        run: cargo +"$RUST_TOOLCHAIN" test --locked
+
+      - name: Builds on the minimum supported Rust version
+        run: |
+          rustup toolchain install "$RUST_MSRV" --profile minimal
+          cargo +"$RUST_MSRV" check --locked --all-targets --features python
+
+  cel-differential:
+    name: Expressions stay a CEL-compatible profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/cel_differential/go.mod
+          cache-dependency-path: tools/cel_differential/go.sum
+
+      - name: Compare ACS evaluation fixtures with cel-go
+        working-directory: tools/cel_differential
+        run: go run . ../../tests/conformance/expressions/eval.json ../../tests/conformance/expressions/check.json
+
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
@@ -59,6 +145,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
+
       - name: Install dependencies
         run: |
           pip install -e ".[dev]" -c constraints.txt
@@ -67,7 +165,7 @@ jobs:
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
 
       - name: Ruff format check
-        run: ruff format --check grounded_agency/ tests/ benchmarks/
+        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py
 
       - name: Mypy type check
         run: mypy grounded_agency/
@@ -86,6 +184,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
+
       - name: Install dependencies
         run: pip install -e ".[dev]" -c constraints.txt
 
@@ -102,6 +212,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
 
       - name: Install dependencies
         run: pip install -e ".[dev]" -c constraints.txt
@@ -133,8 +255,20 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
+
       - name: Install dependencies
-        run: pip install -e "."
+        run: pip install -e "." -c constraints.txt
 
       - name: Run conformance tests
         run: python scripts/run_conformance.py

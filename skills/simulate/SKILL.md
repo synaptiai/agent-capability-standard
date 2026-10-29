@@ -30,7 +30,8 @@ Execute mental simulations of scenarios to explore outcomes without making real 
 | `scenario` | Yes | object | Scenario to simulate (intervention, change, event) |
 | `initial_state` | No | object | Starting state for simulation |
 | `steps` | No | integer | Number of simulation steps/iterations |
-| `explore` | No | string | What to explore: single_path, branches, exhaustive |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -101,6 +102,8 @@ evidence_anchors: ["model:component", "assumption:id"]
 | `final_state` | object | Most likely end state |
 | `insights` | array | Risks, opportunities, and surprises found |
 | `simulation_meta` | object | Simulation parameters and assumptions |
+| `confidence` | number | 0.0-1.0 confidence in the simulation model |
+| `evidence_anchors` | array | References to the model components and assumptions used |
 
 ## Examples
 
@@ -211,7 +214,6 @@ initial_state:
   cache: "warm"
   queue_depth: 0
 steps: 10
-explore: "branches"
 ```
 
 **Output:**

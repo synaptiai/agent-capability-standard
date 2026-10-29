@@ -42,9 +42,7 @@ def validate_requires_edges(registry: CapabilityRegistry) -> list[str]:
     # Check for missing expected edges
     for from_cap, to_cap in expected_requires:
         if (from_cap, to_cap) not in actual_requires:
-            errors.append(
-                f"MISSING requires edge: {from_cap} -> {to_cap}"
-            )
+            errors.append(f"MISSING requires edge: {from_cap} -> {to_cap}")
 
     # Note unexpected requires edges (not necessarily errors, but worth reporting)
     unexpected = actual_requires - expected_requires
@@ -61,15 +59,42 @@ def validate_capabilities_exist(registry: CapabilityRegistry) -> list[str]:
     errors = []
 
     expected_capabilities = {
-        "retrieve", "search", "observe", "receive",
-        "detect", "classify", "measure", "predict", "compare", "discover",
-        "plan", "decompose", "critique", "explain",
-        "state", "transition", "attribute", "ground", "simulate",
-        "generate", "transform", "integrate",
-        "execute", "mutate", "send",
-        "verify", "checkpoint", "rollback", "constrain", "audit",
-        "persist", "recall",
-        "delegate", "synchronize", "invoke", "inquire",
+        "retrieve",
+        "search",
+        "observe",
+        "receive",
+        "detect",
+        "classify",
+        "measure",
+        "predict",
+        "compare",
+        "discover",
+        "plan",
+        "decompose",
+        "critique",
+        "explain",
+        "state",
+        "transition",
+        "attribute",
+        "ground",
+        "simulate",
+        "generate",
+        "transform",
+        "integrate",
+        "execute",
+        "mutate",
+        "send",
+        "verify",
+        "checkpoint",
+        "rollback",
+        "constrain",
+        "audit",
+        "persist",
+        "recall",
+        "delegate",
+        "synchronize",
+        "invoke",
+        "inquire",
     }
 
     actual_capabilities = {node.id for node in registry.all_capabilities()}
@@ -109,7 +134,9 @@ def validate_coercion_registry() -> list[str]:
             # Verify the mapping_ref path exists
             ref_path = ROOT / entry["mapping_ref"]
             if not ref_path.exists():
-                errors.append(f"Coercion {i}: mapping_ref not found: {entry['mapping_ref']}")
+                errors.append(
+                    f"Coercion {i}: mapping_ref not found: {entry['mapping_ref']}"
+                )
 
     return errors
 
@@ -178,7 +205,7 @@ def main() -> int:
     print(f"   {'PASS' if not errors else 'FAIL'}: {len(errors)} error(s)")
 
     # Summary
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     if all_errors:
         print(f"FAIL: {len(all_errors)} total error(s)")
         for err in all_errors:

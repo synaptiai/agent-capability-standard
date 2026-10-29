@@ -56,6 +56,7 @@ RESET = "\033[0m"
 # Validation helpers
 # ---------------------------------------------------------------------------
 
+
 def validate_name(name: str) -> str | None:
     """Return an error message if *name* is invalid, else None."""
     if len(name) < NAME_MIN:
@@ -78,6 +79,7 @@ def _die(msg: str) -> None:
 # ---------------------------------------------------------------------------
 # Subcommand: capability
 # ---------------------------------------------------------------------------
+
 
 def scaffold_capability(args: argparse.Namespace) -> None:
     """Scaffold a new capability in the ontology and create a skill stub."""
@@ -163,7 +165,7 @@ def scaffold_capability(args: argparse.Namespace) -> None:
     fence_start = template_text.find("```markdown")
     fence_end = template_text.find("```\n\n---", fence_start)
     if fence_start != -1 and fence_end != -1:
-        skill_content = template_text[fence_start + len("```markdown\n"):fence_end]
+        skill_content = template_text[fence_start + len("```markdown\n") : fence_end]
     else:
         # Fallback: use the whole template
         skill_content = template_text
@@ -174,9 +176,7 @@ def scaffold_capability(args: argparse.Namespace) -> None:
         "<verb phrase describing what this capability does>",
         "TODO: Add description",
     )
-    skill_content = skill_content.replace(
-        "<explore|general-purpose>", agent
-    )
+    skill_content = skill_content.replace("<explore|general-purpose>", agent)
     skill_content = skill_content.replace(
         "<comma-separated list from ontology default_tools>", allowed_tools
     )
@@ -200,9 +200,15 @@ def scaffold_capability(args: argparse.Namespace) -> None:
 
     # --- dry-run reporting ---
     if dry_run:
-        print(f"{YELLOW}[DRY-RUN] Would add capability node '{name}' to ontology{RESET}")
-        print(f"{YELLOW}[DRY-RUN]   layer: {layer}, risk: {risk}, mutation: {mutation}{RESET}")
-        print(f"{YELLOW}[DRY-RUN] Would append '{name}' to layers.{layer}.capabilities{RESET}")
+        print(
+            f"{YELLOW}[DRY-RUN] Would add capability node '{name}' to ontology{RESET}"
+        )
+        print(
+            f"{YELLOW}[DRY-RUN]   layer: {layer}, risk: {risk}, mutation: {mutation}{RESET}"
+        )
+        print(
+            f"{YELLOW}[DRY-RUN] Would append '{name}' to layers.{layer}.capabilities{RESET}"
+        )
         print(f"{YELLOW}[DRY-RUN] Would write ontology back to {ontology_path}{RESET}")
         print(f"{YELLOW}[DRY-RUN] Would create skill directory {skill_dir}/{RESET}")
         print(f"{YELLOW}[DRY-RUN] Would create skill file {skill_path}{RESET}")
@@ -218,7 +224,9 @@ def scaffold_capability(args: argparse.Namespace) -> None:
 
     # Write ontology
     with open(ontology_path, "w", encoding="utf-8") as f:
-        yaml.dump(ontology, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        yaml.dump(
+            ontology, f, default_flow_style=False, sort_keys=False, allow_unicode=True
+        )
 
     # Create skill directory and file
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -233,6 +241,7 @@ def scaffold_capability(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # Subcommand: workflow
 # ---------------------------------------------------------------------------
+
 
 def scaffold_workflow(args: argparse.Namespace) -> None:
     """Scaffold a new workflow stub in the catalog."""
@@ -289,7 +298,9 @@ def scaffold_workflow(args: argparse.Namespace) -> None:
     catalog[key] = stub
 
     with open(catalog_path, "w", encoding="utf-8") as f:
-        yaml.dump(catalog, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        yaml.dump(
+            catalog, f, default_flow_style=False, sort_keys=False, allow_unicode=True
+        )
 
     print(f"{GREEN}Created workflow '{key}':{RESET}")
     print(f"{GREEN}  - Added to {catalog_path}{RESET}")
@@ -298,6 +309,7 @@ def scaffold_workflow(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # Subcommand: profile
 # ---------------------------------------------------------------------------
+
 
 def scaffold_profile(args: argparse.Namespace) -> None:
     """Scaffold a new domain profile YAML file."""
@@ -372,6 +384,7 @@ trust_model_reviewed: false
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
@@ -423,9 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # --- profile ---
-    prof_parser = subparsers.add_parser(
-        "profile", help="Scaffold a new domain profile"
-    )
+    prof_parser = subparsers.add_parser("profile", help="Scaffold a new domain profile")
     prof_parser.add_argument("name", help="Kebab-case profile name")
     prof_parser.add_argument(
         "--dry-run",

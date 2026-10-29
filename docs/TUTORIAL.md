@@ -4,7 +4,7 @@ This tutorial walks you through creating a custom workflow from scratch. By the 
 
 **Prerequisites:**
 - Completed the [Quickstart Guide](QUICKSTART.md)
-- Python 3.9+ with pyyaml installed
+- Python 3.10+ with the package installed (`pip install -e ".[dev]" -c constraints.txt`, which needs Rust 1.86+)
 - Basic YAML knowledge
 
 ---
@@ -59,13 +59,16 @@ A workflow is a sequence of capability invocations. Each step:
 
 ### 1.3 The Safety Contract
 
-Some capabilities require others to run first:
+Some capabilities depend on others running first. The ontology's edges say how strictly:
 
-| Capability | Requires | Why |
-|------------|----------|-----|
-| `mutate` | `plan`, `checkpoint` | Can't execute blindly; need recovery point |
-| `rollback` | `checkpoint`, `audit` | Need state to restore; need record of why |
-| `verify` | `constrain` | Need invariants to check against |
+| Capability | Needs first | Edge | If missing |
+|------------|-------------|------|------------|
+| `mutate`, `send`, `rollback` | `checkpoint` | `requires` | Error V102 — need a recovery point |
+| `execute`, `mutate`, `send` | `constrain` | `soft_requires` | Warning W601 — act within stated limits |
+| `ground` | one of `observe`, `detect`, `predict`, `attribute`, `explain`, `retrieve`, `search` | `soft_requires` | Warning W601 — need something to ground |
+| `verify` | `execute`, `mutate`, `send` (when present) | `precedes` | Error V102 if they appear in the wrong order |
+
+A `precedes` edge only orders capabilities that are both in the workflow; a step in the same `parallel_group` does not count as running before another.
 
 ---
 
@@ -94,7 +97,7 @@ Let's create a workflow that analyzes a file and reports findings.
 Create `examples/my_first_workflow.yaml`:
 
 ```yaml
-# Standard version: 1.0.0
+# Standard version: 1.1.0
 analyze_file:
   goal: Analyze a file and report findings with recommendations.
   risk: low
@@ -103,18 +106,21 @@ analyze_file:
     - capability: observe
       purpose: Examine the file structure and content.
       store_as: observe_out
+      input_bindings:
+        target: ${user_input.file_path}
 
     - capability: detect
       purpose: Find unusual patterns in the file.
       store_as: anomaly_out
       input_bindings:
-        context: ${observe_out}
+        data: ${observe_out}
+        pattern: anomaly
 
     - capability: explain
       purpose: Create a readable report of findings.
       store_as: summary_out
       input_bindings:
-        content: ${anomaly_out}
+        conclusion: ${anomaly_out}
 
   success:
     - File analyzed
@@ -133,27 +139,30 @@ analyze_file:
 
 | Field | Purpose |
 |-------|---------|
-| `goal` | What this workflow achieves |
-| `risk` | How dangerous is this? (low = read-only) |
-| `steps` | Ordered list of capability invocations |
-| `success` | How to know it worked |
-| `inputs` | What external data is needed |
+| `goal` | What this workflow achieves (required) |
+| `risk` | How dangerous is this? (low = read-only) (required) |
+| `steps` | Ordered list of capability invocations (required) |
+| `success` | How to know it worked (optional) |
+| `inputs` | What external data is needed (optional) |
+
+The `# Standard version: 1.1.0` header declares which version of the standard the file follows; a per-workflow `spec_version: "1.1"` field does the same. Without either, the validator warns (W605).
 
 ### 2.3 Understand Bindings
 
 ```yaml
 input_bindings:
-  context: ${observe_out}
+  data: ${observe_out}
 ```
 
-This tells `detect` to use the output from `observe` as its context. The validator checks:
-1. `observe_out` exists (from a prior step)
-2. The type is compatible with what `detect` expects
+This tells `detect` to analyse the output of `observe` (its `data` input). The validator checks:
+1. `data` is one of `detect`'s inputs in the ontology (else W604)
+2. `observe_out` exists (from a prior step)
+3. The type is compatible with what `detect` expects
 
 ### 2.4 Validate Your Workflow
 
 ```bash
-python tools/validate_workflows.py examples/my_first_workflow.yaml
+python tools/validate_workflows.py --catalog examples/my_first_workflow.yaml
 ```
 
 Expected output:
@@ -205,7 +214,7 @@ Now let's create a workflow that modifies files. This requires safety mechanisms
 Create `examples/fix_and_verify.yaml`:
 
 ```yaml
-# Standard version: 1.0.0
+# Standard version: 1.1.0
 fix_and_verify:
   goal: Fix a detected issue and verify the fix worked.
   risk: high
@@ -215,30 +224,39 @@ fix_and_verify:
     - capability: observe
       purpose: Examine current state.
       store_as: observe_out
+      input_bindings:
+        target: ${user_input.target}
 
     - capability: detect
       purpose: Identify the issue.
       store_as: anomaly_out
       input_bindings:
-        context: ${observe_out}
+        data: ${observe_out}
+        pattern: defect
 
     # 2. Plan the fix
     - capability: plan
       purpose: Create a fix plan.
       store_as: plan_out
       input_bindings:
+        goal: Fix the defect found in ${user_input.target}
         context: ${anomaly_out}
 
     # 3. Define what success looks like
     - capability: constrain
       purpose: Define invariants the fix must satisfy.
       store_as: schema_out
+      input_bindings:
+        target: "${plan_out.steps: array<object>}"
+        constraints: [tests_pass, public_interfaces_unchanged]
 
     # 4. Save state before mutation (REQUIRED)
     - capability: checkpoint
       purpose: Save state for potential rollback.
       store_as: checkpoint_out
       mutation: true
+      input_bindings:
+        scope: ${user_input.target}
 
     # 5. Execute the fix (REQUIRES checkpoint)
     - capability: mutate
@@ -247,27 +265,38 @@ fix_and_verify:
       mutation: true
       requires_checkpoint: true
       input_bindings:
-        plan: ${plan_out}
+        target: ${user_input.target}
+        operation:
+          apply: "${plan_out.steps: array<object>}"
       gates:
         - when: ${checkpoint_out.checkpoint_id} == null
           action: stop
           message: "Cannot proceed without checkpoint"
 
-    # 6. Verify the fix worked (REQUIRES constrain)
+    # 6. Verify the fix worked (must come after mutate)
     - capability: verify
       purpose: Check that fix satisfies invariants.
       store_as: verify_out
+      input_bindings:
+        target: ${user_input.target}
+        conditions: [tests_pass, public_interfaces_unchanged, defect_absent]
       failure_modes:
-        - condition: verdict == FAIL
+        - condition: The fix does not satisfy the invariants.
+          when: ${verify_out.passed} == false
           action: rollback
           recovery:
-            goto_step: plan
+            goto_step: plan_out
             max_loops: 3
 
     # 7. Record what happened
     - capability: audit
       purpose: Log the change for accountability.
       store_as: audit_out
+      input_bindings:
+        event:
+          type: fix_applied
+          target: ${user_input.target}
+          verified: ${verify_out.passed}
 
   success:
     - Issue fixed
@@ -290,6 +319,8 @@ fix_and_verify:
   purpose: Save state for potential rollback.
   store_as: checkpoint_out
   mutation: true
+  input_bindings:
+    scope: src/parser.py
 ```
 
 **Gate that blocks without checkpoint:**
@@ -303,23 +334,27 @@ gates:
 **Recovery on failure:**
 ```yaml
 failure_modes:
-  - condition: verdict == FAIL
+  - condition: The fix does not satisfy the invariants.
+    when: ${verify_out.passed} == false   # fires after verify, on its output
     action: rollback
     recovery:
-      goto_step: plan
+      goto_step: plan_out                 # loop back to the plan step
       max_loops: 3
 ```
 
 ### 3.3 Validate the Safety Workflow
 
 ```bash
-python tools/validate_workflows.py examples/fix_and_verify.yaml
+python tools/validate_workflows.py --catalog examples/fix_and_verify.yaml
 ```
 
 The validator ensures:
-- `checkpoint` comes before `mutate`
-- `constrain` comes before `verify`
+- `checkpoint` comes before `mutate` (error V102 otherwise)
+- `verify` comes after `mutate` (error V102 otherwise)
+- `constrain` comes before `mutate` (warning W601 otherwise)
 - All bindings are valid
+
+Add `--strict` to make warnings fail the run too.
 
 ---
 
@@ -351,12 +386,18 @@ steps:
     purpose: Search logs
     store_as: log_search
     parallel_group: gather_context
+    input_bindings:
+      query: ${user_input.error_message}
+      scope: logs
 
   - capability: search
     purpose: Search code
     store_as: code_search
     parallel_group: gather_context
     join: all_complete
+    input_bindings:
+      query: ${user_input.error_message}
+      scope: src
 
   - capability: integrate
     purpose: Combine search results
@@ -377,16 +418,20 @@ Skip steps based on conditions:
   store_as: action_out
   condition: ${approval_out.approved} == true
   skip_if_false: true
+  input_bindings:
+    target: ${user_input.target}
+    operation:
+      apply: "${plan_out.steps: array<object>}"
 ```
 
 ### 4.3 Typed Bindings
 
-When types are ambiguous, add annotations:
+When types are ambiguous, add annotations. Quote typed references: unquoted, the `: ` inside them stops the file loading when the reference is a mapping value, and makes YAML read a list item as a mapping (W612):
 
 ```yaml
 input_bindings:
-  observations: ${integrate_out.merged.observations: array<object>}
-  domain: ${integrate_out.merged.meta.world_id: string}
+  observations: "${integrate_out.merged.observations: array<object>}"
+  domain: "${integrate_out.merged.meta.world_id: string}"
 ```
 
 ### 4.4 Transform Mappings
@@ -397,6 +442,9 @@ Reference external transform definitions:
 - capability: transform
   purpose: Normalize data format.
   store_as: transform_out
+  input_bindings:
+    input: ${retrieve_out.data}
+    target_format: event
   mapping_ref: schemas/transforms/my_transform.yaml
   output_conforms_to: schemas/event_schema.yaml#/event
 ```
@@ -409,7 +457,7 @@ Reference external transform definitions:
 
 **Error:**
 ```
-V101: UNKNOWN_CAPABILITY: 'detect-anamoly' not found
+[my_workflow] step 1 (detect-anamoly): V101 capability 'detect-anamoly' not found in ontology
 ```
 
 **Fix:** Check spelling. It's `detect`, not `detect-anamoly`.
@@ -418,31 +466,31 @@ V101: UNKNOWN_CAPABILITY: 'detect-anamoly' not found
 
 **Error:**
 ```
-V102: MISSING_PREREQUISITE: 'mutate' requires 'checkpoint'
+[my_workflow] step 3 (mutate): V102 capability 'mutate' missing required prerequisite 'checkpoint' before it
 ```
 
 **Fix:** Add a `checkpoint` step before `mutate`.
 
-### 5.3 Invalid Binding Path (B201)
+### 5.3 Unknown Store Reference (B202)
 
 **Error:**
 ```
-B201: INVALID_BINDING_PATH: 'insepct_out.findings' not found
+[my_workflow] step 2 (explain): B202 unknown reference store 'insepct_out' in ${insepct_out.findings}
 ```
 
-**Fix:** Check the `store_as` name. It's `observe_out`, not `insepct_out`.
+**Fix:** Check the `store_as` name. It's `observe_out`, not `insepct_out`. (If the store exists but the path after it is not in the producer's output schema, the error is B201 INVALID_BINDING_PATH.)
 
 ### 5.4 Ambiguous Type (B204)
 
 **Error:**
 ```
-B204: AMBIGUOUS_TYPE: Cannot infer type for '${data.items}'
+[my_workflow] step 1 (compare): B204 ambiguous type for ${data.items}: inferred array<unknown> is ambiguous or unknown; add a typed annotation
 ```
 
-**Fix:** Add a type annotation:
+**Fix:** Add a (quoted) type annotation:
 ```yaml
 input_bindings:
-  items: ${data.items: array<object>}
+  items: "${data.items: array<object>}"
 ```
 
 ---
@@ -461,7 +509,7 @@ input_bindings:
 
 Before any mutation:
 - [ ] Add `checkpoint` step
-- [ ] Set `mutation: true` on mutating steps
+- [ ] Leave safety flags (`mutation`, `requires_checkpoint`, ...) to the ontology — steps inherit them, and a weaker step value is ignored with warning W602
 - [ ] Add gate to verify checkpoint exists
 - [ ] Add `verify` step after mutation
 - [ ] Add `failure_modes` with recovery
@@ -482,8 +530,8 @@ Every step should have:
 | Understand all 36 capabilities | [Capability Ontology](../schemas/capability_ontology.yaml) |
 | See production workflows | [Workflow Catalog](../schemas/workflow_catalog.yaml) |
 | Work with images, audio, and video | [Modality Handling Guide](guides/MODALITY_HANDLING.md) |
-| Read the full spec | [STANDARD-v1.0.0.md](../spec/STANDARD-v1.0.0.md) |
-| Understand error codes | [STANDARD Section 9](../spec/STANDARD-v1.0.0.md#9-error-model) |
+| Read the full spec | [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) |
+| Understand error codes | [STANDARD Section 9](../spec/STANDARD-v1.1.0.md#9-diagnostic-model) |
 
 ---
 

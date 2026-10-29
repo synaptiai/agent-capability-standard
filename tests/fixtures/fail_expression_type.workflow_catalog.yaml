@@ -1,0 +1,20 @@
+# Standard version: 1.1.0
+# Negative fixture (STANDARD v1.1 §5.8): ordering a boolean against a number
+# is a type error. B206.
+expression_type:
+  goal: Reject an ill-typed condition.
+  risk: low
+  steps:
+  - capability: verify
+    purpose: Verify.
+    store_as: verify_out
+    input_bindings:
+      conditions: []
+  - capability: explain
+    purpose: Explain only when verification passed.
+    store_as: explain_out
+    condition: ${verify_out.passed} > 1
+    input_bindings:
+      conclusion: done
+  success:
+  - Never valid

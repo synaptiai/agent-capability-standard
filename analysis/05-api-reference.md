@@ -2,7 +2,7 @@
 
 > **Package**: `grounded_agency`
 > **Version**: `0.1.0`
-> **Python**: 3.9+
+> **Python**: >=3.10 (the package includes the compiled Rust extension `grounded_agency._core`; building from source needs Rust >= 1.86)
 > **License**: See repository root
 
 This document provides the complete API reference for the Grounded Agency Python SDK. Every public class, method, property, constant, and type alias exported by the `grounded_agency` package is documented here with full signatures, parameter descriptions, return types, and usage examples.
@@ -51,12 +51,32 @@ from grounded_agency import (
     Checkpoint,
     EvidenceStore,
     EvidenceAnchor,
+    # Workflows
+    WorkflowEngine,
+    WorkflowDefinition,
+    WorkflowStep,
+    # Error model
+    ErrorCode,          # Enum of diagnostic codes (V1xx, B2xx, S3xx, R4xx, F5xx, W601-W616)
+    Severity,           # str Enum: "error" | "warning"
+    ValidationError,
+    format_error,
+    format_errors_response,
     # Types
     HookCallback,
     # Logging
     logger,
 )
 ```
+
+This is a selection: `__all__` also exports the query/client helpers (`grounded_query`, `GroundedClient`, `CostSummary`), rate limiting, workflow tracing, coordination and discovery types.
+
+`ErrorCode` mirrors the Rust core's code list (`_core.CODES`). Every diagnostic carries a `Severity`; warnings (`W601`-`W616`) never fail validation unless the caller treats them as errors (e.g. `validate_workflows.py --strict`). `ValidationError.from_core()` builds one from a diagnostic of a `_core` validation report.
+
+`WorkflowEngine` (`grounded_agency/workflows/engine.py`) loads catalogs through the Rust core (`_core.load_catalog`) and validates them with `_core.Validator`. Recent additions:
+
+- `validate_report(workflow_name: str | None = None) -> list[ValidationError]` -- every diagnostic, errors and warnings, in the validator's order (all loaded workflows are validated together so references between them resolve)
+- `add_workflow(workflow: WorkflowDefinition) -> None` -- add or replace a workflow; its steps' safety fields are resolved against the ontology (raises `ValueError` for `x-` names)
+- `effective_flags(step: WorkflowStep) -> dict[str, Any]` -- the safety fields a step is treated as: its own values made at least as strict as the ontology's (`mutation: false` is honoured only when declared on a `mutation_overridable` capability)
 
 The package logger is pre-configured with `NullHandler` so consumers control their own logging setup:
 
@@ -83,6 +103,9 @@ Configuration dataclass for the `GroundedAgentAdapter`. All fields have defaults
 | `audit_log_path` | `str` | `".claude/audit.log"` | Path for the audit log file written by hooks. |
 | `checkpoint_dir` | `str` | `".checkpoints"` | Directory for checkpoint metadata storage. |
 | `expiry_minutes` | `int` | `30` | Default checkpoint expiry in minutes. After this period, a checkpoint is no longer valid. |
+| `checkpoint_reservation_seconds` | `float \| None` | `None` | How long a tool call holds the checkpoint it reserved if it never reports back (never consumes or releases it). `None` uses the tracker default, `CheckpointTracker.DEFAULT_RESERVATION_SECONDS` (600). Passed to `CheckpointTracker(reservation_seconds=...)`. |
+
+Further optional fields (`rate_limit`, `ontology_hash`, `output_format`, `max_budget_usd`, `model`, `max_turns`, `enable_discovery`) are documented in the class docstring.
 
 ### Example
 
@@ -138,7 +161,7 @@ During `__post_init__`, the adapter creates:
 
 - `self.registry` -- `CapabilityRegistry` loaded from `config.ontology_path`
 - `self.mapper` -- `ToolCapabilityMapper` initialized with the raw ontology dict
-- `self.checkpoint_tracker` -- `CheckpointTracker` initialized with `config.checkpoint_dir`
+- `self.checkpoint_tracker` -- `CheckpointTracker` initialized with `config.checkpoint_dir` and `reservation_seconds=config.checkpoint_reservation_seconds`
 - `self.evidence_store` -- `EvidenceStore` (default 10,000 anchor capacity)
 
 ### Attributes
@@ -168,8 +191,11 @@ Wraps SDK `ClaudeAgentOptions` with the grounded agency safety layer.
 **Injected modifications**:
 
 - `enable_file_checkpointing=True` for SDK-level rollback support
-- `can_use_tool` callback for checkpoint enforcement (see permission callback below)
+- `can_use_tool` callback for rate limiting and checkpoint enforcement (see permission callback below)
+- `PreToolUse` hooks: checkpoint hook (reserves the checkpoint for each checkpoint-gated call), plus the discovery injector when `enable_discovery=True`
 - `PostToolUse` hooks: evidence collector, skill tracker, mutation consumer
+- `PostToolUseFailure` hook: failure releaser (gives back the checkpoint a failed or interrupted call reserved)
+- Existing hooks in `base.hooks` are kept; the adapter's hooks are appended
 - `Skill` added to `allowed_tools` if not present
 - `"project"` added to `setting_sources` if not present
 
@@ -183,13 +209,17 @@ async with ClaudeSDKClient(options) as client:
     await client.query("Edit the config file...")
 ```
 
+**Internal behavior of the PreToolUse checkpoint hook**:
+
+PreToolUse runs for every tool call, including pre-approved ones that never reach `can_use_tool`. For a checkpoint-gated call it reserves the active checkpoint with `CheckpointTracker.validate_and_reserve(tool_use_id)`. If there is no valid checkpoint, or another call holds the reservation, it denies the call in strict mode by returning `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}`; in non-strict mode it logs a warning.
+
 **Internal behavior of the permission callback**:
 
-When `strict_mode=True` and a tool requiring a checkpoint is invoked without one, the callback returns `PermissionResultDeny` (or a dict `{"allowed": False, "message": ...}` if the SDK is not installed). When `strict_mode=False`, a warning is logged but execution proceeds. On any internal error during the permission check, access is denied (fail-closed security).
+The callback first applies the per-risk rate limit (SEC-010). For a checkpoint-gated tool it then repeats the reservation for the same `tool_use_id` (idempotent, so the PreToolUse reservation is kept). When `strict_mode=True` and no reservation can be made (no valid checkpoint, or the checkpoint is reserved by another in-flight call), the callback returns `PermissionResultDeny` (or a `FallbackPermissionDeny` if the SDK is not installed). When `strict_mode=False`, a warning is logged but execution proceeds. On any internal error during the permission check, access is denied (fail-closed security).
 
-**Internal behavior of the mutation consumer hook**:
+**Internal behavior of the mutation consumer and failure releaser hooks**:
 
-After a mutation tool completes successfully, the active checkpoint is automatically consumed, enforcing one-checkpoint-per-mutation semantics. If the mutation fails (indicated by `is_error` in the response), the checkpoint is preserved.
+After a checkpoint-gated tool completes, the PostToolUse mutation consumer calls `consume_checkpoint(tool_use_id)`, consuming only the checkpoint that call reserved, which enforces one-checkpoint-per-mutation semantics. If the tool reports an error (`is_error` in the response) or the call is not a mutation, it calls `release_reservation(tool_use_id)` instead and the checkpoint is preserved. A call that fails or is interrupted gets no PostToolUse; the PostToolUseFailure hook releases its reservation. A reservation nobody ends lapses after `checkpoint_reservation_seconds`.
 
 ---
 
@@ -220,7 +250,7 @@ checkpoint_id = adapter.create_checkpoint(
 
 ### `consume_checkpoint() -> str | None`
 
-Marks the active checkpoint as consumed. Call after a successful mutation to require a new checkpoint for subsequent mutations.
+Marks the active checkpoint as consumed (delegates to `checkpoint_tracker.consume_checkpoint()` with no holder, ending any reservation). Call after a successful mutation to require a new checkpoint for subsequent mutations. Inside `wrap_options()` this is done automatically per tool call.
 
 **Returns**: `str | None` -- ID of the consumed checkpoint, or `None` if no active checkpoint exists.
 
@@ -501,6 +531,7 @@ Represents a single capability from the ontology.
 | `mutation` | `bool` | *required* | Whether this capability modifies persistent state. |
 | `requires_checkpoint` | `bool` | `False` | Whether a checkpoint is required before execution. |
 | `requires_approval` | `bool` | `False` | Whether human approval is required. |
+| `mutation_overridable` | `bool` | `False` | Whether a workflow step may declare `mutation: false` for this capability and have it honoured (otherwise a weaker step flag is ignored with W602). `from_dict()` raises `ValueError` unless the node also has `mutation: true`, `risk: "low"` and neither `requires_checkpoint` nor `requires_approval`. Set only on `audit`. |
 | `input_schema` | `dict[str, Any]` | `{}` | JSON Schema for capability inputs. |
 | `output_schema` | `dict[str, Any]` | `{}` | JSON Schema for capability outputs. |
 
@@ -730,6 +761,7 @@ Manages the checkpoint lifecycle for mutation safety. Before any mutation (Write
 |----------|-------|-------------|
 | `DEFAULT_EXPIRY_MINUTES` | `30` | Default checkpoint expiry in minutes. |
 | `DEFAULT_MAX_HISTORY` | `100` | Maximum checkpoints retained in history. |
+| `DEFAULT_RESERVATION_SECONDS` | `600.0` | How long a reservation holds if its holder never consumes or releases it. |
 
 ### Constructor
 
@@ -737,6 +769,8 @@ Manages the checkpoint lifecycle for mutation safety. Before any mutation (Write
 CheckpointTracker(
     checkpoint_dir: str | Path = ".checkpoints",
     max_history: int | None = None,
+    marker_dir: str | Path | None = None,
+    reservation_seconds: float | None = None,
 )
 ```
 
@@ -746,6 +780,8 @@ CheckpointTracker(
 |-----------|------|---------|-------------|
 | `checkpoint_dir` | `str \| Path` | `".checkpoints"` | Directory for checkpoint metadata storage. |
 | `max_history` | `int \| None` | `None` | Maximum checkpoints to keep in history. Defaults to `DEFAULT_MAX_HISTORY` (100). Oldest checkpoints are pruned when the limit is exceeded. |
+| `marker_dir` | `str \| Path \| None` | `None` | Directory for the shell hook marker (`.claude/`). If set, `create_checkpoint()` writes `checkpoint.ok` there and `consume_checkpoint()` removes it (SEC-001). |
+| `reservation_seconds` | `float \| None` | `None` | How long `validate_and_reserve()` holds the active checkpoint if neither `consume_checkpoint()` nor `release_reservation()` follows. Defaults to `DEFAULT_RESERVATION_SECONDS` (600). |
 
 ---
 
@@ -821,17 +857,42 @@ Returns the ID of the active checkpoint, or `None` if no valid checkpoint exists
 
 ---
 
-### `consume_checkpoint() -> str | None`
+### `validate_and_reserve(holder: str | None = None) -> tuple[bool, str | None]`
 
-Marks the active checkpoint as consumed. Called after a successful mutation to indicate the checkpoint has been "used up" and a new one is needed.
+Atomically (under the tracker's lock) checks the active checkpoint and reserves it for one tool call (SEC-007). Only one holder at a time may hold the checkpoint, so concurrent tool calls cannot both proceed on it. Reserving again with the same `holder` succeeds (idempotent), so the PreToolUse hook and the permission callback of one call can both reserve. Reservations are held in memory only and lapse after `reservation_seconds`.
 
-**Returns**: `str | None` -- ID of the consumed checkpoint, or `None` if no active checkpoint exists.
+**Parameters**: `holder: str | None` -- Who holds the reservation, normally the tool call's `tool_use_id`. If omitted, an anonymous holder is used that only `release_reservation()` / `consume_checkpoint()` without a holder can end.
+
+**Returns**:
+
+- `(True, checkpoint_id)` -- reserved for `holder`
+- `(False, checkpoint_id)` -- a valid checkpoint exists but another holder has reserved it
+- `(False, None)` -- no valid checkpoint
+
+---
+
+### `release_reservation(holder: str | None = None) -> bool`
+
+Ends a reservation without consuming the checkpoint, e.g. after the mutation failed or changed nothing. With `holder`, only that holder's reservation is released; without, any.
+
+**Returns**: `bool` -- `True` if a reservation was released.
+
+---
+
+### `consume_checkpoint(holder: str | None = None) -> str | None`
+
+Marks a checkpoint as consumed. Called after a successful mutation to indicate the checkpoint has been "used up" and a new one is needed.
+
+Without `holder`, the active checkpoint is consumed and any reservation ends. With `holder`, only the checkpoint that holder reserved is consumed: nothing happens for a call that holds no reservation, and if a newer checkpoint was created meanwhile, the reserved one is marked consumed in history while the newer one stays active.
+
+**Returns**: `str | None` -- ID of the consumed checkpoint, or `None` if nothing was consumed.
 
 **Side effects**:
 
 - Sets `consumed = True` and `consumed_at` on the checkpoint
-- Moves the checkpoint to history
-- Sets `_active_checkpoint = None`
+- Moves the checkpoint to history and clears the reservation
+- Sets `_active_checkpoint = None` (when the active checkpoint is consumed)
+- Removes the shell marker (if `marker_dir` is set) and persists state
 
 ---
 
@@ -1474,7 +1535,7 @@ These are private but affect public behavior:
 
 ## 17. CLI Tools Reference
 
-The project ships five CLI validator tools under `tools/`. All tools require `pyyaml` and run from the repository root.
+The project ships its validators and generators under `tools/`; this section documents the five most used. All run from the repository root. Most need only `pyyaml` (they load YAML through the standalone `tools/yaml_util.py`), but `validate_workflows.py` is a front end to the Rust core and needs the built package (`grounded_agency._core`): run `pip install -e ".[dev]" -c constraints.txt` (Rust >= 1.86) first. `validate_benchmark_deps.py` also imports `grounded_agency`.
 
 ---
 
@@ -1482,12 +1543,14 @@ The project ships five CLI validator tools under `tools/`. All tools require `py
 
 **File**: `tools/validate_workflows.py`
 
-Validates workflow definitions in `schemas/workflow_catalog.yaml` against the capability ontology. Performs structural validation, reference validation, type system checking, consumer-side type checking, and patch suggestion generation.
+Validates workflow definitions in `schemas/workflow_catalog.yaml` (or another catalog) against the capability ontology. The checks themselves run in the Rust core (`core/src/validate/`, exposed as `grounded_agency._core.validate_catalog`); the script formats the report, writes the JSON output and renders the optional patch. The core parses the catalog with its own YAML 1.2 loader; PyYAML (`safe_yaml_load`) is used only to re-serialize the catalog for `--emit-patch`.
 
 **Usage**:
 
 ```bash
 python tools/validate_workflows.py
+python tools/validate_workflows.py --catalog path/to/catalog.yaml
+python tools/validate_workflows.py --strict
 python tools/validate_workflows.py --emit-patch
 ```
 
@@ -1495,34 +1558,44 @@ python tools/validate_workflows.py --emit-patch
 
 | Flag | Description |
 |------|-------------|
-| `--emit-patch` | Write a unified diff patch file (`tools/validator_patch.diff`) with suggested transform insertions for type mismatches. |
+| `--catalog PATH` | Validate this catalog instead of `schemas/workflow_catalog.yaml`. |
+| `--strict` | Treat warnings as errors (exit 1 if any warning is emitted). |
+| `--emit-patch` | Also write a unified diff (`tools/validator_patch.diff`) with suggested transform insertions for type mismatches. |
 
 **Exit codes**:
 
 | Code | Meaning |
 |------|---------|
-| `0` | All workflows pass validation. |
-| `1` | One or more validation errors found. |
+| `0` | No errors (warnings allowed unless `--strict`). |
+| `1` | One or more errors (or, with `--strict`, warnings), or the catalog/ontology could not be loaded. |
 
-**Output files** (always written):
+**Output files** (always written, pass or fail):
 
-- `tools/validator_suggestions.json` -- Machine-readable errors and suggestions with patch plans.
+- `tools/validator_suggestions.json` -- keys `errors` and `warnings` (one-line strings), `structured_errors` and `structured_warnings` (diagnostic objects: `code`, `message`, `severity`, `location`, optional `suggestion`), and `suggestions` (machine-usable patch plans).
 
 **Output files** (with `--emit-patch`):
 
 - `tools/validator_patch.diff` -- Unified diff of suggested workflow modifications.
 
-**Validation checks**:
+**Validation checks** (STANDARD §5, §10 levels L1-L4):
 
-1. **Structural**: Capability exists in ontology; prerequisites satisfied; `mapping_ref` and `output_conforms_to` files exist.
-2. **Reference**: `${store.path}` references resolve; external `inputs.*.ref` resolved.
+1. **Structural**: Capability exists in ontology; edge semantics (`requires`, ordering-only `precedes`, any-of `soft_requires` -> W601, `conflicts_with` not in one `parallel_group` -> F504); `mapping_ref` and `output_conforms_to` files exist; spec version and extensions supported.
+2. **Reference**: `${store.path}` references resolve (unknown store -> B202); external `inputs.*.ref` resolved.
 3. **Type system**: Inferred types for untyped bindings; typed annotations validated against schema; ambiguous types flagged.
 4. **Consumer type checking**: Binding types validated against consumer capability's `input_schema`.
-5. **Patch suggestions**: Transform insertion suggestions with coercion registry lookup.
+5. **Expressions**: Gate/condition expressions parsed and type-checked (V108, B206).
+6. **Safety flags**: Step flags inherit from the ontology; a weaker declaration is ignored with W602.
+7. **Patch suggestions**: Transform insertion suggestions with coercion registry lookup.
 
-**Example output (pass)**:
+Diagnostics have severity `error` or `warning` (W601-W616).
+
+**Output format**: a `WARNINGS:` block (if any), then `VALIDATION PASS` or `VALIDATION FAIL:` followed by the errors, one per line as `[workflow] step N (capability): CODE message — hint` (the hint only when the diagnostic carries one).
+
+**Example output (pass with a warning)**:
 
 ```
+WARNINGS:
+ - [unplanned_execute] step 0 (execute): W601 'execute' should be preceded by 'constrain' (soft_requires)
 VALIDATION PASS
 Suggestions written to: /path/to/tools/validator_suggestions.json
 ```
@@ -1531,8 +1604,7 @@ Suggestions written to: /path/to/tools/validator_suggestions.json
 
 ```
 VALIDATION FAIL:
- - [anomaly_detection] step 2 'predict': missing required prereq 'ground' before it
- - Consumer input type mismatch in workflow 'anomaly_detection' step 3: ...
+ - [classify_before_detect] step 0 (classify): V102 'classify' must come after 'detect' (precedes), but 'detect' first appears at step 1
 
 Suggestions written to: /path/to/tools/validator_suggestions.json
 ```
@@ -1567,7 +1639,7 @@ python tools/validate_ontology.py --ontology path/to/ontology.yaml
 | Code | Meaning |
 |------|---------|
 | `0` | Ontology graph is valid. |
-| `1` | Validation errors found (orphans, invalid references, cycles). |
+| `1` | Validation errors found (orphans, invalid references, cycles, `mutation_overridable` misuse, repeated edges). |
 
 **Validation checks**:
 
@@ -1575,7 +1647,9 @@ python tools/validate_ontology.py --ontology path/to/ontology.yaml
 2. **Orphan detection**: Capabilities with no incoming or outgoing edges.
 3. **Symmetric edges**: `conflicts_with` and `alternative_to` edges have bidirectional counterparts.
 4. **Cycle detection**: DFS cycle detection in `requires` and `precedes` edges.
-5. **Duplicate edges** (optional): Multiple edge types between the same pair.
+5. **`mutation_overridable`**: Allowed only on nodes with `mutation: true`, `risk: low` and neither `requires_checkpoint` nor `requires_approval`.
+6. **Repeated edges**: The same `(from, to, type)` edge listed twice.
+7. **Duplicate edges** (optional): Multiple edge types between the same pair.
 
 **Example output (pass)**:
 
@@ -1583,10 +1657,10 @@ python tools/validate_ontology.py --ontology path/to/ontology.yaml
 Validating ontology: schemas/capability_ontology.yaml
 ============================================================
 Total capabilities: 36
-Total edges: 85
+Total edges: 99
 
 Graph statistics:
-  - Capabilities with outgoing edges: 32/36
+  - Capabilities with outgoing edges: 30/36
   - Capabilities with incoming edges: 34/36
   - Orphan capabilities: 0
 
@@ -1691,50 +1765,45 @@ SKILL REFERENCE VALIDATION PASS: 36 skills validated
 
 **File**: `tools/sync_skill_schemas.py`
 
-Generates skill-local output schemas from the capability ontology and bundles transitive dependencies for workflow catalogs.
+Regenerates the skill-local files derived from the repository's sources: output schemas from the capability ontology, the vendored workflow catalogs, and vendored schema copies.
 
 **Usage**:
 
 ```bash
-python tools/sync_skill_schemas.py
-python tools/sync_skill_schemas.py --dry-run
+python tools/sync_skill_schemas.py            # write what changed
+python tools/sync_skill_schemas.py --dry-run  # list what would change
+python tools/sync_skill_schemas.py --check    # exit 1 on drift (CI)
 ```
 
 **Flags**:
 
 | Flag | Description |
 |------|-------------|
-| `--dry-run` | Preview what would be generated without writing any files. |
+| `--dry-run` | List the files a sync would write or remove without touching them. |
+| `--check` | Exit 1 if any generated file differs from its source or a generated file is orphaned. Run in CI. |
 
 **Exit codes**:
 
 | Code | Meaning |
 |------|---------|
-| `0` | Sync completed successfully. |
-| `1` | Warnings or errors encountered (missing skill directories, missing transitive deps). |
+| `0` | Sync completed (or `--check` found everything up to date). |
+| `1` | Drift found under `--check`, or problems encountered (missing skill directories, missing sources). |
 
-**Operations performed**:
+**Files owned by the sync**:
 
-**Phase 1 -- Schema sync**:
-- Reads `schemas/capability_ontology.yaml`
-- For each capability node, writes `skills/<name>/schemas/output_schema.yaml`
-- Generated files include a `DO NOT EDIT` header with regeneration instructions
+- `skills/<name>/schemas/output_schema.yaml` for each ontology node, with a `DO NOT EDIT` header
+- `skills/<name>/reference/workflow_catalog.yaml` for every skill that bundles one (17 today), regenerated from `schemas/workflow_catalog.yaml` with its schema paths rewritten to co-located copies
+- The co-located copies next to each bundled catalog (`world_state_schema.yaml`, `event_schema.yaml`, `transform_mapping_rawlog_to_observation.yaml`), plus any other copy of them a skill vendors in its `reference/` directory
 
-**Phase 2 -- Workflow catalog dependency bundling**:
-- For skills with `reference/workflow_catalog.yaml`, copies transitive dependencies:
-  - `schemas/world_state_schema.yaml`
-  - `schemas/event_schema.yaml`
-  - `schemas/transforms/transform_mapping_rawlog_to_observation.yaml`
-- Rewrites internal `schemas/` paths in bundled workflow catalogs to use co-located relative filenames
+Generated `output_schema.yaml` files the plan no longer produces (e.g. for a removed capability) are removed; only files carrying the generated header are ever touched. Line-ending differences (CRLF) are not drift.
 
 **Example output**:
 
 ```
-SCHEMA SYNC: 36 schemas generated, 0 skipped
-WORKFLOW CATALOG DEPS: 12 files bundled, 4 catalogs rewritten
-
-SYNC COMPLETE
+SYNC COMPLETE: 0 of 105 generated files changed, 0 removed
 ```
+
+With `--check`: `SYNC CHECK PASS: 105 generated files up to date`.
 
 ---
 
@@ -1781,13 +1850,13 @@ grounded_agency/
 | Class / Function | Method Count | Module |
 |-----------------|-------------|--------|
 | `GroundedAgentAdapter` | 8 methods + 2 properties | `adapter.py` |
-| `GroundedAgentConfig` | 5 fields (dataclass) | `adapter.py` |
+| `GroundedAgentConfig` | 13 fields (dataclass) | `adapter.py` |
 | `CapabilityRegistry` | 16 methods + 3 properties | `capabilities/registry.py` |
-| `CapabilityNode` | 9 fields + 1 class method | `capabilities/registry.py` |
+| `CapabilityNode` | 10 fields + 1 class method | `capabilities/registry.py` |
 | `CapabilityEdge` | 3 fields | `capabilities/registry.py` |
 | `ToolCapabilityMapper` | 5 public methods | `capabilities/mapper.py` |
 | `ToolMapping` | 4 fields + `__str__` | `capabilities/mapper.py` |
-| `CheckpointTracker` | 10 methods + 1 property | `state/checkpoint_tracker.py` |
+| `CheckpointTracker` | 12 methods + 1 property | `state/checkpoint_tracker.py` |
 | `Checkpoint` | 8 fields + 2 methods | `state/checkpoint_tracker.py` |
 | `EvidenceStore` | 14 methods + `__len__`/`__iter__` | `state/evidence_store.py` |
 | `EvidenceAnchor` | 4 fields + 4 class methods | `state/evidence_store.py` |
@@ -1796,4 +1865,4 @@ grounded_agency/
 | `OASFSkillResult` | 5 fields (frozen dataclass) | `adapters/oasf.py` |
 | `create_evidence_collector` | Factory function | `hooks/evidence_collector.py` |
 | `create_skill_tracker` | Factory function | `hooks/skill_tracker.py` |
-| CLI tools | 5 validators | `tools/*.py` |
+| CLI tools | 5 documented here (more under `tools/`) | `tools/*.py` |

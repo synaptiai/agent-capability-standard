@@ -1,7 +1,7 @@
 ---
 name: classify
 description: Assign labels or categories to items based on characteristics. Use when categorizing entities, tagging content, identifying types, or labeling data according to a taxonomy.
-argument-hint: "[item] [taxonomy] [multi-label]"
+argument-hint: "[item] [taxonomy] [multi_label]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -30,7 +30,8 @@ Assign one or more labels from a defined taxonomy to items based on their observ
 | `item` | Yes | any | The item to classify (entity, document, code, data) |
 | `taxonomy` | No | string\|array | Classification scheme or list of valid labels |
 | `multi_label` | No | boolean | Whether multiple labels can be assigned (default: false) |
-| `context` | No | object | Additional context to inform classification |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -86,6 +87,8 @@ assumptions: []
 | `primary_label` | string | Single best classification |
 | `ambiguous` | boolean | Whether classification is uncertain |
 | `confidence` | number | 0.0-1.0 overall confidence |
+| `evidence_anchors` | array | References to the characteristics each label rests on |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 

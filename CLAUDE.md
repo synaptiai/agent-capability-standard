@@ -4,9 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-### Validate workflows against the ontology
+### Validate workflows against the ontology (CI runs this in strict mode)
 ```bash
-python tools/validate_workflows.py
+python tools/validate_workflows.py --strict
+```
+
+### Validate the domain workflow catalogs and examples (CI runs these in strict mode)
+```bash
+for c in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do python tools/validate_workflows.py --catalog "$c" --strict; done
 ```
 
 ### Validate domain profiles against schema
@@ -59,9 +64,16 @@ python tools/validate_transform_refs.py
 python tools/validate_benchmark_deps.py
 ```
 
-### Sync skill-local schemas from ontology
+### Sync skill-local schemas and bundled catalogs from their sources
 ```bash
-python tools/sync_skill_schemas.py
+python tools/sync_skill_schemas.py          # write what changed
+python tools/sync_skill_schemas.py --check  # CI: fail on drift
+```
+
+### Regenerate the runtime conformance fixtures
+```bash
+python scripts/gen_runtime_fixtures.py          # after editing the fixtures there
+python scripts/gen_runtime_fixtures.py --check  # CI: fail on drift
 ```
 
 ### Run conformance tests (optional, local only)
@@ -74,6 +86,24 @@ python scripts/run_conformance.py
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
 ```
+
+The package is built with maturin: the validator and the executor live in
+the Rust crate under `core/` and
+compiles into `grounded_agency._core`, so a Rust toolchain (rustc >= 1.86) is
+required. After changing Rust code, re-run the `pip install -e` line to rebuild
+the extension.
+
+### Rust core checks
+```bash
+cd core
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features python -- -D warnings
+cargo test
+```
+
+CI pins the toolchain that runs these (`RUST_TOOLCHAIN` in
+`.github/workflows/ci.yml`), as `constraints.txt` pins ruff.
 
 Install the `dev` extra rather than individual packages, and pass
 `-c constraints.txt` — that file pins the exact tool versions CI runs, so the
@@ -161,11 +191,11 @@ The plugin enforces safety through Claude Code hooks:
 ### Ontology Edge Types
 
 Relationships between capabilities (in `capability_ontology.yaml`):
-- `requires`: Hard dependency (must be satisfied)
-- `soft_requires`: Recommended but not mandatory
+- `requires`: Hard dependency — a `from` step must run before the target (e.g. `checkpoint` → `mutate`/`send`/`rollback`), else V102
+- `soft_requires`: Recommended — any one incoming source must run before the target, else warning W601
 - `enables`: Unlocks other capabilities
-- `precedes`: Temporal ordering (must complete before target)
-- `conflicts_with`: Mutual exclusivity (cannot coexist in workflow)
+- `precedes`: Ordering only — when both capabilities are present, the source must come first (V102)
+- `conflicts_with`: May not share a `parallel_group` (F504); running them in sequence is allowed
 - `alternative_to`: Substitutable capabilities
 - `specializes`: Parent-child inheritance
 
@@ -216,11 +246,21 @@ python -c "import yaml; yaml.safe_load(open('schemas/capability_ontology.yaml'))
 ```bash
 python tools/sync_skill_schemas.py
 ```
-This generates `skills/<name>/schemas/output_schema.yaml` from the ontology.
+This regenerates `skills/<name>/schemas/output_schema.yaml` from the ontology
+(removing orphaned generated ones), regenerates the skill-bundled
+`skills/*/reference/workflow_catalog.yaml` copies from
+`schemas/workflow_catalog.yaml` with their schema paths rewritten, and keeps the
+vendored schema copies in sync. `--check` fails on drift (CI); `--dry-run` lists
+what would change.
 
 ## Releasing
 
 When creating a new release, update the version in `.claude-plugin/plugin.json` to match the new tag before committing. This file does not auto-sync with git tags.
+
+Give the release its `## [vX.Y.Z] — date` section in `CHANGELOG.md`, then push an annotated tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` publishes the GitHub Release with that section as its notes (a `-suffix` tag is a pre-release). It refuses a tag that does not match `plugin.json` or has no section; check first with:
+```bash
+python scripts/release_notes.py vX.Y.Z
+```
 
 ## Claude Agent SDK Integration
 
@@ -252,6 +292,7 @@ python examples/capability_skills_demo.py
 | `ToolCapabilityMapper` | Maps SDK tools to capability metadata |
 | `CheckpointTracker` | Manages checkpoint lifecycle for mutation safety |
 | `EvidenceStore` | Collects evidence anchors from tool executions |
+| `WorkflowRunner` | Runs a workflow on the core's executor, dispatching actions to a `Host` ([guide](docs/guides/RUNNING_WORKFLOWS.md)) |
 
 ### Example Usage
 
@@ -278,8 +319,15 @@ Medium-risk capabilities (`execute`, `rollback`, `delegate`, `synchronize`, `inv
 - `execute` also has `requires_approval: true`
 
 Other mutation capabilities (`checkpoint`, `audit`, `persist`) have:
-- `mutation: true`
+- `mutation: true`, but need no checkpoint
 - Lower risk levels (low or medium)
+- `audit` also has `mutation_overridable: true`, so a step may declare `mutation: false`
+
+A checkpoint must run before `mutate`, `send` and `rollback` (`requires_checkpoint`
+or a `checkpoint` `requires` edge). Safety flags on workflow steps are optional and
+inherit from the ontology; a step value weaker than the ontology's is ignored with
+warning W602, and a stricter one takes effect (a step that raises
+`requires_checkpoint` with no checkpoint before it is F501).
 
 These are enforced structurally—not by convention.
 

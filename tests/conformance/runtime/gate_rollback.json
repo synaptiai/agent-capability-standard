@@ -1,0 +1,72 @@
+{
+  "description": "A rollback gate rolls back to the latest checkpoint, then raises R403.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "y"
+          },
+          "gates": [
+            {
+              "when": "true",
+              "action": "rollback"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Rollback",
+        "checkpoint_id": "cp1",
+        "step": 1
+      },
+      "respond": {
+        "kind": "RolledBack"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R403",
+    "step": 1
+  },
+  "trace_kinds": [
+    "gate_fired",
+    "rolled_back"
+  ]
+}

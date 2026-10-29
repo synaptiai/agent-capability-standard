@@ -1,7 +1,7 @@
 ---
 name: receive
 description: Ingest and parse incoming messages, events, or signals into structured form. Use when processing external inputs, handling API responses, parsing webhook payloads, or ingesting sensor data.
-argument-hint: "[input_source] [expected_format json|xml|text|binary] [validation_schema]"
+argument-hint: "[channel] [filter] [timeout]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -16,7 +16,7 @@ Execute **receive** to ingest incoming data from external sources and parse it i
 **Success criteria:**
 - Input data is successfully ingested from the source
 - Data is parsed according to expected format
-- Validation against schema (if provided) passes or errors are captured
+- Validation against schema (if one applies) passes or errors are captured
 - Structured output is ready for downstream capabilities
 - Malformed or unexpected data is handled gracefully
 
@@ -28,11 +28,19 @@ Execute **receive** to ingest incoming data from external sources and parse it i
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `input_source` | Yes | string\|object | Source of incoming data: file path, URL, inline data, or stream identifier |
-| `expected_format` | No | enum | Expected data format: `json`, `xml`, `yaml`, `text`, `csv`, `binary`. Default: auto-detect |
-| `validation_schema` | No | string | Schema to validate parsed data against |
-| `encoding` | No | string | Character encoding. Default: `utf-8` |
-| `max_size` | No | string | Maximum input size to accept (e.g., "10MB"). Default: "100MB" |
+| `channel` | No | string | Source channel |
+| `filter` | No | object | Event filter criteria |
+| `timeout` | No | string | Wait timeout |
+| `accept_from` | No | array[string] | Principals to accept items from; items from others are dropped and counted, and each kept item carries its authenticated `sender` (Standard v1.1 `delegation@1`) |
+| `sender_check` | No | array[string] | Accepted `authenticated_by` values of the sender's identity; items without a matching identity are dropped and counted (Standard v1.1 `identity@1`) |
+| `accept_trust_classes` | No | array[string] | Trust classes to accept items from; others are dropped and counted (`identity@1`). Any kept item with an identity carries it as `sender_identity` |
+| `always_ask_trust_classes` | No | array[string] | Trust classes whose items (and items with no trust class) make any step that requires approval and uses them be asked of a person, whatever mandate would cover it (`identity@1`) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
+
+In a workflow, a step can also `wait` for a matching event with a required
+timeout (Standard v1.1 `wait@1`); see
+[ORCHESTRATION_EXTENSIONS.md](../../docs/guides/ORCHESTRATION_EXTENSIONS.md).
 
 ## Procedure
 
@@ -46,7 +54,7 @@ Execute **receive** to ingest incoming data from external sources and parse it i
    - Check file exists and is readable
    - Verify URL is reachable
    - Confirm stream is connected
-   - Check size does not exceed max_size
+   - Check size does not exceed the size limit
 
 3) **Detect format**: Identify data format if not specified
    - Check content-type headers or file extension
@@ -62,7 +70,7 @@ Execute **receive** to ingest incoming data from external sources and parse it i
    - Binary: Extract structured fields per schema
 
 5) **Validate structure**: Check parsed data against schema
-   - If validation_schema provided: validate and collect errors
+   - If a schema applies to the channel (e.g. `schemas/event_v2.yaml`): validate and collect errors
    - If no schema: perform basic sanity checks
    - Flag missing required fields
    - Flag type mismatches
@@ -84,19 +92,21 @@ Execute **receive** to ingest incoming data from external sources and parse it i
 Return a structured object:
 
 ```yaml
+source: string  # Event source: where data came from
+timestamp: string  # ISO 8601 date-time of receipt
 received:
-  source: string  # Where data came from
   source_type: file | url | inline | stream
-  timestamp: string  # ISO timestamp of receipt
   format_detected: json | xml | yaml | csv | text | binary
   size_bytes: integer  # Size of received data
   encoding: string  # Character encoding used
-messages:
+data:
   - id: string  # Unique message identifier
     type: string | null  # Event/message type if identifiable
     payload: object  # Parsed message content
     timestamp: string | null  # Message timestamp if present
     metadata: object | null  # Additional message metadata
+    sender: string  # Host-authenticated principal that sent the item (with accept_from)
+    sender_identity: object  # Sender's identity as the host reported it (identity@1)
 parsed_count: integer  # Number of messages/events parsed
 validation:
   schema_ref: string | null  # Schema used for validation
@@ -119,12 +129,16 @@ assumptions: array[string]  # Explicit assumptions
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `received.source` | string | Origin of the data |
-| `messages` | array[object] | Parsed messages/events |
+| `data` | array[object] | Received messages/events, each with its parsed `payload` (and `sender` / `sender_identity` when the host authenticates senders) |
+| `source` | string | Event source: origin of the data |
+| `timestamp` | string | ISO 8601 date-time of receipt |
+| `received` | object | Transport details: source type, detected format, size, encoding |
 | `validation.valid` | boolean | Whether validation passed |
 | `validation.errors` | array | Validation error details |
 | `conflicts` | array | Anomalies or conflicts in data |
 | `confidence` | number | Lower if parse errors or validation failures |
+| `evidence_anchors` | array | Source references |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 
@@ -132,21 +146,19 @@ assumptions: array[string]  # Explicit assumptions
 
 **Input:**
 ```yaml
-input_source: "https://api.example.com/events"
-expected_format: json
-validation_schema: "schemas/event_v2.yaml"
+channel: "https://api.example.com/events"
 ```
 
 **Output:**
 ```yaml
+source: "https://api.example.com/events"
+timestamp: "2024-01-16T12:00:00Z"
 received:
-  source: "https://api.example.com/events"
   source_type: url
-  timestamp: "2024-01-16T12:00:00Z"
   format_detected: json
   size_bytes: 4256
   encoding: "utf-8"
-messages:
+data:
   - id: "evt_001"
     type: "order.created"
     payload:
@@ -191,21 +203,19 @@ assumptions:
 
 **Input:**
 ```yaml
-input_source: "/var/log/sensor_data.json"
-expected_format: json
-validation_schema: "schemas/sensor_reading.yaml"
+channel: "/var/log/sensor_data.json"
 ```
 
 **Output:**
 ```yaml
+source: "/var/log/sensor_data.json"
+timestamp: "2024-01-16T14:30:00Z"
 received:
-  source: "/var/log/sensor_data.json"
   source_type: file
-  timestamp: "2024-01-16T14:30:00Z"
   format_detected: json
   size_bytes: 1024
   encoding: "utf-8"
-messages:
+data:
   - id: "msg_001"
     type: "sensor_reading"
     payload:
@@ -263,27 +273,29 @@ next_actions:
 
 **Input:**
 ```yaml
-input_source:
-  inline: |
-    <?xml version="1.0"?>
-    <notification type="alert">
-      <severity>high</severity>
-      <message>CPU usage exceeded threshold</message>
-      <host>server-01</host>
-    </notification>
-expected_format: xml
+channel: inline  # payload delivered with the request
+```
+
+**Payload received:**
+```xml
+<?xml version="1.0"?>
+<notification type="alert">
+  <severity>high</severity>
+  <message>CPU usage exceeded threshold</message>
+  <host>server-01</host>
+</notification>
 ```
 
 **Output:**
 ```yaml
+source: "inline"
+timestamp: "2024-01-16T15:00:00Z"
 received:
-  source: "inline"
   source_type: inline
-  timestamp: "2024-01-16T15:00:00Z"
   format_detected: xml
   size_bytes: 198
   encoding: "utf-8"
-messages:
+data:
   - id: "msg_001"
     type: "notification.alert"
     payload:
@@ -329,7 +341,7 @@ assumptions:
 **Capability-specific rules:**
 - Do not execute or run arbitrary code from received data
 - Use safe parsing methods (JSON.parse, safe YAML loader)
-- Validate max_size before loading large files into memory
+- Validate size limits before loading large files into memory
 - Sanitize file paths to prevent directory traversal
 - Do not store credentials or secrets found in payloads
 - Log but do not propagate malformed/suspicious data without flagging

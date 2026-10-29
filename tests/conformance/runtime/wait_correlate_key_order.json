@@ -1,0 +1,85 @@
+{
+  "description": "An event that fails several correlate keys is dropped for the first key in sorted order, so a restored run reports the same reason.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "wait": {
+            "event_type": "done",
+            "correlate": {
+              "zz": "${z}",
+              "aa": "${a}"
+            }
+          }
+        }
+      ],
+      "inputs": {
+        "z": {
+          "type": "string",
+          "required": true
+        },
+        "a": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "z": "1",
+    "a": "2"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "correlate": {
+          "zz": "1",
+          "aa": "2"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "done"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "done",
+          "zz": "1",
+          "aa": "2"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "event_dropped",
+    "event_received"
+  ]
+}

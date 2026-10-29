@@ -1,3 +1,4 @@
+# Standard version: 1.1.0
 # Personal Assistant Domain Workflows
 # Composed from 36 atomic capabilities
 # Profile: schemas/profiles/personal_assistant.yaml
@@ -25,7 +26,8 @@ schedule_management:
       input_bindings:
         target: user_calendar
         format: calendar_events
-        range: ${request.date_range}
+        filter:
+          time_range: ${request.date_range}
 
     - capability: critique
       purpose: Analyze request for ambiguity or missing information.
@@ -47,12 +49,14 @@ schedule_management:
       store_as: clarification_out
       input_bindings:
         ambiguous_input: ${request.content}
-        context: ${calendar_out.data}
+        context:
+          calendar: "${calendar_out.data: object}"
+          ambiguities: "${request_analysis_out.issues: array<object>}"
         max_questions: 2
       gates:
-        - when: ${request_analysis_out.confidence} > 0.85
+        - when: ${request_analysis_out.issues} == []
           action: skip
-          message: Request is clear, no clarification needed.
+          message: The analysis found no ambiguity; no clarification needed.
 
     - capability: detect
       purpose: Identify scheduling conflicts in proposed time.
@@ -61,7 +65,7 @@ schedule_management:
       mutation: false
       store_as: conflicts_out
       input_bindings:
-        data: ${calendar_out.data}
+        data: "${calendar_out.data: object}"
         pattern: time_overlap
         threshold: 0  # Any overlap is a conflict
 
@@ -75,7 +79,7 @@ schedule_management:
           duration: ${request.duration}
           preferences: ${user_preferences.scheduling}
           constraints: ${request.constraints}
-        scope: ${calendar_out.data}
+        scope: user_calendar
 
     - capability: compare
       purpose: Rank available slots by user preference alignment.
@@ -84,7 +88,7 @@ schedule_management:
       mutation: false
       store_as: ranked_slots_out
       input_bindings:
-        options: ${available_slots_out.results}
+        options: "${available_slots_out.results: array<object>}"
         criteria:
           - time_of_day_preference
           - buffer_time
@@ -92,20 +96,24 @@ schedule_management:
           - focus_time_protection
         weights: ${user_preferences.weights}
       gates:
-        - when: ${conflicts_out.detected} == true && ${available_slots_out.total_count} == 0
-          action: stop
-          message: No available slots found. User must manually resolve.
+        - when: ${available_slots_out.results} == []
+          action: skip
+          message: No free slot matches the request; there is nothing to rank.
 
     - capability: plan
       purpose: Create calendar modification plan.
       risk: low
       mutation: false
       store_as: calendar_plan_out
+      gates:
+        - when: ${ranked_slots_out} == null
+          action: skip
+          message: No slot was ranked; there is nothing to schedule. The explanation tells the user.
       input_bindings:
         goal: schedule_event
         constraints:
           preferred_slot: ${ranked_slots_out.recommendation}
-          conflicts_to_resolve: ${conflicts_out.matches}
+          conflicts_to_resolve: "${conflicts_out.matches: array<object>}"
           user_preferences: ${user_preferences}
 
     - capability: generate
@@ -114,22 +122,33 @@ schedule_management:
       risk: low
       mutation: false
       store_as: event_draft_out
+      gates:
+        - when: ${clarification_out.questions} != null && ${clarification_out.questions} != []
+          action: skip
+          message: Clarifying questions are open; ask them before drafting the event.
+        - when: ${calendar_plan_out} == null
+          action: skip
+          message: No slot was found, so there is no event to draft.
       input_bindings:
         specification:
           type: calendar_event
           title: ${request.title}
-          time: ${calendar_plan_out.steps[0].time}
+          time: "${calendar_plan_out.steps[0].time: string}"
           duration: ${request.duration}
           participants: ${request.participants}
           location: ${request.location}
 
     - capability: explain
-      purpose: Summarize scheduling decision for user.
+      purpose: Summarize the scheduling decision for the user, or why no slot was found and which conflicts they must resolve themselves.
       risk: low
       mutation: false
       store_as: explanation_out
       input_bindings:
-        conclusion: ${event_draft_out}
+        conclusion:
+          draft: ${event_draft_out}
+          open_questions: "${clarification_out.questions: array<object>}"
+          available_slots: "${available_slots_out.results: array<object>}"
+          conflicts: "${conflicts_out.matches: array<object>}"
         audience: user
         depth: brief
 
@@ -143,7 +162,8 @@ schedule_management:
           type: scheduling_request
           original_request: ${request.content}
           conflicts_found: ${conflicts_out.detected}
-          proposed_time: ${event_draft_out.content.time}
+          open_questions: "${clarification_out.questions: array<object>}"
+          proposed_time: "${event_draft_out.content.time: string}"
 
   inputs:
     request:
@@ -154,12 +174,15 @@ schedule_management:
         date_range: {type: object}
         duration: {type: string}
         title: {type: string}
-        participants: {type: array}
+        participants: {type: array, items: {type: string}}
         location: {type: string}
         constraints: {type: object}
     user_preferences:
       type: object
       description: User's scheduling preferences
+      properties:
+        scheduling: {type: object}
+        weights: {type: object}
     profile:
       type: object
       ref: schemas/profiles/personal_assistant.yaml
@@ -195,7 +218,8 @@ information_research:
       mutation: false
       store_as: web_search_out
       input_bindings:
-        query: ${decomposed_out.subproblems}
+        query:
+          sub_questions: "${decomposed_out.subproblems: array<object>}"
         scope: web
         limit: 10
 
@@ -205,28 +229,19 @@ information_research:
       mutation: false
       store_as: local_search_out
       input_bindings:
-        query: ${decomposed_out.subproblems}
+        query:
+          sub_questions: "${decomposed_out.subproblems: array<object>}"
         scope: user_documents
         limit: 5
 
     - capability: retrieve
-      purpose: Fetch full content from top search results.
+      purpose: Fetch full content from the top search result.
       risk: low
       mutation: false
       store_as: content_out
       input_bindings:
-        target: ${web_search_out.results[0:5]}
+        target: "${web_search_out.results[0].path: string}"
         format: text_content
-
-    - capability: classify
-      purpose: Assess source credibility and relevance.
-      risk: low
-      mutation: false
-      store_as: source_quality_out
-      input_bindings:
-        item: ${content_out.data}
-        taxonomy: [authoritative, reliable, questionable, unreliable]
-        multi_label: false
 
     - capability: detect
       purpose: Identify key facts and claims in content.
@@ -235,8 +250,18 @@ information_research:
       mutation: false
       store_as: facts_out
       input_bindings:
-        data: ${content_out.data}
+        data: "${content_out.data: string}"
         pattern: factual_claim
+
+    - capability: classify
+      purpose: Assess source credibility and relevance.
+      risk: low
+      mutation: false
+      store_as: source_quality_out
+      input_bindings:
+        item: "${content_out.data: string}"
+        taxonomy: [authoritative, reliable, questionable, unreliable]
+        multi_label: false
 
     - capability: compare
       purpose: Cross-reference facts across sources.
@@ -245,7 +270,7 @@ information_research:
       mutation: false
       store_as: cross_ref_out
       input_bindings:
-        options: ${facts_out.matches}
+        options: "${facts_out.matches: array<object>}"
         criteria:
           - source_agreement
           - recency
@@ -257,19 +282,9 @@ information_research:
       mutation: false
       store_as: integrated_knowledge_out
       input_bindings:
-        sources: ${cross_ref_out.ranking}
+        sources: "${cross_ref_out.ranking: array<object>}"
         strategy: weighted_merge
         conflict_resolution: prefer_high_confidence
-
-    - capability: ground
-      purpose: Anchor all claims to source citations.
-      risk: low
-      mutation: false
-      store_as: grounded_out
-      input_bindings:
-        claim: ${integrated_knowledge_out.merged}
-        sources: ${content_out.data}
-        required_strength: moderate
 
     - capability: generate
       purpose: Synthesize research into user-friendly summary.
@@ -281,11 +296,29 @@ information_research:
         specification:
           type: research_summary
           question: ${query}
-          findings: ${grounded_out}
+          knowledge: ${integrated_knowledge_out.merged}
+          findings: "${cross_ref_out.ranking: array<object>}"
           format: ${output_format}
         constraints:
           max_length: ${max_length}
           include_citations: true
+
+    - capability: ground
+      purpose: Anchor every claim in the summary to source citations.
+      risk: low
+      mutation: false
+      store_as: grounded_out
+      input_bindings:
+        claim: "${summary_out.content: string}"
+        sources:
+          - ${content_out}
+          - ${local_search_out}
+        required_strength: moderate
+      gates:
+        - when: ${grounded_out.grounded} == false
+          phase: after
+          action: warn
+          message: The summary is not grounded in the sources; present it with its grounding gaps, not as established fact.
 
     - capability: audit
       purpose: Record research session.
@@ -297,7 +330,9 @@ information_research:
           type: information_research
           query: ${query}
           sources_consulted: ${web_search_out.total_count}
-          facts_extracted: ${facts_out.matches}
+          facts_extracted: "${facts_out.matches: array<object>}"
+          summary_grounded: ${grounded_out.grounded}
+          grounding_gaps: "${grounded_out.gaps: array<object>}"
 
   inputs:
     query:
@@ -346,7 +381,7 @@ task_delegation:
       mutation: false
       store_as: task_classification_out
       input_bindings:
-        item: ${subtasks_out.subproblems}
+        item: "${subtasks_out.subproblems: array<object>}"
         taxonomy: [automated_service, human_assistant, user_action, ai_agent]
         multi_label: false
 
@@ -356,8 +391,10 @@ task_delegation:
       mutation: false
       store_as: executor_search_out
       input_bindings:
-        query: ${task_classification_out}
-        scope: [available_services, contacts, integrations]
+        query:
+          subtask_types: "${task_classification_out.labels: array<object>}"
+          sources: [available_services, contacts, integrations]
+        scope: delegation_executors
 
     - capability: compare
       purpose: Rank potential executors by suitability.
@@ -366,7 +403,7 @@ task_delegation:
       mutation: false
       store_as: executor_ranking_out
       input_bindings:
-        options: ${executor_search_out.results}
+        options: "${executor_search_out.results: array<object>}"
         criteria:
           - capability_match
           - availability
@@ -383,7 +420,7 @@ task_delegation:
         constraints:
           deadline: ${task.deadline}
           budget: ${task.budget}
-          dependencies: ${subtasks_out.dependencies}
+          dependencies: "${subtasks_out.dependencies: array<object>}"
 
     - capability: generate
       purpose: Create delegation request messages.
@@ -394,7 +431,7 @@ task_delegation:
       input_bindings:
         specification:
           type: delegation_request
-          subtasks: ${delegation_plan_out.steps}
+          subtasks: "${delegation_plan_out.steps: array<object>}"
           executors: ${executor_ranking_out.recommendation}
           context: ${task.context}
 
@@ -405,7 +442,7 @@ task_delegation:
       store_as: checkpoint_out
       input_bindings:
         scope: delegation
-        label: "DEL-${task.id}-${timestamp}"
+        label: "DEL-${task.id}"
 
     - capability: explain
       purpose: Summarize delegation plan for user approval.
@@ -426,8 +463,8 @@ task_delegation:
         event:
           type: delegation_planning
           task_id: ${task.id}
-          subtasks_created: ${subtasks_out.subproblems}
-          delegations_proposed: ${delegation_requests_out.content}
+          subtasks_created: "${subtasks_out.subproblems: array<object>}"
+          delegations_proposed: "${delegation_requests_out.content: object}"
           checkpoint_id: ${checkpoint_out.checkpoint_id}
 
   inputs:
@@ -479,12 +516,14 @@ communication_drafting:
       store_as: clarification_out
       input_bindings:
         ambiguous_input: ${request}
-        context: ${conversation_history}
+        context:
+          conversation_history: ${conversation_history}
+          ambiguities: "${intent_analysis_out.issues: array<object>}"
         max_questions: 2
       gates:
-        - when: ${intent_analysis_out.confidence} > 0.85
+        - when: ${intent_analysis_out.issues} == []
           action: skip
-          message: Intent is clear.
+          message: The analysis found no ambiguity in the intent.
 
     - capability: search
       purpose: Find relevant prior communications with recipient.
@@ -520,14 +559,18 @@ communication_drafting:
       risk: low
       mutation: false
       store_as: draft_out
+      gates:
+        - when: ${clarification_out.questions} != null && ${clarification_out.questions} != []
+          action: skip
+          message: Clarifying questions are open; ask them before drafting.
       input_bindings:
         specification:
           type: ${communication_type}
-          recipient: ${recipient_info_out.data}
+          recipient: "${recipient_info_out.data: object}"
           intent: ${intent_analysis_out}
-          tone: ${style_prefs_out.data.tone}
-          context: ${history_search_out.results}
-          key_points: ${request.key_points}
+          tone: "${style_prefs_out.data.tone: string}"
+          context: "${history_search_out.results: array<object>}"
+          key_points: ${key_points}
         constraints:
           max_length: ${max_length}
           format: ${format}
@@ -537,8 +580,12 @@ communication_drafting:
       risk: low
       mutation: false
       store_as: draft_review_out
+      gates:
+        - when: ${draft_out} == null
+          action: skip
+          message: No draft to review.
       input_bindings:
-        target: ${draft_out.content}
+        target: "${draft_out.content: string}"
         criteria:
           - tone_appropriateness
           - clarity
@@ -551,13 +598,13 @@ communication_drafting:
       mutation: false
       store_as: revised_draft_out
       input_bindings:
-        input: ${draft_out.content}
+        input: "${draft_out.content: string}"
         source_format: draft
         target_format: polished
         options:
-          corrections: ${draft_review_out.suggestions}
+          corrections: "${draft_review_out.suggestions: array<object>}"
       gates:
-        - when: ${draft_review_out.issues} == []
+        - when: ${draft_review_out} == null || ${draft_review_out.issues} == []
           action: skip
           message: Draft needs no revision.
 
@@ -568,7 +615,7 @@ communication_drafting:
       store_as: checkpoint_out
       input_bindings:
         scope: communication_draft
-        label: "COMM-${communication_type}-${timestamp}"
+        label: "COMM-${communication_type}"
 
     - capability: audit
       purpose: Record communication drafting session.
@@ -581,6 +628,7 @@ communication_drafting:
           recipient: ${recipient}
           communication_type: ${communication_type}
           intent: ${intent_analysis_out}
+          open_questions: "${clarification_out.questions: array<object>}"
           checkpoint_id: ${checkpoint_out.checkpoint_id}
 
   inputs:
@@ -597,7 +645,12 @@ communication_drafting:
       default: email
     conversation_history:
       type: array
+      items: {type: object}
       description: Recent conversation context
+    key_points:
+      type: array
+      items: {type: string}
+      description: Points the communication must cover
     max_length:
       type: integer
       default: 300

@@ -15,19 +15,25 @@ These hooks directly implement capabilities defined in the standard's SAFETY lay
 
 ### Pre-Tool-Use Hooks
 
-Run **before** a tool executes and can block operations.
+Run **before** a tool executes and can block operations. Claude Code passes
+the tool call as JSON on stdin; exit 0 allows the call, and exit 2 blocks it,
+with the reason on stderr shown to Claude (any other non-zero exit is a
+non-blocking error, so the tool would still run).
 
 ```bash
-# Exit 0 = allow, non-zero = block
-./pretooluse_require_checkpoint.sh "$payload"
+echo '{"tool_name": "Write", "tool_input": {"file_path": "a.py"}}' \
+  | ./pretooluse_require_checkpoint.sh   # exit 2 without a valid marker
+./pretooluse_require_checkpoint.sh "Write a.py"   # a payload as $1 is also accepted
 ```
 
 ### Post-Tool-Use Hooks
 
-Run **after** a tool executes for logging and audit.
+Run **after** a tool executes for logging and audit. The tool call arrives as
+JSON on stdin.
 
 ```bash
-./posttooluse_log_tool.sh "$payload"
+echo '{"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}' \
+  | ./posttooluse_log_tool.sh
 ```
 
 ## Configuration
@@ -72,7 +78,8 @@ Each hook entry specifies:
 ## Checkpoint System
 
 The `pretooluse_require_checkpoint.sh` hook enforces the `checkpoint` capability requirement:
-- Expects a marker file at `.claude/checkpoint.ok` before allowing mutation operations
+- Expects a marker file at `.claude/checkpoint.ok` before allowing mutation operations: every `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Bash` call (it fails closed: a shell command is not trusted to be read-only). The marker is written outside these tools, by `CheckpointTracker` or by a person
+- Blocks with exit code 2 and the reason on stderr
 - Validates marker contains JSON with checkpoint ID, creation time, and expiry (SEC-001)
 - Rejects stale markers that have expired (default: 30 minutes)
 - Rejects symlinks to prevent bypass attacks (SEC-006)

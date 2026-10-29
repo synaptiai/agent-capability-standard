@@ -1,7 +1,7 @@
 ---
 name: synchronize
 description: Merge outputs from multiple sources, resolve conflicts, and reconcile constraints into a unified result. Use when combining parallel agent outputs, merging data from different systems, or reconciling conflicting information.
-argument-hint: "[sources] [strategy merge|replace|conflict_resolve] [conflict_rules]"
+argument-hint: "[agents] [state] [timeout]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -26,10 +26,15 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `sources` | Yes | array[string\|object] | List of data sources to synchronize (URIs, agent outputs, or inline data) |
-| `strategy` | No | enum | Merge strategy: `merge` (combine), `replace` (latest wins), `conflict_resolve` (manual rules). Default: `merge` |
-| `conflict_rules` | No | object | Rules for conflict resolution: priority order, field-level policies, or custom handlers |
-| `target_schema` | No | string | Schema to validate merged output against |
+| `agents` | Yes | array | Agents to synchronize |
+| `state` | Yes | object | State to agree on |
+| `timeout` | No | string | Sync timeout |
+| `accept_from` | No | array[string] | Principals to accept state from (Standard v1.1 `delegation@1`) |
+| `sender_check` | No | array[string] | Accepted `authenticated_by` values of the sender's identity (Standard v1.1 `identity@1`) |
+| `accept_trust_classes` | No | array[string] | Trust classes to accept state from (`identity@1`) |
+| `always_ask_trust_classes` | No | array[string] | Trust classes whose state (and state with no trust class) makes any step that requires approval and uses it be asked of a person (`identity@1`) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -49,7 +54,7 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
    - Missing in one source: record as addition/deletion
 
 4) **Apply resolution strategy**:
-   - `merge`: Combine non-conflicting data; use conflict_rules for overlaps
+   - `merge`: Combine non-conflicting data; use the conflict rules for overlaps
    - `replace`: Use most recent or highest-priority source
    - `conflict_resolve`: Apply explicit rules; flag unresolvable for human review
 
@@ -57,7 +62,7 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
    - Format: `source:<source_id>:<path>` or `conflict:<resolution_method>`
    - Track which source contributed each field
 
-6) **Validate output**: Check merged result against target schema if provided
+6) **Validate output**: Check merged result against the target schema, if one applies
 
 7) **Format output**: Structure results according to the output contract below
 
@@ -66,8 +71,12 @@ Execute **synchronize** to merge data from multiple sources into a coherent, uni
 Return a structured object:
 
 ```yaml
+synchronized: boolean  # True if all conflicts resolved and an agreed state reached
+agreed_state: object | null  # The synchronized result
+participants: array[string]  # IDs of the agents/sources synchronized
+sender: string  # Host-authenticated principal that delivered the agreed state, when the step waited for it (wait@1)
+sender_identity: object  # That sender's identity as the host reported it (identity@1)
 synchronization:
-  sources: array[string]  # IDs of sources synchronized
   strategy: merge | replace | conflict_resolve
   timestamp: string  # ISO timestamp of sync operation
 changes:
@@ -82,11 +91,9 @@ conflicts:
     values: array[object]  # Conflicting values from each source
     resolution: string | null  # How resolved, or null if unresolved
     resolution_rationale: string | null
-result:
-  synchronized: boolean  # True if all conflicts resolved
+summary:
   entities_affected: integer  # Count of entities changed
   unresolved_conflicts: integer  # Count of conflicts needing human review
-merged_data: object  # The synchronized result
 confidence: number  # 0.0-1.0 based on conflict count and resolution quality
 evidence_anchors: array[string]  # Source references for each claim
 assumptions: array[string]  # Explicit assumptions made during sync
@@ -96,12 +103,16 @@ assumptions: array[string]  # Explicit assumptions made during sync
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `synchronization.sources` | array[string] | Identifiers for all sources included |
+| `synchronized` | boolean | Whether sync completed without unresolved conflicts |
+| `agreed_state` | object | The final synchronized state (null when not synchronized) |
+| `participants` | array[string] | Identifiers for all agents/sources included |
+| `sender` / `sender_identity` | string / object | Who delivered the agreed state, when the step waited for it |
 | `changes` | array[object] | Detailed log of every change made |
 | `conflicts` | array[object] | All detected conflicts and their resolution |
-| `result.synchronized` | boolean | Whether sync completed without unresolved conflicts |
-| `merged_data` | object | The final synchronized output |
+| `summary` | object | Counts of entities affected and unresolved conflicts |
 | `confidence` | number | Lower if many conflicts; higher if clean merge |
+| `evidence_anchors` | array | Source references for each claim |
+| `assumptions` | array | Explicit assumptions made during sync |
 
 ## Examples
 
@@ -109,27 +120,33 @@ assumptions: array[string]  # Explicit assumptions made during sync
 
 **Input:**
 ```yaml
-sources:
-  - agent_output_1:
-      entity: "user_123"
-      name: "Alice"
-      role: "admin"
-      last_seen: "2024-01-15"
-  - agent_output_2:
-      entity: "user_123"
-      name: "Alice Smith"
-      department: "Engineering"
-      last_seen: "2024-01-16"
-strategy: merge
-conflict_rules:
-  name: prefer_longer
-  last_seen: prefer_newer
+agents: ["agent_output_1", "agent_output_2"]
+state:
+  agent_output_1:
+    entity: "user_123"
+    name: "Alice"
+    role: "admin"
+    last_seen: "2024-01-15"
+  agent_output_2:
+    entity: "user_123"
+    name: "Alice Smith"
+    department: "Engineering"
+    last_seen: "2024-01-16"
 ```
+
+Resolution strategy: `merge`, preferring the longer `name` and the newer `last_seen`.
 
 **Output:**
 ```yaml
+synchronized: true
+agreed_state:
+  entity: "user_123"
+  name: "Alice Smith"
+  role: "admin"
+  department: "Engineering"
+  last_seen: "2024-01-16"
+participants: ["agent_output_1", "agent_output_2"]
 synchronization:
-  sources: ["agent_output_1", "agent_output_2"]
   strategy: merge
   timestamp: "2024-01-16T14:30:00Z"
 changes:
@@ -164,16 +181,9 @@ conflicts:
     values: ["2024-01-15", "2024-01-16"]
     resolution: "prefer_newer"
     resolution_rationale: "More recent timestamp preferred"
-result:
-  synchronized: true
+summary:
   entities_affected: 1
   unresolved_conflicts: 0
-merged_data:
-  entity: "user_123"
-  name: "Alice Smith"
-  role: "admin"
-  department: "Engineering"
-  last_seen: "2024-01-16"
 confidence: 0.95
 evidence_anchors:
   - "source:agent_output_1:role"
@@ -185,7 +195,7 @@ assumptions:
   - "Longer name is more complete (not a different person)"
 ```
 
-**Evidence pattern:** Each field in merged_data traced to originating source; conflicts logged with resolution method.
+**Evidence pattern:** Each field in agreed_state traced to originating source; conflicts logged with resolution method.
 
 ---
 
@@ -193,18 +203,20 @@ assumptions:
 
 **Input:**
 ```yaml
-sources:
-  - system_a: { price: 100, currency: "USD" }
-  - system_b: { price: 150, currency: "USD" }
-strategy: conflict_resolve
-conflict_rules:
-  price: require_human_review
+agents: ["system_a", "system_b"]
+state:
+  system_a: { price: 100, currency: "USD" }
+  system_b: { price: 150, currency: "USD" }
 ```
+
+Resolution strategy: `conflict_resolve`; a `price` conflict requires human review.
 
 **Output:**
 ```yaml
+synchronized: false
+agreed_state: null
+participants: ["system_a", "system_b"]
 synchronization:
-  sources: ["system_a", "system_b"]
   strategy: conflict_resolve
   timestamp: "2024-01-16T15:00:00Z"
 changes: []
@@ -214,11 +226,9 @@ conflicts:
     values: [100, 150]
     resolution: null
     resolution_rationale: "Price conflict requires human review per policy"
-result:
-  synchronized: false
+summary:
   entities_affected: 0
   unresolved_conflicts: 1
-merged_data: null
 confidence: 0.3
 evidence_anchors:
   - "source:system_a:price"
@@ -232,7 +242,7 @@ assumptions:
 
 - [ ] All source data accounted for in changes or conflicts
 - [ ] Every conflict has resolution or is flagged unresolved
-- [ ] merged_data passes target_schema validation (if provided)
+- [ ] agreed_state passes target schema validation (if one applies)
 - [ ] confidence reflects conflict severity and resolution quality
 - [ ] evidence_anchors trace every merged field to source
 
@@ -243,7 +253,7 @@ assumptions:
 - `mutation`: false
 - `requires_checkpoint`: false
 - `requires_approval`: false
-- `risk`: low
+- `risk`: medium
 
 **Capability-specific rules:**
 - Do not auto-resolve conflicts involving security-sensitive fields (credentials, permissions)

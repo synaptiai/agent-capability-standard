@@ -1,0 +1,30 @@
+# Standard version: 1.1.0
+# A required capability input the step does not bind is W615: the host would
+# get no value for it. An invoke step's workflow_id gives its workflow.
+sparse_bindings:
+  goal: Detect anomalies without saying what to look for.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Fetch the readings.
+    store_as: readings
+    input_bindings:
+      target: sensors/latest
+  - capability: detect
+    purpose: Detect anomalies in the readings.
+    store_as: anomalies
+    input_bindings:
+      data: "${readings.data: object}"
+  - capability: invoke
+    purpose: Hand off to the report workflow.
+    store_as: report_out
+    workflow_id: report
+report:
+  goal: Report.
+  risk: low
+  steps:
+  - capability: explain
+    purpose: Explain the findings.
+    store_as: explanation
+    input_bindings:
+      conclusion: no anomalies

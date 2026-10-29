@@ -1,0 +1,51 @@
+{
+  "description": "A capability call that outlasts its timeout times out on tick (R401).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "timeout": "10s",
+          "input_bindings": {
+            "target": "x"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "deadline": 10000
+      }
+    },
+    {
+      "tick": 10000
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      }
+    },
+    {
+      "tick": 10001
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R401"
+  },
+  "trace_kinds": []
+}

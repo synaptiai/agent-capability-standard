@@ -1,0 +1,776 @@
+{
+ "description": "Static-check fixtures for ACS condition expressions. 'scope' gives each reference root's schema and whether it is always present; expect lists the diagnostic codes, in order, a validator MUST report. A root without 'schema' is untyped: nothing is known about its fields.",
+ "version": "1.0",
+ "scope": {
+  "c": {
+   "schema": {
+    "type": "object",
+    "required": [
+     "passed",
+     "confidence",
+     "label",
+     "items",
+     "count"
+    ],
+    "properties": {
+     "passed": {
+      "type": "boolean"
+     },
+     "opt": {
+      "type": "boolean"
+     },
+     "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+     },
+     "label": {
+      "type": "string"
+     },
+     "items": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "bare_items": {
+      "type": "array"
+     },
+     "count": {
+      "type": "integer"
+     },
+     "x": {
+      "type": "any"
+     },
+     "sev": {
+      "type": "object"
+     },
+     "level": {
+      "enum": [
+       "low",
+       "high"
+      ]
+     },
+     "nullable_n": {
+      "type": [
+       "number",
+       "null"
+      ]
+     },
+     "open": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+       "k": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "always_present": true
+  },
+  "u": {
+   "schema": {
+    "type": [
+     "string",
+     "number"
+    ]
+   },
+   "always_present": false
+  },
+  "skipped": {
+   "schema": {
+    "type": "object",
+    "required": [
+     "passed",
+     "confidence",
+     "label",
+     "items",
+     "count"
+    ],
+    "properties": {
+     "passed": {
+      "type": "boolean"
+     },
+     "opt": {
+      "type": "boolean"
+     },
+     "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+     },
+     "label": {
+      "type": "string"
+     },
+     "items": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "bare_items": {
+      "type": "array"
+     },
+     "count": {
+      "type": "integer"
+     },
+     "x": {
+      "type": "any"
+     },
+     "sev": {
+      "type": "object"
+     },
+     "level": {
+      "enum": [
+       "low",
+       "high"
+      ]
+     },
+     "nullable_n": {
+      "type": [
+       "number",
+       "null"
+      ]
+     },
+     "open": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+       "k": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "always_present": false
+  },
+  "untyped": {
+   "always_present": false
+  }
+ },
+ "cases": [
+  {
+   "id": "bool-eq-string",
+   "expr": "${c.passed} == \"yes\"",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "bool-order",
+   "expr": "${c.passed} > 1",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "bare-bool-required",
+   "expr": "${c.passed}",
+   "expect": []
+  },
+  {
+   "id": "bare-bool-optional",
+   "expr": "${c.opt}",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "bare-bool-producer-maybe-skipped",
+   "expr": "${skipped.passed}",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "num-order",
+   "expr": "${c.confidence} > 0.85",
+   "expect": []
+  },
+  {
+   "id": "num-order-string-lit",
+   "expr": "${c.confidence} > \"0.85\"",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "str-order",
+   "expr": "${c.label} < \"m\"",
+   "expect": []
+  },
+  {
+   "id": "str-order-num",
+   "expr": "${c.label} < 1",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "array-order",
+   "expr": "${c.items} < 1",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "any-order",
+   "expr": "${c.x} > 1",
+   "expect": [
+    "B204"
+   ]
+  },
+  {
+   "id": "any-order-annotated",
+   "expr": "${c.x: number} > 1",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "any-eq",
+   "expr": "${c.x} == 1",
+   "expect": []
+  },
+  {
+   "id": "any-bare",
+   "expr": "${c.x}",
+   "expect": [
+    "B204"
+   ]
+  },
+  {
+   "id": "any-bare-annotated",
+   "expr": "${c.x: boolean}",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "bad-path",
+   "expr": "${c.nope} == 1",
+   "expect": [
+    "B201"
+   ]
+  },
+  {
+   "id": "open-object-unknown-key",
+   "expr": "${c.open.zzz} == 1",
+   "expect": []
+  },
+  {
+   "id": "unknown-root",
+   "expr": "${zzz} == 1",
+   "expect": [
+    "B202"
+   ]
+  },
+  {
+   "id": "annotation-mismatch",
+   "expr": "${c.confidence: string} == \"a\"",
+   "expect": [
+    "B203"
+   ]
+  },
+  {
+   "id": "eq-null",
+   "expr": "${c.confidence} == null",
+   "expect": []
+  },
+  {
+   "id": "null-order",
+   "expr": "null > 1",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "ref-null-order",
+   "expr": "${c.confidence} >= null",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "non-bool-condition",
+   "expr": "1",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "non-bool-ref-condition",
+   "expr": "${c.label}",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "array-eq-empty",
+   "expr": "${c.items} == []",
+   "expect": []
+  },
+  {
+   "id": "array-eq-object",
+   "expr": "${c.items} == {}",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "field-on-array",
+   "expr": "${c.items.name} == \"a\"",
+   "expect": [
+    "B201"
+   ]
+  },
+  {
+   "id": "index-then-field",
+   "expr": "${c.items[0].name} == \"a\"",
+   "expect": []
+  },
+  {
+   "id": "index-untyped-items",
+   "expr": "${c.bare_items[0]} == 1",
+   "expect": []
+  },
+  {
+   "id": "index-on-string",
+   "expr": "${c.label[0]} == \"a\"",
+   "expect": [
+    "B201"
+   ]
+  },
+  {
+   "id": "int-eq-fraction",
+   "expr": "${c.count} == 0.5",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "int-eq-integral-float",
+   "expr": "${c.count} == 1.0",
+   "expect": []
+  },
+  {
+   "id": "int-order-fraction",
+   "expr": "${c.count} < 0.5",
+   "expect": []
+  },
+  {
+   "id": "not-number",
+   "expr": "!${c.confidence}",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "and-any",
+   "expr": "${c.passed} && ${c.x}",
+   "expect": [
+    "B204"
+   ]
+  },
+  {
+   "id": "and-ok",
+   "expr": "${c.passed} == true && ${c.count} == 0",
+   "expect": []
+  },
+  {
+   "id": "union-ne-null",
+   "expr": "${u} != null",
+   "expect": []
+  },
+  {
+   "id": "union-order",
+   "expr": "${u} > 1",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "enum-eq-member-kind",
+   "expr": "${c.level} == \"low\"",
+   "expect": []
+  },
+  {
+   "id": "enum-eq-number",
+   "expr": "${c.level} == 1",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "nullable-order",
+   "expr": "${c.nullable_n} > 1",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "object-eq-string",
+   "expr": "${c.sev} == \"minor\"",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "optional-order",
+   "expr": "${skipped.confidence} > 0.5",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "guarded-optional-order",
+   "expr": "${skipped.confidence} != null && ${skipped.confidence} > 0.5",
+   "expect": []
+  },
+  {
+   "id": "invalid-annotation",
+   "expr": "${c.confidence: banana} > 1",
+   "expect": [
+    "B205"
+   ]
+  },
+  {
+   "id": "empty-annotation",
+   "expr": "${c.confidence:} > 1",
+   "expect": [
+    "B205"
+   ]
+  },
+  {
+   "id": "malformed-reference-index",
+   "expr": "${c.confidence[01]} > 1",
+   "expect": [
+    "B201"
+   ]
+  },
+  {
+   "id": "malformed-reference-negative-index",
+   "expr": "${c.confidence[-1]} > 1",
+   "expect": [
+    "B201"
+   ]
+  },
+  {
+   "id": "syntax-error",
+   "expr": "${c.passed} = true",
+   "expect": [
+    "V108"
+   ]
+  },
+  {
+   "id": "integer-annotation-on-number",
+   "expr": "${c.confidence: integer} == 1",
+   "expect": [
+    "B203"
+   ]
+  },
+  {
+   "id": "undeclared-key-closed-object",
+   "expr": "${c.sev.zzz} == 1",
+   "expect": []
+  },
+  {
+   "id": "bool-order-bool",
+   "expr": "${c.passed} > ${c.opt}",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "or-guard-narrows",
+   "expr": "${skipped.confidence} == null || ${skipped.confidence} > 0.5",
+   "expect": []
+  },
+  {
+   "id": "guard-does-not-leak-out-of-and",
+   "expr": "(${skipped.confidence} != null && true) || ${skipped.confidence} > 0.5",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "guard-other-path-not-narrowed",
+   "expr": "${skipped.label} != null && ${skipped.confidence} > 0.5",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "prefix-guard-narrows-required-field",
+   "expr": "${skipped} != null && ${skipped.confidence} > 0.5",
+   "expect": []
+  },
+  {
+   "id": "prefix-or-guard-narrows-required-field",
+   "expr": "${skipped} == null || ${skipped.confidence} < 0.5",
+   "expect": []
+  },
+  {
+   "id": "prefix-guard-keeps-optional-field-nullable",
+   "expr": "${skipped} != null && ${skipped.nullable_n} > 0.5",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "prefix-guard-wrong-polarity-not-narrowed",
+   "expr": "${skipped} != null || ${skipped.confidence} > 0.5",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "prefix-guard-keeps-optional-non-null-field-nullable",
+   "expr": "${skipped} != null && ${skipped.opt} > false",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "intermediate-prefix-guard-keeps-optional-field-nullable",
+   "expr": "${c.open} != null && ${c.open.k} > \"a\"",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "index-prefix-guard-narrows-required-field",
+   "expr": "${c.items[0]} != null && ${c.items[0].name: string} > \"a\"",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "root-guard-does-not-cover-index",
+   "expr": "${c} != null && ${c.items[0].name: string} > \"a\"",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "untyped-path-may-be-absent",
+   "expr": "${untyped.a.b: number} > 1",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "untyped-root-guard-does-not-cover-fields",
+   "expr": "${untyped} != null && ${untyped.a.b: number} > 1",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "untyped-path-guard-narrows-itself",
+   "expr": "${untyped.a.b} != null && ${untyped.a.b: number} > 1",
+   "expect": []
+  },
+  {
+   "id": "field-below-any-may-be-absent",
+   "expr": "${c.x.deep: number} > 1",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "unknown-root-no-cascade",
+   "expr": "${zzz} > 1",
+   "expect": [
+    "B202"
+   ]
+  },
+  {
+   "id": "unknown-root-bare-no-cascade",
+   "expr": "${zzz}",
+   "expect": [
+    "B202"
+   ]
+  },
+  {
+   "id": "bad-path-no-cascade",
+   "expr": "${c.nope} > 1",
+   "expect": [
+    "B201"
+   ]
+  },
+  {
+   "id": "field-below-any",
+   "expr": "${c.x.title: string} == \"a\"",
+   "expect": []
+  },
+  {
+   "id": "annotation-array-mismatch",
+   "expr": "${c.items: array<string>} == []",
+   "expect": [
+    "B203"
+   ]
+  },
+  {
+   "id": "in-literal-list",
+   "expr": "${c.label} in [\"a\", \"b\"]",
+   "expect": []
+  },
+  {
+   "id": "in-array-ref",
+   "expr": "{\"name\": \"a\"} in ${c.items}",
+   "expect": []
+  },
+  {
+   "id": "in-map-ref",
+   "expr": "${c.sev} != null && \"high\" in ${c.sev}",
+   "expect": []
+  },
+  {
+   "id": "in-open-map",
+   "expr": "\"k\" in ${c.open}",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "in-string-right",
+   "expr": "\"a\" in ${c.label}",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "in-number-right",
+   "expr": "1 in ${c.count}",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "in-null-right",
+   "expr": "\"a\" in null",
+   "expect": [
+    "B206"
+   ]
+  },
+  {
+   "id": "in-untyped-right",
+   "expr": "\"a\" in ${untyped}",
+   "expect": [
+    "B204"
+   ]
+  },
+  {
+   "id": "in-any-right",
+   "expr": "\"a\" in ${c.x}",
+   "expect": [
+    "B204"
+   ]
+  },
+  {
+   "id": "in-annotated-right",
+   "expr": "${c.x} != null && \"a\" in ${c.x: array<string>}",
+   "expect": []
+  },
+  {
+   "id": "in-optional-right",
+   "expr": "\"a\" in ${skipped.items}",
+   "expect": [
+    "W610"
+   ]
+  },
+  {
+   "id": "in-guarded-right",
+   "expr": "${skipped} != null && {\"name\": \"a\"} in ${skipped.items}",
+   "expect": []
+  },
+  {
+   "id": "in-list-never-matches",
+   "expr": "${c.count} in [\"a\", \"b\"]",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-list-numbers-match",
+   "expr": "${c.confidence} in [0, 1]",
+   "expect": []
+  },
+  {
+   "id": "in-empty-list",
+   "expr": "${c.label} in []",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-map-non-string-key",
+   "expr": "${c.sev} != null && ${c.count} in ${c.sev}",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-map-null-key",
+   "expr": "${c.sev} != null && null in ${c.sev}",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-nullable-left-null-member",
+   "expr": "${u} in [null, \"a\"]",
+   "expect": []
+  },
+  {
+   "id": "in-dynamic-left",
+   "expr": "${untyped} in [\"a\"]",
+   "expect": []
+  },
+  {
+   "id": "in-result-boolean",
+   "expr": "${c.sev} != null && !(\"a\" in ${c.sev})",
+   "expect": []
+  },
+  {
+   "id": "in-chained",
+   "expr": "\"a\" in ${c.sev} == true",
+   "expect": [
+    "V108"
+   ]
+  },
+  {
+   "id": "in-adjacent-ref",
+   "expr": "${c.label}in[\"a\"]",
+   "expect": []
+  },
+  {
+   "id": "in-empty-map",
+   "expr": "\"a\" in {}",
+   "expect": [
+    "W611"
+   ]
+  },
+  {
+   "id": "in-empty-list-dynamic-left",
+   "expr": "${untyped} in []",
+   "expect": [
+    "W611"
+   ]
+  }
+ ]
+}

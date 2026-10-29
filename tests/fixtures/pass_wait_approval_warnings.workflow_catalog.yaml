@@ -1,0 +1,50 @@
+# Standard version: 1.1.0
+# Valid but risky (STANDARD v1.1 §5.13, §5.14): the only checkpoint is taken
+# before a wait that can last hours, so after resuming it no longer
+# authorises the mutation (W608); and an event trigger starts runs
+# unattended while the mutation's approval does not say what to do then
+# (W606).
+risky_change:
+  goal: Apply a change when an incident is resolved.
+  risk: high
+  workflow_extensions:
+    requires: [triggers@1, wait@1, approval@1]
+  triggers:
+  - kind: event
+    event:
+      event_type: incident.opened
+      source_kind: api
+      delivers_to: incident
+  inputs:
+    incident:
+      type: object
+      required: true
+      ref: schemas/event_schema.yaml#/event
+  steps:
+  - capability: constrain
+    purpose: Check the change against policy.
+    store_as: policy_out
+    input_bindings:
+      target: ${incident}
+      constraints: [change_policy]
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
+  - capability: receive
+    purpose: Wait until the incident is resolved.
+    store_as: resolved_out
+    timeout: 8h
+    wait:
+      event_type: incident.resolved
+      correlate:
+        incident_id: ${incident.event_id}
+  - capability: mutate
+    purpose: Re-enable the feature flag.
+    store_as: mutate_out
+    input_bindings:
+      target: flags/feature.yaml
+      operation: {enabled: true}
+    approval:
+      approver: {kind: human, role: incident-commander}

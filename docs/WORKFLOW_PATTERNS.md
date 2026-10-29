@@ -547,14 +547,26 @@ monitor:
 
 ### 1. Capability Dependencies
 
-Some capabilities require others to be invoked first:
+Only `requires` edges force another capability to be present: every `mutate`, `send` and `rollback` step needs a `checkpoint` step running before it (V102). `precedes` edges only order capabilities that both appear in a workflow (V102 when the target has no source step before it); they never demand the source. `constrain` is a soft prerequisite of `execute`, `mutate` and `send`: a workflow without it still validates, with warning W601. A step in the same `parallel_group` does not count as running before another.
 
 ```
-checkpoint → mutate → verify
-checkpoint → send → verify
-retrieve → detect → classify
-plan → execute
-decompose → delegate
+requires (presence and order, V102):
+  checkpoint → mutate | send | rollback
+
+precedes (order when both are present, V102), for example:
+  checkpoint → mutate, send
+  plan → execute, mutate
+  constrain → execute, mutate, send, generate
+  execute | mutate | send → verify → audit
+  observe → detect → classify
+
+soft_requires (one source first, else W601):
+  constrain → execute | mutate | send
+  observe | detect | predict | attribute | explain → ground
+
+enables (informational):
+  retrieve → detect
+  decompose → delegate
 ```
 
 ### 2. Safety Requirements

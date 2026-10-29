@@ -1,0 +1,109 @@
+{
+  "description": "An after-gate's R403 goes to the step's failure modes: a rollback gate and a rollback failure mode on the same condition roll back twice (\u00a75.6).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "t",
+            "conditions": [
+              "ok"
+            ]
+          },
+          "gates": [
+            {
+              "when": "${v.passed} == false",
+              "phase": "after",
+              "action": "rollback"
+            }
+          ],
+          "failure_modes": [
+            {
+              "condition": "verification failed",
+              "when": "${v.passed} == false",
+              "action": "rollback"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Rollback",
+        "checkpoint_id": "cp1",
+        "step": 1
+      },
+      "respond": {
+        "kind": "RolledBack"
+      }
+    },
+    {
+      "expect": {
+        "kind": "Rollback",
+        "checkpoint_id": "cp1",
+        "step": 1
+      },
+      "respond": {
+        "kind": "RolledBack"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R403",
+    "step": 1
+  },
+  "trace_kinds": [
+    "gate_fired",
+    "rolled_back",
+    "failure_mode_fired",
+    "rolled_back"
+  ]
+}

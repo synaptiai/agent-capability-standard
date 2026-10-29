@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 parallel:
   goal: Workflow with parallel execution groups.
   risk: low
@@ -11,6 +12,8 @@ parallel:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   - capability: search
     purpose: Search in parallel.
@@ -23,6 +26,8 @@ parallel:
     timeout: null
     retry: null
     store_as: search_out
+    input_bindings:
+      query: "status"
     failure_modes: []
   - capability: retrieve
     purpose: Retrieve in parallel.
@@ -35,6 +40,8 @@ parallel:
     timeout: null
     retry: null
     store_as: retrieve_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   success:
   - Parallel group completed

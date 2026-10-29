@@ -205,3 +205,116 @@ class TestThreadSafety:
         for cp in tracker._checkpoint_history:
             assert cp.id is not None
             assert isinstance(cp.scope, list)
+
+
+class TestReservation:
+    """A checkpoint covers one mutation: validate_and_reserve() hands it to
+    one holder at a time until that holder consumes or releases it."""
+
+    def test_second_holder_sees_reserved(self, tracker: CheckpointTracker) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        assert tracker.validate_and_reserve("a") == (True, created)
+        assert tracker.validate_and_reserve("a") == (True, created)  # idempotent
+        assert tracker.validate_and_reserve("b") == (False, created)
+        assert tracker.validate_and_reserve() == (False, created)
+        # Still a valid checkpoint, only taken.
+        assert tracker.has_valid_checkpoint()
+
+    def test_only_the_holder_releases(self, tracker: CheckpointTracker) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve("a")
+        assert tracker.release_reservation("b") is False
+        assert tracker.validate_and_reserve("b") == (False, created)
+        assert tracker.release_reservation("a") is True
+        assert tracker.release_reservation("a") is False
+        assert tracker.validate_and_reserve("b") == (True, created)
+
+    def test_release_without_holder_releases_any(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        assert tracker.validate_and_reserve() == (True, created)
+        assert tracker.release_reservation() is True
+        assert tracker.validate_and_reserve("b") == (True, created)
+
+    def test_only_the_holder_consumes(self, tracker: CheckpointTracker) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve("a")
+        assert tracker.consume_checkpoint("b") is None
+        assert tracker.has_valid_checkpoint()
+        assert tracker.consume_checkpoint("a") == created
+        assert not tracker.has_valid_checkpoint()
+
+    def test_holder_consumes_its_own_checkpoint_after_a_new_one(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        """A checkpoint created mid-flight is not consumed by the earlier
+        holder's success; the reserved (superseded) one is."""
+        first = tracker.create_checkpoint(scope=["*"], reason="first")
+        tracker.validate_and_reserve("a")
+        second = tracker.create_checkpoint(scope=["*"], reason="second")
+        assert tracker.consume_checkpoint("a") == first
+        assert tracker.get_active_checkpoint_id() == second
+        consumed = tracker.get_checkpoint_by_id(first)
+        assert consumed is not None and consumed.consumed
+        assert tracker.validate_and_reserve("b") == (True, second)
+
+    def test_unheld_consume_keeps_legacy_behaviour(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve("a")
+        assert tracker.consume_checkpoint() == created
+        assert tracker.release_reservation("a") is False
+
+    def test_new_checkpoint_is_unreserved(self, tracker: CheckpointTracker) -> None:
+        tracker.create_checkpoint(scope=["*"], reason="first")
+        tracker.validate_and_reserve("a")
+        second = tracker.create_checkpoint(scope=["*"], reason="second")
+        assert tracker.validate_and_reserve("b") == (True, second)
+
+    def test_invalidate_all_ends_the_reservation(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve("a")
+        tracker.invalidate_all()
+        assert tracker.release_reservation() is False
+
+    def test_abandoned_reservation_lapses(self, tmp_path: Path) -> None:
+        tracker = CheckpointTracker(checkpoint_dir=str(tmp_path), reservation_seconds=0)
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve("a")
+        assert tracker.validate_and_reserve("b") == (True, created)
+
+    def test_reservation_is_not_persisted(self, tmp_path: Path) -> None:
+        tracker = CheckpointTracker(checkpoint_dir=str(tmp_path))
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        tracker.validate_and_reserve("a")
+        reloaded = CheckpointTracker(checkpoint_dir=str(tmp_path))
+        assert reloaded.validate_and_reserve("b") == (True, created)
+
+    def test_concurrent_reservations_have_one_winner(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        created = tracker.create_checkpoint(scope=["*"], reason="test")
+        workers = 16
+        barrier = threading.Barrier(workers)
+        results: list[tuple[bool, str | None]] = []
+        results_lock = threading.Lock()
+
+        def reserve(holder: str) -> None:
+            barrier.wait()
+            result = tracker.validate_and_reserve(holder)
+            with results_lock:
+                results.append(result)
+
+        threads = [
+            threading.Thread(target=reserve, args=(f"t{i}",)) for i in range(workers)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert sorted(results) == [(False, created)] * (workers - 1) + [(True, created)]

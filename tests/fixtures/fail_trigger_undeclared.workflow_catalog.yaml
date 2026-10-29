@@ -1,0 +1,15 @@
+# Standard version: 1.1.0
+# Must-understand (STANDARD v1.1 §5.9): using triggers without declaring
+# triggers@1 is V106, so a consumer cannot silently ignore them.
+undeclared_trigger:
+  goal: Start on a schedule without saying so.
+  risk: low
+  triggers:
+  - kind: schedule
+    schedule: {every: 1h}
+  steps:
+  - capability: observe
+    purpose: Observe.
+    store_as: observe_out
+    input_bindings:
+      target: "system"

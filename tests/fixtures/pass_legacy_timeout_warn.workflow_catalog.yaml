@@ -1,0 +1,13 @@
+# Standard version: 1.1.0
+# A step timeout outside the duration grammar (STANDARD v1.1 §5.10.1) is
+# accepted, as in 1.0, but cannot be enforced: W614.
+loose_timeout:
+  goal: Use a free-text timeout.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe.
+    store_as: observe_out
+    input_bindings:
+      target: "system"
+    timeout: five minutes

@@ -1,0 +1,121 @@
+{
+  "description": "Events from the wrong source kind or principal are dropped (counted once each); the sender is kept.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "accept_from": [
+              "a"
+            ]
+          },
+          "wait": {
+            "event_type": "review.verdict",
+            "source_kind": "agent"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "source_kind": "agent",
+        "accept_from": [
+          "a"
+        ]
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.verdict",
+          "source": {
+            "kind": "api"
+          }
+        },
+        "principal": "a"
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.verdict",
+          "source": {
+            "kind": "agent"
+          }
+        },
+        "principal": "b"
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.verdict",
+          "source": {
+            "kind": "agent"
+          }
+        },
+        "principal": "b"
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.verdict",
+          "source": {
+            "kind": "agent"
+          }
+        },
+        "principal": "a"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "r": {
+        "source": "agent",
+        "data": [
+          {
+            "sender": "a"
+          }
+        ]
+      }
+    }
+  },
+  "trace_kinds": [
+    "event_dropped",
+    "event_received"
+  ]
+}

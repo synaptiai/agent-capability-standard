@@ -1,0 +1,123 @@
+{
+  "description": "An end gate in an invoked workflow ends that run only: the invoke step completes with its stores and the caller goes on.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child",
+            "input": {}
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "z"
+          }
+        }
+      ]
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "y"
+          },
+          "gates": [
+            {
+              "when": "${r.data} == 0",
+              "action": "end",
+              "message": "nothing to do"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0,
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 0,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "step": 1,
+        "frame": [
+          "w"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "i": {
+        "result": {
+          "r": {
+            "data": 0
+          }
+        },
+        "steps_executed": [
+          "r"
+        ]
+      }
+    }
+  },
+  "trace_kinds": [
+    "run_ended",
+    "invoke_returned"
+  ]
+}

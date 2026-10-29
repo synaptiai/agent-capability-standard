@@ -296,10 +296,11 @@ class WorkflowTracer:
                     f"Step {idx} ({step.capability}) executed out of order"
                 )
 
-        # Check for mutation steps executed without checkpoint coverage
+        # Check for steps that need a checkpoint (by the ontology, whatever
+        # the step declares) executed without checkpoint coverage
         for i in matched:
             step = self._workflow.steps[i]
-            if step.requires_checkpoint:
+            if self._engine.effective_flags(step)["requires_checkpoint"]:
                 # Check if a checkpoint step preceded this
                 checkpoint_found = False
                 for j in matched:

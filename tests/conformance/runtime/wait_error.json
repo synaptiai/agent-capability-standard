@@ -1,0 +1,47 @@
+{
+  "description": "An error from the event source fails the wait (R402).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "wait": {
+            "event_type": "e"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "boom",
+        "message": "x"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402"
+  },
+  "trace_kinds": []
+}

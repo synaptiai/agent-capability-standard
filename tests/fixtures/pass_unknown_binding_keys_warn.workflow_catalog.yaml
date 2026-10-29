@@ -1,0 +1,15 @@
+# Standard version: 1.1.0
+# A binding key the capability's input schema does not define is W604 (with
+# a did-you-mean hint, or the list of inputs); 'x-' keys are vendor data.
+typo_bindings:
+  goal: Bind a misspelt input and an input the capability does not have.
+  risk: low
+  steps:
+  - capability: search
+    purpose: Search with a misspelt limit and a stray key.
+    store_as: search_out
+    input_bindings:
+      query: open incidents
+      limt: 10
+      sender_check: true
+      x-trace: true

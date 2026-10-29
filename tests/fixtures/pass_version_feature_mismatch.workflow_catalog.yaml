@@ -1,0 +1,40 @@
+# Standard version: 1.0.0
+# A workflow that targets 1.0 but uses a feature new in 1.1 is W616: a 1.0
+# consumer does not know it. Once per feature, at its first use.
+early_end:
+  goal: End early when nothing was found, and fail on a lookup error.
+  risk: low
+  steps:
+  - capability: search
+    purpose: Look for matching documents.
+    store_as: found
+    input_bindings:
+      query: open incidents
+    gates:
+    - when: ${found.results} == []
+      action: end
+      phase: after
+      message: Nothing to report.
+    failure_modes:
+    - condition: The search failed
+      action: stop
+      on_error: R402
+  - capability: explain
+    purpose: Summarise the findings.
+    store_as: summary
+    input_bindings:
+      conclusion: "${found.results: array<object>}"
+pinned_to_1_1:
+  goal: The same feature under a workflow that declares 1.1.
+  risk: low
+  spec_version: "1.1"
+  steps:
+  - capability: search
+    purpose: Look for matching documents.
+    store_as: found
+    input_bindings:
+      query: open incidents
+    failure_modes:
+    - condition: The search failed
+      action: stop
+      on_error: R402

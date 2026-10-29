@@ -1,0 +1,172 @@
+{
+  "description": "A handler listed before the deferred step it reads is deferred on escalation: the run ends deferred with the cause.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "page",
+          "handler": true,
+          "workflow_id": "oncall",
+          "input_bindings": {
+            "workflow": "oncall",
+            "input": {
+              "why": "observation failed",
+              "applied": "${m.success: boolean}"
+            }
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "elsewhere"
+          },
+          "failure_modes": [
+            {
+              "condition": "observation failed",
+              "on_error": "R402",
+              "action": "escalate",
+              "recovery": {
+                "goto_step": "page"
+              }
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1",
+          "recovery@1"
+        ]
+      }
+    },
+    "oncall": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "inquire",
+          "purpose": "inquire step",
+          "store_as": "q",
+          "input_bindings": {
+            "ambiguous_input": "${why}"
+          }
+        }
+      ],
+      "inputs": {
+        "why": {
+          "type": "string",
+          "required": true
+        },
+        "applied": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "step": 4
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "down"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "deferred",
+    "cause": "R402",
+    "deferred": [
+      {
+        "step": 3
+      },
+      {
+        "step": 2,
+        "reason": "it reads 'm', which was deferred"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "escalated",
+    "step_deferred"
+  ]
+}

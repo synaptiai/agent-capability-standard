@@ -1,8 +1,13 @@
 """Size-limited YAML loading for tools/ scripts (SEC-003).
 
 Standalone mirror of ``grounded_agency/utils/safe_yaml.py`` that avoids
-import dependencies on the ``grounded_agency`` package so ``tools/``
-scripts work without installing the package.
+import dependencies on the ``grounded_agency`` package, so the ``tools/``
+scripts that need only YAML loading (e.g. ``validate_ontology.py``,
+``validate_profiles.py``, ``sync_skill_schemas.py``) run from a bare checkout
+without installing the package. This does not hold for every tool:
+``validate_workflows.py`` is a front end to the Rust core and needs the built
+extension ``grounded_agency._core`` (``pip install -e .``), and
+``validate_benchmark_deps.py`` imports ``grounded_agency`` directly.
 
 IMPORTANT: The canonical source is ``grounded_agency/utils/safe_yaml.py``.
 Both files MUST expose the same public API (``safe_yaml_load``,

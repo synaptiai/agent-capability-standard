@@ -20,5 +20,23 @@ output_schema:
     actions_taken:
       type: array
       description: Enforcement actions
+    tally:
+      type: object
+      description: "Review quorum count, when the step has a quorum (quorum@1, STANDARD\
+        \ v1.1 \xA75.16)"
+      properties:
+        passes:
+          type: integer
+        blocks:
+          type: integer
+        abstains:
+          type: integer
+        full_passes:
+          type: integer
+          description: Passing verdicts with scope full (min_full)
+        voters:
+          type: array
+          items:
+            type: string
     evidence_anchors:
       type: array

@@ -29,7 +29,8 @@ Fixing these statically saves hours of runtime debugging and prevents data corru
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.10+
+- Rust 1.86+ (the validator is a compiled Rust extension, built during install)
 - Git
 
 ## Step 1: Clone and Setup (2 min)
@@ -43,8 +44,8 @@ cd agent-capability-standard
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies
-pip install pyyaml
+# Install the package and dev tools (builds the Rust core with maturin)
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 ## Step 2: Validate the Reference Workflows (2 min)
@@ -58,8 +59,10 @@ python tools/validate_workflows.py
 Expected output:
 ```
 VALIDATION PASS
-Suggestions written to: tools/validator_suggestions.json
+Suggestions written to: .../tools/validator_suggestions.json
 ```
+
+Any warnings are printed in a `WARNINGS` block before the verdict. Use `--catalog PATH` to validate a different file and `--strict` to make warnings fail.
 
 The validator checks:
 - All capabilities exist in the ontology
@@ -75,26 +78,27 @@ The conformance suite tests both valid and intentionally invalid fixtures:
 python scripts/run_conformance.py
 ```
 
-Expected output:
+Expected output (one line per fixture, abbreviated here):
 ```
 PASS: pass_reference
-PASS: fail_unknown_capability
-PASS: fail_bad_binding_path
-PASS: fail_ambiguous_untyped
-PASS: fail_consumer_contract_mismatch
+PASS: pass_minimal_single_step
+PASS: pass_all_36_capabilities
+...
 
 Conformance PASSED
 ```
 
-Each test verifies a specific validation behavior:
+The fixtures live in `tests/fixtures/` (40+ of them); `tests/fixtures/EXPECTATIONS.json` records whether each should pass and which error and warning codes it must produce. Each verifies a specific validation behavior, for example:
 
 | Test | Purpose |
 |------|---------|
 | `pass_reference` | Valid workflows should pass |
-| `fail_unknown_capability` | Unknown capabilities should fail |
-| `fail_bad_binding_path` | Invalid binding paths should fail |
-| `fail_ambiguous_untyped` | Ambiguous types without annotations should fail |
-| `fail_consumer_contract_mismatch` | Type mismatches should fail |
+| `fail_unknown_capability` | Unknown capabilities should fail (V101) |
+| `fail_bad_binding_path` | A path missing from the producer's schema should fail (B201) |
+| `fail_missing_store_ref` | A reference to an unknown store should fail (B202) |
+| `fail_type_mismatch_binding` | Type mismatches should fail (B203) |
+| `fail_conflicts_parallel` | Conflicting capabilities in one parallel group should fail (F504) |
+| `pass_soft_requires_warn` | A missing soft prerequisite passes with warning W601 |
 
 ## Step 4: Explore a Workflow (2 min)
 
@@ -108,43 +112,94 @@ debug_code_change:
   - capability: observe
     purpose: Observe failing behavior, logs, and relevant code paths.
     store_as: observe_out
+    input_bindings:
+      target: "${bug.component}"
   - capability: search
     purpose: Find related code, configs, and error patterns.
     store_as: search_out
+    input_bindings:
+      query: "${bug.symptom}"
   - capability: attribute
     purpose: Build dependency graph and identify causal relationships.
     store_as: attribute_out
+    input_bindings:
+      effect: "${bug.symptom}"
   - capability: constrain
     purpose: Define invariants/spec expectations for the component.
     store_as: constrain_out
+    input_bindings:
+      target: "${bug.component}"
+      constraints: ["existing_tests_pass", "public_interfaces_unchanged"]
   - capability: critique
     purpose: List likely failure modes + edge cases.
     store_as: critique_out
+    input_bindings:
+      target: "${attribute_out.causes: array<object>}"
   - capability: plan
     purpose: Produce minimal fix plan with checkpoints.
     store_as: plan_out
+    input_bindings:
+      goal: "Fix ${bug.symptom} in ${bug.component}"
+      constraints: "${user_input.constraints}"
   - capability: checkpoint           # <-- Safety: checkpoint before mutation
     purpose: Create checkpoint before mutation.
     store_as: checkpoint_out
-  - capability: execute              # <-- Requires checkpoint (enforced)
+    input_bindings:
+      scope: "${bug.component}"
+  - capability: execute              # <-- Runs after the checkpoint
     purpose: Apply fix, run tests, and produce diff summary.
     requires_checkpoint: true
     store_as: execute_out
+    input_bindings:
+      code: "${bug.fix_command}"
   - capability: verify
     purpose: Run targeted verification and return PASS/FAIL.
     store_as: verify_out
+    input_bindings:
+      target: "${bug.component}"
+      conditions: ["tests_pass", "symptom_resolved"]
   - capability: audit
     purpose: Record what changed and why.
     store_as: audit_out
+    input_bindings:
+      event:
+        type: "debug_code_change"
+        component: "${bug.component}"
+        plan: "${plan_out.steps: array<object>}"
+        verified: "${verify_out.passed}"
   - capability: rollback
     purpose: If verify FAIL, revert safely.
     store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    gates:
+    - when: ${verify_out.passed} == true   # <-- Roll back only on failure
+      action: skip
+  inputs:
+    bug:                             # <-- The workflow's input: what to fix
+      type: object
+      required: true
+      properties:
+        component:
+          type: string
+        symptom:
+          type: string
+        fix_command:
+          type: string
+    user_input:
+      type: object
+      properties:
+        domain:
+          type: string
+        constraints:
+          type: object
 ```
 
 Key observations:
 - **Capabilities are atomic**: Each step does one thing
-- **Safety by construction**: `checkpoint` before `execute` is required
+- **Safety by construction**: a `checkpoint` runs before `execute`; the validator requires one before `mutate`, `send` and `rollback`
 - **Outputs are named**: `store_as` enables later steps to reference outputs
+- **Inputs are bound**: `input_bindings` feed each step the inputs its capability requires, from the workflow's `bug` input or an earlier step's output (`${attribute_out.causes}`)
 
 ## Step 5: Explore the Capability Ontology (2 min)
 
@@ -277,16 +332,16 @@ Each domain provides:
 | Build your own workflow | [TUTORIAL.md](TUTORIAL.md) |
 | Understand key terms | [GLOSSARY.md](GLOSSARY.md) |
 | Work with images, audio, video | [MODALITY_HANDLING.md](guides/MODALITY_HANDLING.md) |
-| Read the full spec | [STANDARD-v1.0.0.md](../spec/STANDARD-v1.0.0.md) |
+| Read the full spec | [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) |
 | Understand conformance levels | [CONFORMANCE.md](../spec/CONFORMANCE.md) |
 
 ## Common Issues
 
-### "ModuleNotFoundError: No module named 'yaml'"
+### "ModuleNotFoundError: No module named 'grounded_agency._core'" (or 'yaml')
 
-Install the dependency:
+The compiled Rust extension is missing or stale. Rebuild it from the repository root (requires Rust 1.86+):
 ```bash
-pip install pyyaml
+pip install -e ".[dev]" -c constraints.txt
 ```
 
 ### "FileNotFoundError: schemas/..."

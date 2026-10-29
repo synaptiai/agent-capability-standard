@@ -1,0 +1,193 @@
+{
+  "description": "Events that do not match are dropped; the match is the output, and earlier checkpoints lapse.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "wait": {
+            "event_type": "job.done",
+            "correlate": {
+              "job": "${job}"
+            }
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          }
+        }
+      ],
+      "inputs": {
+        "job": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {
+    "job": "j1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "event_type": "job.done",
+        "correlate": {
+          "job": "j1"
+        },
+        "deadline": 3600000
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "job.done",
+          "canonical": {
+            "job": "j2"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "job.done",
+          "canonical": {
+            "job": "j1"
+          },
+          "timestamp": "t",
+          "anchors": []
+        }
+      },
+      "at": 1000
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval"
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "cp2"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "r": {
+        "data": [
+          {
+            "event_type": "job.done",
+            "canonical": {
+              "job": "j1"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "trace_kinds": [
+    "event_dropped",
+    "event_received",
+    "checkpoints_invalidated"
+  ]
+}

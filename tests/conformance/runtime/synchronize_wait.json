@@ -1,0 +1,73 @@
+{
+  "description": "A synchronize step waits for agreement; the event's state is the agreed state.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "synchronize",
+          "purpose": "synchronize step",
+          "store_as": "s",
+          "timeout": "1h",
+          "input_bindings": {
+            "agents": [
+              "a",
+              "b"
+            ],
+            "state": {
+              "v": 1
+            }
+          },
+          "wait": {
+            "event_type": "state.agreed"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "event_type": "state.agreed"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "state.agreed",
+          "canonical": {
+            "v": 1
+          }
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "s": {
+        "synchronized": true,
+        "agreed_state": {
+          "v": 1
+        },
+        "participants": [
+          "a",
+          "b"
+        ]
+      }
+    }
+  },
+  "trace_kinds": []
+}

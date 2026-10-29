@@ -1,0 +1,258 @@
+{
+  "description": "A nested run that defers a mutate defers its invoke step; the invoke, approved and run, stays executed, the nested run's record is the queued action, and a parent verify waits because the ontology orders verify after the mutate deferred below.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child"
+          },
+          "requires_approval": true,
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/nightly-sync"
+            }
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "target": "config",
+            "conditions": [
+              "applied"
+            ]
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "elsewhere"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/nightly-sync"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "status"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "frame": [
+          "w"
+        ],
+        "step": 0
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d0",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "unavailable",
+        "approvers": [],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "total_count": 0,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe",
+        "frame": [
+          "w"
+        ],
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "observation": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "deferred",
+    "action_records": [
+      {
+        "status": "executed",
+        "reason": "its nested run deferred steps, which are queued separately"
+      },
+      {
+        "status": "planned"
+      }
+    ],
+    "deferred": [
+      {
+        "frame": [
+          "w",
+          "child"
+        ],
+        "step": 2
+      },
+      {
+        "frame": [
+          "w"
+        ],
+        "step": 0
+      },
+      {
+        "frame": [
+          "w"
+        ],
+        "step": 1,
+        "reason": "the ontology orders verify after mutate, which was deferred"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "step_deferred"
+  ]
+}

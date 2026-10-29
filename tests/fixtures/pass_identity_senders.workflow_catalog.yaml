@@ -1,0 +1,39 @@
+# Standard version: 1.1.0
+# Positive fixture (STANDARD v1.1 §5.17, identity@1): an answer is accepted
+# only from the owner, a decision person or a colleague authenticated by a
+# session or a vendor single sign-on; a step that requires approval and uses
+# a colleague's answer is asked of a person, whatever its mandate.
+owner_answer:
+  goal: Act on an answer from the owner.
+  risk: medium
+  workflow_extensions:
+    requires: [wait@1, identity@1, approval@1]
+  steps:
+  - capability: receive
+    purpose: Wait for the answer.
+    store_as: answer
+    timeout: 2h
+    input_bindings:
+      sender_check: [session_id, x-acme.sso]
+      accept_trust_classes: [owner, decision_person, colleague]
+      always_ask_trust_classes: [colleague]
+    wait:
+      event_type: answer.given
+  - capability: constrain
+    purpose: Check the answer against policy.
+    store_as: policy_out
+    input_bindings:
+      target: "${answer.data: array<object>}"
+      constraints: [change_policy]
+  - capability: execute
+    purpose: Apply the answer.
+    store_as: run_out
+    input_bindings:
+      code: apply-answer
+      environment:
+        answer: "${answer.data: array<object>}"
+    approval:
+      approver: {kind: standing_mandate, mandate_ref: mandates/answers}
+      when_unattended: defer_to_queue
+  success:
+  - The answer came from the owner, a decision person or a colleague

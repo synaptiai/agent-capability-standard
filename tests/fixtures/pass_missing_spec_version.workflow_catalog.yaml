@@ -1,0 +1,11 @@
+# No spec_version and no '# Standard version:' header: W605 asks the author
+# to declare the version, and the workflow is otherwise valid.
+unversioned_workflow:
+  goal: Omit the standard version.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe something.
+    store_as: observe_out
+    input_bindings:
+      target: "system"

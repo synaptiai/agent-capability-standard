@@ -1,0 +1,36 @@
+[package]
+name = "acs-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+description = "Reference core of the Agent Capability Standard: workflow validator and executor"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "acs_core"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+# Builds the `grounded_agency._core` Python extension module. maturin enables
+# it (see pyproject.toml); plain `cargo build`/`cargo test` leave it off.
+python = ["dep:pyo3"]
+
+[dependencies]
+indexmap = "2.14.2"
+saphyr = "0.3.1"
+saphyr-parser = "0.3.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
+pyo3 = { version = "0.30.1", optional = true, features = ["abi3-py310"] }
+chrono-tz = { version = "0.10.4", default-features = false }
+hmac = "0.12.1"
+ryu-js = "1.0.3"
+sha2 = "0.10.9"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

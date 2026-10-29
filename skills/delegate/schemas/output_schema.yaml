@@ -20,5 +20,25 @@ output_schema:
     agent:
       type: string
       description: Assigned agent
+    effective:
+      type: object
+      description: The delegation settings actually used, as attested by the host
+      properties:
+        fresh_context:
+          type: boolean
+        model_family:
+          type: string
+        role:
+          type: string
+        read_only:
+          type: boolean
+        identity:
+          type: object
+          description: The agent_identity of the party that took the delegation (identity@1);
+            a waiting delegate keeps only its results
+    result:
+      type: object
+      description: "The delegate's result, when the step waits for it (wait@1, STANDARD\
+        \ v1.1 \xA75.13), with its sender (and, with identity@1, its sender_identity)"
     evidence_anchors:
       type: array

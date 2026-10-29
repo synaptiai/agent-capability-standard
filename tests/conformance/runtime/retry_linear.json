@@ -1,0 +1,72 @@
+{
+  "description": "Linear backoff waits 1 s \u00d7 the attempt number.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          },
+          "retry": {
+            "max": 1,
+            "backoff": "linear"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R401"
+      }
+    },
+    {
+      "expect": {
+        "kind": "Sleep",
+        "until": 1000
+      }
+    },
+    {
+      "tick": 1000
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 1,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "retry"
+  ]
+}

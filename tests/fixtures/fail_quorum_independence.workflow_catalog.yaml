@@ -1,0 +1,62 @@
+# Standard version: 1.1.0
+# A review that is not independent (STANDARD v1.1 §5.16): one reviewer reads
+# the author's notes through a summary step. F504.
+dependent_review:
+  goal: Review a change.
+  risk: medium
+  workflow_extensions:
+    requires: [delegation@1, quorum@1]
+  inputs:
+    change_ref: {type: string, required: true}
+    author_notes: {type: string, required: true}
+  steps:
+  - capability: retrieve
+    purpose: Fetch the diff.
+    store_as: diff_out
+    input_bindings:
+      target: ${change_ref}
+  - capability: transform
+    purpose: Summarise the change for reviewers, using the author's notes.
+    store_as: summary_out
+    input_bindings:
+      input: ${author_notes}
+      target_format: summary
+  - capability: delegate
+    purpose: First review.
+    store_as: review_a
+    input_bindings:
+      task:
+        summary: "${summary_out.output: object}"
+      agent: reviewer-a
+      fresh_context: true
+      model_family: claude
+  - capability: delegate
+    purpose: Second review.
+    store_as: review_b
+    input_bindings:
+      task:
+        diff: "${diff_out.data: object}"
+      agent: reviewer-b
+      fresh_context: true
+      model_family: gpt
+  - capability: receive
+    purpose: Collect verdicts.
+    store_as: verdicts_out
+  - capability: constrain
+    purpose: Require two approvals.
+    store_as: quorum_out
+    input_bindings:
+      target: ${verdicts_out.data}
+      constraints: [two_approvals]
+      action_on_violation: block
+    quorum:
+      verdicts: ${verdicts_out.data}
+      reviewers: [review_a, review_b]
+      vocabulary: [approve, reject]
+      pass_values: [approve]
+      blocking_values: [reject]
+      min_pass: 2
+      pinned_to: ${change_ref}
+      forbidden_inputs: [author_notes]
+      require_fresh_context: true
+      require_model_families: [claude, gpt]

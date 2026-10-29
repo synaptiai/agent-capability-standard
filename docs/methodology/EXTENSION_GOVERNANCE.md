@@ -235,10 +235,13 @@ search_and_replace:
   steps:
     - capability: search
       store_as: matches
+      input_bindings:
+        query: old_function_name
     - capability: transform
       input_bindings:
-        source: ${matches}
-        operation: replace
+        input: ${matches}
+        target_format: replaced_text
+        options: {operation: replace}
 ```
 
 If it works as a pattern, don't propose it as a capability.

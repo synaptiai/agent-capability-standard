@@ -1,0 +1,44 @@
+# Standard version: 1.1.0
+# Positive fixture (STANDARD v1.1 §5.6, §5.8): a before-gate guards the step
+# with an earlier output, an after-gate reads the step's own output, and a
+# failure mode fires on a structured `when`. Every expression type-checks.
+gate_phases:
+  goal: Gate a mutation before it runs and roll back after it if verification fails.
+  risk: high
+  steps:
+  - capability: checkpoint
+    purpose: Save state before the change.
+    store_as: checkpoint_out
+    input_bindings:
+      scope: "workspace"
+  - capability: constrain
+    purpose: Check the change is allowed.
+    store_as: constrain_out
+    input_bindings:
+      target: '${checkpoint_out: object}'
+      constraints: []
+    gates:
+    - when: ${checkpoint_out.checkpoint_id} == null
+      action: stop
+      message: No checkpoint, do not continue.
+  - capability: verify
+    purpose: Verify the result.
+    store_as: verify_out
+    input_bindings:
+      conditions: []
+    gates:
+    - when: ${constrain_out.compliant} == false
+      phase: before
+      action: stop
+      message: Not allowed.
+    - when: ${verify_out.passed} == false && ${verify_out.confidence} >= 0.5
+      phase: after
+      action: rollback
+      message: Verification failed.
+    failure_modes:
+    - condition: Low-confidence verification
+      action: request_more_context
+      when: ${verify_out.confidence} < 0.5
+      recovery: Gather more evidence.
+  success:
+  - Gates evaluated in their phase

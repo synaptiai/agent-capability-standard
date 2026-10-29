@@ -1,7 +1,7 @@
 ---
 name: checkpoint
 description: Create a safety checkpoint marker before mutation or execution steps. Use when about to modify files, execute plans, or perform any irreversible action. Essential for the CAVR pattern.
-argument-hint: "[scope] [reason] [checkpoint_type]"
+argument-hint: "[scope] [label] [metadata]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Edit
@@ -65,10 +65,11 @@ Execute **checkpoint** to create a restorable state marker before any mutating o
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `scope` | Yes | string\|array | Files, directories, or state keys to checkpoint |
-| `reason` | No | string | Why this checkpoint is being created (for audit trail) |
-| `checkpoint_type` | No | enum | Type: git_stash, file_backup, state_snapshot, database_savepoint |
-| `expiry` | No | string | When checkpoint can be garbage collected (e.g., "24h", "never") |
+| `scope` | Yes | string | Files, directories, or state keys to checkpoint |
+| `label` | No | string | Checkpoint name |
+| `metadata` | No | object | Additional metadata |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -105,16 +106,16 @@ Execute **checkpoint** to create a restorable state marker before any mutating o
 Return a structured object:
 
 ```yaml
-checkpoint_created: boolean
-checkpoint:
-  id: string  # Unique identifier (e.g., "chk_20240115_143022_abc123")
-  type: git_stash | file_backup | state_snapshot | database_savepoint
-  created_at: string  # ISO timestamp
-  scope:
-    files: array[string]  # File paths included
-    state_keys: array[string]  # State keys included (if applicable)
-  restore_command: string  # Exact command to restore
-  expiry: string | null  # When checkpoint expires
+checkpoint_id: string  # Unique identifier (e.g., "chk_20240115_143022_abc123")
+timestamp: string  # ISO 8601 date-time the checkpoint was created
+size: integer  # Checkpoint size in bytes (optional)
+checkpoint_created: boolean  # Whether the checkpoint was successfully created
+type: git_stash | file_backup | state_snapshot | database_savepoint
+scope:
+  files: array[string]  # File paths included
+  state_keys: array[string]  # State keys included (if applicable)
+restore_command: string  # Exact command to restore
+expiry: string | null  # When checkpoint expires
 pre_mutation_state:
   hash: string | null  # Combined hash of all checkpointed content
   summary: string  # Human-readable state summary
@@ -128,11 +129,14 @@ assumptions: []
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `checkpoint_id` | string | Unique identifier for this checkpoint (workflows bind `${<step>.checkpoint_id}`) |
+| `timestamp` | string | ISO 8601 date-time the checkpoint was created |
+| `size` | integer | Checkpoint size in bytes (optional) |
 | `checkpoint_created` | boolean | Whether checkpoint was successfully created |
-| `checkpoint.id` | string | Unique identifier for this checkpoint |
-| `checkpoint.type` | enum | Mechanism used for checkpointing |
-| `checkpoint.scope` | object | What was included in the checkpoint |
-| `checkpoint.restore_command` | string | Exact command to restore state |
+| `type` | enum | Mechanism used for checkpointing |
+| `scope` | object | What was included in the checkpoint |
+| `restore_command` | string | Exact command to restore state |
+| `expiry` | string | When the checkpoint expires, or null |
 | `pre_mutation_state.hash` | string | Integrity hash of captured state |
 | `next_safe_actions` | array | Actions that can now safely proceed |
 | `confidence` | number | 0.0-1.0 based on checkpoint integrity verification |
@@ -145,34 +149,32 @@ assumptions: []
 
 **Input:**
 ```yaml
-scope:
-  - "src/api/handlers/*.py"
-  - "tests/test_handlers.py"
-reason: "Before refactoring API handlers"
-checkpoint_type: git_stash
+scope: "src/api/handlers/*.py tests/test_handlers.py"
+metadata:
+  reason: "Before refactoring API handlers"
+  checkpoint_type: git_stash
 ```
 
 **Output:**
 ```yaml
+checkpoint_id: "chk_20240115_143022_a7b3c9"
+timestamp: "2024-01-15T14:30:22Z"
 checkpoint_created: true
-checkpoint:
-  id: "chk_20240115_143022_a7b3c9"
-  type: git_stash
-  created_at: "2024-01-15T14:30:22Z"
-  scope:
-    files:
-      - "src/api/handlers/user.py"
-      - "src/api/handlers/auth.py"
-      - "tests/test_handlers.py"
-    state_keys: []
-  restore_command: "git stash pop stash@{0}"
-  expiry: null
+type: git_stash
+scope:
+  files:
+    - "src/api/handlers/user.py"
+    - "src/api/handlers/auth.py"
+    - "tests/test_handlers.py"
+  state_keys: []
+restore_command: "git stash pop stash@{0}"
+expiry: null
 pre_mutation_state:
   hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   summary: "3 files, 342 lines total, last modified 2024-01-15"
 next_safe_actions:
-  - "act-plan: Proceed with handler refactoring"
-  - "edit: Modify files in scope"
+  - "execute: Proceed with handler refactoring"
+  - "mutate: Modify files in scope"
 confidence: 1.0
 evidence_anchors:
   - "tool:bash:git stash push -m 'checkpoint:chk_20240115_143022_a7b3c9:Before refactoring API handlers'"
@@ -191,29 +193,30 @@ assumptions:
 **Input:**
 ```yaml
 scope: "config/production.yaml"
-reason: "Before config migration"
-checkpoint_type: file_backup
-expiry: "24h"
+metadata:
+  reason: "Before config migration"
+  checkpoint_type: file_backup
+  expiry: "24h"
 ```
 
 **Output:**
 ```yaml
+checkpoint_id: "chk_20240115_150000_config"
+timestamp: "2024-01-15T15:00:00Z"
+size: 3412
 checkpoint_created: true
-checkpoint:
-  id: "chk_20240115_150000_config"
-  type: file_backup
-  created_at: "2024-01-15T15:00:00Z"
-  scope:
-    files:
-      - "config/production.yaml"
-    state_keys: []
-  restore_command: "cp .checkpoints/chk_20240115_150000_config/production.yaml config/production.yaml"
-  expiry: "2024-01-16T15:00:00Z"
+type: file_backup
+scope:
+  files:
+    - "config/production.yaml"
+  state_keys: []
+restore_command: "cp .checkpoints/chk_20240115_150000_config/production.yaml config/production.yaml"
+expiry: "2024-01-16T15:00:00Z"
 pre_mutation_state:
   hash: "sha256:abc123..."
   summary: "1 file, 89 lines, production database config"
 next_safe_actions:
-  - "act-plan: Apply config migration"
+  - "mutate: Apply config migration"
 confidence: 0.95
 evidence_anchors:
   - "file:.checkpoints/chk_20240115_150000_config/manifest.json"
@@ -229,7 +232,7 @@ Apply the following verification patterns:
 - [ ] **State Assertion**: pre_mutation_state.hash can be recomputed and matches
 - [ ] **Restore Command Valid**: restore_command executes without error (dry-run if possible)
 - [ ] **Scope Complete**: All files in scope are captured in checkpoint
-- [ ] **Evidence Grounding**: checkpoint.id appears in evidence_anchors
+- [ ] **Evidence Grounding**: checkpoint_id appears in evidence_anchors
 
 **Verification tools:** Bash (for hash verification), Read (for manifest)
 
@@ -238,10 +241,10 @@ Apply the following verification patterns:
 - `mutation`: true (creates checkpoint artifacts)
 - `requires_checkpoint`: false (this IS the checkpoint operation)
 - `requires_approval`: false
-- `risk`: medium
+- `risk`: low
 
 **Capability-specific rules:**
-- NEVER skip checkpoint before act-plan (CRITICAL)
+- NEVER skip checkpoint before mutate or send (CRITICAL)
 - NEVER delete checkpoints until explicitly requested
 - ALWAYS verify checkpoint integrity immediately after creation
 - Do not checkpoint sensitive files (.env, credentials) - warn and exclude
@@ -256,12 +259,13 @@ Apply the following verification patterns:
 - `constrain` - After policy check passes, checkpoint before mutation
 
 **Commonly precedes:**
-- `act-plan` - REQUIRED: Never act-plan without prior checkpoint (CAVR pattern)
-- `improve` - Checkpoint before iterative improvement cycles
-- `send` - Checkpoint before external communications
+- `mutate` - REQUIRED: Never mutate without prior checkpoint (CAVR pattern)
+- `execute` - Checkpoint before a step that raises `requires_checkpoint`
+- `send` - REQUIRED: Checkpoint before external communications
+- `rollback` - REQUIRED: Rollback restores to a checkpoint
 
 **Anti-patterns:**
-- CRITICAL: Never call `act-plan` without prior `checkpoint`
+- CRITICAL: Never call `mutate` or `send` without prior `checkpoint`
 - CRITICAL: Never call `rollback` without valid checkpoint reference
 - Never checkpoint after mutation has started
 - Never delete checkpoint before verify confirms success

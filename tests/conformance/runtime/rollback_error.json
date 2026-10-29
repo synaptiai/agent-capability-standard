@@ -1,0 +1,68 @@
+{
+  "description": "A rollback that fails ends the run (F503).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "y"
+          },
+          "gates": [
+            {
+              "when": "true",
+              "action": "rollback"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Rollback"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "F503",
+        "message": "gone"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F503"
+  },
+  "trace_kinds": []
+}

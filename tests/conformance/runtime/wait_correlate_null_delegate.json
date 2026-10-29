@@ -1,0 +1,72 @@
+{
+  "description": "A waiting delegate whose correlate resolves to null fails before it delegates: nothing is sent and then abandoned.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "timeout": "1h",
+          "input_bindings": {
+            "task": {
+              "t": 1
+            },
+            "agent": "a"
+          },
+          "wait": {
+            "event_type": "done",
+            "correlate": {
+              "ticket": "${r.data}"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 1
+  },
+  "trace_kinds": [
+    "step_failed"
+  ]
+}

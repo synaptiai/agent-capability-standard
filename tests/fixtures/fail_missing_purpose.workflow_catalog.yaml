@@ -1,0 +1,13 @@
+# Standard version: 1.1.0
+# Negative fixture (STANDARD §5.2): `purpose` is a required step field.
+# S304 MISSING_REQUIRED_FIELD.
+missing_purpose:
+  goal: Reject a step without a purpose.
+  risk: low
+  steps:
+  - capability: observe
+    store_as: observe_out
+    input_bindings:
+      target: "system"
+  success:
+  - Never valid

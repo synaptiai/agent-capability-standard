@@ -1,0 +1,29 @@
+# Standard version: 1.1.0
+# An invoke step's literal input is checked against the invoked workflow's
+# inputs: an undeclared name is S303 and a missing required one is S304
+# (the executor refuses both at runtime with R402).
+caller:
+  goal: Invoke a workflow with the wrong inputs.
+  risk: low
+  inputs:
+    ticket: {type: string, required: true}
+  steps:
+  - capability: invoke
+    purpose: Triage the ticket.
+    store_as: triage_out
+    workflow_id: triage
+    input_bindings:
+      workflow: triage
+      input:
+        tiket: ${ticket}
+triage:
+  goal: Triage a ticket.
+  risk: low
+  inputs:
+    ticket: {type: string, required: true}
+  steps:
+  - capability: classify
+    purpose: Classify the ticket.
+    store_as: classify_out
+    input_bindings:
+      item: ${ticket}

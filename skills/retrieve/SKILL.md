@@ -1,7 +1,7 @@
 ---
 name: retrieve
 description: Fetch known facts or data from specified sources with citations and evidence pointers. Use when you know what you need and where to find it. Emphasizes provenance and verifiable references.
-argument-hint: "[target] [source] [format]"
+argument-hint: "[target] [format] [filter]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Web
@@ -30,10 +30,12 @@ Retrieve feeds into all world modeling layers by providing grounded observations
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `target` | Yes | string\|object | What to retrieve (path, URL, query, or identifier) |
-| `source` | No | string | Where to retrieve from (file, api, database); default: infer |
+| `target` | Yes | string | What to retrieve (path, URL, query, or identifier) |
 | `format` | No | string | Expected format (json, text, binary); default: auto-detect |
-| `constraints` | No | object | Filters, projections, version specifications |
+| `filter` | No | object | Criteria the retrieved data must meet (e.g. `time_range`) |
+| `references` | No | array | Further references to retrieve along with `target` (e.g. search results) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -60,7 +62,7 @@ Retrieve feeds into all world modeling layers by providing grounded observations
    - Validate against schema if available
    - Compute hash for integrity tracking
 
-5) **Extract relevant portions**: If constraints specified
+5) **Extract relevant portions**: If a `filter` is specified
    - Apply filters to reduce data
    - Project specific fields
    - Slice by line numbers or sections
@@ -86,11 +88,11 @@ Retrieve feeds into all world modeling layers by providing grounded observations
 Return a structured object:
 
 ```yaml
-retrieved:
+data: object | string | array  # The retrieved content
+retrieved:  # What was fetched, from where, and when
   target: string  # What was requested
   source: string  # Where it came from
   timestamp: string  # ISO 8601 retrieval time
-  data: object | string | array  # The retrieved content
   format: string  # Data format (json, text, etc.)
   complete: boolean  # Was full content retrieved?
 citation:
@@ -117,10 +119,14 @@ assumptions: array[string]
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `retrieved.data` | any | The fetched content |
+| `data` | any | The fetched content |
+| `retrieved` | object | Request target, source, retrieval timestamp, format, and whether the content is complete |
 | `citation` | object | Verifiable reference to re-fetch |
 | `provenance` | object | Source reliability and freshness |
 | `extraction` | object | Filtering/processing applied |
+| `confidence` | number | 0.0-1.0 confidence the data is accurate and complete |
+| `evidence_anchors` | array | References to the exact source locations |
+| `assumptions` | array | Explicit assumptions |
 
 ## Examples
 
@@ -129,25 +135,24 @@ assumptions: array[string]
 **Input:**
 ```yaml
 target: "config/database.yml"
-source: file
 ```
 
 **Output:**
 ```yaml
+data:
+  development:
+    adapter: postgresql
+    host: localhost
+    database: myapp_dev
+  production:
+    adapter: postgresql
+    host: "${DATABASE_HOST}"
+    database: myapp_prod
+    pool: 25
 retrieved:
   target: "config/database.yml"
   source: "file:config/database.yml"
   timestamp: "2025-01-24T15:30:00Z"
-  data:
-    development:
-      adapter: postgresql
-      host: localhost
-      database: myapp_dev
-    production:
-      adapter: postgresql
-      host: "${DATABASE_HOST}"
-      database: myapp_prod
-      pool: 25
   format: yaml
   complete: true
 citation:
@@ -181,25 +186,24 @@ assumptions:
 **Input:**
 ```yaml
 target: "https://api.example.com/docs/v2/endpoints"
-source: web
 format: json
 ```
 
 **Output:**
 ```yaml
+data:
+  version: "2.0.0"
+  endpoints:
+    - path: "/users"
+      methods: ["GET", "POST"]
+      auth_required: true
+    - path: "/users/{id}"
+      methods: ["GET", "PUT", "DELETE"]
+      auth_required: true
 retrieved:
   target: "https://api.example.com/docs/v2/endpoints"
   source: "web:api.example.com"
   timestamp: "2025-01-24T15:35:00Z"
-  data:
-    version: "2.0.0"
-    endpoints:
-      - path: "/users"
-        methods: ["GET", "POST"]
-        auth_required: true
-      - path: "/users/{id}"
-        methods: ["GET", "PUT", "DELETE"]
-        auth_required: true
   format: json
   complete: true
 citation:
@@ -231,36 +235,35 @@ assumptions:
 **Input:**
 ```yaml
 target: "src/models/user.ts"
-source: file
-constraints:
+filter:
   lines: "1-50"
   sections: ["interface", "class"]
 ```
 
 **Output:**
 ```yaml
+data: |
+  interface UserAttributes {
+    id: string;
+    email: string;
+    name: string;
+    createdAt: Date;
+  }
+
+  class User implements UserAttributes {
+    id: string;
+    email: string;
+    name: string;
+    createdAt: Date;
+
+    constructor(attrs: UserAttributes) {
+      Object.assign(this, attrs);
+    }
+  }
 retrieved:
   target: "src/models/user.ts"
   source: "file:src/models/user.ts"
   timestamp: "2025-01-24T15:40:00Z"
-  data: |
-    interface UserAttributes {
-      id: string;
-      email: string;
-      name: string;
-      createdAt: Date;
-    }
-
-    class User implements UserAttributes {
-      id: string;
-      email: string;
-      name: string;
-      createdAt: Date;
-
-      constructor(attrs: UserAttributes) {
-        Object.assign(this, attrs);
-      }
-    }
   format: text
   complete: false
 citation:

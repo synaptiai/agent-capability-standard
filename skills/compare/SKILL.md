@@ -26,10 +26,11 @@ Systematically evaluate multiple alternatives against defined criteria to produc
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `options` | Yes | array[string\|object] | Alternatives to compare (2+ items) |
-| `criteria` | Yes | array[string\|object] | Evaluation dimensions with optional weights |
-| `context` | No | object | Constraints, priorities, or decision context |
-| `must_have` | No | array[string] | Required criteria (eliminates options that fail) |
+| `options` | Yes | array | Alternatives to compare (2+ items) |
+| `criteria` | No | array | Evaluation dimensions (weight them with `weights`) |
+| `weights` | No | object | Criteria weights |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -41,7 +42,7 @@ Systematically evaluate multiple alternatives against defined criteria to produc
 2) **Define criteria**: Establish evaluation dimensions
    - Quantitative criteria: measurable (cost, time, size)
    - Qualitative criteria: assessed (quality, maintainability, risk)
-   - Apply must_have filters to eliminate non-viable options
+   - Apply hard requirements (must-haves) as filters to eliminate non-viable options
 
 3) **Assign weights**: Determine relative importance of each criterion
    - Weights should sum to 1.0
@@ -55,7 +56,7 @@ Systematically evaluate multiple alternatives against defined criteria to produc
 
 5) **Calculate weighted scores**: Aggregate criteria scores
    - weighted_score = sum(criterion_score * criterion_weight)
-   - Rank options by weighted score
+   - Rank options by weighted score (`ranking`, `scores`)
 
 6) **Analyze tradeoffs**: Document what each choice sacrifices
    - Identify criteria where top choice is not best
@@ -85,10 +86,14 @@ comparison_matrix:
       - criterion: string
         score: number  # 0.0-1.0 normalized score
         rationale: string  # Why this score
-recommendation:
-  choice: string  # Recommended option ID
-  rationale: string  # Why this option
-  confidence: number  # 0.0-1.0 in recommendation
+ranking:  # Options ordered best-first by weighted score
+  - option_id: string
+    weighted_score: number  # 0.0-1.0
+scores:  # Weighted score per option
+  <option_id>: number  # 0.0-1.0
+recommendation: string  # Recommended (top) option ID
+recommendation_rationale: string  # Why this option
+recommendation_confidence: number  # 0.0-1.0 in recommendation
 tradeoffs:
   - option: string
     pros: array[string]
@@ -105,7 +110,11 @@ assumptions: array[string]  # Conditions affecting comparison
 | `options` | array | List of alternatives with summaries |
 | `criteria` | array | Evaluation dimensions with weights |
 | `comparison_matrix` | array | Scores for each option on each criterion |
-| `recommendation` | object | Proposed choice with confidence |
+| `ranking` | array<object> | Options ordered best-first, each with `option_id` and `weighted_score` |
+| `scores` | object | Weighted score per option, keyed by option id |
+| `recommendation` | string | Recommended option ID (the top of `ranking` unless rationale says otherwise) |
+| `recommendation_rationale` | string | Why the recommended option was chosen |
+| `recommendation_confidence` | number | 0.0-1.0 confidence in the recommendation |
 | `tradeoffs` | array | Pros/cons for each option |
 | `confidence` | number | 0.0-1.0 overall analysis confidence |
 | `evidence_anchors` | array[string] | References supporting scores |
@@ -124,20 +133,15 @@ options:
     summary: "MongoDB document database"
   - id: "dynamodb"
     summary: "AWS DynamoDB managed service"
-criteria:
-  - name: "query_flexibility"
-    weight: 0.3
-  - name: "operational_overhead"
-    weight: 0.25
-  - name: "cost_at_scale"
-    weight: 0.25
-  - name: "team_familiarity"
-    weight: 0.2
-context:
-  workload: "mixed read/write"
-  scale: "10M records"
-  team_size: 3
+criteria: ["query_flexibility", "operational_overhead", "cost_at_scale", "team_familiarity"]
+weights:
+  query_flexibility: 0.3
+  operational_overhead: 0.25
+  cost_at_scale: 0.25
+  team_familiarity: 0.2
 ```
+
+The workload is mixed read/write at 10M records, run by a team of 3; the scores below assume that context.
 
 **Output:**
 ```yaml
@@ -204,10 +208,20 @@ comparison_matrix:
       - criterion: "team_familiarity"
         score: 0.3
         rationale: "No team experience with DynamoDB"
-recommendation:
-  choice: "postgres"
-  rationale: "Highest weighted score (0.79) driven by query flexibility and team familiarity. Operational overhead is manageable with RDS."
-  confidence: 0.8
+ranking:
+  - option_id: "postgres"
+    weighted_score: 0.79
+  - option_id: "mongodb"
+    weighted_score: 0.63
+  - option_id: "dynamodb"
+    weighted_score: 0.605
+scores:
+  postgres: 0.79
+  mongodb: 0.63
+  dynamodb: 0.605
+recommendation: "postgres"
+recommendation_rationale: "Highest weighted score (0.79) driven by query flexibility and team familiarity. Operational overhead is manageable with RDS."
+recommendation_confidence: 0.8
 tradeoffs:
   - option: "postgres"
     pros:
@@ -254,16 +268,14 @@ options:
   - "incremental refactoring"
   - "complete rewrite"
   - "strangler fig pattern"
-criteria:
-  - name: "risk"
-    weight: 0.4
-  - name: "time_to_value"
-    weight: 0.35
-  - name: "final_quality"
-    weight: 0.25
-must_have:
-  - "maintains production uptime"
+criteria: ["risk", "time_to_value", "final_quality"]
+weights:
+  risk: 0.4
+  time_to_value: 0.35
+  final_quality: 0.25
 ```
+
+Hard requirement: any option must maintain production uptime.
 
 **Output:**
 ```yaml
@@ -318,10 +330,20 @@ comparison_matrix:
       - criterion: "final_quality"
         score: 0.8
         rationale: "Good design with some integration overhead"
-recommendation:
-  choice: "strangler"
-  rationale: "Best balance of risk and time-to-value (0.78 weighted score). Delivers incremental value while achieving good final quality."
-  confidence: 0.75
+ranking:
+  - option_id: "strangler"
+    weighted_score: 0.78
+  - option_id: "incremental"
+    weighted_score: 0.735
+  - option_id: "rewrite"
+    weighted_score: 0.415
+scores:
+  strangler: 0.78
+  incremental: 0.735
+  rewrite: 0.415
+recommendation: "strangler"
+recommendation_rationale: "Best balance of risk and time-to-value (0.78 weighted score). Delivers incremental value while achieving good final quality; incremental refactoring is close behind (0.735), within the 0.1 margin."
+recommendation_confidence: 0.75
 tradeoffs:
   - option: "strangler"
     pros:
@@ -346,7 +368,7 @@ assumptions:
 - [ ] All scores are in 0.0-1.0 range with rationale
 - [ ] Recommendation aligns with highest weighted score
 - [ ] Tradeoffs identify criteria where recommendation is not best
-- [ ] must_have criteria properly filtered options
+- [ ] Hard requirements (must-haves) properly filtered options
 
 **Verification tools:** Manual review of scoring rationale, stakeholder validation
 

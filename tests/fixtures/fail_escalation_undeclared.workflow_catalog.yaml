@@ -1,0 +1,30 @@
+# Standard version: 1.1.0
+# Escalation and handler steps belong to recovery@1 (STANDARD v1.1 §5.9):
+# using them undeclared is V106.
+undeclared_escalation:
+  goal: Escalate without declaring recovery@1.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe.
+    store_as: observe_out
+    input_bindings:
+      target: "system"
+    failure_modes:
+    - condition: Observation failed.
+      on_error: R402
+      action: escalate
+      recovery: {goto_step: handler_out}
+  - capability: invoke
+    purpose: Handle it.
+    store_as: handler_out
+    handler: true
+    workflow_id: notify_owner
+notify_owner:
+  goal: Tell the owner.
+  risk: low
+  steps:
+  - capability: inquire
+    purpose: Ask the owner to look.
+    store_as: ask_out
+    input_bindings: {ambiguous_input: Something failed.}

@@ -1,7 +1,7 @@
 ---
 name: rollback
 description: Safely undo changes by restoring to a checkpoint. Use when verify fails, errors occur, or explicit undo is requested. Essential for the CAVR pattern recovery.
-argument-hint: "[checkpoint_id] [scope] [verify_restore]"
+argument-hint: "[checkpoint_id] [scope]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Git
@@ -73,9 +73,9 @@ Execute **rollback** to restore system state to a previously created checkpoint.
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `checkpoint_id` | Yes | string | ID of checkpoint to restore to |
-| `scope` | No | array | Specific files/keys to rollback (default: all in checkpoint) |
-| `verify_restore` | No | boolean | Whether to verify state matches checkpoint after restore (default: true) |
-| `reason` | No | string | Why rollback is being performed (for audit) |
+| `scope` | No | string | Specific files/keys to rollback (default: all in checkpoint) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -113,7 +113,13 @@ Execute **rollback** to restore system state to a previously created checkpoint.
 Return a structured object:
 
 ```yaml
-rolled_back: boolean
+restored: boolean  # Whether state was restored to the checkpoint
+previous_state:  # State before rollback
+  hash: string
+  summary: string
+restored_state:  # State after rollback
+  hash: string
+  summary: string
 restored_to:
   checkpoint_id: string
   checkpoint_type: string
@@ -123,10 +129,8 @@ changes_reverted:
     operation: string  # What was undone (create, modify, delete)
     summary: string  # Brief description of change reverted
 verification:
-  pre_state_hash: string  # Hash before rollback
-  post_state_hash: string  # Hash after rollback
   checkpoint_hash: string  # Expected hash from checkpoint
-  match: boolean  # post_state_hash == checkpoint_hash
+  match: boolean  # restored_state.hash == checkpoint_hash
 warnings: array[string]  # Any issues encountered
 next_actions: array[string]  # Suggested follow-up
 confidence: number  # 0.0-1.0
@@ -138,7 +142,9 @@ assumptions: []
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `rolled_back` | boolean | Whether rollback was successful |
+| `restored` | boolean | Whether rollback was successful (workflows gate on `${<step>.restored}`) |
+| `previous_state` | any | State before rollback (hash and summary) |
+| `restored_state` | any | State after rollback (hash and summary) |
 | `restored_to` | object | Checkpoint that was restored to |
 | `changes_reverted` | array | List of changes that were undone |
 | `verification.match` | boolean | Whether restored state matches checkpoint |
@@ -155,13 +161,19 @@ assumptions: []
 **Input:**
 ```yaml
 checkpoint_id: "chk_20240115_143022_a7b3c9"
-verify_restore: true
-reason: "Tests failed after refactoring"
 ```
+
+Reason for the rollback: tests failed after refactoring.
 
 **Output:**
 ```yaml
-rolled_back: true
+restored: true
+previous_state:
+  hash: "sha256:deadbeef..."
+  summary: "2 handler files with refactored, failing code"
+restored_state:
+  hash: "sha256:e3b0c442..."
+  summary: "Handlers as of checkpoint"
 restored_to:
   checkpoint_id: "chk_20240115_143022_a7b3c9"
   checkpoint_type: git_stash
@@ -174,8 +186,6 @@ changes_reverted:
     operation: modify
     summary: "Reverted auth token validation changes"
 verification:
-  pre_state_hash: "sha256:deadbeef..."
-  post_state_hash: "sha256:e3b0c442..."
   checkpoint_hash: "sha256:e3b0c442..."
   match: true
 warnings: []
@@ -200,13 +210,19 @@ assumptions:
 **Input:**
 ```yaml
 checkpoint_id: "chk_20240115_150000_config"
-verify_restore: true
-reason: "Config migration caused service failure"
 ```
+
+Reason for the rollback: the config migration caused a service failure.
 
 **Output:**
 ```yaml
-rolled_back: true
+restored: true
+previous_state:
+  hash: "sha256:newconfig..."
+  summary: "Migrated database connection string"
+restored_state:
+  hash: "sha256:abc123..."
+  summary: "Original production config"
 restored_to:
   checkpoint_id: "chk_20240115_150000_config"
   checkpoint_type: file_backup
@@ -216,8 +232,6 @@ changes_reverted:
     operation: modify
     summary: "Reverted database connection string changes"
 verification:
-  pre_state_hash: "sha256:newconfig..."
-  post_state_hash: "sha256:abc123..."
   checkpoint_hash: "sha256:abc123..."
   match: true
 warnings:
@@ -238,7 +252,7 @@ assumptions:
 
 Apply the following verification patterns:
 
-- [ ] **Rollback Verification**: post_state_hash == checkpoint_hash (CRITICAL)
+- [ ] **Rollback Verification**: restored_state.hash == checkpoint_hash (CRITICAL)
 - [ ] **State Assertion**: No unexpected files remain after rollback
 - [ ] **Evidence Grounding**: Restore command execution is captured
 - [ ] **Clean Git State**: git status shows no unexpected changes
@@ -248,7 +262,7 @@ Apply the following verification patterns:
 ## Safety Constraints
 
 - `mutation`: true (modifies files to restore state)
-- `requires_checkpoint`: true (MUST have valid checkpoint to rollback to)
+- `requires_checkpoint`: false (but a `checkpoint` MUST precede it: the ontology's `checkpoint` → `rollback` `requires` edge, else V102)
 - `requires_approval`: false
 - `risk`: medium
 
@@ -263,8 +277,8 @@ Apply the following verification patterns:
 ## Composition Patterns
 
 **Commonly follows:**
-- `verify` - When verify returns FAIL, trigger rollback (CAVR pattern)
-- `act-plan` - If act-plan encounters error, rollback
+- `verify` - When verify returns `passed: false`, trigger rollback (CAVR pattern)
+- `mutate` / `execute` - If the side effect fails or verify returns `passed: false`, rollback
 - `checkpoint` - Rollback requires prior checkpoint (dependency)
 
 **Commonly precedes:**
@@ -280,5 +294,5 @@ Apply the following verification patterns:
 
 **Workflow references:**
 - See `reference/composition_patterns.md#checkpoint-act-verify-rollback` for CAVR pattern
-- See `reference/composition_patterns.md#rollback-verification` in verification_patterns.md
+- See `reference/verification_patterns.md#pattern-4-rollback-verification` for rollback verification
 - See `reference/composition_patterns.md#debug-code-change` for rollback-then-critique flow

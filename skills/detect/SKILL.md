@@ -1,7 +1,7 @@
 ---
 name: detect
 description: Determine whether a specific pattern, entity, or condition exists in the given data. Use when searching for patterns, checking existence, validating presence, or finding signals.
-argument-hint: "[target] [pattern-type] [threshold]"
+argument-hint: "[data] [pattern] [threshold]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep
@@ -26,10 +26,11 @@ Scan data sources to determine whether a specified pattern, entity, or condition
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `target` | Yes | string\|object | The data source to scan (file path, URL, or structured data) |
-| `pattern` | Yes | string\|regex | The pattern, entity type, or condition to detect |
-| `threshold` | No | object | Detection sensitivity settings (e.g., min_matches, confidence_floor) |
-| `scope` | No | string | Limit search to specific regions (e.g., "functions", "imports", "comments") |
+| `data` | Yes | any | Data to analyze |
+| `pattern` | Yes | string\|object | The pattern, entity type, or condition to detect |
+| `threshold` | No | number | Detection threshold (e.g. minimum confidence for a match) |
+
+Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
@@ -64,10 +65,11 @@ Return a structured object:
 ```yaml
 detected: boolean  # True if pattern/entity was found
 target_type: string  # What was being detected (e.g., "security vulnerability", "deprecated API")
-signals:
+matches:
   - signal: string  # Description of what was found
     strength: low | medium | high  # Signal strength
     location: string  # file:line or path where found
+locations: array[string]  # Every location where the pattern was found
 false_positive_risk: low | medium | high  # Likelihood of spurious detection
 confidence: number  # 0.0-1.0 based on evidence quality
 evidence_anchors: array[string]  # File:line references
@@ -81,7 +83,8 @@ next_actions: array[string]  # 0-3 suggested follow-ups if uncertain
 |-------|------|-------------|
 | `detected` | boolean | True if the target pattern/entity was found |
 | `target_type` | string | Category of what was searched for |
-| `signals` | array | List of individual detection signals with strength |
+| `matches` | array<object> | Found occurrences: each detection signal with strength and location (empty when nothing found) |
+| `locations` | array[string] | Every location where the pattern was found |
 | `false_positive_risk` | enum | Assessment of detection reliability |
 | `confidence` | number | 0.0-1.0 based on evidence completeness |
 | `evidence_anchors` | array[string] | File:line references or tool outputs |
@@ -93,23 +96,25 @@ next_actions: array[string]  # 0-3 suggested follow-ups if uncertain
 
 **Input:**
 ```yaml
-target: src/api/user_controller.py
+data: src/api/user_controller.py
 pattern: "SQL injection pattern"
-threshold:
-  min_matches: 1
+threshold: 0.5  # report matches with at least this confidence
 ```
 
 **Output:**
 ```yaml
 detected: true
 target_type: "SQL injection vulnerability"
-signals:
+matches:
   - signal: "String concatenation in SQL query with user input"
     strength: high
     location: "src/api/user_controller.py:47"
   - signal: "Raw SQL execution without parameterization"
     strength: medium
     location: "src/api/user_controller.py:52"
+locations:
+  - "src/api/user_controller.py:47"
+  - "src/api/user_controller.py:52"
 false_positive_risk: low
 confidence: 0.85
 evidence_anchors:
@@ -131,19 +136,20 @@ next_actions:
 
 **Input:**
 ```yaml
-target: src/
+data: "src/**/*.{jsx,tsx}"
 pattern: "componentWillMount|componentWillReceiveProps"
-scope: "*.jsx,*.tsx"
 ```
 
 **Output:**
 ```yaml
 detected: true
 target_type: "deprecated React lifecycle method"
-signals:
+matches:
   - signal: "componentWillMount usage"
     strength: high
     location: "src/components/Dashboard.jsx:23"
+locations:
+  - "src/components/Dashboard.jsx:23"
 false_positive_risk: low
 confidence: 0.95
 evidence_anchors:
@@ -158,7 +164,7 @@ next_actions:
 
 - [ ] Output contains `detected` boolean matching signal presence
 - [ ] At least one evidence anchor exists for positive detections
-- [ ] Confidence score correlates with number and strength of signals
+- [ ] Confidence score correlates with number and strength of matches
 - [ ] All referenced file:line locations are valid and accessible
 - [ ] False positive risk assessment is justified
 

@@ -1,0 +1,198 @@
+{
+  "description": "Context a recovery loop injects from an always-ask item is marked: the step it loops back to is asked of a person the second time.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "1h",
+          "input_bindings": {
+            "always_ask_trust_classes": [
+              "external"
+            ]
+          },
+          "wait": {
+            "event_type": "answer"
+          }
+        },
+        {
+          "capability": "execute",
+          "purpose": "execute step",
+          "store_as": "act",
+          "input_bindings": {
+            "code": "${_recovery.hint: string}"
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "mandates/ops"
+            }
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "conditions": [
+              "ok"
+            ]
+          },
+          "failure_modes": [
+            {
+              "condition": "verification failed",
+              "action": "request_more_context",
+              "when": "${v.passed} == false",
+              "recovery": {
+                "goto_step": "act",
+                "inject_context": {
+                  "hint": "${r.data: array<object>}"
+                },
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "identity@1",
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "answer"
+        },
+        "identity": {
+          "principal": "mail:someone@example.com",
+          "kind": "human",
+          "authenticated_by": "x-mail-dkim",
+          "trust_class": "external"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1,
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "mandates/ops"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1,
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "execute",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "result": "ok",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "loop",
+    "always_ask"
+  ]
+}

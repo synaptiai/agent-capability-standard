@@ -1,3 +1,4 @@
+# Standard version: 1.0.0
 inner_workflow:
   goal: An inner workflow for nesting test.
   risk: low
@@ -11,6 +12,8 @@ inner_workflow:
     timeout: null
     retry: null
     store_as: observe_out
+    input_bindings:
+      target: "system"
     failure_modes: []
   success:
   - Inner complete

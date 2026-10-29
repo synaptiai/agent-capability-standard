@@ -133,10 +133,10 @@ Configuration is managed through `hooks/hooks.json` with shell-based enforcement
 | `pass_reference.workflow_catalog.yaml` | Positive | Valid workflow passes all checks |
 | `fail_unknown_capability.workflow_catalog.yaml` | Negative | Unknown capability reference |
 | `fail_bad_binding_path.workflow_catalog.yaml` | Negative | Invalid binding path |
-| `fail_consumer_contract_mismatch.workflow_catalog.yaml` | Negative | Type mismatch at consumer |
+| `fail_type_mismatch_binding.workflow_catalog.yaml` | Negative | Type mismatch on an annotated binding |
 | `fail_ambiguous_untyped.workflow_catalog.yaml` | Negative | Ambiguous untyped node |
 
-Expectations are codified in `tests/EXPECTATIONS.json` for automated conformance runs via `scripts/run_conformance.py`.
+Fixtures live in `tests/fixtures/` (79 at the time of writing, including edge-semantics, expression and warning cases added for Standard v1.1.0). Expectations, including expected error and warning codes, are codified in `tests/fixtures/EXPECTATIONS.json` for automated conformance runs via `scripts/run_conformance.py`, which passes each fixture to the validator with `--catalog`.
 
 ### 1.9 World State and Trust Model
 
@@ -146,7 +146,7 @@ Expectations are codified in `tests/EXPECTATIONS.json` for automated conformance
 
 ### 1.10 Additional Deliverables
 
-- **Formal standard** (`spec/STANDARD-v1.0.0.md`) with normative language (RFC 2119)
+- **Formal standard** (`spec/STANDARD-v1.0.0.md`) with normative language (RFC 2119), and Standard v1.1.0 (`spec/STANDARD-v1.1.0.md`, a Candidate Standard accepted by RFC-0003 and RFC-0004: condition expression language, warnings, edge and safety-flag semantics, orchestration extensions; v1.0.0 remains supported)
 - **Whitepaper** (`spec/WHITEPAPER.md`) with motivation, design rationale, and evaluation approach
 - **Governance model** (`spec/GOVERNANCE.md`) with SemVer, RFC process, and compatibility rules
 - **Security policy** (`spec/SECURITY.md`) for vulnerability reporting
@@ -198,13 +198,13 @@ Build a CLI tool to generate new capabilities, workflows, and profiles from temp
 
 ```bash
 # Generate a new capability with skill, schema, and ontology entry
-acs scaffold capability --name "negotiate" --layer COORDINATE
+python tools/scaffold.py capability negotiate --layer COORDINATE
 
-# Generate a new workflow from a pattern
-acs scaffold workflow --name "incident_response" --pattern mitigate
+# Generate a new workflow skeleton in the catalog
+python tools/scaffold.py workflow incident-response
 
 # Generate a new domain profile
-acs scaffold profile --domain "fintech"
+python tools/scaffold.py profile fintech
 ```
 
 This directly addresses the multi-file update burden documented in CLAUDE.md (ontology, skill, counts across 10+ files, schema sync).

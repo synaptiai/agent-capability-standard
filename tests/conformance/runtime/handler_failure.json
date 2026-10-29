@@ -1,0 +1,94 @@
+{
+  "description": "A handler that fails ends the run failed, not escalated.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
+          "input_bindings": {
+            "target": "x"
+          },
+          "failure_modes": [
+            {
+              "condition": "c",
+              "action": "escalate",
+              "on_error": "R402",
+              "recovery": {
+                "goto_step": "page"
+              }
+            }
+          ]
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "page",
+          "handler": true,
+          "workflow_id": "oncall",
+          "input_bindings": {
+            "workflow": "oncall"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "recovery@1"
+        ]
+      }
+    },
+    "oncall": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "inquire",
+          "purpose": "inquire step",
+          "store_as": "q",
+          "input_bindings": {
+            "ambiguous_input": "x"
+          }
+        }
+      ]
+    }
+  },
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "observe"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "inquire"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "pager down"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402"
+  },
+  "trace_kinds": [
+    "escalated"
+  ]
+}
