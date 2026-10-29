@@ -1,0 +1,36 @@
+name: Release
+
+# Publishes a GitHub Release for each pushed version tag. The notes are the
+# tag's CHANGELOG.md section; scripts/release_notes.py refuses a tag that does
+# not match .claude-plugin/plugin.json or has no section, so nothing is
+# published for it. A tag with a pre-release suffix (v2.0.0-rc.1) is published
+# as a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag and extract its notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python3 scripts/release_notes.py "$TAG" > notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=()
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md "${flags[@]}"

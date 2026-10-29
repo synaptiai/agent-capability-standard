@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v2.0.0] — 2026-10-29
+
+Implements Standard v1.1.0 (Candidate Standard) with RFC-0003 and RFC-0004
+(#114, #116) and replaces the 1.0 validator and engine with one Rust core
+(#115). The Standard's version (v1.1.0; v1.0.0 still supported) is separate
+from this plugin release.
+
+**Upgrading from v1.2.0:**
+- Building from source needs a Rust toolchain (rustc >= 1.86): the validator
+  and executor are the `grounded_agency._core` extension, built by maturin
+  with `pip install -e ".[dev]" -c constraints.txt`.
+- `transform.output` is `object|array` (ontology 2.1.0); a reference to it
+  without an annotation is now B204.
+- Validation is stricter: catalogs that passed 1.0 may now get errors or
+  warnings (unknown fields W604, unbound required inputs W615, literal type
+  mismatches B203, among others listed below).
+- A quorum's model families count only when the host attests them.
+
 ### Added
 - **Delegate identity (#114, RFC-0004 amendment).** With `identity@1` a
   host may attest who took a delegation (`effective.identity`); a waiting
@@ -173,15 +191,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `README.md` only: repo-wide that check produces ~109 findings of which
   essentially none are defects (package-relative paths, tutorial placeholders,
   roadmap deliverables), and a validator that cries wolf gets ignored
-- `CapabilityRegistry.all_edges()` public method for enumerating ontology edges
-- Benchmark drift-prevention validator (`tools/validate_benchmark_deps.py`) and CI job
-- Multi-agent coordination runtime with delegate, synchronize, and invoke patterns (#98)
-- NIST AI RMF 1.0 profile with tier assessments and maturity roadmap (#59)
-- EU AI Act conformity assessment preparation (#58, #97)
-- ISO 42001 gap analysis and certification readiness documentation (#96)
-- Workflow execution engine (TD-006) (#94)
-- OASF GA extension mechanism for unmapped capabilities (TD-010) (#95)
-- Comprehensive analysis documentation package (13 documents, ~570KB)
 
 ### Changed
 - **`transform.output` is `object|array`** (ontology 2.1.0), so a
@@ -295,7 +304,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   validation evidence. The wording is deliberate: "I do not have one" is not
   "none exists", and a document whose argument rests on §3.1 must not convert
   the one into the other (#104)
-- Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
 
 ### Fixed
 - **W608 sees waits in invoked workflows.** An `invoke` of a catalog
@@ -473,6 +481,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   skills that carry a `reference/workflow_catalog.yaml`. It is now resynced and
   the canonical-schema validator asserts every vendored copy matches its
   source (#107)
+
+## [v1.2.0] — 2026-02-04
+
+The full list is in the
+[v1.2.0 release](https://github.com/synaptiai/agent-capability-standard/releases/tag/v1.2.0);
+v1.1.0 and v1.1.1 are documented in their GitHub releases.
+
+### Added
+- `CapabilityRegistry.all_edges()` public method for enumerating ontology edges
+- Benchmark drift-prevention validator (`tools/validate_benchmark_deps.py`) and CI job
+- Multi-agent coordination runtime with delegate, synchronize, and invoke patterns (#98)
+- NIST AI RMF 1.0 profile with tier assessments and maturity roadmap (#59)
+- EU AI Act conformity assessment preparation (#58, #97)
+- ISO 42001 gap analysis and certification readiness documentation (#96)
+- Workflow execution engine (TD-006) (#94)
+- OASF GA extension mechanism for unmapped capabilities (TD-010) (#95)
+- Comprehensive analysis documentation package (13 documents, ~570KB)
+
+### Changed
+- Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
+
+### Fixed
 - Remediate benchmark suite drift from ontology and SDK (#100)
 - Use public `all_edges()` API in benchmark validator instead of private `_loaded_edges` (#100)
 - Install real SDK, remove all mock/skip patterns (#99)

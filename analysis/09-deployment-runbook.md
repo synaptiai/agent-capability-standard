@@ -59,7 +59,7 @@ claude plugin install agent-capability-standard
 ```json
 {
   "name": "agent-capability-standard",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "Grounded Agency: 36 atomic capabilities across 9 cognitive layers...",
   "author": {
     "name": "Agent Capability Standard Contributors",
@@ -193,7 +193,7 @@ Follow semantic versioning: MAJOR for breaking API changes, MINOR for new featur
 
 **File:** `.claude-plugin/plugin.json`
 **Field:** `version`
-**Current value:** `1.2.0`
+**Current value:** `2.0.0`
 
 ```json
 {
@@ -355,6 +355,8 @@ git push origin main --tags
 
 Use annotated tags (`-a`) for releases so they carry the tagger identity and message. Lightweight tags are acceptable only for pre-releases and release candidates.
 
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes the GitHub Release with the tag's `CHANGELOG.md` section as its notes (a tag with a `-suffix` is a pre-release). It refuses a tag that does not match `.claude-plugin/plugin.json` or has no section; `python scripts/release_notes.py vX.Y.Z` runs the same check locally.
+
 ### Step 12: Publish to PyPI
 
 ```bash
@@ -460,7 +462,7 @@ meta:
 
 **File:** `.claude-plugin/plugin.json`
 **Field:** `version`
-**Current value:** `1.2.0`
+**Current value:** `2.0.0`
 
 The plugin version tracks changes to the Claude Code integration surface: skill files, hook scripts, and the plugin manifest itself. It follows its own release cadence because plugin updates can ship without SDK changes.
 
@@ -483,7 +485,7 @@ Four independent version sources must stay synchronized at release time. Failure
 | Source | File | Field | Current | Tracks |
 |--------|------|-------|---------|--------|
 | SDK Package | `pyproject.toml` | `project.version` | `0.1.0` | Python package releases |
-| Plugin | `.claude-plugin/plugin.json` | `version` | `1.2.0` | Claude Code plugin releases |
+| Plugin | `.claude-plugin/plugin.json` | `version` | `2.0.0` | Claude Code plugin releases |
 | Runtime | `grounded_agency/__init__.py` | `__version__` | `0.1.0` | Must match pyproject.toml |
 | Ontology | `schemas/capability_ontology.yaml` | `meta.version` | `2.1.0` | Capability graph changes |
 
@@ -493,7 +495,7 @@ Four independent version sources must stay synchronized at release time. Failure
 The `__version__` in `grounded_agency/__init__.py` must equal the `version` in `pyproject.toml`. A mismatch means `importlib.metadata.version("grounded-agency")` and `grounded_agency.__version__` will return different values.
 
 **Rule 2: Plugin and SDK are independently versioned.**
-The plugin version (`1.2.0`) and SDK version (`0.1.0`) follow separate tracks. A plugin update that only changes skill files does not require an SDK release. An SDK release that only changes adapter logic does not require a plugin update.
+The plugin version (`2.0.0`) and SDK version (`0.1.0`) follow separate tracks. A plugin update that only changes skill files does not require an SDK release. An SDK release that only changes adapter logic does not require a plugin update.
 
 **Rule 3: Ontology version changes propagate.**
 When the ontology version changes, both the plugin and SDK should be tested against the new ontology. If the change is breaking (MAJOR bump), both may need releases.

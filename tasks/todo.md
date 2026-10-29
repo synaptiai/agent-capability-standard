@@ -554,3 +554,17 @@ evaluated properly (maintainers' call, demand from #114 and internally).
   drop it); the no-extension fixture now proves the binding is off; a
   redundant S303 beside V106 dropped; messages pinned; design note.
 
+# H7: merge and release v2.0.0 (user, 2026-10-29)
+Decisions (AskUserQuestion): v2.0.0; merge commit (keeps the stage SHAs
+cited on #114 and here); CHANGELOG split by release; a release workflow.
+- [x] plugin.json, README badge and versioning line, analysis 06/09 at
+  2.0.0; the Python package (grounded-agency 0.1.0) keeps its own track.
+- [x] CHANGELOG: `[v2.0.0] — 2026-10-29` with upgrade notes; the entries
+  that shipped in v1.2.0 (#59, #94–#100, the analysis docs, CLAUDE.md
+  guidelines) moved to `[v1.2.0] — 2026-02-04`; `[Unreleased]` empty.
+- [x] `.github/workflows/release.yml` + `scripts/release_notes.py` (tag
+  matches plugin.json, notes are the CHANGELOG section) and tests;
+  CLAUDE.md and the runbook document it.
+- [ ] CI green, merge #116 with a merge commit, tag v2.0.0 on main, push
+  the tag, check the Release is published.
+

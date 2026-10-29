@@ -95,7 +95,7 @@ The plugin metadata is defined in `.claude-plugin/plugin.json`:
 ```json
 {
   "name": "agent-capability-standard",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "Grounded Agency: 36 atomic capabilities across 9 cognitive layers...",
   "skills": "./skills/"
 }
