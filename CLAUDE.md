@@ -257,7 +257,7 @@ what would change.
 
 When creating a new release, update the version in `.claude-plugin/plugin.json` to match the new tag before committing. This file does not auto-sync with git tags.
 
-Give the release its `## [vX.Y.Z] — date` section in `CHANGELOG.md`, then push an annotated tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` publishes the GitHub Release with that section as its notes (a `-suffix` tag is a pre-release). It refuses a tag that does not match `plugin.json` or has no section; check first with:
+Give the release its `## [vX.Y.Z] — date` section in `CHANGELOG.md`, then push an annotated tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` publishes the GitHub Release with that section as its notes (a `-suffix` tag is a pre-release). Where the tag cannot be pushed, run the workflow by hand on `main` with the tag as its input: it creates the annotated tag on `main`'s head, then publishes the Release. It refuses a tag that does not match `plugin.json` or has no section, or (run by hand) one that already exists; check first with:
 ```bash
 python scripts/release_notes.py vX.Y.Z
 ```

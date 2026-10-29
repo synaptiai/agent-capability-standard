@@ -565,6 +565,10 @@ cited on #114 and here); CHANGELOG split by release; a release workflow.
 - [x] `.github/workflows/release.yml` + `scripts/release_notes.py` (tag
   matches plugin.json, notes are the CHANGELOG section) and tests;
   CLAUDE.md and the runbook document it.
-- [ ] CI green, merge #116 with a merge commit, tag v2.0.0 on main, push
-  the tag, check the Release is published.
+- [x] CI green; #116 merged as a merge commit (`c0bc9be`); #114 and #115
+  closed by it.
+- [ ] Tag and release: this session's git proxy refuses tag pushes (403,
+  only the working branch). User chose a manual trigger: release.yml gains
+  `workflow_dispatch` (creates the annotated tag on main's head, then
+  publishes); follow-up PR, merge, run it, check the Release.
 

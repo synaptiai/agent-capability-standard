@@ -1,13 +1,25 @@
 name: Release
 
-# Publishes a GitHub Release for each pushed version tag. The notes are the
-# tag's CHANGELOG.md section; scripts/release_notes.py refuses a tag that does
-# not match .claude-plugin/plugin.json or has no section, so nothing is
-# published for it. A tag with a pre-release suffix (v2.0.0-rc.1) is published
-# as a pre-release.
+# Publishes a GitHub Release with the tag's CHANGELOG.md section as its notes.
+# scripts/release_notes.py refuses a tag that does not match
+# .claude-plugin/plugin.json or has no section, so nothing is published for it.
+# A tag with a pre-release suffix (v2.0.0-rc.1) is published as a pre-release.
+#
+# Two ways to start it:
+# - push an annotated tag vX.Y.Z on main;
+# - run it by hand on main with the tag (workflow_dispatch): it creates that
+#   annotated tag on the commit it runs on, then publishes the Release. For
+#   when the tag cannot be pushed, as from a session limited to one branch.
+#   (A tag pushed with the workflow's own token starts no second run.)
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to create on main's head and release (vX.Y.Z)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -16,20 +28,33 @@ jobs:
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
+    # A hand-started release tags main, never another branch.
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     permissions:
       contents: write
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Check the tag and extract its notes
-        env:
-          TAG: ${{ github.ref_name }}
         run: python3 scripts/release_notes.py "$TAG" > notes.md
+
+      - name: Create the annotated tag (run by hand)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "tag $TAG already exists; push events release existing tags" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
 
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
           flags=()
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
