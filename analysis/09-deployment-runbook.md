@@ -355,7 +355,7 @@ git push origin main --tags
 
 Use annotated tags (`-a`) for releases so they carry the tagger identity and message. Lightweight tags are acceptable only for pre-releases and release candidates.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes the GitHub Release with the tag's `CHANGELOG.md` section as its notes (a tag with a `-suffix` is a pre-release). It refuses a tag that does not match `.claude-plugin/plugin.json` or has no section; `python scripts/release_notes.py vX.Y.Z` runs the same check locally.
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes the GitHub Release with the tag's `CHANGELOG.md` section as its notes (a tag with a `-suffix` is a pre-release). It refuses a tag that does not match `.claude-plugin/plugin.json` or has no section; `python scripts/release_notes.py vX.Y.Z` runs the same check locally. Where the tag cannot be pushed, run the workflow by hand (`workflow_dispatch`) on `main` with the tag as its input: it creates the annotated tag on `main`'s head and publishes the Release; it refuses a tag that already exists.
 
 ### Step 12: Publish to PyPI
 

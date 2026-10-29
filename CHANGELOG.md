@@ -25,6 +25,11 @@ from this plugin release.
 - A quorum's model families count only when the host attests them.
 
 ### Added
+- **Release workflow.** `.github/workflows/release.yml` publishes a GitHub
+  Release with the tag's CHANGELOG section as its notes, for a pushed `v*`
+  tag or, run by hand on `main`, for a tag it creates there;
+  `scripts/release_notes.py` refuses a tag that does not match `plugin.json`
+  or has no section
 - **Delegate identity (#114, RFC-0004 amendment).** With `identity@1` a
   host may attest who took a delegation (`effective.identity`); a waiting
   delegate keeps only results from that principal (others dropped as
