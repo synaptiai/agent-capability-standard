@@ -82,8 +82,9 @@
     color: var(--on-accent);
     box-shadow: var(--shadow-1);
     font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 16px;
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 20px;
     line-height: 1;
     text-decoration: none;
     cursor: pointer;
@@ -235,8 +236,9 @@
     color: var(--ink);
     text-decoration: none;
     font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 20px;
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 25px;
     line-height: 1;
     white-space: nowrap;
   }
@@ -664,8 +666,9 @@
     align-items: center;
     gap: var(--space-2);
     font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 20px;
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 25px;
     line-height: 1.2;
   }
 
@@ -1193,8 +1196,9 @@
   .capability-tile__symbol {
     grid-area: symbol;
     font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 28px;
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 30px;
     line-height: 1.1;
   }
 
@@ -1271,8 +1275,9 @@
     left: 28px;
     top: 6px;
     font-family: var(--font-display);
-    font-weight: 500;
-    font-size: 16px;
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 20px;
     color: var(--ink-2);
   }
 

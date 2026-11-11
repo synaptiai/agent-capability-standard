@@ -8,8 +8,7 @@ import atkinson700 from '@fontsource/atkinson-hyperlegible-next/files/atkinson-h
 import atkinson700i from '@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-700-italic.woff2?url';
 import mono400 from '@fontsource/atkinson-hyperlegible-mono/files/atkinson-hyperlegible-mono-latin-400-normal.woff2?url';
 import mono700 from '@fontsource/atkinson-hyperlegible-mono/files/atkinson-hyperlegible-mono-latin-700-normal.woff2?url';
-import pixelify500 from '@fontsource/pixelify-sans/files/pixelify-sans-latin-500-normal.woff2?url';
-import pixelify700 from '@fontsource/pixelify-sans/files/pixelify-sans-latin-700-normal.woff2?url';
+import jersey400 from '@fontsource/jersey-10/files/jersey-10-latin-400-normal.woff2?url';
 import silkscreen400 from '@fontsource/silkscreen/files/silkscreen-latin-400-normal.woff2?url';
 
 interface Face {
@@ -22,8 +21,7 @@ interface Face {
 }
 
 const FACES: Face[] = [
-  { family: 'Pixelify Sans', weight: 500, style: 'normal', display: 'optional', url: pixelify500, preload: true },
-  { family: 'Pixelify Sans', weight: 700, style: 'normal', display: 'optional', url: pixelify700, preload: true },
+  { family: 'Jersey 10', weight: 400, style: 'normal', display: 'optional', url: jersey400, preload: true },
   { family: 'Silkscreen', weight: 400, style: 'normal', display: 'optional', url: silkscreen400 },
   { family: 'Atkinson Hyperlegible Next', weight: 400, style: 'normal', display: 'swap', url: atkinson400, preload: true },
   { family: 'Atkinson Hyperlegible Next', weight: 400, style: 'italic', display: 'swap', url: atkinson400i },

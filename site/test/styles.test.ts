@@ -24,7 +24,8 @@ describe('typography', () => {
   it('uses the pixel display font only where the design lists it', () => {
     // Typography table: h1-h3, hero headline, wordmark, primary buttons,
     // prev/next titles, tile symbols. WorkflowDiagram recipe: the step number
-    // beside each node is Pixelify 16px.
+    // beside each node is in the display font (Jersey 10 since the user's
+    // decision of 2026-11-11, replacing Pixelify Sans).
     const allowed = new Set([
       'h1',
       'h2',
@@ -39,6 +40,28 @@ describe('typography', () => {
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))
       .flatMap((r) => r.selectors);
     expect(display.filter((s) => !allowed.has(s))).toEqual([]);
+  });
+
+  it('sets the display font at weight 400 with no synthesized bold (Jersey 10 has one weight)', () => {
+    const display = rules().filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body));
+    expect(display.length).toBeGreaterThan(0);
+    for (const r of display) {
+      expect(r.body, r.selectors.join(',')).toMatch(/font-weight:\s*400\b/);
+      expect(r.body, r.selectors.join(',')).toMatch(/font-synthesis:\s*none/);
+    }
+  });
+
+  it('keeps a heading hierarchy by size alone: h1 > h2 > h3 > h4', () => {
+    // With one display weight, size is the only signal left between levels.
+    const size = (sel: string) => {
+      const r = rules().find((x) => x.file === 'base.css' && x.selectors.length === 1 && x.selectors[0] === sel && /font-size/.test(x.body));
+      return Number(/font-size:\s*(\d+)px/.exec(r?.body ?? '')?.[1]);
+    };
+    const [h1, h2, h3] = [size('h1'), size('h2'), size('h3')];
+    const h4 = Number(/font-size:\s*(\d+)px/.exec(rules().find((x) => x.file === 'base.css' && x.selectors.includes('h4') && /font-size/.test(x.body))!.body)?.[1]);
+    expect(h1).toBeGreaterThan(h2);
+    expect(h2).toBeGreaterThan(h3);
+    expect(h3).toBeGreaterThan(h4);
   });
 });
 

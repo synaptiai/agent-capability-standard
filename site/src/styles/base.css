@@ -1,7 +1,7 @@
 /*
  * Reset, type scale, links, focus, selection and prose.
  * Pixel fonts are for display text only: h1 to h3, the wordmark, buttons
- * that lead somewhere, prev/next titles and tile symbols (Pixelify Sans), and
+ * that lead somewhere, prev/next titles and tile symbols (Jersey 10), and
  * eyebrows (Silkscreen). Body text, h4 to h6, tables, code, controls and the
  * contents list use the readable fonts.
  */
@@ -88,12 +88,17 @@
   h2,
   h3 {
     font-family: var(--font-display);
-    font-weight: 700;
-    line-height: 1.2;
+    /* Jersey 10 has one weight. Headings differ by size only, and the
+       browser must not draw a fake bold, including for <strong> inside. */
+    font-weight: 400;
+    font-synthesis: none;
+    line-height: 1.1;
     color: var(--ink);
     text-wrap: balance;
   }
 
+  /* Sizes are multiples of 5px, so each pixel of the font lands on whole
+     device pixels at 2x. */
   h1 {
     font-size: 40px;
     margin: 0 0 var(--space-4);
@@ -101,18 +106,17 @@
 
   @media (min-width: 960px) {
     h1 {
-      font-size: 48px;
+      font-size: 50px;
     }
   }
 
   h2 {
-    font-size: 28px;
+    font-size: 35px;
     margin: var(--space-7) 0 var(--space-4);
   }
 
   h3 {
-    font-size: 22px;
-    font-weight: 500;
+    font-size: 25px;
     margin: var(--space-6) 0 var(--space-3);
   }
 

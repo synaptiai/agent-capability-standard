@@ -2,11 +2,11 @@
 // Open Font License asks.
 import atkinsonMono from '@fontsource/atkinson-hyperlegible-mono/LICENSE?raw';
 import atkinsonNext from '@fontsource/atkinson-hyperlegible-next/LICENSE?raw';
-import pixelify from '@fontsource/pixelify-sans/LICENSE?raw';
+import jersey from '@fontsource/jersey-10/LICENSE?raw';
 import silkscreen from '@fontsource/silkscreen/LICENSE?raw';
 
 const LICENCES: [string, string][] = [
-  ['Pixelify Sans', pixelify],
+  ['Jersey 10', jersey],
   ['Silkscreen', silkscreen],
   ['Atkinson Hyperlegible Next', atkinsonNext],
   ['Atkinson Hyperlegible Mono', atkinsonMono],
