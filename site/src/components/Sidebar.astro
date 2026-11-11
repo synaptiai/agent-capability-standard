@@ -64,6 +64,8 @@ const mono = route.section === 'capabilities';
 </aside>
 
 <script>
+  import { wrapFocus } from '../lib/focus';
+
   const sidebar = document.querySelector<HTMLElement>('[data-sidebar]');
   const button = document.querySelector<HTMLButtonElement>('[data-menu-button]');
   const KEY = 'acs-sidebar-scroll';
@@ -85,8 +87,10 @@ const mono = route.section === 'capabilities';
   }
 
   // The menu panel below 1024px: the button toggles it; Escape, a link or a
-  // wider window closes it. While it is open the rest of the page is inert.
-  const outside = () => document.querySelectorAll<HTMLElement>('main, footer, .site-nav, .site-header__bar > :not([data-menu-button])');
+  // wider window closes it. While it is open the rest of the page is inert
+  // and Tab cycles through the menu button and the panel's links.
+  const outside = () =>
+    document.querySelectorAll<HTMLElement>('.skip-link, main, footer, .site-nav, .site-header__bar > :not([data-menu-button])');
   function setOpen(open: boolean, returnFocus = true): void {
     if (!sidebar || !button) return;
     sidebar.dataset.open = open ? 'true' : 'false';
@@ -98,7 +102,15 @@ const mono = route.section === 'capabilities';
   }
   button?.addEventListener('click', () => setOpen(sidebar?.dataset.open !== 'true'));
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && sidebar?.dataset.open === 'true') setOpen(false);
+    if (!sidebar || !button || sidebar.dataset.open !== 'true') return;
+    if (e.key === 'Escape') setOpen(false);
+    if (e.key !== 'Tab') return;
+    const items = [button, ...sidebar.querySelectorAll<HTMLElement>('a[href], button')];
+    const next = wrapFocus(items, document.activeElement as HTMLElement | null, e.shiftKey);
+    if (next) {
+      e.preventDefault();
+      next.focus();
+    }
   });
   sidebar?.addEventListener('click', (e) => {
     if ((e.target as HTMLElement).closest('a') && sidebar.dataset.open === 'true') setOpen(false, false);
