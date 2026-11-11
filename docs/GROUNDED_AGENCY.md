@@ -694,7 +694,7 @@ This transparency is critical for deploying agents in high-stakes domains (healt
 
 **Learned trust weights**: Use reinforcement learning from conflict resolution feedback to calibrate source authority. Historical logs of which source "won" conflicts—and whether downstream verification succeeded—provide training signal.
 
-**Multi-agent protocols**: Extend the Coordination layer with formal protocols for delegation, negotiation, and consensus. This would enable principled composition of multiple Grounded Agency instances with explicit trust boundaries.
+**Multi-agent protocols**: Extend the COORDINATE layer with formal protocols for delegation, negotiation, and consensus. This would enable principled composition of multiple Grounded Agency instances with explicit trust boundaries.
 
 **Capability synthesis**: Generate capability implementations from natural language specifications using code generation models.
 
