@@ -1,0 +1,43 @@
+---
+// "Copy page as Markdown" and "View as Markdown", for the page's Markdown copy
+// at <route>index.md. Copying fetches that file; if it cannot be fetched or
+// written to the clipboard, the status line says so and nothing else happens.
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+interface Props {
+  /** The page URL, e.g. /spec/1.1.0/. */
+  url: string;
+}
+
+const markdownUrl = `${Astro.props.url}index.md`;
+---
+<div class="page-actions" data-page-actions>
+  <button type="button" class="btn btn--quiet btn--small" data-copy-markdown={markdownUrl}>
+    <PixelGlyph name="copy" />
+    <span>Copy page as Markdown</span>
+  </button>
+  <a class="btn btn--quiet btn--small" href={markdownUrl} type="text/markdown">
+    <PixelGlyph name="external" />
+    <span>View as Markdown</span>
+  </a>
+  <span class="page-actions__status" role="status" aria-live="polite"></span>
+</div>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy-markdown]')) {
+    const status = button.parentElement?.querySelector('.page-actions__status');
+    button.addEventListener('click', async () => {
+      const say = (text: string) => {
+        if (status) status.textContent = text;
+      };
+      try {
+        const res = await fetch(button.dataset.copyMarkdown!);
+        if (!res.ok) throw new Error(String(res.status));
+        await navigator.clipboard.writeText(await res.text());
+        say('Copied');
+      } catch {
+        say('Could not copy the Markdown');
+      }
+    });
+  }
+</script>

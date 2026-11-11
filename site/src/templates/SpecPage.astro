@@ -1,10 +1,11 @@
 ---
 // A version of the Standard, as one page so every existing #anchor keeps
-// working. Adds a contents list of the H2 and H3 headings and, on an older
-// version, a note naming the current one. Whether the older version is still
-// supported, and which appendix lists the changes, come from the current
-// Standard's text; a fact it does not state is left out.
-import type { MarkdownHeading } from 'astro';
+// working. Shows its status as a badge and, on an older version, a note
+// naming the current one. (The layout's contents list covers the H2 and H3
+// headings.) Whether the older version is still supported, and which
+// appendix lists the changes, come from the current Standard's text; a fact
+// it does not state is left out.
+import StatusBadge from '../components/StatusBadge.astro';
 import { loadVersions, olderVersionNote } from '../data/versions';
 import { readRepoFile } from '../lib/repo';
 import type { Route } from '../lib/routes';
@@ -14,17 +15,16 @@ import type { PageMeta } from '../plugins/remark-page-meta';
 interface Props {
   route: Route;
   page: PageMeta;
-  headings: MarkdownHeading[];
 }
 
-const { route, page, headings } = Astro.props;
+const { route, page } = Astro.props;
 const { current, previous } = loadVersions().standard;
 const isCurrent = route.source === current.source;
 const currentUrl = routeForSource(current.source)?.url;
 const self = previous.find((v) => v.source === route.source);
 if (!isCurrent && !self) throw new Error(`SpecPage: ${route.source} is not a tracked Standard version`);
 const note = self ? olderVersionNote(self.version, readRepoFile(current.source)) : null;
-const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const status = (self ?? current).status;
 ---
 <article
   class="doc doc--spec"
@@ -33,6 +33,7 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
   data-current={isCurrent ? 'true' : 'false'}
   data-pagefind-body
 >
+  <p class="doc-status"><StatusBadge status={status} /></p>
   {self && note && (
     <p class="version-note" role="note">
       {`This is version ${self.version}.${note.stillSupported ? ' It is still supported.' : ''} The current version is `}<a href={currentUrl}>{current.version}</a>{note.changes ? (
@@ -40,15 +41,6 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
       ) : '.'}
     </p>
   )}
-  <nav class="toc" aria-label="On this page">
-    <ol>
-      {toc.map((h) => (
-        <li class={`toc__item toc__item--h${h.depth}`}>
-          <a href={`#${h.slug}`}>{h.text}</a>
-        </li>
-      ))}
-    </ol>
-  </nav>
   <div class="doc__body">
     <slot />
   </div>

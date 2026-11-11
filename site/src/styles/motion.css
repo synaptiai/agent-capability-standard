@@ -1,0 +1,54 @@
+/*
+ * Motion. Every transition uses steps() timing; there are no easing curves,
+ * no blur and no parallax, and nothing loops. With prefers-reduced-motion,
+ * all motion is off and everything shows its final state.
+ */
+@layer components {
+  .btn,
+  .prev-next__link,
+  .capability-tile,
+  .section-index__card {
+    transition:
+      transform var(--step-hover),
+      box-shadow var(--step-hover);
+  }
+
+  .toc a::before {
+    transition: top var(--step-marker);
+  }
+
+  /* The mark's last block snaps into its slot when the home link is hovered or focused. */
+  .mark__loose {
+    transition: transform 120ms steps(1, end);
+  }
+
+  .site-header__home:is(:hover, :focus-visible) .mark__loose {
+    transform: translate(-1px, -1px);
+  }
+}
+
+@layer utilities {
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+      scroll-behavior: auto !important;
+    }
+
+    .site-header__home:is(:hover, :focus-visible) .mark__loose {
+      transform: none;
+    }
+
+    .btn:hover,
+    .btn:active,
+    .prev-next__link:hover,
+    .prev-next__link:active,
+    .capability-tile:hover,
+    .capability-tile:active,
+    .section-index__card:has(> a:first-child:hover) {
+      transform: none;
+    }
+  }
+}

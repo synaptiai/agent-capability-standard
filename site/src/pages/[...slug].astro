@@ -27,14 +27,14 @@ const { route } = Astro.props;
 const source = route.source!;
 const entry = await getEntry('docs', source);
 if (!entry) throw new Error(`[...slug]: no docs entry for ${source}`);
-const { Content, headings, remarkPluginFrontmatter } = await render(entry);
+const { Content, remarkPluginFrontmatter } = await render(entry);
 const page = remarkPluginFrontmatter.page as PageMeta | undefined;
 if (!page) throw new Error(`[...slug]: remark-page-meta gave ${source} no page data`);
 const { title, headTitle, description } = pageHead(route, page);
 ---
 <DocLayout route={route} title={title} headTitle={headTitle} description={description}>
   {route.template === 'spec' && (
-    <SpecPage route={route} page={page} headings={headings}><Content /></SpecPage>
+    <SpecPage route={route} page={page}><Content /></SpecPage>
   )}
   {route.template === 'rfc' && (
     <RfcPage route={route} page={page}><Content /></RfcPage>

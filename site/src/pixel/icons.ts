@@ -101,3 +101,8 @@ export function ogPng(): Buffer {
   }
   return encodePng(raster);
 }
+
+/** The page background of a theme, for the browser chrome colour. */
+export function pageColour(theme: Theme): string {
+  return hex(rgb(theme, 'var(--bg)'));
+}

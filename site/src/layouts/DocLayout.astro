@@ -1,9 +1,24 @@
 ---
-// The shell every documentation page shares. Unstyled for now: the markup is
-// semantic and carries class hooks for the design system. The page body
-// (including its own H1) comes in through the slot.
-import { ROUTES, SECTIONS, type Route } from '../lib/routes';
+// The shell every page shares: the theme script (first child of <head>),
+// fonts and styles, the header, the sidebar, the page with its breadcrumb,
+// page actions, contents list and previous/next links, and the footer.
+// The page body (including its own H1) comes in through the slot. The
+// contents list is read from the rendered body, so generated pages get one
+// the same way Markdown pages do.
+import '../styles/tokens.css';
+import '../styles/base.css';
+import '../styles/components.css';
+import '../styles/motion.css';
+import Header from '../components/Header.astro';
+import PageActions from '../components/PageActions.astro';
+import PrevNext from '../components/PrevNext.astro';
+import Sidebar from '../components/Sidebar.astro';
+import Toc from '../components/Toc.astro';
 import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
+import { SECTIONS, type Route } from '../lib/routes';
+import { tocEntries } from '../lib/toc';
+import { pageColour } from '../pixel/icons';
+import { FONT_CREDITS, FONT_FACE_CSS, FONT_PRELOADS } from '../styles/fonts';
 
 interface Props {
   route: Route;
@@ -19,47 +34,62 @@ const { route, title, headTitle, description, noindex = false } = Astro.props;
 const section = SECTIONS.find((s) => s.id === route.section);
 const pageTitle = route.url === '/' ? 'Agent Capability Standard' : `${headTitle ?? title} - Agent Capability Standard`;
 const sourceUrl = route.source ? githubBlobUrl(route.source) : null;
-// Each section links to its first page in sidebar order.
-const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
-  ...s,
-  url: ROUTES.find((r) => r.section === s.id && r.order === 0)?.url ?? '/',
-}));
+const body = await Astro.slots.render('default');
+const toc = tocEntries(body);
+const hasSidebar = route.section !== 'home';
+const hasMarkdownCopy = route.template !== 'not-found';
+const light = pageColour('light');
+const dark = pageColour('dark');
+const ogImage = new URL('/og.png', Astro.site);
 ---
 <!doctype html>
 <html lang="en">
   <head>
+    <script is:inline>
+      (() => {
+        let t = 'system';
+        try { t = localStorage.getItem('acs-theme') || 'system'; } catch {}
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      })();
+    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
     {description && <meta name="description" content={description} />}
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={new URL(route.url, Astro.site)} />}
+    <meta name="theme-color" content={light} media="(prefers-color-scheme: light)" data-light={light} data-dark={dark} />
+    <meta name="theme-color" content={dark} media="(prefers-color-scheme: dark)" data-light={light} data-dark={dark} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32" />
+    {hasMarkdownCopy && <link rel="alternate" type="text/markdown" href={`${route.url}index.md`} />}
+    <meta property="og:title" content={pageTitle} />
+    {description && <meta property="og:description" content={description} />}
+    <meta property="og:image" content={ogImage} />
+    <meta name="twitter:card" content="summary_large_image" />
+    {FONT_PRELOADS.map((href) => <link rel="preload" href={href} as="font" type="font/woff2" crossorigin />)}
+    <style is:inline set:html={FONT_FACE_CSS}></style>
   </head>
-  <body class:list={['page', `page--${route.template}`]} data-section={route.section}>
+  <body class:list={['page', `page--${route.template}`, hasSidebar ? 'page--with-sidebar' : 'page--no-sidebar']} data-section={route.section}>
     <a class="skip-link" href="#content">Skip to content</a>
-    <header class="site-header">
-      <a class="site-header__home" href="/">Agent Capability Standard</a>
-      <nav class="site-nav" aria-label="Sections">
-        <ul>
-          {nav.map((s) => (
-            <li>
-              <a href={s.url} aria-current={s.id === route.section ? 'true' : undefined}>{s.label}</a>
-            </li>
-          ))}
-        </ul>
-      </nav>
-    </header>
-    <main id="content" class="doc-main">
-      {section && (
-        <nav class="breadcrumb" aria-label="Breadcrumb">
-          <ol>
-            <li>{section.label}</li>
-            {route.group && <li>{route.group}</li>}
-            <li aria-current="page">{title}</li>
-          </ol>
-        </nav>
-      )}
-      <slot />
-    </main>
+    <Header route={route} />
+    <div class="frame">
+      <Sidebar route={route} />
+      <main id="content" class="doc-main" tabindex="-1">
+        {section && route.section !== 'home' && (
+          <nav class="breadcrumb" aria-label="Breadcrumb">
+            <ol>
+              <li>{section.label}</li>
+              {route.group && <li>{route.group}</li>}
+              <li aria-current="page">{title}</li>
+            </ol>
+          </nav>
+        )}
+        {hasMarkdownCopy && <PageActions url={route.url} />}
+        <Toc entries={toc} />
+        <div class="doc-main__body"><Fragment set:html={body} /></div>
+        <PrevNext route={route} />
+      </main>
+    </div>
     <footer class="site-footer">
       {sourceUrl && (
         <p class="site-footer__source">
@@ -67,6 +97,9 @@ const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
         </p>
       )}
       <p class="site-footer__build">Built from commit <code>{COMMIT_SHA.slice(0, 12)}</code>.</p>
+      <p class="site-footer__fonts">
+        Fonts: {FONT_CREDITS.join(', ')}, under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.
+      </p>
     </footer>
   </body>
 </html>

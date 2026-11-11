@@ -1,0 +1,80 @@
+---
+// "On this page": the h2 and h3 headings of the page. From 1280px it is a
+// column beside the content; below that it is a block that starts closed.
+// Without JavaScript the list is open and has no active marker. With many
+// entries (the Standard), only the h3 headings of the current h2 show.
+import type { TocEntry } from '../lib/toc';
+
+interface Props {
+  entries: TocEntry[];
+}
+
+const { entries } = Astro.props;
+const COMPACT_AT = 40;
+const tree: { entry: TocEntry; children: TocEntry[] }[] = [];
+for (const e of entries) {
+  if (e.depth === 2 || tree.length === 0) tree.push({ entry: e, children: [] });
+  else tree.at(-1)!.children.push(e);
+}
+---
+{entries.length > 1 && (
+  <details class="toc" open data-toc data-compact={entries.length > COMPACT_AT ? 'true' : undefined}>
+    <summary class="toc__title">On this page</summary>
+    <ol class="toc__list">
+      {tree.map((node) => (
+        <li class="toc__item" data-depth={node.entry.depth}>
+          <a href={`#${node.entry.id}`}>{node.entry.text}</a>
+          {node.children.length > 0 && (
+            <ol class="toc__sub">
+              {node.children.map((c) => (
+                <li class="toc__item" data-depth={c.depth}><a href={`#${c.id}`}>{c.text}</a></li>
+              ))}
+            </ol>
+          )}
+        </li>
+      ))}
+    </ol>
+  </details>
+)}
+
+<script>
+  const toc = document.querySelector<HTMLDetailsElement>('[data-toc]');
+  if (toc) {
+    // Closed below 1280px, open beside the content from 1280px.
+    const wide = window.matchMedia('(min-width: 1280px)');
+    const sync = () => {
+      toc.open = wide.matches;
+    };
+    sync();
+    wide.addEventListener('change', sync);
+    if (toc.dataset.compact === 'true') toc.classList.add('toc--compact');
+
+    const links = new Map<string, HTMLAnchorElement>();
+    for (const a of toc.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')) links.set(decodeURIComponent(a.hash.slice(1)), a);
+    const headings = [...links.keys()].map((id) => document.getElementById(id)).filter((h): h is HTMLElement => h !== null);
+    let active: HTMLAnchorElement | null = null;
+    const setActive = (id: string) => {
+      const a = links.get(id);
+      if (!a || a === active) return;
+      active?.removeAttribute('aria-current');
+      for (const li of toc.querySelectorAll('.is-current-section')) li.classList.remove('is-current-section');
+      a.setAttribute('aria-current', 'location');
+      a.closest('.toc__list > .toc__item')?.classList.add('is-current-section');
+      active = a;
+    };
+    const visible = new Set<string>();
+    const observer = new IntersectionObserver(
+      (records) => {
+        for (const r of records) {
+          if (r.isIntersecting) visible.add(r.target.id);
+          else visible.delete(r.target.id);
+        }
+        const first = headings.find((h) => visible.has(h.id));
+        if (first) setActive(first.id);
+      },
+      { rootMargin: '-64px 0px -60% 0px' },
+    );
+    for (const h of headings) observer.observe(h);
+    if (headings[0]) setActive(headings[0].id);
+  }
+</script>

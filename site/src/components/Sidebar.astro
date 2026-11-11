@@ -1,0 +1,109 @@
+---
+// The sidebar: the pages of the current section in route-table order, with
+// consecutive rows of one group under that group's title (a layer group shows
+// the layer glyph). Below 1024px the menu button opens it as a panel, which
+// also lists the sections. The current page has aria-current="page". The
+// scroll position is kept in sessionStorage within a visit.
+import { loadOntology } from '../data/ontology';
+import { ROUTES, SECTIONS, type Route } from '../lib/routes';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+interface Props {
+  route: Route;
+}
+
+const { route } = Astro.props;
+const layers = new Set(loadOntology().layers.map((l) => l.id));
+const rows = ROUTES.filter((r) => r.section === route.section && route.section !== 'home').sort((a, b) => a.order - b.order);
+// Group consecutive rows that share a group (a section can have ungrouped rows on both sides of a group).
+const runs: { group: string | null; rows: Route[] }[] = [];
+for (const r of rows) {
+  const group = r.group ?? null;
+  const last = runs.at(-1);
+  if (last && last.group === group) last.rows.push(r);
+  else runs.push({ group, rows: [r] });
+}
+const section = SECTIONS.find((s) => s.id === route.section);
+const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
+  ...s,
+  url: ROUTES.find((r) => r.section === s.id && r.order === 0)?.url ?? '/',
+}));
+const mono = route.section === 'capabilities';
+---
+<aside id="site-sidebar" class="sidebar" aria-label="Site navigation" data-sidebar>
+  <nav class="sidebar__sections" aria-label="Sections (menu)">
+    <p class="sidebar__title">Sections</p>
+    <ul>
+      {sections.map((s) => (
+        <li><a href={s.url} aria-current={s.id === route.section ? 'true' : undefined}>{s.label}</a></li>
+      ))}
+    </ul>
+  </nav>
+  {runs.length > 0 && section && (
+    <nav class="sidebar__pages" aria-label={`${section.label} pages`}>
+      <p class="sidebar__title">{section.label}</p>
+      {runs.map((run) => (
+        <div class="sidebar__group">
+          {run.group && (
+            <p class="sidebar__group-title">
+              {layers.has(run.group) ? <PixelGlyph name={run.group} layer={run.group} /> : <span class="pip" aria-hidden="true"></span>}
+              <span>{run.group}</span>
+            </p>
+          )}
+          <ul>
+            {run.rows.map((r) => (
+              <li>
+                <a href={r.url} aria-current={r.url === route.url ? 'page' : undefined} class:list={[mono && r.template === 'capability' && 'sidebar__mono']}>{r.title}</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  )}
+</aside>
+
+<script>
+  const sidebar = document.querySelector<HTMLElement>('[data-sidebar]');
+  const button = document.querySelector<HTMLButtonElement>('[data-menu-button]');
+  const KEY = 'acs-sidebar-scroll';
+
+  if (sidebar) {
+    try {
+      const saved = sessionStorage.getItem(KEY);
+      if (saved) sidebar.scrollTop = Number(saved);
+    } catch {
+      // Storage is blocked: the sidebar starts at the top.
+    }
+    window.addEventListener('pagehide', () => {
+      try {
+        sessionStorage.setItem(KEY, String(sidebar.scrollTop));
+      } catch {
+        // Storage is blocked.
+      }
+    });
+  }
+
+  // The menu panel below 1024px: the button toggles it; Escape, a link or a
+  // wider window closes it. While it is open the rest of the page is inert.
+  const outside = () => document.querySelectorAll<HTMLElement>('main, footer, .site-nav, .site-header__bar > :not([data-menu-button])');
+  function setOpen(open: boolean, returnFocus = true): void {
+    if (!sidebar || !button) return;
+    sidebar.dataset.open = open ? 'true' : 'false';
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.documentElement.classList.toggle('menu-open', open);
+    for (const el of outside()) el.inert = open;
+    if (open) sidebar.querySelector<HTMLElement>('a[aria-current="page"], a')?.focus();
+    else if (returnFocus) button.focus();
+  }
+  button?.addEventListener('click', () => setOpen(sidebar?.dataset.open !== 'true'));
+  sidebar?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sidebar.dataset.open === 'true') setOpen(false);
+  });
+  sidebar?.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('a') && sidebar.dataset.open === 'true') setOpen(false, false);
+  });
+  window.matchMedia('(min-width: 1024px)').addEventListener('change', (e) => {
+    if (e.matches && sidebar?.dataset.open === 'true') setOpen(false, false);
+  });
+</script>

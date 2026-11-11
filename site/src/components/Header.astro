@@ -1,0 +1,58 @@
+---
+// The site header: the mark and wordmark (home link), a chip with the current
+// Standard version, an empty slot that search fills in a later phase, the
+// GitHub link, the theme toggle and, below 1024px, the menu button. A second
+// row links to each section.
+import { loadVersions } from '../data/versions';
+import { currentStandard } from '../lib/generated';
+import { GITHUB_BASE } from '../lib/repo';
+import { ROUTES, SECTIONS, type Route } from '../lib/routes';
+import Mark from '../pixel/Mark.astro';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+import ThemeToggle from './ThemeToggle.astro';
+
+interface Props {
+  route: Route;
+}
+
+const { route } = Astro.props;
+const version = loadVersions().standard.current.version;
+const specUrl = currentStandard().url;
+// Each section links to its first page in sidebar order.
+const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
+  ...s,
+  url: ROUTES.find((r) => r.section === s.id && r.order === 0)?.url ?? '/',
+}));
+---
+<header class="site-header">
+  <div class="site-header__bar">
+    <button type="button" class="menu-button btn btn--quiet" aria-controls="site-sidebar" aria-expanded="false" data-menu-button>
+      <PixelGlyph name="menu" class="menu-button__open" />
+      <PixelGlyph name="close" class="menu-button__close" />
+      <span class="menu-button__text">Menu</span>
+    </button>
+    <a class="site-header__home" href="/" aria-label="Agent Capability Standard, home">
+      <Mark scale={2} class="site-header__mark" />
+      <span class="wordmark" aria-hidden="true">
+        <span class="wordmark__full">Agent Capability Standard</span>
+        <span class="wordmark__short">ACS</span>
+      </span>
+    </a>
+    <a class="version-chip" href={specUrl}>Standard v{version}</a>
+    <div class="site-header__search" data-search-slot></div>
+    <a class="site-header__github btn btn--quiet" href={GITHUB_BASE}>
+      <PixelGlyph name="code" />
+      <span>GitHub</span>
+    </a>
+    <ThemeToggle />
+  </div>
+  <nav class="site-nav" aria-label="Sections">
+    <ul>
+      {nav.map((s) => (
+        <li>
+          <a href={s.url} aria-current={s.id === route.section ? 'true' : undefined}>{s.label}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+</header>
