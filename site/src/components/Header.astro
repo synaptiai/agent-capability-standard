@@ -38,7 +38,7 @@ const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
         <span class="wordmark__short">ACS</span>
       </span>
     </a>
-    <a class="version-chip" href={specUrl}>Standard v{version}</a>
+    <a class="version-chip" href={specUrl}><span class="version-chip__word">Standard </span>v{version}</a>
     <div class="site-header__search" data-search-slot></div>
     <a class="site-header__github btn btn--quiet" href={GITHUB_BASE}>
       <PixelGlyph name="code" />

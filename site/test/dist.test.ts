@@ -207,7 +207,7 @@ describe('design system on the built site', () => {
 
   it('shows the newest Standard file version in the header chip, and a skip link to the main content', () => {
     // Expected: the highest version among spec/STANDARD-v*.md file names.
-    const chip = `>Standard v${standardFileVersions()[0]}</a>`;
+    const chip = `><span class="version-chip__word">Standard </span>v${standardFileVersions()[0]}</a>`;
     for (const f of pages()) {
       const h = html(f);
       expect(h.includes(chip), f).toBe(true);

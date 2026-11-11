@@ -17,8 +17,8 @@ describe('contrast arithmetic', () => {
     expect(contrast([56, 189, 248], [56, 189, 248])).toBe(1);
   });
 
-  it('mixes in sRGB by channel and rounds to 8 bits, as a browser stores the colour', () => {
-    // 50% of #000000 into #ffffff is 127.5 per channel, stored as an 8-bit value.
+  it('mixes in sRGB by channel and rounds to 8 bits, which reproduces the ratios in the design notes', () => {
+    // 50% of #000000 into #ffffff is 127.5 per channel, rounded to 128.
     expect(resolveColor('color-mix(in srgb, #000000 50%, #ffffff)', {})).toEqual([128, 128, 128]);
   });
 });

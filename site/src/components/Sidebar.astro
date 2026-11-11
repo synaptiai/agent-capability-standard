@@ -93,12 +93,12 @@ const mono = route.section === 'capabilities';
     button.setAttribute('aria-expanded', open ? 'true' : 'false');
     document.documentElement.classList.toggle('menu-open', open);
     for (const el of outside()) el.inert = open;
-    if (open) sidebar.querySelector<HTMLElement>('a[aria-current="page"], a')?.focus();
+    if (open) (sidebar.querySelector<HTMLElement>('a[aria-current="page"]') ?? sidebar.querySelector<HTMLElement>('a'))?.focus();
     else if (returnFocus) button.focus();
   }
   button?.addEventListener('click', () => setOpen(sidebar?.dataset.open !== 'true'));
-  sidebar?.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && sidebar.dataset.open === 'true') setOpen(false);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sidebar?.dataset.open === 'true') setOpen(false);
   });
   sidebar?.addEventListener('click', (e) => {
     if ((e.target as HTMLElement).closest('a') && sidebar.dataset.open === 'true') setOpen(false, false);

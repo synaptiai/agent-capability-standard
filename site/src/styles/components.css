@@ -59,6 +59,13 @@
     margin-bottom: 0;
   }
 
+  /* Tables from Markdown have no wrapper: they scroll on their own. */
+  :is(.doc--prose, .doc--spec, .doc--rfc, .doc--skill, .doc__body) table:not(.table-wrap > table) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
   /* Headers of generated tables: body font, bold capitals. Prose tables keep sentence case. */
   .table-wrap thead th,
   .doc:not(.doc--prose, .doc--spec, .doc--rfc) > .table-wrap thead th {
@@ -273,10 +280,8 @@
   }
 
   .version-chip {
-    display: inline-flex;
-    align-items: center;
-    min-height: 28px;
-    padding: 2px 6px;
+    display: inline-block;
+    padding: 4px 6px;
     border: var(--border);
     background: var(--bg-sub);
     color: var(--ink);
@@ -315,8 +320,9 @@
       padding: 0 var(--space-3);
     }
 
-    /* The button keeps "Menu" as its name; only the word is hidden. */
-    .menu-button__text {
+    /* The button keeps "Menu" as its name and the chip keeps "Standard"; only the words are hidden. */
+    .menu-button__text,
+    .version-chip__word {
       position: absolute;
       width: 1px;
       height: 1px;
@@ -940,6 +946,11 @@
     border-top: 6px solid var(--layer);
     background: var(--bg-sub);
     margin-bottom: var(--space-4);
+  }
+
+  ul:has(> li > .capability-card) {
+    list-style: none;
+    padding: 0;
   }
 
   .capability-card__id {
