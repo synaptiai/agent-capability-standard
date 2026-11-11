@@ -3,6 +3,7 @@
 // link to the capability's page showing its number in table order, risk pips,
 // two-letter symbol and id. The accessible name says the layer, the risk and
 // which safety flags apply; the data attributes carry the same facts.
+// Search indexes only the id: the number and symbol would join onto it.
 import type { Capability } from '../data/ontology';
 import { capabilityNeedsCheckpoint } from '../lib/flags';
 import { capabilityHref } from '../lib/generated';
@@ -36,8 +37,8 @@ const name = [
   data-checkpoint={checkpoint ? 'true' : 'false'}
   data-approval={cap.requires_approval ? 'true' : 'false'}
 >
-  <span class="capability-tile__index">{index}</span>
+  <span class="capability-tile__index" data-pagefind-ignore>{index}</span>
   <span class="risk-pips" data-level={pips} aria-hidden="true">{Array.from({ length: pips }, () => <span class="risk-pips__pip"></span>)}</span>
-  <span class="capability-tile__symbol" aria-hidden="true">{symbol}</span>
+  <span class="capability-tile__symbol" aria-hidden="true" data-pagefind-ignore>{symbol}</span>
   <code class="capability-tile__id">{cap.id}</code>
 </a>

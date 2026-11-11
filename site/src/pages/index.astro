@@ -54,11 +54,12 @@ const groups = [
       <p class="lead"><InlineText parts={o.summary} /></p>
       <p class="home-opening__version">{o.versionLine}</p>
       <p class="home-opening__links">
+        {/* The space between links keeps their words apart in search. */}
         {o.links.map((l, i) => (
-          <a class:list={['btn', i > 0 && 'btn--quiet']} href={href(l)}>
+          <>{i > 0 && ' '}<a class:list={['btn', i > 0 && 'btn--quiet']} href={href(l)}>
             {l.text}
             <PixelGlyph name="arrow-right" />
-          </a>
+          </a></>
         ))}
       </p>
       <CopyBlock label={o.install.label} text={o.install.commands.join('\n')} />

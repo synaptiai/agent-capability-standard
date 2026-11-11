@@ -1,7 +1,7 @@
 ---
 // A labelled block of text to copy, such as shell commands or a prompt, with
 // a Copy button. Without JavaScript the button is hidden and the text stays
-// selectable.
+// selectable. Search skips the button, whose word would join onto the label.
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 
 interface Props {
@@ -14,13 +14,13 @@ const { label, text } = Astro.props;
 <figure class="copy-block" data-copy-block>
   <figcaption class="copy-block__label">
     <span>{label}</span>
-    <button type="button" class="btn btn--quiet btn--small copy-block__button" data-copy-button>
+    <button type="button" class="btn btn--quiet btn--small copy-block__button" data-copy-button data-pagefind-ignore="all">
       <PixelGlyph name="copy" />
       <span>Copy</span>
     </button>
   </figcaption>
   <pre class="copy-block__text"><code data-copy-text>{text}</code></pre>
-  <span class="copy-block__status" role="status" aria-live="polite"></span>
+  <span class="copy-block__status" role="status" aria-live="polite" data-pagefind-ignore></span>
 </figure>
 
 <script>

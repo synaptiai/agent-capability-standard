@@ -424,6 +424,21 @@ describe('agent files', () => {
     expect(bad).toEqual([]);
   });
 
+  it('keeps tile numbers and symbols, copy buttons and adjacent home links out of the indexed words', () => {
+    // Pagefind joins these onto the next word: "1Rtretrieve", "2.0.0Copy", "specificationQuickstart".
+    const bad: string[] = [];
+    for (const d of dirsWith('index.html')) {
+      const html = readFileSync(path.join(dist, d, 'index.html'), 'utf8');
+      for (const m of html.matchAll(/<(?:span|button)\b[^>]*class="(?:capability-tile__index|capability-tile__symbol|[^"]*copy-block__button)"[^>]*>/g)) {
+        if (!m[0].includes('data-pagefind-ignore')) bad.push(`${d}: ${m[0].slice(0, 60)}`);
+      }
+    }
+    expect(bad).toEqual([]);
+    const home = readFileSync(path.join(dist, 'index.html'), 'utf8');
+    const links = /class="home-opening__links">([\s\S]*?)<\/p>/.exec(home)![1]!;
+    expect(links).not.toContain('</a><a');
+  });
+
   it('tags each older Standard with its version for search and weights its words down; the current one has neither', () => {
     const [current, ...older] = standardFileVersions();
     expect(older.length).toBeGreaterThan(0);
@@ -479,6 +494,12 @@ describe('agent files', () => {
       }
     }
     expect(bad).toEqual([]);
+  });
+
+  it('offers a search for the missing path and a Search link on the 404 page', () => {
+    const html = readFileSync(path.join(dist, '404.html'), 'utf8');
+    expect(html).toMatch(/<button[^>]*data-not-found-query/);
+    expect(html).toMatch(/<a href="https:\/\/duckduckgo\.com\/\?q=site%3Aacs\.synapti\.ai" data-not-found-open>Search<\/a>/);
   });
 
   it('lists every HTML page in the sitemap, minus the 404 page, and no Markdown or text file', () => {
