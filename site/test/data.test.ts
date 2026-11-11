@@ -290,6 +290,17 @@ describe('diagnostics', () => {
     expect(() => crossCheck(d, rs)).toThrow(/W601/);
   });
 
+  it('fails when a section heading disagrees with the §9.1 severity', () => {
+    const text = [
+      '### 9.1 Categories and Severity',
+      '| Validation | V1xx | error | x |',
+      '### 9.2 Warnings',
+      '| V101 | A_NAME | first |',
+      '### 9.8 Diagnostic Format',
+    ].join('\n');
+    expect(() => parseSpecDiagnostics(text)).toThrow(/V101 has severity error/);
+  });
+
   it('stops at §9.8', () => {
     const text = [
       '### 9.1 Categories and Severity',

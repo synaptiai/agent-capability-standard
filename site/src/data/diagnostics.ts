@@ -1,7 +1,8 @@
 // Diagnostic codes from the current Standard's §9.2 to §9.7 tables, cross-checked
 // against core/src/diag.rs. Only those sections are read: Appendix C repeats
 // a code in a change table. Severity is not a table column; it comes from the
-// §9.1 row whose code range covers the section's codes.
+// §9.1 row whose code range covers the code, and must agree with the section
+// heading ("... Errors" or "Warnings").
 import { slug } from 'github-slugger';
 import { readRepoFile } from '../lib/repo';
 import { standardVersions } from './versions';
@@ -76,6 +77,15 @@ export function parseSpecDiagnostics(text: string): Diagnostic[] {
     if (!range) throw new Error(`diagnostics: ${code} is in no §9.1 code range`);
     if (sectionSeverity !== null && sectionSeverity !== range.severity) {
       throw new Error(`diagnostics: §${section.number} mixes error and warning codes`);
+    }
+    // The heading must agree: "... Errors" sections hold errors, "Warnings" warnings.
+    const headed: Severity | null = /Errors$/.test(section.title)
+      ? 'error'
+      : /^Warnings$/.test(section.title)
+        ? 'warning'
+        : null;
+    if (headed !== range.severity) {
+      throw new Error(`diagnostics: ${code} has severity ${range.severity} under §${section.number} ${section.title}`);
     }
     sectionSeverity = range.severity;
     out.push({

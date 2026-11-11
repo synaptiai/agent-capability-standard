@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { checkRoutes, ROUTES, type Route } from '../src/lib/routes';
+import { checkRoutes, DIRECTORY_MAP, ROUTES, type Route, type Section } from '../src/lib/routes';
 
 // The public set is computed here from `git ls-files` and the plan's
 // exclusion list (plan "Recommended defaults" item 12), written out
@@ -101,6 +101,106 @@ describe('route table against the repository', () => {
   });
 });
 
+// Sidebar order, copied from design.md "ia-home" section 3. Rows the design
+// did not list (README, contributed fixtures) are filtered out before comparing.
+describe('sidebar order', () => {
+  const urlsOf = (section: Section) =>
+    ROUTES.filter((r) => r.section === section)
+      .sort((a, b) => a.order - b.order)
+      .map((r) => r.url);
+  const only = (urls: string[], keep: string[]) => urls.filter((u) => keep.includes(u));
+
+  it('orders the Specification section', () => {
+    const expected = [
+      '/spec/1.1.0/',
+      '/spec/conformance/',
+      '/spec/edge-types/',
+      '/spec/diagnostics/',
+      '/spec/security/',
+      '/spec/schemas/',
+      '/spec/extending/',
+      '/spec/changelog/',
+      '/spec/1.0.0/',
+    ];
+    expect(only(urlsOf('spec'), expected)).toEqual(expected);
+  });
+
+  it('orders the EU AI Act sub-group', () => {
+    const eu = urlsOf('compliance').filter((u) => u.startsWith('/compliance/eu-ai-act/'));
+    expect(eu).toEqual([
+      '/compliance/eu-ai-act/',
+      '/compliance/eu-ai-act/risk-classification/',
+      '/compliance/eu-ai-act/annex-iv-technical-documentation/',
+      '/compliance/eu-ai-act/quality-management-system/',
+      '/compliance/eu-ai-act/post-market-monitoring/',
+      '/compliance/eu-ai-act/notified-body-assessment/',
+    ]);
+  });
+
+  it('orders the reference workflows as the core catalog does', () => {
+    const ref = ROUTES.filter((r) => r.group === 'Reference workflows')
+      .sort((a, b) => a.order - b.order)
+      .map((r) => r.url.split('/')[2]);
+    expect(ref).toEqual([
+      'monitor-and-replan',
+      'clarify-intent',
+      'debug-code-change',
+      'world-model-build',
+      'capability-gap-analysis',
+      'digital-twin-sync-loop',
+      'digital-twin-bootstrap',
+      'rag-pipeline',
+      'security-assessment',
+      'multi-agent-orchestration',
+      'data-quality-pipeline',
+      'model-deployment',
+    ]);
+  });
+
+  it('orders the Community section', () => {
+    expect(urlsOf('community')).toEqual([
+      '/community/contributing/',
+      '/community/governance/',
+      '/community/code-of-conduct/',
+      '/community/roadmap/',
+      '/community/release-notes/',
+      '/community/citation/',
+      '/community/press-kit/',
+    ]);
+  });
+
+  it('puts each layer page before its capabilities, in ontology order', () => {
+    // schemas/capability_ontology.yaml layers.PERCEIVE.capabilities.
+    const caps = urlsOf('capabilities');
+    expect(caps.slice(0, 6)).toEqual([
+      '/capabilities/',
+      '/layers/perceive/',
+      '/capabilities/retrieve/',
+      '/capabilities/search/',
+      '/capabilities/observe/',
+      '/capabilities/receive/',
+    ]);
+  });
+});
+
+describe('directory map', () => {
+  // design.md "pipeline" section 3, "Directory links".
+  it.each([
+    ['docs/compliance', '/compliance/'],
+    ['docs/compliance/iso42001', '/compliance/iso-42001/'],
+    ['docs/domains', '/domains/'],
+    ['docs/domains/healthcare', '/domains/healthcare/'],
+    ['skills/detect', '/capabilities/detect/'],
+    ['spec', '/spec/1.1.0/'],
+  ])('maps %s to %s', (dir, url) => {
+    expect(DIRECTORY_MAP[dir]).toBe(url);
+  });
+
+  it('does not map the excluded raw data folder', () => {
+    expect(DIRECTORY_MAP['docs/research/raw_data']).toBeUndefined();
+  });
+});
+
 describe('checkRoutes on a broken table', () => {
   const ok: Route = { source: 'docs/A.md', url: '/a/', section: 'guides', order: 0, template: 'prose', title: 'A' };
   const files = new Set(['docs/A.md', 'docs/B.md', 'CLAUDE.md', 'tasks/x.md', 'schemas/x.yaml']);
@@ -141,6 +241,14 @@ describe('checkRoutes on a broken table', () => {
     const b: Route = { ...ok, source: 'docs/B.md', url: '/b/' };
     const wf: Route = { source: null, url: '/workflows/patterns/', section: 'workflows', order: 1, template: 'workflow', title: 'x' };
     expect(checkRoutes([ok, b, wf], files)).toEqual(['/workflows/patterns/: workflow slug patterns is reserved']);
+  });
+
+  it('reports a mapped directory that is missing or points nowhere', () => {
+    const b: Route = { ...ok, source: 'docs/B.md', url: '/b/' };
+    expect(checkRoutes([ok, b], files, { docs: '/a/', nowhere: '/a/', schemas: '/missing/' })).toEqual([
+      'nowhere/: mapped but no tracked file is in it',
+      'schemas/: maps to /missing/, which is not a route',
+    ]);
   });
 
   it('reports a URL without the trailing slash', () => {

@@ -3,7 +3,8 @@
 // - every tracked public .md file has exactly one row;
 // - every Markdown source is tracked and not excluded;
 // - no URL is used twice and every URL has the /a/b/ form;
-// - no workflow takes a slug the workflow section reserves.
+// - no workflow takes a slug the workflow section reserves;
+// - every directory in the directory map exists and points at a page.
 // A new public .md file therefore needs a row here, or the build fails.
 import { loadOntology } from '../data/ontology';
 import { loadProfiles } from '../data/profiles';
@@ -108,7 +109,11 @@ const URL_FORM = /^\/(?:[a-z0-9][a-z0-9.-]*\/)*$/;
  * Check a route table against the tracked files. Returns every problem found,
  * one line each. Pure, so tests can feed it a broken table.
  */
-export function checkRoutes(rows: readonly Route[], tracked: ReadonlySet<string>): string[] {
+export function checkRoutes(
+  rows: readonly Route[],
+  tracked: ReadonlySet<string>,
+  directories: Readonly<Record<string, string>> = {},
+): string[] {
   const problems: string[] = [];
   const urls = new Map<string, Route>();
   const sources = new Map<string, Route>();
@@ -131,7 +136,31 @@ export function checkRoutes(rows: readonly Route[], tracked: ReadonlySet<string>
   for (const p of publicMarkdown(tracked)) {
     if (!sources.has(p)) problems.push(`${p}: public Markdown with no route`);
   }
+  const trackedList = [...tracked];
+  for (const [dir, url] of Object.entries(directories)) {
+    if (!trackedList.some((p) => p.startsWith(`${dir}/`))) problems.push(`${dir}/: mapped but no tracked file is in it`);
+    if (!urls.has(url)) problems.push(`${dir}/: maps to ${url}, which is not a route`);
+  }
   return problems;
+}
+
+/**
+ * Repository directories that links may point at, and the page each one
+ * stands for. A link to any other directory goes to its GitHub tree page.
+ */
+export function buildDirectoryMap(): Record<string, string> {
+  const map: Record<string, string> = {
+    spec: `/spec/${standardVersions()[0]?.version ?? 'missing'}/`,
+    'docs/compliance': '/compliance/',
+    'docs/compliance/eu-ai-act': '/compliance/eu-ai-act/',
+    'docs/compliance/iso42001': '/compliance/iso-42001/',
+    'docs/compliance/nist-ai-rmf': '/compliance/nist-ai-rmf/',
+    'docs/domains': '/domains/',
+  };
+  for (const d of loadProfiles()) map[`docs/domains/${d.key}`] = `/domains/${d.key}/`;
+  for (const c of loadOntology().capabilities) map[`skills/${c.id}`] = `/capabilities/${kebab(c.id)}/`;
+  for (const dir of Object.keys(COMPOSED_SKILLS)) map[`skills/${dir}`] = `/guides/skills/${dir}/`;
+  return map;
 }
 
 type RowInput = Omit<Route, 'order' | 'section'>;
@@ -314,13 +343,13 @@ export function buildRoutes(): Route[] {
     'compliance',
     { source: null, url: '/compliance/', title: 'Overview', template: 'listing' },
     prose(`${eu}/README.md`, '/compliance/eu-ai-act/', 'Overview', 'EU AI Act'),
-    // Same order as the table in the EU AI Act README.
+    // Sidebar order from the site design (information architecture, section 3).
     ...[
       ['risk_classification.md', 'Risk classification'],
+      ['annex_iv_technical_documentation.md', 'Annex IV technical documentation'],
+      ['quality_management_system.md', 'Quality management system'],
       ['post_market_monitoring.md', 'Post-market monitoring'],
       ['notified_body_assessment.md', 'Notified body assessment'],
-      ['quality_management_system.md', 'Quality management system'],
-      ['annex_iv_technical_documentation.md', 'Annex IV technical documentation'],
     ].map(([f, t]) => prose(`${eu}/${f}`, `/compliance/eu-ai-act/${kebab(f!)}/`, t!, 'EU AI Act')),
     prose(`${iso}/README.md`, '/compliance/iso-42001/', 'Overview', 'ISO/IEC 42001'),
     // Ordered by the standard's clauses, as in the ISO 42001 README.
@@ -392,15 +421,20 @@ export function buildRoutes(): Route[] {
   return rows;
 }
 
-export function assertRoutes(rows: readonly Route[], tracked: ReadonlySet<string>): void {
-  const problems = checkRoutes(rows, tracked);
+export function assertRoutes(
+  rows: readonly Route[],
+  tracked: ReadonlySet<string>,
+  directories: Readonly<Record<string, string>>,
+): void {
+  const problems = checkRoutes(rows, tracked, directories);
   if (problems.length > 0) {
     throw new Error(`routes: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
   }
 }
 
 export const ROUTES: readonly Route[] = buildRoutes();
-assertRoutes(ROUTES, TRACKED_FILES);
+export const DIRECTORY_MAP: Readonly<Record<string, string>> = buildDirectoryMap();
+assertRoutes(ROUTES, TRACKED_FILES, DIRECTORY_MAP);
 
 /** Repo paths of every Markdown source, for the content collection's pattern list. */
 export function markdownSources(): string[] {
