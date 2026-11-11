@@ -21,7 +21,7 @@ This document records capabilities that were considered during ontology developm
 
 | Category | Criteria | Example |
 |----------|----------|---------|
-| **COMPOSITION** | Can be expressed as sequence of existing capabilities | `mitigate` = estimate-risk → plan → act |
+| **COMPOSITION** | Can be expressed as sequence of existing capabilities | `mitigate` = measure → plan → checkpoint → mutate |
 | **REDUNDANT** | Semantically equivalent to existing capability | `validate` = `verify` |
 | **PARAMETERIZABLE** | Domain specialization that should be a parameter | `detect-person` = `detect(domain: person)` |
 | **TOO VAGUE** | No clear, specific semantics | `process`, `handle` |
@@ -44,13 +44,15 @@ These were considered but are actually compositions of atomic capabilities.
 ```yaml
 mitigate:
   steps:
-    - capability: estimate-risk
+    - capability: measure
       purpose: Quantify the risk
     - capability: plan
       purpose: Create mitigation plan
     - capability: constrain
       purpose: Apply limits
-    - capability: act-plan
+    - capability: checkpoint
+      purpose: Save state before the change
+    - capability: mutate
       purpose: Execute mitigation
 ```
 
@@ -72,13 +74,15 @@ improve:
       purpose: Identify weaknesses
     - capability: plan
       purpose: Create improvement plan
-    - capability: act-plan
+    - capability: checkpoint
+      purpose: Save state before the change
+    - capability: mutate
       purpose: Execute improvements
     - capability: verify
       purpose: Confirm improvement
 ```
 
-**Why it's not atomic**: "Improve" requires knowing what's wrong (critique), planning fixes (plan), doing the work (act), and checking results (verify). Each step is a distinct capability.
+**Why it's not atomic**: "Improve" requires knowing what's wrong (critique), planning fixes (plan), doing the work (mutate), and checking results (verify). Each step is a distinct capability.
 
 ---
 
@@ -95,13 +99,11 @@ optimize:
     - capability: discover
       purpose: Find candidate solutions
     - capability: compare
-      purpose: Evaluate alternatives
+      purpose: Evaluate alternatives and select the best option
       loop: until optimal or max_iterations
-    - capability: decide
-      purpose: Select best option
 ```
 
-**Why it's not atomic**: Optimization is iterative search. It requires discovery, comparison, and decision—all separate operations.
+**Why it's not atomic**: Optimization is iterative search. It repeats discovery and comparison, which are separate operations.
 
 ---
 
@@ -115,11 +117,11 @@ optimize:
 ```yaml
 digital_twin:
   steps:
-    - capability: world-state
+    - capability: state
       purpose: Create initial snapshot
-    - capability: state-transition
+    - capability: transition
       purpose: Define dynamics
-    - capability: simulation
+    - capability: simulate
       purpose: Run scenarios
     - capability: integrate
       purpose: Sync with real world
@@ -249,15 +251,15 @@ A decision is the output of comparison. You compare options to decide.
 
 ---
 
-### 2.8 `provenance` (→ merge with `grounding`)
+### 2.8 `provenance` (→ merge with `ground`)
 
 **Description**: Track claim origins
 
-**Rejection Reason**: REDUNDANT with `grounding`
+**Rejection Reason**: REDUNDANT with `ground`
 
 **Analysis**: Provenance is part of grounding. Grounding = anchoring claims to evidence AND tracking where claims came from.
 
-**Resolution**: Include provenance as part of `grounding` output.
+**Resolution**: Include provenance as part of `ground` output.
 
 ---
 
@@ -310,25 +312,25 @@ These were considered but should be parameters of base capabilities.
 | `detect-activity` | detect | `domain: activity` |
 | `detect-attribute` | detect | `domain: attribute` |
 | `detect-world` | detect | `domain: world` |
-| `identify-person` | identify | `domain: person` |
-| `identify-entity` | identify | `domain: entity` |
-| `identify-human-attribute` | identify | `domain: human-attribute` |
-| `identify-anomaly` | identify | `domain: anomaly` |
-| `identify-attribute` | identify | `domain: attribute` |
-| `identify-activity` | identify | `domain: activity` |
-| `identify-world` | identify | `domain: world` |
-| `estimate-relationship` | estimate | `target: relationship` |
-| `estimate-activity` | estimate | `target: activity` |
-| `estimate-outcome` | estimate | `target: outcome` |
-| `estimate-world` | estimate | `target: world` |
-| `estimate-attribute` | estimate | `target: attribute` |
-| `estimate-impact` | estimate | `target: impact` |
-| `forecast-time` | forecast | `target: time` |
-| `forecast-impact` | forecast | `target: impact` |
-| `forecast-outcome` | forecast | `target: outcome` |
-| `forecast-attribute` | forecast | `target: attribute` |
-| `forecast-world` | forecast | `target: world` |
-| `forecast-risk` | forecast | `target: risk` |
+| `identify-person` | classify | `domain: person` |
+| `identify-entity` | classify | `domain: entity` |
+| `identify-human-attribute` | classify | `domain: human-attribute` |
+| `identify-anomaly` | classify | `domain: anomaly` |
+| `identify-attribute` | classify | `domain: attribute` |
+| `identify-activity` | classify | `domain: activity` |
+| `identify-world` | classify | `domain: world` |
+| `estimate-relationship` | measure | `target: relationship` |
+| `estimate-activity` | measure | `target: activity` |
+| `estimate-outcome` | measure | `target: outcome` |
+| `estimate-world` | measure | `target: world` |
+| `estimate-attribute` | measure | `target: attribute` |
+| `estimate-impact` | measure | `target: impact` |
+| `forecast-time` | predict | `target: time` |
+| `forecast-impact` | predict | `target: impact` |
+| `forecast-outcome` | predict | `target: outcome` |
+| `forecast-attribute` | predict | `target: attribute` |
+| `forecast-world` | predict | `target: world` |
+| `forecast-risk` | predict | `target: risk` |
 | `compare-entities` | compare | `target: entities` |
 | `compare-plans` | compare | `target: plans` |
 | `compare-attributes` | compare | `target: attributes` |
@@ -384,7 +386,7 @@ These were considered but have unclear semantics.
 
 **Analysis**: "Process" could mean transform, analyze, validate, or many other things. It has no clear, specific semantics.
 
-**Resolution**: Use specific capabilities: `transform`, `analyze` (via detect/identify/estimate), etc.
+**Resolution**: Use specific capabilities: `transform`, or `detect`, `classify` and `measure` for analysis.
 
 ---
 
@@ -406,9 +408,9 @@ These were considered but have unclear semantics.
 
 **Rejection Reason**: TOO VAGUE
 
-**Analysis**: "Analyze" is an umbrella term that could mean detect, identify, estimate, compare, or any combination. It's not a single operation.
+**Analysis**: "Analyze" is an umbrella term that could mean detect, classify, measure, compare, or any combination. It's not a single operation.
 
-**Resolution**: Use specific DIS verbs: detect (find patterns), identify (classify), estimate (quantify), compare (evaluate).
+**Resolution**: Use specific capabilities: detect (find patterns), classify (label), measure (quantify), compare (evaluate).
 
 ---
 
@@ -418,7 +420,7 @@ These were considered but have unclear semantics.
 
 **Rejection Reason**: TOO VAGUE
 
-**Analysis**: "Understanding" is an outcome of multiple operations (detect, identify, estimate, model), not a single operation.
+**Analysis**: "Understanding" is an outcome of multiple operations (detect, classify, measure, state), not a single operation.
 
 **Resolution**: Use specific capabilities that produce understanding as output.
 
@@ -446,7 +448,7 @@ These were considered but are implementation details.
 
 **Rejection Reason**: TOOL-SPECIFIC
 
-**Analysis**: This is an implementation of `retrieve` (GET), `send` (POST), or `act` (mutations).
+**Analysis**: This is an implementation of `retrieve` (GET), `send` (POST), or `mutate` (changes to state).
 
 **Resolution**: Use appropriate capability with API as the source/target.
 
@@ -470,9 +472,9 @@ These were considered but are implementation details.
 
 **Rejection Reason**: TOOL-SPECIFIC
 
-**Analysis**: This is an implementation of `act` or `generate` depending on purpose.
+**Analysis**: This is an implementation of `execute` or `generate` depending on purpose.
 
-**Resolution**: Use `act(tool: shell, command: ...)`.
+**Resolution**: Use `execute(tool: shell, command: ...)`.
 
 ---
 

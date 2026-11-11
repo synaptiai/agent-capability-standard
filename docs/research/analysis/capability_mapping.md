@@ -336,7 +336,7 @@ Most failures require **capability composition** rather than single capabilities
 2. **Validated Transform**: `input → constrain(schema) → transform → verify`
 3. **Grounded Claim**: `claim → ground(sources) → verify → output`
 4. **Coordinated Execution**: `delegate → synchronize → execute → verify`
-5. **Audited Decision**: `decide → explain → audit → constrain(output)`
+5. **Audited Decision**: `compare → explain → audit → constrain(output)`
 
 ---
 

@@ -21,10 +21,10 @@ Perform **data integration** to combine information from multiple heterogeneous 
 - Information loss is minimized and documented
 
 **World Modeling Context:**
-Integrate is essential for building comprehensive `world-state` from multiple observation sources. It combines outputs from `retrieve`, `search`, and `inspect` into unified models, and depends on `identity-resolution` for entity deduplication.
+Integrate is essential for building a comprehensive `state` from multiple observation sources. It combines outputs from `retrieve`, `search`, and `observe` into unified models, and resolves entity identity itself to remove duplicates.
 
 **Hard dependencies:**
-- Requires `identity-resolution` when sources contain overlapping entities
+- None. When sources contain overlapping entities, resolve their identity first (step 3)
 
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
@@ -54,7 +54,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Document unmappable fields (information loss)
 
 3) **Resolve entity identity**: Determine which records refer to same entity
-   - Apply `identity-resolution` for overlapping entities
+   - Apply the identity resolution policy to overlapping entities
    - Assign canonical IDs
    - Track all source IDs as aliases
 
@@ -400,19 +400,18 @@ evidence_anchors:
 - Never silently drop data - document all information loss
 - When confidence < 0.5 on a merge, flag for review
 - Preserve source identifiers for traceability
-- Apply `identity-resolution` before merging overlapping entities
+- Resolve the identity of overlapping entities before merging them
 
 ## Composition Patterns
 
 **Commonly follows:**
 - `retrieve` - Get data from sources before integrating
 - `search` - Discover relevant sources to integrate
-- `identity-resolution` - Resolve entity identity before merge
 
 **Commonly precedes:**
-- `world-state` - Integration produces unified state
-- `grounding` - Integrated data needs grounding
-- `diff-world-state` - Compare integrated states over time
+- `state` - Integration produces unified state
+- `ground` - Integrated data needs grounding
+- `compare` - Compare integrated states over time
 
 **Anti-patterns:**
 - Never integrate without understanding source schemas

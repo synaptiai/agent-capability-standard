@@ -186,17 +186,17 @@ next_actions:
 ## Composition Patterns
 
 **Commonly follows:**
-- `inspect` - Detection often follows initial observation of a system
+- `observe` - Detection often follows initial observation of a system
 - `search` - Detection may refine broad search results
 
 **Commonly precedes:**
-- `identify` - Positive detection often leads to classification of what was found
-- `estimate-risk` - Detection of anomalies feeds into risk assessment
+- `classify` - Positive detection often leads to classification of what was found
+- `measure` - Detection of anomalies feeds into risk measurement
 - `plan` - Detected issues may trigger remediation planning
 
 **Anti-patterns:**
-- Never use detect for complex entity classification (use `identify` instead)
-- Avoid detect for quantitative assessment (use `estimate` instead)
+- Never use detect for complex entity classification (use `classify` instead)
+- Avoid detect for quantitative assessment (use `measure` instead)
 
 **Workflow references:**
 - See `reference/composition_patterns.md#risk-assessment` for detection in risk workflows

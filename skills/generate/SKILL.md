@@ -338,19 +338,19 @@ next_actions:
 **Commonly follows:**
 - `compare` - Generate solution based on comparison winner
 - `plan` - Generate artifacts specified in plan
-- `identify` - Generate based on identified requirements
+- `classify` - Generate based on classified requirements
 - `discover` - Generate to address discovered gaps
 
 **Commonly precedes:**
 - `verify` - Generated artifacts should be verified
-- `act` - Generated content may be written to files
+- `mutate` - Generated content may be written to files
 - `critique` - Generated plans should be critiqued
 
 **Anti-patterns:**
 - Never generate without constraints (unbounded generation)
 - Avoid generate for retrieval (use `search` or `retrieve`)
-- Do not use generate for analysis (use `estimate`, `compare`, etc.)
+- Do not use generate for analysis (use `measure`, `compare`, etc.)
 
 **Workflow references:**
-- See `reference/composition_patterns.md#capability-gap-analysis` for generate-plan usage
+- See `reference/composition_patterns.md#capability-gap-analysis` for plan generation
 - See `reference/composition_patterns.md#debug-code-change` for code generation in fixes

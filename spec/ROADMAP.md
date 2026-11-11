@@ -40,7 +40,7 @@ cross-session behavioural reliability for agents.
 |---------|------|--------------|
 | 2.0.0 | 2026-10-29 | Implements Standard 1.1.0. The validator and the executor are one Rust core, used by `tools/validate_workflows.py` and by the Python package. |
 | 1.2.0 | 2026-02-04 | Workflow execution engine; multi-agent coordination runtime (delegate, synchronize, invoke); OASF mapping and extension mechanism; vision, audio and multimodal profiles; EU AI Act, NIST AI RMF and ISO 42001 documents. |
-| 1.0.0 to 1.1.1 | 2026-01-24 to 2026-01-27 | Early releases, listed in their [GitHub releases](https://github.com/synaptiai/agent-capability-standard/releases). |
+| 1.0.0 to 1.1.1 | 2026-01-24 to 2026-01-27 | Early releases, listed in the [project changelog](../CHANGELOG.md). |
 
 ## Next
 
@@ -68,3 +68,15 @@ The open items are listed below.
 - [Federated trust networks](https://github.com/synaptiai/agent-capability-standard/issues/85)
 - [Formal verification of workflow compositions](https://github.com/synaptiai/agent-capability-standard/issues/86)
 - [Pluggable safety backends](https://github.com/synaptiai/agent-capability-standard/issues/88)
+
+## Under consideration
+
+These ideas are not scheduled and have no issue yet.
+
+- Visual workflow builder
+- Cloud-hosted validation API
+- Runtime adapters for other agent frameworks, such as LangChain, CrewAI
+  and AutoGPT
+- A formal specification of the multi-agent coordination protocol
+- Runtime telemetry and observability hooks
+- More coercion mappings in the transform coercion registry

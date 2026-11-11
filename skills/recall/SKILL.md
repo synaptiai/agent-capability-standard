@@ -306,7 +306,7 @@ next_actions:
 - `search` - Search results may trigger memory lookup for similar past queries
 
 **Commonly precedes:**
-- `decide` - Recalled decisions inform new decision-making
+- `compare` - Recalled decisions inform new comparisons and choices
 - `plan` - Past patterns guide new plan creation
 - `explain` - Recalled rationale used to explain current approach
 - `persist` - New decisions should be consistent with recalled ones

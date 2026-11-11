@@ -257,7 +257,7 @@ Each capability was validated against atomicity criteria:
 - **Typed contract**: Has well-defined input and output schemas
 - **Domain-general**: Not specific to one tool or framework
 
-#### The Number 35
+#### The Number 36
 
 The derivation yielded 36 atomic capabilities across 9 cognitive layers:
 - 4 PERCEIVE (information acquisition)

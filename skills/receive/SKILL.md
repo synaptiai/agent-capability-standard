@@ -349,12 +349,11 @@ assumptions:
 ## Composition Patterns
 
 **Commonly follows:**
-- External triggers (webhooks, API calls, file drops)
-- `schedule` - Scheduled data ingestion
+- External triggers (webhooks, API calls, file drops) and scheduled ingestion
 
 **Commonly precedes:**
 - `transform` - Normalize received data for processing
-- `validate` - Deeper validation beyond schema
+- `verify` - Deeper validation beyond schema
 - `integrate` - Merge received data with existing state
 - `synchronize` - Combine with other data sources
 - `recall` - Check received data against prior context
