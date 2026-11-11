@@ -20,6 +20,7 @@ import { parse } from 'yaml';
 import { ruleDeclarations } from './check-contrast.mjs';
 import { LAYER_GLYPHS, LETTERS, MARK, UI_GLYPHS } from '../src/pixel/glyphs.ts';
 import { parseGrid } from '../src/pixel/grid.ts';
+import { governanceStatuses } from '../src/lib/governance.ts';
 import { STATUS_STYLES } from '../src/lib/status.ts';
 
 const SITE = fileURLToPath(new URL('..', import.meta.url));
@@ -69,12 +70,7 @@ export function checkGrids(sets) {
   return problems;
 }
 
-/** RFC statuses spec/GOVERNANCE.md allows, from its "An RFC's status is ..." sentence. */
-export function governanceStatuses(text) {
-  const m = /An RFC's status is ([^.]+)\./.exec(text.replace(/\s+/g, ' '));
-  if (!m) throw new Error('spec/GOVERNANCE.md has no "An RFC\'s status is" sentence');
-  return m[1].replace(/\([^)]*\)/g, '').split(/,\s*|\s+or\s+/).map((s) => s.trim()).filter(Boolean);
-}
+export { governanceStatuses };
 
 /**
  * Status values the site shows a badge for, from the sources:

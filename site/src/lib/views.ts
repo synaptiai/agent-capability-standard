@@ -498,19 +498,6 @@ export function schemaListing(specText: string): SchemaEntry[] {
   });
 }
 
-// ---------------------------------------------------------------------- RFCs
-
-/** RFC statuses spec/GOVERNANCE.md allows, read from its "An RFC's status is ..." sentence. */
-export function governanceStatuses(text: string): string[] {
-  const m = /An RFC's status is ([^.]+)\./.exec(text.replace(/\s+/g, ' '));
-  if (!m) throw new Error("views: spec/GOVERNANCE.md has no \"An RFC's status is\" sentence");
-  return m[1]!
-    .replace(/\([^)]*\)/g, '')
-    .split(/,\s*|\s+or\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 /** The groups of the schemas page, in order, with their intro lines. */
 export function schemaGroups(standardVersion: string): { key: SchemaEntry['group']; label: string; intro: string }[] {
   return [

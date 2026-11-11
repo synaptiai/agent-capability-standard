@@ -3,6 +3,8 @@
 // table and tools/validate_canonical_schemas.py, not from the loaders. Tests
 // on fixtures state where each expected value comes from.
 import { describe, expect, it } from 'vitest';
+import { governanceStatuses as scriptGovernanceStatuses } from '../scripts/check-design-data.mjs';
+import { governanceStatuses } from '../src/lib/governance';
 import { EDGE_TYPES, loadOntology } from '../src/data/ontology';
 import { capabilityUsage, loadWorkflows, parseCatalog } from '../src/data/workflows';
 import { inlineMarkdown, pageHref, refSlugger } from '../src/lib/generated';
@@ -10,7 +12,6 @@ import { readRepoFile } from '../src/lib/repo';
 import {
   crossLayerEdges,
   edgeGroups,
-  governanceStatuses,
   layerUsage,
   producerSteps,
   schemaDescription,
@@ -329,6 +330,18 @@ describe('schema descriptions', () => {
 describe('other page helpers', () => {
   it('reads the four RFC statuses from GOVERNANCE.md (design notes, ia-home 6.7)', () => {
     expect(governanceStatuses(readRepoFile('spec/GOVERNANCE.md'))).toEqual(['Draft', 'Accepted', 'Rejected', 'Superseded']);
+  });
+
+  it('reads the RFC statuses with or without an Oxford comma', () => {
+    const want = ['Draft', 'Accepted', 'Rejected', 'Superseded'];
+    for (const sentence of [
+      "An RFC's status is Draft, Accepted, Rejected, or Superseded.",
+      "An RFC's status is Draft, Accepted, Rejected or Superseded.",
+      "An RFC's status is Draft,Accepted , Rejected,  or\n Superseded (by a later RFC).",
+    ]) {
+      expect(governanceStatuses(sentence), sentence).toEqual(want);
+      expect(scriptGovernanceStatuses(sentence), sentence).toEqual(want);
+    }
   });
 
   it('sorts trust weights highest first and keeps file order on ties', () => {

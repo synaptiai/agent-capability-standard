@@ -6,7 +6,7 @@ import type { PageMeta } from '../plugins/remark-page-meta';
 import { pageHref, routesByTemplate } from './generated';
 import { readRepoFile } from './repo';
 import { ROUTES } from './routes';
-import { governanceStatuses } from './views';
+import { governanceStatuses } from './governance';
 
 export function allowedRfcStatuses(): string[] {
   return governanceStatuses(readRepoFile('spec/GOVERNANCE.md'));
