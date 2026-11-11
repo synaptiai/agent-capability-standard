@@ -125,3 +125,75 @@ export function diagnosticRowsPerSection(text: string): Record<string, number> {
   }
   return out;
 }
+
+/** The ontology's edges as (from, to, type), by a line scan of its `edges:` list. */
+export function ontologyEdgeTriples(): { from: string; to: string; type: string }[] {
+  const lines = repoText('schemas/capability_ontology.yaml').split('\n');
+  const start = lines.indexOf('edges:');
+  if (start === -1) throw new Error('independent: the ontology has no edges: line');
+  const out: { from: string; to: string; type: string }[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const from = /^- from: (\S+)$/.exec(lines[i]!);
+    if (!from) {
+      if (/^\S/.test(lines[i]!)) break;
+      continue;
+    }
+    const to = /^ {2}to: (\S+)$/.exec(lines[i + 1] ?? '');
+    const type = /^ {2}type: (\S+)$/.exec(lines[i + 2] ?? '');
+    if (!to || !type) throw new Error(`independent: edge at line ${i + 1} is not from/to/type`);
+    out.push({ from: from[1]!, to: to[1]!, type: type[1]! });
+  }
+  return out;
+}
+
+/** Edge types marked `symmetric: true` under `edge_types:`, by a line scan. */
+export function symmetricEdgeTypes(): string[] {
+  const lines = repoText('schemas/capability_ontology.yaml').split('\n');
+  const start = lines.indexOf('edge_types:');
+  const out: string[] = [];
+  let current = '';
+  for (const l of lines.slice(start + 1)) {
+    if (/^\S/.test(l)) break;
+    const t = /^ {2}([a-z_]+):$/.exec(l);
+    if (t) current = t[1]!;
+    if (/^ {4}symmetric: true$/.test(l)) out.push(current);
+  }
+  return out;
+}
+
+/**
+ * For each workflow of a catalog file, its capabilities in step order, by a
+ * line scan: a workflow starts at an unindented `id:` line, and each
+ * `- capability:` line under it is the next step.
+ */
+export function catalogSteps(repoPath: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  let current: string[] | null = null;
+  for (const l of repoText(repoPath).split('\n')) {
+    const top = /^([A-Za-z_][A-Za-z0-9_-]*):/.exec(l);
+    if (top) {
+      current = top[1]!.startsWith('x-') ? null : [];
+      if (current) out.set(top[1]!, current);
+      continue;
+    }
+    const step = /^\s*- capability: (\S+)/.exec(l);
+    if (step && current) current.push(step[1]!);
+  }
+  return out;
+}
+
+/** Every workflow of the core and domain catalogs, in file order, with its capabilities in step order. */
+export function allCatalogSteps(): Map<string, string[]> {
+  const { core, domain } = catalogFiles();
+  const out = new Map<string, string[]>();
+  for (const f of [core, ...domain]) for (const [k, v] of catalogSteps(f)) out.set(k, v);
+  return out;
+}
+
+/** CANONICAL_SCHEMAS in tools/validate_canonical_schemas.py, the five files spec §6.1 requires. */
+export function canonicalSchemaNames(): string[] {
+  const text = repoText('tools/validate_canonical_schemas.py');
+  const block = /^CANONICAL_SCHEMAS = \[([\s\S]*?)\]/m.exec(text);
+  if (!block) throw new Error('independent: no CANONICAL_SCHEMAS list');
+  return [...block[1]!.matchAll(/"([^"]+)"/g)].map((m) => `${m[1]}.yaml`);
+}
