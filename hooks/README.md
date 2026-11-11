@@ -97,7 +97,7 @@ manages this marker file, bridging the shell and Python safety layers.
 ## Audit Trail
 
 The `posttooluse_log_tool.sh` hook implements the `audit` capability:
-- Logs all tool invocations as JSON with timestamps
+- Logs each Skill invocation (the PostToolUse matcher is `Skill`) as JSON with timestamps
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
 - Each entry includes the HMAC of the previous entry, creating a hash chain
 - Records what was executed for provenance tracking
