@@ -39,9 +39,8 @@ cross-session behavioural reliability for agents.
 | Version | Date | Main changes |
 |---------|------|--------------|
 | 2.0.0 | 2026-10-29 | Implements Standard 1.1.0. The validator and the executor are one Rust core, used by `tools/validate_workflows.py` and by the Python package. |
-| 1.2.0 | 2026-02-04 | Workflow execution engine; multi-agent coordination runtime (delegate, synchronize, invoke); OASF extension mechanism; EU AI Act, NIST AI RMF and ISO 42001 documents. |
-| 1.1.0, 1.1.1 | 2026-01-27 | Listed in their [GitHub releases](https://github.com/synaptiai/agent-capability-standard/releases). |
-| 1.0.0 to 1.0.5 | January 2026 | 36 capabilities in 9 layers, the reference validator, 12 reference workflows, domain profiles, safety hooks, Claude Agent SDK integration, the benchmark suite and the OASF mapping. |
+| 1.2.0 | 2026-02-04 | Workflow execution engine; multi-agent coordination runtime (delegate, synchronize, invoke); OASF mapping and extension mechanism; vision, audio and multimodal profiles; EU AI Act, NIST AI RMF and ISO 42001 documents. |
+| 1.0.0 to 1.1.1 | 2026-01-24 to 2026-01-27 | Early releases, listed in their [GitHub releases](https://github.com/synaptiai/agent-capability-standard/releases). |
 
 ## Next
 

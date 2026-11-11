@@ -263,8 +263,9 @@ gaps on the standard's side (RFC-0003, amendments):
   bounds `retry.max` and enumerates `retry.backoff`, matching the
   validator.
 
-The changes in the three sections below (#105, #106, #107) were also made
-to the 1.0.0 text, so Appendix C of 1.1.0 does not list them.
+The changes in the three sections below (#105, #106, #107) are in the
+1.0.0 text and in the schema files both versions use. Appendix C of 1.1.0
+does not list them.
 
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`
