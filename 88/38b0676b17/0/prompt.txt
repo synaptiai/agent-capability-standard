@@ -1,0 +1,211 @@
+check out latest
+
+---
+
+rebuild the local install
+
+---
+
+Downgrading dependencies sounds bad. We should rather bump all dependencies to latest and fix the repo
+
+---
+
+<task-notification>
+<task-id>ac06fc4a1ae25f234</task-id>
+<tool-use-id>toolu_016v8ZbgnS2ZNyeZuKekGTve</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review medium" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>```json
+[
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 108,
+    "summary": "The rust-core job builds with `--features python` (in the extension Clippy step and the MSRV check) but never sets up Python. With the new `abi3-py314` feature in core/Cargo.toml, pyo3's build script fails when the runner's default python3 is older than 3.14.",
+    "failure_scenario": "On an ubuntu-latest image whose system python3 is 3.12 (Ubuntu 24.04), `cargo clippy --features python` and `cargo +1.88.0 check --features python` both stop with 'cannot set a minimum Python version 3.14 higher than the interpreter version 3.12 (the minimum Python version is implied by the abi3-py314 feature)'. I reproduced this locally with PYO3_PYTHON=/usr/bin/python3 (3.9.6). The fix is to add setup-python 3.14 to rust-core, as release.yml now does, or to set PYO3_PYTHON."
+  },
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 298,
+    "summary": "Taking Skill out of allowed_tools only covers one case. The rate limit lives in can_use_tool, and the SDK skips can_use_tool for every tool in allowed_tools, so any tool the caller lists (including Skill, if the caller adds it) still avoids the rate limit.",
+    "failure_scenario": "`wrap_options(ClaudeAgentOptions(allowed_tools=['Skill','Bash','Write']))`: Skill, Bash and Write calls never reach the rate limiter, as the docs example now admits ('listed tools skip its rate limit'). Checkpoint enforcement was already moved into the PreToolUse hook because that hook runs for every tool. Rate limiting belongs in the same hook; that would close the bypass for all tools and make the Skill special case unnecessary."
+  },
+  {
+    "file": "tools/validate_constraints.py",
+    "line": 103,
+    "summary": "The new `tomllib.loads` call has no error handling. A malformed pyproject.toml now produces an uncaught TOMLDecodeError traceback instead of the validator's usual failure message and exit status 1.",
+    "failure_scenario": "A pyproject edit with a TOML syntax error (for example an unclosed array) makes the 'Validate constraints agree with pyproject' CI step crash with a Python traceback rather than report a clear failure. The old hand-written parser never raised."
+  },
+  {
+    "file": "core/src/exec/machine.rs",
+    "line": 1374,
+    "summary": "After the let-chain flattening, rustfmt could not reformat some blocks, so they keep their old, deeper indentation. `fmt --check` still passes, which hides this.",
+    "failure_scenario": "The `self.trace_step(\"retry\", json!({...}))` call in machine.rs (about lines 1374-1377), the `report.push(loc.diag(...))` body in semantics.rs flag_downgrades (about line 281) and the timezone `report.push(s303(...))` in extensions.rs (about line 408) sit at the indentation of the removed nesting level. They read as if they belong to a different scope. Splitting the long string or json! literal would let rustfmt format them."
+  },
+  {
+    "file": "tools/validate_doc_links.py",
+    "line": 266,
+    "summary": "ruff 0.17 with target py314 rewrote this to the unparenthesized `except OSError, subprocess.CalledProcessError:` form (PEP 758), which does not parse on Python 3.13 or older. This is a `#!/usr/bin/env python3` tool, so running it with an older interpreter fails at parse time.",
+    "failure_scenario": "Running `python3 tools/validate_doc_links.py` with an interpreter older than 3.14, such as macOS /usr/bin/python3 (3.9) or a pre-commit environment, raises SyntaxError before main() runs, with no message saying 3.14 is required. tests/test_core_yaml.py:42 and adapter.py:70 have the same form. Keeping the parenthesized form costs nothing and still works everywhere."
+  },
+  {
+    "file": "pyproject.toml",
+    "line": 58,
+    "summary": "The dev-dependency floors were left as they were while requires-python moved to 3.14 and the caps were raised. `pytest&gt;=7.0` and `pytest-asyncio&gt;=0.21` admit versions that do not run this suite.",
+    "failure_scenario": "Installing without constraints.txt, a resolver can pick pytest-asyncio 0.21–0.23, which does not understand the `asyncio_default_fixture_loop_scope` setting in [tool.pytest.ini_options] (that needs 0.24 or later), or pytest 7.x, which is not tested on 3.14. The comment above the dev list says the bounds describe what CI has verified, but the floors no longer do."
+  }
+]
+```
+
+Checks I ran on the working tree (the branch has no commits beyond main):
+- Python 3.14.10 venv: 1595 tests passed.
+- `cargo +1.88.0 check --all-features` (the minimum Rust version) passed.
+- `cargo +1.99.1 clippy --all-targets --all-features -D warnings` passed.
+- `fmt --check` passed.
+- `tools/validate_constraints.py` passed.
+
+The first finding depends on the runner's system Python, which I inferred and did not check. I reproduced the build failure locally with Python 3.9. Whether it hits CI depends on which Ubuntu image ubuntu-latest maps to at run time. Ubuntu 24.04 ships Python 3.12, so it would fail there.</result>
+<usage><subagent_tokens>120338</subagent_tokens><tool_uses>26</tool_uses><duration_ms>245957</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a3045d228296e6b59</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review medium" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>The staged changes on `chore/bump-dependencies` (no commits ahead of `main`) were reviewed across all eight angles. I ran these checks:
+
+- **Python:** the adapter, SDK and pre-tool-use hook tests pass on Python 3.14.10 (119 tests).
+- **Rust:** clippy with warnings as errors and the core test suite pass on Rust 1.99.1, and the minimum-version check passes on 1.88.0.
+- **Constraints:** the constraints validator passes.
+
+The rewritten Rust `if` blocks matched the old logic wherever I compared them; I did not check every hunk. I found no `str()` or f-string use of the three enums that changed to `StrEnum`. Your machine's `stable` Rust is 1.86, which can no longer build the crate. Everything I ran used the pinned 1.88.0 and 1.99.1 toolchains.
+
+```json
+[
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 530,
+    "summary": "The rate limit (SEC-010) moved from the permission callback, which denies when it hits an error, into the PreToolUse hook, whose catch-all `except Exception` logs a warning and returns {}, which lets the call through.",
+    "failure_scenario": "`limiter.allow()` or `mapper.map_tool()` raises inside the hook, for example on a bad custom MCP mapping or a limiter bug. For a tool in `allowed_tools` the hook returns {} and the call runs with no rate limit and no checkpoint check. Before this change, the callback's handler denied any call that reached it whenever the check raised; now the rate limit is not checked at all in that case. The hook should deny on exception, at least in strict mode."
+  },
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 461,
+    "summary": "The docstring says 'a denied call reserves nothing', but that only covers a denial from this hook. A deny from a user-supplied PreToolUse hook, which runs earlier in the list, or from the discovery hook still leaves this hook's rate token spent and its checkpoint reserved.",
+    "failure_scenario": "The base options carry their own PreToolUse hook that denies Write. The SDK still runs this safety hook, which takes a high-risk token and calls `validate_and_reserve(tool_use_id)`. The call never runs, so neither PostToolUse nor PostToolUseFailure releases the reservation. Every other mutation is then denied as 'held by another call' for `checkpoint_reservation_seconds` (600 s)."
+  },
+  {
+    "file": "examples/mcp_tools_demo.py",
+    "line": 6,
+    "summary": "This demo and checkpoint_enforcement_demo / grounded_agent_demo call only `_make_permission_callback()`, which no longer applies any rate limit, yet this docstring still says rate limits apply through it.",
+    "failure_scenario": "A reader copies the demo pattern of wiring only `can_use_tool` without `wrap_options` hooks and gets no SEC-010 rate limiting at all, which is a silent loss of a security control for anyone using the callback on its own."
+  },
+  {
+    "file": "docs/integrations/claude_agent_sdk.md",
+    "line": 272,
+    "summary": "The PreToolUse bullet under 'PreToolUse Hook Enforcement' still describes only the checkpoint reservation and leaves out that the hook now enforces the per-risk rate limit, including in non-strict mode.",
+    "failure_scenario": "Integrators reading the main hook description conclude that non-strict mode never denies in PreToolUse, but rate-limited calls are now denied there in both modes."
+  },
+  {
+    "file": "analysis/04-security-scan-findings.md",
+    "line": 753,
+    "summary": "The rewritten SEC-010 status line gives the limits as medium 60/min and low 300/min, but `RateLimitConfig` defaults are `medium_rpm=30` and `low_rpm=120`.",
+    "failure_scenario": "A security reviewer relying on this register believes medium-risk tools (Skill, Bash and so on) allow 60 calls a minute, when they are throttled at 30 (45 burst). The line was edited in this change, so the error was carried forward."
+  },
+  {
+    "file": "analysis/04-security-scan-findings.md",
+    "line": 110,
+    "summary": "The dependency table updated the ruff row but left pytest&gt;=7.0, pytest-asyncio&gt;=0.21 and mypy&gt;=1.0, which no longer match pyproject (pytest&gt;=8.4.2,&lt;10, pytest-asyncio&gt;=1.0,&lt;2, mypy&gt;=1.19.1,&lt;3).",
+    "failure_scenario": "The supply-chain section states version floors the project no longer accepts, so the same table is now inconsistent row by row."
+  },
+  {
+    "file": "tests/test_sdk_e2e.py",
+    "line": 121,
+    "summary": "`assert adapter.rate_limiter.get_remaining(\"medium\") &lt; 1` adds nothing: the previous `_is_allowed(callback(...))` assertion already proves the callback took no token, and this check would also pass if the hook had charged nothing and the bucket were simply empty or refilling.",
+    "failure_scenario": "A regression where the hook stops charging Skill calls while the callback starts charging them could still leave remaining below 1 and pass. The test should assert the exact remaining value, or count `allow` calls with a spy."
+  },
+  {
+    "file": "tests/test_grounded_query.py",
+    "line": 201,
+    "summary": "The cleanup that dropped `asyncio.TimeoutError` from the except tuple at line 158, since on 3.14 it is just the builtin, left `pytest.raises(asyncio.TimeoutError)` at line 201.",
+    "failure_scenario": "The same exception is spelled two ways within 50 lines after a cleanup meant to remove the 3.10-era alias. Use the builtin `TimeoutError` for consistency."
+  }
+]
+```</result>
+<usage><subagent_tokens>136712</subagent_tokens><tool_uses>29</tool_uses><duration_ms>189944</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ae7410b4e2570e0b7</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>REDACTED.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review medium" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>```json
+[
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 577,
+    "summary": "The new PreToolUse safety hook calls mapper.map_tool outside the fail-closed try, so any mapper exception lets the call through without the rate limit or the checkpoint check, and the mapper still raises for a Bash call whose tool_input is not a dict.",
+    "failure_scenario": "Bash is in allowed_tools, strict_mode=True, and tool_input is None, a list or a string. _classify_bash_command calls tool_input.get(...) and raises AttributeError (reproduced locally). The outer `except Exception` at line 614 logs and returns {}, so the call is approved with no rate charge and no checkpoint. This contradicts the CHANGELOG, which says malformed Bash input is now a checkpoint-gated mutation and that an error in the rate check denies the call. The existing test still asserts that a mapper exception returns {}."
+  },
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 193,
+    "summary": "A reservation left by a call that another PreToolUse hook denied is only released at Stop or SubagentStop, so it blocks every checkpoint-gated call for the rest of that turn.",
+    "failure_scenario": "A user PreToolUse hook denies Write#1 after the adapter reserved the checkpoint for it. The agent retries in the same turn with Write#2. validate_and_reserve returns (False, id) because Write#1 still holds the reservation, so strict mode denies Write#2 and every later mutation until the turn ends. The fix sits at the end of the turn. The underlying problem is that the reservation is taken before the other hooks have decided. A deeper fix is to let a new PreToolUse from the same (session, agent) supersede that agent's earlier holder that never got PostToolUse or PostToolUseFailure, at least for sequential calls."
+  },
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 598,
+    "summary": "The ledger records every successful reservation and removes entries only at Stop or SubagentStop. Entries are never dropped when PostToolUse, PostToolUseFailure or the can_use_tool deny ends the reservation, and entries under a key that no Stop ever matches stay forever.",
+    "failure_scenario": "A PreToolUse input without session_id (an older CLI, or a direct call) is stored under key (None, None), but Stop always carries a session_id, so the entry is never taken. The same happens to a session that ends on max_turns, a budget stop, an interrupt or an exception without a Stop event. On a long-lived adapter, such as GroundedClient reused across sessions, the _holders dict grows without bound. In the normal case each Stop also makes N useless release_reservation calls for holders that already finished. Removing the holder in the consume, release and deny paths would keep the ledger to calls actually in flight."
+  },
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 371,
+    "summary": "wrap_options now appends a rate-limiting PreToolUse hook every time it is called, so options wrapped twice charge the limiter twice per call. Before this change the rate limit sat in can_use_tool, which is replaced rather than appended, so it was charged once.",
+    "failure_scenario": "A caller passes options that adapter.wrap_options already returned into GroundedClient, which wraps again in client.py at line 82, or calls wrap_options twice. Each tool call then runs two safety hooks, uses two tokens, and hits the limit at half the configured rate. The default allows 10 high-risk calls a minute, so a 6th Write in a minute is denied. Stop and SubagentStop releasers are duplicated too. wrap_options has no guard against wrapping options it already wrapped."
+  },
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 581,
+    "summary": "The rate limit is charged in PreToolUse before the call is known to run, so calls that a later PreToolUse hook (the discovery injector or a user hook) or can_use_tool denies still use up tokens.",
+    "failure_scenario": "A user hook denies a run of Write calls, for example a path policy. Each denied call still takes a high-risk token. After 10 to 15 denials in a minute, legitimate Writes are rate-limited even though none of the denied calls ran. Under the old placement in can_use_tool, calls rejected by earlier hooks were not charged."
+  },
+  {
+    "file": "pyproject.toml",
+    "line": 58,
+    "summary": "The comment says the pytest, pytest-asyncio and mypy floors (8.4.2, 1.0, 1.19.1) are the oldest versions the suite has been run on with Python 3.14, but nothing pins or tests those floors.",
+    "failure_scenario": "constraints.txt pins only ruff. The local venv has pytest 9.2.0, pytest-asyncio 1.4.1 and mypy 2.4.1, and CI resolves to the newest releases, so the floor versions are never run. A consumer who installs pytest-asyncio 1.0 or mypy 1.19.1 gets a combination the comment calls verified but no run has checked. This breaks the file's own rule that 'These caps say the major CI has actually run'."
+  },
+  {
+    "file": "grounded_agency/adapter.py",
+    "line": 614,
+    "summary": "The outer handler of the merged hook still fails open ('PreToolUse safety check failed' then return {}), while the inner rate-limit handler fails closed, so how the merged hook behaves on an error depends on which line raised.",
+    "failure_scenario": "Any exception after the rate check, such as from tracker.validate_and_reserve or ledger.record, or before it, from map_tool, approves the call silently in strict mode. Only an exception inside limiter.allow denies. The docstring and CHANGELOG present the hook as fail-closed for the rate limit, but in strict mode the checkpoint half still fails open."
+  }
+]
+```
+
+Seven findings. I did not run a separate verification pass on any of them; the review procedure said to skip it.
+
+- **What the review covered:** the uncommitted working-tree diff on chore/bump-dependencies (65 files; the branch has no commits ahead of main).
+- **Rust changes:** the core/src/ changes are mechanical. They collapse nested `if` blocks into let-chains, which needs Rust 1.88 and matches the raised minimum version. I checked each collapsed block and none had an `else` branch whose behaviour would change.
+- **Checks run:**
+  - The adapter, end-to-end, integration and classifier-fuzz tests: 185 passed.
+  - Over the paths CI checks: `ruff check` passed, `ruff format --check` passed, and mypy found no issues.
+  - `tools/validate_constraints.py` passed.
+  - All five GitHub Action versions exist as releases (checked with `gh api`).
+- **Reproduced:** the first finding. The mapper raising `AttributeError` for a Bash call whose input is not a dict was confirmed directly.</result>
+<usage><subagent_tokens>139944</subagent_tokens><tool_uses>30</tool_uses><duration_ms>222557</duration_ms></usage>
+</task-notification>

@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "8838b0676b17",
+  "strategy": "manual-commit",
+  "branch": "chore/bump-dependencies",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "CHANGELOG.md",
+    "grounded_agency/adapter.py",
+    "tests/test_grounded_query.py",
+    "tests/test_pretooluse_hooks.py",
+    "tests/test_sdk_e2e.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/88/38b0676b17/0/metadata.json",
+      "transcript": "/88/38b0676b17/0/full.jsonl",
+      "context": "/88/38b0676b17/0/context.md",
+      "content_hash": "/88/38b0676b17/0/content_hash.txt",
+      "prompt": "/88/38b0676b17/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 420,
+    "cache_creation_tokens": 740295,
+    "cache_read_tokens": 37385976,
+    "output_tokens": 133795,
+    "api_call_count": 198
+  }
+}

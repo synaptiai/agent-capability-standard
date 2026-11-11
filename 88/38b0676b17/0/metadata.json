@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "8838b0676b17",
+  "session_id": "0b70a916-70ca-4438-a655-a4223d93ad1f",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-11T10:15:00.235251Z",
+  "branch": "chore/bump-dependencies",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "CHANGELOG.md",
+    "grounded_agency/adapter.py",
+    "tests/test_grounded_query.py",
+    "tests/test_pretooluse_hooks.py",
+    "tests/test_sdk_e2e.py"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "cdbaeb56-6824-4795-b5df-eecbde6b302d",
+  "token_usage": {
+    "input_tokens": 420,
+    "cache_creation_tokens": 740295,
+    "cache_read_tokens": 37385976,
+    "output_tokens": 133795,
+    "api_call_count": 198
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-11-11T10:14:59.143553Z",
+    "agent_lines": 0,
+    "human_added": 124743,
+    "human_modified": 686,
+    "human_removed": 0,
+    "total_committed": 125136,
+    "agent_percentage": 0
+  },
+  "transcript_path": ".claude-work/projects/-Users-danielbentes-agent-capability-standard/0b70a916-70ca-4438-a655-a4223d93ad1f.jsonl"
+}
