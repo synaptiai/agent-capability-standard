@@ -8,7 +8,7 @@
     },
     "posttooluse_log_tool": {
       "enabled": true,
-      "description": "Log all tool usage for audit trail (VERIFY layer)",
+      "description": "Log skill invocations for audit trail (VERIFY layer)",
       "configurable": true
     }
   },

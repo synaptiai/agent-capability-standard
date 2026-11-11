@@ -397,7 +397,7 @@ assumptions:
 - `explain` - Clarify goal before decomposing
 
 **Commonly precedes:**
-- `plan` - Plan and time-order decomposed subproblems (REQUIRED by plan)
+- `plan` - Plan and time-order decomposed subproblems
 - `compare` - Order subproblems by priority
 - `delegate` - Assign subproblems
 
@@ -407,4 +407,4 @@ assumptions:
 - Never skip acceptance criteria
 
 **Workflow references:**
-- See `reference/composition_patterns.md` for plan requiring decompose
+- See `reference/composition_patterns.md` for patterns that decompose a goal before planning

@@ -265,7 +265,7 @@ gaps on the standard's side (RFC-0003, amendments):
 
 The changes in the three sections below (#105, #106, #107) are in both the
 1.0.0 and 1.1.0 texts and in the schema files. Appendix C of 1.1.0 does not
-list them because they also apply to 1.0.0.
+list them.
 
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`
