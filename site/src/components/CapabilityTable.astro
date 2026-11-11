@@ -1,0 +1,31 @@
+---
+// The periodic table of capabilities: one column per layer, in ontology order,
+// each column listing its capabilities in the layer's own order. Generated
+// from the ontology; nothing in it is typed by hand.
+import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
+import { layerHref } from '../lib/generated';
+import CapabilityTile from './CapabilityTile.astro';
+
+interface Props {
+  /** Show each capability's description in its tile. */
+  descriptions?: boolean;
+}
+
+const { descriptions = false } = Astro.props;
+const ontology = loadOntology();
+---
+<div class="capability-table" role="list" aria-label="Capabilities by layer">
+  {ontology.layers.map((layer) => (
+    <section class="capability-table__layer" role="listitem" data-layer={layer.slug} aria-label={layer.id}>
+      <p class="capability-table__layer-name">
+        <a href={layerHref(layer.id)}>{layer.id}</a>
+        <span class="capability-table__layer-count">{layer.capabilities.length}</span>
+      </p>
+      <ol class="capability-table__tiles">
+        {capabilitiesOfLayer(ontology, layer.id).map((cap) => (
+          <li><CapabilityTile cap={cap} description={descriptions} /></li>
+        ))}
+      </ol>
+    </section>
+  ))}
+</div>

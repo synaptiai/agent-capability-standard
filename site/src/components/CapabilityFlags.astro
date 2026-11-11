@@ -1,0 +1,33 @@
+---
+// The safety flags of a capability as badges, each linked to the section of
+// the Standard that defines it: risk and mutation (§4.1), checkpoint and
+// mutation override (§4.4), approval (§5.2.1).
+import type { Capability } from '../data/ontology';
+import { specSectionHref } from '../lib/generated';
+import FlagBadge from './FlagBadge.astro';
+import RiskBadge from './RiskBadge.astro';
+
+interface Props {
+  cap: Capability;
+  /** Link each badge to the Standard. Off inside tiles, which are links themselves. */
+  links?: boolean;
+}
+
+const { cap, links = true } = Astro.props;
+const at = (section: string) => (links ? specSectionHref(section) : undefined);
+---
+<ul class="capability-flags">
+  <li><RiskBadge risk={cap.risk} href={at('4.1')} /></li>
+  <li>
+    {cap.mutation ? (
+      <FlagBadge kind="mutation" label="Mutates state" href={at('4.1')} />
+    ) : (
+      <FlagBadge kind="read-only" label="Read-only" href={at('4.1')} />
+    )}
+  </li>
+  {cap.requires_checkpoint && <li><FlagBadge kind="checkpoint" label="Checkpoint required" href={at('4.4')} /></li>}
+  {cap.requires_approval && <li><FlagBadge kind="approval" label="Approval required" href={at('5.2.1')} /></li>}
+  {cap.mutation_overridable && (
+    <li><FlagBadge kind="overridable" label="Mutation can be declared false" href={at('4.4')} /></li>
+  )}
+</ul>

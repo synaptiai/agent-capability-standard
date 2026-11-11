@@ -1,0 +1,10 @@
+---
+// The status of an RFC, a proposal or a profile workflow, as written in its source.
+interface Props {
+  status: string;
+}
+
+const { status } = Astro.props;
+const key = status.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+---
+<span class:list={['status-badge', `status-badge--${key}`]} data-status={status}>{status}</span>

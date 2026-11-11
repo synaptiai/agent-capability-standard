@@ -1,0 +1,48 @@
+---
+// A workflow's steps as an ordered list. Each step shows its number, its
+// capability (marked with its layer), what it stores, and markers for
+// checkpoint, state change, verify, rollback, approval, gates, conditions,
+// parallel groups and invoked workflows. The markers come from the step's
+// effective safety flags (Standard §5.2.1).
+import type { Workflow } from '../data/workflows';
+import { capabilityHref } from '../lib/generated';
+import { stepMarkers } from '../lib/views';
+
+interface Props {
+  workflow: Workflow;
+  /** Prefix for each step's id, so the list can link to the step details. */
+  stepIdPrefix?: string;
+}
+
+const { workflow, stepIdPrefix } = Astro.props;
+---
+<ol class="workflow-diagram" data-workflow={workflow.id} aria-label={`Steps of ${workflow.id}`}>
+  {workflow.steps.map((step) => {
+    const markers = stepMarkers(step);
+    return (
+      <li
+        class="workflow-diagram__step"
+        data-step={step.index}
+        data-layer={step.layer.toLowerCase()}
+        data-capability={step.capability}
+        data-markers={markers.map((m) => m.kind).join(' ') || undefined}
+      >
+        <span class="workflow-diagram__index">{step.index}</span>
+        {stepIdPrefix ? (
+          <a class="workflow-diagram__capability" href={`#${stepIdPrefix}${step.index}`}><code>{step.capability}</code></a>
+        ) : (
+          <a class="workflow-diagram__capability" href={capabilityHref(step.capability)}><code>{step.capability}</code></a>
+        )}
+        <span class="workflow-diagram__layer">{step.layer}</span>
+        {step.store_as && <span class="workflow-diagram__store">stores <code>{step.store_as}</code></span>}
+        {markers.length > 0 && (
+          <ul class="workflow-diagram__markers">
+            {markers.map((m) => (
+              <li class:list={['workflow-diagram__marker', `workflow-diagram__marker--${m.kind}`]}>{m.label}</li>
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  })}
+</ol>

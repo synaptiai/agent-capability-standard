@@ -1,0 +1,28 @@
+---
+// One capability as a tile: its id, description, risk and flags. The data
+// attributes let the design system tint tiles and filter them.
+import type { Capability } from '../data/ontology';
+import { capabilityHref } from '../lib/generated';
+import CapabilityFlags from './CapabilityFlags.astro';
+
+interface Props {
+  cap: Capability;
+  /** Show the description under the id. */
+  description?: boolean;
+}
+
+const { cap, description = true } = Astro.props;
+---
+<article
+  class="capability-tile"
+  data-capability={cap.id}
+  data-layer={cap.layer.toLowerCase()}
+  data-risk={cap.risk}
+  data-mutation={cap.mutation ? 'true' : 'false'}
+  data-checkpoint={cap.requires_checkpoint ? 'true' : 'false'}
+  data-approval={cap.requires_approval ? 'true' : 'false'}
+>
+  <a class="capability-tile__id" href={capabilityHref(cap.id)}><code>{cap.id}</code></a>
+  {description && <p class="capability-tile__description">{cap.description}</p>}
+  <CapabilityFlags cap={cap} links={false} />
+</article>

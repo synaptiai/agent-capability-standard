@@ -1,0 +1,13 @@
+---
+// One safety flag: mutation, checkpoint, approval or an override. Links to the
+// section of the Standard that defines it when `href` is given.
+interface Props {
+  kind: string;
+  label: string;
+  href?: string;
+}
+
+const { kind, label, href } = Astro.props;
+const Tag = href ? 'a' : 'span';
+---
+<Tag class:list={['flag-badge', `flag-badge--${kind}`]} href={href} data-flag={kind}>{label}</Tag>

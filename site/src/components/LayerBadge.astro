@@ -1,0 +1,16 @@
+---
+// A capability layer (Standard §4.2), linked to its page.
+import { loadOntology } from '../data/ontology';
+import { layerHref } from '../lib/generated';
+
+interface Props {
+  layer: string;
+  link?: boolean;
+}
+
+const { layer, link = true } = Astro.props;
+const info = loadOntology().layers.find((l) => l.id === layer);
+if (!info) throw new Error(`LayerBadge: unknown layer ${layer}`);
+const Tag = link ? 'a' : 'span';
+---
+<Tag class:list={['layer-badge', `layer-badge--${info.slug}`]} href={link ? layerHref(layer) : undefined} data-layer={info.slug}>{layer}</Tag>
