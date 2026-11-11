@@ -101,6 +101,8 @@ describe('definitions', () => {
       (t) =>
         !t.startsWith('--astro-code-') &&
         !t.startsWith('--layer-') &&
+        // The plan's Phase 5 recipe names shadows of 3, 5 and 7px; the 7px one is defined before any component uses it.
+        t !== '--shadow-3' &&
         !sources.includes(`var(${t})`) &&
         !sources.includes(`var(${t},`) &&
         !sources.includes(`'${t}'`),

@@ -81,6 +81,7 @@
     --border: var(--px) solid var(--line);
     --shadow-1: 3px 3px 0 0 var(--shadow);
     --shadow-2: 5px 5px 0 0 var(--shadow);
+    --shadow-3: 7px 7px 0 0 var(--shadow);
     --radius: 0;
     --pip: calc(var(--px) * 2);
     --space-1: 4px;
