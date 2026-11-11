@@ -175,9 +175,9 @@ We organize capabilities into 9 cognitive layers:
 | COORDINATE | Multi-agent | Varies | 4 |
 
 This organization provides several benefits:
-- **Risk assessment**: ACTION layer capabilities are inherently higher risk
-- **Dependency ordering**: PERCEPTION typically precedes MODELING, which precedes REASONING, which precedes ACTION
-- **Safety integration**: SAFETY capabilities can be required before ACTION capabilities
+- **Risk assessment**: the EXECUTE layer holds the only high-risk capabilities, `mutate` and `send`
+- **Dependency ordering**: PERCEIVE typically precedes UNDERSTAND and MODEL, which precede REASON, which precedes EXECUTE
+- **Safety integration**: VERIFY capabilities such as `checkpoint` can be required before EXECUTE capabilities
 
 ### 3.3 Key Capability Families
 

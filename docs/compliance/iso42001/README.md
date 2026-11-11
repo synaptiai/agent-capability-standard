@@ -2,8 +2,9 @@
 
 ISO/IEC 42001:2023 sets the requirements for an AI management system (AIMS).
 These seven documents map the Grounded Agency framework to its clauses 4 to
-10. Most are templates: fill in the bracketed fields for your organization
-before you use them.
+7, 9 and 10. Clause 8 (Operation) has no document of its own: its audit
+questions are in the internal audit checklist. Most are templates: fill in the
+bracketed fields for your organization before you use them.
 
 | Clause | Document | Doc ID | Purpose |
 |--------|----------|--------|---------|

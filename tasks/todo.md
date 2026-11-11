@@ -1,9 +1,9 @@
-# Issue #120 — documentation site
+# Issue #120: documentation site
 
 Epic: https://github.com/synaptiai/agent-capability-standard/issues/120
 
 - [ ] 0. Spike: confirm the build approach works on real content
-- [x] 1. Fix stale public content (branch `fix/issue-120-stale-docs`)
+- [ ] 1. Fix stale public content (branch `fix/issue-120-stale-docs`; pushed, PR not yet open)
 - [ ] 2. Scaffold and data loading
 - [ ] 3. Markdown rendering and prose pages
 - [ ] 4. Generated reference pages
