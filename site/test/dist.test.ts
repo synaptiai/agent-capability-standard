@@ -111,6 +111,20 @@ describe('built site', () => {
     expect(tiles.sort()).toEqual(want);
   });
 
+  it('states the auto-approve threshold as a sentence, including none', () => {
+    // Expected: each profile's `auto_approve:` line, by line scan; the page for a profile is /domains/<file name with - for _>/.
+    const values = profileFiles().map((f) => ({
+      page: f.replace(/\.yaml$/, '').replaceAll('_', '-'),
+      level: /^ {2}auto_approve: (\w+)/m.exec(repoText(`schemas/profiles/${f}`))?.[1],
+    }));
+    expect(values.map((v) => v.level)).toContain('none');
+    for (const { page, level } of values) {
+      const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
+      const dd = /<dt>Approved automatically<\/dt><dd>(.*?)<\/dd>/.exec(html)?.[1]?.replace(/<[^>]+>/g, '');
+      expect(dd, page).toBe(level === 'none' ? 'Nothing' : `${level} risk and below`);
+    }
+  });
+
   it('builds no page outside the route table except 404', () => {
     expect(checkRouteCoverage(dist)).toEqual({ missing: [], extra: [] });
   });
