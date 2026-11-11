@@ -52,6 +52,21 @@ New skills must:
 - Define clear input/output contracts
 - Include workflow references where applicable
 
+### Documentation Site
+
+The site at [acs.synapti.ai](https://acs.synapti.ai/) is built from the Markdown in this repository, and its build runs on every pull request.
+
+- A new public `.md` file needs a row in `site/src/lib/routes.ts` (or an entry in its `EXCLUSIONS` list) in the same pull request. Without one the build fails with `<path>: public Markdown with no route`. These get a page automatically and need no row: a capability's `skills/<id>/SKILL.md`, `spec/RFC-NNNN-*.md`, `spec/STANDARD-v*.md` and a domain's `docs/domains/<domain>/README.md`. A composed skill's `SKILL.md` needs an entry in `COMPOSED_SKILLS` in `site/src/data/skills.ts`.
+- A workflow id that a domain profile lists but no catalog defines must be listed in `site/src/data/proposed-workflows.ts`.
+- Adding a capability also needs its two-letter symbol in `site/test/views.test.ts`.
+- Do not add `.yml` or `.yaml` files under `site/`.
+
+To check your change locally (Node version in `site/.nvmrc`):
+
+```bash
+cd site && npm ci && npm run check && npm test && npm run build
+```
+
 ### Code Style
 
 - YAML files: 2-space indentation

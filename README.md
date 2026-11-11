@@ -7,6 +7,8 @@
 [![Spec](https://img.shields.io/badge/Spec-v1.1.0_Candidate-blue.svg)](spec/STANDARD-v1.1.0.md)
 [![Plugin](https://img.shields.io/badge/Plugin-v2.0.0-green.svg)](CHANGELOG.md)
 
+**Documentation:** [acs.synapti.ai](https://acs.synapti.ai/) has the specification, a page for every capability, workflow and domain, and search. Coding agents can start from [acs.synapti.ai/llms.txt](https://acs.synapti.ai/llms.txt).
+
 > **Versioning:** The spec version (v1.1.0, Candidate Standard; [v1.0.0](spec/STANDARD-v1.0.0.md) still supported) tracks the standard itself. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
 
 ```bash
