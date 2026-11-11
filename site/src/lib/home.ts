@@ -12,6 +12,7 @@ import { anchorsOf, headingText, parseMarkdown, stripFrontmatter } from './ancho
 import { currentStandard, diagnosticHref, type Inline } from './generated';
 import { SITE_ORIGIN } from './links';
 import { GITHUB_BASE, readRepoFile } from './repo';
+import { kebab } from './routes';
 import { contractRows, gateRows, stepRole } from './views';
 
 /** The one-sentence summary used as the page description and in llms.txt. */
@@ -38,6 +39,39 @@ export interface Card {
   /** Spec section label, e.g. "§5.8", for cards about the Standard. */
   section?: string;
 }
+
+/** A sentence with one link in it; `code` shows the link text as code. */
+export interface LinkSentence {
+  before: string;
+  link: HomeLink & { code?: boolean };
+  after: string;
+}
+
+/** The headings and connecting sentences of the sections, shared by the page and its copy. */
+export const STORY_HEADING = 'How a workflow is built';
+
+export function storyIntro(): LinkSentence {
+  return {
+    before: 'The steps below follow the reference workflow for deploying a model, ',
+    link: { text: STORY_WORKFLOW, url: `/workflows/${kebab(STORY_WORKFLOW)}/`, code: true },
+    after: '.',
+  };
+}
+
+export const CAPABILITIES_INTRO: Inline = [
+  { code: false, text: 'Domain variants are parameters, not new capabilities: ' },
+  { code: true, text: 'detect' },
+  { code: false, text: ' with ' },
+  { code: true, text: 'domain: anomaly' },
+  { code: false, text: ', not ' },
+  { code: true, text: 'detect-anomaly' },
+  { code: false, text: '.' },
+];
+
+export const CAPABILITIES_DERIVED: HomeLink = { text: 'How the set was derived', url: '/background/methodology/first-principles-reassessment/' };
+
+export const AGENTS_HEADING = 'For coding agents';
+export const AGENTS_LINE = 'Paste this into Claude Code, Codex, Cursor or another coding agent.';
 
 /** Text with inline code, as one string where code spans are in backticks. */
 export function inlineText(parts: Inline): string {
@@ -117,14 +151,17 @@ function phrasing(nodes: PhrasingContent[]): Inline {
 }
 
 /** The design principles of the current Standard: the H3s of its "3. Design Principles" section. */
-export function principles(): { intro: string; items: Principle[]; sectionUrl: string } {
+/** The section of the Standard the design principles are read from. */
+const PRINCIPLES_SECTION = '3';
+
+export function principles(): { intro: string; items: Principle[]; sectionUrl: string; source: LinkSentence } {
   const std = currentStandard();
   const text = readRepoFile(std.source);
   const tree = parseMarkdown(text);
   const body = stripFrontmatter(text);
   const nodes = tree.children;
-  const h2 = nodes.findIndex((n) => n.type === 'heading' && n.depth === 2 && /^3\.\s/.test(headingText(n)));
-  if (h2 === -1) throw new Error('home: the current Standard has no section 3');
+  const h2 = nodes.findIndex((n) => n.type === 'heading' && n.depth === 2 && headingText(n).startsWith(`${PRINCIPLES_SECTION}. `));
+  if (h2 === -1) throw new Error(`home: the current Standard has no section ${PRINCIPLES_SECTION}`);
   const end = nodes.findIndex((n, i) => i > h2 && n.type === 'heading' && n.depth <= 2);
   const section = nodes.slice(h2 + 1, end === -1 ? undefined : end);
   const items: Principle[] = [];
@@ -159,7 +196,9 @@ export function principles(): { intro: string; items: Principle[]; sectionUrl: s
   if (items.length === 0) throw new Error('home: section 3 of the Standard has no principles');
   introParts = introParts.map((p) => p.replace(/\s*\n\s*/g, ' '));
   const sectionAnchor = anchors.get(headingText(nodes[h2] as Heading))!;
-  return { intro: introParts.join(' '), items, sectionUrl: `${std.url}#${sectionAnchor}` };
+  const sectionUrl = `${std.url}#${sectionAnchor}`;
+  const source: LinkSentence = { before: 'They come from ', link: { text: `section ${PRINCIPLES_SECTION} of the Standard`, url: sectionUrl }, after: '.' };
+  return { intro: introParts.join(' '), items, sectionUrl, source };
 }
 
 function anchorsFor(source: string) {
@@ -334,6 +373,9 @@ export function coverage(): { standard: Card[]; data: Card[]; tools: Card[] } {
     }
     return { title: h.title, line: text, link: { text: `§${num}`, url: `${std.url}#${h.slug}` }, section: `§${num}` };
   });
+  // The section of the Standard that defines the diagnostic codes, by its heading.
+  const diagnosticsSection = entries.map((x) => /^(\d+)\.\s+Diagnostic/.exec(x.text)?.[1]).find(Boolean);
+  if (!diagnosticsSection) throw new Error('home: the current Standard has no top-level Diagnostic section');
   const k = loadCounts();
   const data: Card[] = [
     { title: `Capabilities (${k.capabilityCount})`, line: 'Each with its contract, risk level, edges and skill.', link: { text: 'Capabilities', url: '/capabilities/' } },
@@ -344,7 +386,7 @@ export function coverage(): { standard: Card[]; data: Card[]; tools: Card[] } {
     { title: `Diagnostic codes (${k.diagnosticCount})`, line: 'What each code means and whether it is an error.', link: { text: 'Diagnostics', url: '/spec/diagnostics/' } },
   ];
   const tools: Card[] = [
-    { title: 'Validator', line: 'A Rust core with a Python command-line tool. It reports the diagnostic codes of section 9.', link: { text: 'Quickstart', url: '/start/quickstart/' } },
+    { title: 'Validator', line: `A Rust core with a Python command-line tool. It reports the diagnostic codes of section ${diagnosticsSection}.`, link: { text: 'Quickstart', url: '/start/quickstart/' } },
     { title: 'Executor', line: 'Runs a workflow and hands each action to your host code.', link: { text: 'Running workflows', url: '/guides/running-workflows/' } },
     { title: 'Claude Code plugin', line: 'One skill per capability, plus hooks that block file edits until a checkpoint exists.', link: { text: 'Safety hooks', url: '/guides/hooks/' } },
     { title: 'Python SDK adapter', line: 'Adds checkpoint enforcement and evidence tracking to the Claude Agent SDK.', link: { text: 'Claude Agent SDK', url: '/guides/claude-agent-sdk/' } },
@@ -360,8 +402,17 @@ export interface FaqItem {
   answer: Inline;
 }
 
+/** The minimum deprecation period, in months, from the deprecation policy of the current Standard. */
+export function deprecationMonths(): number {
+  const text = readRepoFile(currentStandard().source);
+  const m = /^\s*\d+\.\s+Minimum deprecation period:\s*(\d+)\s+months?\s*$/im.exec(text);
+  if (!m) throw new Error('home: the current Standard states no "Minimum deprecation period: N months"');
+  return Number(m[1]);
+}
+
 export function faq(): { items: FaqItem[]; more: HomeLink } {
   const v = loadVersions().standard.current;
+  const months = deprecationMonths();
   // Codes named in an answer must exist; diagnosticHref throws if one does not.
   for (const code of ['V102', 'B203']) diagnosticHref(code);
   return {
@@ -387,7 +438,7 @@ export function faq(): { items: FaqItem[]; more: HomeLink } {
       {
         question: 'How stable is it?',
         answer: t(
-          `Version ${v.version} is a ${v.status}. Breaking changes need a new major version. A feature is deprecated in a minor release with a warning, and removed no earlier than the next major release and at least six months later.`,
+          `Version ${v.version} is a ${v.status}. Breaking changes need a new major version. A feature is deprecated in a minor release with a warning, and removed no earlier than the next major release and at least ${months} ${months === 1 ? 'month' : 'months'} later.`,
         ),
       },
     ],
