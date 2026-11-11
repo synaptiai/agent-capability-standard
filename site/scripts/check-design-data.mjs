@@ -6,9 +6,10 @@
 //   rectangular, at the size its kind needs;
 // - every status value the sources use, and every RFC status
 //   spec/GOVERNANCE.md allows, has a badge style in src/lib/status.ts;
-// - no count is typed by hand into the site source: a literal number next to
-//   "capabilit", "layer" or "workflow", or a CSS repeat() of the layer or
-//   capability count.
+// - no count is typed by hand into the site source: a number (in digits, in
+//   words up to forty, or as a JSX expression such as {36}) before a noun the
+//   data counts (capabilities, layers, workflows, profiles, edges, domains,
+//   diagnostic codes), or a CSS repeat() of the layer or capability count.
 //
 // Run: node scripts/check-design-data.mjs
 import { execFileSync } from 'node:child_process';
@@ -100,13 +101,23 @@ export function checkStatuses(values, styles) {
   return [...values].filter(([v]) => !(v in styles)).map(([v, where]) => `status "${v}" (${where}) has no badge style in src/lib/status.ts`);
 }
 
+const UNITS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const TEENS = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+/** A count in digits, in words from one to forty-nine, or as a JSX expression such as {36}. */
+const NUMBER = `(?:\\d+|\\{\\s*\\d+\\s*\\}|(?:twenty|thirty|forty)(?:-(?:${UNITS.join('|')}))?|${[...UNITS, ...TEENS].join('|')})`;
+/** Nouns for the things the data counts. */
+const COUNTED = '(?:capabilit\\w*|layers?|workflows?|profiles?|edges?|domains?|diagnostic\\s+codes?|diagnostics)\\b';
+
 /**
  * Hand-typed counts in site source. `counts` are numbers that must not be
  * typed into CSS repeat() (the layer and capability counts).
  */
 export function findHandTypedCounts(files, counts) {
   const problems = [];
-  const nearNoun = /\b(\d+)\s+(?:(?:atomic|cognitive|reference|domain|core|composed)\s+)?(?:capabilit\w*|layers?\b|workflows?\b)/gi;
+  const nearNoun = new RegExp(
+    `(?<![\\w-])${NUMBER}\\s+(?:(?:atomic|cognitive|reference|domain|core|composed|ontology)\\s+)?${COUNTED}`,
+    'gi',
+  );
   const repeat = /repeat\(\s*(\d+)\s*,/g;
   for (const { path: p, text } of files) {
     const lines = text.split('\n');

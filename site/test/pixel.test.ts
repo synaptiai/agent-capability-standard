@@ -105,6 +105,32 @@ describe('design data', () => {
       'b.css:1: "repeat(9," types a count by hand; set it from the data',
     ]);
   });
+
+  it('finds counts written as words or as JSX expressions, and counts of profiles, edges, domains and codes', () => {
+    const lines = [
+      '<p>Nine layers and thirty-six capabilities.</p>',
+      '<p>{36} capabilities and { 9 } cognitive layers</p>',
+      '<p>There are 7 domain profiles, 7 domains and seven profiles.</p>',
+      '<p>99 edges, 46 diagnostic codes and Twelve workflows.</p>',
+    ];
+    expect(findHandTypedCounts([{ path: 'd.astro', text: lines.join('\n') }], [9, 36])).toEqual([
+      'd.astro:1: "Nine layers" types a count by hand',
+      'd.astro:1: "thirty-six capabilities" types a count by hand',
+      'd.astro:2: "{36} capabilities" types a count by hand',
+      'd.astro:2: "{ 9 } cognitive layers" types a count by hand',
+      'd.astro:3: "7 domain profiles" types a count by hand',
+      'd.astro:3: "7 domains" types a count by hand',
+      'd.astro:3: "seven profiles" types a count by hand',
+      'd.astro:4: "99 edges" types a count by hand',
+      'd.astro:4: "46 diagnostic codes" types a count by hand',
+      'd.astro:4: "Twelve workflows" types a count by hand',
+    ]);
+  });
+
+  it('leaves words that only contain a number word, and numbers not before a counted noun', () => {
+    const text = '<p>Someone layers styles; often capabilities; each layer; one per layer; 3 steps; anyone edges in.</p>';
+    expect(findHandTypedCounts([{ path: 'e.astro', text }], [9, 36])).toEqual([]);
+  });
 });
 
 describe('PNG encoder', () => {

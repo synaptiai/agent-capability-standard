@@ -227,7 +227,7 @@ export function loadOntology(): Ontology {
   return cached;
 }
 
-/** The capabilities of one layer, in the layer's own list order. */
+/** The capabilities of a layer, in the layer's own list order. */
 export function capabilitiesOfLayer(o: Ontology, layerId: string): Capability[] {
   const layer = o.layers.find((l) => l.id === layerId);
   if (!layer) throw new Error(`ontology: unknown layer ${layerId}`);
