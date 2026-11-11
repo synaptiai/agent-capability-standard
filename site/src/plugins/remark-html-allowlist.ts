@@ -1,17 +1,32 @@
 // Raw HTML in the sources must render the same on the site as on GitHub, so
-// only a few harmless elements are allowed: details, summary, br, sup, sub, and
-// an <a> that carries only a name or id (an anchor target). HTML comments are
-// allowed. Anything else, such as a bare <id> in prose that a browser would
-// read as an element, fails the build with its path:line.
+// only a few harmless elements are allowed: details (with at most `open`),
+// summary, br, sup and sub with no attributes, and an <a> that carries only a
+// name or id (an anchor target). GitHub strips event handlers and styles, so
+// an attribute that would only take effect on the site is refused. Well-formed
+// HTML comments are allowed; a comment a browser would end early (`<!-->`,
+// `<!--->`, one containing `--`) is refused, because what follows it is live
+// HTML. Anything else, such as a bare <id> in prose that a browser would read
+// as an element, fails the build with its path:line.
 import type { Html, Root } from 'mdast';
 import { visit } from 'unist-util-visit';
 import type { VFile } from 'vfile';
 import { failWith, lineOf, sourceOf } from './source';
 
 export const ALLOWED_ELEMENTS: ReadonlySet<string> = new Set(['details', 'summary', 'br', 'sup', 'sub', 'a']);
-const A_ATTRIBUTES: ReadonlySet<string> = new Set(['name', 'id']);
+/** The attributes each allowed element may carry. */
+const ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
+  a: new Set(['name', 'id']),
+  details: new Set(['open']),
+  summary: new Set(),
+  br: new Set(),
+  sup: new Set(),
+  sub: new Set(),
+};
 
-const COMMENT = /<!--[\s\S]*?-->/g;
+// A comment the HTML parser reads the same way: its text does not start with
+// `>` or `->` and contains no `--`.
+const COMMENT = /<!--(?!>|->)(?:(?!--)[\s\S])*-->/g;
+const COMMENT_PART = /<!--|--!?>/;
 const TAG = /<(\/?)([A-Za-z][A-Za-z0-9-]*)([^>]*)>/g;
 const ATTR = /([^\s=/]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/g;
 
@@ -19,6 +34,7 @@ const ATTR = /([^\s=/]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/g;
 export function checkHtml(value: string): string[] {
   const problems: string[] = [];
   const html = value.replace(COMMENT, '');
+  if (COMMENT_PART.test(html)) problems.push('malformed HTML comment: a browser ends it at a different place');
   for (const m of html.matchAll(TAG)) {
     const [, closing, rawName, attrs] = m;
     const name = rawName!.toLowerCase();
@@ -26,12 +42,20 @@ export function checkHtml(value: string): string[] {
       problems.push(`<${closing}${rawName}> is not an allowed HTML element`);
       continue;
     }
-    if (name === 'a' && !closing) {
-      const names = [...attrs!.matchAll(ATTR)].map((a) => a[1]!.toLowerCase());
-      const bad = names.filter((n) => !A_ATTRIBUTES.has(n));
+    if (closing) continue;
+    const names = [...attrs!.matchAll(ATTR)].map((a) => a[1]!.toLowerCase());
+    const allowed = ATTRIBUTES[name]!;
+    const bad = names.filter((n) => !allowed.has(n));
+    if (name === 'a') {
       if (bad.length > 0 || names.length === 0) {
         problems.push(`<a> may carry only name or id, found: ${names.join(', ') || 'nothing'}`);
       }
+    } else if (bad.length > 0) {
+      problems.push(
+        allowed.size === 0
+          ? `<${name}> may carry no attributes, found: ${names.join(', ')}`
+          : `<${name}> may carry only ${[...allowed].join(', ')}, found: ${names.join(', ')}`,
+      );
     }
   }
   return problems;

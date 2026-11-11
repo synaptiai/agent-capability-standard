@@ -103,6 +103,33 @@ describe('remark-html-allowlist', () => {
     expect(checkHtml('<script>alert(1)</script>')).toHaveLength(2);
   });
 
+  it('rejects attributes on the allowed elements, except open on details', () => {
+    // An event handler on any allowed element would run script on the site,
+    // while GitHub strips it, so the source looks harmless in review.
+    expect(checkHtml('<details open>')).toEqual([]);
+    expect(checkHtml('<br/>')).toEqual([]);
+    expect(checkHtml('<br />')).toEqual([]);
+    expect(checkHtml('<details open ontoggle="alert(document.domain)">')).toEqual(['<details> may carry only open, found: open, ontoggle']);
+    expect(checkHtml('<summary onclick="x()">')).toEqual(['<summary> may carry no attributes, found: onclick']);
+    expect(checkHtml('<br onmouseover=x()>')).toEqual(['<br> may carry no attributes, found: onmouseover']);
+    expect(checkHtml('<sup style="color:red">')).toEqual(['<sup> may carry no attributes, found: style']);
+    expect(checkHtml('<sub class="x">')).toEqual(['<sub> may carry no attributes, found: class']);
+    expect(checkHtml('<a name="x" onclick="y()">')).toEqual(['<a> may carry only name or id, found: name, onclick']);
+  });
+
+  it('does not let a malformed comment hide an element', () => {
+    // A browser ends each of these comments earlier than the regex would, so
+    // the element after it is live HTML.
+    for (const html of ['<!--><details ontoggle=alert(1)>-->', '<!---><details ontoggle=alert(1)>-->', '<!-- --!><details ontoggle=alert(1)>-->']) {
+      expect(checkHtml(html), html).not.toEqual([]);
+    }
+  });
+
+  it('fails the build on an event handler through the real pipeline', async () => {
+    const text = `${readRepoFile('docs/FAQ.md')}\n\n<details open ontoggle="alert(1)">\n<summary>x</summary>\n</details>\n`;
+    await expect(renderRepoFile('docs/FAQ.md', text)).rejects.toThrow(/<details> may carry only open/);
+  });
+
   it('fails the build on a bare <id> in prose', async () => {
     const text = `${readRepoFile('docs/FAQ.md')}\n\nThe message reads <id> failed.\n`;
     await expect(renderRepoFile('docs/FAQ.md', text)).rejects.toThrow(/<id> is not an allowed HTML element/);
