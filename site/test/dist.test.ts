@@ -10,7 +10,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadCounts } from '../src/data/counts';
 import { RESERVED_WORKFLOW_SLUGS } from '../src/data/workflows';
-import { checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
+import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
 import { ROUTES, type Route } from '../src/lib/routes';
 import {
   allCatalogSteps,
@@ -160,12 +160,25 @@ describe('built site', () => {
     }
   });
 
+  it('gives every heading on every built page an id', () => {
+    const bare = ROUTES.flatMap((r) => {
+      const html = readFileSync(path.join(dist, pageFile(r.url)), 'utf8');
+      return [...html.matchAll(/<h[1-6](?![^>]*\sid=")[^>]*>/g)].map(() => r.url);
+    });
+    expect(bare).toEqual([]);
+  });
+
   it('builds no page outside the route table except 404', () => {
     expect(checkRouteCoverage(dist)).toEqual({ missing: [], extra: [] });
   });
 });
 
 describe('dist checks on a fixture', () => {
+  it('reports headings with no id, on any page', () => {
+    expect(bareHeadings('/p/', '<h1>T</h1><h2 class="x">A</h2><h2 id="b">B</h2>')).toBe('/p/: 2 heading(s) without an id');
+    expect(bareHeadings('/p/', '<h1 id="t">T</h1><header>x</header>')).toBeNull();
+  });
+
   const route = (url: string, extra: Partial<Route> = {}): Route => ({
     source: null,
     url,
@@ -206,9 +219,8 @@ describe('dist checks on a fixture', () => {
     expect(checkGeneratedHeadings('/p/', html, ['intro', 'inputs'])).toEqual([]);
   });
 
-  it('reports a generated heading without the prefix, a heading with no id, and a source id with the prefix', () => {
+  it('reports a generated heading without the prefix and a source id with the prefix', () => {
     expect(checkGeneratedHeadings('/p/', '<h2 id="inputs">Inputs</h2>', [])).toHaveLength(1);
-    expect(checkGeneratedHeadings('/p/', '<h2>Inputs</h2>', [])).toEqual(['/p/: 1 heading(s) without an id']);
     expect(checkGeneratedHeadings('/p/', '<h2 id="ref-x">X</h2>', ['ref-x'])).toHaveLength(2);
   });
 });

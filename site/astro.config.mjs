@@ -55,7 +55,7 @@ export default defineConfig({
           if (distProblems.length > 0) {
             throw new Error(`built site:\n  ${distProblems.join('\n  ')}`);
           }
-          logger.info(`pages: every one of the ${dist.pages} routes has a page; no id is repeated; generated headings use ref- ids`);
+          logger.info(`pages: every one of the ${dist.pages} routes has a page; no id is repeated; every heading has an id; generated headings use ref- ids`);
         },
       },
     },

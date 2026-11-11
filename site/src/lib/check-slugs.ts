@@ -4,7 +4,8 @@
 // headings in document order, frontmatter removed), not through anchors.ts, so
 // the check does not share code with the resolver it guards.
 // The build runs `checkBuiltSlugs` on every page in dist/ that renders a
-// Markdown source; test/slugs.test.ts runs the same comparison on every source,
+// Markdown source, leaving out headings the page template adds, which carry
+// the `ref-` prefix; test/slugs.test.ts runs the same comparison on every source,
 // including those shown inside generated pages.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -17,6 +18,9 @@ import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
 import { readRepoFile } from './repo';
 import { markdownPages } from './routes';
+
+/** Prefix of the ids of headings a page adds to the Markdown it shows. */
+export const REF_ID_PREFIX = 'ref-';
 
 export function githubHeadingIds(markdown: string): string[] {
   const body = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
@@ -59,7 +63,10 @@ export function checkBuiltSlugs(distDir: string): SlugReport {
       continue;
     }
     const want = githubHeadingIds(readRepoFile(route.source!));
-    const diff = compareIds(want, renderedHeadingIds(readFileSync(file, 'utf8')));
+    const got = renderedHeadingIds(readFileSync(file, 'utf8')).filter((id) => !id.startsWith(REF_ID_PREFIX));
+    const clash = want.filter((id) => id.startsWith(REF_ID_PREFIX));
+    if (clash.length > 0) report.problems.push(`${route.url} (${route.source}): source heading ids with the ${REF_ID_PREFIX} prefix: ${clash.join(', ')}`);
+    const diff = compareIds(want, got);
     report.pages += 1;
     report.headings += want.length;
     if (diff) report.problems.push(`${route.url} (${route.source}): ${diff}`);

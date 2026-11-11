@@ -1,17 +1,17 @@
 // Checks on the built site, run when a build finishes and by the tests:
 // - every route in the table has an index.html, and no other page was built
 //   (the 404 page aside);
-// - no page uses an element id twice;
+// - no page uses an element id twice, and every heading on every page has an id;
 // - on a generated page that shows a Markdown source, the headings the page
 //   adds have `ref-` ids and the rest are exactly the ids GitHub gives the
 //   source; on a generated page with no source, every heading id has the prefix.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { githubHeadingIds, renderedHeadingIds } from './check-slugs';
+import { githubHeadingIds, REF_ID_PREFIX, renderedHeadingIds } from './check-slugs';
 import { readRepoFile } from './repo';
 import { MARKDOWN_TEMPLATES, ROUTES, type Route } from './routes';
 
-export const REF_ID_PREFIX = 'ref-';
+export { REF_ID_PREFIX };
 
 /** dist path of a route's page: `/a/b/` -> `a/b/index.html`, `/` -> `index.html`. */
 export function pageFile(url: string): string {
@@ -63,9 +63,13 @@ export function checkGeneratedHeadings(url: string, html: string, sourceIds: str
   }
   const clash = sourceIds.filter((id) => id.startsWith(REF_ID_PREFIX));
   if (clash.length > 0) problems.push(`${url}: the source has heading ids with the ${REF_ID_PREFIX} prefix: ${clash.join(', ')}`);
-  const bare = [...html.matchAll(/<h[1-6](?![^>]*\sid=")[^>]*>/g)].map((m) => m[0]);
-  if (bare.length > 0) problems.push(`${url}: ${bare.length} heading(s) without an id`);
   return problems;
+}
+
+/** A problem line when headings on the page have no id, else null. */
+export function bareHeadings(url: string, html: string): string | null {
+  const bare = [...html.matchAll(/<h[1-6](?![^>]*\sid=")[^>]*>/g)].length;
+  return bare > 0 ? `${url}: ${bare} heading(s) without an id` : null;
 }
 
 /** Run every check on a built site. */
@@ -80,8 +84,10 @@ export function checkDist(distDir: string, routes: readonly Route[] = ROUTES): D
     const html = readFileSync(file, 'utf8');
     const dups = duplicateIds(html);
     if (dups.length > 0) problems.push(`${r.url}: ids used more than once: ${dups.join(', ')}`);
+    const bare = bareHeadings(r.url, html);
+    if (bare) problems.push(bare);
     const ownPage = r.source !== null && MARKDOWN_TEMPLATES.has(r.template) && !r.embed;
-    if (ownPage) continue; // check-slugs.ts compares these with their sources.
+    if (ownPage) continue; // check-slugs.ts compares these with their sources, ref- ids aside.
     const sourceIds = r.source === null ? [] : githubHeadingIds(readRepoFile(r.source));
     problems.push(...checkGeneratedHeadings(r.url, html, sourceIds));
   }

@@ -2,6 +2,7 @@
 // A composed skill. SKILL.md files have no H1, so the page heading is the
 // frontmatter `name` (the name the skill is invoked by), followed by its
 // description and the frontmatter fields a reader needs to run it.
+import { refSlugger } from '../lib/generated';
 import type { Route } from '../lib/routes';
 import type { PageMeta } from '../plugins/remark-page-meta';
 
@@ -23,10 +24,12 @@ const facts = FIELDS.flatMap(([key, label]) => {
   return typeof v === 'string' && v.trim() !== '' ? [{ label, value: v }] : [];
 });
 const dir = route.source?.split('/')[1];
+const id = refSlugger();
+const title = page.title ?? route.title;
 ---
 <article class="doc doc--skill" data-skill={dir} data-pagefind-body>
   <header class="skill-header">
-    <h1>{page.title}</h1>
+    <h1 id={id(title)}>{title}</h1>
     {page.description && <p class="lead">{page.description}</p>}
     {facts.length > 0 && (
       <dl class="skill-meta">
