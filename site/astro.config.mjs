@@ -2,6 +2,7 @@ import { defineConfig } from 'astro/config';
 import { unified } from '@astrojs/markdown-remark';
 import { rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { checkDist, formatDistReport } from './src/lib/check-dist';
 import { checkBuiltSlugs } from './src/lib/check-slugs';
 import { formatLinkStats, linkStats } from './src/lib/links';
 import { markdownSources } from './src/lib/routes';
@@ -47,6 +48,14 @@ export default defineConfig({
             throw new Error(`heading ids differ from github-slugger run on the source:\n  ${slugs.problems.join('\n  ')}`);
           }
           logger.info(`heading ids: ${slugs.headings} ids on ${slugs.pages} pages equal github-slugger run on their sources`);
+          // Every route is built, nothing else is, and generated pages keep
+          // their own heading ids apart from their sources' ids.
+          const dist = checkDist(fileURLToPath(dir));
+          const distProblems = formatDistReport(dist);
+          if (distProblems.length > 0) {
+            throw new Error(`built site:\n  ${distProblems.join('\n  ')}`);
+          }
+          logger.info(`pages: every one of the ${dist.pages} routes has a page; no id is repeated; generated headings use ref- ids`);
         },
       },
     },
