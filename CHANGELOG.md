@@ -589,12 +589,16 @@ The full list is in the
 - Agent failure taxonomy research (#8, #13)
 - Replanning and goal uncertainty capabilities (#9, #14)
 - Missing edge types to ontology (#2, #20)
+- Reference list of the 99 v1 capabilities (#6, #7)
+- Practitioner adoption appendix in Grounded Agency
 
 ### Fixed
 - Complete edge graph for 5 orphan capabilities (#1, #21)
 
 ### Changed
 - Migrated from 99 to 36 atomic capabilities with domain parameterization
+- Grounded Agency evaluation section reports the 51 steps in the reference
+  workflows
 
 ## [v1.0.5] — 2026-01-25
 
@@ -628,9 +632,18 @@ The full list is in the
 
 ## [v1.0.1] — 2026-01-25
 
+### Added
+- `docs/GROUNDED_AGENCY.md`: the Grounded Agency paper in Markdown
+
 ### Changed
 - README, quickstart, tutorial, FAQ, glossary, Grounded Agency, whitepaper
   and Standard 1.0.0 explain why and when to use each feature
+- Grounded Agency layer counts corrected and its academic references checked
+
+### Removed
+- The LaTeX source and PDF of the Grounded Agency paper, replaced by the
+  Markdown version
+- `spec/RELEASE_CHECKLIST.md`
 
 ## [v1.0.0] — 2026-01-24
 
