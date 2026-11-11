@@ -393,13 +393,12 @@ assumptions:
 
 **Commonly follows:**
 - `retrieve` - Gather requirements
-- `inspect` - Understand existing system
+- `observe` - Understand existing system
 - `explain` - Clarify goal before decomposing
 
 **Commonly precedes:**
-- `plan` - Plan decomposed subproblems (REQUIRED by plan)
-- `prioritize` - Order subproblems
-- `schedule` - Time-order subproblems
+- `plan` - Plan and time-order decomposed subproblems (REQUIRED by plan)
+- `compare` - Order subproblems by priority
 - `delegate` - Assign subproblems
 
 **Anti-patterns:**

@@ -334,15 +334,13 @@ evidence_anchors:
 ## Composition Patterns
 
 **Commonly follows:**
-- `analyze` - Explain analysis results
-- `decide` - Justify decision rationale
+- `compare` - Justify the option a comparison selected
 - `critique` - Explain findings
-- Any capability that produces complex output
+- Any capability that produces complex output, such as analysis results
 
 **Commonly precedes:**
-- `summarize` - Condense explanation further
-- `translate` - Convert to different register
-- `validate` - Check explanation accuracy
+- `generate` - Condense the explanation or convert it to a different register
+- `verify` - Check explanation accuracy
 
 **Anti-patterns:**
 - Never explain without understanding first

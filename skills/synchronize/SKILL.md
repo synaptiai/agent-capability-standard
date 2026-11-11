@@ -270,14 +270,14 @@ assumptions:
 - `delegate` - Returns outputs from parallel agents to be merged
 
 **Commonly precedes:**
-- `world-state` - Synchronized data becomes canonical state snapshot
-- `identity-resolution` - Merged entities may need identity reconciliation
+- `state` - Synchronized data becomes canonical state snapshot
+- `integrate` - Merged entities may need identity reconciliation
 - `persist` - Save synchronized result to durable storage
 - `verify` - Validate merged output meets requirements
 
 **Anti-patterns:**
-- Never synchronize without `grounding` - merge requires evidence anchors (see ontology edge)
-- Never synchronize without `provenance` - merge requires lineage trace (see ontology edge)
+- Never synchronize without evidence anchors (`ground`) for the merged values
+- Never synchronize without recording which source each merged value came from
 - Avoid synchronizing security-sensitive data without human review
 
 **Workflow references:**

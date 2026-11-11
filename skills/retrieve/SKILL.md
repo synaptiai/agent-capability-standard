@@ -21,7 +21,7 @@ Execute **retrieve** to fetch specific, known information from specified sources
 - Missing data is explicitly flagged
 
 **World Modeling Context:**
-Retrieve feeds into all world modeling layers by providing grounded observations for `world-state`, timestamps for `temporal-reasoning`, and evidence for `grounding`.
+Retrieve feeds into all world modeling layers by providing grounded observations for `state`, timestamps for reasoning about time, and evidence for `ground`.
 
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
@@ -318,12 +318,11 @@ assumptions:
 
 **Commonly follows:**
 - `search` - After finding, retrieve full content
-- `inspect` - Retrieve specific files discovered during inspection
+- `observe` - Retrieve specific files discovered during observation
 
 **Commonly precedes:**
-- `world-state` - Retrieved data becomes observations
-- `grounding` - Retrieved content provides evidence
-- `provenance` - Retrieval is a step in provenance chain
+- `state` - Retrieved data becomes observations
+- `ground` - Retrieved content provides evidence, and retrieval is a step in its provenance chain
 - `integrate` - Retrieved data feeds integration
 
 **Anti-patterns:**

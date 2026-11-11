@@ -31,7 +31,7 @@ Execute **search** to find relevant information when you don't know exactly wher
 - False positives are minimized
 
 **World Modeling Context:**
-Search feeds into the **State Layer** by discovering entities and observations to include in `world-state`. It supports the **Identity & Continuity Layer** by finding candidate matches for `identity-resolution`.
+Search feeds the **MODEL** layer by discovering entities and observations to include in `state`. It also finds candidate matches for the identity resolution that `integrate` performs.
 
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
@@ -328,13 +328,13 @@ next_searches:
 
 **Commonly follows:**
 - None typically - search is often a starting point
-- May follow `inspect` when inspection reveals knowledge gaps
+- May follow `observe` when observation reveals knowledge gaps
 
 **Commonly precedes:**
 - `retrieve` - After finding, retrieve full content
-- `world-state` - Search results inform state construction
-- `identity-resolution` - Find candidate entities to resolve
-- `grounding` - Search for evidence to ground claims
+- `state` - Search results inform state construction
+- `integrate` - Find candidate entities to resolve and merge
+- `ground` - Search for evidence to ground claims
 
 **Anti-patterns:**
 - Avoid searching when exact path is known (use `retrieve`)

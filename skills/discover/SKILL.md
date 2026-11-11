@@ -251,13 +251,13 @@ assumptions:
 ## Composition Patterns
 
 **Commonly follows:**
-- `inspect` - Discovery often follows initial system observation
+- `observe` - Discovery often follows initial system observation
 - `search` - Discovery extends search results
-- `identify` - Discovery finds relationships between identified entities
+- `classify` - Discovery finds relationships between classified entities
 
 **Commonly precedes:**
-- `identify` - Discovered entities may need identification
-- `estimate` - Discovered patterns may need quantification
+- `classify` - Discovered entities may need classification
+- `measure` - Discovered patterns may need quantification
 - `compare` - Discovered options may need comparison
 - `plan` - Discoveries may trigger action planning
 
@@ -267,5 +267,5 @@ assumptions:
 - Do not use discover when you already know what to find
 
 **Workflow references:**
-- See `reference/composition_patterns.md#capability-gap-analysis` for discover-relationship usage
+- See `reference/composition_patterns.md#capability-gap-analysis` for relationship discovery
 - See `reference/composition_patterns.md#world-model-build` for discovery in modeling

@@ -356,12 +356,12 @@ assumptions:
 
 **Commonly follows:**
 - `plan` - Critique plans before execution
-- `inspect` - Understand target before critique
+- `observe` - Understand target before critique
 - `retrieve` - Gather context for critique
 
 **Commonly precedes:**
 - `plan` - Revise plan based on critique issues and suggestions
-- `mitigate` - Address identified risks
+- `constrain` - Apply limits that address identified risks
 - `verify` - Validate fixes for findings
 - `audit` - Record critique and responses
 
