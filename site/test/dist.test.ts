@@ -469,6 +469,18 @@ describe('agent files', () => {
     expect(notFound).not.toMatch(/href="\/404\/index\.md"/);
   });
 
+  it('preloads both pixel fonts, which use font-display: optional, on every page', () => {
+    // Design notes: the pixel fonts are "optional"; without a preload a first visit shows the fallback.
+    const bad: string[] = [];
+    for (const d of dirsWith('index.html')) {
+      const html = readFileSync(path.join(dist, d, 'index.html'), 'utf8');
+      for (const font of ['jersey-10', 'silkscreen']) {
+        if (!new RegExp(`<link rel="preload" href="[^"]*${font}[^"]*\\.woff2" as="font"`).test(html)) bad.push(`${d}: ${font}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
   it('lists every HTML page in the sitemap, minus the 404 page, and no Markdown or text file', () => {
     const xml = readFileSync(path.join(dist, 'sitemap.xml'), 'utf8');
     const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!.slice(ORIGIN.length)).sort();

@@ -1,6 +1,7 @@
 // The self-hosted fonts (Fontsource, SIL Open Font License), latin subset.
-// Pixel fonts use font-display: optional so headings never re-flow late;
-// body and mono fonts use swap. Characters outside the subset fall back to
+// Pixel fonts use font-display: optional so headings never re-flow late, and
+// are preloaded so a first visit gets them rather than the fallback; body and
+// mono fonts use swap. Characters outside the subset fall back to
 // the next font in each stack.
 import atkinson400 from '@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-400-normal.woff2?url';
 import atkinson400i from '@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-400-italic.woff2?url';
@@ -22,7 +23,7 @@ interface Face {
 
 const FACES: Face[] = [
   { family: 'Jersey 10', weight: 400, style: 'normal', display: 'optional', url: jersey400, preload: true },
-  { family: 'Silkscreen', weight: 400, style: 'normal', display: 'optional', url: silkscreen400 },
+  { family: 'Silkscreen', weight: 400, style: 'normal', display: 'optional', url: silkscreen400, preload: true },
   { family: 'Atkinson Hyperlegible Next', weight: 400, style: 'normal', display: 'swap', url: atkinson400, preload: true },
   { family: 'Atkinson Hyperlegible Next', weight: 400, style: 'italic', display: 'swap', url: atkinson400i },
   { family: 'Atkinson Hyperlegible Next', weight: 700, style: 'normal', display: 'swap', url: atkinson700 },
