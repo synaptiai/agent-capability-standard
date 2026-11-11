@@ -7,8 +7,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { computeAnchors } from '../src/lib/anchors';
 import { compareIds, githubHeadingIds, renderedHeadingIds } from '../src/lib/check-slugs';
-import { readRepoFile } from '../src/lib/repo';
-import { ROUTES } from '../src/lib/routes';
+import { readRepoFile, TRACKED_FILES } from '../src/lib/repo';
+import { publicMarkdown, ROUTES } from '../src/lib/routes';
 import { renderRepoFile } from './pipeline';
 
 const sources = ROUTES.flatMap((r) => (r.source === null ? [] : [r.source]));
@@ -27,10 +27,10 @@ beforeAll(async () => {
 }, 300_000);
 
 describe('every Markdown source through the build pipeline', () => {
-  it('covers every routed source', () => {
-    // 118 at bf65451: the public .md set from git ls-files after the plan's exclusions.
+  it('covers every public Markdown file, once each', () => {
+    // The public set: git ls-files, .md, minus the plan's exclusions.
     expect(sources.length).toBe(new Set(sources).size);
-    expect(sources.length).toBeGreaterThan(0);
+    expect([...sources].sort()).toEqual(publicMarkdown(TRACKED_FILES));
   });
 
   it('renders without a link, HTML or metadata error', () => {
