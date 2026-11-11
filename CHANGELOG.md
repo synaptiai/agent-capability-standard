@@ -616,14 +616,13 @@ The full list is in the
 
 ### Added
 - Initial publication candidate
-- Capability ontology with 36 atomic capabilities across 9 cognitive layers
+- Capability ontology with 99 atomic capabilities across 8 layers
 - Typed I/O contracts and explicit dependencies for all capabilities
 - Workflow DSL spec v2 with bindings, conditions, gates, recovery loops, parallel groups
 - Canonical world state and event schemas (provenance, uncertainty, retention, lineage)
 - Identity taxonomy and identity resolution policy
 - Authority trust model (weights, decay, field-specific authority)
 - Compiler-grade validator with $ref resolution, type inference, consumer input schema checking, and patch suggestions
-- 12 reference workflows in workflow catalog
+- 5 reference workflows in workflow catalog
 - Safety hooks (checkpoint enforcement, audit logging)
-- Domain profiles for healthcare, manufacturing, data analysis, and personal assistant
 - Conformance test suite with 5 fixture tests
