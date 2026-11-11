@@ -2,7 +2,7 @@
 
 This changelog tracks changes to the **Agent Capability Standard specification** itself. For plugin and project-level changes, see the [root CHANGELOG](../CHANGELOG.md).
 
-## Unreleased
+## v1.1.0 (2026-10-28)
 
 ### Added — Standard v1.1.0 (Candidate Standard), RFC-0003 and RFC-0004 (#114)
 - **[STANDARD-v1.1.0](STANDARD-v1.1.0.md)**,
@@ -262,6 +262,9 @@ gaps on the standard's side (RFC-0003, amendments):
 - **`workflow_catalog.schema.json`** accepts an input `type` that is a list,
   bounds `retry.max` and enumerates `retry.backoff`, matching the
   validator.
+
+The changes in the three sections below (#105, #106, #107) were also made
+to the 1.0.0 text, so Appendix C of 1.1.0 does not list them.
 
 ### Fixed
 - **Authority trust model — decay is now a true half-life.** `conflict_resolution_function.recency_factor`

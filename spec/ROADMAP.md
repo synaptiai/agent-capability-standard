@@ -1,64 +1,71 @@
 # Roadmap
 
-> For detailed product strategy and competitive analysis, see [analysis/12-product-roadmap.md](../analysis/12-product-roadmap.md).
+The Standard and the plugin have separate version numbers. The Standard is the
+specification. The plugin is the reference implementation: the validator, the
+executor, the skills, the hooks and the Python package. Plugin 2.0.0 implements
+Standard 1.1.0.
 
-## v1.0.0 — Initial Release (Released 2026-01-24) ✅
+For the full list of changes, see the [specification changelog](CHANGELOG.md)
+and the [project changelog](../CHANGELOG.md).
 
-- 36 atomic capabilities across 9 cognitive layers
-- Reference validator with type inference and patch suggestions
-- 12 reference workflows in the workflow catalog
-- Domain profiles for healthcare, manufacturing, data analysis, personal assistant
-- Safety hooks (checkpoint enforcement, audit logging)
-- Conformance test suite
+## Standard
 
-## v1.0.4 — Domain Expansion (Released 2026-01-27) ✅
+| Version | Date | Status |
+|---------|------|--------|
+| [1.1.0](STANDARD-v1.1.0.md) | 2026-10-28 | Candidate Standard, current |
+| [1.0.0](STANDARD-v1.0.0.md) | 2026-01-24 | Supported |
+| 1.2.0 | Not scheduled | Planned |
 
-- Domain-specific workflow templates and automated profile validation
-- Claude Agent SDK integration with safety patterns
-- Benchmark suite for Grounded Agency validation
-- Migration from 99 to 36 atomic capabilities with domain parameterization
-- YAML-based capability ontology (migrated from JSON)
-- Complete edge graph for orphan capabilities
+Standard 1.1.0 was accepted by [RFC-0003](RFC-0003-orchestration-extensions.md)
+and [RFC-0004](RFC-0004-agent-identity.md). It adds:
 
-## v1.0.5 — Interoperability (Released 2026-01-29) ✅
+- a condition expression language for conditions, gates and failure-mode
+  triggers;
+- defined semantics for ontology edges and step safety flags;
+- a diagnostic model with severities and warning codes;
+- orchestration extensions that a workflow opts into: triggers, handler steps,
+  recovery and escalation, waits, approval, delegation, quorum and sender
+  identity.
 
-- OASF-to-Grounded-Agency capability mapping and compatibility adapter
-- Modality handling for vision, audio, and multimodal domains
-- Perspective validation checklist (PVC) system
-- Self-contained skill dependencies
+[Appendix C](STANDARD-v1.1.0.md#appendix-c-changes-from-100) of the 1.1.0 text
+lists every change from 1.0.0.
 
-## v1.1.0 — In Progress 🔧
+Standard 1.2.0 has one proposal so far:
+[RFC-0002](RFC-0002-agent-reliability-profile.md) (Draft), which adds
+cross-session behavioural reliability for agents.
 
-- [Standard v1.1.0](STANDARD-v1.1.0.md) (Candidate Standard), accepted by [RFC-0003](RFC-0003-orchestration-extensions.md) and [RFC-0004](RFC-0004-agent-identity.md); v1.0.0 remains supported
-  - Condition expression language for conditions, gates and failure-mode triggers
-  - Specified edge and safety-flag semantics
-  - Diagnostic model with severities and warnings (W6xx)
-  - Orchestration extensions (handlers, recovery and escalation, waits, approval, delegation, quorum, sender identity) specified and implemented in the reference validator and executor
-- Reference validator moved to a Rust core (`core/`, compiled into `grounded_agency._core`), shared by `tools/validate_workflows.py` and the Python `WorkflowEngine`
-- Multi-agent coordination runtime (delegate, synchronize, invoke)
-- Workflow execution engine
-- OASF GA extension mechanism for unmapped capabilities
-- EU AI Act conformity assessment and NIST AI RMF profile
-- ISO 42001 gap analysis and certification readiness
-- Comprehensive analysis documentation package
+## Plugin and tools
 
-## v1.1.0 — Planned
+| Version | Date | Main changes |
+|---------|------|--------------|
+| 2.0.0 | 2026-10-29 | Implements Standard 1.1.0. The validator and the executor are one Rust core, used by `tools/validate_workflows.py` and by the Python package. |
+| 1.2.0 | 2026-02-04 | Workflow execution engine; multi-agent coordination runtime (delegate, synchronize, invoke); OASF extension mechanism; EU AI Act, NIST AI RMF and ISO 42001 documents. |
+| 1.1.0, 1.1.1 | 2026-01-27 | Listed in their [GitHub releases](https://github.com/synaptiai/agent-capability-standard/releases). |
+| 1.0.0 to 1.0.5 | January 2026 | 36 capabilities in 9 layers, the reference validator, 12 reference workflows, domain profiles, safety hooks, Claude Agent SDK integration, the benchmark suite and the OASF mapping. |
 
-- Conformance test pack with CI automation
-- Extended coercion mappings and schema-ref fixtures
-- Official capability-to-skill scaffolder
-- Plugin marketplace distribution
+## Next
 
-## v1.2.0 — Planned
+Planned work is tracked in three
+[GitHub milestones](https://github.com/synaptiai/agent-capability-standard/milestones).
+The open items are listed below.
 
-- Multi-agent coordination protocol spec (formal)
-- Streaming event ingestion patterns
-- Formal trust calibration workflows
-- Runtime telemetry and observability hooks
+### Hardening and developer experience
 
-## v2.0.0 — Future Vision
+- [Standalone description-to-contract CLI tool](https://github.com/synaptiai/agent-capability-standard/issues/103)
 
-- Cross-framework runtime adapter (LangChain, AutoGPT, CrewAI)
-- Visual workflow builder
-- Cloud-hosted validation API
-- Certification program for conformance levels
+### Runtime and ecosystem
+
+- [Streaming events for real-time evidence collection](https://github.com/synaptiai/agent-capability-standard/issues/77)
+- [Trust calibration tooling](https://github.com/synaptiai/agent-capability-standard/issues/78)
+- [Domain profile marketplace](https://github.com/synaptiai/agent-capability-standard/issues/79)
+- [Automated compliance reporting](https://github.com/synaptiai/agent-capability-standard/issues/80)
+- [Plugin SDK for third-party extensions](https://github.com/synaptiai/agent-capability-standard/issues/81)
+
+### Standards and scale
+
+- [Industry standard adoption (ISO/IEC candidate)](https://github.com/synaptiai/agent-capability-standard/issues/82)
+- [Multi-language SDKs (TypeScript, Rust, Go, Java)](https://github.com/synaptiai/agent-capability-standard/issues/83)
+- [Certification program for AI agents](https://github.com/synaptiai/agent-capability-standard/issues/84)
+- [Federated trust networks](https://github.com/synaptiai/agent-capability-standard/issues/85)
+- [Formal verification of workflow compositions](https://github.com/synaptiai/agent-capability-standard/issues/86)
+- [Pluggable safety backends](https://github.com/synaptiai/agent-capability-standard/issues/88)
