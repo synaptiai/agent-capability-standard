@@ -1,7 +1,10 @@
 // Each expected value names its source. None is copied from the loaders' output.
 // Values that change with routine content or release work (counts, versions,
-// catalog order) are read at test time through ./independent; literals stay
-// only for inline fixtures and for facts the Standard itself fixes.
+// catalog order) are read at test time through ./independent. Literals stay
+// for inline fixtures, for facts the Standard fixes (edge types, the requires
+// edges, diagnostic codes), for files that do not change once released (a
+// versioned Standard), and for a few named items whose change would be a real
+// change to check (debug_code_change bindings, skill names, citation author).
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildCitation, loadCitation } from '../src/data/citation';
@@ -139,8 +142,10 @@ describe('workflows', () => {
   it('turns ids into slugs and records the catalog header version', () => {
     const d = w.byId.get('debug_code_change')!;
     expect(d.slug).toBe('debug-code-change');
-    // First line of schemas/workflow_catalog.yaml: "# Standard version: 1.1.0".
-    expect(d.standardVersion).toBe('1.1.0');
+    // First line of schemas/workflow_catalog.yaml ("# Standard version: 1.1.0" at 9945a39).
+    const header = repoText('schemas/workflow_catalog.yaml').split('\n')[0]!;
+    expect(header).toMatch(/^# Standard version: \d+\.\d+\.\d+$/);
+    expect(d.standardVersion).toBe(header.split(': ')[1]);
   });
 
   it('records which workflows invoke which (workflow_catalog.yaml, digital_twin_bootstrap steps)', () => {

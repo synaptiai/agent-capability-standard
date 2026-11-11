@@ -8,7 +8,7 @@ import type { PageMeta } from '../src/plugins/remark-page-meta';
 import { KEYWORDS, markKeywords } from '../src/plugins/rehype-keywords';
 import { standardVersions } from '../src/data/versions';
 import { pageHead } from '../src/lib/page-head';
-import { DESCRIPTIONS, routeForSource } from '../src/lib/routes';
+import { DESCRIPTIONS, routeForSource, type Route } from '../src/lib/routes';
 import { sectionLines } from './independent';
 import { renderRepoFile } from './pipeline';
 
@@ -163,10 +163,26 @@ describe('rehype-callouts', () => {
 describe('page title and description', () => {
   const headOf = async (source: string) => pageHead(routeForSource(source)!, (await pageOf(source)).page);
 
-  it('uses the route description where the first paragraph is an author line', async () => {
-    // docs/GROUNDED_AGENCY.md: the paragraph after the H1 is the author, affiliation and email.
-    const { page } = await pageOf('docs/GROUNDED_AGENCY.md');
-    expect(page.description).toContain('@');
+  it('prefers a route description over the derived one', () => {
+    const page: PageMeta = {
+      title: 'Paper',
+      description: 'A. Author a@example.org',
+      meta: [],
+      version: null,
+      status: null,
+      documentStatus: null,
+      date: null,
+    };
+    const route: Route = { source: 'x.md', url: '/x/', section: 'background', order: 0, template: 'prose', title: 'X' };
+    expect(pageHead(route, page).description).toBe('A. Author a@example.org');
+    expect(pageHead({ ...route, description: 'What the paper covers.' }, page)).toEqual({
+      title: 'Paper',
+      headTitle: 'Paper',
+      description: 'What the paper covers.',
+    });
+  });
+
+  it('gives the Grounded Agency paper its route description', async () => {
     const head = await headOf('docs/GROUNDED_AGENCY.md');
     expect(head.description).toBe(DESCRIPTIONS['docs/GROUNDED_AGENCY.md']);
     expect(head.description).not.toContain('@');
