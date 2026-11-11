@@ -242,6 +242,20 @@ describe('design system on the built site', () => {
     expect(html('fonts/OFL.txt')).toContain('SIL Open Font License');
   });
 
+  it('names the home link from its visible wordmark, so "ACS" and the full name are both in it (WCAG 2.5.3)', () => {
+    for (const f of pages()) {
+      const link = /<a class="site-header__home"([^>]*)>([\s\S]*?)<\/a>/.exec(html(f));
+      expect(link, f).not.toBeNull();
+      const [, attrs = '', inner = ''] = link!;
+      expect(attrs.includes('aria-label'), f).toBe(false);
+      const text = inner
+        .replace(/<svg[\s\S]*?<\/svg>/g, '')
+        .replace(/<[^>]*aria-hidden="true"[^>]*>[\s\S]*?<\/span>/g, '')
+        .replace(/<[^>]+>/g, '');
+      for (const word of ['Agent Capability Standard', 'ACS', 'home']) expect(text, f).toContain(word);
+    }
+  });
+
   it('gives the capability table one wide column per layer in the CLAUDE.md table', () => {
     const layers = claudeLayerTable().length;
     expect(html('index.html')).toContain(`class="capability-table__grid" style="--layers: ${layers}"`);

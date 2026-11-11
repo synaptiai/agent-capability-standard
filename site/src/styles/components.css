@@ -302,13 +302,24 @@
     flex: 1;
   }
 
-  .site-header__github span,
+  /* The theme toggle is named by its aria-label, so its word can go. The
+     GitHub link has no other name: its word is only hidden visually. */
   .theme-toggle__text {
     display: none;
   }
 
+  @media (max-width: 639px) {
+    .site-header__github span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
+
   @media (min-width: 640px) {
-    .site-header__github span,
     .theme-toggle__text {
       display: inline;
     }

@@ -41,3 +41,15 @@ describe('typography', () => {
     expect(display.filter((s) => !allowed.has(s))).toEqual([]);
   });
 });
+
+describe('accessible names', () => {
+  it('never hides with display: none the only text of a control that has no aria-label', () => {
+    // The GitHub link and the menu button have no aria-label: their words may
+    // be hidden visually below a width, but must stay in the accessibility tree.
+    const hidden = rules()
+      .filter((r) => /display:\s*none/.test(r.body))
+      .flatMap((r) => r.selectors)
+      .filter((s) => /site-header__github|menu-button__text|wordmark\b(?!__)|version-chip__word/.test(s));
+    expect(hidden).toEqual([]);
+  });
+});

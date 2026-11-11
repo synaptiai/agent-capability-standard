@@ -1,5 +1,6 @@
 ---
-// The site header: the mark and wordmark (home link), a chip with the current
+// The site header: the mark and wordmark (home link, named by the visible
+// wordmark so the name contains what is on screen at every width), a chip with the current
 // Standard version, an empty slot that search fills in a later phase, the
 // GitHub link, the theme toggle and, below 1024px, the menu button. A second
 // row links to each section.
@@ -31,12 +32,13 @@ const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
       <PixelGlyph name="close" class="menu-button__close" />
       <span class="menu-button__text">Menu</span>
     </button>
-    <a class="site-header__home" href="/" aria-label="Agent Capability Standard, home">
+    <a class="site-header__home" href="/">
       <Mark scale={2} class="site-header__mark" />
-      <span class="wordmark" aria-hidden="true">
+      <span class="wordmark">
         <span class="wordmark__full">Agent Capability Standard</span>
         <span class="wordmark__short">ACS</span>
       </span>
+      <span class="visually-hidden">, home</span>
     </a>
     <a class="version-chip" href={specUrl}><span class="version-chip__word">Standard </span>v{version}</a>
     <div class="site-header__search" data-search-slot></div>
