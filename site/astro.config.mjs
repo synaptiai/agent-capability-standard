@@ -1,6 +1,7 @@
 import { defineConfig } from 'astro/config';
 import { unified } from '@astrojs/markdown-remark';
 import { rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkDist, formatDistReport } from './src/lib/check-dist';
 import { checkBuiltSlugs } from './src/lib/check-slugs';
@@ -19,12 +20,18 @@ import { PROCESSOR_OPTIONS, SHIKI_CONFIG } from './src/lib/markdown';
 // and skips the plugins, and with them the link checks. So the cache is
 // removed whenever this config loads, and every build (`npm run build`,
 // which also passes --force, or a plain `astro build`) renders every source.
-for (const dir of ['node_modules/.astro', '.astro']) {
-  rmSync(new URL(`./${dir}/data-store.json`, import.meta.url), { force: true });
+//
+// ACS_ASTRO_CACHE_DIR (an absolute path) gives a build its own cache, so the
+// dist test can build while another Astro command runs in site/ without the
+// two reading each other's content cache.
+const cacheDir = process.env.ACS_ASTRO_CACHE_DIR;
+for (const dir of [cacheDir ?? fileURLToPath(new URL('./node_modules/.astro', import.meta.url)), fileURLToPath(new URL('./.astro', import.meta.url))]) {
+  rmSync(path.join(dir, 'data-store.json'), { force: true });
 }
 
 export default defineConfig({
   site: 'https://acs.synapti.ai',
+  ...(cacheDir ? { cacheDir } : {}),
   output: 'static',
   trailingSlash: 'always',
   build: { format: 'directory' },

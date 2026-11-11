@@ -26,15 +26,25 @@ import {
   symmetricEdgeTypes,
 } from './independent';
 
+let work = '';
 let dist = '';
 
+// The build gets its own output and cache directories, so the test can run
+// while another Astro command (astro check, astro dev, npm run build, another
+// test run) uses site/. The output directory must be inside site/: for one
+// outside it, Astro puts its prerender chunks in the shared site/.astro/.
 beforeAll(() => {
-  dist = mkdtempSync(path.join(tmpdir(), 'acs-site-'));
-  execFileSync('npx', ['astro', 'build', '--force', '--outDir', dist], { cwd: process.cwd(), stdio: 'pipe' });
+  work = mkdtempSync(path.join(process.cwd(), 'node_modules', '.acs-dist-test-'));
+  dist = path.join(work, 'dist');
+  execFileSync('npx', ['astro', 'build', '--force', '--outDir', dist], {
+    cwd: process.cwd(),
+    stdio: 'pipe',
+    env: { ...process.env, ACS_ASTRO_CACHE_DIR: path.join(work, 'cache') },
+  });
 }, 300_000);
 
 afterAll(() => {
-  if (dist) rmSync(dist, { recursive: true, force: true });
+  if (work) rmSync(work, { recursive: true, force: true });
 });
 
 /** Directories directly under `dir` that hold an index.html. */
