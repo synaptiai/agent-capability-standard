@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkDistDir, internalTarget, linkValues } from '../scripts/check-dist.mjs';
+import { checkDistDir, internalTarget, linkValues, markdownLinkValues } from '../scripts/check-dist.mjs';
 
 const O = 'https://acs.synapti.ai';
 
@@ -128,6 +128,36 @@ describe('check-dist.mjs', () => {
     ]);
   });
 
+  it('fails a broken site URL and a raw relative .md link in a Markdown copy', () => {
+    const s = cleanSite();
+    s['guide/index.md'] = `# Guide\n\nSee [x](${O}/no-such-page/) and [y](../docs/FAQ.md).\n`;
+    expect(problems(s)).toEqual([
+      `[links] /guide/index.md: ${O}/no-such-page/ does not resolve to a file in dist`,
+      "[md-links] /guide/index.md: links to ../docs/FAQ.md, a .md file that is not a page's Markdown copy",
+    ]);
+  });
+
+  it('fails a broken site URL and a missing fragment in llms-full.txt', () => {
+    const s = cleanSite();
+    s['llms-full.txt'] = `# all\n\n[x](${O}/no-such-page/)\n\n[y](${O}/guide/#install)\n`;
+    expect(problems(s)).toEqual([
+      `[links] /llms-full.txt: ${O}/no-such-page/ does not resolve to a file in dist`,
+      `[links] /llms-full.txt: ${O}/guide/#install names #install, which is not an id on /guide/`,
+    ]);
+  });
+
+  it('fails a social image on the site origin that is not in dist', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('<head>', `<head><meta property="og:image" content="${O}/og-missing.png">`);
+    expect(problems(s)).toEqual([`[links] /guide/: ${O}/og-missing.png does not resolve to a file in dist`]);
+  });
+
+  it('reports a broken link once per page, however often the page repeats it', () => {
+    const s = cleanSite();
+    s['index.html'] = s['index.html']!.replace('<a href="/guide/#setup">Setup</a>', '<a href="/guides/">a</a><a href="/guides/">b</a><a href="/guides/">c</a>');
+    expect(problems(s)).toEqual(['[links] /: /guides/ does not resolve to a file in dist']);
+  });
+
   it('fails when Pagefind did not run', () => {
     const s = cleanSite();
     delete s['pagefind/pagefind.js'];
@@ -140,6 +170,22 @@ describe('link parsing', () => {
     const html = '<pre><code>&lt;a href="/nope/"&gt;</code></pre><script>const a = \'<a href="/also-nope/">\';</script><a class="x" href="/a/?q=1&amp;b=2#k%C3%A9">y</a>';
     expect(linkValues(html)).toEqual(['/a/?q=1&b=2#k%C3%A9']);
     expect(internalTarget('/a/?q=1&b=2#k%C3%A9', '/')).toEqual({ path: '/a/', fragment: 'ké' });
+  });
+
+  it('reads meta content only when it is a URL on the site origin', () => {
+    const html = `<meta property="og:image" content="${O}/og.png"><meta name="description" content="/not-a-link/"><meta property="og:see" content="https://example.com/x.png">`;
+    expect(linkValues(html)).toEqual([`${O}/og.png`]);
+  });
+
+  it('reads Markdown links and definitions, not code', () => {
+    const md = [
+      '[a](/x/ "title") ![i](<../img one.png>) and `[no](/code-span/)`',
+      '```js',
+      'f(arr[0](/fenced/))',
+      '```',
+      '[ref]: https://example.com/r',
+    ].join('\n');
+    expect(markdownLinkValues(md)).toEqual(['/x/', '../img one.png', 'https://example.com/r']);
   });
 
   it('resolves relative links against the page and leaves other origins alone', () => {

@@ -2,9 +2,11 @@
 // Pagefind has written its files. It reads only dist/, so it does not share
 // code with the route table that produced the pages:
 // - links: every internal href and src (root-relative, relative, or an
-//   absolute URL on the site's own origin) names a file in dist/, a page
-//   directory with an index.html, or a _redirects source; every #fragment on
-//   an HTML target names an id (or a name) on that page;
+//   absolute URL on the site's own origin), every <meta> content that is a URL
+//   on the site's origin (og:image), and every Markdown link in the Markdown
+//   copies and llms-full.txt names a file in dist/, a page directory with an
+//   index.html, or a _redirects source; every #fragment on an HTML target
+//   names an id (or a name) on that page;
 // - md-links: no internal link ends in .md, other than a link to a page's
 //   Markdown copy (<page>/index.md next to that page's index.html);
 // - copies: every page has a Markdown copy, every copy has a page, and
@@ -66,13 +68,46 @@ function tags(html) {
   return bare.match(/<[a-zA-Z][^>]*>/g) ?? [];
 }
 
-/** Every href and src value in a page's tags, entity-decoded. */
-export function linkValues(html) {
+/**
+ * Every href and src value in a page's tags, and every <meta> content that is
+ * a URL on `origin` (og:image and the like), entity-decoded.
+ */
+export function linkValues(html, origin = SITE_ORIGIN) {
   const out = [];
   for (const tag of tags(html)) {
     for (const m of tag.matchAll(/\s(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
       out.push(decodeEntities(m[2] ?? m[3] ?? m[4] ?? ''));
     }
+    if (/^<meta\b/i.test(tag)) {
+      for (const m of tag.matchAll(/\scontent\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+        const v = decodeEntities(m[1] ?? m[2] ?? '').trim();
+        if (v === origin || v.startsWith(`${origin}/`)) out.push(v);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Every link target in a Markdown text: inline links and images
+ * `[text](target "title")` and reference definitions `[id]: target`. Fenced
+ * code blocks and inline code spans are skipped.
+ */
+export function markdownLinkValues(md) {
+  const out = [];
+  let fence = null;
+  for (const line of md.split('\n')) {
+    const f = line.match(/^\s{0,3}(`{3,}|~{3,})/);
+    if (f) {
+      if (fence === null) fence = f[1];
+      else if (f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+    const text = line.replace(/(`+)[\s\S]*?\1/g, '');
+    for (const m of text.matchAll(/\]\(\s*(?:<([^>]*)>|([^)\s]+))/g)) out.push(m[1] ?? m[2]);
+    const def = text.match(/^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)/);
+    if (def) out.push(def[1]);
   }
   return out;
 }
@@ -141,43 +176,49 @@ export function isCopyLink(urlPath, files) {
   return files.has(`${urlPath.slice(1, -COPY.length)}index.html`);
 }
 
+/** True for a Markdown file whose links the link check reads. */
+function isMarkdownWithLinks(f) {
+  return f === COPY || f.endsWith(`/${COPY}`) || f === 'llms-full.txt';
+}
+
 /**
- * Link problems on every HTML file in a dist listing. `read(file)` returns a
- * file's text. Returns { links, mdLinks, checked } where the first two are
- * problem lines.
+ * Link problems on every HTML file, Markdown copy and llms-full.txt in a dist
+ * listing. `read(file)` returns a file's text. Returns { links, mdLinks,
+ * checked } where the first two are problem lines, each reported once.
  */
 export function checkLinks(fileList, read, redirects = new Set()) {
   const files = new Set(fileList);
-  const html = fileList.filter((f) => f.endsWith('.html'));
+  const sources = fileList.filter((f) => f.endsWith('.html') || isMarkdownWithLinks(f));
   const idCache = new Map();
   const idsOf = (f) => {
     if (!idCache.has(f)) idCache.set(f, anchorIds(read(f)));
     return idCache.get(f);
   };
-  const links = [];
-  const mdLinks = [];
+  const links = new Set();
+  const mdLinks = new Set();
   let checked = 0;
-  for (const f of html) {
-    const from = pageUrl(f);
-    for (const value of linkValues(read(f))) {
+  for (const f of sources) {
+    const from = f.endsWith('.html') ? pageUrl(f) : `/${f}`;
+    const values = f.endsWith('.html') ? linkValues(read(f)) : markdownLinkValues(read(f));
+    for (const value of values) {
       const t = internalTarget(value, from);
       if (t === null) continue;
       checked += 1;
       if (/\.md$/i.test(t.path) && !isCopyLink(t.path, files)) {
-        mdLinks.push(`${from}: links to ${value}, a .md file that is not a page's Markdown copy`);
+        mdLinks.add(`${from}: links to ${value}, a .md file that is not a page's Markdown copy`);
         continue;
       }
       const target = servedFile(t.path, files);
       if (target === null) {
-        if (!redirects.has(t.path)) links.push(`${from}: ${value} does not resolve to a file in dist`);
+        if (!redirects.has(t.path)) links.add(`${from}: ${value} does not resolve to a file in dist`);
         continue;
       }
       if (t.fragment !== null && t.fragment !== '' && target.endsWith('.html') && !idsOf(target).has(t.fragment)) {
-        links.push(`${from}: ${value} names #${t.fragment}, which is not an id on ${pageUrl(target)}`);
+        links.add(`${from}: ${value} names #${t.fragment}, which is not an id on ${pageUrl(target)}`);
       }
     }
   }
-  return { links, mdLinks, checked };
+  return { links: [...links], mdLinks: [...mdLinks], checked };
 }
 
 /** URL paths of the HTML pages: every .html file but the 404 page. */
