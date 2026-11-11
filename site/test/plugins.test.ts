@@ -300,3 +300,31 @@ describe('tableLabel', () => {
     expect(tableLabel('', null)).toBe('Table');
   });
 });
+
+describe('rehype-task-lists', () => {
+  it('names each checkbox with its own item text, not its nested items', async () => {
+    const md = '# T\n\n- [ ] Verify the checkpoint exists\n- [x] Log the `mutation` result\n  - [ ] Nested step\n';
+    const { html } = await pageOf('docs/FAQ.md', md);
+    const labels = [...html.matchAll(/<input type="checkbox"[^>]*aria-label="([^"]*)"/g)].map((m) => m[1]);
+    // Written by hand from the three items above.
+    expect(labels).toEqual(['Verify the checkpoint exists', 'Log the mutation result', 'Nested step']);
+    expect(html).not.toMatch(/<input type="checkbox"(?![^>]*aria-label)[^>]*>/);
+  });
+
+  it('cuts a long item at a word', async () => {
+    const { taskLabel } = await import('../src/plugins/rehype-task-lists');
+    const long = 'word '.repeat(40).trim(); // 199 characters
+    const out = taskLabel(long);
+    expect(out.endsWith('word…')).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(121);
+  });
+});
+
+describe('rehype-tables labels', () => {
+  it('gives tables under the same heading distinct region names', async () => {
+    const md = '# T\n\n## Fields\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n| c | d |\n|---|---|\n| 3 | 4 |\n';
+    const { html } = await pageOf('docs/FAQ.md', md);
+    const labels = [...html.matchAll(/class="table-wrap"[^>]*aria-label="([^"]*)"/g)].map((m) => m[1]);
+    expect(labels).toEqual(['Table: Fields', 'Table: Fields (2)']);
+  });
+});

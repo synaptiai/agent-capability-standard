@@ -13,6 +13,7 @@ import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypeCallouts from '../plugins/rehype-callouts';
 import rehypeKeywords from '../plugins/rehype-keywords';
 import rehypeTables from '../plugins/rehype-tables';
+import rehypeTaskLists from '../plugins/rehype-task-lists';
 import remarkHtmlAllowlist from '../plugins/remark-html-allowlist';
 import remarkPageMeta from '../plugins/remark-page-meta';
 import remarkRepoLinks from '../plugins/remark-repo-links';
@@ -66,5 +67,6 @@ export const PROCESSOR_OPTIONS: UnifiedProcessorOptions = {
     [rehypeKeywords, { sources: KEYWORD_SOURCES }],
     rehypeCallouts,
     rehypeTables,
+    rehypeTaskLists,
   ],
 };

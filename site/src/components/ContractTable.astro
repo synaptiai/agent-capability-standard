@@ -36,7 +36,7 @@ const { rows, caption, from } = Astro.props;
               {r.nested && (
                 <details class="contract-table__nested">
                   <summary>Show schema</summary>
-                  <pre class="code-block code-block--yaml"><code>{r.nested}</code></pre>
+                  <pre class="code-block code-block--yaml" tabindex="0"><code>{r.nested}</code></pre>
                 </details>
               )}
             </td>

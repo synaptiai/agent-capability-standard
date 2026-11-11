@@ -208,3 +208,18 @@ describe('description lists', () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe('scrollable code blocks', () => {
+  it('makes every hand-written <pre> keyboard-focusable', () => {
+    // Markdown code blocks get tabindex="0" from Shiki; components write their
+    // own <pre>, which scrolls sideways when a line is long and must then be
+    // reachable by keyboard (axe rule scrollable-region-focusable).
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(`${dir}/${e.name}`) : e.name.endsWith('.astro') ? [`${dir}/${e.name}`] : [],
+      );
+    const pres = walk('src').flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/<pre\b[^>]*>/g)].map((m) => `${f}: ${m[0]}`));
+    expect(pres.length).toBeGreaterThan(0);
+    expect(pres.filter((p) => !/tabindex="0"/.test(p))).toEqual([]);
+  });
+});
