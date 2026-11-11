@@ -1,0 +1,97 @@
+---
+// One page per layer of the ontology: its description and cognitive mapping,
+// its capabilities, the edges that cross into other layers, and the workflows
+// that use its capabilities.
+import CapabilityTile from '../../components/CapabilityTile.astro';
+import LayerBadge from '../../components/LayerBadge.astro';
+import { capabilitiesOfLayer, loadOntology } from '../../data/ontology';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { capabilityHref, refSlugger, routesByTemplate, specSectionHref, workflowHref } from '../../lib/generated';
+import type { Route } from '../../lib/routes';
+import { crossLayerEdges, layerUsage } from '../../lib/views';
+
+export function getStaticPaths() {
+  const { layers } = loadOntology();
+  return routesByTemplate('layer').map((route) => {
+    const layer = layers.find((l) => `/layers/${l.slug}/` === route.url);
+    if (!layer) throw new Error(`layers: no layer for ${route.url}`);
+    return { params: { layer: layer.slug }, props: { route, layerId: layer.id } };
+  });
+}
+
+interface Props {
+  route: Route;
+  layerId: string;
+}
+
+const { route, layerId } = Astro.props;
+const ontology = loadOntology();
+const layer = ontology.layers.find((l) => l.id === layerId)!;
+const caps = capabilitiesOfLayer(ontology, layer.id);
+const crossing = crossLayerEdges(layer.id, ontology);
+const usage = layerUsage(layer.id);
+const id = refSlugger();
+const sentence = `${layer.description.replace(/\.$/, '')}.`;
+---
+<DocLayout route={route} title={layer.id} description={`${sentence} ${layer.capabilities.length} capabilities.`}>
+  <article class="doc doc--layer" data-layer={layer.slug} data-pagefind-body>
+    <header class="layer-header">
+      <p class="layer-header__position">Layer {layer.order + 1} of {ontology.layers.length}</p>
+      <h1 id={id(layer.id)}>{layer.id}</h1>
+      <p class="lead">{sentence}</p>
+      <dl class="layer-meta">
+        <div><dt>Cognitive mapping</dt><dd>{layer.cognitive_mapping}</dd></div>
+        <div><dt>Capabilities</dt><dd>{layer.capabilities.length}</dd></div>
+      </dl>
+      <p>Layers are defined in <a href={specSectionHref('4.2')}>section 4.2 of the Standard</a>.</p>
+    </header>
+
+    <section class="layer-capabilities">
+      <h2 id={id('Capabilities')}>Capabilities</h2>
+      <ul class="capability-tiles">
+        {caps.map((cap) => <li><CapabilityTile cap={cap} /></li>)}
+      </ul>
+    </section>
+
+    <section class="layer-edges">
+      <h2 id={id('Edges to other layers')}>Edges to other layers</h2>
+      {crossing.length === 0 ? (
+        <p>No edge connects this layer's capabilities to another layer.</p>
+      ) : (
+        crossing.map((g) => (
+          <div class="table-scroll" data-edge-type={g.type}>
+            <table class="edge-table">
+              <caption><code>{g.type}</code> edges ({g.edges.length})</caption>
+              <thead><tr><th scope="col">From</th><th scope="col">To</th><th scope="col">Other layer</th></tr></thead>
+              <tbody>
+                {g.edges.map((e) => (
+                  <tr data-direction={e.direction}>
+                    <td><a href={capabilityHref(e.from)}><code>{e.from}</code></a></td>
+                    <td><a href={capabilityHref(e.to)}><code>{e.to}</code></a></td>
+                    <td><LayerBadge layer={e.otherLayer} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))
+      )}
+    </section>
+
+    <section class="layer-workflows">
+      <h2 id={id('Workflows that use this layer')}>Workflows that use this layer</h2>
+      {usage.length === 0 ? (
+        <p>No reference or domain workflow uses a capability of this layer.</p>
+      ) : (
+        <ul class="usage-list">
+          {usage.map((u) => (
+            <li data-workflow={u.workflow.id}>
+              <a href={workflowHref(u.workflow.id)}><code>{u.workflow.id}</code></a> uses{' '}
+              {u.capabilities.map((c, i) => <>{i > 0 && ', '}<a href={capabilityHref(c)}><code>{c}</code></a></>)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  </article>
+</DocLayout>

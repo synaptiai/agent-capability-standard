@@ -1,0 +1,175 @@
+---
+// One page per capability, from its ontology node: the contract, safety flags,
+// edges by type, the workflows that use it, and the skill that implements it
+// (skills/<id>/SKILL.md, rendered through the Markdown pipeline). The layer
+// always comes from the ontology. Headings the page adds have `ref-` ids; the
+// skill's own headings keep the ids GitHub gives them.
+import { getEntry, render } from 'astro:content';
+import CapabilityFlags from '../../components/CapabilityFlags.astro';
+import ContractTable from '../../components/ContractTable.astro';
+import LayerBadge from '../../components/LayerBadge.astro';
+import { loadOntology, ONTOLOGY_SOURCE } from '../../data/ontology';
+import { loadVersions } from '../../data/versions';
+import { capabilityUsage } from '../../data/workflows';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { capabilityHref, refSlugger, routesByTemplate, workflowHref } from '../../lib/generated';
+import { COMMIT_SHA, githubBlobUrl } from '../../lib/repo';
+import type { Route } from '../../lib/routes';
+import { contractRows, EDGE_LABELS, edgeGroups } from '../../lib/views';
+
+export function getStaticPaths() {
+  const ontology = loadOntology();
+  return routesByTemplate('capability').map((route) => {
+    const cap = ontology.capabilities.find((c) => route.source === `skills/${c.id}/SKILL.md`);
+    if (!cap) throw new Error(`capabilities: no capability for ${route.url}`);
+    return { params: { id: route.url.split('/')[2]! }, props: { route, capId: cap.id } };
+  });
+}
+
+interface Props {
+  route: Route;
+  capId: string;
+}
+
+const { route, capId } = Astro.props;
+const ontology = loadOntology();
+const cap = ontology.byId.get(capId)!;
+const usage = capabilityUsage(cap.id);
+const groups = edgeGroups(cap, ontology);
+const versions = loadVersions();
+const id = refSlugger();
+
+const entry = await getEntry('docs', route.source!);
+if (!entry) throw new Error(`capabilities: no docs entry for ${route.source}`);
+const { Content } = await render(entry);
+const fm = entry.data;
+const skillFacts = (
+  [
+    ['argument-hint', 'Arguments'],
+    ['allowed-tools', 'Allowed tools'],
+    ['agent', 'Agent'],
+    ['context', 'Context'],
+  ] as const
+).flatMap(([key, label]) => {
+  const v = fm[key];
+  return typeof v === 'string' && v.trim() !== '' ? [{ label, value: v }] : [];
+});
+---
+<DocLayout route={route} title={cap.id} description={cap.description}>
+  <article class="doc doc--capability" data-capability={cap.id} data-layer={cap.layer.toLowerCase()} data-pagefind-body>
+    <header class="capability-header">
+      <LayerBadge layer={cap.layer} />
+      <h1 id={id(cap.id)}><code>{cap.id}</code></h1>
+      <p class="lead">{cap.description}</p>
+      <CapabilityFlags cap={cap} />
+    </header>
+
+    <section class="capability-contract">
+      <h2 id={id('Contract')}>Contract</h2>
+      <h3 id={id('Inputs')}>Inputs</h3>
+      <ContractTable rows={contractRows(cap.input_schema)} caption={`Inputs of ${cap.id}`} from={ONTOLOGY_SOURCE} />
+      <h3 id={id('Outputs')}>Outputs</h3>
+      <ContractTable rows={contractRows(cap.output_schema)} caption={`Outputs of ${cap.id}`} from={ONTOLOGY_SOURCE} />
+    </section>
+
+    <section class="capability-relationships">
+      <h2 id={id('Relationships')}>Relationships</h2>
+      {groups.length === 0 ? (
+        <p>No edge in the ontology starts or ends at this capability.</p>
+      ) : (
+        <div class="table-scroll">
+          <table class="edge-table">
+            <caption>Edges of {cap.id} in the ontology, by type</caption>
+            <thead>
+              <tr>
+                <th scope="col">Edge type</th>
+                <th scope="col">From this capability</th>
+                <th scope="col">To this capability</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <tr data-edge-type={g.type}>
+                  <th scope="row"><code>{g.type}</code></th>
+                  {g.symmetric ? (
+                    <td colspan="2">
+                      <span class="edge-table__label">{EDGE_LABELS[g.type].out}</span>{' '}
+                      <ul class="edge-table__list">
+                        {g.related.map((c) => <li><a href={capabilityHref(c)}><code>{c}</code></a></li>)}
+                      </ul>
+                    </td>
+                  ) : (
+                    <>
+                      <td>
+                        {g.outgoing.length > 0 && (
+                          <>
+                            <span class="edge-table__label">{EDGE_LABELS[g.type].out}</span>{' '}
+                            <ul class="edge-table__list">
+                              {g.outgoing.map((c) => <li><a href={capabilityHref(c)}><code>{c}</code></a></li>)}
+                            </ul>
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        {g.incoming.length > 0 && (
+                          <>
+                            <span class="edge-table__label">{EDGE_LABELS[g.type].in}</span>{' '}
+                            <ul class="edge-table__list">
+                              {g.incoming.map((c) => <li><a href={capabilityHref(c)}><code>{c}</code></a></li>)}
+                            </ul>
+                          </>
+                        )}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+
+    <section class="capability-usage">
+      <h2 id={id('Used in workflows')}>Used in workflows</h2>
+      {usage.length === 0 ? (
+        <p>No reference or domain workflow uses this capability.</p>
+      ) : (
+        <ul class="usage-list">
+          {usage.map((u) => (
+            <li data-workflow={u.workflowId} data-catalog={u.catalog}>
+              <a href={workflowHref(u.workflowId)}><code>{u.workflowId}</code></a>
+              {' '}
+              <span class="usage-list__steps">{u.steps.length === 1 ? 'step' : 'steps'} {u.steps.join(', ')}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+
+    <section class="capability-skill" data-skill={cap.id}>
+      <h2 id={id('Claude Code skill')}>Claude Code skill</h2>
+      <p>
+        The skill <code>{typeof fm.name === 'string' ? fm.name : cap.id}</code> implements this capability.
+        {typeof fm.description === 'string' && <> {fm.description}</>}
+      </p>
+      {skillFacts.length > 0 && (
+        <dl class="skill-meta">
+          {skillFacts.map((f) => (
+            <div>
+              <dt>{f.label}</dt>
+              <dd><code>{f.value}</code></dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <div class="doc__body">
+        <Content />
+      </div>
+    </section>
+
+    <p class="generated-stamp">
+      From ontology {versions.ontology} (<a href={githubBlobUrl(ONTOLOGY_SOURCE)}>{ONTOLOGY_SOURCE}</a>), commit <code>{COMMIT_SHA.slice(0, 12)}</code>.
+    </p>
+  </article>
+</DocLayout>
