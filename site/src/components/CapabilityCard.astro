@@ -1,0 +1,23 @@
+---
+// A capability as a card on a layer page: its id, description, risk and flags.
+import type { Capability } from '../data/ontology';
+import { capabilityHref } from '../lib/generated';
+import CapabilityFlags from './CapabilityFlags.astro';
+
+interface Props {
+  cap: Capability;
+}
+
+const { cap } = Astro.props;
+---
+<article
+  class="capability-card has-layer"
+  style={`--layer: var(--layer-${cap.layer})`}
+  data-capability={cap.id}
+  data-risk={cap.risk}
+  data-mutation={cap.mutation ? 'true' : 'false'}
+>
+  <a class="capability-card__id" href={capabilityHref(cap.id)}><code>{cap.id}</code></a>
+  <p class="capability-card__description">{cap.description}</p>
+  <CapabilityFlags cap={cap} links={false} />
+</article>

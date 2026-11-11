@@ -1,31 +1,34 @@
 ---
-// The periodic table of capabilities: one column per layer, in ontology order,
-// each column listing its capabilities in the layer's own order. Generated
+// The periodic table of capabilities (design notes, design-system section
+// 11): one column per layer in ontology order, each with its name and count,
+// then its capabilities as tiles numbered 1 onwards in layer order. Generated
 // from the ontology; nothing in it is typed by hand.
 import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
 import { layerHref } from '../lib/generated';
+import { capabilitySymbols, tableOrder } from '../lib/views';
 import CapabilityTile from './CapabilityTile.astro';
 
-interface Props {
-  /** Show each capability's description in its tile. */
-  descriptions?: boolean;
-}
-
-const { descriptions = false } = Astro.props;
 const ontology = loadOntology();
+const order = tableOrder(ontology);
+const symbols = capabilitySymbols(order);
 ---
-<div class="capability-table" role="list" aria-label="Capabilities by layer">
+<div class="capability-table" data-capabilities={order.length}>
   {ontology.layers.map((layer) => (
-    <section class="capability-table__layer" role="listitem" data-layer={layer.slug} aria-label={layer.id}>
+    <section
+      class="capability-table__layer has-layer"
+      style={`--layer: var(--layer-${layer.id})`}
+      data-layer={layer.slug}
+      aria-label={`${layer.id}, ${layer.capabilities.length} capabilities`}
+    >
       <p class="capability-table__layer-name">
         <a href={layerHref(layer.id)}>{layer.id}</a>
         <span class="capability-table__layer-count">{layer.capabilities.length}</span>
       </p>
-      <ol class="capability-table__tiles">
+      <ul class="capability-table__tiles">
         {capabilitiesOfLayer(ontology, layer.id).map((cap) => (
-          <li><CapabilityTile cap={cap} description={descriptions} /></li>
+          <li><CapabilityTile cap={cap} index={order.indexOf(cap.id) + 1} symbol={symbols.get(cap.id)!} /></li>
         ))}
-      </ol>
+      </ul>
     </section>
   ))}
 </div>

@@ -2,7 +2,7 @@
 // One page per layer of the ontology: its description and cognitive mapping,
 // its capabilities, the edges that cross into other layers, and the workflows
 // that use its capabilities.
-import CapabilityTile from '../../components/CapabilityTile.astro';
+import CapabilityCard from '../../components/CapabilityCard.astro';
 import LayerBadge from '../../components/LayerBadge.astro';
 import { capabilitiesOfLayer, loadOntology } from '../../data/ontology';
 import DocLayout from '../../layouts/DocLayout.astro';
@@ -49,7 +49,7 @@ const sentence = `${layer.description.replace(/\.$/, '')}.`;
     <section class="layer-capabilities">
       <h2 id={id('Capabilities')}>Capabilities</h2>
       <ul class="capability-tiles">
-        {caps.map((cap) => <li><CapabilityTile cap={cap} /></li>)}
+        {caps.map((cap) => <li><CapabilityCard cap={cap} /></li>)}
       </ul>
     </section>
 
@@ -59,7 +59,7 @@ const sentence = `${layer.description.replace(/\.$/, '')}.`;
         <p>No edge connects this layer's capabilities to another layer.</p>
       ) : (
         crossing.map((g) => (
-          <div class="table-scroll" data-edge-type={g.type}>
+          <div class="table-wrap" data-edge-type={g.type}>
             <table class="edge-table">
               <caption><code>{g.type}</code> edges ({g.edges.length})</caption>
               <thead><tr><th scope="col">From</th><th scope="col">To</th><th scope="col">Other layer</th></tr></thead>

@@ -1,15 +1,20 @@
 ---
-// The risk level of a capability or step (Standard §4.1). Always shows the word.
+// The risk level of a capability or step (Standard §4.1): the word, with one,
+// two or three pips for low, medium and high.
 import type { Risk } from '../data/ontology';
 
 interface Props {
   risk: Risk;
   href?: string;
-  /** Text before the level, e.g. "Risk" or "Effective risk". */
+  /** Text before the level, e.g. "Risk". */
   label?: string;
 }
 
 const { risk, href, label = 'Risk' } = Astro.props;
+const pips = { low: 1, medium: 2, high: 3 }[risk];
 const Tag = href ? 'a' : 'span';
 ---
-<Tag class:list={['risk-badge', `risk-badge--${risk}`]} href={href} data-risk={risk}>{label}: {risk}</Tag>
+<Tag class:list={['risk-badge', `risk-badge--${risk}`]} href={href} data-risk={risk}>
+  <span class="risk-pips" data-level={pips} aria-hidden="true">{Array.from({ length: pips }, () => <span class="risk-pips__pip"></span>)}</span>
+  {label}: {risk}
+</Tag>
