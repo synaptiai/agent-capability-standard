@@ -143,6 +143,22 @@ describe('remark-html-allowlist', () => {
     }
   });
 
+  it('reads comments and tags in one pass, as a browser does', () => {
+    // A "<!--" inside a tag, or inside a quoted attribute value, is part of
+    // the tag, so it must not hide the tag or what follows it.
+    expect(checkHtml('<details open ontoggle=alert(1) <!-- -->')).not.toEqual([]);
+    expect(checkHtml('<details><a name="<!--"><details open ontoggle=alert(1)>-->')).toContain(
+      '<details> may carry only open, found: open, ontoggle',
+    );
+    // A tag with no closing ">" is not let through unread.
+    expect(checkHtml('<details open ontoggle=alert(1) x="')).toEqual(['unclosed or malformed tag: <details open ontoggle=alert(1) x="']);
+  });
+
+  it('fails the build on an event handler hidden after a comment opener through the real pipeline', async () => {
+    const text = `${readRepoFile('docs/FAQ.md')}\n\n<details open ontoggle=alert(1) <!-- -->\n`;
+    await expect(renderRepoFile('docs/FAQ.md', text)).rejects.toThrow(/remark-html-allowlist/);
+  });
+
   it('fails the build on an event handler through the real pipeline', async () => {
     const text = `${readRepoFile('docs/FAQ.md')}\n\n<details open ontoggle="alert(1)">\n<summary>x</summary>\n</details>\n`;
     await expect(renderRepoFile('docs/FAQ.md', text)).rejects.toThrow(/<details> may carry only open/);

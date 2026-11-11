@@ -23,20 +23,24 @@ const ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
   sub: new Set(),
 };
 
-// A comment the HTML parser reads the same way: its text does not start with
-// `>` or `->` and contains no `--`.
-const COMMENT = /<!--(?!>|->)(?:(?!--)[\s\S])*-->/g;
-const COMMENT_PART = /<!--|--!?>/;
-const TAG = /<(\/?)([A-Za-z][A-Za-z0-9-]*)([^>]*)>/g;
+// One left-to-right pass, as a browser reads it: whichever of a comment or a
+// tag starts first wins, so a "<!--" inside a tag or a quoted attribute value
+// is part of that tag. A comment counts only when the HTML parser reads it the
+// same way: its text does not start with `>` or `->` and contains no `--`.
+const TOKEN = /<!--(?!>|->)(?:(?!--)[\s\S])*-->|<(\/?)([A-Za-z][A-Za-z0-9-]*)((?:"[^"]*"|'[^']*'|[^'">])*)>/g;
+// Anything left that a browser could read as markup: a tag with no closing
+// ">", a malformed comment, a <!...> or <?...> construct.
+const LEFTOVER = /<[A-Za-z/!?][^\n]*/;
 const ATTR = /([^\s=/]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/g;
 
 /** Problems with one raw HTML string; empty when it is allowed. */
 export function checkHtml(value: string): string[] {
   const problems: string[] = [];
-  const html = value.replace(COMMENT, '');
-  if (COMMENT_PART.test(html)) problems.push('malformed HTML comment: a browser ends it at a different place');
-  for (const m of html.matchAll(TAG)) {
+  const leftover = LEFTOVER.exec(value.replace(TOKEN, ''));
+  if (leftover) problems.push(`unclosed or malformed tag: ${leftover[0].slice(0, 60)}`);
+  for (const m of value.matchAll(TOKEN)) {
     const [, closing, rawName, attrs] = m;
+    if (rawName === undefined) continue; // a comment
     const name = rawName!.toLowerCase();
     if (!ALLOWED_ELEMENTS.has(name)) {
       problems.push(`<${closing}${rawName}> is not an allowed HTML element`);
