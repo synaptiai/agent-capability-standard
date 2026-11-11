@@ -79,8 +79,8 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/synaptiai/agent-capability-standard"
-Documentation = "https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/claude_agent_sdk.md"
+Homepage = "https://acs.synapti.ai/"
+Documentation = "https://acs.synapti.ai/guides/claude-agent-sdk/"
 Repository = "https://github.com/synaptiai/agent-capability-standard"
 
 [tool.maturin]
