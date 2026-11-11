@@ -29,7 +29,7 @@ The Grounded Agency framework handles three types of uncertainty:
 
 | Uncertainty Type | How Handled |
 |------------------|-------------|
-| Data uncertainty | `uncertainty-model` with epistemic/aleatoric typing |
+| Data uncertainty | The `Uncertainty` record in the world state schema, typed epistemic, aleatoric or mixed |
 | Source conflicts | Trust model with authority weights |
 | Capability uncertainty | Dependency graph blocks invalid compositions |
 
