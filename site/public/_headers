@@ -1,0 +1,17 @@
+# Cloudflare Pages response headers.
+# The Markdown copy of each page, at <route>index.md.
+/*.md
+  Content-Type: text/markdown; charset=utf-8
+
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+
+/llms-full.txt
+  Content-Type: text/plain; charset=utf-8
+
+# Keep the pages.dev copies of the site out of search engines.
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
+
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex

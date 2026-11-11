@@ -1,10 +1,11 @@
 import { defineConfig } from 'astro/config';
 import { unified } from '@astrojs/markdown-remark';
-import { rmSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { checkDist, formatDistReport } from './src/lib/check-dist';
 import { checkBuiltSlugs } from './src/lib/check-slugs';
 import { formatLinkStats, linkStats } from './src/lib/links';
+import { REDIRECTS_FILE, redirectsFile } from './src/lib/redirects';
 import { markdownSources } from './src/lib/routes';
 import { PROCESSOR_OPTIONS, SHIKI_CONFIG } from './src/lib/markdown';
 
@@ -66,6 +67,9 @@ export default defineConfig({
           if (distProblems.length > 0) {
             throw new Error(`built site:\n  ${distProblems.join('\n  ')}`);
           }
+          // The /spec/ redirect names the current version, so it is written here rather than kept in public/.
+          writeFileSync(new URL(REDIRECTS_FILE, dir), redirectsFile());
+          logger.info(`redirects: ${redirectsFile().trim().split('\n').join('; ')}`);
           logger.info(`pages: every one of the ${dist.pages} routes has a page; no id is repeated; every heading has an id; generated headings use ref- ids`);
         },
       },
