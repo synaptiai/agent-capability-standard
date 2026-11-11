@@ -6,6 +6,8 @@
 import type { Workflow } from '../data/workflows';
 import { capabilityHref, diagnosticHref, workflowHref } from '../lib/generated';
 import { failureRows, gateRows, type DiagramStep } from '../lib/views';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+import Callout from './Callout.astro';
 import FlagBadge from './FlagBadge.astro';
 import LayerBadge from './LayerBadge.astro';
 import RiskBadge from './RiskBadge.astro';
@@ -21,6 +23,9 @@ const e = step.effective;
 const gates = gateRows(step);
 const failures = failureRows(step);
 const stepId = (n: number) => `ref-step-${n}`;
+// The node glyph shows the role, so the colour of the node is not the only signal.
+const NODE_GLYPH: Partial<Record<typeof role, string>> = { checkpoint: 'flag', verify: 'check', rollback: 'undo', mutating: 'pencil' };
+const nodeGlyph = NODE_GLYPH[role];
 ---
 <li
   id={stepId(step.index)}
@@ -33,7 +38,7 @@ const stepId = (n: number) => `ref-step-${n}`;
   data-capability={step.capability}
   data-layer={step.layer.toLowerCase()}
 >
-  <span class="wf-step__node" aria-hidden="true"></span>
+  <span class="wf-step__node" aria-hidden="true">{nodeGlyph && <PixelGlyph name={nodeGlyph} />}</span>
   <span class="wf-step__number">{step.index}</span>
   <div class="wf-step__card">
     <p class="wf-step__head">
@@ -55,28 +60,30 @@ const stepId = (n: number) => `ref-step-${n}`;
       <p class="wf-step__checkpoint">Restores the checkpoint from <a href={`#${stepId(checkpointStep)}`}>step {checkpointStep}</a>.</p>
     )}
     {missingCheckpoint && (
-      <p class="callout callout--caution" role="note">
-        This step needs a checkpoint before it, and no earlier step is one. A validator reports
-        {' '}<a href={diagnosticHref(missingCheckpoint)}><code>{missingCheckpoint}</code></a>.
-      </p>
+      <Callout type="caution">
+        <p>
+          This step needs a checkpoint before it, and no earlier step is one. A validator reports
+          {' '}<a href={diagnosticHref(missingCheckpoint)}><code>{missingCheckpoint}</code></a>.
+        </p>
+      </Callout>
     )}
     {step.condition !== undefined && step.condition !== null && (
       <p class="wf-step__branch">
-        <span class="wf-step__only-if">Only if</span> <code>{String(step.condition)}</code>
+        <PixelGlyph name="diamond" /><span class="wf-step__only-if">Only if</span> <code>{String(step.condition)}</code>
       </p>
     )}
     {gates.length > 0 && (
       <ul class="wf-step__gates">
         {gates.map((g) => (
           <li>
-            <span class="wf-step__gate-label">Gate</span>{g.phase && <> ({g.phase} the step)</>}: when <code>{g.when}</code>,{' '}
+            <PixelGlyph name="diamond" /> <span class="wf-step__gate-label">Gate</span>{g.phase && <> ({g.phase} the step)</>}: when <code>{g.when}</code>,{' '}
             <code>{g.action}</code>.{g.message && <> {g.message}</>}
           </li>
         ))}
       </ul>
     )}
     {step.workflow_id && (
-      <p class="wf-step__subflow">Runs workflow <a href={workflowHref(step.workflow_id)}><code>{step.workflow_id}</code></a></p>
+      <p class="wf-step__subflow"><PixelGlyph name="nested" /> Runs workflow <a href={workflowHref(step.workflow_id)}><code>{step.workflow_id}</code></a></p>
     )}
     {step.store_as && <p class="wf-step__store">Stores <code>{step.store_as}</code></p>}
     {failures.length > 0 && (

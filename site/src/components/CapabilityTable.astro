@@ -2,10 +2,12 @@
 // The periodic table of capabilities (design notes, design-system section
 // 11): one column per layer in ontology order, each with its name and count,
 // then its capabilities as tiles numbered 1 onwards in layer order. Generated
-// from the ontology; nothing in it is typed by hand.
+// from the ontology; nothing in it is typed by hand, and the number of
+// columns in the wide layout is the number of layers.
 import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
 import { layerHref } from '../lib/generated';
 import { capabilitySymbols, tableOrder } from '../lib/views';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
 import CapabilityTile from './CapabilityTile.astro';
 
 const ontology = loadOntology();
@@ -13,6 +15,7 @@ const order = tableOrder(ontology);
 const symbols = capabilitySymbols(order);
 ---
 <div class="capability-table" data-capabilities={order.length}>
+  <div class="capability-table__grid" style={`--layers: ${ontology.layers.length}`}>
   {ontology.layers.map((layer) => (
     <section
       class="capability-table__layer has-layer"
@@ -21,6 +24,7 @@ const symbols = capabilitySymbols(order);
       aria-label={`${layer.id}, ${layer.capabilities.length} capabilities`}
     >
       <p class="capability-table__layer-name">
+        <PixelGlyph name={layer.id} layer={layer.id} scale={3} />
         <a href={layerHref(layer.id)}>{layer.id}</a>
         <span class="capability-table__layer-count">{layer.capabilities.length}</span>
       </p>
@@ -31,4 +35,5 @@ const symbols = capabilitySymbols(order);
       </ul>
     </section>
   ))}
+  </div>
 </div>

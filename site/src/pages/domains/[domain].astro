@@ -6,6 +6,7 @@
 // README. A listed id that no catalog defines is shown as proposed.
 import { getEntry, render } from 'astro:content';
 import StatusBadge from '../../components/StatusBadge.astro';
+import { PROPOSED_WORKFLOW_STATUS } from '../../lib/status';
 import ValueList from '../../components/ValueList.astro';
 import { loadProfiles } from '../../data/profiles';
 import { loadWorkflows } from '../../data/workflows';
@@ -195,7 +196,7 @@ const title = page?.title ?? `${d.key} domain`;
                 {wf ? (
                   <><a href={workflowHref(w.id)}><code>{w.id}</code></a>: {wf.goal}</>
                 ) : (
-                  <><code>{w.id}</code> <StatusBadge status="Proposed, not yet in a catalog" /></>
+                  <><code>{w.id}</code> <StatusBadge status={PROPOSED_WORKFLOW_STATUS} /></>
                 )}
               </li>
             );

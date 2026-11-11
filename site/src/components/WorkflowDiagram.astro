@@ -6,6 +6,7 @@
 // group sit in one box.
 import type { Workflow } from '../data/workflows';
 import { diagramRuns, diagramSteps } from '../lib/views';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
 import WorkflowStep from './WorkflowStep.astro';
 
 interface Props {
@@ -22,7 +23,7 @@ const runs = diagramRuns(diagramSteps(workflow));
     ) : (
       <li class="wf-parallel" data-group={run.group}>
         <p class="wf-parallel__label">
-          Parallel: <code>{run.group}</code>
+          <PixelGlyph name="fork" /> Parallel: <code>{run.group}</code>
           {run.join !== undefined && run.join !== null && <>, join: <code>{typeof run.join === 'string' ? run.join : JSON.stringify(run.join)}</code></>}
         </p>
         <ol class="wf wf--parallel">

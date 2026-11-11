@@ -1,10 +1,14 @@
 ---
-// The status of an RFC, a proposal or a profile workflow, as written in its source.
+// The status of a document, an RFC, a proposal, the Standard or a profile
+// workflow, as written in its source. The style comes from src/lib/status.ts;
+// a value with no style there fails the build.
+import { statusStyle } from '../lib/status';
+
 interface Props {
   status: string;
 }
 
-const { status } = Astro.props;
-const key = status.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const status = Astro.props.status.trim();
+const style = statusStyle(status);
 ---
-<span class:list={['status-badge', `status-badge--${key}`]} data-status={status}>{status}</span>
+<span class:list={['status-badge', `status-badge--${style}`]} data-status={status}>{status}</span>

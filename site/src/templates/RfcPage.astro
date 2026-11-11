@@ -1,6 +1,7 @@
 ---
 // An RFC or proposal. Its `**Status:**` line (Draft, Accepted, Draft Proposal)
-// is exposed for the status badge.
+// shows as a status badge.
+import StatusBadge from '../components/StatusBadge.astro';
 import type { Route } from '../lib/routes';
 import type { PageMeta } from '../plugins/remark-page-meta';
 
@@ -12,5 +13,6 @@ interface Props {
 const { page } = Astro.props;
 ---
 <article class="doc doc--rfc" data-status={page.status ?? undefined} data-pagefind-body>
+  {page.status && <p class="doc-status"><StatusBadge status={page.status} /></p>}
   <slot />
 </article>
