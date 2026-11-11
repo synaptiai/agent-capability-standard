@@ -288,7 +288,7 @@ assumptions:
 - `observe` - After initial data quality assessment
 
 **Commonly precedes:**
-- `digital-twin-sync-loop` - Later sync iterations start from the bootstrapped twin
+- `digital-twin-sync-workflow` - Later sync iterations start from the bootstrapped twin
 - `simulate` - To run what-if scenarios
 - `predict` (domain: risk) - To predict future states
 - `explain` - To generate executive reports

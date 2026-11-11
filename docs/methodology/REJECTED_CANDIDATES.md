@@ -21,7 +21,7 @@ This document records capabilities that were considered during ontology developm
 
 | Category | Criteria | Example |
 |----------|----------|---------|
-| **COMPOSITION** | Can be expressed as sequence of existing capabilities | `mitigate` = measure → plan → mutate |
+| **COMPOSITION** | Can be expressed as sequence of existing capabilities | `mitigate` = measure → plan → checkpoint → mutate |
 | **REDUNDANT** | Semantically equivalent to existing capability | `validate` = `verify` |
 | **PARAMETERIZABLE** | Domain specialization that should be a parameter | `detect-person` = `detect(domain: person)` |
 | **TOO VAGUE** | No clear, specific semantics | `process`, `handle` |
@@ -50,6 +50,8 @@ mitigate:
       purpose: Create mitigation plan
     - capability: constrain
       purpose: Apply limits
+    - capability: checkpoint
+      purpose: Save state before the change
     - capability: mutate
       purpose: Execute mitigation
 ```
@@ -72,6 +74,8 @@ improve:
       purpose: Identify weaknesses
     - capability: plan
       purpose: Create improvement plan
+    - capability: checkpoint
+      purpose: Save state before the change
     - capability: mutate
       purpose: Execute improvements
     - capability: verify
