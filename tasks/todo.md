@@ -9,8 +9,8 @@ Epic: https://github.com/synaptiai/agent-capability-standard/issues/120
 - [x] 4. Generated reference pages: capability, layer, workflow, domain, edge type, diagnostics, schemas, RFC and citation pages from the repository data
 - [x] 5. Original pixel design system: tokens with a contrast check, pixel glyphs, page shell; display font Jersey 10
 - [x] 6. Home page, Markdown copies, llms.txt and search: a Markdown copy of every page, llms.txt, llms-full.txt, sitemap and Pagefind search
-- [ ] 7. Post-build checks and CI: `scripts/check-dist.mjs` runs last in `npm run build`; `.github/workflows/site.yml` builds pushes and pull requests to main and deploys main once `SITE_DEPLOY_ENABLED` is true. Built; done once the site check runs green on a pull request
-- [ ] 8. Launch (Cloudflare project, domain and secrets need the maintainer)
+- [x] 7. Post-build checks and CI: `scripts/check-dist.mjs` runs last in `npm run build`; `.github/workflows/site.yml` builds pushes and pull requests to main and deploys main once `SITE_DEPLOY_ENABLED` is true. The site check passed on its first pull request run (#122)
+- [ ] 8. Launch: Pages project `acs-docs` and the domain acs.synapti.ai are set up, and the `production` environment (limited to `main`) holds the account ID. Still needed: the API token secret, `SITE_DEPLOY_ENABLED=true`, the first deploy, and the site links in `pyproject.toml`, `plugin.json`, the README and the repository homepage
 
 # Issue #114 — orchestration extensions + validator/engine unification
 
