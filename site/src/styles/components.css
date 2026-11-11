@@ -1566,7 +1566,9 @@
     color: var(--ink-2);
   }
 
-  :root:not(.js) .copy-block__button {
+  /* Buttons that only work with JavaScript. */
+  :root:not(.js) .copy-block__button,
+  :root:not(.js) [data-copy-markdown] {
     display: none;
   }
 

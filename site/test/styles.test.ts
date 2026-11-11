@@ -93,6 +93,13 @@ describe('menu without JavaScript', () => {
     expect(has(':root:not(.js) .menu-button', /display:\s*none/)).toBe(true);
     expect(has(':root:not(.js) .site-nav', /display:\s*block/)).toBe(true);
   });
+
+  it('hides both copy buttons, which need JavaScript, until the head script has set .js', () => {
+    const all = rules();
+    const has = (sel: string) => all.some((r) => r.selectors.includes(sel) && /display:\s*none/.test(r.body));
+    expect(has(':root:not(.js) .copy-block__button')).toBe(true);
+    expect(has(':root:not(.js) [data-copy-markdown]')).toBe(true);
+  });
 });
 
 describe('accessible names', () => {
