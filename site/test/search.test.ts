@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { isRealMatch, wordsAt } from '../src/lib/search-match';
 import { spaceForSearch } from '../src/lib/search-text';
+import { loadFailedMessage, retryingLoader } from '../src/lib/search-loader';
 
 describe('search matches', () => {
   it('drops results Pagefind matched only on a short prefix of a made-up word', () => {
@@ -56,5 +57,40 @@ describe('word breaks for search', () => {
   it('leaves other tags and text alone', () => {
     const html = '<p>a</p><td>b</td><code>c</code><span>d</span> </th>';
     expect(spaceForSearch(html)).toBe(html);
+  });
+});
+
+describe('search index loader', () => {
+  it('loads once, and after a failure tries again on the next call with a new URL', async () => {
+    const urls: string[] = [];
+    let fail = true;
+    const load = retryingLoader('/pagefind/pagefind.js', async (url) => {
+      urls.push(url);
+      if (fail) throw new Error('offline');
+      return { ok: url };
+    });
+    expect(await load()).toBeNull();
+    expect(await load()).toBeNull();
+    fail = false;
+    const mod = await load();
+    expect(mod).toEqual({ ok: '/pagefind/pagefind.js?retry=2' });
+    expect(await load()).toBe(mod);
+    // A cached failure of the same URL is never reused.
+    expect(urls).toEqual(['/pagefind/pagefind.js', '/pagefind/pagefind.js?retry=1', '/pagefind/pagefind.js?retry=2']);
+  });
+
+  it('shares one attempt between calls made while it is loading', async () => {
+    let calls = 0;
+    const load = retryingLoader('/x.js', async () => {
+      calls++;
+      return 1;
+    });
+    await Promise.all([load(), load(), load()]);
+    expect(calls).toBe(1);
+  });
+
+  it('tells a reader of the built site to retry, and a developer how to build', () => {
+    expect(loadFailedMessage(false)).toBe('Search could not load. Check your connection and try again.');
+    expect(loadFailedMessage(true)).toMatch(/npm run build/);
   });
 });

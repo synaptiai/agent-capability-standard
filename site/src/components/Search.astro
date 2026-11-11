@@ -60,6 +60,7 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
 </div>
 
 <script>
+  import { loadFailedMessage, retryingLoader } from '../lib/search-loader';
   import { isRealMatch, wordsAt } from '../lib/search-match';
   import { SEARCH_EVENT } from '../lib/search-url';
 
@@ -91,27 +92,23 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
     const form = root.querySelector<HTMLFormElement>('[data-search-form]')!;
     const MAX = 12;
     let pagefind: Pagefind | null = null;
-    let loading: Promise<Pagefind | null> | null = null;
     let run = 0;
 
     trigger.setAttribute('role', 'button');
     trigger.setAttribute('aria-haspopup', 'dialog');
     trigger.setAttribute('aria-keyshortcuts', '/ Control+K Meta+K');
 
-    const load = (): Promise<Pagefind | null> => {
-      loading ??= (async () => {
-        try {
-          const url = '/pagefind/pagefind.js';
-          const mod = (await import(/* @vite-ignore */ url)) as Pagefind;
-          await mod.options({ excerptLength: 24 });
-          pagefind = mod;
-          return mod;
-        } catch {
-          status.textContent = 'Search works on the built site only. Run npm run build, then npm run preview.';
-          return null;
-        }
-      })();
-      return loading;
+    // A failed load is tried again on the next open or keystroke.
+    const importIndex = retryingLoader('/pagefind/pagefind.js', async (url) => {
+      const mod = (await import(/* @vite-ignore */ url)) as Pagefind;
+      await mod.options({ excerptLength: 24 });
+      pagefind = mod;
+      return mod;
+    });
+    const load = async (): Promise<Pagefind | null> => {
+      const pf = await importIndex();
+      if (!pf) status.textContent = loadFailedMessage(import.meta.env.DEV);
+      return pf;
     };
 
     const open = () => {
@@ -170,27 +167,35 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
       }
       const pf = pagefind ?? (await load());
       if (!pf || mine !== run) return;
-      const filters: Record<string, string> = section.value ? { section: section.value } : {};
-      const found = await pf.debouncedSearch(q, { filters }, 150);
-      if (found === null || mine !== run) return;
-      // Check results in batches until MAX real matches are found or none are
-      // left. The page title counts as matched text too.
-      const real = (r: PagefindResult) => isRealMatch(q, [...wordsAt(r.content, r.locations), ...(r.meta.title ?? '').split(/\s+/)]);
-      const items: PagefindResult[] = [];
-      let checked = 0;
-      let dropped = 0;
-      while (items.length < MAX && checked < found.results.length) {
-        const batch = await Promise.all(found.results.slice(checked, checked + MAX).map((r) => r.data()));
-        if (mine !== run) return;
-        checked += batch.length;
-        for (const r of batch) {
-          if (real(r)) items.push(r);
-          else dropped++;
+      try {
+        const filters: Record<string, string> = section.value ? { section: section.value } : {};
+        const found = await pf.debouncedSearch(q, { filters }, 150);
+        if (found === null || mine !== run) return;
+        // Check results in batches until MAX real matches are found or none are
+        // left. The page title counts as matched text too.
+        const real = (r: PagefindResult) => isRealMatch(q, [...wordsAt(r.content, r.locations), ...(r.meta.title ?? '').split(/\s+/)]);
+        const items: PagefindResult[] = [];
+        let checked = 0;
+        let dropped = 0;
+        while (items.length < MAX && checked < found.results.length) {
+          const batch = await Promise.all(found.results.slice(checked, checked + MAX).map((r) => r.data()));
+          if (mine !== run) return;
+          checked += batch.length;
+          for (const r of batch) {
+            if (real(r)) items.push(r);
+            else dropped++;
+          }
         }
+        const all = checked === found.results.length;
+        const total = all ? items.length : dropped === 0 ? found.results.length : items.length;
+        render(items.slice(0, MAX), total, all || dropped === 0, q);
+      } catch {
+        // The index or a result could not be fetched: do not leave the
+        // previous query's results under the new query.
+        if (mine !== run) return;
+        list.replaceChildren();
+        status.textContent = 'Search failed. Try again.';
       }
-      const all = checked === found.results.length;
-      const total = all ? items.length : dropped === 0 ? found.results.length : items.length;
-      render(items.slice(0, MAX), total, all || dropped === 0, q);
     };
 
     trigger.addEventListener('click', (e) => {
