@@ -1,0 +1,101 @@
+---
+// One step of the workflow diagram (design notes, design-system section 12):
+// its number, capability and layer, purpose, effective risk and flags, the
+// checkpoint it relies on, its condition or gates (drawn as a branch), the
+// workflow it runs, and its failure handling.
+import type { Workflow } from '../data/workflows';
+import { capabilityHref, diagnosticHref, workflowHref } from '../lib/generated';
+import { failureRows, gateRows, type DiagramStep } from '../lib/views';
+import FlagBadge from './FlagBadge.astro';
+import LayerBadge from './LayerBadge.astro';
+import RiskBadge from './RiskBadge.astro';
+
+interface Props {
+  workflow: Workflow;
+  d: DiagramStep;
+}
+
+const { d } = Astro.props;
+const { step, role, branch, checkpointStep, missingCheckpoint } = d;
+const e = step.effective;
+const gates = gateRows(step);
+const failures = failureRows(step);
+const stepId = (n: number) => `ref-step-${n}`;
+---
+<li
+  id={stepId(step.index)}
+  value={step.index}
+  class="wf-step has-layer"
+  style={`--layer: var(--layer-${step.layer})`}
+  data-step={step.index}
+  data-role={role}
+  data-branch={branch ? 'true' : undefined}
+  data-capability={step.capability}
+  data-layer={step.layer.toLowerCase()}
+>
+  <span class="wf-step__node" aria-hidden="true"></span>
+  <span class="wf-step__number">{step.index}</span>
+  <div class="wf-step__card">
+    <p class="wf-step__head">
+      <a href={capabilityHref(step.capability)}><code>{step.capability}</code></a>{' '}
+      <LayerBadge layer={step.layer} />
+      {step.domain && <> with domain <code>{step.domain}</code></>}
+    </p>
+    {step.purpose && <p class="wf-step__purpose">{step.purpose}</p>}
+    <ul class="capability-flags">
+      <li><RiskBadge risk={e.risk} /></li>
+      {e.mutation && <li><FlagBadge kind="mutation" label="Mutates" /></li>}
+      {e.checkpoint.needed && <li><FlagBadge kind="checkpoint" label="Checkpoint required" /></li>}
+      {e.requires_approval && <li><FlagBadge kind="approval" label="Approval required" /></li>}
+    </ul>
+    {role === 'mutating' && checkpointStep !== null && (
+      <p class="wf-step__checkpoint">Checkpoint: <a href={`#${stepId(checkpointStep)}`}>step {checkpointStep}</a></p>
+    )}
+    {role === 'rollback' && checkpointStep !== null && (
+      <p class="wf-step__checkpoint">Restores the checkpoint from <a href={`#${stepId(checkpointStep)}`}>step {checkpointStep}</a>.</p>
+    )}
+    {missingCheckpoint && (
+      <p class="callout callout--caution" role="note">
+        This step needs a checkpoint before it, and no earlier step is one. A validator reports
+        {' '}<a href={diagnosticHref(missingCheckpoint)}><code>{missingCheckpoint}</code></a>.
+      </p>
+    )}
+    {step.condition !== undefined && step.condition !== null && (
+      <p class="wf-step__branch">
+        <span class="wf-step__only-if">Only if</span> <code>{String(step.condition)}</code>
+      </p>
+    )}
+    {gates.length > 0 && (
+      <ul class="wf-step__gates">
+        {gates.map((g) => (
+          <li>
+            <span class="wf-step__gate-label">Gate</span>{g.phase && <> ({g.phase} the step)</>}: when <code>{g.when}</code>,{' '}
+            <code>{g.action}</code>.{g.message && <> {g.message}</>}
+          </li>
+        ))}
+      </ul>
+    )}
+    {step.workflow_id && (
+      <p class="wf-step__subflow">Runs workflow <a href={workflowHref(step.workflow_id)}><code>{step.workflow_id}</code></a></p>
+    )}
+    {step.store_as && <p class="wf-step__store">Stores <code>{step.store_as}</code></p>}
+    {failures.length > 0 && (
+      <details class="wf-step__failures">
+        <summary>Failure handling ({failures.length})</summary>
+        <ul>
+          {failures.map((f) => (
+            <li>
+              {f.condition && <>{f.condition.replace(/[.\s]+$/, '')}{f.when && <> (<code>{f.when}</code>)</>}. </>}
+              {!f.condition && f.when && <>When <code>{f.when}</code>. </>}
+              {f.codes.length > 0 && (
+                <>Codes: {f.codes.map((c, i) => <>{i > 0 && ', '}<a href={diagnosticHref(c)}><code>{c}</code></a></>)}. </>
+              )}
+              Action: <code>{f.action}</code>.{f.recovery && <> {f.recovery}</>}
+            </li>
+          ))}
+        </ul>
+      </details>
+    )}
+    <a class="wf-step__details-link" href={`#${stepId(step.index)}-details`}>Bindings and other details</a>
+  </div>
+</li>

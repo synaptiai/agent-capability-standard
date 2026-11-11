@@ -1,11 +1,11 @@
 ---
 // One page per workflow in the core and domain catalogs: goal, inputs, the
-// step list with markers, then each step's purpose, effective safety flags
-// (Standard §5.2.1), bindings, gates and failure modes, and the workflow's
-// other sections. Every heading the page adds has a `ref-` id.
+// step diagram (each step's role, purpose, effective safety flags per
+// Standard §5.2.1, branches and failure handling), then each step's bindings,
+// gates and other fields, and the workflow's other sections. Every heading the
+// page adds has a `ref-` id.
 import ContractTable from '../../components/ContractTable.astro';
 import FlagBadge from '../../components/FlagBadge.astro';
-import LayerBadge from '../../components/LayerBadge.astro';
 import RiskBadge from '../../components/RiskBadge.astro';
 import WorkflowDiagram from '../../components/WorkflowDiagram.astro';
 import YamlBlock from '../../components/YamlBlock.astro';
@@ -28,7 +28,6 @@ import type { Route } from '../../lib/routes';
 import {
   capabilitiesUsed,
   composedSkillsFor,
-  failureRows,
   gateRows,
   producerSteps,
   profilesListing,
@@ -54,11 +53,11 @@ const wf = loadWorkflows().byId.get(workflowId)!;
 const ontology = loadOntology();
 const id = refSlugger();
 const stepId = (n: number) => `ref-step-${n}`;
+const detailsId = (n: number) => `ref-step-${n}-details`;
 const profiles = profilesListing(wf.id);
 const skills = composedSkillsFor(wf.id);
 const flagsHref = specSectionHref('5.2.1');
 const gatesHref = specSectionHref('5.6');
-const failuresHref = specSectionHref('5.7');
 const checkpoints = wf.steps.filter((s) => s.capability === 'checkpoint').length;
 const changing = wf.steps.filter((s) => s.effective.mutation).length;
 const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
@@ -101,40 +100,28 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
 
     <section class="workflow-steps">
       <h2 id={id('Steps')}>Steps</h2>
-      <WorkflowDiagram workflow={wf} stepIdPrefix="ref-step-" />
+      <WorkflowDiagram workflow={wf} />
     </section>
 
     <section class="workflow-step-details">
-      <h2 id={id('Step details')}>Step details</h2>
+      <h2 id={id('Bindings and details')}>Bindings and details</h2>
       {wf.steps.map((step) => {
         const gates = gateRows(step);
-        const failures = failureRows(step);
         const reads = producerSteps(wf, step);
         const e = step.effective;
         return (
           <section class="workflow-step" data-step={step.index} data-capability={step.capability}>
-            <h3 id={stepId(step.index)}>Step {step.index}: <code>{step.capability}</code></h3>
-            <p class="workflow-step__capability">
-              <a href={capabilityHref(step.capability)}><code>{step.capability}</code></a>{' '}
-              <LayerBadge layer={step.layer} />
-              {step.domain && <> with domain <code>{step.domain}</code></>}
-            </p>
-            {step.purpose && <p class="workflow-step__purpose">{step.purpose}</p>}
+            <h3 id={detailsId(step.index)}><a href={`#${stepId(step.index)}`}>Step {step.index}</a>: <code>{step.capability}</code></h3>
             <dl class="workflow-step__facts">
-              <div>
-                <dt><a href={flagsHref}>Effective flags</a></dt>
-                <dd>
-                  <ul class="capability-flags">
-                    <li><RiskBadge risk={e.risk} /></li>
-                    <li>{e.mutation ? <FlagBadge kind="mutation" label="Changes state" /> : <FlagBadge kind="read-only" label="Read-only" />}</li>
-                    {e.checkpoint.needed && <li><FlagBadge kind="checkpoint" label="Needs a checkpoint before it" /></li>}
-                    {e.requires_approval && <li><FlagBadge kind="approval" label="Needs approval" /></li>}
-                    {e.downgrades.length > 0 && (
-                      <li><FlagBadge kind="downgrade" label={`Weaker declaration ignored (W602): ${e.downgrades.join(', ')}`} href={diagnosticHref('W602')} /></li>
-                    )}
-                  </ul>
-                </dd>
-              </div>
+              {e.downgrades.length > 0 && (
+                <div>
+                  <dt><a href={flagsHref}>Ignored declarations</a></dt>
+                  <dd>
+                    The step declares {e.downgrades.join(', ')} weaker than the ontology. The ontology's values apply, and a
+                    validator reports <a href={diagnosticHref('W602')}><code>W602</code></a>.
+                  </dd>
+                </div>
+              )}
               {step.store_as && <div><dt>Stores</dt><dd><code>{step.store_as}</code></dd></div>}
               {reads.length > 0 && (
                 <div>
@@ -166,7 +153,7 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
               </>
             )}
             {gates.length > 0 && (
-              <div class="table-scroll">
+              <div class="table-wrap">
                 <table class="gate-table">
                   <caption><a href={gatesHref}>Gates</a> of step {step.index}</caption>
                   <thead><tr><th scope="col">When</th><th scope="col">Action</th><th scope="col">Message</th></tr></thead>
@@ -176,26 +163,6 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
                         <td><code>{g.when}</code>{g.phase && <> ({g.phase} the step)</>}</td>
                         <td><code>{g.action}</code></td>
                         <td>{g.message}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {failures.length > 0 && (
-              <div class="table-scroll">
-                <table class="failure-table">
-                  <caption><a href={failuresHref}>Failure modes</a> of step {step.index}</caption>
-                  <thead><tr><th scope="col">Condition</th><th scope="col">Diagnostics</th><th scope="col">Action</th><th scope="col">Recovery</th></tr></thead>
-                  <tbody>
-                    {failures.map((f) => (
-                      <tr>
-                        <td>{f.condition}{f.when && <> <code>{f.when}</code></>}</td>
-                        <td>
-                          {f.codes.map((c, i) => <>{i > 0 && ', '}<a href={diagnosticHref(c)}><code>{c}</code></a></>)}
-                        </td>
-                        <td><code>{f.action}</code></td>
-                        <td>{f.recovery}</td>
                       </tr>
                     ))}
                   </tbody>

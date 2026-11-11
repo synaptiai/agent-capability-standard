@@ -103,6 +103,37 @@ export function contractRows(schema: Obj): SchemaRow[] {
   return schemaRows(schema.properties, schema.required);
 }
 
+// --------------------------------------------------------------- tile symbols
+
+const VOWELS = new Set(['a', 'e', 'i', 'o', 'u']);
+
+/**
+ * Two-letter symbols for the periodic table (design notes, design-system
+ * section 11): the id's first letter in upper case, then the first consonant
+ * after it that gives an unused symbol, then the first vowel that does.
+ * Capabilities are taken in ontology layer order, so earlier ones keep theirs.
+ */
+export function capabilitySymbols(ids: string[]): Map<string, string> {
+  const used = new Set<string>();
+  const out = new Map<string, string>();
+  for (const id of ids) {
+    const letters = [...id.toLowerCase()].filter((c) => /[a-z]/.test(c));
+    const first = letters[0]!.toUpperCase();
+    const rest = letters.slice(1);
+    const candidates = [...rest.filter((c) => !VOWELS.has(c)), ...rest.filter((c) => VOWELS.has(c))];
+    const second = candidates.find((c) => !used.has(first + c));
+    if (second === undefined) throw new Error(`views: no unused symbol for ${id}`);
+    used.add(first + second);
+    out.set(id, first + second);
+  }
+  return out;
+}
+
+/** Capability ids in layer order, as the periodic table numbers them from 1. */
+export function tableOrder(ontology: Ontology = loadOntology()): string[] {
+  return ontology.layers.flatMap((l) => l.capabilities);
+}
+
 // -------------------------------------------------------------------- edges
 
 export interface EdgeGroup {
@@ -165,34 +196,72 @@ export function layerUsage(layerId: string): { workflow: Workflow; capabilities:
     .filter((u) => u.capabilities.length > 0);
 }
 
-export type MarkerKind = 'checkpoint' | 'mutate' | 'verify' | 'rollback' | 'approval' | 'gate' | 'condition' | 'parallel' | 'invoke';
+/** A step's role in the diagram (design notes, design-system section 12). */
+export type StepRole = 'checkpoint' | 'mutating' | 'verify' | 'rollback' | 'plain';
 
-export interface StepMarker {
-  kind: MarkerKind;
-  label: string;
-}
+/** Capabilities that change state only by recording: not drawn as mutating steps. */
+const RECORDING = new Set(['checkpoint', 'audit', 'persist']);
 
 /**
- * Markers for one step of the diagram, from the step's effective flags
- * (Standard §5.2.1) and its capability:
- * - checkpoint, verify and rollback mark steps that run those capabilities;
- * - mutate marks a step whose effective `mutation` is true;
- * - approval marks an effective `requires_approval`;
- * - gate, condition, parallel and invoke mark the step's own keys.
+ * The role of a step, from its capability and its effective flags (Standard
+ * §5.2.1), never from its name alone:
+ * - checkpoint, rollback: the step runs that capability;
+ * - verify: it runs `verify` or `constrain`;
+ * - mutating: its effective `mutation` is true and it is not a checkpoint,
+ *   audit or persist step;
+ * - plain: anything else.
  */
-export function stepMarkers(step: Step): StepMarker[] {
-  const m: StepMarker[] = [];
-  if (step.capability === 'checkpoint') m.push({ kind: 'checkpoint', label: 'Checkpoint' });
-  if (step.effective.mutation) m.push({ kind: 'mutate', label: 'Changes state' });
-  if (step.capability === 'verify') m.push({ kind: 'verify', label: 'Verify' });
-  if (step.capability === 'rollback') m.push({ kind: 'rollback', label: 'Rollback' });
-  if (step.effective.requires_approval) m.push({ kind: 'approval', label: 'Needs approval' });
-  const gates = step.gates?.length ?? 0;
-  if (gates > 0) m.push({ kind: 'gate', label: gates === 1 ? '1 gate' : `${gates} gates` });
-  if (step.condition !== undefined && step.condition !== null) m.push({ kind: 'condition', label: 'Conditional' });
-  if (step.parallel_group) m.push({ kind: 'parallel', label: `Parallel group ${step.parallel_group}` });
-  if (step.workflow_id) m.push({ kind: 'invoke', label: `Runs ${step.workflow_id}` });
-  return m;
+export function stepRole(step: Step): StepRole {
+  if (step.capability === 'checkpoint') return 'checkpoint';
+  if (step.capability === 'rollback') return 'rollback';
+  if (step.capability === 'verify' || step.capability === 'constrain') return 'verify';
+  if (step.effective.mutation && !RECORDING.has(step.capability)) return 'mutating';
+  return 'plain';
+}
+
+export interface DiagramStep {
+  step: Step;
+  role: StepRole;
+  /** The step has gates or a condition, so the diagram draws it as a branch. */
+  branch: boolean;
+  /** Index of the nearest earlier checkpoint step, for mutating and rollback steps. */
+  checkpointStep: number | null;
+  /** The step needs a checkpoint and none comes before it: the diagnostic a validator reports. */
+  missingCheckpoint: 'V102' | 'F501' | null;
+}
+
+export function diagramSteps(wf: Workflow): DiagramStep[] {
+  let lastCheckpoint: number | null = null;
+  return wf.steps.map((step) => {
+    const role = stepRole(step);
+    const cp = lastCheckpoint;
+    if (step.capability === 'checkpoint') lastCheckpoint = step.index;
+    const branch = (step.gates?.length ?? 0) > 0 || (step.condition !== undefined && step.condition !== null);
+    const missingCheckpoint = step.effective.checkpoint.needed && cp === null ? step.effective.checkpoint.code : null;
+    return {
+      step,
+      role,
+      branch,
+      checkpointStep: role === 'mutating' || role === 'rollback' ? cp : null,
+      missingCheckpoint,
+    };
+  });
+}
+
+/** Runs of steps for the diagram: consecutive steps in one parallel group form one run. */
+export function diagramRuns(steps: DiagramStep[]): { group: string | null; join: unknown; steps: DiagramStep[] }[] {
+  const runs: { group: string | null; join: unknown; steps: DiagramStep[] }[] = [];
+  for (const d of steps) {
+    const group = d.step.parallel_group ?? null;
+    const last = runs.at(-1);
+    if (group !== null && last && last.group === group) {
+      last.steps.push(d);
+      if (d.step.join !== undefined) last.join = d.step.join;
+    } else {
+      runs.push({ group, join: d.step.join, steps: [d] });
+    }
+  }
+  return runs;
 }
 
 export interface GateRow {

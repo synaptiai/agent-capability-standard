@@ -18,7 +18,9 @@ import {
   schemaRows,
   sortedTrustWeights,
   standardSchemaNames,
-  stepMarkers,
+  capabilitySymbols,
+  diagramRuns,
+  diagramSteps,
 } from '../src/lib/views';
 import {
   allCatalogSteps,
@@ -166,15 +168,18 @@ describe('contract tables', () => {
   });
 });
 
-describe('workflow step markers', () => {
-  // A hand-written catalog. Expected flags follow Standard 1.1.0 §5.2.1 and
-  // the ontology's node values for each capability (CLAUDE.md "Safety Model":
-  // mutate is mutation + approval; audit is mutation_overridable).
+describe('workflow diagram roles', () => {
+  // A hand-written catalog. Expected roles follow design notes, design-system
+  // section 12; expected flags follow Standard 1.1.0 §5.2.1 and the ontology
+  // values CLAUDE.md "Safety Model" lists (mutate and send need a checkpoint,
+  // rollback needs one through its requires edge, audit is mutation_overridable).
   const yaml = `
 fixture_flow:
   goal: test
   risk: high
   steps:
+    - capability: send
+      store_as: early
     - capability: checkpoint
       store_as: cp
     - capability: mutate
@@ -192,25 +197,71 @@ fixture_flow:
         checkpoint: \${cp.id}
     - capability: audit
       mutation: false
+    - capability: persist
+    - capability: constrain
+      parallel_group: g
+    - capability: observe
+      parallel_group: g
+      join: all
 `;
   const wf = parseCatalog('fixture.yaml', yaml, 'core', loadOntology())[0]!;
-  const kinds = wf.steps.map((s) => stepMarkers(s).map((m) => m.kind));
+  const steps = diagramSteps(wf);
 
-  it('marks checkpoint, state changes, verify and rollback', () => {
-    expect(kinds).toEqual([
-      ['checkpoint', 'mutate'], // checkpoint has mutation: true (CLAUDE.md "Other mutation capabilities")
-      ['mutate', 'approval'],
-      ['verify', 'gate'],
-      ['mutate', 'rollback', 'condition'],
-      [], // audit with mutation: false is honoured (mutation_overridable)
+  it('gives each step its role', () => {
+    expect(steps.map((d) => d.role)).toEqual([
+      'mutating', // send
+      'checkpoint',
+      'mutating',
+      'verify',
+      'rollback',
+      'plain', // audit with mutation: false
+      'plain', // persist mutates, but only records
+      'verify', // constrain
+      'plain',
     ]);
   });
 
-  it('finds the step that produced each output a step reads', () => {
-    expect(producerSteps(wf, wf.steps[3]!)).toEqual([
-      { name: 'cp', index: 1 },
-      { name: 'checked', index: 3 },
+  it('points mutating and rollback steps at the nearest earlier checkpoint', () => {
+    expect(steps.map((d) => d.checkpointStep)).toEqual([null, null, 2, null, 2, null, null, null, null]);
+  });
+
+  it('flags a step that needs a checkpoint when none comes before it', () => {
+    // send has a requires edge from checkpoint, so the code is V102 (flags.ts, Standard §4.3).
+    expect(steps.map((d) => d.missingCheckpoint)).toEqual(['V102', null, null, null, null, null, null, null, null]);
+  });
+
+  it('draws steps with gates or a condition as branches', () => {
+    expect(steps.map((d) => d.branch)).toEqual([false, false, false, true, true, false, false, false, false]);
+  });
+
+  it('boxes consecutive steps of one parallel group together', () => {
+    expect(diagramRuns(steps).map((r) => [r.group, r.steps.map((d) => d.step.index), r.join])).toEqual([
+      ...[1, 2, 3, 4, 5, 6, 7].map((i) => [null, [i], undefined]),
+      ['g', [8, 9], 'all'],
     ]);
+  });
+
+  it('finds the step that produced each output a step reads, bindings before the condition', () => {
+    // workflows.ts scans input_bindings, then gates, then condition.
+    expect(producerSteps(wf, wf.steps[4]!)).toEqual([
+      { name: 'cp', index: 2 },
+      { name: 'checked', index: 4 },
+    ]);
+  });
+});
+
+describe('periodic table symbols', () => {
+  it('gives the symbols the design lists, in layer order', () => {
+    // Design notes, design-system section 11, "Symbol rule".
+    const listed = 'Rt Sr Ob Rc Dt Cl Ms Pr Cm Ds Pl Dc Cr Ex St Tr At Gr Sm Gn Tn In Ec Mt Sn Vr Ch Rl Cn Ad Ps Re Dl Sy Iv Iq'.split(' ');
+    const order = claudeLayerTable().flatMap((l) => l.capabilities);
+    expect([...capabilitySymbols(order).values()]).toEqual(listed);
+  });
+
+  it('falls back to a vowel when every consonant symbol is taken, and fails when nothing is left', () => {
+    // Hand computed: rot -> R + t; rote -> Rt is taken and has no other consonant, so R + o.
+    expect([...capabilitySymbols(['rot', 'rote']).values()]).toEqual(['Rt', 'Ro']);
+    expect(() => capabilitySymbols(['rot', 'rote', 'root'])).toThrow(/no unused symbol for root/);
   });
 });
 
