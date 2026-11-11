@@ -26,3 +26,8 @@ conformance_results.json
 core/target/
 grounded_agency/_core*.so
 grounded_agency/_core*.pyd
+
+# Documentation site build outputs
+site/node_modules/
+site/dist/
+site/.astro/
