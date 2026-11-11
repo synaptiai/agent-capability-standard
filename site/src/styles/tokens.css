@@ -1,0 +1,221 @@
+/*
+ * Design tokens: the only file that holds colour values.
+ * - Light values sit on :root.
+ * - Dark values sit under the prefers-color-scheme media query (unless the
+ *   reader chose light) and again under [data-theme="dark"] (the reader chose
+ *   dark). scripts/check-contrast.mjs reads this file, fails when the two dark
+ *   blocks differ, and checks every text and edge pair the design requires.
+ * - The accent is a fill only. Focus rings use --ink; the current item uses
+ *   --indicator. Red and gold are kept for risk.
+ */
+@layer reset, tokens, base, components, utilities;
+
+@layer tokens {
+  :root {
+    color-scheme: light;
+
+    /* Surfaces */
+    --bg: #ffffff;
+    --bg-sub: #f6f8fb;
+    --bg-mut: #eaeff5;
+    --bg-code: #f1f4f9;
+
+    /* Text, strongest to most muted */
+    --ink: #0d1526;
+    --ink-2: #334155;
+    --ink-3: #566479;
+    --link: #0369a1;
+
+    /* Fills */
+    --accent: #38bdf8;
+    --on-accent: #0d1526;
+    --accent-soft: #bae6fd;
+
+    /* State and edges */
+    --indicator: #0369a1;
+    --line: #0d1526;
+    --control: #64748b;
+    --rule: #c5cfdc;
+    --shadow: #0d1526;
+
+    /* One colour per cognitive layer */
+    --layer-PERCEIVE: #0369a1;
+    --layer-UNDERSTAND: #0f766e;
+    --layer-REASON: #6d28d9;
+    --layer-MODEL: #a21caf;
+    --layer-SYNTHESIZE: #be185d;
+    --layer-EXECUTE: #b45309;
+    --layer-VERIFY: #12733a;
+    --layer-REMEMBER: #4d7c0f;
+    --layer-COORDINATE: #1d4ed8;
+    --tint-amount: 12%;
+
+    /* Risk (red and gold are used for nothing else) */
+    --risk-low: #3f5168;
+    --risk-medium: #8a6100;
+    --risk-high: #b91c1c;
+    --on-risk-high: #ffffff;
+    --ok: #12733a;
+
+    /* Requirement keywords share the risk colours */
+    --kw-must: var(--risk-high);
+    --kw-should: var(--risk-medium);
+    --kw-may: var(--risk-low);
+    --callout-amount: 8%;
+
+    /* Code */
+    --code-foreground: #0d1526;
+    --code-background: #f1f4f9;
+    --code-token-keyword: #6d28d9;
+    --code-token-string: #12733a;
+    --code-token-constant: #b45309;
+    --code-token-comment: #566479;
+    --code-token-function: #0369a1;
+    --code-token-parameter: #be185d;
+    --code-token-string-expression: #0f766e;
+    --code-token-punctuation: #334155;
+    --code-token-link: #1d4ed8;
+
+    /* Theme-independent values */
+    --px: 2px;
+    --border: var(--px) solid var(--line);
+    --shadow-1: 3px 3px 0 0 var(--shadow);
+    --shadow-2: 5px 5px 0 0 var(--shadow);
+    --shadow-3: 7px 7px 0 0 var(--shadow);
+    --radius: 0;
+    --pip: calc(var(--px) * 2);
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
+    --space-8: 64px;
+    --header-h: 64px;
+    --sidebar-w: 16rem;
+    --toc-w: 14rem;
+    --content-max: 46rem;
+    --frame-max: 88rem;
+
+    /* Fonts */
+    --font-display: 'Pixelify Sans', ui-monospace, monospace;
+    --font-eyebrow: 'Silkscreen', ui-monospace, monospace;
+    --font-body: 'Atkinson Hyperlegible Next', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+    /* Motion */
+    --step-hover: 120ms steps(2, end);
+    --step-enter: 240ms steps(4, end);
+    --step-marker: 80ms steps(2, end);
+
+    /* Shiki's css-variables theme reads these names */
+    --astro-code-foreground: var(--code-foreground);
+    --astro-code-background: var(--code-background);
+    --astro-code-token-keyword: var(--code-token-keyword);
+    --astro-code-token-string: var(--code-token-string);
+    --astro-code-token-constant: var(--code-token-constant);
+    --astro-code-token-comment: var(--code-token-comment);
+    --astro-code-token-function: var(--code-token-function);
+    --astro-code-token-parameter: var(--code-token-parameter);
+    --astro-code-token-string-expression: var(--code-token-string-expression);
+    --astro-code-token-punctuation: var(--code-token-punctuation);
+    --astro-code-token-link: var(--code-token-link);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0b111e;
+      --bg-sub: #111a2b;
+      --bg-mut: #1a2538;
+      --bg-code: #0f1726;
+      --ink: #eef2f8;
+      --ink-2: #c6d0dd;
+      --ink-3: #97a5b9;
+      --link: #7dd3fc;
+      --accent: #38bdf8;
+      --on-accent: #0b111e;
+      --accent-soft: #0c4a6e;
+      --indicator: #7dd3fc;
+      --line: #6b7b96;
+      --control: #6b7b96;
+      --rule: #26334a;
+      --shadow: #000000;
+      --layer-PERCEIVE: #7dd3fc;
+      --layer-UNDERSTAND: #5eead4;
+      --layer-REASON: #b79cff;
+      --layer-MODEL: #f0abfc;
+      --layer-SYNTHESIZE: #f9a8d4;
+      --layer-EXECUTE: #fdba74;
+      --layer-VERIFY: #86efac;
+      --layer-REMEMBER: #bef264;
+      --layer-COORDINATE: #6f9cff;
+      --tint-amount: 20%;
+      --risk-low: #b4c0d0;
+      --risk-medium: #facc15;
+      --risk-high: #f87171;
+      --on-risk-high: #0b111e;
+      --ok: #86efac;
+      --callout-amount: 10%;
+      --code-foreground: #eef2f8;
+      --code-background: #0f1726;
+      --code-token-keyword: #b79cff;
+      --code-token-string: #86efac;
+      --code-token-constant: #fdba74;
+      --code-token-comment: #97a5b9;
+      --code-token-function: #7dd3fc;
+      --code-token-parameter: #f9a8d4;
+      --code-token-string-expression: #5eead4;
+      --code-token-punctuation: #c6d0dd;
+      --code-token-link: #6f9cff;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0b111e;
+    --bg-sub: #111a2b;
+    --bg-mut: #1a2538;
+    --bg-code: #0f1726;
+    --ink: #eef2f8;
+    --ink-2: #c6d0dd;
+    --ink-3: #97a5b9;
+    --link: #7dd3fc;
+    --accent: #38bdf8;
+    --on-accent: #0b111e;
+    --accent-soft: #0c4a6e;
+    --indicator: #7dd3fc;
+    --line: #6b7b96;
+    --control: #6b7b96;
+    --rule: #26334a;
+    --shadow: #000000;
+    --layer-PERCEIVE: #7dd3fc;
+    --layer-UNDERSTAND: #5eead4;
+    --layer-REASON: #b79cff;
+    --layer-MODEL: #f0abfc;
+    --layer-SYNTHESIZE: #f9a8d4;
+    --layer-EXECUTE: #fdba74;
+    --layer-VERIFY: #86efac;
+    --layer-REMEMBER: #bef264;
+    --layer-COORDINATE: #6f9cff;
+    --tint-amount: 20%;
+    --risk-low: #b4c0d0;
+    --risk-medium: #facc15;
+    --risk-high: #f87171;
+    --on-risk-high: #0b111e;
+    --ok: #86efac;
+    --callout-amount: 10%;
+    --code-foreground: #eef2f8;
+    --code-background: #0f1726;
+    --code-token-keyword: #b79cff;
+    --code-token-string: #86efac;
+    --code-token-constant: #fdba74;
+    --code-token-comment: #97a5b9;
+    --code-token-function: #7dd3fc;
+    --code-token-parameter: #f9a8d4;
+    --code-token-string-expression: #5eead4;
+    --code-token-punctuation: #c6d0dd;
+    --code-token-link: #6f9cff;
+  }
+}
