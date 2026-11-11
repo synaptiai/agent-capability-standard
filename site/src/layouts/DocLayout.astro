@@ -37,7 +37,11 @@ const sourceUrl = route.source ? githubBlobUrl(route.source) : null;
 const body = await Astro.slots.render('default');
 const toc = tocEntries(body);
 const hasSidebar = route.section !== 'home';
-const hasMarkdownCopy = route.template !== 'not-found';
+// The Markdown copy at <route>index.md exists only once an endpoint builds it
+// (src/pages/**/*.md.ts). Until then the page offers no copy actions and no
+// alternate link, so nothing points at a file that is not there.
+const markdownEndpoints = Object.keys(import.meta.glob('../pages/**/*.md.ts'));
+const hasMarkdownCopy = markdownEndpoints.length > 0 && route.template !== 'not-found';
 const light = pageColour('light');
 const dark = pageColour('dark');
 const ogImage = new URL('/og.png', Astro.site);

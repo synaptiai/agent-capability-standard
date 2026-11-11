@@ -265,6 +265,18 @@ describe('design system on the built site', () => {
     }
   });
 
+  it('points every internal link, script, stylesheet and alternate link at a file the build wrote', () => {
+    const missing = new Set<string>();
+    for (const f of pages()) {
+      for (const m of html(f).matchAll(/\s(?:href|src)="(\/(?!\/)[^"#?]*)/g)) {
+        const url = decodeURI(m[1]!);
+        const file = url.endsWith('/') ? path.join(dist, url, 'index.html') : path.join(dist, url);
+        if (!existsSync(file) && !existsSync(path.join(dist, url, 'index.html'))) missing.add(`${f} -> ${url}`);
+      }
+    }
+    expect([...missing].slice(0, 10)).toEqual([]);
+  });
+
   it('gives the capability table one wide column per layer in the CLAUDE.md table', () => {
     const layers = claudeLayerTable().length;
     expect(html('index.html')).toContain(`class="capability-table__grid" style="--layers: ${layers}"`);
