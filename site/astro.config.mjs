@@ -41,12 +41,12 @@ export default defineConfig({
             throw new Error(`links: checked ${linkStats.size} of ${expected} Markdown sources; the content cache was reused`);
           }
           logger.info(`links: ${formatLinkStats()}`);
-          // Every built Markdown page must carry GitHub's heading ids.
+          // Every built Markdown page must carry the ids github-slugger gives its source.
           const slugs = checkBuiltSlugs(fileURLToPath(dir));
           if (slugs.problems.length > 0) {
-            throw new Error(`heading ids differ from GitHub's:\n  ${slugs.problems.join('\n  ')}`);
+            throw new Error(`heading ids differ from github-slugger run on the source:\n  ${slugs.problems.join('\n  ')}`);
           }
-          logger.info(`heading ids: ${slugs.headings} ids on ${slugs.pages} pages match GitHub's`);
+          logger.info(`heading ids: ${slugs.headings} ids on ${slugs.pages} pages equal github-slugger run on their sources`);
         },
       },
     },
