@@ -359,13 +359,13 @@ fn failure_mode(
             .at("field", at.to_string())
     };
     let action = fm.get("action").and_then(Value::as_str);
-    if let Some(a) = action {
-        if !ACTIONS.contains(&a) {
-            report.push(s303(
-                format!("{field}.action '{a}' is not one of {}", ACTIONS.join(", ")),
-                &format!("{field}.action"),
-            ));
-        }
+    if let Some(a) = action
+        && !ACTIONS.contains(&a)
+    {
+        report.push(s303(
+            format!("{field}.action '{a}' is not one of {}", ACTIONS.join(", ")),
+            &format!("{field}.action"),
+        ));
     }
     // on_error is base 1.1, checked whether or not escalation is declared.
     if let Some(on_error) = fm.get("on_error") {
@@ -453,24 +453,24 @@ fn failure_mode(
             }
         }
     }
-    if let Some(inject) = rec.get("inject_context") {
-        if !inject.is_object() {
-            report.push(s303(
-                format!(
-                    "{rfield}.inject_context must map keys to references, found {}",
-                    yaml::kind_of(inject)
-                ),
-                &format!("{rfield}.inject_context"),
-            ));
-        }
+    if let Some(inject) = rec.get("inject_context")
+        && !inject.is_object()
+    {
+        report.push(s303(
+            format!(
+                "{rfield}.inject_context must map keys to references, found {}",
+                yaml::kind_of(inject)
+            ),
+            &format!("{rfield}.inject_context"),
+        ));
     }
-    if let Some(max) = rec.get("max_loops").filter(|_| !escalate) {
-        if !count(max).is_some_and(|n| (1..=MAX_LOOPS).contains(&n)) {
-            report.push(s303(
-                format!("{rfield}.max_loops must be an integer from 1 to {MAX_LOOPS}, found {max}"),
-                &format!("{rfield}.max_loops"),
-            ));
-        }
+    if let Some(max) = rec.get("max_loops").filter(|_| !escalate)
+        && !count(max).is_some_and(|n| (1..=MAX_LOOPS).contains(&n))
+    {
+        report.push(s303(
+            format!("{rfield}.max_loops must be an integer from 1 to {MAX_LOOPS}, found {max}"),
+            &format!("{rfield}.max_loops"),
+        ));
     }
     let goto = rec.get("goto_step");
     if goto.is_none() {

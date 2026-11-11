@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 

@@ -7,7 +7,7 @@ the .claude/checkpoint.ok marker file used by the shell PreToolUse hook.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -78,7 +78,7 @@ class TestMarkerFileCreation:
         tracker.create_checkpoint(scope=["*"], reason="test")
         marker = marker_dir / "checkpoint.ok"
         data = json.loads(marker.read_text(encoding="utf-8"))
-        now = int(datetime.now(timezone.utc).timestamp())
+        now = int(datetime.now(UTC).timestamp())
         assert data["expires_at"] > now
 
     def test_no_marker_when_marker_dir_not_set(
@@ -120,7 +120,7 @@ class TestMarkerFileRemoval:
         # Force expiry by manipulating the checkpoint
         active = tracker._active_checkpoint
         assert active is not None
-        active.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        active.expires_at = datetime.now(UTC) - timedelta(minutes=1)
 
         marker = marker_dir / "checkpoint.ok"
         assert marker.exists()

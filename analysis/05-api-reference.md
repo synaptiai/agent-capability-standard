@@ -2,7 +2,7 @@
 
 > **Package**: `grounded_agency`
 > **Version**: `0.1.0`
-> **Python**: >=3.10 (the package includes the compiled Rust extension `grounded_agency._core`; building from source needs Rust >= 1.86)
+> **Python**: >=3.14 (the package includes the compiled Rust extension `grounded_agency._core`; building from source needs Rust >= 1.88)
 > **License**: See repository root
 
 This document provides the complete API reference for the Grounded Agency Python SDK. Every public class, method, property, constant, and type alias exported by the `grounded_agency` package is documented here with full signatures, parameter descriptions, return types, and usage examples.
@@ -191,12 +191,13 @@ Wraps SDK `ClaudeAgentOptions` with the grounded agency safety layer.
 **Injected modifications**:
 
 - `enable_file_checkpointing=True` for SDK-level rollback support
-- `can_use_tool` callback for rate limiting and checkpoint enforcement (see permission callback below)
-- `PreToolUse` hooks: checkpoint hook (reserves the checkpoint for each checkpoint-gated call), plus the discovery injector when `enable_discovery=True`
+- `can_use_tool` callback for checkpoint enforcement (see permission callback below)
+- `PreToolUse` hooks: safety hook (applies the rate limit to every call and reserves the checkpoint for each checkpoint-gated call), plus the discovery injector when `enable_discovery=True`
 - `PostToolUse` hooks: evidence collector, skill tracker, mutation consumer
 - `PostToolUseFailure` hook: failure releaser (gives back the checkpoint a failed or interrupted call reserved)
+- `Stop` and `SubagentStop` hooks: release a reservation still held by a call of the finishing session and agent (a call another PreToolUse hook denied after the adapter reserved for it)
 - Existing hooks in `base.hooks` are kept; the adapter's hooks are appended
-- `Skill` added to `allowed_tools` if not present
+- `allowed_tools` is left as given and `Skill` is not added: a tool listed there is approved without reaching `can_use_tool`, but the PreToolUse hook still applies the rate limit and checkpoint rule to it
 - `"project"` added to `setting_sources` if not present
 
 **Example**:
@@ -209,13 +210,13 @@ async with ClaudeSDKClient(options) as client:
     await client.query("Edit the config file...")
 ```
 
-**Internal behavior of the PreToolUse checkpoint hook**:
+**Internal behavior of the PreToolUse safety hook**:
 
-PreToolUse runs for every tool call, including pre-approved ones that never reach `can_use_tool`. For a checkpoint-gated call it reserves the active checkpoint with `CheckpointTracker.validate_and_reserve(tool_use_id)`. If there is no valid checkpoint, or another call holds the reservation, it denies the call in strict mode by returning `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}`; in non-strict mode it logs a warning.
+PreToolUse runs for every tool call, including pre-approved ones that never reach `can_use_tool`. It first applies the per-risk rate limit (SEC-010) and denies a call over the limit in strict and non-strict mode alike. For a checkpoint-gated call it reserves the active checkpoint with `CheckpointTracker.validate_and_reserve(tool_use_id)`. If there is no valid checkpoint, or another call holds the reservation, it denies the call in strict mode by returning `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}`; in non-strict mode it logs a warning.
 
 **Internal behavior of the permission callback**:
 
-The callback first applies the per-risk rate limit (SEC-010). For a checkpoint-gated tool it then repeats the reservation for the same `tool_use_id` (idempotent, so the PreToolUse reservation is kept). When `strict_mode=True` and no reservation can be made (no valid checkpoint, or the checkpoint is reserved by another in-flight call), the callback returns `PermissionResultDeny` (or a `FallbackPermissionDeny` if the SDK is not installed). When `strict_mode=False`, a warning is logged but execution proceeds. On any internal error during the permission check, access is denied (fail-closed security).
+For a checkpoint-gated tool the callback repeats the reservation for the same `tool_use_id` (idempotent, so the PreToolUse reservation is kept). When `strict_mode=True` and no reservation can be made (no valid checkpoint, or the checkpoint is reserved by another in-flight call), the callback returns `PermissionResultDeny` (or a `FallbackPermissionDeny` if the SDK is not installed). When `strict_mode=False`, a warning is logged but execution proceeds. On any internal error during the permission check, access is denied (fail-closed security).
 
 **Internal behavior of the mutation consumer and failure releaser hooks**:
 
@@ -1535,7 +1536,7 @@ These are private but affect public behavior:
 
 ## 17. CLI Tools Reference
 
-The project ships its validators and generators under `tools/`; this section documents the five most used. All run from the repository root. Most need only `pyyaml` (they load YAML through the standalone `tools/yaml_util.py`), but `validate_workflows.py` is a front end to the Rust core and needs the built package (`grounded_agency._core`): run `pip install -e ".[dev]" -c constraints.txt` (Rust >= 1.86) first. `validate_benchmark_deps.py` also imports `grounded_agency`.
+The project ships its validators and generators under `tools/`; this section documents the five most used. All run from the repository root. Most need only `pyyaml` (they load YAML through the standalone `tools/yaml_util.py`), but `validate_workflows.py` is a front end to the Rust core and needs the built package (`grounded_agency._core`): run `pip install -e ".[dev]" -c constraints.txt` (Rust >= 1.88) first. `validate_benchmark_deps.py` also imports `grounded_agency`.
 
 ---
 

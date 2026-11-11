@@ -39,7 +39,7 @@ def _tracked_yaml_files() -> list[str]:
             text=True,
             check=True,
         ).stdout
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         return []
     files = [f for f in out.split("\0") if f]
     return [f for f in files if not f.startswith(NOT_ACS_DOCUMENTS)]

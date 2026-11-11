@@ -67,7 +67,7 @@ def _find_ontology_path() -> str:
             if path.exists():
                 resolved = path.resolve(strict=True)
                 return str(resolved)
-    except (ImportError, FileNotFoundError, TypeError, OSError):
+    except ImportError, FileNotFoundError, TypeError, OSError:
         pass
 
     # Fallback: look relative to this file
@@ -295,7 +295,12 @@ class GroundedAgentAdapter:
         - enable_file_checkpointing=True for SDK-level rollback
         - can_use_tool callback for checkpoint enforcement
         - PostToolUse hooks for evidence collection
-        - Skill tool in allowed_tools for autonomous checkpoints
+
+        ``allowed_tools`` is passed through unchanged; ``Skill`` is not
+        added. The SDK approves a tool listed there without consulting
+        ``can_use_tool`` (and warns that the callback is shadowed). The
+        rate limit and checkpoint checks run in the PreToolUse hook, so they
+        apply to listed tools too.
 
         Args:
             base: ClaudeAgentOptions instance
@@ -309,6 +314,10 @@ class GroundedAgentAdapter:
         """
         # Build hooks dict
         existing_hooks = getattr(base, "hooks", None) or {}
+        # Options this adapter already wrapped keep their hooks (adding a
+        # second safety hook would charge the rate limit twice per call);
+        # everything else below is applied again.
+        already_wrapped = self._already_wrapped(existing_hooks)
         post_hooks = list(existing_hooks.get("PostToolUse", []))
 
         # Add evidence collector
@@ -331,10 +340,18 @@ class GroundedAgentAdapter:
         failure_hooks = list(existing_hooks.get("PostToolUseFailure", []))
         failure_hooks.append(self._wrap_hook(self._make_failure_releaser()))
 
-        # Build PreToolUse hooks for checkpoint enforcement in Python layer
+        # PreToolUse hook: rate limit and checkpoint enforcement
         pre_hooks = list(existing_hooks.get("PreToolUse", []))
-        checkpoint_pre_hook = self._make_pretooluse_checkpoint_hook()
-        pre_hooks.append(self._wrap_hook(checkpoint_pre_hook))
+        safety_pre_hook = self._make_pretooluse_safety_hook()
+        safety_pre_hook._grounded_adapter = self  # see _already_wrapped
+        pre_hooks.append(self._wrap_hook(safety_pre_hook))
+
+        # Stop / SubagentStop: release a reservation left by a call that
+        # another hook denied (see _make_turn_end_releaser).
+        stop_hooks = list(existing_hooks.get("Stop", []))
+        stop_hooks.append(self._wrap_hook(self._make_turn_end_releaser()))
+        subagent_stop_hooks = list(existing_hooks.get("SubagentStop", []))
+        subagent_stop_hooks.append(self._wrap_hook(self._make_turn_end_releaser()))
 
         # Add discovery injector if enabled
         if self.config.enable_discovery:
@@ -352,17 +369,18 @@ class GroundedAgentAdapter:
             )
             pre_hooks.append(self._wrap_hook(discovery_hook))
 
-        merged_hooks = {
-            **existing_hooks,
-            "PreToolUse": pre_hooks,
-            "PostToolUse": post_hooks,
-            "PostToolUseFailure": failure_hooks,
-        }
-
-        # Ensure Skill tool is allowed
-        allowed_tools = list(getattr(base, "allowed_tools", None) or [])
-        if "Skill" not in allowed_tools:
-            allowed_tools.append("Skill")
+        merged_hooks = (
+            existing_hooks
+            if already_wrapped
+            else {
+                **existing_hooks,
+                "PreToolUse": pre_hooks,
+                "PostToolUse": post_hooks,
+                "PostToolUseFailure": failure_hooks,
+                "Stop": stop_hooks,
+                "SubagentStop": subagent_stop_hooks,
+            }
+        )
 
         # Ensure setting_sources includes project (for skills)
         setting_sources = getattr(base, "setting_sources", None) or ["project"]
@@ -374,7 +392,6 @@ class GroundedAgentAdapter:
             "enable_file_checkpointing": True,
             "can_use_tool": self._make_permission_callback(),
             "hooks": merged_hooks,
-            "allowed_tools": allowed_tools,
             "setting_sources": setting_sources,
         }
 
@@ -412,6 +429,17 @@ class GroundedAgentAdapter:
 
         return replace(base, **kwargs)
 
+    def _already_wrapped(self, hooks: dict[str, Any]) -> bool:
+        """Whether ``hooks`` already holds this adapter's safety hook."""
+        for entry in hooks.get("PreToolUse") or []:
+            if isinstance(entry, dict):
+                fns = entry.get("hooks") or []
+            else:
+                fns = getattr(entry, "hooks", None) or []
+            if any(getattr(fn, "_grounded_adapter", None) is self for fn in fns):
+                return True
+        return False
+
     def _wrap_hook(
         self,
         hook_fn: Any,
@@ -444,21 +472,75 @@ class GroundedAgentAdapter:
                 config["matcher"] = matcher
             return config
 
-    def _make_pretooluse_checkpoint_hook(self) -> Any:
+    def _make_turn_end_releaser(self) -> Any:
         """
-        Create PreToolUse hook that enforces checkpoint-before-mutation.
+        Create the Stop / SubagentStop hook that releases a checkpoint
+        reservation still held by a call of the session (and agent) that
+        just finished.
 
-        This is the Python-layer equivalent of the shell hook
-        ``pretooluse_require_checkpoint.sh``, providing defense-in-depth
+        A reservation ends when the call it was taken for finishes
+        (PostToolUse / PostToolUseFailure) or is denied by ``can_use_tool``.
+        A call another PreToolUse hook denies after the safety hook reserved
+        for it never runs, so nothing ends its reservation. When a session's
+        turn ends (Stop), or a subagent finishes (SubagentStop), none of its
+        calls is in flight, so a reservation one of them holds is released.
+        Other sessions sharing the adapter, and background subagents still
+        running, keep theirs.
+
+        Returns:
+            Async hook callback function
+        """
+        tracker = self.checkpoint_tracker
+
+        async def release_at_turn_end(
+            input_data: dict[str, Any],
+            tool_use_id: str | None,
+            context: HookContext | None,
+        ) -> dict[str, Any]:
+            try:
+                holder = tracker.release_reservation_in_scope(
+                    (input_data.get("session_id"), input_data.get("agent_id"))
+                )
+                if holder is not None:
+                    logger.info(
+                        "Turn ended: released the reservation left by %s", holder
+                    )
+            except Exception as e:
+                logger.warning("Turn-end releaser failed: %s", e)
+            return {}
+
+        return release_at_turn_end
+
+    def _make_pretooluse_safety_hook(self) -> Any:
+        """
+        Create the PreToolUse hook that enforces the rate limit and
+        checkpoint-before-mutation.
+
+        The checkpoint check is the Python-layer equivalent of the shell
+        hook ``pretooluse_require_checkpoint.sh``, providing defense-in-depth
         for environments where shell hooks are not active (e.g., when
         using the SDK programmatically).
 
-        PreToolUse runs for every tool call, including pre-approved ones
-        that never reach ``can_use_tool``, so this is where a checkpoint-gated
-        call reserves the active checkpoint, keyed by its ``tool_use_id``
-        (SEC-007). In strict mode it denies the call (``hookSpecificOutput``
-        with ``permissionDecision: "deny"``) when there is no valid
-        checkpoint or another call holds it.
+        PreToolUse runs for every tool call, including pre-approved ones in
+        ``allowed_tools`` that never reach ``can_use_tool``, so both checks
+        live here:
+
+        - Rate limit (SEC-010): a call over its risk level's limit, or one
+          whose limit check raises, is denied in strict and non-strict mode
+          alike. This runs first, so a call this check denies reserves
+          nothing.
+        - Checkpoint (SEC-007): a checkpoint-gated call reserves the active
+          checkpoint, keyed by its ``tool_use_id``. In strict mode the call
+          is denied when there is no valid checkpoint or another call holds
+          it.
+
+        They share one hook so the rate check is guaranteed to run before
+        the reservation. With two hooks nothing fixes their order, and a
+        call denied by the rate limit could keep a reservation that no
+        later hook releases.
+
+        A denial is ``hookSpecificOutput`` with
+        ``permissionDecision: "deny"``.
 
         Returns:
             Async hook callback function
@@ -466,23 +548,51 @@ class GroundedAgentAdapter:
         tracker = self.checkpoint_tracker
         mapper = self.mapper
         strict = self.config.strict_mode
+        limiter = self.rate_limiter
 
-        async def check_checkpoint_before_tool(
+        def deny(message: str) -> dict[str, Any]:
+            logger.warning("PreToolUse denied: %s", message)
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": message,
+                }
+            }
+
+        async def check_before_tool(
             input_data: dict[str, Any],
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
-            """PreToolUse hook to enforce checkpoint before mutations."""
+            """PreToolUse hook: rate limit, then checkpoint before mutations."""
             try:
                 tool_name = input_data.get("tool_name", "")
                 tool_input = input_data.get("tool_input", {})
 
                 mapping = mapper.map_tool(tool_name, tool_input)
 
+                try:
+                    within_limit = limiter.allow(mapping.risk)
+                except Exception as e:
+                    # The rate limit used to sit in can_use_tool, which
+                    # denies on error; keep it fail-closed here.
+                    return deny(f"Rate limit check failed: {e}")
+                if not within_limit:
+                    return deny(
+                        f"Rate limited: {mapping.risk}-risk capability "
+                        f"'{mapping.capability_id}' via {tool_name}. "
+                        f"Too many invocations — please wait."
+                    )
+
                 if not mapping.requires_checkpoint:
                     return {}
 
-                reserved, checkpoint_id = tracker.validate_and_reserve(tool_use_id)
+                holder = tool_use_id or input_data.get("tool_use_id")
+                reserved, checkpoint_id = tracker.validate_and_reserve(
+                    holder,
+                    scope=(input_data.get("session_id"), input_data.get("agent_id")),
+                )
                 if reserved:
                     return {}
 
@@ -491,23 +601,16 @@ class GroundedAgentAdapter:
                 )
 
                 if strict:
-                    logger.warning("PreToolUse denied: %s", message)
-                    return {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": message,
-                        }
-                    }
+                    return deny(message)
 
                 logger.warning("PreToolUse warning (non-strict): %s", message)
 
             except Exception as e:
-                logger.warning("PreToolUse checkpoint check failed: %s", e)
+                logger.warning("PreToolUse safety check failed: %s", e)
 
             return {}
 
-        return check_checkpoint_before_tool
+        return check_before_tool
 
     def _make_mutation_consumer(self) -> Any:
         """
@@ -539,6 +642,11 @@ class GroundedAgentAdapter:
 
                 mapping = mapper.map_tool(tool_name, tool_input)
                 if not mapping.requires_checkpoint:
+                    # The input it ran with (possibly rewritten by another
+                    # hook) is not checkpoint-gated, but PreToolUse may have
+                    # reserved for the original: give back only this call's.
+                    if tool_use_id is not None:
+                        tracker.release_reservation(tool_use_id)
                     return {}
 
                 # Check if the call was successful (no error in response)
@@ -600,11 +708,12 @@ class GroundedAgentAdapter:
 
     def _make_permission_callback(self) -> Any:
         """
-        Create permission callback that enforces checkpoint requirements
-        and rate limits.
+        Create permission callback that enforces checkpoint requirements.
 
-        This is the core safety mechanism - mutations are blocked
-        unless a valid checkpoint exists and rate limits are not exceeded.
+        Mutations are blocked unless a valid checkpoint exists. The rate
+        limit is enforced in the PreToolUse hook instead, which also sees
+        tools in ``allowed_tools`` that never reach this callback; checking
+        it here as well would charge a call twice.
 
         Returns:
             Async permission callback function
@@ -613,7 +722,6 @@ class GroundedAgentAdapter:
         tracker = self.checkpoint_tracker
         mapper = self.mapper
         strict = self.config.strict_mode
-        limiter = self.rate_limiter
 
         # Try to import SDK permission types
         try:
@@ -644,7 +752,7 @@ class GroundedAgentAdapter:
             context: HookContext | None,
         ) -> Any:
             """
-            Permission callback for checkpoint enforcement and rate limiting.
+            Permission callback for checkpoint enforcement.
 
             Args:
                 tool_name: Name of tool being invoked
@@ -658,15 +766,6 @@ class GroundedAgentAdapter:
             try:
                 # Map tool to capability
                 mapping = mapper.map_tool(tool_name, input_data)
-
-                # SEC-010: Rate limit check
-                if not limiter.allow(mapping.risk):
-                    return deny(
-                        f"Rate limited: {mapping.risk}-risk capability "
-                        f"'{mapping.capability_id}' via {tool_name}. "
-                        f"Too many invocations — please wait.",
-                        holder,
-                    )
 
                 # Check if checkpoint required
                 if mapping.requires_checkpoint:

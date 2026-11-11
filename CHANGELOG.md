@@ -6,6 +6,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+**Upgrading:**
+- Python 3.14 or 3.15 is required (`requires-python = ">=3.14"`); 3.10–3.13
+  are no longer supported. The extension's stable-ABI floor is 3.14.
+- Building from source needs Rust 1.88 or newer (was 1.86), because `sha2`
+  0.11 requires it.
+
+### Changed
+- Direct dependencies are at their latest releases. Python: the dev ranges are
+  pytest 8.4.2–9, pytest-asyncio 1.x, mypy 1.19.1–2 and ruff 0.17 (CI runs
+  ruff 0.17.4).
+  Rust: `hmac` 0.13, `sha2` 0.11, `saphyr`/`saphyr-parser` 0.3.3; CI builds
+  with Rust 1.99.1. Two indirect crates stay behind: `encoding_rs` (capped
+  by `saphyr`) and `ordered-float` (5.5 needs Rust 1.90). Go: cel-go 0.33.2
+  for the CEL differential check, which now needs Go 1.26.
+  GitHub Actions: checkout v7, setup-python v7, cache v6, upload-artifact
+  v7, setup-go v7.
+- CI tests Python 3.14 and 3.15.
+- The rate limit (SEC-010) is enforced in the adapter's PreToolUse hook
+  instead of the permission callback. The SDK approves a tool in
+  `allowed_tools` without calling the callback, so listed tools used to skip
+  the rate limit; the hook runs for every call. **Tools you pre-approve in
+  `allowed_tools` now count against the limit**: by default 10 high-risk
+  calls a minute (Write, Edit, destructive Bash), 30 medium and 120 low,
+  with a 1.5x burst. Raise them with `GroundedAgentConfig(rate_limit=...)`
+  if an agent needs more. A rate-limited call is denied before it reserves
+  a checkpoint, and an error inside the rate check denies the call.
+- `wrap_options()` adds Stop and SubagentStop hooks that release a
+  checkpoint reservation left behind by a call another PreToolUse hook
+  denied. Such a call never runs, so its reservation used to block every
+  other mutation for up to 10 minutes; now it lasts until the end of the
+  turn. Only reservations taken in the finishing session, by the finishing
+  agent, are released.
+- `wrap_options()` no longer adds `Skill` to `allowed_tools`, so `Skill`
+  calls reach the permission callback (the SDK warned that it was shadowed).
+- `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s, so `str()` of
+  a member is its value.
+
+### Fixed
+- A Bash call whose input is not a dictionary, or whose `command` is not
+  text, made the tool mapper raise, and the PreToolUse hook then let the
+  call through. It is now treated as an unknown, checkpoint-gated mutation.
+- Passing options that `wrap_options()` already returned to it again (as
+  `GroundedClient` does with the options it is given) returns them
+  unchanged instead of adding a second set of hooks.
+
 ## [v2.0.0] — 2026-10-29
 
 Implements Standard v1.1.0 (Candidate Standard) with RFC-0003 and RFC-0004

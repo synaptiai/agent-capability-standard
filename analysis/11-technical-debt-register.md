@@ -385,7 +385,7 @@ None of these are automated. Contributors must remember to run them manually bef
 
 **Remediation:**
 1. Create `.github/workflows/ci.yml` with jobs for:
-   - Python matrix testing (3.10, 3.11, 3.12)
+   - Python matrix testing (3.14, 3.15)
    - YAML validation (all 4 validators)
    - Conformance tests
    - `mypy --strict` type checking

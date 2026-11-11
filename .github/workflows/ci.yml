@@ -14,28 +14,28 @@ env:
   # ruff: a newer rustc, rustfmt or clippy can turn a green build red with no
   # source change. RUSTUP_TOOLCHAIN makes the maturin builds behind
   # `pip install -e` use it too. Bump deliberately.
-  RUST_TOOLCHAIN: "1.97.0"
-  RUSTUP_TOOLCHAIN: "1.97.0"
+  RUST_TOOLCHAIN: "1.99.1"
+  RUSTUP_TOOLCHAIN: "1.99.1"
   # Oldest rustc the crate supports (core/Cargo.toml `rust-version`).
-  RUST_MSRV: "1.86.0"
+  RUST_MSRV: "1.88.0"
 
 jobs:
   validate-schemas:
     name: Validate YAML schemas
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install Rust toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -96,7 +96,14 @@ jobs:
       run:
         working-directory: core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # pyo3's build script needs a Python at least as new as the abi3
+      # floor (3.14) for the `--features python` steps below.
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
 
       - name: Install Rust toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt,clippy
@@ -122,10 +129,10 @@ jobs:
     name: Expressions stay a CEL-compatible profile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: tools/cel_differential/go.mod
           cache-dependency-path: tools/cel_differential/go.sum
@@ -138,18 +145,18 @@ jobs:
     name: Lint & type-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install Rust toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -175,12 +182,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.14", "3.15"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -188,7 +195,7 @@ jobs:
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -206,18 +213,18 @@ jobs:
     name: Benchmark validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install Rust toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -236,7 +243,7 @@ jobs:
 
       - name: Upload benchmark results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: benchmarks/results/benchmark_results.json
@@ -248,18 +255,18 @@ jobs:
     name: Conformance tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install Rust toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -275,7 +282,7 @@ jobs:
 
       - name: Upload conformance results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: conformance-results
           path: build/conformance_results.json

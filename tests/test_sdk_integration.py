@@ -480,7 +480,7 @@ class TestGroundedAgentAdapter:
         # Check injected settings
         assert wrapped.enable_file_checkpointing is True
         assert wrapped.can_use_tool is not None
-        assert "Skill" in wrapped.allowed_tools
+        assert "Skill" not in wrapped.allowed_tools
         assert "PostToolUse" in wrapped.hooks
 
     def test_wrap_options_preserves_existing(self, adapter: GroundedAgentAdapter):
@@ -491,7 +491,7 @@ class TestGroundedAgentAdapter:
         assert "Read" in wrapped.allowed_tools
         assert "Write" in wrapped.allowed_tools
         assert "Bash" in wrapped.allowed_tools
-        assert "Skill" in wrapped.allowed_tools
+        assert "Skill" not in wrapped.allowed_tools
 
     def test_create_checkpoint_convenience(self, adapter: GroundedAgentAdapter):
         """Test adapter's create_checkpoint convenience method."""
@@ -612,7 +612,7 @@ class TestCheckpointReservation:
         """Pre-approved tools never reach can_use_tool; PreToolUse always
         runs, so it takes the reservation."""
         adapter.create_checkpoint(["*"], "Test")
-        pre = adapter._make_pretooluse_checkpoint_hook()
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
 
         ok = await pre({"tool_name": "Write", "tool_input": {}}, "t1", None)
@@ -719,7 +719,7 @@ class TestCheckpointReservation:
         it must not treat it as foreign: it checks the checkpoint and leaves
         the reservation to PreToolUse."""
         adapter.create_checkpoint(["*"], "Test")
-        pre = adapter._make_pretooluse_checkpoint_hook()
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
 
         assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
@@ -743,14 +743,18 @@ class TestCheckpointReservation:
         """A call can_use_tool denies never runs, so no PostToolUse hook
         ends the reservation its PreToolUse took; the deny releases it."""
         adapter.create_checkpoint(["*"], "Test")
-        pre = adapter._make_pretooluse_checkpoint_hook()
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
 
         assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
-        monkeypatch.setattr(adapter.rate_limiter, "allow", lambda risk: False)
+
+        def fail(*args: object) -> None:
+            raise RuntimeError("mapper failure")
+
+        monkeypatch.setattr(adapter.mapper, "map_tool", fail)
         denied = await callback("Write", {}, self._ctx("t1"))
         assert _denied(denied)
-        assert "Rate limited" in denied.message
+        assert "internal error" in denied.message
         monkeypatch.undo()
 
         assert adapter.has_valid_checkpoint()

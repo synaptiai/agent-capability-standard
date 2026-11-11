@@ -300,7 +300,7 @@ classDiagram
         +get_mutations() list~EvidenceAnchor~
         +ontology_version: str
         +capability_count: int
-        -_make_pretooluse_checkpoint_hook() Callable
+        -_make_pretooluse_safety_hook() Callable
         -_make_permission_callback() Callable
         -_make_mutation_consumer() Callable
         -_make_failure_releaser() Callable
@@ -383,6 +383,7 @@ classDiagram
         +get_active_checkpoint_id() str|None
         +validate_and_reserve(holder) tuple~bool,str|None~
         +release_reservation(holder) bool
+        +release_reservation_in_scope(scope) str
         +consume_checkpoint(holder) str|None
         +get_checkpoint_by_id(checkpoint_id) Checkpoint|None
         +get_history(limit) list~Checkpoint~
@@ -516,7 +517,7 @@ sequenceDiagram
 
     Note over Adapter: PreToolUse Hook Phase (every call, incl. pre-approved ones)
 
-    SDK->>Adapter: check_checkpoint_before_tool(input_data, tool_use_id, context)
+    SDK->>Adapter: check_before_tool(input_data, tool_use_id, context)
     Adapter->>Mapper: map_tool("Write", input)
     Mapper-->>Adapter: ToolMapping{capability_id="mutate",<br/>risk="high", mutation=true,<br/>requires_checkpoint=true}
     Adapter->>Tracker: validate_and_reserve(tool_use_id)
@@ -712,7 +713,7 @@ The ACS employs two layers of hooks: shell-level hooks configured in `hooks.json
 sequenceDiagram
     participant CC as Claude Code Runtime
     participant PreShell as PreToolUse Shell Hook<br/>pretooluse_require_checkpoint.sh
-    participant PyPre as PreToolUse Checkpoint Hook<br/>adapter._make_pretooluse_checkpoint_hook()
+    participant PyPre as PreToolUse Safety Hook<br/>adapter._make_pretooluse_safety_hook()
     participant PyPerm as Python Permission Callback<br/>adapter._make_permission_callback()
     participant Tool as Tool Execution Engine
     participant PyEvidence as PostToolUse Evidence Collector<br/>evidence_collector.py
@@ -733,10 +734,10 @@ sequenceDiagram
         PreShell-->>CC: exit 0 -- proceed
     end
 
-    CC->>PyPre: check_checkpoint_before_tool(input_data, tool_use_id, ctx)
-    PyPre->>PyPre: map_tool() -> ToolMapping<br/>If requires_checkpoint:<br/>validate_and_reserve(tool_use_id)
+    CC->>PyPre: check_before_tool(input_data, tool_use_id, ctx)
+    PyPre->>PyPre: map_tool() -> ToolMapping<br/>Rate limit check<br/>If requires_checkpoint:<br/>validate_and_reserve(tool_use_id)
 
-    alt Not reserved + strict_mode
+    alt Rate limited, or not reserved + strict_mode
         PyPre-->>CC: hookSpecificOutput{permissionDecision: "deny"}
         Note over CC: Tool execution ABORTED
     else Reserved (or not checkpoint-gated, or non-strict)
@@ -744,7 +745,7 @@ sequenceDiagram
     end
 
     CC->>PyPerm: can_use_tool(tool_name, input, context)
-    PyPerm->>PyPerm: map_tool() -> ToolMapping<br/>Rate limit check<br/>validate_and_reserve(tool_use_id) (idempotent)
+    PyPerm->>PyPerm: map_tool() -> ToolMapping<br/>validate_and_reserve(tool_use_id) (idempotent)
 
     alt Permission denied
         PyPerm-->>CC: PermissionResultDeny
@@ -812,10 +813,11 @@ sequenceDiagram
 | PostToolUse | Shell | `posttooluse_log_tool.sh` | `Skill` | Append skill invocations to `.claude/audit.log` |
 | PostToolUse | Python | `evidence_collector.py` | All tools | Capture evidence anchors to `EvidenceStore` |
 | PostToolUse | Python | `skill_tracker.py` | `Skill` | Update `CheckpointTracker` on checkpoint/rollback skills |
-| PreToolUse | Python | `adapter._make_pretooluse_checkpoint_hook()` | All tools | Reserve the active checkpoint for the call (`tool_use_id`); deny via `hookSpecificOutput` in strict mode |
-| can_use_tool | Python | `adapter._make_permission_callback()` | All tools | SDK-level rate limiting and checkpoint enforcement (repeats the reservation idempotently) |
+| PreToolUse | Python | `adapter._make_pretooluse_safety_hook()` | All tools | Rate limit every call; reserve the active checkpoint for a checkpoint-gated call (`tool_use_id`); deny via `hookSpecificOutput` |
+| can_use_tool | Python | `adapter._make_permission_callback()` | Tools not in `allowed_tools` | Checkpoint enforcement (repeats the reservation idempotently) |
 | PostToolUse | Python | `adapter._make_mutation_consumer()` | All tools | Consume the call's reserved checkpoint after a successful mutation; release it otherwise |
 | PostToolUseFailure | Python | `adapter._make_failure_releaser()` | All tools | Release the reservation of a failed or interrupted call |
+| Stop, SubagentStop | Python | `adapter._make_turn_end_releaser()` | - | Release a reservation still held by a call of the finishing session and agent |
 
 ---
 
@@ -1328,7 +1330,7 @@ This matrix tracks the implementation status of every major feature across all s
 | PostToolUse skill tracker (Python) | Implemented | `skill_tracker.py` | Injected via wrap_options |
 | PostToolUse mutation consumer (Python) | Implemented | `adapter.py` | Injected via wrap_options |
 | Permission callback (Python) | Implemented | `adapter.py` | Injected via wrap_options |
-| PreToolUse checkpoint hook (Python) | Implemented | `adapter.py` | Reserves the checkpoint per `tool_use_id`; injected via wrap_options |
+| PreToolUse safety hook (Python) | Implemented | `adapter.py` | Rate-limits every call and reserves the checkpoint per `tool_use_id`; injected via wrap_options |
 | PostToolUseFailure releaser (Python) | Implemented | `adapter.py` | Releases the reservation of a failed call; injected via wrap_options |
 
 ### 11.4 Skill Features

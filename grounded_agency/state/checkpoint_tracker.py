@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,8 @@ class _Reservation:
     checkpoint_id: str
     holder: str  # the tool call's tool_use_id, or an anonymous token
     reserved_at: float  # time.monotonic()
+    # (session_id, agent_id) of the call that took it, when known
+    scope: tuple[str | None, str | None] | None = None
 
 
 @dataclass(slots=True)
@@ -57,7 +59,7 @@ class Checkpoint:
         """Check if checkpoint is still valid (not consumed, not expired)."""
         if self.consumed:
             return False
-        if self.expires_at and datetime.now(timezone.utc) > self.expires_at:
+        if self.expires_at and datetime.now(UTC) > self.expires_at:
             return False
         return True
 
@@ -361,9 +363,9 @@ class CheckpointTracker:
 
         expires_at = None
         if expiry_minutes is not None:
-            expires_at = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
+            expires_at = datetime.now(UTC) + timedelta(minutes=expiry_minutes)
         elif self.DEFAULT_EXPIRY_MINUTES:
-            expires_at = datetime.now(timezone.utc) + timedelta(
+            expires_at = datetime.now(UTC) + timedelta(
                 minutes=self.DEFAULT_EXPIRY_MINUTES
             )
 
@@ -371,7 +373,7 @@ class CheckpointTracker:
             id=checkpoint_id,
             scope=scope,
             reason=reason,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             expires_at=expires_at,
             metadata=metadata or {},
         )
@@ -396,7 +398,7 @@ class CheckpointTracker:
         32 hex characters.  ``os.urandom`` is already cryptographically
         secure, so hashing adds no additional entropy.
         """
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         random_suffix = os.urandom(16).hex()
         return f"chk_{timestamp}_{random_suffix}"
 
@@ -543,7 +545,9 @@ class CheckpointTracker:
         )
 
     def validate_and_reserve(
-        self, holder: str | None = None
+        self,
+        holder: str | None = None,
+        scope: tuple[str | None, str | None] | None = None,
     ) -> tuple[bool, str | None]:
         """Atomically check the active checkpoint and reserve it for one
         mutation.
@@ -563,6 +567,8 @@ class CheckpointTracker:
                 ``tool_use_id``. Omitted, an anonymous holder is used that
                 only ``release_reservation()`` / ``consume_checkpoint()``
                 without a holder can end.
+            scope: ``(session_id, agent_id)`` of the call, recorded on a new
+                reservation for ``release_reservation_in_scope()``.
 
         Returns:
             ``(True, checkpoint_id)``: reserved for ``holder``.
@@ -587,6 +593,7 @@ class CheckpointTracker:
                 checkpoint_id=checkpoint.id,
                 holder=holder if holder is not None else f"anon_{os.urandom(8).hex()}",
                 reserved_at=time.monotonic(),
+                scope=scope,
             )
             return True, checkpoint.id
 
@@ -604,6 +611,24 @@ class CheckpointTracker:
                 return False
             self._reservation = None
             return True
+
+    def release_reservation_in_scope(
+        self, scope: tuple[str | None, str | None]
+    ) -> str | None:
+        """Release the reservation if a call in ``scope`` (``(session_id,
+        agent_id)``) took it. For when that session's turn, or that agent,
+        has ended: none of its calls is in flight, so a reservation it still
+        holds belongs to a call that never ran.
+
+        Returns:
+            The released holder, or None
+        """
+        with self._lock:
+            r = self._reservation
+            if r is None or r.scope != scope:
+                return None
+            self._reservation = None
+            return r.holder
 
     def has_checkpoint_for_scope(self, target: str) -> bool:
         """
@@ -672,7 +697,7 @@ class CheckpointTracker:
             self._reservation = None
 
             consumed.consumed = True
-            consumed.consumed_at = datetime.now(timezone.utc)
+            consumed.consumed_at = datetime.now(UTC)
             checkpoint_id = consumed.id
 
             # Move to history
@@ -687,7 +712,7 @@ class CheckpointTracker:
         for checkpoint in self._checkpoint_history:
             if checkpoint.id == checkpoint_id and not checkpoint.consumed:
                 checkpoint.consumed = True
-                checkpoint.consumed_at = datetime.now(timezone.utc)
+                checkpoint.consumed_at = datetime.now(UTC)
                 self._persist_state()
                 return checkpoint_id
         return None
@@ -742,7 +767,7 @@ class CheckpointTracker:
             Number of expired checkpoints removed (active + history)
         """
         with self._lock:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             active_cleared = False
 
             # Move expired active checkpoint to history FIRST so it gets
@@ -779,7 +804,7 @@ class CheckpointTracker:
             self._reservation = None
             if self._active_checkpoint:
                 self._active_checkpoint.consumed = True
-                self._active_checkpoint.consumed_at = datetime.now(timezone.utc)
+                self._active_checkpoint.consumed_at = datetime.now(UTC)
                 self._checkpoint_history.append(self._active_checkpoint)
                 self._active_checkpoint = None
                 self._remove_marker()

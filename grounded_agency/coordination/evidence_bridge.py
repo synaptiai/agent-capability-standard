@@ -13,7 +13,7 @@ import logging
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
@@ -43,9 +43,7 @@ class SharedEvidence:
     source_agent_id: str
     trust_score: float
     original_trust: float = 0.0
-    shared_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    shared_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON export."""
@@ -133,7 +131,7 @@ class CrossAgentEvidenceBridge:
             )
             return []
 
-        shared_at = datetime.now(timezone.utc).isoformat()
+        shared_at = datetime.now(UTC).isoformat()
         results: list[SharedEvidence] = []
 
         with self._lock:

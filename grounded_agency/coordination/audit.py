@@ -15,7 +15,7 @@ import threading
 import types
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ class CoordinationAuditLog:
             source_agent_id=source_agent_id,
             target_agent_ids=tuple(target_agent_ids),
             capability_id=capability_id,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             details=types.MappingProxyType(
                 json.loads(json.dumps(details, default=str)) if details else {}
             ),

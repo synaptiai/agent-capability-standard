@@ -135,14 +135,14 @@ pub(crate) fn check(
     if let Some(r) = a.get("recheck") {
         recheck(r, checker, scope, &at, report);
     }
-    if let Some(e) = a.get("expires") {
-        if duration_field(e, "approval.expires", &at, report).is_some_and(|d| d.is_zero()) {
-            report.push(s303(
-                &at,
-                "approval.expires",
-                "approval.expires must be longer than zero".into(),
-            ));
-        }
+    if let Some(e) = a.get("expires")
+        && duration_field(e, "approval.expires", &at, report).is_some_and(|d| d.is_zero())
+    {
+        report.push(s303(
+            &at,
+            "approval.expires",
+            "approval.expires must be longer than zero".into(),
+        ));
     }
     enum_field(
         a,
@@ -181,14 +181,14 @@ fn approver(value: &Value, at: &dyn Fn(Diagnostic) -> Diagnostic, report: &mut R
         report,
     );
     string_field(ap, "role", field, at, report);
-    if let Some(n) = ap.get("min_approvers") {
-        if !count(n).is_some_and(|n| n >= 1) {
-            report.push(s303(
-                at,
-                &format!("{field}.min_approvers"),
-                format!("{field}.min_approvers must be an integer of at least 1, found {n}"),
-            ));
-        }
+    if let Some(n) = ap.get("min_approvers")
+        && !count(n).is_some_and(|n| n >= 1)
+    {
+        report.push(s303(
+            at,
+            &format!("{field}.min_approvers"),
+            format!("{field}.min_approvers must be an integer of at least 1, found {n}"),
+        ));
     }
     string_field(ap, "mandate_ref", field, at, report);
     match (kind, ap.contains_key("mandate_ref")) {

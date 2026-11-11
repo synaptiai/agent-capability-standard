@@ -67,12 +67,12 @@ fn resolve_str(s: &str, b: &dyn Bindings) -> Value {
         };
         eval::resolve(&at, b).into_owned()
     };
-    if let [m] = found.as_slice() {
-        if m.start == 0 && m.end == s.len() {
-            if let Ok(r) = &m.parsed {
-                return read(r);
-            }
-        }
+    if let [m] = found.as_slice()
+        && m.start == 0
+        && m.end == s.len()
+        && let Ok(r) = &m.parsed
+    {
+        return read(r);
     }
     let mut out = String::new();
     let mut last = 0;
@@ -228,10 +228,10 @@ impl<'a> Machine<'a> {
     /// An approved action that then failed. A record that is already
     /// rejected, expired or executed keeps its status.
     fn record_failed(&mut self) {
-        if let Some(r) = self.frame_ref().cur.record {
-            if self.st.records[r]["status"] == "approved" {
-                self.st.records[r]["status"] = json!("failed");
-            }
+        if let Some(r) = self.frame_ref().cur.record
+            && self.st.records[r]["status"] == "approved"
+        {
+            self.st.records[r]["status"] = json!("failed");
         }
     }
 
@@ -476,12 +476,12 @@ impl<'a> Machine<'a> {
             // so its record (if approved) is executed; the nested run's own
             // records are the queued actions.
             Ok((Outcome::Deferred, None)) => {
-                if let Some(r) = self.frame_ref().cur.record {
-                    if self.st.records[r]["status"] == "approved" {
-                        self.st.records[r]["status"] = json!("executed");
-                        self.st.records[r]["reason"] =
-                            json!("its nested run deferred steps, which are queued separately");
-                    }
+                if let Some(r) = self.frame_ref().cur.record
+                    && self.st.records[r]["status"] == "approved"
+                {
+                    self.st.records[r]["status"] = json!("executed");
+                    self.st.records[r]["reason"] =
+                        json!("its nested run deferred steps, which are queued separately");
                 }
                 let wf = &self.program.workflows[&child.workflow];
                 let mut caps: Vec<String> = child
@@ -743,12 +743,10 @@ impl<'a> Machine<'a> {
             .get("approver")
             .cloned()
             .unwrap_or_else(|| json!({"kind": "human"}));
-        if marked {
-            if let Value::Object(a) = &mut approver {
-                a.insert("kind".into(), json!("human"));
-                a.remove("mandate_ref");
-                a.insert("always_ask".into(), json!(true));
-            }
+        if marked && let Value::Object(a) = &mut approver {
+            a.insert("kind".into(), json!("human"));
+            a.remove("mandate_ref");
+            a.insert("always_ask".into(), json!(true));
         }
         // More approvers than any count can reach: the cap keeps the state
         // exactly representable (I-JSON) without changing the outcome.
@@ -1177,118 +1175,122 @@ impl<'a> Machine<'a> {
             step.capability.as_str(),
             "receive" | "synchronize" | "delegate"
         ) {
-            if wf.extension("delegation@1") {
-                if let Err(e) = accept_from_input(&self.frame_ref().cur.inputs) {
-                    return self.step_error("R402", e);
-                }
+            if wf.extension("delegation@1")
+                && let Err(e) = accept_from_input(&self.frame_ref().cur.inputs)
+            {
+                return self.step_error("R402", e);
             }
-            if wf.extension("identity@1") {
-                if let Err(e) = identity_inputs(&self.frame_ref().cur.inputs) {
-                    return self.step_error("R402", e);
-                }
+            if wf.extension("identity@1")
+                && let Err(e) = identity_inputs(&self.frame_ref().cur.inputs)
+            {
+                return self.step_error("R402", e);
             }
         }
         // A correlate key that resolves to null would match every event
         // without that key: fail before acting (delegating) or waiting.
-        if wf.extension("wait@1") {
-            if let Some(Value::Object(c)) = step.raw.get("wait").and_then(|w| w.get("correlate")) {
-                let bindings = FrameBindings(self.frame_ref());
-                if let Some(k) = c
-                    .iter()
-                    .find(|(_, v)| resolve(v, &bindings).is_null())
-                    .map(|(k, _)| k)
-                {
-                    return self.step_error(
-                        "R402",
-                        format!("wait.correlate.{k} resolved to null, so it would match events that lack it"),
-                    );
-                }
+        if wf.extension("wait@1")
+            && let Some(Value::Object(c)) = step.raw.get("wait").and_then(|w| w.get("correlate"))
+        {
+            let bindings = FrameBindings(self.frame_ref());
+            if let Some(k) = c
+                .iter()
+                .find(|(_, v)| resolve(v, &bindings).is_null())
+                .map(|(k, _)| k)
+            {
+                return self.step_error(
+                    "R402",
+                    format!(
+                        "wait.correlate.{k} resolved to null, so it would match events that lack it"
+                    ),
+                );
             }
         }
         // A delegate that waits delegates first (an InvokeCapability below),
         // then waits for its delegate's result.
         let delegating = step.capability == "delegate" && self.frame_ref().cur.delegated.is_none();
-        if wf.extension("wait@1") && !delegating {
-            if let Some(Value::Object(wait)) = step.raw.get("wait") {
-                let bindings = FrameBindings(self.frame_ref());
-                let mut correlate: Map<String, Value> = wait
-                    .get("correlate")
-                    .and_then(Value::as_object)
-                    .map(|c| {
-                        c.iter()
-                            .map(|(k, v)| (k.clone(), resolve(v, &bindings)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                // The result must be for this delegation.
-                if let Some(task) = self
-                    .frame_ref()
+        if wf.extension("wait@1")
+            && !delegating
+            && let Some(Value::Object(wait)) = step.raw.get("wait")
+        {
+            let bindings = FrameBindings(self.frame_ref());
+            let mut correlate: Map<String, Value> = wait
+                .get("correlate")
+                .and_then(Value::as_object)
+                .map(|c| {
+                    c.iter()
+                        .map(|(k, v)| (k.clone(), resolve(v, &bindings)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            // The result must be for this delegation.
+            if let Some(task) = self
+                .frame_ref()
+                .cur
+                .delegated
+                .as_ref()
+                .and_then(|d| d.get("task_id"))
+                .filter(|t| !t.is_null())
+            {
+                correlate.insert("task_id".to_string(), task.clone());
+            }
+            let inputs = &self.frame_ref().cur.inputs;
+            let accept_from = string_list(inputs, "accept_from");
+            let sender_check = string_list(inputs, "sender_check");
+            let accept_trust_classes = string_list(inputs, "accept_trust_classes");
+            let delegate_principal = if wf.extension("identity@1") {
+                self.frame_ref()
                     .cur
                     .delegated
                     .as_ref()
-                    .and_then(|d| d.get("task_id"))
-                    .filter(|t| !t.is_null())
-                {
-                    correlate.insert("task_id".to_string(), task.clone());
-                }
-                let inputs = &self.frame_ref().cur.inputs;
-                let accept_from = string_list(inputs, "accept_from");
-                let sender_check = string_list(inputs, "sender_check");
-                let accept_trust_classes = string_list(inputs, "accept_trust_classes");
-                let delegate_principal = if wf.extension("identity@1") {
-                    self.frame_ref()
-                        .cur
-                        .delegated
-                        .as_ref()
-                        .and_then(super::delegate_principal)
-                } else {
-                    None
-                };
-                return self.emit(
-                    Body::AwaitEvent {
-                        step: index,
-                        event_type: wait
-                            .get("event_type")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string(),
-                        source_kind: wait
-                            .get("source_kind")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                        correlate,
-                        accept_from,
-                        sender_check,
-                        accept_trust_classes,
-                        delegate_principal,
-                        liveness: wait.get("liveness").cloned(),
-                        deadline,
-                    },
-                    Purpose::Event,
+                    .and_then(super::delegate_principal)
+            } else {
+                None
+            };
+            return self.emit(
+                Body::AwaitEvent {
+                    step: index,
+                    event_type: wait
+                        .get("event_type")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    source_kind: wait
+                        .get("source_kind")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    correlate,
+                    accept_from,
+                    sender_check,
+                    accept_trust_classes,
+                    delegate_principal,
+                    liveness: wait.get("liveness").cloned(),
                     deadline,
-                );
-            }
+                },
+                Purpose::Event,
+                deadline,
+            );
         }
         if step.capability == "invoke" {
             return self.invoke(step);
         }
-        if step.capability == "constrain" && wf.extension("quorum@1") {
-            if let Some(Value::Object(q)) = step.raw.get("quorum") {
-                let identities =
-                    self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
-                let result = quorum::evaluate(q, self.frame_ref(), identities);
-                self.trace_step("quorum", json!({"tally": result.output["tally"]}));
-                self.frame().cur.output = Some(result.output);
-                if !result.compliant {
-                    // The output stays readable by failure modes.
-                    if let Some(store) = &step.store_as {
-                        let out = self.frame_ref().cur.output.clone().unwrap_or_default();
-                        self.frame().stores.insert(store.clone(), out);
-                    }
-                    return self.step_error("F504", result.message);
+        if step.capability == "constrain"
+            && wf.extension("quorum@1")
+            && let Some(Value::Object(q)) = step.raw.get("quorum")
+        {
+            let identities =
+                self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
+            let result = quorum::evaluate(q, self.frame_ref(), identities);
+            self.trace_step("quorum", json!({"tally": result.output["tally"]}));
+            self.frame().cur.output = Some(result.output);
+            if !result.compliant {
+                // The output stays readable by failure modes.
+                if let Some(store) = &step.store_as {
+                    let out = self.frame_ref().cur.output.clone().unwrap_or_default();
+                    self.frame().stores.insert(store.clone(), out);
                 }
-                return self.set_stage(Stage::After);
+                return self.step_error("F504", result.message);
             }
+            return self.set_stage(Stage::After);
         }
         let inputs = self.frame_ref().cur.inputs.clone();
         let attempt = self.frame_ref().cur.attempt;
@@ -1361,35 +1363,35 @@ impl<'a> Machine<'a> {
                 s.retry.as_ref().map(|r| (r.max, r.backoff.clone())),
             )
         };
-        if matches!(code, "R401" | "R402" | "R406") {
-            if let Some((max, backoff)) = retry {
-                if attempt <= max {
-                    let wait_ms: u64 = match backoff.as_str() {
-                        "linear" => 1000u64.saturating_mul(u64::from(attempt)),
-                        "exponential" => {
-                            1000u64.saturating_mul(1u64 << attempt.saturating_sub(1).min(32))
-                        }
-                        _ => 0,
-                    };
-                    self.trace_step(
-                        "retry",
-                        json!({"code": code, "message": message, "attempt": attempt, "backoff_ms": wait_ms}),
-                    );
-                    // A delegate that waits is delegated again: a delegate
-                    // that went silent is replaced, not waited on again.
-                    let cur = &mut self.frame().cur;
-                    if let Some(d) = cur.delegated.take() {
-                        cur.replaces = d.get("task_id").cloned();
-                    }
-                    cur.deadline = None;
-                    if wait_ms == 0 {
-                        self.frame().cur.attempt = self.frame_ref().cur.attempt.saturating_add(1);
-                        return self.set_stage(Stage::Execute);
-                    }
-                    let until = self.st.now.saturating_add(wait_ms).min(MAX_TIME);
-                    return self.set_stage(Stage::Backoff { until });
-                }
+        if matches!(code, "R401" | "R402" | "R406")
+            && let Some((max, backoff)) = retry
+            && attempt <= max
+        {
+            let wait_ms: u64 = match backoff.as_str() {
+                "linear" => 1000u64.saturating_mul(u64::from(attempt)),
+                "exponential" => 1000u64.saturating_mul(1u64 << attempt.saturating_sub(1).min(32)),
+                _ => 0,
+            };
+            let detail = json!({
+                "code": code,
+                "message": message,
+                "attempt": attempt,
+                "backoff_ms": wait_ms,
+            });
+            self.trace_step("retry", detail);
+            // A delegate that waits is delegated again: a delegate
+            // that went silent is replaced, not waited on again.
+            let cur = &mut self.frame().cur;
+            if let Some(d) = cur.delegated.take() {
+                cur.replaces = d.get("task_id").cloned();
             }
+            cur.deadline = None;
+            if wait_ms == 0 {
+                self.frame().cur.attempt = self.frame_ref().cur.attempt.saturating_add(1);
+                return self.set_stage(Stage::Execute);
+            }
+            let until = self.st.now.saturating_add(wait_ms).min(MAX_TIME);
+            return self.set_stage(Stage::Backoff { until });
         }
         self.step_error(code, message)
     }
@@ -1428,10 +1430,9 @@ impl<'a> Machine<'a> {
         if step.capability == "delegate"
             && self.frame_ref().cur.delegated.is_none()
             && wf.extension("identity@1")
+            && let Some(e) = super::delegate_identity_error(&value)
         {
-            if let Some(e) = super::delegate_identity_error(&value) {
-                return self.exec_error("R402", e);
-            }
+            return self.exec_error("R402", e);
         }
         if step.capability == "delegate"
             && self.frame_ref().cur.delegated.is_none()
@@ -1449,10 +1450,10 @@ impl<'a> Machine<'a> {
                 );
             }
             let mut traced = json!({"task_id": value.get("task_id")});
-            if wf.extension("identity@1") {
-                if let Some(p) = super::delegate_principal(&value) {
-                    traced["principal"] = json!(p);
-                }
+            if wf.extension("identity@1")
+                && let Some(p) = super::delegate_principal(&value)
+            {
+                traced["principal"] = json!(p);
             }
             self.trace_step("delegated", traced);
             let f = self.frame();

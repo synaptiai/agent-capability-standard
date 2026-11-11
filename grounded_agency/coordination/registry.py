@@ -14,7 +14,7 @@ import re
 import threading
 import types
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..capabilities.registry import CapabilityRegistry
@@ -66,9 +66,7 @@ class AgentDescriptor:
     metadata: types.MappingProxyType | dict[str, Any] = field(
         default_factory=lambda: types.MappingProxyType({})
     )
-    registered_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    registered_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.trust_score <= 1.0:

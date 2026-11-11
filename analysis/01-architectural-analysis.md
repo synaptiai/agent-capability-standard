@@ -141,10 +141,11 @@ options = adapter.wrap_options(base_options)  # Injects hooks, permissions, sett
 |---------|------|---------|
 | `create_evidence_collector(store, mapper)` | PostToolUse | Captures evidence anchors from all tool executions |
 | `create_skill_tracker(tracker)` | PostToolUse | Tracks checkpoint/rollback skill invocations |
-| `_make_pretooluse_checkpoint_hook()` | PreToolUse | Reserves the active checkpoint for each checkpoint-gated call (keyed by `tool_use_id`); denies via `hookSpecificOutput` in strict mode |
+| `_make_pretooluse_safety_hook()` | PreToolUse | Applies the per-risk rate limit to every call, then reserves the active checkpoint for each checkpoint-gated call (keyed by `tool_use_id`); denies via `hookSpecificOutput` |
 | `_make_permission_callback()` | CanUseTool | **Core safety gate**: repeats the reservation idempotently; denies mutations without a valid, unreserved checkpoint |
 | `_make_mutation_consumer()` | PostToolUse | Consumes the call's reserved checkpoint after a successful mutation; releases it on error or a non-mutating call |
 | `_make_failure_releaser()` | PostToolUseFailure | Releases the reservation of a failed or interrupted call |
+| `_make_turn_end_releaser()` | Stop, SubagentStop | Releases a reservation still held by a call of the finishing session and agent |
 
 **Enforcement Chain** (for a mutation like Write):
 1. Shell PreToolUse hook checks `.claude/checkpoint.ok` file exists
@@ -313,7 +314,7 @@ The core safety pattern for mutations:
 - `CheckpointTracker.has_valid_checkpoint()` checks: exists AND not consumed AND not expired
 - `Checkpoint.matches_scope(target)` validates target covered by scope patterns (supports `*` and fnmatch globs)
 - `CheckpointTracker.consume_checkpoint()` marks consumed with timestamp, moves to history
-- `CheckpointTracker.validate_and_reserve(holder)` reserves the active checkpoint for one tool call (keyed by `tool_use_id`, idempotent for the same holder, lapses after `reservation_seconds`, default 600); `release_reservation(holder)` gives it back; `consume_checkpoint(holder)` consumes only what that holder reserved
+- `CheckpointTracker.validate_and_reserve(holder)` reserves the active checkpoint for one tool call (keyed by `tool_use_id`, idempotent for the same holder, lapses after `reservation_seconds`, default 600); `release_reservation(holder)` gives it back; `release_reservation_in_scope((session_id, agent_id))` gives it back at the end of that session's turn or that subagent; `consume_checkpoint(holder)` consumes only what that holder reserved
 - `CheckpointTracker.invalidate_all()` clears all checkpoints (for rollback)
 
 ### 4.3 Dual-Layer Enforcement
@@ -326,7 +327,7 @@ Layer 1: Shell Hooks (Claude Code CLI)
      └─ Uses CLAUDE_PROJECT_DIR for absolute path resolution
 
 Layer 2: Python SDK (PreToolUse hook + Permission Callback)
-  └─ adapter._make_pretooluse_checkpoint_hook()
+  └─ adapter._make_pretooluse_safety_hook()
      └─ Runs for every tool call, including pre-approved ones
      └─ Maps tool → capability via ToolCapabilityMapper
      └─ Checks requires_checkpoint flag
@@ -382,15 +383,15 @@ The `ToolCapabilityMapper._classify_bash_command()` method uses a priority-order
 
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
-| **Language** | Python | >=3.10 | `\|` union types, `slots=True` dataclasses, `match` statements |
+| **Language** | Python | >=3.14 | `\|` union types, `slots=True` dataclasses, `match` statements |
 | **Build** | maturin | >=1.9,<2 | PEP 517 build backend; compiles the Rust crate `core/` (`acs-core`) into `grounded_agency._core` (abi3 wheels per platform) |
-| **Core** | Rust | >=1.86 | Workflow validator and executor (YAML 1.2 loader, type system, expressions, diagnostics) |
+| **Core** | Rust | >=1.88 | Workflow validator and executor (YAML 1.2 loader, type system, expressions, diagnostics) |
 | **Schema** | YAML | 1.2 | All ontology, workflow, profile, and mapping definitions |
 | **YAML Parser** | PyYAML | >=6.0,<7 | Only runtime Python dependency; Python-side loading uses `yaml.safe_load()` exclusively (workflow validation uses the Rust core's YAML 1.2 loader) |
 | **Testing** | pytest | >=7.0 | Unit tests with async support |
 | **Async Testing** | pytest-asyncio | >=0.21 | `auto` mode for async test functions |
-| **Type Checking** | mypy | >=1.0 | Strict mode, Python 3.10+ target |
-| **Linting** | ruff | >=0.16,<0.17 (exact pin in `constraints.txt`) | pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade |
+| **Type Checking** | mypy | >=1.19.1,<3 | Strict mode, Python 3.14+ target |
+| **Linting** | ruff | >=0.17,<0.18 (exact pin in `constraints.txt`) | pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade |
 | **SDK** | claude-agent-sdk | >=0.1.52,<0.3 | Optional dependency (`pip install grounded-agency[sdk]`) |
 | **Plugin** | Claude Code | CLI | Hooks, skills, audit logging |
 | **Shell** | Bash | 4+ | Hook scripts with jq for JSON parsing |
@@ -601,7 +602,7 @@ event_schema.yaml ──→ world_state_schema.yaml (observation event mapping)
 ```
 grounded-agency (Python package)
     └── pyyaml>=6.0,<7 (only runtime Python dependency)
-    └── grounded_agency._core (compiled from core/, Rust >= 1.86, via maturin)
+    └── grounded_agency._core (compiled from core/, Rust >= 1.88, via maturin)
     └── [optional] claude-agent-sdk>=0.1.52,<0.3
 
 Claude Code Plugin
@@ -636,7 +637,7 @@ Claude Code Plugin
 | CI pipeline | `.github/workflows/ci.yml` |
 | Plugin version | 1.1.0 |
 | SDK version | 0.1.0 |
-| Python requirement | >=3.10 |
+| Python requirement | >=3.14 |
 
 ---
 

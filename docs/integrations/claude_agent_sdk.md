@@ -69,6 +69,10 @@ base_options = ClaudeAgentOptions(
 )
 options = adapter.wrap_options(base_options)
 
+# Tools in allowed_tools are approved without the adapter's permission
+# callback; the adapter's PreToolUse hook still applies the rate limit and
+# the checkpoint rule to every tool call.
+
 async with ClaudeSDKClient(options) as client:
     await client.query("Refactor the authentication module")
     async for msg in client.receive_response():
@@ -263,11 +267,12 @@ assert not adapter.has_valid_checkpoint()
 
 ## PreToolUse Hook Enforcement
 
-The adapter injects PreToolUse, PostToolUse and PostToolUseFailure hooks:
+The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop and SubagentStop hooks:
 
-- **PreToolUse**: For tools whose capability requires a checkpoint (Write, Edit, Bash with destructive commands), reserves the active checkpoint for the call, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`). It runs for every tool call, including pre-approved ones that never reach `can_use_tool`. When there is no valid checkpoint, or another in-flight call holds the reservation, strict mode denies the call with `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "..."}}`; non-strict mode logs a warning.
+- **PreToolUse**: First applies the per-risk rate limit to every call, denying a call over the limit in strict and non-strict mode alike. Then, for tools whose capability requires a checkpoint (Write, Edit, Bash with destructive commands), reserves the active checkpoint for the call, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`). It runs for every tool call, including pre-approved ones that never reach `can_use_tool`. When there is no valid checkpoint, or another in-flight call holds the reservation, strict mode denies the call with `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "..."}}`; non-strict mode logs a warning.
 - **PostToolUse**: Collects evidence anchors. After a successful mutation it consumes the checkpoint the call reserved; if the tool reported an error, or the checkpoint-gated tool does not mutate, it releases the reservation instead and the checkpoint stays valid.
 - **PostToolUseFailure**: Releases the reservation of a call that failed or was interrupted, so the checkpoint can cover a retry.
+- **Stop / SubagentStop**: Release a reservation still held by a call of the session (and agent) that just finished. That happens when another PreToolUse hook (yours, or one from a settings file) denies a call after the adapter reserved for it: the call never runs, so nothing else ends the reservation. Other sessions sharing the adapter, and background subagents still running, keep theirs.
 
 A reservation that is never consumed or released lapses after `checkpoint_reservation_seconds` (default 600).
 
@@ -275,9 +280,10 @@ This provides defense-in-depth alongside the `can_use_tool` permission callback:
 
 ```python
 # Both enforcement layers are active:
-# 1. PreToolUse hook reserves the checkpoint before the tool runs
+# 1. PreToolUse hook applies the rate limit and reserves the checkpoint
+#    before the tool runs
 # 2. can_use_tool callback repeats the reservation for the same tool_use_id
-#    (idempotent) and enforces rate limits
+#    (idempotent)
 # 3. PostToolUse hook collects evidence and consumes (or releases) the reservation
 # 4. PostToolUseFailure hook releases the reservation of a failed or interrupted call
 ```
@@ -440,7 +446,7 @@ options = adapter.wrap_options(
     ClaudeAgentOptions(
         cwd=Path("/path/to/agent-capability-standard"),
         setting_sources=["project"],  # Loads skills
-        allowed_tools=["Skill", "Read", "Write", "Bash"],
+        allowed_tools=["Read"],
     )
 )
 

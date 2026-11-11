@@ -572,3 +572,35 @@ cited on #114 and here); CHANGELOG split by release; a release workflow.
   `workflow_dispatch` (creates the annotated tag on main's head, then
   publishes); follow-up PR, merge, run it, check the Release.
 
+
+# H8: dependencies to latest; Python 3.14/3.15 only (user, 2026-11-11)
+
+Branch `chore/bump-dependencies`.
+
+- [x] Python: dev caps raised (pytest <10, pytest-asyncio <2, mypy <3,
+  ruff 0.17 with constraints pin 0.17.4); `requires-python >=3.14`,
+  classifiers 3.14/3.15, mypy and ruff targets 3.14; ruff fixes for the new
+  target (UTC alias, three `StrEnum`s); `validate_constraints.py` reads
+  pyproject with `tomllib`.
+- [x] Rust: `hmac` 0.13, `sha2` 0.11 (MSRV 1.86 → 1.88), `saphyr` 0.3.3;
+  pyo3 `abi3-py314`; CI toolchain 1.99.1; clippy's let-chain fixes.
+- [x] Go: cel-go 0.33.2 (go directive 1.26); differential 155/77/92 cases,
+  same as before.
+- [x] Actions: checkout v7, setup-python v7, cache v6, upload-artifact v7,
+  setup-go v7; release.yml sets up Python 3.14.
+- [x] `wrap_options()` no longer adds `Skill` to `allowed_tools`, and the
+  rate limit moved from the permission callback into the PreToolUse hook so
+  tools in `allowed_tools` are limited too (both user decisions).
+- [x] Review pass (/code-review medium) findings fixed: Python set up in the
+  rust-core job, TOML errors reported, Rust indentation, dev floors raised
+  to versions run on 3.14 (pytest 8.4.2, pytest-asyncio 1.0, mypy 1.19.1).
+- [x] Second review: the rate check fails closed; docs and tests aligned.
+- [x] Reservation leak: Stop / SubagentStop hooks release a reservation
+  left by a call another hook denied, scoped to the finishing session and
+  agent. (Running the caller's hooks inside the adapter's was tried and
+  dropped after review: it could not reproduce the CLI's hook semantics.)
+- [x] Minimum Rust stays 1.88 (user decision; `ordered-float` held at 5.4).
+- [x] Local: every CI command passes; pytest 1603 on Python 3.14.10 and
+  3.15.2.
+- [ ] Commit, push, open a PR and watch CI (the Actions bumps and the
+  3.14/3.15 matrix are unproven until CI runs them).

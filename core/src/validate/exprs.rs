@@ -89,18 +89,16 @@ pub(crate) fn gates<'a>(
             continue;
         };
         let action = gate.get("action").and_then(Value::as_str);
-        if let Some(a) = action {
-            if !matches!(a, "stop" | "rollback" | "skip" | "warn" | "end") {
-                report.push(
-                    loc.diag(
-                        Code::SchemaValidationFailed,
-                        format!(
-                            "{field}.action '{a}' is not one of stop, rollback, skip, warn, end"
-                        ),
-                    )
-                    .at("field", format!("{field}.action")),
-                );
-            }
+        if let Some(a) = action
+            && !matches!(a, "stop" | "rollback" | "skip" | "warn" | "end")
+        {
+            report.push(
+                loc.diag(
+                    Code::SchemaValidationFailed,
+                    format!("{field}.action '{a}' is not one of stop, rollback, skip, warn, end"),
+                )
+                .at("field", format!("{field}.action")),
+            );
         }
         // Ending the run from a concurrently running step would leave its
         // group mates half done.

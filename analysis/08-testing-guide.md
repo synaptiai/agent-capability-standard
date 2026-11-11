@@ -134,10 +134,10 @@ From `pyproject.toml` `[project.optional-dependencies]`:
 
 ```toml
 dev = [
-    "pytest>=7.0,<9",
-    "pytest-asyncio>=0.21,<1",
-    "mypy>=1.0,<2",
-    "ruff>=0.16,<0.17",
+    "pytest>=8.4.2,<10",
+    "pytest-asyncio>=1.0,<2",
+    "mypy>=1.19.1,<3",
+    "ruff>=0.17,<0.18",
     "types-PyYAML>=6.0,<7",
     "hypothesis>=6.0,<7",
     "jsonschema>=4.0,<5",
@@ -721,7 +721,7 @@ The conformance runner no longer touches the production catalog at all: it passe
 python -m venv .venv
 source .venv/bin/activate
 
-# Install with development dependencies (builds the Rust core; needs rustc >= 1.86)
+# Install with development dependencies (builds the Rust core; needs rustc >= 1.88)
 pip install -e ".[dev]" -c constraints.txt
 ```
 
@@ -899,7 +899,7 @@ rust-core: Rust core (fmt, clippy, tests, MSRV)   [in core/]
   - cargo clippy --locked --all-targets -- -D warnings
   - cargo clippy --locked --all-targets --features python -- -D warnings
   - cargo test --locked
-  - cargo +1.86.0 check --locked --all-targets --features python   (MSRV)
+  - cargo +1.88.0 check --locked --all-targets --features python   (MSRV)
 
 cel-differential: Expressions stay a CEL-compatible profile   [Go]
   - go run . tests/conformance/expressions/eval.json .../check.json   (vs cel-go)
@@ -909,7 +909,7 @@ lint: Lint & type-check
   - ruff format --check grounded_agency/ tests/ benchmarks/
   - mypy grounded_agency/
 
-test: Tests (Python 3.10, 3.11, 3.12)
+test: Tests (Python 3.14, 3.15)
   - pytest tests/ -v --tb=short
 
 benchmarks: Benchmark validation
@@ -926,11 +926,11 @@ conformance: Conformance tests
 From `pyproject.toml`:
 
 ```
-Python versions: 3.10, 3.11, 3.12
-Rust: pinned toolchain (RUST_TOOLCHAIN in ci.yml); MSRV 1.86 checked
+Python versions: 3.14, 3.15
+Rust: pinned toolchain (RUST_TOOLCHAIN in ci.yml); MSRV 1.88 checked
 Build: maturin>=1.9,<2
 Required: pyyaml>=6.0,<7
-Dev: pytest>=7.0,<9, pytest-asyncio>=0.21,<1, mypy>=1.0,<2, ruff>=0.16,<0.17 (exact versions in constraints.txt)
+Dev: pytest>=8.4.2,<10, pytest-asyncio>=1.0,<2, mypy>=1.19.1,<3, ruff>=0.17,<0.18 (exact versions in constraints.txt)
 Optional: claude-agent-sdk>=0.1.52,<0.3
 ```
 
@@ -949,7 +949,7 @@ Optional: claude-agent-sdk>=0.1.52,<0.3
 
 **`ModuleNotFoundError: No module named 'grounded_agency'`**
 
-The package is not installed. Run `pip install -e ".[dev]" -c constraints.txt` from the repository root (needs a Rust toolchain, rustc >= 1.86).
+The package is not installed. Run `pip install -e ".[dev]" -c constraints.txt` from the repository root (needs a Rust toolchain, rustc >= 1.88).
 
 **`ModuleNotFoundError: No module named 'grounded_agency._core'`** (or `cannot import name '_core'`)
 

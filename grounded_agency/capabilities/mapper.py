@@ -350,8 +350,12 @@ class ToolCapabilityMapper:
         Returns:
             ToolMapping with capability metadata
         """
-        # Handle Bash specially - analyze command content
+        # Handle Bash specially - analyze command content. Input that is
+        # not a dict has no command to read: classify it as an empty one,
+        # which is fail-safe high risk.
         if tool_name == "Bash":
+            if not isinstance(tool_input, dict):
+                tool_input = {}
             return self._classify_bash_command(tool_input)
 
         # Check dynamic mappings (MCP tools, etc.)
@@ -391,8 +395,8 @@ class ToolCapabilityMapper:
         """
         command = tool_input.get("command", "")
 
-        # Empty command is suspicious - fail-safe
-        if not command or not command.strip():
+        # Empty or non-string command is suspicious - fail-safe
+        if not isinstance(command, str) or not command.strip():
             return ToolMapping(
                 capability_id="mutate",
                 risk="high",

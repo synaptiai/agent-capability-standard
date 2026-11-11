@@ -24,13 +24,13 @@ This document provides comprehensive instructions for setting up, configuring, a
 
 | Dependency | Minimum Version | Purpose | Verification Command |
 |------------|----------------|---------|---------------------|
-| **Python** | 3.10+ | Runtime, validators, SDK package | `python --version` |
+| **Python** | 3.14+ | Runtime, validators, SDK package | `python --version` |
 | **Git** | 2.x | Version control, clone, hooks | `git --version` |
 | **pip** | 22.0+ | Package installation | `pip --version` |
-| **Rust toolchain** | rustc 1.86+ | Builds the validator/executor core (`core/`, crate `acs-core`) into `grounded_agency._core` via maturin; needed for any install from source, including `pip install -e` | `rustc --version` |
+| **Rust toolchain** | rustc 1.88+ | Builds the validator/executor core (`core/`, crate `acs-core`) into `grounded_agency._core` via maturin; needed for any install from source, including `pip install -e` | `rustc --version` |
 | **PyYAML** | 6.0+ (<7) | Only runtime Python dependency (installed automatically) | `python -c "import yaml; print(yaml.__version__)"` |
 
-There is deliberately no pure-Python fallback for the core: `pip install -e ".[dev]" -c constraints.txt` compiles the Rust crate, and every consumer (the SDK, `tools/validate_workflows.py`, the conformance runner) runs that one implementation. CI pins the toolchain it uses (`RUST_TOOLCHAIN` in `.github/workflows/ci.yml`) and also checks the minimum supported version (1.86).
+There is deliberately no pure-Python fallback for the core: `pip install -e ".[dev]" -c constraints.txt` compiles the Rust crate, and every consumer (the SDK, `tools/validate_workflows.py`, the conformance runner) runs that one implementation. CI pins the toolchain it uses (`RUST_TOOLCHAIN` in `.github/workflows/ci.yml`) and also checks the minimum supported version (1.88).
 
 ### Optional Software
 
@@ -42,25 +42,18 @@ There is deliberately no pure-Python fallback for the core: `pip install -e ".[d
 | **ruff** | Linting and formatting (development) | `ruff --version` |
 | **Go** | Only for the CEL differential check (`tools/cel_differential/`, run in CI) | `go version` |
 
-### Why Python 3.10+?
+### Supported Python versions
 
-The `grounded_agency` Python package and its tooling require Python 3.10 as the minimum supported version (configured in `pyproject.toml` via `requires-python = ">=3.10"`). This is not an arbitrary choice; three language features introduced in Python 3.10 are used throughout the codebase:
+The `grounded_agency` package supports Python 3.14 and 3.15 (`requires-python = ">=3.14"` in `pyproject.toml`), and CI tests both. The compiled extension `grounded_agency._core` is built against the stable ABI with 3.14 as its floor, so one wheel per platform serves both versions.
 
-1. **Union type syntax with `|` (PEP 604)** -- The adapter and state modules use `str | None` and `list[str] | str` instead of `Optional[str]` and `Union[list[str], str]`. This appears in type annotations across `adapter.py`, `checkpoint_tracker.py`, `evidence_store.py`, and other modules.
-
-2. **`slots=True` in dataclasses (PEP 680)** -- The `GroundedAgentConfig` dataclass uses `@dataclass(slots=True)` for memory efficiency and to prevent accidental attribute creation. This keyword argument is not available in Python 3.9 or earlier.
-
-3. **Structural pattern matching (`match` statements, PEP 634)** -- While not pervasive, the codebase is designed to accommodate `match/case` constructs for capability routing and tool dispatch.
-
-The `pyproject.toml` classifiers confirm tested versions:
+The `pyproject.toml` classifiers list the tested versions:
 
 ```
-Programming Language :: Python :: 3.10
-Programming Language :: Python :: 3.11
-Programming Language :: Python :: 3.12
+Programming Language :: Python :: 3.14
+Programming Language :: Python :: 3.15
 ```
 
-Attempting to use Python 3.9 or earlier will produce `SyntaxError` on the `|` type union expressions and `TypeError` on the `slots=True` dataclass parameter.
+pip refuses to install the package on Python 3.13 or earlier.
 
 ---
 
@@ -130,9 +123,9 @@ pip install grounded-agency[all]
 |-------|--------------------|----------|
 | *(core)* | `pyyaml>=6.0,<7` (the validator/executor ships inside the wheel as `grounded_agency._core`) | Ontology loading, schema parsing, workflow validation |
 | `[sdk]` | `claude-agent-sdk>=0.1.52,<0.3` | Wrapping SDK options with safety layer |
-| `[dev]` | `pytest>=7.0,<9`, `pytest-asyncio>=0.21,<1`, `mypy>=1.0,<2`, `ruff>=0.16,<0.17`, `types-PyYAML`, `hypothesis`, `jsonschema`, `claude-agent-sdk` | Testing, type checking, linting |
+| `[dev]` | `pytest>=8.4.2,<10`, `pytest-asyncio>=1.0,<2`, `mypy>=1.19.1,<3`, `ruff>=0.17,<0.18`, `types-PyYAML`, `hypothesis`, `jsonschema`, `claude-agent-sdk` | Testing, type checking, linting |
 
-Wheels are built per platform with the stable ABI (abi3, Python >= 3.10). Where no wheel matches the platform, pip builds from the sdist, which needs a Rust toolchain (>= 1.86).
+Wheels are built per platform with the stable ABI (abi3, Python >= 3.14). Where no wheel matches the platform, pip builds from the sdist, which needs a Rust toolchain (>= 1.88).
 | `[all]` | All of the above | Full development environment |
 
 **Post-install verification:**
@@ -162,7 +155,7 @@ source .venv/bin/activate        # macOS/Linux
 # .venv\Scripts\activate.bat     # Windows (cmd)
 
 # Step 3: Install in editable mode with all dependencies
-# (compiles the Rust core; needs rustc >= 1.86)
+# (compiles the Rust core; needs rustc >= 1.88)
 pip install -e ".[dev]" -c constraints.txt
 
 # Step 4: Verify installation
@@ -242,10 +235,10 @@ This builds the Rust core and provides:
 |---------|---------|---------|
 | `pyyaml` | >=6.0,<7 | YAML parsing for ontology, schemas, profiles |
 | `claude-agent-sdk` | >=0.1.52,<0.3 | SDK integration for `GroundedAgentAdapter` |
-| `pytest` | >=7.0,<9 | Test runner |
-| `pytest-asyncio` | >=0.21,<1 | Async test support (adapter hooks are async) |
-| `mypy` | >=1.0,<2 | Static type analysis |
-| `ruff` | >=0.16,<0.17 | Linting, formatting and import sorting |
+| `pytest` | >=8.4.2,<10 | Test runner |
+| `pytest-asyncio` | >=1.0,<2 | Async test support (adapter hooks are async) |
+| `mypy` | >=1.19.1,<3 | Static type analysis |
+| `ruff` | >=0.17,<0.18 | Linting, formatting and import sorting |
 | `types-PyYAML`, `hypothesis`, `jsonschema` | see `pyproject.toml` | Type stubs, property tests, schema tests |
 
 For the Rust core itself, the checks CI runs are:
@@ -268,7 +261,7 @@ From `pyproject.toml`:
 
 ```toml
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.14"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -299,7 +292,7 @@ From `pyproject.toml`:
 
 ```toml
 [tool.ruff]
-target-version = "py310"
+target-version = "py314"
 line-length = 88
 
 [tool.ruff.lint]
@@ -793,24 +786,20 @@ agent-capability-standard/
 
 ### Python Version Too Old
 
-**Symptom:**
+**Symptom:** pip refuses the install with an error like:
 ```
-SyntaxError: unsupported syntax (Python 3.9)
-```
-or
-```
-TypeError: dataclass() got an unexpected keyword argument 'slots'
+ERROR: Package 'grounded-agency' requires a different Python: 3.13.5 not in '>=3.14'
 ```
 
-**Cause:** The `grounded_agency` package requires Python 3.10+ for `str | None` union syntax and `@dataclass(slots=True)`.
+**Cause:** The `grounded_agency` package requires Python 3.14 or newer.
 
 **Fix:**
 ```bash
 python --version  # Check current version
-# Install Python 3.10+ via pyenv, brew, or system package manager
-pyenv install 3.12.0 && pyenv local 3.12.0
+# Install Python 3.14+ via pyenv, brew, or system package manager
+pyenv install 3.14 && pyenv local 3.14
 # Or on macOS:
-brew install python@3.12
+brew install python@3.14
 ```
 
 ### PyYAML Version Conflicts
@@ -960,11 +949,11 @@ ModuleNotFoundError: No module named 'grounded_agency._core'
 # Ensure virtualenv is activated
 source .venv/bin/activate
 
-# Build the Rust core and install everything (needs rustc >= 1.86)
+# Build the Rust core and install everything (needs rustc >= 1.88)
 pip install -e ".[dev]" -c constraints.txt
 ```
 
-If the build fails with `rustc` not found or a version error, install or update Rust (e.g. via `rustup`) to 1.86 or newer. After pulling changes to `core/`, re-run the same command: an editable install does not rebuild the extension automatically.
+If the build fails with `rustc` not found or a version error, install or update Rust (e.g. via `rustup`) to 1.88 or newer. After pulling changes to `core/`, re-run the same command: an editable install does not rebuild the extension automatically.
 
 ### Checkpoint Marker Not Found
 

@@ -155,10 +155,7 @@ class TestGroundedQueryImport:
             ConnectionError,
             OSError,
             ClaudeSDKError,
-            # Redundant on 3.11+, where asyncio.TimeoutError is the builtin and
-            # already an OSError subclass -- but load-bearing on the 3.10 leg
-            # of the CI matrix, where it is a distinct asyncio.exceptions type.
-            asyncio.TimeoutError,
+            # Includes TimeoutError from wait_for, a subclass of OSError.
         ) as exc:
             # Expected: no live API connection, no CLI session, or an API too
             # slow to answer inside the budget.
@@ -201,7 +198,7 @@ class TestBoundedConsumption:
                 async for _ in stream:
                     break
 
-        with pytest.raises(asyncio.TimeoutError):
+        with pytest.raises(TimeoutError):
             await asyncio.wait_for(consume(), timeout=0.1)
 
     @pytest.mark.asyncio

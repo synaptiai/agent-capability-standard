@@ -12,7 +12,7 @@ import logging
 import os
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
@@ -22,7 +22,7 @@ from .audit import CoordinationAuditLog
 logger = logging.getLogger(__name__)
 
 
-class SyncStrategy(str, enum.Enum):
+class SyncStrategy(enum.StrEnum):
     """Supported merge strategies for barrier resolution."""
 
     LAST_WRITER_WINS = "last_writer_wins"
@@ -50,9 +50,7 @@ class SyncBarrier:
     participants: frozenset[str]
     required_state: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: float = 60.0
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     proposals: dict[str, dict[str, Any]] = field(default_factory=dict)
     resolved: bool = False
 

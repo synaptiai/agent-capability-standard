@@ -13,7 +13,7 @@ import logging
 import os
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
@@ -45,9 +45,7 @@ class DelegationTask:
     required_capabilities: frozenset[str]
     input_data: dict[str, Any] = field(default_factory=dict)
     constraints: dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON export."""
@@ -146,7 +144,7 @@ class DelegationProtocol:
         anchor = EvidenceAnchor(
             ref=f"delegation:{task_id}",
             kind="coordination",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             metadata=metadata,
         )
         self._evidence_store.add_anchor(anchor, capability_id="delegate")

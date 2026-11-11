@@ -58,7 +58,7 @@ AI systems built on this framework inherit its structural safety properties and 
 |-----------|---------|---------|
 | Capability ontology | 2.1.0 | Core specification |
 | Python SDK integration | 0.1.0 | `grounded_agency/` package |
-| Python runtime | 3.9+ | Execution environment |
+| Python runtime | 3.14+ | Execution environment |
 | PyYAML | Latest stable | YAML processing for ontology/profiles |
 | Claude Agent SDK | Per deployment | Agent execution runtime |
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 import copy
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +47,7 @@ def _stricter_risk(a: str, b: str) -> str:
     return a if _RISK_ORDER.get(a, -1) >= _RISK_ORDER.get(b, -1) else b
 
 
-class StepStatus(str, Enum):
+class StepStatus(StrEnum):
     """Status of a workflow step during execution."""
 
     PENDING = "pending"

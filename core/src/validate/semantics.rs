@@ -276,20 +276,17 @@ pub(crate) fn flag_downgrades(
         .get("risk")
         .and_then(Value::as_str)
         .and_then(Risk::parse)
+        && declared < cap.risk
     {
-        if declared < cap.risk {
-            report.push(
-                loc.diag(
-                    Code::SafetyFlagDowngrade,
-                    format!(
-                        "ontology declares risk={} but step declares risk={}; the ontology value applies",
-                        cap.risk.as_str(),
-                        declared.as_str()
-                    ),
-                )
+        let message = format!(
+            "ontology declares risk={} but step declares risk={}; the ontology value applies",
+            cap.risk.as_str(),
+            declared.as_str()
+        );
+        report.push(
+            loc.diag(Code::SafetyFlagDowngrade, message)
                 .at("field", "risk"),
-            );
-        }
+        );
     }
 }
 
@@ -643,13 +640,13 @@ fn newer_features(
             found.push((feature, field));
         }
     };
-    if let Some(Value::Object(ext)) = wf.get("workflow_extensions") {
-        if ext.contains_key("requires") {
-            note(
-                "'workflow_extensions.requires'",
-                "workflow_extensions.requires".into(),
-            );
-        }
+    if let Some(Value::Object(ext)) = wf.get("workflow_extensions")
+        && ext.contains_key("requires")
+    {
+        note(
+            "'workflow_extensions.requires'",
+            "workflow_extensions.requires".into(),
+        );
     }
     for (i, step) in objects(wf.get("steps")) {
         if uses_in(step.get("condition")) {

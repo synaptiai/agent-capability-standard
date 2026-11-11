@@ -61,3 +61,23 @@ so it rendered broken. I only noticed while reading the next reply.
 **Rule.** After posting or editing a GitHub comment or issue, read it back
 and check the stored body (links, tables, code spans). Avoid ending a
 sentence with a bare `](url).`; put text after the link instead.
+
+## Report a version change as a choice, not a side effect (dependency bump)
+
+**What happened.** Installing with the constraints file moved pytest from
+9.0.2 to 8.4.2 and pytest-asyncio from 1.3.0 to 0.26.0. I reported that as a
+neutral detail. The user's answer was to raise the caps to the latest
+releases and fix whatever broke.
+
+**Rule.** When an install moves a package to an older version, treat it as a
+finding: name the cap that caused it and offer to raise it. Do not accept
+the older version silently.
+
+## Ask which Python versions are supported before testing old ones
+
+**What happened.** I started a Python 3.10 test run because
+`requires-python` said `>=3.10`. The user supports only 3.14 and 3.15.
+
+**Rule.** `requires-python` and the CI matrix may lag the project's real
+support policy. Before spending work on an old interpreter, confirm the
+supported versions with the user.

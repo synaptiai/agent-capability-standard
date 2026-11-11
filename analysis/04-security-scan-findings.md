@@ -107,10 +107,10 @@ The project has zero other runtime dependencies beyond PyYAML. This minimal depe
 
 | Package | Version | Classification | Risk Notes |
 |---------|---------|---------------|------------|
-| `pytest>=7.0` | Dev-only | Low | Not shipped in production builds |
-| `pytest-asyncio>=0.21` | Dev-only | Low | Async test support only |
-| `mypy>=1.0` | Dev-only | Low | Static type checker only |
-| `ruff>=0.16,<0.17` | Dev-only | Low | Linter/formatter only (exact version pinned in `constraints.txt`) |
+| `pytest>=8.4.2,<10` | Dev-only | Low | Not shipped in production builds |
+| `pytest-asyncio>=1.0,<2` | Dev-only | Low | Async test support only |
+| `mypy>=1.19.1,<3` | Dev-only | Low | Static type checker only |
+| `ruff>=0.17,<0.18` | Dev-only | Low | Linter/formatter only (exact version pinned in `constraints.txt`) |
 
 **Assessment:** All development dependencies are installed via `pip install -e ".[dev]"` and are excluded from production wheel builds via `pyproject.toml` configuration. The `[tool.maturin]` section limits the wheel to the `grounded_agency` Python package plus the compiled `grounded_agency._core` extension.
 
@@ -128,7 +128,7 @@ The project has zero other runtime dependencies beyond PyYAML. This minimal depe
 |-----------|---------|------------|
 | Build backend | `maturin` | Used only at build time |
 | Build requires | `maturin>=1.9,<2` | Not a runtime dependency |
-| Native extension | Rust crate `core/` (`acs-core`, Rust >= 1.86) | Compiled into `grounded_agency._core`; crate dependencies pinned by `core/Cargo.lock` (`saphyr`, `serde`, `serde_json`, `indexmap`, `chrono-tz`, `pyo3`) |
+| Native extension | Rust crate `core/` (`acs-core`, Rust >= 1.88) | Compiled into `grounded_agency._core`; crate dependencies pinned by `core/Cargo.lock` (`saphyr`, `serde`, `serde_json`, `indexmap`, `chrono-tz`, `pyo3`) |
 
 **Assessment:** maturin is used only for packaging; it compiles the Rust validator/executor core into `grounded_agency._core` (abi3 wheels, one per platform). The `[tool.maturin]` `include` entries add `schemas/` and `skills/` to the sdist, which is appropriate for a self-contained distribution. The Rust crate dependencies are a second, build-time supply chain to monitor alongside PyPI.
 
@@ -714,7 +714,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | A mutation could execute without a valid checkpoint at the actual moment of execution, despite the check passing moments earlier. |
 | **Existing Mitigation** | The window is typically very small (milliseconds between check and execution). The 30-minute default expiry makes expiry-based races unlikely. Single-threaded SDK execution reduces concurrency risks. |
 | **Recommended Mitigation** | (1) Atomically reserve-and-consume the checkpoint in a single operation within the permission callback. (2) Return the checkpoint ID in the permission result for correlation with the tool execution. (3) For concurrent scenarios, use a mutex or compare-and-swap pattern on checkpoint consumption. |
-| **Status** | **Resolved** (PR #91, reservation semantics refined since) -- `CheckpointTracker.validate_and_reserve(holder)` atomically (under a thread lock) checks the active checkpoint and reserves it for one tool call, keyed by its `tool_use_id`; while reserved, any other holder is refused, so concurrent calls cannot both proceed on one checkpoint. Reserving again with the same holder is idempotent, so the adapter's PreToolUse hook (which also covers pre-approved calls that never reach `can_use_tool`) and the permission callback both reserve. The reservation ends with `consume_checkpoint(holder)` in the PostToolUse hook after a successful mutation, or `release_reservation(holder)` when the call errors, changes nothing, or fails (new PostToolUseFailure hook); `consume_checkpoint(holder)` only consumes what that holder reserved. A reservation nobody ends lapses after `reservation_seconds` (default 600, `GroundedAgentConfig.checkpoint_reservation_seconds`). Reservations are in-memory only. |
+| **Status** | **Resolved** (PR #91, reservation semantics refined since) -- `CheckpointTracker.validate_and_reserve(holder)` atomically (under a thread lock) checks the active checkpoint and reserves it for one tool call, keyed by its `tool_use_id`; while reserved, any other holder is refused, so concurrent calls cannot both proceed on one checkpoint. Reserving again with the same holder is idempotent, so the adapter's PreToolUse hook (which also covers pre-approved calls that never reach `can_use_tool`) and the permission callback both reserve. The reservation ends with `consume_checkpoint(holder)` in the PostToolUse hook after a successful mutation, or `release_reservation(holder)` when the call errors, changes nothing, or fails (new PostToolUseFailure hook); `consume_checkpoint(holder)` only consumes what that holder reserved. A reservation left by a call another hook denied is released when that session's turn (Stop) or that subagent (SubagentStop) ends; one nobody ends lapses after `reservation_seconds` (default 600, `GroundedAgentConfig.checkpoint_reservation_seconds`). Reservations are in-memory only. |
 
 ### SEC-008: Metadata Injection via Malformed Keys
 
@@ -750,7 +750,7 @@ echo "[$ts] Skill: $skill (args: $args)" >> "$log_dir/audit.log"
 | **Impact** | Denial of service, evidence loss, and audit trail degradation. |
 | **Existing Mitigation** | The underlying Claude SDK may impose its own rate limits. The `max_loops` parameter on recovery workflows provides loop-level limiting but not invocation-rate limiting. |
 | **Recommended Mitigation** | (1) Add a configurable rate limiter to the permission callback (e.g., token bucket algorithm). (2) Implement per-capability rate limits based on risk level (e.g., high-risk mutations limited to 10/minute). (3) Add rate-based anomaly detection with alerting. |
-| **Status** | **Resolved** (PR #91) -- Token bucket rate limiter with per-risk-level limits (high: 10/min, medium: 60/min, low: 300/min) integrated into permission callback. |
+| **Status** | **Resolved** (PR #91) -- Token bucket rate limiter with per-risk-level limits (defaults high: 10/min, medium: 30/min, low: 120/min, with a 1.5x burst) enforced in the adapter's PreToolUse hook, which sees every tool call. |
 
 ### SEC-011: Checkpoint History Pruning Loses Forensic Data
 

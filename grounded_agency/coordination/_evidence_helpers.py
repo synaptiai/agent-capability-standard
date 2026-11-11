@@ -6,7 +6,7 @@ Internal module — not part of the public API.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
@@ -47,7 +47,7 @@ def record_coordination_evidence(
     anchor = EvidenceAnchor(
         ref=f"{ref_prefix}:{ref_id}",
         kind="coordination",
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         metadata=metadata,
     )
     evidence_store.add_anchor(anchor, capability_id=capability_id)
