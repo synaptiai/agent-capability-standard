@@ -21,8 +21,12 @@ on:
 permissions:
   contents: read
 
+# The event is part of the group so that a manual run on main cannot replace a
+# pending push run (a group keeps one pending run), which would leave that
+# push undeployed: only push runs deploy. Deploys are serialized by the deploy
+# job's own site-deploy group.
 concurrency:
-  group: site-${{ github.ref }}
+  group: site-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
