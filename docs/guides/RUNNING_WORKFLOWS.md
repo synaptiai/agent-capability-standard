@@ -13,9 +13,9 @@ enters through the timestamps you pass. So the same catalog, inputs,
 responses and times always produce the same actions, the same trace and
 the same snapshot, and a run can be saved and resumed anywhere.
 
-The contract is [STANDARD-v1.1.0 §5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl);
-[design-114 §16](../../tasks/design-114.md#16-executor-sans-io) is
-background on the executor's design.
+The contract is [STANDARD-v1.1.0 §5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl).
+The executor's source is in `core/src/exec/`, and Python reaches it as
+`grounded_agency._core.Run`.
 
 ## Quick start
 

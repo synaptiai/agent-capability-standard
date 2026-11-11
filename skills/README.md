@@ -15,9 +15,9 @@ This directory contains **36 atomic capability skills** organized according to t
 | VERIFY | 5 | Ensure correctness |
 | REMEMBER | 2 | Persist state |
 | COORDINATE | 4 | Multi-agent and user interaction |
-| Composed | 5 | Composed multi-step skills |
+| Composed | 6 | Composed multi-step skills |
 
-**Total: 36 atomic capabilities + 5 composed skills = 41 skills**
+**Total: 36 atomic capabilities + 6 composed skills = 42 skills**
 
 ## The 36 Atomic Capabilities
 
@@ -111,17 +111,18 @@ Multi-agent and user interaction.
 | `invoke` | Execute a composed workflow |
 | `inquire` | Request clarification when input is ambiguous |
 
-## Composed Skills (5)
+## Composed Skills (6)
 
-> **Note:** These 5 composed skills implement a subset of the [12 reference workflows](../schemas/workflow_catalog.yaml). Additional workflows can be composed by following the [Tutorial](../docs/TUTORIAL.md).
+> **Note:** Four of these skills run one of the [12 reference workflows](../schemas/workflow_catalog.yaml): `debug-workflow`, `gap-analysis-workflow`, `digital-twin-bootstrap` and `digital-twin-sync-workflow`. `perspective-validation` and `discover-capabilities` run no catalog workflow. Additional workflows can be composed by following the [Tutorial](../docs/TUTORIAL.md).
 
 | Skill | Description |
 |-------|-------------|
 | `debug-workflow` | Execute a safe, auditable debugging workflow |
-| `capability-gap-analysis` | Identify missing capabilities and propose additions |
+| `gap-analysis-workflow` | Identify missing capabilities and propose additions |
 | `digital-twin-bootstrap` | Initialize a digital twin from scratch |
-| `digital-twin-sync-loop` | Synchronize digital twin state with reality |
+| `digital-twin-sync-workflow` | Synchronize digital twin state with reality |
 | `perspective-validation` | Generate a PVC report for socio-technical review |
+| `discover-capabilities` | Detect the capabilities a task needs and synthesize a workflow |
 
 ## Domain Parameterization
 

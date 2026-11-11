@@ -18,7 +18,7 @@ After completing this quickstart, you'll be able to:
 Without validation, workflow errors surface at runtime—often in production, often at 2 AM.
 
 The validator catches issues that would otherwise fail silently:
-- **Missing capability prerequisites** — `act-plan` without `checkpoint` means no rollback
+- **Missing capability prerequisites** — `mutate` without a `checkpoint` before it means no rollback
 - **Type mismatches** — Passing an array where an object is expected
 - **Invalid bindings** — Referencing outputs that don't exist
 - **Ungrounded claims** — Data flowing without provenance

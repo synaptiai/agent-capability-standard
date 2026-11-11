@@ -207,7 +207,7 @@ See [WORKFLOW_PATTERNS.md](docs/WORKFLOW_PATTERNS.md) for the complete pattern c
 
 ### 12 Composed Workflows
 
-Reference workflow compositions defined in the [workflow catalog](schemas/workflow_catalog.yaml), with gates, failure modes that roll back on error, and typed bindings. Five of these are also available as [composed skills](skills/README.md#composed-skills-5) for direct invocation:
+Reference workflow compositions defined in the [workflow catalog](schemas/workflow_catalog.yaml), with gates, failure modes that roll back on error, and typed bindings. Four of these have a [composed skill](skills/README.md#composed-skills-6) that runs them:
 
 | Workflow | Goal | Risk |
 |----------|------|------|
@@ -245,7 +245,7 @@ Pre-configured trust weights, risk thresholds, and checkpoint policies for speci
 
 ### Safety Hooks
 
-Hooks implementing SAFETY layer capabilities:
+Hooks implementing VERIFY layer capabilities:
 
 | Hook | Capability | Purpose |
 |------|------------|---------|

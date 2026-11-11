@@ -1,10 +1,10 @@
 # Safety Hooks
 
-This directory contains hooks that implement the SAFETY layer capabilities from the Agent Capability Standard.
+This directory contains hooks that implement the VERIFY layer capabilities from the Agent Capability Standard.
 
 ## Spec-Aligned Hooks
 
-These hooks directly implement capabilities defined in the standard's SAFETY layer:
+These hooks directly implement capabilities defined in the standard's VERIFY layer:
 
 | Hook | Capability | Purpose |
 |------|------------|---------|
@@ -112,7 +112,7 @@ Set a custom HMAC key via the `AUDIT_HMAC_KEY` environment variable.
 
 ## Relationship to Spec
 
-These hooks implement runtime enforcement of SAFETY layer requirements:
+These hooks implement runtime enforcement of VERIFY layer requirements:
 
 | Spec Field | Hook Implementation |
 |------------|---------------------|

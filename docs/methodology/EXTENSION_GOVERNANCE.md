@@ -1,4 +1,4 @@
-# Extension Governance: Adding Capability #36
+# Extension Governance: Adding a New Capability
 
 **Document Status**: Normative
 **Last Updated**: 2026-01-26
