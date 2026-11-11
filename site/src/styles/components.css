@@ -1941,3 +1941,19 @@
     white-space: nowrap;
   }
 }
+
+@layer components {
+  /* A link that is only an image (README badges): side by side, each target at
+     least 24px tall with a gap, as WCAG 2.2 target size asks. */
+  .doc p > a:has(> img:only-child) {
+    display: inline-block;
+    min-height: 24px;
+    padding-block: 2px;
+    margin-inline-end: var(--space-2);
+    vertical-align: middle;
+  }
+
+  .doc p > a:has(> img:only-child) > img {
+    display: inline-block;
+  }
+}

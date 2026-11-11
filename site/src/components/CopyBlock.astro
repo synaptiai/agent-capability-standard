@@ -19,7 +19,7 @@ const { label, text } = Astro.props;
       <span>Copy</span>
     </button>
   </figcaption>
-  <pre class="copy-block__text"><code data-copy-text>{text}</code></pre>
+  <pre class="copy-block__text" tabindex="0"><code data-copy-text>{text}</code></pre>
   <span class="copy-block__status" role="status" aria-live="polite" data-pagefind-ignore></span>
 </figure>
 

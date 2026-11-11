@@ -25,9 +25,9 @@ const description = `How to cite ${c.title}, version ${c.version}, with the cita
       <div><dt>Licence</dt><dd>{c.license}</dd></div>
     </dl>
     <h2 id={id('BibTeX')}>BibTeX</h2>
-    <pre class="code-block code-block--bibtex"><code>{c.bibtex}</code></pre>
+    <pre class="code-block code-block--bibtex" tabindex="0"><code>{c.bibtex}</code></pre>
     <h2 id={id('Citation file')}>Citation file</h2>
     <p>The repository's <a href={githubBlobUrl(CITATION_SOURCE)}><code>{CITATION_SOURCE}</code></a>, in Citation File Format:</p>
-    <pre class="code-block code-block--yaml"><code>{cff}</code></pre>
+    <pre class="code-block code-block--yaml" tabindex="0"><code>{cff}</code></pre>
   </article>
 </DocLayout>
