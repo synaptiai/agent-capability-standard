@@ -22,6 +22,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
+import { isMain } from './is-main.mjs';
 
 export const NOT_FOUND_PAGE = '404.html';
 const COPY = 'index.md';
@@ -336,8 +337,7 @@ export function formatStats(s) {
   ];
 }
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) {
+if (isMain(import.meta.url)) {
   const dist = process.argv[2] ?? fileURLToPath(new URL('../dist', import.meta.url));
   const { problems, stats } = checkDistDir(dist);
   const lines = Object.entries(problems).flatMap(([check, list]) => list.map((p) => `[${check}] ${p}`));

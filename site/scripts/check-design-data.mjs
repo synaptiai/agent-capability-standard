@@ -22,6 +22,7 @@ import { LAYER_GLYPHS, LETTERS, MARK, UI_GLYPHS } from '../src/pixel/glyphs.ts';
 import { parseGrid } from '../src/pixel/grid.ts';
 import { governanceStatuses } from '../src/lib/governance.ts';
 import { STATUS_STYLES } from '../src/lib/status.ts';
+import { isMain } from './is-main.mjs';
 
 const SITE = fileURLToPath(new URL('..', import.meta.url));
 const REPO = path.resolve(SITE, '..');
@@ -175,5 +176,4 @@ function main() {
   );
 }
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) main();
+if (isMain(import.meta.url)) main();

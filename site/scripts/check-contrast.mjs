@@ -13,8 +13,8 @@
 //
 // Run: node scripts/check-contrast.mjs [path/to/tokens.css]
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 
 export const TEXT_MIN = 4.5;
 export const EDGE_MIN = 3;
@@ -219,8 +219,7 @@ export function checkContrast(css) {
   return { checked, failures, problems };
 }
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) {
+if (isMain(import.meta.url)) {
   const file = process.argv[2] ?? fileURLToPath(new URL('../src/styles/tokens.css', import.meta.url));
   const { checked, failures, problems } = checkContrast(readFileSync(file, 'utf8'));
   for (const p of [...problems, ...failures]) console.error(`check-contrast: ${p}`);
