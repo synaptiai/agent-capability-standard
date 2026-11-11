@@ -602,5 +602,8 @@ Branch `chore/bump-dependencies`.
 - [x] Minimum Rust stays 1.88 (user decision; `ordered-float` held at 5.4).
 - [x] Local: every CI command passes; pytest 1603 on Python 3.14.10 and
   3.15.2.
-- [ ] Commit, push, open a PR and watch CI (the Actions bumps and the
-  3.14/3.15 matrix are unproven until CI runs them).
+- [x] PR #118: reviewed (code review on the PR, six findings fixed), CI
+  green on 6707927, landed on main as e9d31f5; CI green on main after.
+- [x] Follow-up: in strict mode an error inside the PreToolUse safety check
+  denies the call (it allowed it, skipping the rate limit and checkpoint
+  for tools in `allowed_tools`).

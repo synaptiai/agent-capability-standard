@@ -32,6 +32,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   with a 1.5x burst. Raise them with `GroundedAgentConfig(rate_limit=...)`
   if an agent needs more. A rate-limited call is denied before it reserves
   a checkpoint, and an error inside the rate check denies the call.
+- The adapter's PreToolUse safety check no longer lets a call through
+  when it hits an error. For a tool in `allowed_tools` that hook is the
+  only check that runs, so an error used to skip both the rate limit and
+  the checkpoint. A tool the mapper cannot classify is now treated as a
+  high-risk mutation (rate-limited, needs a checkpoint) in both modes; any
+  other error denies the call in strict mode and is logged in non-strict
+  mode. Deny reasons are generic; the detail and traceback go to the log.
 - `wrap_options()` adds Stop and SubagentStop hooks that release a
   checkpoint reservation left behind by a call another PreToolUse hook
   denied. Such a call never runs, so its reservation used to block every
