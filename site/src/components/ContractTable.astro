@@ -16,7 +16,7 @@ const { rows, caption, from } = Astro.props;
 {rows.length === 0 ? (
   <p class="contract-table__empty">No fields.</p>
 ) : (
-  <div class="table-scroll">
+  <div class="table-wrap">
     <table class="contract-table">
       <caption>{caption}</caption>
       <thead>

@@ -30,7 +30,7 @@ const typeId = new Map(ontology.edgeTypes.map((t) => [t.id, id(`Edges: ${t.id}`)
         Generated from <a href={githubBlobUrl(ONTOLOGY_SOURCE)}><code>{ONTOLOGY_SOURCE}</code></a>, ontology version
         {' '}{ontology.version}. It has {ontology.edgeTypes.length} edge types and {ontology.edges.length} edges.
       </p>
-      <div class="table-scroll">
+      <div class="table-wrap">
         <table class="edge-type-table">
           <caption>Edge types and how many edges of each type the ontology has</caption>
           <thead>

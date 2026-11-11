@@ -145,7 +145,7 @@ const title = page?.title ?? `${d.key} domain`;
       {sources.length > 0 && (
         <>
           <h3 id={id('Domain sources')}>Domain sources</h3>
-          <div class="table-scroll">
+          <div class="table-wrap">
             <table class="source-table">
               <caption>Sources in the {d.key} profile</caption>
               <thead><tr><th scope="col">Source</th><th scope="col">Type</th><th scope="col">Default trust</th></tr></thead>

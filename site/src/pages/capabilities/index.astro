@@ -28,7 +28,7 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
     </section>
     <section class="capabilities-counts">
       <h2 id={id('Counts')}>Counts</h2>
-      <div class="table-scroll">
+      <div class="table-wrap">
         <table class="count-table">
           <caption>Capabilities by risk level</caption>
           <thead><tr><th scope="col">Risk</th><th scope="col">Capabilities</th></tr></thead>
@@ -38,7 +38,7 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
         </table>
       </div>
       <p>{mutating} of the {n} capabilities change state.</p>
-      <div class="table-scroll">
+      <div class="table-wrap">
         <table class="count-table">
           <caption>Edges by type (<a href={pageHref('/spec/edge-types/')}>edge types</a>)</caption>
           <thead><tr><th scope="col">Edge type</th><th scope="col">Edges</th></tr></thead>

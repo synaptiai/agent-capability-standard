@@ -20,10 +20,11 @@ const description = `The ${diagnostics.length} diagnostic codes of Standard ${st
     <h1 id={id('Diagnostics')}>Diagnostics</h1>
     <p class="lead">
       A validator or runtime reports a problem as a diagnostic code. Standard {std.version} defines {diagnostics.length}{' '}
-      codes: {errors} errors, which reject a workflow, and {warnings} warnings, which do not. This table is read from
-      sections 9.2 to 9.7 of the <a href={std.url}>Standard</a>.
+      codes: {errors} errors and {warnings} warnings. A workflow is valid when it has no errors; a warning marks a
+      workflow that is accepted but suspect. Each code's severity is fixed. This table is read from sections 9.2 to 9.7
+      of the <a href={std.url}>Standard</a>.
     </p>
-    <div class="table-scroll">
+    <div class="table-wrap">
       <table class="diagnostics-table">
         <caption>Diagnostic codes of Standard {std.version}</caption>
         <thead>
