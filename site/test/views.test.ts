@@ -22,6 +22,7 @@ import {
   diagramRuns,
   diagramSteps,
   failureRows,
+  splitAtFirstH2,
 } from '../src/lib/views';
 import {
   allCatalogSteps,
@@ -388,5 +389,16 @@ describe('links to a part of a page', () => {
 
   it('rejects a fragment that no heading of the page source has', () => {
     expect(() => pageHref('/community/governance/#decision-process')).toThrow(/decision-process/);
+  });
+});
+
+describe('domain page order', () => {
+  it('splits rendered Markdown before the first H2 and not at an H1, H3 or header element', () => {
+    const html = '<h1 id="t">T</h1><header>x</header><p>Lead</p><h2 id="a">A</h2><h3 id="b">B</h3><h2 id="c">C</h2>';
+    expect(splitAtFirstH2(html)).toEqual({
+      head: '<h1 id="t">T</h1><header>x</header><p>Lead</p>',
+      rest: '<h2 id="a">A</h2><h3 id="b">B</h3><h2 id="c">C</h2>',
+    });
+    expect(splitAtFirstH2('<h1>T</h1><p>x</p>')).toEqual({ head: '<h1>T</h1><p>x</p>', rest: '' });
   });
 });

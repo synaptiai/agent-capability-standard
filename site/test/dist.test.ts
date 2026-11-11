@@ -173,6 +173,22 @@ describe('built site', () => {
     expect(html).toContain('href="/community/governance/#decision-making"');
   });
 
+  it('puts the profile values after the README title and lead and before the README sections (design notes, ia-home 6.6)', () => {
+    // Expected: each domain README's first `# ` and `## ` lines, slugged by hand (lower case, spaces to hyphens).
+    const slug = (line: string) => line.replace(/^#+ /, '').toLowerCase().replace(/ /g, '-');
+    for (const d of pageDirs('domains')) {
+      const lines = repoText(`docs/domains/${d}/README.md`).split('\n');
+      const h1 = slug(lines.find((l) => l.startsWith('# '))!);
+      const h2 = slug(lines.find((l) => l.startsWith('## '))!);
+      const ids = [...readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8').matchAll(/<h[1-6][^>]*\sid="([^"]+)"/g)].map((m) => m[1]);
+      const at = (id: string) => ids.indexOf(id);
+      expect(at(h1), `${d} ${h1}`).toBe(0);
+      expect(at('ref-profile-values'), d).toBeGreaterThan(at(h1));
+      expect(at('ref-workflows-in-this-profile'), d).toBeGreaterThan(at('ref-profile-values'));
+      expect(at(h2), `${d} ${h2}`).toBeGreaterThan(at('ref-workflows-in-this-profile'));
+    }
+  });
+
   it('builds no page outside the route table except 404', () => {
     expect(checkRouteCoverage(dist)).toEqual({ missing: [], extra: [] });
   });

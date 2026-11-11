@@ -1,9 +1,9 @@
 ---
-// One page per domain profile: the domain README first (its H1 is the page
-// H1, with the id GitHub gives it), then the profile values from
+// One page per domain profile (design notes, ia-home 6.6): the domain README's
+// H1 (with the id GitHub gives it) and lead, then the profile values from
 // schemas/profiles/<domain>.yaml, which are authoritative where the README
-// repeats them, then the workflows the profile lists. A listed id that no
-// catalog defines is shown as proposed.
+// repeats them, then the workflows the profile lists, then the rest of the
+// README. A listed id that no catalog defines is shown as proposed.
 import { getEntry, render } from 'astro:content';
 import StatusBadge from '../../components/StatusBadge.astro';
 import ValueList from '../../components/ValueList.astro';
@@ -13,7 +13,7 @@ import DocLayout from '../../layouts/DocLayout.astro';
 import { capabilityHref, refSlugger, routesByTemplate, workflowHref } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
 import type { Route } from '../../lib/routes';
-import { PROFILE_SECTION_KEYS, sortedTrustWeights } from '../../lib/views';
+import { PROFILE_SECTION_KEYS, sortedTrustWeights, splitAtFirstH2 } from '../../lib/views';
 import { loadOntology } from '../../data/ontology';
 import type { PageMeta } from '../../plugins/remark-page-meta';
 
@@ -52,21 +52,24 @@ const grounding = evidence && Array.isArray(evidence.require_grounding) ? eviden
 const anchorTypes = evidence && Array.isArray(evidence.required_anchor_types) ? evidence.required_anchor_types.map(String) : [];
 const capLink = (c: string) => (ontology.byId.has(c) ? capabilityHref(c) : undefined);
 
-let Content: Awaited<ReturnType<typeof render>>['Content'] | null = null;
+// The README's rendered HTML is split before its first H2 so the generated
+// sections can sit between its lead and its sections.
+let readme: { head: string; rest: string } | null = null;
 let page: PageMeta | undefined;
 if (d.readme) {
   const entry = await getEntry('docs', d.readme);
   if (!entry) throw new Error(`domains: no docs entry for ${d.readme}`);
   const r = await render(entry);
-  Content = r.Content;
+  if (typeof entry.rendered?.html !== 'string') throw new Error(`domains: ${d.readme} has no rendered HTML`);
+  readme = splitAtFirstH2(entry.rendered.html);
   page = r.remarkPluginFrontmatter.page as PageMeta | undefined;
 }
 const title = page?.title ?? `${d.key} domain`;
 ---
 <DocLayout route={route} title={title} description={d.description || page?.description}>
   <article class="doc doc--domain" data-domain={d.key} data-pagefind-body>
-    {Content ? (
-      <div class="doc__body"><Content /></div>
+    {readme ? (
+      <div class="doc__body" set:html={readme.head} />
     ) : (
       <h1 id={id(title)}>{title}</h1>
     )}
@@ -75,7 +78,7 @@ const title = page?.title ?? `${d.key} domain`;
       <h2 id={id('Profile values')}>Profile values</h2>
       <p>
         These values are read from <a href={githubBlobUrl(d.profileFile)}><code>{d.profileFile}</code></a>, profile
-        version {d.version}. Where the text above repeats them, these values are the ones that apply.
+        version {d.version}. Where the text on this page repeats them, these values are the ones that apply.
         {p.trust_model_reviewed === true && typeof p.trust_model_reviewed_at === 'string' && (
           <> The trust model was reviewed on {p.trust_model_reviewed_at}.</>
         )}
@@ -200,5 +203,7 @@ const title = page?.title ?? `${d.key} domain`;
         </ul>
       )}
     </section>
+
+    {readme && readme.rest !== '' && <div class="doc__body" set:html={readme.rest} />}
   </article>
 </DocLayout>

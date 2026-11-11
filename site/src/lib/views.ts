@@ -328,6 +328,15 @@ export function producerSteps(wf: Workflow, step: Step): { name: string; index: 
   });
 }
 
+/**
+ * Rendered Markdown split before its first H2: the title and lead, then the
+ * sections. With no H2 the whole text is the head.
+ */
+export function splitAtFirstH2(html: string): { head: string; rest: string } {
+  const i = html.search(/<h2[\s>]/);
+  return i === -1 ? { head: html, rest: '' } : { head: html.slice(0, i), rest: html.slice(i) };
+}
+
 /** Profiles whose `workflows` list names the workflow. */
 export function profilesListing(workflowId: string, profiles: DomainProfile[] = loadProfiles()): DomainProfile[] {
   return profiles.filter((p) => p.workflows.some((w) => w.id === workflowId));
