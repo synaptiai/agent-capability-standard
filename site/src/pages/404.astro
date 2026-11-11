@@ -1,0 +1,49 @@
+---
+// Shown for any path with no page. A short script fills in the path asked
+// for and offers a search for its last part, in the header's search dialog.
+// Without JavaScript the Search link goes to a web search limited to the site.
+import DocLayout from '../layouts/DocLayout.astro';
+import { currentStandard, pageHref, refSlugger } from '../lib/generated';
+import type { Route } from '../lib/routes';
+import { siteSearchUrl } from '../lib/search-url';
+
+const route: Route = { source: null, url: '/404/', section: 'home', order: 0, template: 'not-found', title: 'Page not found' };
+const id = refSlugger();
+---
+<DocLayout route={route} title="Page not found" description="There is no page at this address." noindex>
+  <article class="doc doc--not-found">
+    <h1 id={id('Page not found')}>Page not found</h1>
+    <p class="not-found__path">There is no page at <code id="not-found-path">this address</code>.</p>
+    <p class="not-found__search" hidden data-not-found-search>
+      <button type="button" class="btn" data-not-found-query><span>Search the site for <span data-not-found-term></span></span></button>
+    </p>
+    <ul class="not-found__links">
+      <li><a href={pageHref('/')}>Home</a></li>
+      <li><a href={currentStandard().url}>Specification</a></li>
+      <li><a href={pageHref('/capabilities/')}>Capabilities</a></li>
+      <li><a href={pageHref('/workflows/')}>Workflows</a></li>
+      <li><a href={siteSearchUrl()} data-not-found-open>Search</a></li>
+    </ul>
+  </article>
+  <script>
+    import { SEARCH_EVENT } from '../lib/search-url';
+
+    const openSearch = (query: string) => document.dispatchEvent(new CustomEvent(SEARCH_EVENT, { detail: { query } }));
+    document.getElementById('not-found-path')!.textContent = location.pathname;
+    const last = location.pathname.split('/').filter(Boolean).at(-1) ?? '';
+    let term = last;
+    try {
+      term = decodeURIComponent(last);
+    } catch {}
+    term = term.trim();
+    if (term) {
+      document.querySelector<HTMLElement>('[data-not-found-term]')!.textContent = `"${term}"`;
+      document.querySelector<HTMLElement>('[data-not-found-search]')!.hidden = false;
+      document.querySelector('[data-not-found-query]')!.addEventListener('click', () => openSearch(term));
+    }
+    document.querySelector('[data-not-found-open]')!.addEventListener('click', (e) => {
+      e.preventDefault();
+      openSearch('');
+    });
+  </script>
+</DocLayout>

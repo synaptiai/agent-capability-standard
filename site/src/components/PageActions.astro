@@ -1,0 +1,44 @@
+---
+// "Copy page as Markdown" and "View as Markdown", for the page's Markdown copy
+// at <route>index.md. Copying fetches that file; if it cannot be fetched or
+// written to the clipboard, the status line says so and nothing else happens.
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+interface Props {
+  /** The page URL, e.g. /spec/1.1.0/. */
+  url: string;
+}
+
+const markdownUrl = `${Astro.props.url}index.md`;
+---
+<div class="page-actions" data-page-actions>
+  <button type="button" class="btn btn--quiet btn--small" data-copy-markdown={markdownUrl}>
+    <PixelGlyph name="copy" />
+    <span>Copy page as Markdown</span>
+  </button>
+  <a class="btn btn--quiet btn--small" href={markdownUrl} type="text/markdown">
+    <PixelGlyph name="external" />
+    <span>View as Markdown</span>
+  </a>
+  <span class="page-actions__status" role="status" aria-live="polite"></span>
+</div>
+
+<script>
+  import { copyMarkdown } from '../lib/copy-markdown';
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy-markdown]')) {
+    const status = button.parentElement?.querySelector('.page-actions__status');
+    button.addEventListener('click', async () => {
+      const clipboard = navigator.clipboard;
+      const message = await copyMarkdown(button.dataset.copyMarkdown!, {
+        fetch: (url) => fetch(url),
+        clipboard: {
+          write: typeof clipboard?.write === 'function' ? (items) => clipboard.write(items as ClipboardItem[]) : undefined,
+          writeText: (text) => (clipboard ? clipboard.writeText(text) : Promise.reject(new Error('no clipboard'))),
+        },
+        makeItem: typeof ClipboardItem === 'function' ? (data) => new ClipboardItem(data) : undefined,
+      });
+      if (status) status.textContent = message;
+    });
+  }
+</script>

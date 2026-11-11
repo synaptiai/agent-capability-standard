@@ -1,0 +1,23 @@
+---
+// A capability layer (Standard §4.2), linked to its page: the layer glyph in
+// the layer colour and the layer name, on the layer tint.
+import { loadOntology } from '../data/ontology';
+import { layerHref } from '../lib/generated';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+interface Props {
+  layer: string;
+  link?: boolean;
+}
+
+const { layer, link = true } = Astro.props;
+const info = loadOntology().layers.find((l) => l.id === layer);
+if (!info) throw new Error(`LayerBadge: unknown layer ${layer}`);
+const Tag = link ? 'a' : 'span';
+---
+<Tag
+  class:list={['layer-badge', 'has-layer', `layer-badge--${info.slug}`]}
+  style={`--layer: var(--layer-${layer})`}
+  href={link ? layerHref(layer) : undefined}
+  data-layer={info.slug}
+><PixelGlyph name={layer} />{layer}</Tag>

@@ -1,0 +1,27 @@
+---
+// A Markdown file shown as its source text, for files whose placeholders do
+// not read as prose (the skill template).
+import { Code } from 'astro:components';
+import { refSlugger } from '../lib/generated';
+import type { Route } from '../lib/routes';
+import { githubBlobUrl, readRepoFile } from '../lib/repo';
+import type { PageMeta } from '../plugins/remark-page-meta';
+
+interface Props {
+  route: Route;
+  page: PageMeta;
+}
+
+const { route, page } = Astro.props;
+const source = route.source!;
+const text = readRepoFile(source);
+const title = page.title ?? route.title;
+---
+<article class="doc doc--raw" data-pagefind-body>
+  <h1 id={refSlugger()(title)}>{title}</h1>
+  <p class="lead">
+    This is the Markdown source of <a href={githubBlobUrl(source)}>{source}</a>. Copy it as the starting point for a
+    new skill.
+  </p>
+  <Code code={text} lang="markdown" theme="css-variables" />
+</article>

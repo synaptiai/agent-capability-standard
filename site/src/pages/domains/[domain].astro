@@ -1,0 +1,211 @@
+---
+// One page per domain profile (design notes, ia-home 6.6): the domain README's
+// H1 (with the id GitHub gives it) and lead, then the profile values from
+// schemas/profiles/<domain>.yaml, which are authoritative where the README
+// repeats them, then the workflows the profile lists, then the rest of the
+// README. A listed id that no catalog defines is shown as proposed.
+import { getEntry, render } from 'astro:content';
+import StatusBadge from '../../components/StatusBadge.astro';
+import { PROPOSED_WORKFLOW_STATUS } from '../../lib/status';
+import ValueList from '../../components/ValueList.astro';
+import { loadProfiles } from '../../data/profiles';
+import { loadWorkflows } from '../../data/workflows';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { capabilityHref, refSlugger, routesByTemplate, workflowHref } from '../../lib/generated';
+import { githubBlobUrl } from '../../lib/repo';
+import type { Route } from '../../lib/routes';
+import { PROFILE_SECTION_KEYS, sortedTrustWeights, splitAtFirstH2 } from '../../lib/views';
+import { loadOntology } from '../../data/ontology';
+import type { PageMeta } from '../../plugins/remark-page-meta';
+import TableWrap from '../../components/TableWrap.astro';
+
+export function getStaticPaths() {
+  const profiles = loadProfiles();
+  return routesByTemplate('domain').map((route) => {
+    const d = profiles.find((p) => `/domains/${p.key}/` === route.url);
+    if (!d) throw new Error(`domains: no profile for ${route.url}`);
+    return { params: { domain: d.key }, props: { route, key: d.key } };
+  });
+}
+
+interface Props {
+  route: Route;
+  key: string;
+}
+
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const { route, key } = Astro.props;
+const d = loadProfiles().find((p) => p.key === key)!;
+const p = d.profile;
+const id = refSlugger();
+const workflows = loadWorkflows();
+const ontology = loadOntology();
+const weights = sortedTrustWeights(p);
+const thresholds = isObj(p.risk_thresholds) ? p.risk_thresholds : null;
+const checkpointPolicy = isObj(p.checkpoint_policy) ? p.checkpoint_policy : null;
+const evidence = isObj(p.evidence_policy) ? p.evidence_policy : null;
+const sources = Array.isArray(p.domain_sources) ? p.domain_sources.filter(isObj) : [];
+const compliance = isObj(p.compliance) ? p.compliance : null;
+const other = Object.fromEntries(Object.entries(p).filter(([k]) => !PROFILE_SECTION_KEYS.has(k)));
+const blocked = thresholds && Array.isArray(thresholds.block_autonomous) ? thresholds.block_autonomous.map(String) : [];
+const grounding = evidence && Array.isArray(evidence.require_grounding) ? evidence.require_grounding.map(String) : [];
+const anchorTypes = evidence && Array.isArray(evidence.required_anchor_types) ? evidence.required_anchor_types.map(String) : [];
+const capLink = (c: string) => (ontology.byId.has(c) ? capabilityHref(c) : undefined);
+
+// The README's rendered HTML is split before its first H2 so the generated
+// sections can sit between its lead and its sections.
+let readme: { head: string; rest: string } | null = null;
+let page: PageMeta | undefined;
+if (d.readme) {
+  const entry = await getEntry('docs', d.readme);
+  if (!entry) throw new Error(`domains: no docs entry for ${d.readme}`);
+  const r = await render(entry);
+  if (typeof entry.rendered?.html !== 'string') throw new Error(`domains: ${d.readme} has no rendered HTML`);
+  readme = splitAtFirstH2(entry.rendered.html);
+  page = r.remarkPluginFrontmatter.page as PageMeta | undefined;
+}
+const title = page?.title ?? `${d.key} domain`;
+---
+<DocLayout route={route} title={title} description={d.description || page?.description}>
+  <article class="doc doc--domain" data-domain={d.key} data-pagefind-body>
+    {readme ? (
+      <div class="doc__body" set:html={readme.head} />
+    ) : (
+      <h1 id={id(title)}>{title}</h1>
+    )}
+
+    <section class="profile-values" data-profile={d.profileFile}>
+      <h2 id={id('Profile values')}>Profile values</h2>
+      <p>
+        These values are read from <a href={githubBlobUrl(d.profileFile)}><code>{d.profileFile}</code></a>, profile
+        version {d.version}. Where the text on this page repeats them, these values are the ones that apply.
+        {p.trust_model_reviewed === true && typeof p.trust_model_reviewed_at === 'string' && (
+          <> The trust model was reviewed on {p.trust_model_reviewed_at}.</>
+        )}
+      </p>
+      {d.description && <p class="profile-values__description">{d.description}</p>}
+
+      {weights.length > 0 && (
+        <>
+          <h3 id={id('Trust weights')}>Trust weights</h3>
+          <p>Higher weights mean the source is trusted more. Highest first.</p>
+          <ol class="trust-weights">
+            {weights.map((w) => (
+              <li data-source={w.source}>
+                <code>{w.source}</code>
+                <meter min="0" max="1" value={w.weight}>{w.weight}</meter>
+                <span class="trust-weights__value">{w.weight}</span>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+
+      {thresholds && (
+        <>
+          <h3 id={id('Risk thresholds')}>Risk thresholds</h3>
+          <dl class="value-list">
+            {typeof thresholds.auto_approve === 'string' && (
+              <div>
+                <dt>Approved automatically</dt>
+                <dd>{thresholds.auto_approve === 'none' ? 'Nothing' : <><code>{thresholds.auto_approve}</code> risk</>}</dd>
+              </div>
+            )}
+            {typeof thresholds.require_review === 'string' && <div><dt>Needs review from</dt><dd><code>{thresholds.require_review}</code> risk</dd></div>}
+            {typeof thresholds.require_human === 'string' && <div><dt>Needs a person from</dt><dd><code>{thresholds.require_human}</code> risk</dd></div>}
+            {blocked.length > 0 && (
+              <div>
+                <dt>Never run without a person</dt>
+                <dd><ul class="value-list__items">{blocked.map((c) => <li><a href={capLink(c)}><code>{c}</code></a></li>)}</ul></dd>
+              </div>
+            )}
+          </dl>
+        </>
+      )}
+
+      {checkpointPolicy && (
+        <>
+          <h3 id={id('Checkpoint policy')}>Checkpoint policy</h3>
+          <ValueList value={checkpointPolicy} />
+        </>
+      )}
+
+      {evidence && (
+        <>
+          <h3 id={id('Evidence policy')}>Evidence policy</h3>
+          <dl class="value-list">
+            {anchorTypes.length > 0 && (
+              <div><dt>Required evidence anchor types</dt><dd><ul class="value-list__items">{anchorTypes.map((a) => <li><code>{a}</code></li>)}</ul></dd></div>
+            )}
+            {evidence.minimum_confidence !== undefined && (
+              <div><dt>Minimum confidence</dt><dd><code>{String(evidence.minimum_confidence)}</code></dd></div>
+            )}
+            {grounding.length > 0 && (
+              <div>
+                <dt>Capabilities whose output must cite evidence</dt>
+                <dd><ul class="value-list__items">{grounding.map((c) => <li><a href={capLink(c)}><code>{c}</code></a></li>)}</ul></dd>
+              </div>
+            )}
+          </dl>
+        </>
+      )}
+
+      {sources.length > 0 && (
+        <>
+          <h3 id={id('Domain sources')}>Domain sources</h3>
+          <TableWrap label={`Sources in the ${d.key} profile`}>
+            <table class="source-table">
+              <caption>Sources in the {d.key} profile</caption>
+              <thead><tr><th scope="col">Source</th><th scope="col">Type</th><th scope="col">Default trust</th></tr></thead>
+              <tbody>
+                {sources.map((s) => (
+                  <tr><th scope="row">{String(s.name ?? '')}</th><td><code>{String(s.type ?? '')}</code></td><td>{String(s.default_trust ?? '')}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
+        </>
+      )}
+
+      {compliance && (
+        <>
+          <h3 id={id('Compliance')}>Compliance</h3>
+          <ValueList value={compliance} />
+        </>
+      )}
+
+      {Object.keys(other).length > 0 && (
+        <>
+          <h3 id={id('Other profile fields')}>Other profile fields</h3>
+          <ValueList value={other} />
+        </>
+      )}
+    </section>
+
+    <section class="profile-workflows">
+      <h2 id={id('Workflows in this profile')}>Workflows in this profile</h2>
+      {d.workflows.length === 0 ? (
+        <p>The profile lists no workflows.</p>
+      ) : (
+        <ul class="profile-workflows__list">
+          {d.workflows.map((w) => {
+            const wf = workflows.byId.get(w.id);
+            return (
+              <li data-workflow={w.id} data-defined={w.defined ? 'true' : 'false'}>
+                {wf ? (
+                  <><a href={workflowHref(w.id)}><code>{w.id}</code></a>: {wf.goal}</>
+                ) : (
+                  <><code>{w.id}</code> <StatusBadge status={PROPOSED_WORKFLOW_STATUS} /></>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+
+    {readme && readme.rest !== '' && <div class="doc__body" set:html={readme.rest} />}
+  </article>
+</DocLayout>

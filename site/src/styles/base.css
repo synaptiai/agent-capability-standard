@@ -1,0 +1,342 @@
+/*
+ * Reset, type scale, links, focus, selection and prose.
+ * Pixel fonts are for display text only: h1 to h3, the wordmark, buttons
+ * that lead somewhere, prev/next titles and tile symbols (Jersey 10), and
+ * eyebrows (Silkscreen). Body text, h4 to h6, tables, code, controls and the
+ * contents list use the readable fonts.
+ */
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  p,
+  figure,
+  blockquote,
+  dl,
+  dd {
+    margin: 0;
+  }
+
+  img,
+  svg,
+  video {
+    display: block;
+    max-width: 100%;
+  }
+
+  svg.pg,
+  svg.mark {
+    display: inline-block;
+    flex: none;
+    vertical-align: middle;
+    max-width: none;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+}
+
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--ink);
+    scroll-padding-top: calc(var(--chrome-h, var(--header-h)) + var(--space-4));
+    --chrome-h: var(--header-h);
+  }
+
+  @media (min-width: 1024px) {
+    html {
+      --chrome-h: calc(var(--header-h) + 44px);
+    }
+  }
+
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.65;
+    overflow-wrap: break-word;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    /* Jersey 10 has one weight. Headings differ by size only, and the
+       browser must not draw a fake bold, including for <strong> inside. */
+    font-weight: 400;
+    font-synthesis: none;
+    line-height: 1.1;
+    color: var(--ink);
+    text-wrap: balance;
+  }
+
+  /* Sizes are multiples of 5px, so each pixel of the font lands on whole
+     device pixels at 2x. */
+  h1 {
+    font-size: 45px;
+    margin: 0 0 var(--space-4);
+  }
+
+  @media (min-width: 960px) {
+    h1 {
+      font-size: 55px;
+    }
+  }
+
+  h2 {
+    font-size: 40px;
+    margin: var(--space-7) 0 var(--space-4);
+  }
+
+  h3 {
+    font-size: 30px;
+    margin: var(--space-6) 0 var(--space-3);
+  }
+
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-body);
+    font-weight: 700;
+    font-size: 18px;
+    line-height: 1.35;
+    margin: var(--space-5) 0 var(--space-2);
+  }
+
+  h5,
+  h6 {
+    font-size: 17px;
+  }
+
+  p,
+  ul,
+  ol,
+  dl,
+  table,
+  pre,
+  blockquote,
+  details {
+    margin-block: 0 var(--space-4);
+  }
+
+  ul,
+  ol {
+    padding-left: 1.5em;
+  }
+
+  li + li {
+    margin-top: var(--space-1);
+  }
+
+  a {
+    color: var(--link);
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  a:hover {
+    color: var(--ink);
+    text-decoration-thickness: 2px;
+  }
+
+  :focus-visible {
+    outline: var(--px) solid var(--ink);
+    outline-offset: 2px;
+  }
+
+  main:focus {
+    outline: none;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
+
+  strong,
+  b {
+    font-weight: 700;
+  }
+
+  hr {
+    border: 0;
+    border-top: var(--px) solid var(--rule);
+    margin: var(--space-6) 0;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+
+  :not(pre) > code {
+    font-size: 0.9em;
+    background: var(--bg-mut);
+    border: 1px solid var(--rule);
+    padding: 0 0.25em;
+    overflow-wrap: anywhere;
+  }
+
+  a code {
+    color: inherit;
+  }
+
+  /* Code in a table cell stays on one line; the table scrolls instead. */
+  :is(td, th) > code,
+  :is(td, th) > a > code {
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  /* Inline code in a heading (capability pages) keeps the display size and has no box. */
+  :is(h1, h2, h3) code {
+    font-size: 0.85em;
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  pre {
+    font-size: 15px;
+    line-height: 1.55;
+    padding: var(--space-4);
+    border: var(--px) solid var(--rule);
+    background: var(--bg-code);
+    color: var(--code-foreground);
+    overflow-x: auto;
+    tab-size: 2;
+  }
+
+  pre.astro-code {
+    /* Shiki writes its colours inline as var(--astro-code-*). */
+    border-radius: var(--radius);
+  }
+
+  blockquote {
+    border-left: 4px solid var(--rule);
+    padding: var(--space-2) var(--space-4);
+    color: var(--ink-2);
+  }
+
+  table {
+    width: 100%;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  caption {
+    caption-side: top;
+    text-align: left;
+    font-size: 15px;
+    color: var(--ink-3);
+    padding-bottom: var(--space-2);
+  }
+
+  th,
+  td {
+    text-align: left;
+    vertical-align: top;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  thead th {
+    background: var(--bg-mut);
+    font-weight: 700;
+    border-bottom: var(--px) solid var(--line);
+  }
+
+  details > summary {
+    cursor: pointer;
+  }
+
+  /* Requirement keywords (MUST, SHOULD, MAY): bold, with an underline in the keyword colour. */
+  .kw {
+    font-weight: 700;
+    color: var(--ink);
+    text-decoration-line: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+  }
+
+  .kw--must {
+    text-decoration-color: var(--kw-must);
+  }
+
+  .kw--should {
+    text-decoration-color: var(--kw-should);
+  }
+
+  .kw--may {
+    text-decoration-color: var(--kw-may);
+  }
+
+  /* The link rehype-autolink-headings appends to each heading. */
+  .heading-anchor {
+    margin-left: 0.3em;
+    color: var(--ink-3);
+    text-decoration: none;
+    font-family: var(--font-body);
+    font-weight: 400;
+    opacity: 0;
+  }
+
+  .heading-anchor::before {
+    content: '#';
+  }
+
+  :is(h1, h2, h3, h4, h5, h6):hover .heading-anchor {
+    opacity: 1;
+  }
+
+  .lead {
+    font-size: 19px;
+    color: var(--ink-2);
+  }
+
+  .skip-link {
+    position: absolute;
+    left: var(--space-4);
+    top: -100px;
+    z-index: 50;
+    background: var(--accent);
+    color: var(--on-accent);
+    border: var(--border);
+    padding: var(--space-2) var(--space-4);
+    font-weight: 700;
+  }
+
+  .skip-link:focus {
+    top: var(--space-2);
+  }
+}

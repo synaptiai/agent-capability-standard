@@ -1,0 +1,29 @@
+---
+// A callout for generated pages, in the same markup the Markdown callouts
+// use: a label row (glyph and word) and the content. Types follow the
+// design: note, tip, important, warning, caution and requirement.
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+type Kind = 'note' | 'tip' | 'important' | 'warning' | 'caution' | 'requirement';
+
+interface Props {
+  type: Kind;
+  /** The label word; defaults to the type. */
+  label?: string;
+}
+
+const GLYPH: Record<Kind, string> = {
+  note: 'note',
+  tip: 'check',
+  important: 'note',
+  warning: 'warning',
+  caution: 'caution',
+  requirement: 'stamp',
+};
+const { type, label } = Astro.props;
+const word = label ?? type.charAt(0).toUpperCase() + type.slice(1);
+---
+<div class:list={['callout', `callout--${type}`]} role="note">
+  <p class="callout__label"><PixelGlyph name={GLYPH[type]} /> {word}</p>
+  <slot />
+</div>

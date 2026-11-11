@@ -1,0 +1,26 @@
+---
+// A mapping from a YAML file as a description list. Lists become inline code
+// items; nested mappings recurse.
+interface Props {
+  value: Record<string, unknown>;
+}
+
+const { value } = Astro.props;
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+---
+<dl class="value-list">
+  {Object.entries(value).map(([k, v]) => (
+    <div data-key={k}>
+      <dt><code>{k}</code></dt>
+      <dd>
+        {Array.isArray(v) ? (
+          <ul class="value-list__items">{v.map((x) => <li><code>{String(x)}</code></li>)}</ul>
+        ) : isObj(v) ? (
+          <Astro.self value={v} />
+        ) : (
+          <code>{String(v)}</code>
+        )}
+      </dd>
+    </div>
+  ))}
+</dl>

@@ -1,0 +1,61 @@
+---
+// The site header: the mark and wordmark (home link, named by the visible
+// wordmark so the name contains what is on screen at every width), a chip with the current
+// Standard version, the search trigger, the
+// GitHub link, the theme toggle and, below 1024px, the menu button. A second
+// row links to each section.
+import { loadVersions } from '../data/versions';
+import { currentStandard } from '../lib/generated';
+import { GITHUB_BASE } from '../lib/repo';
+import { ROUTES, SECTIONS, type Route } from '../lib/routes';
+import Mark from '../pixel/Mark.astro';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+import Search from './Search.astro';
+import ThemeToggle from './ThemeToggle.astro';
+
+interface Props {
+  route: Route;
+}
+
+const { route } = Astro.props;
+const version = loadVersions().standard.current.version;
+const specUrl = currentStandard().url;
+// Each section links to its first page in sidebar order.
+const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
+  ...s,
+  url: ROUTES.find((r) => r.section === s.id && r.order === 0)?.url ?? '/',
+}));
+---
+<header class="site-header" data-pagefind-ignore="all">
+  <div class="site-header__bar">
+    <button type="button" class="menu-button btn btn--quiet" aria-controls="site-sidebar" aria-expanded="false" data-menu-button>
+      <PixelGlyph name="menu" class="menu-button__open" />
+      <PixelGlyph name="close" class="menu-button__close" />
+      <span class="menu-button__text">Menu</span>
+    </button>
+    <a class="site-header__home" href="/">
+      <Mark scale={2} class="site-header__mark" />
+      <span class="wordmark">
+        <span class="wordmark__full">Agent Capability Standard</span>
+        <span class="wordmark__short">ACS</span>
+      </span>
+      <span class="visually-hidden"> home</span>
+    </a>
+    <a class="version-chip" href={specUrl}><span class="version-chip__word">Standard </span>v{version}</a>
+    <div class="site-header__search"><Search /></div>
+    <a class="site-header__github btn btn--quiet" href={GITHUB_BASE}>
+      <PixelGlyph name="code" />
+      <span>GitHub</span>
+    </a>
+    <ThemeToggle />
+  </div>
+  <nav class="site-nav" aria-label="Sections">
+    <ul>
+      {nav.map((s) => (
+        <li>
+          <a href={s.url} aria-current={s.id === route.section ? 'true' : undefined}>{s.label}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+</header>

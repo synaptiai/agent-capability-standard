@@ -1,0 +1,44 @@
+---
+// One tile of the periodic table (design notes, design-system section 11): a
+// link to the capability's page showing its number in table order, risk pips,
+// two-letter symbol and id. The accessible name says the layer, the risk and
+// which safety flags apply; the data attributes carry the same facts.
+// Search indexes only the id: the number and symbol would join onto it.
+import type { Capability } from '../data/ontology';
+import { capabilityNeedsCheckpoint } from '../lib/flags';
+import { capabilityHref } from '../lib/generated';
+
+interface Props {
+  cap: Capability;
+  /** 1-based position in the table, in layer order. */
+  index: number;
+  symbol: string;
+}
+
+const { cap, index, symbol } = Astro.props;
+const checkpoint = capabilityNeedsCheckpoint(cap);
+const pips = { low: 1, medium: 2, high: 3 }[cap.risk];
+const name = [
+  `${cap.id}, ${cap.layer} layer, ${cap.risk} risk`,
+  ...(cap.mutation ? ['mutates'] : []),
+  ...(checkpoint ? ['needs checkpoint'] : []),
+  ...(cap.requires_approval ? ['needs approval'] : []),
+].join(', ');
+---
+<a
+  class="capability-tile has-layer"
+  href={capabilityHref(cap.id)}
+  aria-label={name}
+  style={`--layer: var(--layer-${cap.layer})`}
+  data-capability={cap.id}
+  data-layer={cap.layer.toLowerCase()}
+  data-risk={cap.risk}
+  data-mutation={cap.mutation ? 'true' : 'false'}
+  data-checkpoint={checkpoint ? 'true' : 'false'}
+  data-approval={cap.requires_approval ? 'true' : 'false'}
+>
+  <span class="capability-tile__index" data-pagefind-ignore>{index}</span>
+  <span class="risk-pips" data-level={pips} aria-hidden="true">{Array.from({ length: pips }, () => <span class="risk-pips__pip"></span>)}</span>
+  <span class="capability-tile__symbol" aria-hidden="true" data-pagefind-ignore>{symbol}</span>
+  <code class="capability-tile__id">{cap.id}</code>
+</a>

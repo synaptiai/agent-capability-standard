@@ -1,0 +1,134 @@
+---
+// The shell every page shares: the theme script (first child of <head>; it
+// also sets .js on <html>), fonts and styles, the header, the sidebar, the
+// page with its breadcrumb, page actions, contents list and previous/next
+// links, and the footer.
+// The page body (including its own H1) comes in through the slot. The
+// contents list is read from the rendered body, so generated pages get one
+// the same way Markdown pages do.
+import '../styles/tokens.css';
+import '../styles/base.css';
+import '../styles/components.css';
+import '../styles/motion.css';
+import Header from '../components/Header.astro';
+import PageActions from '../components/PageActions.astro';
+import PrevNext from '../components/PrevNext.astro';
+import Sidebar from '../components/Sidebar.astro';
+import Toc from '../components/Toc.astro';
+import { loadVersions } from '../data/versions';
+import { SITEMAP_PATH } from '../lib/agent-files';
+import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
+import { SECTIONS, type Route } from '../lib/routes';
+import { tocEntries } from '../lib/toc';
+import { pageColour } from '../pixel/icons';
+import { FONT_CREDITS, FONT_FACE_CSS, FONT_PRELOADS } from '../styles/fonts';
+
+interface Props {
+  route: Route;
+  title: string;
+  /** The <title> text before the site name, when it differs from the title. */
+  headTitle?: string;
+  description?: string | null;
+  /** Keep the page out of search engines (the 404 page). */
+  noindex?: boolean;
+  /** Show the "On this page" contents list (the home page has none). */
+  toc?: boolean;
+}
+
+const { route, title, headTitle, description, noindex = false, toc: showToc = true } = Astro.props;
+const section = SECTIONS.find((s) => s.id === route.section);
+const pageTitle = route.url === '/' ? 'Agent Capability Standard' : `${headTitle ?? title} - Agent Capability Standard`;
+const sourceUrl = route.source ? githubBlobUrl(route.source) : null;
+const body = await Astro.slots.render('default');
+const toc = showToc ? tocEntries(body) : [];
+const hasSidebar = route.section !== 'home';
+// The Markdown copy at <route>index.md exists only once an endpoint builds it
+// (src/pages/**/*.md.ts). Until then the page offers no copy actions and no
+// alternate link, so nothing points at a file that is not there.
+const markdownEndpoints = Object.keys(import.meta.glob('../pages/**/*.md.ts'));
+const hasMarkdownCopy = markdownEndpoints.length > 0 && route.template !== 'not-found';
+const light = pageColour('light');
+const dark = pageColour('dark');
+const ogImage = new URL('/og.png', Astro.site);
+// An older Standard is tagged with its version in search and ranked below
+// the current one (its words count for less).
+const olderStandard = loadVersions().standard.previous.find((p) => route.url === `/spec/${p.version}/`)?.version;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <script is:inline>
+      (() => {
+        document.documentElement.classList.add('js');
+        let t = 'system';
+        try { t = localStorage.getItem('acs-theme') || 'system'; } catch {}
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      })();
+    </script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta data-pagefind-meta="title[content]" content={headTitle ?? title} />
+    {olderStandard && <meta data-pagefind-filter="version[content]" content={olderStandard} />}
+    {description && <meta name="description" content={description} />}
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={new URL(route.url, Astro.site)} />}
+    <meta name="theme-color" content={light} media="(prefers-color-scheme: light)" data-light={light} data-dark={dark} />
+    <meta name="theme-color" content={dark} media="(prefers-color-scheme: dark)" data-light={light} data-dark={dark} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32" />
+    {hasMarkdownCopy && <link rel="alternate" type="text/markdown" href={`${route.url}index.md`} />}
+    <meta property="og:title" content={pageTitle} />
+    {description && <meta property="og:description" content={description} />}
+    <meta property="og:image" content={ogImage} />
+    <meta name="twitter:card" content="summary_large_image" />
+    {FONT_PRELOADS.map((href) => <link rel="preload" href={href} as="font" type="font/woff2" crossorigin />)}
+    <style is:inline set:html={FONT_FACE_CSS}></style>
+  </head>
+  <body class:list={['page', `page--${route.template}`, hasSidebar ? 'page--with-sidebar' : 'page--no-sidebar']} data-section={route.section}>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <Header route={route} />
+    <div class="frame">
+      <Sidebar route={route} />
+      <main
+        id="content"
+        class="doc-main"
+        tabindex="-1"
+        data-pagefind-filter={section ? `section:${section.label}` : undefined}
+      >
+        {section && route.section !== 'home' && (
+          <nav class="breadcrumb" aria-label="Breadcrumb" data-pagefind-ignore="all">
+            <ol>
+              <li>{section.label}</li>
+              {route.group && <li>{route.group}</li>}
+              <li aria-current="page">{title}</li>
+            </ol>
+          </nav>
+        )}
+        {hasMarkdownCopy && <PageActions url={route.url} />}
+        <Toc entries={toc} />
+        <div class="doc-main__body" data-pagefind-weight={olderStandard ? '0.5' : undefined}><Fragment set:html={body} /></div>
+        <PrevNext route={route} />
+      </main>
+    </div>
+    <footer class="site-footer" data-pagefind-ignore="all">
+      <nav class="site-footer__agents" aria-label="For agents">
+        <p class="site-footer__heading">For agents</p>
+        <ul>
+          <li><a href="/llms.txt" type="text/plain">llms.txt</a></li>
+          <li><a href="/llms-full.txt" type="text/plain">llms-full.txt</a></li>
+          {hasMarkdownCopy && <li><a href={`${route.url}index.md`} type="text/markdown">Markdown of this page</a></li>}
+          <li><a href={SITEMAP_PATH}>Sitemap</a></li>
+        </ul>
+      </nav>
+      {sourceUrl && (
+        <p class="site-footer__source">
+          Source: <a href={sourceUrl}>{route.source}</a>
+        </p>
+      )}
+      <p class="site-footer__build">Built from commit <code>{COMMIT_SHA.slice(0, 12)}</code>.</p>
+      <p class="site-footer__fonts">
+        Fonts: {FONT_CREDITS.join(', ')}, under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.
+      </p>
+    </footer>
+  </body>
+</html>

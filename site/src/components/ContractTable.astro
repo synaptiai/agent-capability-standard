@@ -1,0 +1,48 @@
+---
+// A contract table: field, type, required and description. Fields of a
+// top-level object are indented one level; deeper schema is shown as YAML.
+import { repoPathHref } from '../lib/generated';
+import type { SchemaRow } from '../lib/views';
+import TableWrap from './TableWrap.astro';
+
+interface Props {
+  rows: SchemaRow[];
+  caption: string;
+  /** Repository file the rows come from, for resolving `ref` paths. */
+  from: string;
+}
+
+const { rows, caption, from } = Astro.props;
+---
+{rows.length === 0 ? (
+  <p class="contract-table__empty">No fields.</p>
+) : (
+  <TableWrap label={caption}>
+    <table class="contract-table">
+      <caption>{caption}</caption>
+      <thead>
+        <tr><th scope="col">Field</th><th scope="col">Type</th><th scope="col">Required</th><th scope="col">Description</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr class:list={['contract-table__row', `contract-table__row--depth-${r.depth}`]} data-field={r.path}>
+            <th scope="row"><code>{r.depth > 0 ? r.path : r.name}</code></th>
+            <td><code>{r.type}</code></td>
+            <td>{r.required ? 'Yes' : 'No'}</td>
+            <td>
+              {r.description}
+              {r.constraints.length > 0 && <span class="contract-table__constraints">{r.description ? ' ' : ''}{r.constraints.join('. ')}.</span>}
+              {r.ref && <span class="contract-table__ref"> Schema: <a href={repoPathHref(r.ref, from)}><code>{r.ref}</code></a></span>}
+              {r.nested && (
+                <details class="contract-table__nested">
+                  <summary>Show schema</summary>
+                  <pre class="code-block code-block--yaml"><code>{r.nested}</code></pre>
+                </details>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </TableWrap>
+)}

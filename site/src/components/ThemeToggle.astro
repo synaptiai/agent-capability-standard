@@ -1,0 +1,66 @@
+---
+// Cycles the colour theme: System, Light, Dark. The current state is in the
+// button's accessible name ("Theme: System"); there is no aria-pressed. The
+// choice is saved as `acs-theme` (inside try/catch); System removes it, so the
+// colour-scheme media query decides. The script in the page head applies a
+// saved choice before the page paints.
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+---
+<button type="button" class="theme-toggle btn btn--quiet" data-theme-toggle data-state="system" aria-label="Theme: System">
+  <PixelGlyph name="half" class="theme-toggle__glyph theme-toggle__glyph--system" />
+  <PixelGlyph name="sun" class="theme-toggle__glyph theme-toggle__glyph--light" />
+  <PixelGlyph name="moon" class="theme-toggle__glyph theme-toggle__glyph--dark" />
+  <span class="theme-toggle__text" aria-hidden="true">System</span>
+</button>
+
+<script>
+  const ORDER = ['system', 'light', 'dark'] as const;
+  type Theme = (typeof ORDER)[number];
+  const LABEL: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+
+  function stored(): Theme {
+    try {
+      const t = localStorage.getItem('acs-theme');
+      return t === 'light' || t === 'dark' ? t : 'system';
+    } catch {
+      return 'system';
+    }
+  }
+
+  function save(t: Theme): void {
+    try {
+      if (t === 'system') localStorage.removeItem('acs-theme');
+      else localStorage.setItem('acs-theme', t);
+    } catch {
+      // Storage is blocked: the choice lasts until the page is left.
+    }
+  }
+
+  function apply(t: Theme): void {
+    const root = document.documentElement;
+    if (t === 'system') delete root.dataset.theme;
+    else root.dataset.theme = t;
+    // Browser chrome colour: an explicit choice sets both tags to that theme's colour.
+    for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+      const own = meta.dataset.own ?? meta.content;
+      meta.dataset.own = own;
+      meta.content = t === 'system' ? own : (meta.dataset[t] ?? own);
+    }
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]')) {
+      button.dataset.state = t;
+      button.setAttribute('aria-label', `Theme: ${LABEL[t]}`);
+      const text = button.querySelector('.theme-toggle__text');
+      if (text) text.textContent = LABEL[t];
+    }
+  }
+
+  let current = stored();
+  apply(current);
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]')) {
+    button.addEventListener('click', () => {
+      current = ORDER[(ORDER.indexOf(current) + 1) % ORDER.length]!;
+      save(current);
+      apply(current);
+    });
+  }
+</script>

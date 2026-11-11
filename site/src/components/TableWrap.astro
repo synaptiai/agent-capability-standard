@@ -1,0 +1,13 @@
+---
+// The scroll container for a generated table. Keyboard users can focus it to
+// scroll a wide table, and screen readers announce it as a region named by
+// `label` (the table's caption as plain text). Markdown tables get the same
+// wrapper from the rehype-tables plugin.
+interface Props {
+  label: string;
+  [attr: `data-${string}`]: string | undefined;
+}
+
+const { label, ...data } = Astro.props;
+---
+<div class="table-wrap" role="region" tabindex="0" aria-label={label} {...data}><slot /></div>

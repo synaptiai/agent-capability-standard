@@ -1,0 +1,13 @@
+---
+// A value from a YAML source shown as YAML, in a plain code block.
+import { toYaml } from '../lib/views';
+
+interface Props {
+  value: unknown;
+  /** Text to show as is, instead of serialising `value`. */
+  text?: string;
+}
+
+const { value, text } = Astro.props;
+---
+<pre class="code-block code-block--yaml"><code>{text ?? toYaml(value)}</code></pre>

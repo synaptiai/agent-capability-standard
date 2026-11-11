@@ -1,0 +1,26 @@
+---
+// One safety flag (mutation, checkpoint, approval, an override) or a catalog
+// fact, with its glyph and its word, so colour is never the only signal.
+// Links to the section of the Standard that defines it when `href` is given.
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+interface Props {
+  kind: string;
+  label: string;
+  href?: string;
+}
+
+const GLYPHS: Record<string, string> = {
+  mutation: 'pencil',
+  'read-only': 'eye',
+  checkpoint: 'flag',
+  approval: 'stamp',
+  overridable: 'undo',
+  'catalog-core': 'nested',
+  'catalog-domain': 'fork',
+};
+const { kind, label, href } = Astro.props;
+const glyph = GLYPHS[kind];
+const Tag = href ? 'a' : 'span';
+---
+<Tag class:list={['flag-badge', `flag-badge--${kind}`]} href={href} data-flag={kind}>{glyph ? <PixelGlyph name={glyph} /> : <span class="pip" aria-hidden="true"></span>}{label}</Tag>

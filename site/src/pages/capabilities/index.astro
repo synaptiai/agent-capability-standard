@@ -1,0 +1,53 @@
+---
+// The capabilities overview: the periodic table generated from the ontology,
+// then counts by risk level and by edge type.
+import CapabilityTable from '../../components/CapabilityTable.astro';
+import { loadOntology, RISKS } from '../../data/ontology';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
+import TableWrap from '../../components/TableWrap.astro';
+
+const route = routeByUrl('/capabilities/');
+const ontology = loadOntology();
+const id = refSlugger();
+const n = ontology.capabilities.length;
+const byRisk = RISKS.map((risk) => ({ risk, count: ontology.capabilities.filter((c) => c.risk === risk).length }));
+const mutating = ontology.capabilities.filter((c) => c.mutation).length;
+const description = `The ${n} capabilities of the ontology in ${ontology.layers.length} layers, with their risk levels and safety flags.`;
+---
+<DocLayout route={route} title="Capabilities" description={description}>
+  <article class="doc doc--capabilities" data-pagefind-body>
+    <h1 id={id('Capabilities')}>Capabilities</h1>
+    <p class="lead">
+      The ontology defines {n} atomic capabilities in {ontology.layers.length} layers. Each capability has a typed
+      input and output contract, a risk level and safety flags (<a href={specSectionHref('4.1')}>Standard §4.1</a>).
+      Workflows compose them (<a href={pageHref('/workflows/')}>see workflows</a>).
+    </p>
+    <section class="capabilities-table">
+      <h2 id={id('By layer')}>By layer</h2>
+      <CapabilityTable />
+    </section>
+    <section class="capabilities-counts">
+      <h2 id={id('Counts')}>Counts</h2>
+      <TableWrap label="Capabilities by risk level">
+        <table class="count-table">
+          <caption>Capabilities by risk level</caption>
+          <thead><tr><th scope="col">Risk</th><th scope="col">Capabilities</th></tr></thead>
+          <tbody>
+            {byRisk.map((r) => <tr data-risk={r.risk}><th scope="row">{r.risk}</th><td>{r.count}</td></tr>)}
+          </tbody>
+        </table>
+      </TableWrap>
+      <p>{mutating} of the {n} capabilities change state.</p>
+      <TableWrap label="Edges by type">
+        <table class="count-table">
+          <caption>Edges by type (<a href={pageHref('/spec/edge-types/')}>edge types</a>)</caption>
+          <thead><tr><th scope="col">Edge type</th><th scope="col">Edges</th></tr></thead>
+          <tbody>
+            {ontology.edgeTypes.map((t) => <tr data-edge-type={t.id}><th scope="row"><code>{t.id}</code></th><td>{t.edges.length}</td></tr>)}
+          </tbody>
+        </table>
+      </TableWrap>
+    </section>
+  </article>
+</DocLayout>

@@ -1,0 +1,27 @@
+---
+// A listing of pages as cards, in groups. Group headings get `ref-` ids.
+import type { ListingGroup } from '../lib/listing';
+
+interface Props {
+  groups: ListingGroup[];
+  /** Makes the page's `ref-` heading ids, so they stay unique with the page's own. */
+  id: (text: string) => string;
+}
+
+const { groups, id } = Astro.props;
+---
+<div class="section-index">
+  {groups.map((g) => (
+    <section class="section-index__group">
+      {g.label && <h2 id={id(g.label)}>{g.label}</h2>}
+      <ul class="section-index__cards">
+        {g.items.map((item) => (
+          <li class="section-index__card" data-template={item.route.template}>
+            <a href={item.url}>{item.title}</a>
+            {item.description && <p>{item.description}</p>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  ))}
+</div>

@@ -1,0 +1,56 @@
+---
+// The workflows overview: every workflow of the core and domain catalogs, with
+// its goal, risk, catalog and step count.
+import RiskBadge from '../../components/RiskBadge.astro';
+import { loadWorkflows } from '../../data/workflows';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { domainHref, pageHref, refSlugger, routeByUrl, specSectionHref, workflowHref } from '../../lib/generated';
+import { githubBlobUrl } from '../../lib/repo';
+import TableWrap from '../../components/TableWrap.astro';
+
+const route = routeByUrl('/workflows/');
+const wfs = loadWorkflows();
+const id = refSlugger();
+const description = `The ${wfs.all.length} workflows of the reference and domain catalogs: ${wfs.core.length} reference workflows and ${wfs.domain.length} domain workflows.`;
+const groups = [
+  { label: 'Reference workflows', items: wfs.core },
+  { label: 'Domain workflows', items: wfs.domain },
+];
+---
+<DocLayout route={route} title="Workflows" description={description}>
+  <article class="doc doc--workflows" data-pagefind-body>
+    <h1 id={id('Workflows')}>Workflows</h1>
+    <p class="lead">
+      A workflow composes capabilities into ordered steps with typed bindings, gates and failure modes
+      (<a href={specSectionHref('5')}>Standard §5</a>). The catalogs define {wfs.all.length} workflows:
+      {' '}{wfs.core.length} reference workflows and {wfs.domain.length} domain workflows. See also
+      {' '}<a href={pageHref('/workflows/patterns/')}>composition patterns</a>.
+    </p>
+    {groups.map((g) => (
+      <section class="workflow-group">
+        <h2 id={id(g.label)}>{g.label}</h2>
+        <TableWrap label={`${g.label} (${g.items.length})`}>
+          <table class="workflow-table">
+            <caption>{g.label} ({g.items.length})</caption>
+            <thead>
+              <tr><th scope="col">Workflow</th><th scope="col">Goal</th><th scope="col">Risk</th><th scope="col">Catalog</th><th scope="col">Steps</th></tr>
+            </thead>
+            <tbody>
+              {g.items.map((w) => (
+                <tr data-workflow={w.id} data-risk={w.risk} data-catalog={w.catalog}>
+                  <th scope="row"><a href={workflowHref(w.id)}><code>{w.id}</code></a></th>
+                  <td>{w.goal}</td>
+                  <td><RiskBadge risk={w.risk} /></td>
+                  <td>
+                    {w.domain ? <a href={domainHref(w.domain)}>{w.domain}</a> : <a href={githubBlobUrl(w.source)}><code>{w.source}</code></a>}
+                  </td>
+                  <td>{w.steps.length}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      </section>
+    ))}
+  </article>
+</DocLayout>

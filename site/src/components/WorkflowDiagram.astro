@@ -1,0 +1,35 @@
+---
+// A workflow's steps as a vertical rail in plain HTML (design notes,
+// design-system section 12): an <ol class="wf"> of step cards, each with a
+// role (checkpoint, mutating, verify, rollback or plain) taken from its
+// capability and effective safety flags. Consecutive steps in one parallel
+// group sit in one box.
+import type { Workflow } from '../data/workflows';
+import { diagramRuns, diagramSteps } from '../lib/views';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+import WorkflowStep from './WorkflowStep.astro';
+
+interface Props {
+  workflow: Workflow;
+}
+
+const { workflow } = Astro.props;
+const runs = diagramRuns(diagramSteps(workflow));
+---
+<ol class="wf" aria-label={`Steps of ${workflow.id}`} data-workflow={workflow.id}>
+  {runs.map((run) =>
+    run.group === null ? (
+      run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} />)
+    ) : (
+      <li class="wf-parallel" data-group={run.group}>
+        <p class="wf-parallel__label">
+          <PixelGlyph name="fork" /> Parallel: <code>{run.group}</code>
+          {run.join !== undefined && run.join !== null && <>, join: <code>{typeof run.join === 'string' ? run.join : JSON.stringify(run.join)}</code></>}
+        </p>
+        <ol class="wf wf--parallel">
+          {run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} />)}
+        </ol>
+      </li>
+    ),
+  )}
+</ol>

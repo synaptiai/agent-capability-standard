@@ -1,0 +1,46 @@
+---
+// The domains overview: docs/domains/README.md as written (its H1 is the page
+// H1), then a card for each domain profile with its description, its highest
+// trust weight and how many of its workflows a catalog defines.
+import { getEntry, render } from 'astro:content';
+import { loadProfiles } from '../../data/profiles';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { domainHref, refSlugger, routeByUrl } from '../../lib/generated';
+import { sortedTrustWeights } from '../../lib/views';
+import type { PageMeta } from '../../plugins/remark-page-meta';
+
+const route = routeByUrl('/domains/');
+const entry = await getEntry('docs', route.source!);
+if (!entry) throw new Error(`domains: no docs entry for ${route.source}`);
+const { Content, remarkPluginFrontmatter } = await render(entry);
+const page = remarkPluginFrontmatter.page as PageMeta | undefined;
+const profiles = loadProfiles();
+const id = refSlugger();
+---
+<DocLayout route={route} title={page?.title ?? route.title} description={route.description ?? page?.description}>
+  <article class="doc doc--domains" data-pagefind-body>
+    <div class="doc__body"><Content /></div>
+    <section class="domain-profiles">
+      <h2 id={id('Domain profiles')}>Domain profiles</h2>
+      <p>One card per profile in the repository, read from the profile files.</p>
+      <ul class="section-index__cards">
+        {profiles.map((d) => {
+          const top = sortedTrustWeights(d.profile)[0];
+          const defined = d.workflows.filter((w) => w.defined).length;
+          const proposed = d.workflows.length - defined;
+          return (
+            <li class="section-index__card domain-card" data-domain={d.key}>
+              <a href={domainHref(d.key)}>{d.key}</a>
+              {d.description && <p>{d.description}</p>}
+              <dl class="domain-card__facts">
+                {top && <div><dt>Most trusted source</dt><dd><code>{top.source}</code> ({top.weight})</dd></div>}
+                <div><dt>Workflows in a catalog</dt><dd>{defined}</dd></div>
+                {proposed > 0 && <div><dt>Proposed workflows</dt><dd>{proposed}</dd></div>}
+              </dl>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  </article>
+</DocLayout>

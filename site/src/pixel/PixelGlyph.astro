@@ -1,0 +1,35 @@
+---
+// A glyph from glyphs.ts as inline SVG made of <rect> elements. The size is a
+// whole number of pixels per cell, so edges stay sharp. Decorative unless a
+// label is given. With a layer, the glyph takes that layer's colour.
+import { glyph, placedRects } from './svg';
+
+interface Props {
+  name: string;
+  /** Pixels per grid cell. */
+  scale?: number;
+  /** Accessible name; without one the glyph is hidden from assistive technology. */
+  label?: string;
+  /** A layer id: paints the glyph in the layer colour. */
+  layer?: string;
+  class?: string;
+}
+
+const { name, scale = 2, label, layer, class: className } = Astro.props;
+if (!Number.isInteger(scale) || scale < 1) throw new Error(`PixelGlyph: scale must be a whole number, got ${scale}`);
+const g = glyph(name);
+const rects = placedRects(g);
+---
+<svg
+  class:list={['pg', layer && 'has-layer pg--layer', className]}
+  style={layer ? `--layer: var(--layer-${layer}); color: var(--layer)` : undefined}
+  viewBox={`0 0 ${g.w} ${g.h}`}
+  width={g.w * scale}
+  height={g.h * scale}
+  shape-rendering="crispEdges"
+  focusable="false"
+  role={label ? 'img' : undefined}
+  aria-label={label}
+  aria-hidden={label ? undefined : 'true'}
+  data-glyph={name}
+>{rects.map((r) => <rect x={r.x} y={r.y} width={r.w} height={r.h} {...r.attrs} />)}</svg>

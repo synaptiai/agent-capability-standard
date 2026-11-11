@@ -1,0 +1,11 @@
+---
+// A one-line Markdown cell (text and code spans only) as HTML, without set:html.
+import { inlineMarkdown } from '../lib/generated';
+
+interface Props {
+  md: string;
+}
+
+const parts = inlineMarkdown(Astro.props.md);
+---
+{parts.map((p) => (p.code ? <code>{p.text}</code> : p.text))}

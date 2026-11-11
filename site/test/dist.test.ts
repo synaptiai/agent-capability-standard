@@ -1,0 +1,587 @@
+// Tests on the built site. The suite builds the site itself into a temporary
+// directory, so it never reads a stale dist/ and works on a clean checkout.
+// Expected page counts come from counts.ts (the plan's Phase 4 rule: compare
+// against counts.ts, never literal numbers), and the diagnostics rows also
+// from a line scan of the Standard.
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { loadCounts } from '../src/data/counts';
+import { RESERVED_WORKFLOW_SLUGS } from '../src/data/workflows';
+import { checkDistDir } from '../scripts/check-dist.mjs';
+import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
+import { ROUTES, type Route } from '../src/lib/routes';
+import {
+  allCatalogSteps,
+  claudeLayerTable,
+  diagnosticRowsPerSection,
+  ontologyEdgeTriples,
+  profileFiles,
+  profileWorkflowIds,
+  repoText,
+  standardCheckpointCapabilities,
+  standardFileVersions,
+  symmetricEdgeTypes,
+} from './independent';
+
+let work = '';
+let dist = '';
+
+// The build gets its own output and cache directories, so the test can run
+// while another Astro command (astro check, astro dev, npm run build, another
+// test run) uses site/. The output directory must be inside site/: for one
+// outside it, Astro puts its prerender chunks in the shared site/.astro/.
+beforeAll(() => {
+  work = mkdtempSync(path.join(process.cwd(), 'node_modules', '.acs-dist-test-'));
+  dist = path.join(work, 'dist');
+  execFileSync('npx', ['astro', 'build', '--force', '--outDir', dist], {
+    cwd: process.cwd(),
+    stdio: 'pipe',
+    env: { ...process.env, ACS_ASTRO_CACHE_DIR: path.join(work, 'cache') },
+  });
+}, 300_000);
+
+afterAll(() => {
+  if (work) rmSync(work, { recursive: true, force: true });
+});
+
+/** Directories directly under `dir` that hold an index.html. */
+function pageDirs(dir: string): string[] {
+  return readdirSync(path.join(dist, dir), { withFileTypes: true })
+    .filter((e) => e.isDirectory() && existsSync(path.join(dist, dir, e.name, 'index.html')))
+    .map((e) => e.name)
+    .sort();
+}
+
+describe('built site', () => {
+  it('has an index.html for every route in routes.ts', () => {
+    const missing = ROUTES.filter((r) => !existsSync(path.join(dist, r.url, 'index.html'))).map((r) => r.url);
+    expect(missing).toEqual([]);
+  });
+
+  it('builds the pages the Phase 4 done-check names', () => {
+    for (const p of ['capabilities/detect', 'workflows/model-deployment', 'domains/data-analysis', 'spec/diagnostics']) {
+      expect(existsSync(path.join(dist, p, 'index.html')), p).toBe(true);
+    }
+    expect(existsSync(path.join(dist, '404.html'))).toBe(true);
+  });
+
+  it('builds one capability page per capability, plus the overview', () => {
+    const c = loadCounts();
+    expect(pageDirs('capabilities').length).toBe(c.capabilityCount);
+    expect(existsSync(path.join(dist, 'capabilities', 'index.html'))).toBe(true);
+  });
+
+  it('builds one page per layer', () => {
+    expect(pageDirs('layers').length).toBe(loadCounts().layerCount);
+  });
+
+  it('builds one page per workflow, besides the reserved prose pages', () => {
+    const dirs = pageDirs('workflows').filter((d) => !RESERVED_WORKFLOW_SLUGS.includes(d));
+    expect(dirs.length).toBe(loadCounts().workflowCount);
+  });
+
+  it('builds one page per domain profile', () => {
+    expect(pageDirs('domains').length).toBe(loadCounts().profileCount);
+  });
+
+  it('lists every diagnostic code, one row each', () => {
+    const html = readFileSync(path.join(dist, 'spec/diagnostics/index.html'), 'utf8');
+    const rows = [...html.matchAll(/<tr id="([a-z]\d{3})"/g)].map((m) => m[1]);
+    const scanned = Object.values(diagnosticRowsPerSection(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`)));
+    expect(rows.length).toBe(loadCounts().diagnosticCount);
+    expect(rows.length).toBe(scanned.reduce((a, b) => a + b, 0));
+    expect(rows).toContain('v102');
+  });
+
+  it('marks each profile workflow that no catalog defines as proposed', () => {
+    // Expected: ids each profile file lists that are not workflow keys in any catalog, by line scans.
+    const defined = new Set(allCatalogSteps().keys());
+    const want = profileFiles().flatMap((f) =>
+      profileWorkflowIds(repoText(`schemas/profiles/${f}`)).filter((id) => !defined.has(id)),
+    );
+    expect(want.length).toBeGreaterThan(0);
+    let proposed = 0;
+    for (const d of pageDirs('domains')) {
+      const html = readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8');
+      proposed += (html.match(/>Proposed, not yet in a catalog</g) ?? []).length;
+    }
+    expect(proposed).toBe(want.length);
+    expect(proposed).toBe(loadCounts().undefinedProfileWorkflowCount);
+  });
+
+  it('marks exactly the capabilities §4.4 lists as needing a checkpoint, on their pages and tiles', () => {
+    // Expected: the §4.4 table of the newest Standard, by line scan (mutate, send and rollback).
+    const want = standardCheckpointCapabilities(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`)).sort();
+    expect(want).toContain('rollback');
+    const badged = pageDirs('capabilities').filter((c) =>
+      readFileSync(path.join(dist, 'capabilities', c, 'index.html'), 'utf8').includes('>Checkpoint required<'),
+    );
+    expect(badged).toEqual(want);
+    const overview = readFileSync(path.join(dist, 'capabilities', 'index.html'), 'utf8');
+    const tiles = [...overview.matchAll(/<a [^>]*data-capability="([a-z_]+)"[^>]*data-checkpoint="true"/g)].map((m) => m[1]);
+    expect(tiles.sort()).toEqual(want);
+  });
+
+  it('states the auto-approve threshold as a sentence, including none', () => {
+    // Expected: each profile's `auto_approve:` line, by line scan; the page for a profile is /domains/<file name with - for _>/.
+    const values = profileFiles().map((f) => ({
+      page: f.replace(/\.yaml$/, '').replaceAll('_', '-'),
+      level: /^ {2}auto_approve: (\w+)/m.exec(repoText(`schemas/profiles/${f}`))?.[1],
+    }));
+    expect(values.map((v) => v.level)).toContain('none');
+    for (const { page, level } of values) {
+      const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
+      const dd = /<dt>Approved automatically<\/dt>\s*<dd>(.*?)<\/dd>/.exec(html)?.[1]?.replace(/<[^>]+>/g, '');
+      expect(dd, page).toBe(level === 'none' ? 'Nothing' : `${level} risk`);
+    }
+  });
+
+  it('puts each asymmetric edge in the From cell of its source and the To cell of its target', () => {
+    // Expected: the line-scanned edge triples. Wording: CLAUDE.md says a requires `from` step "must run
+    // before the target", and a precedes source "must come first".
+    const cells = (cap: string, type: string): [string, string] => {
+      const html = readFileSync(path.join(dist, 'capabilities', cap, 'index.html'), 'utf8');
+      const row = new RegExp(`<tr data-edge-type="${type}"[^>]*>(.*?)</tr>`).exec(html)?.[1];
+      expect(row, `${cap} ${type} row`).toBeDefined();
+      const tds = [...row!.matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((m) => m[1]!);
+      expect(tds, `${cap} ${type} cells`).toHaveLength(2);
+      return [tds[0]!, tds[1]!];
+    };
+    const link = (c: string) => `href="/capabilities/${c}/"`;
+    const sym = symmetricEdgeTypes();
+    const triples = ontologyEdgeTriples().filter((t) => !sym.includes(t.type));
+    expect(triples.map((t) => `${t.type}:${t.from}>${t.to}`)).toContain('requires:checkpoint>mutate');
+    for (const t of triples) {
+      const [fromOut, fromIn] = cells(t.from, t.type);
+      expect(fromOut, `${t.type} ${t.from}>${t.to} on ${t.from}`).toContain(link(t.to));
+      expect(fromIn, `${t.type} ${t.from}>${t.to} on ${t.from}`).not.toContain(link(t.to));
+      const [toOut, toIn] = cells(t.to, t.type);
+      expect(toIn, `${t.type} ${t.from}>${t.to} on ${t.to}`).toContain(link(t.from));
+      expect(toOut, `${t.type} ${t.from}>${t.to} on ${t.to}`).not.toContain(link(t.from));
+      if (t.type === 'requires') {
+        expect(fromOut).toMatch(/>Must run before</);
+        expect(toIn).toMatch(/>Must run after</);
+      }
+      if (t.type === 'precedes') {
+        expect(fromOut).toMatch(/>Comes before/);
+        expect(toIn).toMatch(/>Comes after/);
+      }
+    }
+  });
+
+  it('gives every heading on every built page an id', () => {
+    const bare = ROUTES.flatMap((r) => {
+      const html = readFileSync(path.join(dist, pageFile(r.url)), 'utf8');
+      return [...html.matchAll(/<h[1-6](?![^>]*\sid=")[^>]*>/g)].map(() => r.url);
+    });
+    expect(bare).toEqual([]);
+  });
+
+  it('links the RFC index to the decision-making part of the governance page (design notes, ia-home RFCs 1)', () => {
+    const html = readFileSync(path.join(dist, 'rfcs', 'index.html'), 'utf8');
+    expect(html).toContain('href="/community/governance/#decision-making"');
+  });
+
+  it('puts the profile values after the README title and lead and before the README sections (design notes, ia-home 6.6)', () => {
+    // Expected: each domain README's first `# ` and `## ` lines, slugged by hand (lower case, spaces to hyphens).
+    const slug = (line: string) => line.replace(/^#+ /, '').toLowerCase().replace(/ /g, '-');
+    for (const d of pageDirs('domains')) {
+      const lines = repoText(`docs/domains/${d}/README.md`).split('\n');
+      const h1 = slug(lines.find((l) => l.startsWith('# '))!);
+      const h2 = slug(lines.find((l) => l.startsWith('## '))!);
+      const ids = [...readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8').matchAll(/<h[1-6][^>]*\sid="([^"]+)"/g)].map((m) => m[1]);
+      const at = (id: string) => ids.indexOf(id);
+      expect(at(h1), `${d} ${h1}`).toBe(0);
+      expect(at('ref-profile-values'), d).toBeGreaterThan(at(h1));
+      expect(at('ref-workflows-in-this-profile'), d).toBeGreaterThan(at('ref-profile-values'));
+      expect(at(h2), `${d} ${h2}`).toBeGreaterThan(at('ref-workflows-in-this-profile'));
+    }
+  });
+
+  it('builds no page outside the route table except 404', () => {
+    expect(checkRouteCoverage(dist)).toEqual({ missing: [], extra: [] });
+  });
+});
+
+describe('design system on the built site', () => {
+  const pages = () => [...ROUTES.map((r) => pageFile(r.url)), '404.html'];
+  const html = (file: string) => readFileSync(path.join(dist, file), 'utf8');
+
+  it('runs the theme script as the first child of <head> on every page', () => {
+    for (const f of pages()) {
+      expect(/^<!DOCTYPE html><html lang="en"><head><script>[^<]*localStorage\.getItem\('acs-theme'\)/i.test(html(f)), f).toBe(true);
+    }
+  });
+
+  it('marks <html> with .js from the head script, which the no-JavaScript menu rules read', () => {
+    for (const f of pages()) {
+      expect(/^<!DOCTYPE html><html lang="en"><head><script>\s*\(\(\) => \{\s*document\.documentElement\.classList\.add\('js'\)/i.test(html(f)), f).toBe(true);
+    }
+  });
+
+  it('shows the newest Standard file version in the header chip, and a skip link to the main content', () => {
+    // Expected: the highest version among spec/STANDARD-v*.md file names.
+    const chip = `><span class="version-chip__word">Standard </span>v${standardFileVersions()[0]}</a>`;
+    for (const f of pages()) {
+      const h = html(f);
+      expect(h.includes(chip), f).toBe(true);
+      expect(h.includes('<a class="skip-link" href="#content">'), f).toBe(true);
+      expect(h.includes('<main id="content"'), f).toBe(true);
+    }
+  });
+
+  it('marks exactly one sidebar link as the current page, pointing at the page itself', () => {
+    for (const r of ROUTES.filter((x) => x.section !== 'home')) {
+      const current = [...html(pageFile(r.url)).matchAll(/<a href="([^"]+)" aria-current="page"/g)].map((m) => m[1]);
+      expect(current, r.url).toEqual([r.url]);
+    }
+  });
+
+  it('loads no font from Google and builds no design preview', () => {
+    for (const f of pages()) expect(html(f).includes('fonts.googleapis'), f).toBe(false);
+    expect(existsSync(path.join(dist, 'design-preview'))).toBe(false);
+  });
+
+  it('builds the favicon and the social image as PNG and SVG files of the stated sizes', () => {
+    const size = (f: string) => {
+      const b = readFileSync(path.join(dist, f));
+      expect([...b.subarray(1, 4)].map((c) => String.fromCharCode(c)).join(''), f).toBe('PNG');
+      return [b.readUInt32BE(16), b.readUInt32BE(20)];
+    };
+    // 1200x630 is the social image size the design names; the favicon is the
+    // 12-cell mark at 2px a cell inside a 4px gap and frame on each side: 12*2 + 8.
+    expect(size('og.png')).toEqual([1200, 630]);
+    expect(size('favicon.png')).toEqual([32, 32]);
+    expect(html('favicon.svg').startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"')).toBe(true);
+    expect(html('fonts/OFL.txt')).toContain('SIL Open Font License');
+  });
+
+  it('names the home link from its visible wordmark, so "ACS" and the full name are both in it (WCAG 2.5.3)', () => {
+    for (const f of pages()) {
+      const link = /<a class="site-header__home"([^>]*)>([\s\S]*?)<\/a>/.exec(html(f));
+      expect(link, f).not.toBeNull();
+      const [, attrs = '', inner = ''] = link!;
+      expect(attrs.includes('aria-label'), f).toBe(false);
+      const text = inner
+        .replace(/<svg[\s\S]*?<\/svg>/g, '')
+        .replace(/<[^>]*aria-hidden="true"[^>]*>[\s\S]*?<\/span>/g, '')
+        .replace(/<[^>]+>/g, '');
+      for (const word of ['Agent Capability Standard', 'ACS', ' home']) expect(text, f).toContain(word);
+    }
+  });
+
+  it('puts every table in a focusable region named by a label', () => {
+    for (const f of pages()) {
+      const h = html(f);
+      const tables = (h.match(/<table[\s>]/g) ?? []).length;
+      const wrapped = (h.match(/<div class="table-wrap" role="region" tabindex="0" aria-label="[^"]+"[^>]*><table[\s>]/g) ?? []).length;
+      expect(wrapped, f).toBe(tables);
+    }
+  });
+
+  it('points every internal link, script, stylesheet and alternate link at a file the build wrote', () => {
+    const missing = new Set<string>();
+    for (const f of pages()) {
+      for (const m of html(f).matchAll(/\s(?:href|src)="(\/(?!\/)[^"#?]*)/g)) {
+        const url = decodeURI(m[1]!);
+        const file = url.endsWith('/') ? path.join(dist, url, 'index.html') : path.join(dist, url);
+        if (!existsSync(file) && !existsSync(path.join(dist, url, 'index.html'))) missing.add(`${f} -> ${url}`);
+      }
+    }
+    expect([...missing].slice(0, 10)).toEqual([]);
+  });
+
+  it('gives the capability table one wide column per layer in the CLAUDE.md table', () => {
+    const layers = claudeLayerTable().length;
+    expect(html('index.html')).toContain(`class="capability-table__grid" style="--layers: ${layers}"`);
+  });
+});
+
+describe('dist checks on a fixture', () => {
+  it('reports headings with no id, on any page', () => {
+    expect(bareHeadings('/p/', '<h1>T</h1><h2 class="x">A</h2><h2 id="b">B</h2>')).toBe('/p/: 2 heading(s) without an id');
+    expect(bareHeadings('/p/', '<h1 id="t">T</h1><header>x</header>')).toBeNull();
+  });
+
+  const route = (url: string, extra: Partial<Route> = {}): Route => ({
+    source: null,
+    url,
+    section: 'spec',
+    order: 0,
+    template: 'diagnostics',
+    title: url,
+    ...extra,
+  });
+  let dir = '';
+  beforeAll(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'acs-fixture-'));
+    for (const f of ['index.html', 'a/index.html', 'stray/index.html', '404.html']) {
+      mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      writeFileSync(path.join(dir, f), '<html></html>');
+    }
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('maps a route URL to its page file', () => {
+    expect(pageFile('/')).toBe('index.html');
+    expect(pageFile('/spec/diagnostics/')).toBe('spec/diagnostics/index.html');
+  });
+
+  it('reports a route with no page and a page with no route', () => {
+    expect(checkRouteCoverage(dir, [route('/'), route('/a/'), route('/b/')])).toEqual({
+      missing: ['/b/'],
+      extra: ['stray/index.html'],
+    });
+  });
+
+  it('reports ids used twice', () => {
+    expect(duplicateIds('<h2 id="x">a</h2><p id="y"></p><h3 id="x">b</h3>')).toEqual(['x']);
+  });
+
+  it('accepts ref- headings around the source headings', () => {
+    const html = '<h1 id="ref-t">T</h1><h2 id="intro">Intro</h2><h2 id="ref-inputs">Inputs</h2><h2 id="inputs">Inputs</h2>';
+    expect(checkGeneratedHeadings('/p/', html, ['intro', 'inputs'])).toEqual([]);
+  });
+
+  it('reports a generated heading without the prefix and a source id with the prefix', () => {
+    expect(checkGeneratedHeadings('/p/', '<h2 id="inputs">Inputs</h2>', [])).toHaveLength(1);
+    expect(checkGeneratedHeadings('/p/', '<h2 id="ref-x">X</h2>', ['ref-x'])).toHaveLength(2);
+  });
+});
+
+// Phase 6: Markdown copies, llms.txt, llms-full.txt, the sitemap and the
+// redirect. Expected values come from walking the built directory and from
+// the repository's own files, not from the route table or the loaders.
+describe('agent files', () => {
+  const ORIGIN = 'https://acs.synapti.ai';
+
+  /** Directories (as URL paths like /a/b/) that hold a file with this name, by a walk of dist. */
+  function dirsWith(file: string, dir = '', out: string[] = []): string[] {
+    for (const e of readdirSync(path.join(dist, dir), { withFileTypes: true })) {
+      if (e.isDirectory()) dirsWith(file, path.posix.join(dir, e.name), out);
+      else if (e.name === file) out.push(dir === '' ? '/' : `/${dir}/`);
+    }
+    return out.sort();
+  }
+
+  /** Heading lines outside fenced code, as written. */
+  function headingLines(md: string): string[] {
+    const out: string[] = [];
+    let fence: string | null = null;
+    for (const line of md.split('\n')) {
+      const f = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+      if (f) {
+        if (fence === null) fence = f[0]!;
+        else if (f[0] === fence) fence = null;
+        continue;
+      }
+      if (fence === null && /^#{1,6}\s/.test(line)) out.push(line.trim());
+    }
+    return out;
+  }
+
+  it('builds a Markdown copy beside every HTML page except the 404 page, and no other copy', () => {
+    const html = dirsWith('index.html');
+    const md = dirsWith('index.md');
+    expect(html.length).toBeGreaterThan(0);
+    expect(md).toEqual(html);
+    expect(existsSync(path.join(dist, '404.html'))).toBe(true);
+    expect(existsSync(path.join(dist, '404', 'index.md'))).toBe(false);
+  });
+
+  it('lists exactly the Markdown copies in llms.txt, each once', () => {
+    const text = readFileSync(path.join(dist, 'llms.txt'), 'utf8');
+    expect(text.startsWith('# Agent Capability Standard\n')).toBe(true);
+    expect(text).toMatch(/^> /m);
+    const listed = [...text.matchAll(/^- \[[^\]]+\]\(([^)]+)\)/gm)].map((m) => m[1]!);
+    const want = dirsWith('index.md').map((d) => `${ORIGIN}${d}index.md`).sort();
+    expect([...listed].sort()).toEqual(want);
+    expect(new Set(listed).size).toBe(listed.length);
+  });
+
+  it('puts the current Standard first in llms-full.txt, then the rest of the Specification, Capabilities and Workflows sections', () => {
+    const version = standardFileVersions()[0]!;
+    const title = /^# (.+)$/m.exec(repoText(`spec/STANDARD-v${version}.md`))![1]!;
+    const full = readFileSync(path.join(dist, 'llms-full.txt'), 'utf8');
+    expect(full).toContain(`\n# ${title}\n`);
+    const first = /<!-- (\S+) -->/.exec(full)![1];
+    expect(first).toBe(`${ORIGIN}/spec/${version}/index.md`);
+    // Every built page under /spec/, /capabilities/, /layers/ and /workflows/
+    // (the design's Specification, Capabilities and Workflows sections), each
+    // once, minus the older Standards named by the spec/STANDARD-v*.md files.
+    const urls = [...full.matchAll(/^<!-- (\S+) -->$/gm)].map((m) => m[1]!.slice(ORIGIN.length));
+    const older = new Set(standardFileVersions().slice(1).map((v) => `/spec/${v}/`));
+    const want = dirsWith('index.md')
+      .filter((d) => /^\/(spec|capabilities|layers|workflows)\//.test(d) && !older.has(d))
+      .map((d) => `${d}index.md`)
+      .sort();
+    expect(older.size).toBeGreaterThan(0);
+    expect([...urls].sort()).toEqual(want);
+    expect(new Set(urls).size).toBe(urls.length);
+    expect(want).toContain('/spec/diagnostics/index.md');
+  });
+
+  it('leaves no closing th, caption, dt, dd, summary or figcaption tag directly before another tag', () => {
+    // Pagefind joins the words on either side of those tags (see lib/search-text.ts).
+    const bad: string[] = [];
+    for (const d of dirsWith('index.html')) {
+      const html = readFileSync(path.join(dist, d, 'index.html'), 'utf8');
+      const m = /<\/(th|caption|dt|dd|summary|figcaption)></.exec(html);
+      if (m) bad.push(`${d}: ${m[0]}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('keeps tile numbers and symbols, copy buttons and adjacent home links out of the indexed words', () => {
+    // Pagefind joins these onto the next word: "1Rtretrieve", "2.0.0Copy", "specificationQuickstart".
+    const bad: string[] = [];
+    for (const d of dirsWith('index.html')) {
+      const html = readFileSync(path.join(dist, d, 'index.html'), 'utf8');
+      for (const m of html.matchAll(/<(?:span|button)\b[^>]*class="(?:capability-tile__index|capability-tile__symbol|[^"]*copy-block__button)"[^>]*>/g)) {
+        if (!m[0].includes('data-pagefind-ignore')) bad.push(`${d}: ${m[0].slice(0, 60)}`);
+      }
+    }
+    expect(bad).toEqual([]);
+    const home = readFileSync(path.join(dist, 'index.html'), 'utf8');
+    const links = /class="home-opening__links">([\s\S]*?)<\/p>/.exec(home)![1]!;
+    expect(links).not.toContain('</a><a');
+  });
+
+  it('tags each older Standard with its version for search and weights its words down; the current one has neither', () => {
+    const [current, ...older] = standardFileVersions();
+    expect(older.length).toBeGreaterThan(0);
+    for (const v of older) {
+      const html = readFileSync(path.join(dist, 'spec', v, 'index.html'), 'utf8');
+      expect(html).toContain(`<meta data-pagefind-filter="version[content]" content="${v}">`);
+      expect(html).toMatch(/class="doc-main__body" data-pagefind-weight="0\.\d+"/);
+    }
+    const html = readFileSync(path.join(dist, 'spec', current!, 'index.html'), 'utf8');
+    expect(html).not.toContain('data-pagefind-filter="version');
+    expect(html).not.toContain('data-pagefind-weight');
+  });
+
+  it('gives the home page and its Markdown copy the same H2 headings and section sentences', () => {
+    const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
+    const md = readFileSync(path.join(dist, 'index.md'), 'utf8');
+    const text = (h: string) => h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').trim();
+    const h2Html = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => text(m[1]!));
+    const h2Md = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]!.trim());
+    expect(h2Html.length).toBeGreaterThan(0);
+    expect(h2Md).toEqual(h2Html);
+    // The sentence under each of these headings, without its links, is in both.
+    const plain = (s: string) => s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/`/g, '').replace(/\s+/g, ' ');
+    const htmlText = text(html).replace(/\s+/g, ' ');
+    for (const sentence of ['They come from section', 'The steps below follow the reference workflow', 'Domain variants are parameters', 'Paste this into Claude Code']) {
+      expect(htmlText).toContain(sentence);
+      expect(plain(md)).toContain(sentence);
+    }
+  });
+
+  it('links llms.txt, llms-full.txt, the sitemap and the page\'s own Markdown copy from every page footer', () => {
+    const bad: string[] = [];
+    for (const d of dirsWith('index.html')) {
+      const html = readFileSync(path.join(dist, d, 'index.html'), 'utf8');
+      const footer = /<footer[\s\S]*?<\/footer>/.exec(html)?.[0] ?? '';
+      for (const href of ['/llms.txt', '/llms-full.txt', '/sitemap.xml', `${d}index.md`]) {
+        if (!footer.includes(`href="${href}"`)) bad.push(`${d}: ${href}`);
+      }
+    }
+    expect(bad).toEqual([]);
+    const notFound = readFileSync(path.join(dist, '404.html'), 'utf8');
+    expect(notFound).toContain('href="/llms.txt"');
+    expect(notFound).not.toMatch(/href="\/404\/index\.md"/);
+  });
+
+  it('preloads both pixel fonts, which use font-display: optional, on every page', () => {
+    // Design notes: the pixel fonts are "optional"; without a preload a first visit shows the fallback.
+    const bad: string[] = [];
+    for (const d of dirsWith('index.html')) {
+      const html = readFileSync(path.join(dist, d, 'index.html'), 'utf8');
+      for (const font of ['jersey-10', 'silkscreen']) {
+        if (!new RegExp(`<link rel="preload" href="[^"]*${font}[^"]*\\.woff2" as="font"`).test(html)) bad.push(`${d}: ${font}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('offers a search for the missing path and a Search link on the 404 page', () => {
+    const html = readFileSync(path.join(dist, '404.html'), 'utf8');
+    expect(html).toMatch(/<button[^>]*data-not-found-query/);
+    expect(html).toMatch(/<a href="https:\/\/duckduckgo\.com\/\?q=site%3Aacs\.synapti\.ai" data-not-found-open>Search<\/a>/);
+  });
+
+  it('lists every HTML page in the sitemap, minus the 404 page, and no Markdown or text file', () => {
+    const xml = readFileSync(path.join(dist, 'sitemap.xml'), 'utf8');
+    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!.slice(ORIGIN.length)).sort();
+    expect(locs).toEqual(dirsWith('index.html'));
+    expect(locs.filter((u) => /\.(md|txt)$|404/.test(u))).toEqual([]);
+    expect(readFileSync(path.join(dist, 'robots.txt'), 'utf8')).toContain(`Sitemap: ${ORIGIN}/sitemap.xml`);
+  });
+
+  it('redirects /spec/ to the newest Standard, by its file name, with a 302', () => {
+    const version = standardFileVersions()[0]!;
+    const rules = readFileSync(path.join(dist, '_redirects'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() !== '' && !l.startsWith('#'))
+      .map((l) => l.trim().split(/\s+/));
+    expect(rules).toContainEqual(['/spec/', `/spec/${version}/`, '302']);
+    expect(existsSync(path.join(dist, 'spec', version, 'index.html'))).toBe(true);
+  });
+
+  it('sets the Markdown and text content types and keeps pages.dev out of search engines', () => {
+    const headers = readFileSync(path.join(dist, '_headers'), 'utf8');
+    expect(headers).toMatch(/^\/\*\.md\n\s+Content-Type: text\/markdown/m);
+    expect(headers).toMatch(/^\/llms\.txt\n\s+Content-Type: text\/plain/m);
+    expect(headers).toMatch(/^\/llms-full\.txt\n\s+Content-Type: text\/plain/m);
+    expect(headers).toMatch(/^https:\/\/:project\.pages\.dev\/\*\n\s+X-Robots-Tag: noindex/m);
+  });
+
+  it('leaves no relative link to a .md file in any Markdown copy', () => {
+    const bad: string[] = [];
+    for (const d of dirsWith('index.md')) {
+      const text = readFileSync(path.join(dist, d, 'index.md'), 'utf8');
+      for (const m of text.matchAll(/\]\(([^)\s]+)/g)) {
+        const url = m[1]!;
+        if (/^[a-z]+:/i.test(url) || url.startsWith('#')) continue;
+        if (/\.md(#|$)/.test(url)) bad.push(`${d}: ${url}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('copies a Markdown page from its source, changing only link targets and adding a Source line', () => {
+    // Pairs from the design notes' URL scheme: source file -> page.
+    const version = standardFileVersions()[0]!;
+    const pairs: [string, string][] = [
+      ['docs/QUICKSTART.md', 'start/quickstart'],
+      ['spec/GOVERNANCE.md', 'community/governance'],
+      [`spec/STANDARD-v${version}.md`, `spec/${version}`],
+    ];
+    const strip = (md: string) =>
+      md
+        .replace(/^Source: .*\n\n/m, '')
+        .replace(/\]\([^)]*\)/g, ']()')
+        .replace(/^\[([^\]]+)\]:\s*\S+/gm, '[$1]:')
+        .trim();
+    for (const [source, page] of pairs) {
+      const src = repoText(source);
+      const copy = readFileSync(path.join(dist, page, 'index.md'), 'utf8');
+      expect(copy, source).toContain(`Source: [${source}](`);
+      expect(headingLines(copy), source).toEqual(headingLines(src));
+      expect(strip(copy), source).toBe(strip(src));
+    }
+  });
+});
+
+describe('check-dist.mjs on the built site', () => {
+  it('finds no problem once Pagefind has run, and counts one page per route', () => {
+    execFileSync('npx', ['pagefind', '--site', dist], { cwd: process.cwd(), stdio: 'pipe' });
+    const { problems, stats } = checkDistDir(dist);
+    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [] });
+    expect(stats.pages).toBe(ROUTES.length);
+    expect(stats.copies).toBe(ROUTES.length);
+  }, 120_000);
+});

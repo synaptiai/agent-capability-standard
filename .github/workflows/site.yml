@@ -1,0 +1,102 @@
+name: Site
+
+# Builds the documentation site in site/ and, on main, deploys it to
+# Cloudflare Pages.
+#
+# There is no path filter: a change to any Markdown or YAML file in the
+# repository can break a link or a generated page, and a workflow with a path
+# filter cannot be a required check.
+#
+# The deploy job runs only when the repository variable SITE_DEPLOY_ENABLED is
+# "true", so main stays green until the Cloudflare project and the
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets (in the production
+# environment) exist.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The event is part of the group so that a manual run on main cannot replace a
+# pending push run (a group keeps one pending run), which would leave that
+# push undeployed: only push runs deploy. Deploys are serialized by the deploy
+# job's own site-deploy group.
+concurrency:
+  group: site-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      # The default shallow clone is enough: the site reads the commit SHA and
+      # `git ls-files`, not the history.
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      # No dependency install scripts run in CI. The only one in the lockfile
+      # is the macOS-only fsevents, and one added by a later bump must be
+      # allowed here on purpose.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Type-check and check the design data
+        run: npm run check
+
+      - name: Run the tests
+        run: npm test
+
+      # Builds the pages, runs Pagefind, then checks links, Markdown copies,
+      # llms.txt and the sitemap (scripts/check-dist.mjs).
+      - name: Build
+        run: npm run build
+
+      - name: Upload the built site
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-dist
+          path: site/dist
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to Cloudflare Pages
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SITE_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://acs.synapti.ai
+    concurrency:
+      group: site-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Download the built site
+        uses: actions/download-artifact@v8
+        with:
+          name: site-dist
+          path: dist
+
+      # Pinned to a commit, not a tag: this step holds the Cloudflare token,
+      # and a tag can be moved to other code. Update the SHA and the comment
+      # together, after reading the release.
+      - name: Deploy
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.160.0"
+          command: pages deploy dist --project-name=acs-docs --branch=main --commit-hash=${{ github.sha }}

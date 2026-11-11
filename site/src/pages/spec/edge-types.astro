@@ -1,0 +1,83 @@
+---
+// spec/EDGE_TYPES.md as written (its H1 is the page H1), then a table of the
+// ontology's edge types and every edge of each type, generated from
+// schemas/capability_ontology.yaml.
+import { getEntry, render } from 'astro:content';
+import { loadOntology, ONTOLOGY_SOURCE } from '../../data/ontology';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { capabilityHref, refSlugger, routeByUrl } from '../../lib/generated';
+import { githubBlobUrl } from '../../lib/repo';
+import type { PageMeta } from '../../plugins/remark-page-meta';
+import TableWrap from '../../components/TableWrap.astro';
+
+const route = routeByUrl('/spec/edge-types/');
+const entry = await getEntry('docs', route.source!);
+if (!entry) throw new Error(`edge-types: no docs entry for ${route.source}`);
+const { Content, remarkPluginFrontmatter } = await render(entry);
+const page = remarkPluginFrontmatter.page as PageMeta | undefined;
+const ontology = loadOntology();
+const id = refSlugger();
+const referenceId = id('Edge types in the ontology');
+const allId = id('All edges');
+const typeId = new Map(ontology.edgeTypes.map((t) => [t.id, id(`Edges: ${t.id}`)]));
+---
+<DocLayout route={route} title={page?.title ?? route.title} description={route.description ?? page?.description}>
+  <article class="doc doc--edge-types" data-pagefind-body>
+    <div class="doc__body"><Content /></div>
+
+    <section class="edge-type-reference">
+      <h2 id={referenceId}>Edge types in the ontology</h2>
+      <p>
+        Generated from <a href={githubBlobUrl(ONTOLOGY_SOURCE)}><code>{ONTOLOGY_SOURCE}</code></a>, ontology version
+        {' '}{ontology.version}. It has {ontology.edgeTypes.length} edge types and {ontology.edges.length} edges.
+        Edges are counted and listed as the ontology declares them, so a symmetric pair declared in both directions
+        appears twice. Capability and layer pages list such a pair once.
+      </p>
+      <TableWrap label="Edge types and how many edges of each type the ontology has">
+        <table class="edge-type-table">
+          <caption>Edge types and how many edges of each type the ontology has</caption>
+          <thead>
+            <tr>
+              <th scope="col">Type</th>
+              <th scope="col">Description</th>
+              <th scope="col">Semantics</th>
+              <th scope="col">Transitive</th>
+              <th scope="col">Symmetric</th>
+              <th scope="col">Edges</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ontology.edgeTypes.map((t) => (
+              <tr data-edge-type={t.id}>
+                <th scope="row"><a href={`#${typeId.get(t.id)}`}><code>{t.id}</code></a></th>
+                <td>{t.description}</td>
+                <td>{t.semantics}</td>
+                <td>{t.transitive ? 'Yes' : 'No'}</td>
+                <td>{t.symmetric ? 'Yes' : 'No'}</td>
+                <td>{t.edges.length}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+    </section>
+
+    <section class="edge-list">
+      <h2 id={allId}>All edges</h2>
+      {ontology.edgeTypes.map((t) => (
+          <section data-edge-type={t.id}>
+            <h3 id={typeId.get(t.id)}><code>{t.id}</code> ({t.edges.length})</h3>
+            {t.edges.length === 0 ? (
+              <p>The ontology has no edges of this type.</p>
+            ) : (
+              <ul class="edge-list__items">
+                {t.edges.map((e) => (
+                  <li><a href={capabilityHref(e.from)}><code>{e.from}</code></a> to <a href={capabilityHref(e.to)}><code>{e.to}</code></a></li>
+                ))}
+              </ul>
+            )}
+          </section>
+      ))}
+    </section>
+  </article>
+</DocLayout>

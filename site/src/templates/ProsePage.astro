@@ -1,0 +1,27 @@
+---
+// A Markdown document shown as it reads on GitHub. A `**Document Status**:`
+// line, where the source has one, shows as a status badge; a historical
+// document also gets a callout saying so.
+import Callout from '../components/Callout.astro';
+import StatusBadge from '../components/StatusBadge.astro';
+import type { Route } from '../lib/routes';
+import { statusStyle } from '../lib/status';
+import type { PageMeta } from '../plugins/remark-page-meta';
+
+interface Props {
+  route: Route;
+  page: PageMeta;
+}
+
+const { page } = Astro.props;
+const historical = page.documentStatus !== null && statusStyle(page.documentStatus) === 'historical';
+---
+<article class="doc doc--prose" data-document-status={page.documentStatus ?? undefined} data-pagefind-body>
+  {page.documentStatus && <p class="doc-status"><StatusBadge status={page.documentStatus} /></p>}
+  {historical && (
+    <Callout type="note" label="Historical document">
+      <p>This is a historical document. It describes the project as it was when it was written.</p>
+    </Callout>
+  )}
+  <slot />
+</article>

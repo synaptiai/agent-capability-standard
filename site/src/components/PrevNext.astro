@@ -1,0 +1,33 @@
+---
+// Links to the previous and next pages in route-table order (the sidebar
+// order, section by section), each with its section as an eyebrow.
+import { ROUTES, SECTIONS, type Route } from '../lib/routes';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+interface Props {
+  route: Route;
+}
+
+const { route } = Astro.props;
+const order = ROUTES.filter((r) => r.section !== 'home');
+const i = order.findIndex((r) => r.url === route.url);
+const prev = i > 0 ? order[i - 1] : undefined;
+const next = i >= 0 && i < order.length - 1 ? order[i + 1] : undefined;
+const label = (r: Route) => SECTIONS.find((s) => s.id === r.section)?.label ?? '';
+---
+{(prev || next) && (
+  <nav class="prev-next" aria-label="Previous and next page" data-pagefind-ignore="all">
+    {prev && (
+      <a class="prev-next__link prev-next__link--prev" href={prev.url} rel="prev">
+        <span class="eyebrow">Previous · {label(prev)}</span>
+        <span class="prev-next__title"><PixelGlyph name="chevron-left" /> {prev.title}</span>
+      </a>
+    )}
+    {next && (
+      <a class="prev-next__link prev-next__link--next" href={next.url} rel="next">
+        <span class="eyebrow">Next · {label(next)}</span>
+        <span class="prev-next__title">{next.title} <PixelGlyph name="chevron-right" /></span>
+      </a>
+    )}
+  </nav>
+)}

@@ -1,0 +1,40 @@
+---
+// A labelled block of text to copy, such as shell commands or a prompt, with
+// a Copy button. Without JavaScript the button is hidden and the text stays
+// selectable. Search skips the button, whose word would join onto the label.
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+interface Props {
+  label: string;
+  text: string;
+}
+
+const { label, text } = Astro.props;
+---
+<figure class="copy-block" data-copy-block>
+  <figcaption class="copy-block__label">
+    <span>{label}</span>
+    <button type="button" class="btn btn--quiet btn--small copy-block__button" data-copy-button data-pagefind-ignore="all">
+      <PixelGlyph name="copy" />
+      <span>Copy</span>
+    </button>
+  </figcaption>
+  <pre class="copy-block__text"><code data-copy-text>{text}</code></pre>
+  <span class="copy-block__status" role="status" aria-live="polite" data-pagefind-ignore></span>
+</figure>
+
+<script>
+  for (const block of document.querySelectorAll<HTMLElement>('[data-copy-block]')) {
+    const button = block.querySelector<HTMLButtonElement>('[data-copy-button]');
+    const text = block.querySelector<HTMLElement>('[data-copy-text]');
+    const status = block.querySelector<HTMLElement>('.copy-block__status');
+    button?.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text?.textContent ?? '');
+        if (status) status.textContent = 'Copied';
+      } catch {
+        if (status) status.textContent = 'Could not copy. Select the text and copy it instead.';
+      }
+    });
+  }
+</script>

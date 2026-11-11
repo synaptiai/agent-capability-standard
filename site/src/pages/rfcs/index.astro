@@ -1,0 +1,61 @@
+---
+// The RFC overview: a table of every numbered RFC with its status, target
+// and date, read from each RFC's header lines, then the proposals. An RFC
+// status outside the ones spec/GOVERNANCE.md allows fails the build.
+import StatusBadge from '../../components/StatusBadge.astro';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { pageHref, refSlugger, routeByUrl } from '../../lib/generated';
+import { allowedRfcStatuses, rfcRows } from '../../lib/rfcs';
+import TableWrap from '../../components/TableWrap.astro';
+
+const route = routeByUrl('/rfcs/');
+const allowed = allowedRfcStatuses();
+const id = refSlugger();
+
+const rows = await rfcRows();
+const rfcs = rows.filter((r) => r.numbered);
+const proposals = rows.filter((r) => !r.numbered);
+const description = 'Requests for comments that propose changes to the Agent Capability Standard, with the status, target version and date of each.';
+---
+<DocLayout route={route} title="RFCs" description={description}>
+  <article class="doc doc--rfcs" data-pagefind-body>
+    <h1 id={id('RFCs')}>RFCs</h1>
+    <p class="lead">
+      An RFC proposes a change to the standard. Its status is {allowed.slice(0, -1).join(', ')} or {allowed.at(-1)}.
+      How an RFC is decided is described under <a href={pageHref('/community/governance/#decision-making')}>Decision-making</a> on the Governance page.
+    </p>
+    <TableWrap label="RFCs">
+      <table class="rfc-table">
+        <caption>RFCs</caption>
+        <thead>
+          <tr><th scope="col">RFC</th><th scope="col">Title</th><th scope="col">Status</th><th scope="col">Target</th><th scope="col">Date</th></tr>
+        </thead>
+        <tbody>
+          {rfcs.map((r) => (
+            <tr data-status={r.status}>
+              <th scope="row"><a href={r.url}>{r.label}</a></th>
+              <td>{r.title}</td>
+              <td><StatusBadge status={r.status} /></td>
+              <td>{r.target && (r.targetUrl ? <a href={r.targetUrl}>{r.target}</a> : r.target)}</td>
+              <td>{r.date}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableWrap>
+    {proposals.length > 0 && (
+      <section class="rfc-proposals">
+        <h2 id={id('Proposals')}>Proposals</h2>
+        <p>Proposals that are not numbered RFCs.</p>
+        <ul class="section-index__cards">
+          {proposals.map((r) => (
+            <li class="section-index__card">
+              <a href={r.url}>{r.title}</a> <StatusBadge status={r.status} />
+              {r.date && <p>Dated {r.date}.</p>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+  </article>
+</DocLayout>

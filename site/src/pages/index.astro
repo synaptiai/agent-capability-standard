@@ -1,0 +1,157 @@
+---
+// The home page (design notes, ia-home section 5; plan Phase 6). No sidebar.
+// Sections in order: opening, design principles, why a standard, the scroll
+// story, the capabilities, what the standard covers, questions, get started.
+// Everything it says comes from src/lib/home.ts, which its Markdown copy also
+// reads, and the counts, versions and names come from the data.
+import CapabilityTable from '../components/CapabilityTable.astro';
+import CopyBlock from '../components/CopyBlock.astro';
+import HomeStory from '../components/HomeStory.astro';
+import InlineText from '../components/InlineText.astro';
+import DocLayout from '../layouts/DocLayout.astro';
+import { pageHref, refSlugger, routeByUrl } from '../lib/generated';
+import {
+  AGENTS_HEADING,
+  AGENTS_LINE,
+  CAPABILITIES_DERIVED,
+  CAPABILITIES_INTRO,
+  coverage,
+  faq,
+  getStarted,
+  HOME_H1,
+  homeDescription,
+  opening,
+  principles,
+  STORY_HEADING,
+  storyIntro,
+  WHY,
+  type HomeLink,
+} from '../lib/home';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+const route = routeByUrl('/');
+const id = refSlugger();
+const o = opening();
+const p = principles();
+const cov = coverage();
+const f = faq();
+const g = getStarted();
+const description = homeDescription();
+/** A site page through the route check, or an outside URL as it is. */
+const href = (l: HomeLink) => (l.url.startsWith('/') ? pageHref(l.url) : l.url);
+const si = storyIntro();
+const groups = [
+  { title: 'The standard', cards: cov.standard, glyph: 'note' },
+  { title: 'Reference data', cards: cov.data, glyph: 'hash' },
+  { title: 'Tools', cards: cov.tools, glyph: 'code' },
+] as const;
+---
+<DocLayout route={route} title="Agent Capability Standard" description={description} toc={false}>
+  <article class="doc doc--home home" data-pagefind-body>
+    <section class="home-opening">
+      <p class="eyebrow">Agent Capability Standard</p>
+      <h1 id={id(HOME_H1)}>{HOME_H1}</h1>
+      <p class="lead"><InlineText parts={o.summary} /></p>
+      <p class="home-opening__version">{o.versionLine}</p>
+      <p class="home-opening__links">
+        {/* The space between links keeps their words apart in search. */}
+        {o.links.map((l, i) => (
+          <>{i > 0 && ' '}<a class:list={['btn', i > 0 && 'btn--quiet']} href={href(l)}>
+            {l.text}
+            <PixelGlyph name="arrow-right" />
+          </a></>
+        ))}
+      </p>
+      <CopyBlock label={o.install.label} text={o.install.commands.join('\n')} />
+    </section>
+
+    <section class="home-section home-section--alt home-principles">
+      <h2 id={id('Design principles')}>Design principles</h2>
+      <p>
+        {p.intro} {p.source.before}<a href={href(p.source.link)}>{p.source.link.text}</a>{p.source.after}
+      </p>
+      <ol class="home-principles__list">
+        {p.items.map((item) => (
+          <li>
+            <h3 id={id(item.title)}>{item.title}</h3>
+            {item.blocks.map((b) =>
+              b.kind === 'p' ? (
+                <p><InlineText parts={b.text} /></p>
+              ) : (
+                <ul>{b.items.map((line) => <li><InlineText parts={line} /></li>)}</ul>
+              ),
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <section class="home-section home-why">
+      <h2 id={id('Why a standard')}>Why a standard</h2>
+      <p>{WHY}</p>
+    </section>
+
+    <section class="home-section home-section--alt home-story">
+      <h2 id={id(STORY_HEADING)}>{STORY_HEADING}</h2>
+      <p>
+        {si.before}<a href={href(si.link)}>{si.link.code ? <code>{si.link.text}</code> : si.link.text}</a>{si.after}
+      </p>
+      <HomeStory id={id} />
+    </section>
+
+    <section class="home-section home-capabilities">
+      <h2 id={id('The capabilities')}>The capabilities</h2>
+      <p>
+        <InlineText parts={CAPABILITIES_INTRO} /> <a href={href(CAPABILITIES_DERIVED)}>{CAPABILITIES_DERIVED.text}</a>.
+      </p>
+      <CapabilityTable />
+    </section>
+
+    <section class="home-section home-section--alt home-covers">
+      <h2 id={id('What the standard covers')}>What the standard covers</h2>
+      {groups.map((grp) => (
+        <section class="home-covers__group">
+          <h3 id={id(grp.title)}>{grp.title}</h3>
+          <ul class="home-cards">
+            {grp.cards.map((c) => (
+              <li class="home-card">
+                <PixelGlyph name={grp.glyph} />
+                <p class="home-card__title"><a href={href(c.link)}>{c.title}</a></p>
+                <p class="home-card__line">{c.line}{c.section && <> ({c.section})</>}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </section>
+
+    <section class="home-section home-faq">
+      <h2 id={id('Questions')}>Questions</h2>
+      {f.items.map((item) => (
+        <details class="home-faq__item">
+          <summary>{item.question}</summary>
+          <p><InlineText parts={item.answer} /></p>
+        </details>
+      ))}
+      <p><a href={href(f.more)}>{f.more.text}</a></p>
+    </section>
+
+    <section class="home-section home-section--alt home-start">
+      <h2 id={id('Get started')}>Get started</h2>
+      <div class="home-agents">
+        <h3 id={id(AGENTS_HEADING)}>{AGENTS_HEADING}</h3>
+        <p>{AGENTS_LINE}</p>
+        <CopyBlock label="Prompt" text={g.prompt} />
+      </div>
+      <ul class="home-cards home-cards--start">
+        {g.cards.map((c) => (
+          <li class="home-card">
+            <p class="home-card__title"><a href={href(c.link)}>{c.title}</a></p>
+            <p class="home-card__line">{c.line}</p>
+            {c.extra && <p class="home-card__line"><a href={href(c.extra)}>{c.extra.text}</a></p>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  </article>
+</DocLayout>
