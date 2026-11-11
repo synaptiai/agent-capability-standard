@@ -191,12 +191,15 @@ Include at least one complete example with:
 
 | Layer | Default Tools |
 |-------|--------------|
-| PERCEPTION | Read, Grep |
-| MODELING | Read, Grep |
-| REASONING | Read, Grep |
-| ACTION | Read, Edit, Bash, Git |
-| SAFETY | Read, Grep (add Edit for checkpoint/rollback) |
-| META | Read, Grep |
+| PERCEIVE | Read, Grep (add Web for retrieve and search, Bash for observe) |
+| UNDERSTAND | Read, Grep (add Bash for measure) |
+| REASON | Read, Grep |
+| MODEL | Read, Grep (add Bash for simulate) |
+| SYNTHESIZE | Read, Grep |
+| EXECUTE | Read, Bash (add Edit and Write for mutate) |
+| VERIFY | Read, Grep, Bash (add Edit for checkpoint, Git for rollback) |
+| REMEMBER | Read, Grep (add Edit for persist) |
+| COORDINATE | Read, Grep (add Bash, Edit and Write for invoke) |
 
 ---
 
