@@ -7,7 +7,8 @@ import { crossCheck, loadDiagnostics, parseDiagRs, parseSpecDiagnostics } from '
 import { buildOntology, loadOntology } from '../src/data/ontology';
 import { buildProfile, loadProfiles } from '../src/data/profiles';
 import { loadSkills, parseFrontmatter } from '../src/data/skills';
-import { loadVersions } from '../src/data/versions';
+import { loadVersions, olderVersionNote } from '../src/data/versions';
+import { readRepoFile } from '../src/lib/repo';
 import { loadWorkflows, parseCatalog, referenceRoots } from '../src/data/workflows';
 
 describe('ontology', () => {
@@ -379,6 +380,39 @@ describe('citation, versions and counts', () => {
       diagnosticCount: 46,
       skillCount: 42,
       composedSkillCount: 6,
+    });
+  });
+});
+
+describe('the note on an older Standard version', () => {
+  // A made-up 1.2.0 that supersedes 1.1.0 only and has an appendix for 1.1.0 only.
+  const v120 = [
+    '# Standard',
+    '',
+    '**Version:** 1.2.0',
+    '**Status:** Candidate Standard',
+    '**Supersedes:** [STANDARD-v1.1.0](STANDARD-v1.1.0.md) (still supported)',
+    '',
+    '## Appendix C: Changes from 1.0.0 to 1.1.0',
+    '',
+    '## Appendix D: Changes from 1.1.0',
+    '',
+  ].join('\n');
+
+  it('states support and links the appendix only where the current text does', () => {
+    expect(olderVersionNote('1.1.0', v120)).toEqual({
+      stillSupported: true,
+      changes: { label: 'Appendix D', anchor: 'appendix-d-changes-from-110' },
+    });
+    expect(olderVersionNote('1.0.0', v120)).toEqual({ stillSupported: false, changes: null });
+  });
+
+  it('reads the real 1.1.0 text for 1.0.0', () => {
+    // spec/STANDARD-v1.1.0.md: "**Supersedes:** [STANDARD-v1.0.0](STANDARD-v1.0.0.md) (still supported; ...)"
+    // and "## Appendix C: Changes from 1.0.0", whose id the spike's done-check names.
+    expect(olderVersionNote('1.0.0', readRepoFile('spec/STANDARD-v1.1.0.md'))).toEqual({
+      stillSupported: true,
+      changes: { label: 'Appendix C', anchor: 'appendix-c-changes-from-100' },
     });
   });
 });

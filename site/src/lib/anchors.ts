@@ -41,9 +41,17 @@ export function headingText(node: Heading): string {
 
 const NAMED_ANCHOR = /<a\s[^>]*?\b(?:name|id)\s*=\s*["']([^"']+)["']/gi;
 
+export interface HeadingEntry {
+  depth: number;
+  text: string;
+  slug: string;
+}
+
 export interface Anchors {
   /** Heading slugs in document order. */
   headings: string[];
+  /** The same headings with their depth and text. */
+  entries: HeadingEntry[];
   /** Every valid fragment: heading slugs plus `<a name|id>` values. */
   all: ReadonlySet<string>;
 }
@@ -52,15 +60,19 @@ export interface Anchors {
 export function computeAnchors(text: string): Anchors {
   const tree = parseMarkdown(text);
   const slugger = new GithubSlugger();
-  const headings: string[] = [];
+  const entries: HeadingEntry[] = [];
   const named: string[] = [];
   visit(tree, (node) => {
-    if (node.type === 'heading') headings.push(slugger.slug(headingText(node)));
+    if (node.type === 'heading') {
+      const text = headingText(node);
+      entries.push({ depth: node.depth, text: text.trim(), slug: slugger.slug(text) });
+    }
     if (node.type === 'html') {
       for (const m of (node as Html).value.matchAll(NAMED_ANCHOR)) named.push(m[1]!);
     }
   });
-  return { headings, all: new Set([...headings, ...named]) };
+  const headings = entries.map((e) => e.slug);
+  return { headings, entries, all: new Set([...headings, ...named]) };
 }
 
 const cache = new Map<string, Anchors>();

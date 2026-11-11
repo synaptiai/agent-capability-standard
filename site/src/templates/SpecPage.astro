@@ -1,9 +1,12 @@
 ---
 // A version of the Standard, as one page so every existing #anchor keeps
 // working. Adds a contents list of the H2 and H3 headings and, on an older
-// version, a note naming the current one.
+// version, a note naming the current one. Whether the older version is still
+// supported, and which appendix lists the changes, come from the current
+// Standard's text; a fact it does not state is left out.
 import type { MarkdownHeading } from 'astro';
-import { loadVersions } from '../data/versions';
+import { loadVersions, olderVersionNote } from '../data/versions';
+import { readRepoFile } from '../lib/repo';
 import type { Route } from '../lib/routes';
 import { routeForSource } from '../lib/routes';
 import type { PageMeta } from '../plugins/remark-page-meta';
@@ -15,9 +18,12 @@ interface Props {
 }
 
 const { route, page, headings } = Astro.props;
-const { current } = loadVersions().standard;
+const { current, previous } = loadVersions().standard;
 const isCurrent = route.source === current.source;
 const currentUrl = routeForSource(current.source)?.url;
+const self = previous.find((v) => v.source === route.source);
+if (!isCurrent && !self) throw new Error(`SpecPage: ${route.source} is not a tracked Standard version`);
+const note = self ? olderVersionNote(self.version, readRepoFile(current.source)) : null;
 const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
 ---
 <article
@@ -27,10 +33,11 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
   data-current={isCurrent ? 'true' : 'false'}
   data-pagefind-body
 >
-  {!isCurrent && (
+  {self && note && (
     <p class="version-note" role="note">
-      This is version {page.version}. It is still supported. The current version is{' '}
-      <a href={currentUrl}>{current.version}</a>, and Appendix C of {current.version} lists what changed.
+      {`This is version ${self.version}.${note.stillSupported ? ' It is still supported.' : ''} The current version is `}<a href={currentUrl}>{current.version}</a>{note.changes ? (
+        <>, and <a href={`${currentUrl}#${note.changes.anchor}`}>{`${note.changes.label} of ${current.version}`}</a> lists what changed.</>
+      ) : '.'}
     </p>
   )}
   <nav class="toc" aria-label="On this page">

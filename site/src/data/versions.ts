@@ -1,4 +1,5 @@
 // Every version the site shows, read from the files that own it.
+import { computeAnchors } from '../lib/anchors';
 import { COMMIT_SHA, readRepoFile, TRACKED_FILES } from '../lib/repo';
 import { loadOntology } from './ontology';
 
@@ -42,6 +43,28 @@ export function standardVersions(): StandardVersion[] {
     .filter((p) => /^spec\/STANDARD-v\d+\.\d+\.\d+\.md$/.test(p))
     .map((p) => parseStandardHeader(p, readRepoFile(p)))
     .sort((a, b) => cmpSemver(b.version, a.version));
+}
+
+export interface OlderVersionNote {
+  /** The current Standard's Supersedes line names this version as still supported. */
+  stillSupported: boolean;
+  /** The current Standard's "Appendix X: Changes from <version>" heading, if it has one. */
+  changes: { label: string; anchor: string } | null;
+}
+
+/**
+ * What the current Standard says about an older version, read from its text:
+ * the `**Supersedes:**` header line and an H2 "Appendix X: Changes from
+ * <version>". Either fact is left out when the text does not state it.
+ */
+export function olderVersionNote(version: string, currentText: string): OlderVersionNote {
+  const supersedes = /^\*\*Supersedes:\*\*(.*)$/m.exec(currentText)?.[1] ?? '';
+  const stillSupported = supersedes.includes(`STANDARD-v${version}.md`) && /still supported/i.test(supersedes);
+  const heading = computeAnchors(currentText).entries.find(
+    (h) => h.depth === 2 && new RegExp(`^(Appendix [A-Z]+): Changes from ${version.replace(/\./g, '\\.')}$`).test(h.text),
+  );
+  const changes = heading ? { label: heading.text.split(':')[0]!, anchor: heading.slug } : null;
+  return { stillSupported, changes };
 }
 
 function pyprojectVersion(text: string): string {
