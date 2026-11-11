@@ -12,7 +12,14 @@ import { loadCounts } from '../src/data/counts';
 import { RESERVED_WORKFLOW_SLUGS } from '../src/data/workflows';
 import { checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
 import { ROUTES, type Route } from '../src/lib/routes';
-import { diagnosticRowsPerSection, repoText, standardFileVersions } from './independent';
+import {
+  allCatalogSteps,
+  diagnosticRowsPerSection,
+  profileFiles,
+  profileWorkflowIds,
+  repoText,
+  standardFileVersions,
+} from './independent';
 
 let dist = '';
 
@@ -74,12 +81,19 @@ describe('built site', () => {
     expect(rows).toContain('v102');
   });
 
-  it('marks undefined profile workflows as proposed, once each', () => {
+  it('marks each profile workflow that no catalog defines as proposed', () => {
+    // Expected: ids each profile file lists that are not workflow keys in any catalog, by line scans.
+    const defined = new Set(allCatalogSteps().keys());
+    const want = profileFiles().flatMap((f) =>
+      profileWorkflowIds(repoText(`schemas/profiles/${f}`)).filter((id) => !defined.has(id)),
+    );
+    expect(want.length).toBeGreaterThan(0);
     let proposed = 0;
     for (const d of pageDirs('domains')) {
       const html = readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8');
-      proposed += (html.match(/data-defined="false"/g) ?? []).length;
+      proposed += (html.match(/>Proposed, not yet in a catalog</g) ?? []).length;
     }
+    expect(proposed).toBe(want.length);
     expect(proposed).toBe(loadCounts().undefinedProfileWorkflowCount);
   });
 
