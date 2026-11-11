@@ -369,7 +369,7 @@ Add `--strict` to make warnings fail the run too.
 
 **With typed bindings:**
 - Validator catches: "B203: TYPE_MISMATCH at step 5, binding 'items'"
-- Error message suggests: "Expected array<string>, got array<object>. Consider projecting a field."
+- Error message suggests: "Expected array\<string\>, got array\<object\>. Consider projecting a field."
 - Fix applied before any code runs
 
 Typed bindings shift debugging from runtime (production) to validation (development). The few seconds spent adding type annotations save hours of runtime debugging.

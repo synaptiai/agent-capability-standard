@@ -110,7 +110,7 @@ assumptions: array[string]  # Conditions affecting comparison
 | `options` | array | List of alternatives with summaries |
 | `criteria` | array | Evaluation dimensions with weights |
 | `comparison_matrix` | array | Scores for each option on each criterion |
-| `ranking` | array<object> | Options ordered best-first, each with `option_id` and `weighted_score` |
+| `ranking` | array\<object\> | Options ordered best-first, each with `option_id` and `weighted_score` |
 | `scores` | object | Weighted score per option, keyed by option id |
 | `recommendation` | string | Recommended option ID (the top of `ranking` unless rationale says otherwise) |
 | `recommendation_rationale` | string | Why the recommended option was chosen |

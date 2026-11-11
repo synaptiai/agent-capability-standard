@@ -83,7 +83,7 @@ next_actions: array[string]  # 0-3 suggested follow-ups if uncertain
 |-------|------|-------------|
 | `detected` | boolean | True if the target pattern/entity was found |
 | `target_type` | string | Category of what was searched for |
-| `matches` | array<object> | Found occurrences: each detection signal with strength and location (empty when nothing found) |
+| `matches` | array\<object\> | Found occurrences: each detection signal with strength and location (empty when nothing found) |
 | `locations` | array[string] | Every location where the pattern was found |
 | `false_positive_risk` | enum | Assessment of detection reliability |
 | `confidence` | number | 0.0-1.0 based on evidence completeness |

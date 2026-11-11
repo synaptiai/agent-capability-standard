@@ -105,8 +105,8 @@ assumptions: []
 | `rules[].trigger` | object | What causes the transition |
 | `rules[].preconditions` | array | Conditions that must hold |
 | `rules[].effects` | array | Changes caused by transition |
-| `preconditions` | array<object> | Conditions required by the rules that apply from `from_state`, each tagged with its rule |
-| `effects` | array<object> | State changes those rules make, each tagged with its rule |
+| `preconditions` | array\<object\> | Conditions required by the rules that apply from `from_state`, each tagged with its rule |
+| `effects` | array\<object\> | State changes those rules make, each tagged with its rule |
 | `analysis` | object | State machine analysis results |
 | `confidence` | number | 0.0-1.0 confidence the rules are complete and correct |
 | `evidence_anchors` | array | References to where each rule is defined |
