@@ -11,7 +11,7 @@ import { buildCitation, loadCitation } from '../src/data/citation';
 import { loadCounts } from '../src/data/counts';
 import { crossCheck, loadDiagnostics, parseDiagRs, parseSpecDiagnostics } from '../src/data/diagnostics';
 import { buildOntology, loadOntology } from '../src/data/ontology';
-import { buildProfile, loadProfiles } from '../src/data/profiles';
+import { buildProfile, checkProposals, loadProfiles } from '../src/data/profiles';
 import { loadSkills, parseFrontmatter } from '../src/data/skills';
 import { loadVersions, olderVersionNote } from '../src/data/versions';
 import { readRepoFile } from '../src/lib/repo';
@@ -231,6 +231,24 @@ describe('profiles', () => {
     expect(undefinedIds).toEqual(undefinedProfileIds);
     // schemas/profiles/vision.yaml workflows list.
     expect(p.find((d) => d.key === 'vision')!.workflows.map((x) => x.id)).toContain('object_detection_pipeline');
+  });
+
+  it('fails on a workflow id no catalog defines unless it is a listed proposal', () => {
+    // A renamed workflow, or a typo, must not be shown as "Proposed".
+    const doc = { domain: 'vision', version: '1', workflows: ['object_detection_pipeline', 'objekt_detection_pipeline'] };
+    expect(() => buildProfile('schemas/profiles/vision.yaml', doc, new Set())).toThrow(
+      /vision\.yaml lists objekt_detection_pipeline, which no catalog defines/,
+    );
+    const ok = buildProfile('schemas/profiles/vision.yaml', { ...doc, workflows: ['object_detection_pipeline'] }, new Set());
+    expect(ok.workflows).toEqual([{ id: 'object_detection_pipeline', defined: false }]);
+  });
+
+  it('fails on a listed proposal that a catalog now defines or the profile no longer lists', () => {
+    expect(() => checkProposals(p, { vision: ['object_detection_pipeline', 'gone_pipeline'] })).toThrow(/vision: gone_pipeline/);
+    expect(() => checkProposals(p, { 'data-analysis': [p.find((d) => d.key === 'data-analysis')!.workflows[0]!.id] })).toThrow(
+      /data-analysis: .* is defined by a catalog/,
+    );
+    expect(() => checkProposals(p)).not.toThrow();
   });
 
   it('rejects a domain field that does not match the file name', () => {

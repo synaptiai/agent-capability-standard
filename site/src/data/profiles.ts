@@ -3,6 +3,7 @@
 // `domain` field, which must equal the file name with `_` changed to `-`.
 import { parse } from 'yaml';
 import { readRepoFile, trackedUnder, TRACKED_FILES } from '../lib/repo';
+import { PROPOSED_WORKFLOWS } from './proposed-workflows';
 import { loadWorkflows } from './workflows';
 
 export const PROFILE_DIR = 'schemas/profiles';
@@ -23,7 +24,12 @@ export interface DomainProfile {
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-export function buildProfile(file: string, doc: unknown, definedIds: ReadonlySet<string>): DomainProfile {
+export function buildProfile(
+  file: string,
+  doc: unknown,
+  definedIds: ReadonlySet<string>,
+  proposed: Readonly<Record<string, readonly string[]>> = PROPOSED_WORKFLOWS,
+): DomainProfile {
   if (!isObj(doc)) throw new Error(`profiles: ${file} is not a mapping`);
   const key = doc.domain;
   if (typeof key !== 'string') throw new Error(`profiles: ${file} has no domain field`);
@@ -36,6 +42,13 @@ export function buildProfile(file: string, doc: unknown, definedIds: ReadonlySet
   if (!Array.isArray(list) || !list.every((w) => typeof w === 'string')) {
     throw new Error(`profiles: ${file} workflows must be a list of ids`);
   }
+  for (const id of list as string[]) {
+    if (!definedIds.has(id) && !(proposed[key] ?? []).includes(id)) {
+      throw new Error(
+        `profiles: ${file} lists ${id}, which no catalog defines. Fix the id, or add it to PROPOSED_WORKFLOWS in site/src/data/proposed-workflows.ts if it is a proposal`,
+      );
+    }
+  }
   const readmePath = `docs/domains/${key}/README.md`;
   return {
     key,
@@ -46,6 +59,25 @@ export function buildProfile(file: string, doc: unknown, definedIds: ReadonlySet
     profile: doc,
     workflows: (list as string[]).map((id) => ({ id, defined: definedIds.has(id) })),
   };
+}
+
+/** Fail when a listed proposal is now defined by a catalog, or its profile no longer lists it. */
+export function checkProposals(
+  profiles: readonly DomainProfile[],
+  proposed: Readonly<Record<string, readonly string[]>> = PROPOSED_WORKFLOWS,
+): void {
+  const problems: string[] = [];
+  for (const [key, ids] of Object.entries(proposed)) {
+    const p = profiles.find((x) => x.key === key);
+    for (const id of ids) {
+      const w = p?.workflows.find((x) => x.id === id);
+      if (!w) problems.push(`${key}: ${id} is not listed by the ${key} profile`);
+      else if (w.defined) problems.push(`${key}: ${id} is defined by a catalog now`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`profiles: remove these from PROPOSED_WORKFLOWS in site/src/data/proposed-workflows.ts:\n  ${problems.join('\n  ')}`);
+  }
 }
 
 let cached: DomainProfile[] | undefined;
@@ -68,6 +100,7 @@ export function loadProfiles(): DomainProfile[] {
       throw new Error(`workflows: ${wf.id} has domain ${String(wf.domain)} but its profile is for ${p.key}`);
     }
   }
+  checkProposals(profiles);
   cached = profiles;
   return cached;
 }
