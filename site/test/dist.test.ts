@@ -15,11 +15,13 @@ import { ROUTES, type Route } from '../src/lib/routes';
 import {
   allCatalogSteps,
   diagnosticRowsPerSection,
+  ontologyEdgeTriples,
   profileFiles,
   profileWorkflowIds,
   repoText,
   standardCheckpointCapabilities,
   standardFileVersions,
+  symmetricEdgeTypes,
 } from './independent';
 
 let dist = '';
@@ -122,6 +124,39 @@ describe('built site', () => {
       const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
       const dd = /<dt>Approved automatically<\/dt><dd>(.*?)<\/dd>/.exec(html)?.[1]?.replace(/<[^>]+>/g, '');
       expect(dd, page).toBe(level === 'none' ? 'Nothing' : `${level} risk and below`);
+    }
+  });
+
+  it('puts each asymmetric edge in the From cell of its source and the To cell of its target', () => {
+    // Expected: the line-scanned edge triples. Wording: CLAUDE.md says a requires `from` step "must run
+    // before the target", and a precedes source "must come first".
+    const cells = (cap: string, type: string): [string, string] => {
+      const html = readFileSync(path.join(dist, 'capabilities', cap, 'index.html'), 'utf8');
+      const row = new RegExp(`<tr data-edge-type="${type}"[^>]*>(.*?)</tr>`).exec(html)?.[1];
+      expect(row, `${cap} ${type} row`).toBeDefined();
+      const tds = [...row!.matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((m) => m[1]!);
+      expect(tds, `${cap} ${type} cells`).toHaveLength(2);
+      return [tds[0]!, tds[1]!];
+    };
+    const link = (c: string) => `href="/capabilities/${c}/"`;
+    const sym = symmetricEdgeTypes();
+    const triples = ontologyEdgeTriples().filter((t) => !sym.includes(t.type));
+    expect(triples.map((t) => `${t.type}:${t.from}>${t.to}`)).toContain('requires:checkpoint>mutate');
+    for (const t of triples) {
+      const [fromOut, fromIn] = cells(t.from, t.type);
+      expect(fromOut, `${t.type} ${t.from}>${t.to} on ${t.from}`).toContain(link(t.to));
+      expect(fromIn, `${t.type} ${t.from}>${t.to} on ${t.from}`).not.toContain(link(t.to));
+      const [toOut, toIn] = cells(t.to, t.type);
+      expect(toIn, `${t.type} ${t.from}>${t.to} on ${t.to}`).toContain(link(t.from));
+      expect(toOut, `${t.type} ${t.from}>${t.to} on ${t.to}`).not.toContain(link(t.from));
+      if (t.type === 'requires') {
+        expect(fromOut).toMatch(/>Must run before</);
+        expect(toIn).toMatch(/>Must run after</);
+      }
+      if (t.type === 'precedes') {
+        expect(fromOut).toMatch(/>Comes before/);
+        expect(toIn).toMatch(/>Comes after/);
+      }
     }
   });
 
