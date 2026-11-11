@@ -38,6 +38,15 @@ function declaredBool(v: unknown): boolean | undefined {
   return typeof v === 'boolean' ? v : undefined;
 }
 
+/**
+ * Whether a capability needs a checkpoint before it (Standard §4.4): its
+ * `requires_checkpoint` flag is set or a `requires` edge runs to it from
+ * `checkpoint` (rollback has only the edge).
+ */
+export function capabilityNeedsCheckpoint(cap: Capability): boolean {
+  return cap.requires_checkpoint || cap.edgesIn.requires.includes('checkpoint');
+}
+
 export function effectiveFlags(step: Record<string, unknown>, cap: Capability): EffectiveFlags {
   const downgrades: SafetyFlag[] = [];
 

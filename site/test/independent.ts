@@ -221,3 +221,11 @@ export function catalogOnErrorCodes(repoPath: string): Map<string, string[]> {
   }
   return out;
 }
+
+/** Capabilities whose row in the §4.4 table of a Standard requires `checkpoint`, by a line scan. */
+export function standardCheckpointCapabilities(text: string): string[] {
+  return sectionLines(text, /^### 4\.4 /).flatMap((l) => {
+    const m = /^\| `([a-z_]+)` \| `checkpoint` \|/.exec(l);
+    return m ? [m[1]!] : [];
+  });
+}

@@ -4,6 +4,7 @@
 // two-letter symbol and id. The accessible name says the layer, the risk and
 // which safety flags apply; the data attributes carry the same facts.
 import type { Capability } from '../data/ontology';
+import { capabilityNeedsCheckpoint } from '../lib/flags';
 import { capabilityHref } from '../lib/generated';
 
 interface Props {
@@ -14,11 +15,12 @@ interface Props {
 }
 
 const { cap, index, symbol } = Astro.props;
+const checkpoint = capabilityNeedsCheckpoint(cap);
 const pips = { low: 1, medium: 2, high: 3 }[cap.risk];
 const name = [
   `${cap.id}, ${cap.layer} layer, ${cap.risk} risk`,
   ...(cap.mutation ? ['mutates'] : []),
-  ...(cap.requires_checkpoint ? ['needs checkpoint'] : []),
+  ...(checkpoint ? ['needs checkpoint'] : []),
   ...(cap.requires_approval ? ['needs approval'] : []),
 ].join(', ');
 ---
@@ -31,7 +33,7 @@ const name = [
   data-layer={cap.layer.toLowerCase()}
   data-risk={cap.risk}
   data-mutation={cap.mutation ? 'true' : 'false'}
-  data-checkpoint={cap.requires_checkpoint ? 'true' : 'false'}
+  data-checkpoint={checkpoint ? 'true' : 'false'}
   data-approval={cap.requires_approval ? 'true' : 'false'}
 >
   <span class="capability-tile__index">{index}</span>

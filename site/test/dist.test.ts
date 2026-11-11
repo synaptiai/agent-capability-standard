@@ -18,6 +18,7 @@ import {
   profileFiles,
   profileWorkflowIds,
   repoText,
+  standardCheckpointCapabilities,
   standardFileVersions,
 } from './independent';
 
@@ -95,6 +96,19 @@ describe('built site', () => {
     }
     expect(proposed).toBe(want.length);
     expect(proposed).toBe(loadCounts().undefinedProfileWorkflowCount);
+  });
+
+  it('marks exactly the capabilities §4.4 lists as needing a checkpoint, on their pages and tiles', () => {
+    // Expected: the §4.4 table of the newest Standard, by line scan (mutate, send and rollback).
+    const want = standardCheckpointCapabilities(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`)).sort();
+    expect(want).toContain('rollback');
+    const badged = pageDirs('capabilities').filter((c) =>
+      readFileSync(path.join(dist, 'capabilities', c, 'index.html'), 'utf8').includes('>Checkpoint required<'),
+    );
+    expect(badged).toEqual(want);
+    const overview = readFileSync(path.join(dist, 'capabilities', 'index.html'), 'utf8');
+    const tiles = [...overview.matchAll(/<a [^>]*data-capability="([a-z_]+)"[^>]*data-checkpoint="true"/g)].map((m) => m[1]);
+    expect(tiles.sort()).toEqual(want);
   });
 
   it('builds no page outside the route table except 404', () => {
