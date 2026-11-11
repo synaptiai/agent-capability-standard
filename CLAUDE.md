@@ -123,7 +123,8 @@ constraints file.
 The site in `site/` is an Astro project built from the repository's own files.
 Node is pinned in `site/.nvmrc`. `.github/workflows/site.yml` runs the same
 commands on pushes and pull requests to main and on manual runs, and deploys
-main to Cloudflare Pages.
+pushes to main to Cloudflare Pages once the `SITE_DEPLOY_ENABLED` repository
+variable is `true`.
 
 ```bash
 cd site
@@ -136,8 +137,8 @@ npm run dev     # local server; search works only on a built site (npm run previ
 
 `npm run build` fails when a Markdown link or `#anchor` does not resolve, when
 rendered heading ids differ from GitHub's ids for the source, and, in
-`scripts/check-dist.mjs`, when a link in the built HTML does not resolve, a raw
-`.md` link remains, a page has no Markdown copy or `llms.txt` does not list it,
+`scripts/check-dist.mjs`, when a link in the built HTML, the Markdown copies or
+`llms-full.txt` does not resolve, a raw `.md` link remains, a page has no Markdown copy or `llms.txt` does not list it,
 or the sitemap differs from the built pages.
 
 Rules:
@@ -275,6 +276,11 @@ Search and update capability counts in these files:
 - `.claude-plugin/plugin.json` — Description field
 
 **Tip:** Use `grep -r "N atomic capabilit" .` and `grep -r "N capabilities" .` to find all references (where N is the old count).
+
+### 3a. Update the Documentation Site
+- Add the capability's two-letter symbol, in layer order, to the "periodic table symbols" list in `site/test/views.test.ts` (the failing test prints the symbol the site computed)
+- The site tests compare the ontology with the layer table in this file and the **Total** line in `skills/README.md`, so step 3 must be complete
+- Run `npm test` in `site/` (see "Documentation site" above)
 
 ### 4. Validate
 ```bash
