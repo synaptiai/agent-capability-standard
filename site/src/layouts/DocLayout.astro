@@ -8,12 +8,14 @@ import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
 interface Props {
   route: Route;
   title: string;
+  /** The <title> text before the site name, when it differs from the title. */
+  headTitle?: string;
   description?: string | null;
 }
 
-const { route, title, description } = Astro.props;
+const { route, title, headTitle, description } = Astro.props;
 const section = SECTIONS.find((s) => s.id === route.section);
-const pageTitle = route.url === '/' ? 'Agent Capability Standard' : `${title} - Agent Capability Standard`;
+const pageTitle = route.url === '/' ? 'Agent Capability Standard' : `${headTitle ?? title} - Agent Capability Standard`;
 const sourceUrl = route.source ? githubBlobUrl(route.source) : null;
 // Each section links to its first page in sidebar order.
 const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({

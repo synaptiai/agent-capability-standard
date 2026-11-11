@@ -65,7 +65,25 @@ export interface Route {
   embed?: boolean;
   /** Repo path of the data file a generated page is built from. */
   data?: string;
+  /** Meta description, for a page whose first paragraph does not describe it. */
+  description?: string;
 }
+
+/**
+ * Descriptions for pages whose first paragraph after the H1 is not a summary:
+ * an author line, an answer to the first question, a list introduction, or
+ * front matter of a checklist. Each is taken from the page's own content.
+ */
+export const DESCRIPTIONS: Readonly<Record<string, string>> = {
+  'docs/GROUNDED_AGENCY.md':
+    'The Grounded Agency paper. It presents a capability ontology for AI agents, a world state schema with uncertainty and evidence anchors, and a trust model for resolving conflicts between sources.',
+  'docs/FAQ.md':
+    'Answers to common questions about adopting the standard, its capabilities and workflows, implementation, safety, multimodal support, and how it compares with other approaches.',
+  'docs/research/analysis/capability_mapping.md':
+    'Mappings from observed agent failures to the Grounded Agency capabilities that address them, with mitigation strategies.',
+  'docs/compliance/iso42001/internal_audit_checklist.md':
+    'A checklist for an internal audit of an AI management system against all 10 clauses of ISO/IEC 42001:2023.',
+};
 
 /**
  * Paths that never get a page. From the plan's exclusion list, plus `.github/`
@@ -417,6 +435,14 @@ export function buildRoutes(): Route[] {
     { source: null, url: '/community/citation/', title: 'Cite this standard', template: 'citation', data: 'CITATION.cff' },
     prose('spec/PRESS_KIT.md', '/community/press-kit/', 'Press kit'),
   );
+
+  for (const [source, description] of Object.entries(DESCRIPTIONS)) {
+    const row = rows.find((r) => r.source === source);
+    if (!row) throw new Error(`routes: DESCRIPTIONS names ${source}, which has no route`);
+    // The same limit remark-page-meta cuts a derived description to.
+    if (description.length > 200) throw new Error(`routes: the description of ${source} is over 200 characters`);
+    row.description = description;
+  }
 
   return rows;
 }

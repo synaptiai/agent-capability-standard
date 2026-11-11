@@ -3,6 +3,7 @@
 // The route's template picks the wrapper; the body is the rendered source.
 import { getEntry, render } from 'astro:content';
 import DocLayout from '../layouts/DocLayout.astro';
+import { pageHead } from '../lib/page-head';
 import { markdownPages, type Route } from '../lib/routes';
 import type { PageMeta } from '../plugins/remark-page-meta';
 import ProsePage from '../templates/ProsePage.astro';
@@ -29,9 +30,9 @@ if (!entry) throw new Error(`[...slug]: no docs entry for ${source}`);
 const { Content, headings, remarkPluginFrontmatter } = await render(entry);
 const page = remarkPluginFrontmatter.page as PageMeta | undefined;
 if (!page) throw new Error(`[...slug]: remark-page-meta gave ${source} no page data`);
-const title = page.title ?? route.title;
+const { title, headTitle, description } = pageHead(route, page);
 ---
-<DocLayout route={route} title={title} description={page.description}>
+<DocLayout route={route} title={title} headTitle={headTitle} description={description}>
   {route.template === 'spec' && (
     <SpecPage route={route} page={page} headings={headings}><Content /></SpecPage>
   )}

@@ -6,6 +6,9 @@ import { KEYWORD_SOURCES, unroutedKeywordSources } from '../src/lib/markdown';
 import { checkHtml } from '../src/plugins/remark-html-allowlist';
 import type { PageMeta } from '../src/plugins/remark-page-meta';
 import { KEYWORDS, markKeywords } from '../src/plugins/rehype-keywords';
+import { standardVersions } from '../src/data/versions';
+import { pageHead } from '../src/lib/page-head';
+import { DESCRIPTIONS, routeForSource } from '../src/lib/routes';
 import { renderRepoFile } from './pipeline';
 
 async function pageOf(source: string, text?: string): Promise<{ page: PageMeta; html: string }> {
@@ -150,5 +153,36 @@ describe('rehype-callouts', () => {
     const { html } = await pageOf('docs/FAQ.md', text);
     expect(html).toMatch(/<div class="callout callout--warning" role="note"><p class="callout__label">Warning<\/p>\s*<p>Careful\.<\/p>/);
     expect(html).toMatch(/<blockquote>\s*<p>Just a quote\.<\/p>/);
+  });
+});
+
+describe('page title and description', () => {
+  const headOf = async (source: string) => pageHead(routeForSource(source)!, (await pageOf(source)).page);
+
+  it('uses the route description where the first paragraph is an author line', async () => {
+    // docs/GROUNDED_AGENCY.md: the paragraph after the H1 is the author, affiliation and email.
+    const { page } = await pageOf('docs/GROUNDED_AGENCY.md');
+    expect(page.description).toContain('@');
+    const head = await headOf('docs/GROUNDED_AGENCY.md');
+    expect(head.description).toBe(DESCRIPTIONS['docs/GROUNDED_AGENCY.md']);
+    expect(head.description).not.toContain('@');
+  });
+
+  it('keeps the derived description where the route has none', async () => {
+    const { page } = await pageOf('docs/QUICKSTART.md');
+    expect((await headOf('docs/QUICKSTART.md')).description).toBe(page.description);
+  });
+
+  it('tells the versions of the Standard apart by their Version line', async () => {
+    const versions = standardVersions();
+    expect(versions.length).toBeGreaterThan(1);
+    const heads = await Promise.all(versions.map((v) => headOf(v.source)));
+    // Same H1 in every version; the breadcrumb title stays the H1.
+    expect(new Set(heads.map((h) => h.title)).size).toBe(1);
+    heads.forEach((h, i) => {
+      expect(h.headTitle).toBe(`${h.title}, version ${versions[i]!.version}`);
+      expect(h.description).toMatch(new RegExp(`^Version ${versions[i]!.version.replace(/\./g, '\\.')}\\. `));
+    });
+    expect(new Set(heads.map((h) => h.headTitle)).size).toBe(versions.length);
   });
 });
