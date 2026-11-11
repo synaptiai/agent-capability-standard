@@ -1,7 +1,8 @@
 ---
+import { LISTING_INTROS } from '../../lib/listing';
 import { routeByUrl } from '../../lib/generated';
 import ListingPage from '../../templates/ListingPage.astro';
 
 const route = routeByUrl('/compliance/');
 ---
-<ListingPage route={route} intro="How the standard supports compliance work under the EU AI Act, ISO/IEC 42001 and the NIST AI Risk Management Framework." />
+<ListingPage route={route} intro={LISTING_INTROS['/compliance/']!} />

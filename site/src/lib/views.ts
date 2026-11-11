@@ -510,3 +510,16 @@ export function governanceStatuses(text: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 }
+
+/** The groups of the schemas page, in order, with their intro lines. */
+export function schemaGroups(standardVersion: string): { key: SchemaEntry['group']; label: string; intro: string }[] {
+  return [
+  { key: 'required', label: 'Required by the Standard', intro: `Section 6.1 of Standard ${standardVersion} requires every implementation to provide these schemas.` },
+  { key: 'supporting', label: 'Supporting schemas', intro: `Section 6.1 names these schemas as used by specific sections. They are not required of every implementation.` },
+  { key: 'ontology', label: 'Ontology and workflow catalog', intro: 'The capability ontology, the reference workflow catalog, and the JSON Schemas that check them.' },
+  { key: 'profiles', label: 'Domain profile format', intro: 'The schema every domain profile follows.' },
+  { key: 'interop', label: 'Interoperability', intro: 'Mappings to other agent frameworks.' },
+  { key: 'other', label: 'Other schemas', intro: 'Schema files the Standard does not name.' },
+  { key: 'transforms', label: 'Transforms', intro: 'The coercion registry and the mappings the transform capability uses.' },
+  ];
+}

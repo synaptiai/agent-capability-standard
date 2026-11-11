@@ -21,6 +21,19 @@ export interface ListingGroup {
 
 export const CARD_DESCRIPTION_MAX = 160;
 
+/** The intro line of each section's listing page, shared by the page and its Markdown copy. */
+export const LISTING_INTROS: Readonly<Record<string, string>> = {
+  '/start/':
+    'Pages for a first look at the standard: what it is, how to install the plugin, a tutorial, common questions and the glossary.',
+  '/guides/':
+    'Guides to running workflows, the Claude Agent SDK, safety hooks, modality handling and writing skills.',
+  '/compliance/':
+    'How the standard supports compliance work under the EU AI Act, ISO/IEC 42001 and the NIST AI Risk Management Framework.',
+  '/background/':
+    'The research behind the standard: the whitepaper, the Grounded Agency paper, how the capabilities were derived, and supporting analysis.',
+};
+
+
 /** Title and description of a Markdown route, from the rendered source. */
 export async function sourceMeta(route: Route): Promise<{ title: string; description: string | null }> {
   if (route.source === null) return { title: route.title, description: route.description ?? null };

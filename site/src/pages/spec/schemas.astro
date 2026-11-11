@@ -6,21 +6,13 @@
 import DocLayout from '../../layouts/DocLayout.astro';
 import { currentStandard, pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
 import { githubBlobUrl, readRepoFile } from '../../lib/repo';
-import { schemaListing, type SchemaEntry } from '../../lib/views';
+import { schemaGroups, schemaListing } from '../../lib/views';
 
 const route = routeByUrl('/spec/schemas/');
 const std = currentStandard();
 const entries = schemaListing(readRepoFile(std.source));
 const id = refSlugger();
-const GROUPS: { key: SchemaEntry['group']; label: string; intro: string }[] = [
-  { key: 'required', label: 'Required by the Standard', intro: `Section 6.1 of Standard ${std.version} requires every implementation to provide these schemas.` },
-  { key: 'supporting', label: 'Supporting schemas', intro: `Section 6.1 names these schemas as used by specific sections. They are not required of every implementation.` },
-  { key: 'ontology', label: 'Ontology and workflow catalog', intro: 'The capability ontology, the reference workflow catalog, and the JSON Schemas that check them.' },
-  { key: 'profiles', label: 'Domain profile format', intro: 'The schema every domain profile follows.' },
-  { key: 'interop', label: 'Interoperability', intro: 'Mappings to other agent frameworks.' },
-  { key: 'other', label: 'Other schemas', intro: 'Schema files the Standard does not name.' },
-  { key: 'transforms', label: 'Transforms', intro: 'The coercion registry and the mappings the transform capability uses.' },
-];
+const GROUPS = schemaGroups(std.version);
 const description = `The schema files of the Agent Capability Standard, grouped by what the Standard requires of them, with a link to each file.`;
 ---
 <DocLayout route={route} title="Schemas" description={description}>
