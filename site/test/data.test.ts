@@ -325,6 +325,30 @@ describe('diagnostics', () => {
     expect(() => parseSpecDiagnostics(text)).toThrow(/V101 has severity error/);
   });
 
+  it('fails on a code row the strict pattern does not read, instead of dropping it', () => {
+    // A digit in the name, and a prefix letter §9.1 does not list yet.
+    for (const row of ['| W603 | STEP_2_UNBOUND | x |', '| X101 | NEW_KIND | x |', '| V102 | lower_name | x |']) {
+      const text = [
+        '### 9.1 Categories and Severity',
+        '| Validation | V1xx | error | x |',
+        '### 9.2 Validation Errors',
+        '| V101 | A_NAME | first |',
+        row,
+        '### 9.8 Diagnostic Format',
+      ].join('\n');
+      expect(() => parseSpecDiagnostics(text), row).toThrow(/cannot read the diagnostic row/);
+    }
+  });
+
+  it('fails on a diag.rs entry the strict pattern does not read', () => {
+    const rs = [
+      '    MissingPrerequisite = "V102", "MISSING_PREREQUISITE", Error;',
+      '    StepUnbound = "W603", "STEP_2_UNBOUND", Warning;',
+      '    NewKind = "X101", "NEW_KIND", Error;',
+    ].join('\n');
+    expect(() => parseDiagRs(rs)).toThrow(/cannot read 2 code entries/);
+  });
+
   it('stops at §9.8', () => {
     const text = [
       '### 9.1 Categories and Severity',

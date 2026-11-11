@@ -26,6 +26,9 @@ export interface Diagnostic {
   anchor: string;
 }
 
+/** Any table row that starts with a code-like cell, read or not. */
+const CODE_ROW = /^\|\s*[A-Z]\d{3}\s*\|/;
+
 interface Range {
   prefix: string;
   severity: Severity;
@@ -71,6 +74,10 @@ export function parseSpecDiagnostics(text: string): Diagnostic[] {
       continue;
     }
     const row = /^\|\s*([VBSRFW]\d{3})\s*\|\s*([A-Z_]+)\s*\|\s*(.*?)\s*\|\s*$/.exec(l);
+    // A row that starts with a code but does not match is an error, not
+    // skipped: diag.rs would miss it the same way, and the cross-check
+    // compares only what both parsers keep.
+    if (!row && CODE_ROW.test(l)) throw new Error(`diagnostics: cannot read the diagnostic row: ${l.trim()}`);
     if (!row || !section) continue;
     const code = row[1]!;
     const range = ranges.find((r) => code.startsWith(r.prefix));
@@ -110,7 +117,12 @@ export function parseSpecDiagnostics(text: string): Diagnostic[] {
 /** The (code, name, severity) triples core/src/diag.rs declares. */
 export function parseDiagRs(text: string): { code: string; name: string; severity: Severity }[] {
   const re = /(\w+) = "([VBSRFW]\d{3})", "([A-Z_]+)", (Error|Warning);/g;
-  return [...text.matchAll(re)].map((m) => ({
+  const found = [...text.matchAll(re)];
+  const loose = [...text.matchAll(/"[A-Z]\d{3}",/g)].length;
+  if (loose !== found.length) {
+    throw new Error(`diagnostics: cannot read ${loose - found.length} code entries in ${DIAG_RS}; expected Name = "X999", "NAME", Error|Warning;`);
+  }
+  return found.map((m) => ({
     code: m[2]!,
     name: m[3]!,
     severity: m[4] === 'Error' ? 'error' : 'warning',
