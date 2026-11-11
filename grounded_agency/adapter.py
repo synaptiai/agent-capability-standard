@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
-from .capabilities.mapper import ToolCapabilityMapper
+from .capabilities.mapper import ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
 from .hooks.evidence_collector import create_evidence_collector
 from .hooks.skill_tracker import create_skill_tracker
@@ -187,6 +187,17 @@ class GroundedAgentConfig:
     max_turns: int | None = None
     enable_discovery: bool = False
     checkpoint_reservation_seconds: float | None = None
+
+
+# What the PreToolUse safety hook assumes about a tool the mapper could
+# not classify: an unknown mutation, so the rate limit and the checkpoint
+# rule both apply (the mapper does the same for unreadable Bash input).
+_UNCLASSIFIED_TOOL = ToolMapping(
+    capability_id="mutate",
+    risk="high",
+    mutation=True,
+    requires_checkpoint=True,
+)
 
 
 def _checkpoint_denial(
@@ -533,10 +544,11 @@ class GroundedAgentAdapter:
           checkpoint, keyed by its ``tool_use_id``. In strict mode the call
           is denied when there is no valid checkpoint or another call holds
           it.
-        - Any other error in the check denies the call in strict mode and
-          is logged in non-strict mode. For a tool in ``allowed_tools`` this
-          hook is the only check that runs, so allowing the call on error
-          would skip both the rate limit and the checkpoint.
+        - A tool the mapper fails to classify is treated as a high-risk
+          mutation, so both checks above apply to it. Any other error (for
+          example in the reservation) denies the call in strict mode and is
+          logged in non-strict mode. For a tool in ``allowed_tools`` this
+          hook is the only check that runs.
 
         They share one hook so the rate check is guaranteed to run before
         the reservation. With two hooks nothing fixes their order, and a
@@ -574,14 +586,22 @@ class GroundedAgentAdapter:
                 tool_name = input_data.get("tool_name", "")
                 tool_input = input_data.get("tool_input", {})
 
-                mapping = mapper.map_tool(tool_name, tool_input)
+                try:
+                    mapping = mapper.map_tool(tool_name, tool_input)
+                except Exception:
+                    logger.exception(
+                        "Could not classify %s; treating it as a high-risk mutation",
+                        tool_name,
+                    )
+                    mapping = _UNCLASSIFIED_TOOL
 
                 try:
                     within_limit = limiter.allow(mapping.risk)
-                except Exception as e:
+                except Exception:
                     # The rate limit used to sit in can_use_tool, which
                     # denies on error; keep it fail-closed here.
-                    return deny(f"Rate limit check failed: {e}")
+                    logger.exception("PreToolUse rate limit check failed")
+                    return deny("Rate limit check failed")
                 if not within_limit:
                     return deny(
                         f"Rate limited: {mapping.risk}-risk capability "
@@ -609,10 +629,12 @@ class GroundedAgentAdapter:
 
                 logger.warning("PreToolUse warning (non-strict): %s", message)
 
-            except Exception as e:
+            except Exception:
+                # The detail stays in the log: the deny reason goes back to
+                # the model.
+                logger.exception("PreToolUse safety check failed")
                 if strict:
-                    return deny(f"PreToolUse safety check failed: {e}")
-                logger.warning("PreToolUse safety check failed (non-strict): %s", e)
+                    return deny("PreToolUse safety check failed")
 
             return {}
 

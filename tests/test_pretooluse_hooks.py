@@ -363,26 +363,44 @@ class TestPreToolUseExceptionHandling:
     """Tests for PreToolUse hook exception handling."""
 
     @pytest.mark.asyncio
-    async def test_exception_in_mapper_denies_in_strict_mode(
+    async def test_unclassified_tool_needs_a_checkpoint_in_strict_mode(
         self, strict_adapter: GroundedAgentAdapter
     ):
         """For a tool in allowed_tools this hook is the only check that
-        runs, so an error in it must not let the call through."""
+        runs, so a tool the mapper cannot classify must not pass unchecked:
+        it is treated as a high-risk mutation."""
         from unittest.mock import MagicMock
 
         hook = strict_adapter._make_pretooluse_safety_hook()
         strict_adapter.mapper.map_tool = MagicMock(  # type: ignore[assignment]
+            side_effect=RuntimeError("mapper exploded at /secret/path")
+        )
+        call = {"tool_name": "Read", "tool_input": {}}
+
+        denied = await hook(call, "r1", None)
+        assert _decision(denied) == "deny"
+        assert "/secret/path" not in _reason(denied)
+
+        strict_adapter.create_checkpoint(["*"], "Test")
+        assert await hook(call, "r2", None) == {}
+
+    @pytest.mark.asyncio
+    async def test_unclassified_tool_charges_the_high_risk_limit(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        from unittest.mock import MagicMock
+
+        charged: list[str] = []
+        strict_adapter.rate_limiter.allow = lambda risk: charged.append(risk) or True  # type: ignore[method-assign]
+        strict_adapter.mapper.map_tool = MagicMock(  # type: ignore[assignment]
             side_effect=RuntimeError("mapper exploded")
         )
+        strict_adapter.create_checkpoint(["*"], "Test")
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
-        result = await hook(
-            {"tool_name": "Write", "tool_input": {"file_path": "test.txt"}},
-            "tool_err",
-            None,
-        )
+        await hook({"tool_name": "Read", "tool_input": {}}, "r1", None)
 
-        assert _decision(result) == "deny"
-        assert "safety check failed" in _reason(result)
+        assert charged == ["high"]
 
     @pytest.mark.asyncio
     async def test_exception_in_reservation_denies_in_strict_mode(
@@ -393,29 +411,34 @@ class TestPreToolUseExceptionHandling:
         strict_adapter.create_checkpoint(["*"], "Test")
         hook = strict_adapter._make_pretooluse_safety_hook()
         strict_adapter.checkpoint_tracker.validate_and_reserve = MagicMock(  # type: ignore[method-assign]
-            side_effect=RuntimeError("tracker broken")
+            side_effect=RuntimeError("tracker broken at /secret/path")
         )
 
         result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
 
         assert _decision(result) == "deny"
+        assert "/secret/path" not in _reason(result)
 
     @pytest.mark.asyncio
-    async def test_exception_in_mapper_allows_in_non_strict_mode(
-        self, lenient_adapter: GroundedAgentAdapter
+    async def test_exception_in_reservation_allows_in_non_strict_mode(
+        self, lenient_adapter: GroundedAgentAdapter, caplog: pytest.LogCaptureFixture
     ):
-        """Non-strict mode warns instead of denying, as it does for a
+        """Non-strict mode logs instead of denying, as it does for a
         missing checkpoint."""
         from unittest.mock import MagicMock
 
+        lenient_adapter.create_checkpoint(["*"], "Test")
         hook = lenient_adapter._make_pretooluse_safety_hook()
-        lenient_adapter.mapper.map_tool = MagicMock(  # type: ignore[assignment]
-            side_effect=RuntimeError("mapper exploded")
+        lenient_adapter.checkpoint_tracker.validate_and_reserve = MagicMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("tracker broken")
         )
 
-        result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
+        with caplog.at_level("ERROR", logger="grounded_agency.adapter"):
+            result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
 
         assert result == {}
+        assert "PreToolUse safety check failed" in caplog.text
+        assert "tracker broken" in caplog.text  # with the traceback
 
     @pytest.mark.asyncio
     async def test_exception_in_rate_limiter_denies(
