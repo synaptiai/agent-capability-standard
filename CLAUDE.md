@@ -118,6 +118,50 @@ suite on it, then raise the cap. Note the range still admits patch and minor
 drift: two installs a week apart are not identical unless both use the
 constraints file.
 
+## Documentation site
+
+The site in `site/` is an Astro project built from the repository's own files.
+Node is pinned in `site/.nvmrc`. `.github/workflows/site.yml` runs the same
+commands on every push and pull request, and deploys main to Cloudflare Pages.
+
+```bash
+cd site
+npm ci          # install the exact versions in package-lock.json
+npm run check   # type-check, colour contrast, design data, no hand-typed counts
+npm test        # vitest; also builds the site into a temporary directory
+npm run build   # build, Pagefind index, then scripts/check-dist.mjs
+npm run dev     # local server; search works only on a built site (npm run preview)
+```
+
+`npm run build` fails when a Markdown link or `#anchor` does not resolve, when
+rendered heading ids differ from GitHub's ids for the source, and, in
+`scripts/check-dist.mjs`, when a link in the built HTML does not resolve, a raw
+`.md` link remains, a page has no Markdown copy or `llms.txt` does not list it,
+or the sitemap differs from the built pages.
+
+Rules:
+- **No YAML file under `site/`.** `tests/test_core_yaml.py` checks every
+  tracked YAML file outside `.github/` as an Agent Capability Standard
+  document. Use JSON or TypeScript instead.
+- **Every new public `.md` file needs a row in `site/src/lib/routes.ts`**, or
+  an entry in its `EXCLUSIONS` list. Once the file is tracked by git, the build
+  and the tests fail with `<path>: public Markdown with no route`.
+
+The site tests read the live repository (the ontology, workflow catalogs,
+profiles, `CLAUDE.md`, `skills/README.md`, the Standard), so a change there can
+fail `npm test` in `site/`. When adding a capability (see below), the site
+needs:
+- the layer table in this file and the **Total** line in `skills/README.md`
+  updated (the tests compare the ontology with both);
+- the capability's two-letter symbol added, in layer order, to the list in
+  `site/test/views.test.ts` ("periodic table symbols"); the failing test prints
+  the symbol the site computed.
+
+Nothing else in the site needs editing: pages, counts and the sidebar come from
+the ontology. A release (new version in `.claude-plugin/plugin.json` and a
+`CHANGELOG.md` section) needs no site change; the site reads the version from
+`plugin.json`.
+
 ## Architecture
 
 This is a **Claude Code plugin** that defines a formal capability ontology for AI agents with **36 atomic capabilities** across **9 cognitive layers**, plus 12 composed workflow patterns.
