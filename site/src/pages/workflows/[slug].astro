@@ -1,0 +1,294 @@
+---
+// One page per workflow in the core and domain catalogs: goal, inputs, the
+// step list with markers, then each step's purpose, effective safety flags
+// (Standard §5.2.1), bindings, gates and failure modes, and the workflow's
+// other sections. Every heading the page adds has a `ref-` id.
+import ContractTable from '../../components/ContractTable.astro';
+import FlagBadge from '../../components/FlagBadge.astro';
+import LayerBadge from '../../components/LayerBadge.astro';
+import RiskBadge from '../../components/RiskBadge.astro';
+import WorkflowDiagram from '../../components/WorkflowDiagram.astro';
+import YamlBlock from '../../components/YamlBlock.astro';
+import { loadOntology } from '../../data/ontology';
+import { loadWorkflows } from '../../data/workflows';
+import DocLayout from '../../layouts/DocLayout.astro';
+import {
+  capabilityHref,
+  diagnosticHref,
+  domainHref,
+  pageHref,
+  refSlugger,
+  repoPathHref,
+  routesByTemplate,
+  specSectionHref,
+  workflowHref,
+} from '../../lib/generated';
+import { githubBlobUrl } from '../../lib/repo';
+import type { Route } from '../../lib/routes';
+import {
+  capabilitiesUsed,
+  composedSkillsFor,
+  failureRows,
+  gateRows,
+  producerSteps,
+  profilesListing,
+  schemaRows,
+} from '../../lib/views';
+
+export function getStaticPaths() {
+  const { all } = loadWorkflows();
+  return routesByTemplate('workflow').map((route) => {
+    const wf = all.find((w) => `/workflows/${w.slug}/` === route.url);
+    if (!wf) throw new Error(`workflows: no workflow for ${route.url}`);
+    return { params: { slug: wf.slug }, props: { route, workflowId: wf.id } };
+  });
+}
+
+interface Props {
+  route: Route;
+  workflowId: string;
+}
+
+const { route, workflowId } = Astro.props;
+const wf = loadWorkflows().byId.get(workflowId)!;
+const ontology = loadOntology();
+const id = refSlugger();
+const stepId = (n: number) => `ref-step-${n}`;
+const profiles = profilesListing(wf.id);
+const skills = composedSkillsFor(wf.id);
+const flagsHref = specSectionHref('5.2.1');
+const gatesHref = specSectionHref('5.6');
+const failuresHref = specSectionHref('5.7');
+const checkpoints = wf.steps.filter((s) => s.capability === 'checkpoint').length;
+const changing = wf.steps.filter((s) => s.effective.mutation).length;
+const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
+---
+<DocLayout route={route} title={wf.id} description={wf.goal}>
+  <article class="doc doc--workflow" data-workflow={wf.id} data-catalog={wf.catalog} data-pagefind-body>
+    <header class="workflow-header">
+      <p class="workflow-header__id"><code>{wf.id}</code></p>
+      <h1 id={id(wf.goal)}>{wf.goal}</h1>
+      <ul class="workflow-header__badges">
+        <li><RiskBadge risk={wf.risk} /></li>
+        <li>
+          {wf.catalog === 'core' ? (
+            <FlagBadge kind="catalog-core" label="Reference workflow" />
+          ) : (
+            <FlagBadge kind="catalog-domain" label={`Domain: ${wf.domain ?? 'none'}`} href={wf.domain ? domainHref(wf.domain) : undefined} />
+          )}
+        </li>
+      </ul>
+      <dl class="workflow-meta">
+        {wf.standardVersion && (
+          <div><dt>Declares</dt><dd>Standard {wf.standardVersion}</dd></div>
+        )}
+        <div><dt>Steps</dt><dd>{wf.steps.length}</dd></div>
+        <div><dt>Checkpoint steps</dt><dd>{checkpoints}</dd></div>
+        <div><dt>Steps that change state</dt><dd>{changing}</dd></div>
+        <div><dt>Source</dt><dd><a href={githubBlobUrl(wf.source)}><code>{wf.source}</code></a></dd></div>
+        {wf.profile && (
+          <div><dt>Profile</dt><dd><a href={repoPathHref(wf.profile, wf.source)}><code>{wf.profile}</code></a></dd></div>
+        )}
+      </dl>
+    </header>
+
+    {wf.description && <p class="workflow-description">{wf.description}</p>}
+
+    <section class="workflow-inputs">
+      <h2 id={id('Inputs')}>Inputs</h2>
+      <ContractTable rows={schemaRows(wf.inputs)} caption={`Inputs of ${wf.id}`} from={wf.source} />
+    </section>
+
+    <section class="workflow-steps">
+      <h2 id={id('Steps')}>Steps</h2>
+      <WorkflowDiagram workflow={wf} stepIdPrefix="ref-step-" />
+    </section>
+
+    <section class="workflow-step-details">
+      <h2 id={id('Step details')}>Step details</h2>
+      {wf.steps.map((step) => {
+        const gates = gateRows(step);
+        const failures = failureRows(step);
+        const reads = producerSteps(wf, step);
+        const e = step.effective;
+        return (
+          <section class="workflow-step" data-step={step.index} data-capability={step.capability}>
+            <h3 id={stepId(step.index)}>Step {step.index}: <code>{step.capability}</code></h3>
+            <p class="workflow-step__capability">
+              <a href={capabilityHref(step.capability)}><code>{step.capability}</code></a>{' '}
+              <LayerBadge layer={step.layer} />
+              {step.domain && <> with domain <code>{step.domain}</code></>}
+            </p>
+            {step.purpose && <p class="workflow-step__purpose">{step.purpose}</p>}
+            <dl class="workflow-step__facts">
+              <div>
+                <dt><a href={flagsHref}>Effective flags</a></dt>
+                <dd>
+                  <ul class="capability-flags">
+                    <li><RiskBadge risk={e.risk} /></li>
+                    <li>{e.mutation ? <FlagBadge kind="mutation" label="Changes state" /> : <FlagBadge kind="read-only" label="Read-only" />}</li>
+                    {e.checkpoint.needed && <li><FlagBadge kind="checkpoint" label="Needs a checkpoint before it" /></li>}
+                    {e.requires_approval && <li><FlagBadge kind="approval" label="Needs approval" /></li>}
+                    {e.downgrades.length > 0 && (
+                      <li><FlagBadge kind="downgrade" label={`Weaker declaration ignored (W602): ${e.downgrades.join(', ')}`} href={diagnosticHref('W602')} /></li>
+                    )}
+                  </ul>
+                </dd>
+              </div>
+              {step.store_as && <div><dt>Stores</dt><dd><code>{step.store_as}</code></dd></div>}
+              {reads.length > 0 && (
+                <div>
+                  <dt>Uses output of</dt>
+                  <dd>
+                    {reads.map((r, i) => (
+                      <>{i > 0 && ', '}<a href={`#${stepId(r.index)}`}>step {r.index}</a> (<code>{r.name}</code>)</>
+                    ))}
+                  </dd>
+                </div>
+              )}
+              {step.condition !== undefined && step.condition !== null && (
+                <div><dt>Runs when</dt><dd><code>{String(step.condition)}</code>{step.skip_if_false === true && ' (skipped when false)'}</dd></div>
+              )}
+              {step.parallel_group && <div><dt>Parallel group</dt><dd><code>{step.parallel_group}</code></dd></div>}
+              {step.workflow_id && (
+                <div><dt>Runs workflow</dt><dd><a href={workflowHref(step.workflow_id)}><code>{step.workflow_id}</code></a></dd></div>
+              )}
+              {step.mapping_ref && (
+                <div><dt>Mapping</dt><dd><a href={repoPathHref(step.mapping_ref, wf.source)}><code>{step.mapping_ref}</code></a></dd></div>
+              )}
+              {step.timeout !== undefined && step.timeout !== null && <div><dt>Timeout</dt><dd><code>{String(step.timeout)}</code></dd></div>}
+              {step.retry !== undefined && step.retry !== null && <div><dt>Retry</dt><dd><code>{JSON.stringify(step.retry)}</code></dd></div>}
+            </dl>
+            {Object.keys(step.input_bindings).length > 0 && (
+              <>
+                <p class="workflow-step__label">Input bindings</p>
+                <YamlBlock value={step.input_bindings} />
+              </>
+            )}
+            {gates.length > 0 && (
+              <div class="table-scroll">
+                <table class="gate-table">
+                  <caption><a href={gatesHref}>Gates</a> of step {step.index}</caption>
+                  <thead><tr><th scope="col">When</th><th scope="col">Action</th><th scope="col">Message</th></tr></thead>
+                  <tbody>
+                    {gates.map((g) => (
+                      <tr>
+                        <td><code>{g.when}</code>{g.phase && <> ({g.phase} the step)</>}</td>
+                        <td><code>{g.action}</code></td>
+                        <td>{g.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {failures.length > 0 && (
+              <div class="table-scroll">
+                <table class="failure-table">
+                  <caption><a href={failuresHref}>Failure modes</a> of step {step.index}</caption>
+                  <thead><tr><th scope="col">Condition</th><th scope="col">Diagnostics</th><th scope="col">Action</th><th scope="col">Recovery</th></tr></thead>
+                  <tbody>
+                    {failures.map((f) => (
+                      <tr>
+                        <td>{f.condition}{f.when && <> <code>{f.when}</code></>}</td>
+                        <td>
+                          {f.codes.map((c, i) => <>{i > 0 && ', '}<a href={diagnosticHref(c)}><code>{c}</code></a></>)}
+                        </td>
+                        <td><code>{f.action}</code></td>
+                        <td>{f.recovery}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {Object.keys(step.extra).length > 0 && (
+              <>
+                <p class="workflow-step__label">Other step fields</p>
+                <YamlBlock value={step.extra} />
+              </>
+            )}
+          </section>
+        );
+      })}
+    </section>
+
+    {wf.success.length > 0 && (
+      <section class="workflow-success">
+        <h2 id={id('Success criteria')}>Success criteria</h2>
+        <ul>{wf.success.map((s) => <li>{s}</li>)}</ul>
+      </section>
+    )}
+    {wf.data_flow !== undefined && (
+      <section class="workflow-data-flow">
+        <h2 id={id('Data flow')}>Data flow</h2>
+        <YamlBlock value={wf.data_flow} />
+      </section>
+    )}
+    {wf.risk_propagation !== undefined && (
+      <section class="workflow-risk-propagation">
+        <h2 id={id('Risk propagation')}>Risk propagation</h2>
+        <YamlBlock value={wf.risk_propagation} />
+      </section>
+    )}
+    {wf.workflow_extensions !== undefined && (
+      <section class="workflow-extensions">
+        <h2 id={id('Workflow extensions')}>Workflow extensions</h2>
+        <p>See <a href={specSectionHref('5.9')}>Standard §5.9</a>.</p>
+        <YamlBlock value={wf.workflow_extensions} />
+      </section>
+    )}
+    {wf.triggers !== undefined && (
+      <section class="workflow-triggers">
+        <h2 id={id('Triggers')}>Triggers</h2>
+        <YamlBlock value={wf.triggers} />
+      </section>
+    )}
+    {Object.keys(wf.extra).length > 0 && (
+      <section class="workflow-extra">
+        <h2 id={id('Other fields')}>Other fields</h2>
+        <YamlBlock value={wf.extra} />
+      </section>
+    )}
+
+    <section class="workflow-related">
+      <h2 id={id('Related')}>Related</h2>
+      <dl>
+        {skills.length > 0 && (
+          <div>
+            <dt>Claude Code skill</dt>
+            <dd>{skills.map((s, i) => <>{i > 0 && ', '}<a href={pageHref(`/guides/skills/${s}/`)}><code>{s}</code></a></>)}</dd>
+          </div>
+        )}
+        {profiles.length > 0 && (
+          <div>
+            <dt>Listed by the domain profiles</dt>
+            <dd>{profiles.map((p, i) => <>{i > 0 && ', '}<a href={domainHref(p.key)}>{p.key}</a></>)}</dd>
+          </div>
+        )}
+        {wf.invokedBy.length > 0 && (
+          <div>
+            <dt>Run by the workflows</dt>
+            <dd>{wf.invokedBy.map((w, i) => <>{i > 0 && ', '}<a href={workflowHref(w)}><code>{w}</code></a></>)}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Capabilities used</dt>
+          <dd>
+            <ul class="capability-chips">
+              {capabilitiesUsed(wf).map((c) => (
+                <li data-layer={ontology.byId.get(c)!.layer.toLowerCase()}><a href={capabilityHref(c)}><code>{c}</code></a></li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="workflow-validate">
+      <h2 id={id('Validate it')}>Validate it</h2>
+      <p>Run the reference validator on this workflow's catalog from the repository root:</p>
+      <pre class="code-block code-block--shell"><code>{validateCmd}</code></pre>
+    </section>
+  </article>
+</DocLayout>
