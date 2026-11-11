@@ -1,7 +1,7 @@
 ---
 // The site header: the mark and wordmark (home link, named by the visible
 // wordmark so the name contains what is on screen at every width), a chip with the current
-// Standard version, an empty slot that search fills in a later phase, the
+// Standard version, the search trigger, the
 // GitHub link, the theme toggle and, below 1024px, the menu button. A second
 // row links to each section.
 import { loadVersions } from '../data/versions';
@@ -10,6 +10,7 @@ import { GITHUB_BASE } from '../lib/repo';
 import { ROUTES, SECTIONS, type Route } from '../lib/routes';
 import Mark from '../pixel/Mark.astro';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
+import Search from './Search.astro';
 import ThemeToggle from './ThemeToggle.astro';
 
 interface Props {
@@ -25,7 +26,7 @@ const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
   url: ROUTES.find((r) => r.section === s.id && r.order === 0)?.url ?? '/',
 }));
 ---
-<header class="site-header">
+<header class="site-header" data-pagefind-ignore="all">
   <div class="site-header__bar">
     <button type="button" class="menu-button btn btn--quiet" aria-controls="site-sidebar" aria-expanded="false" data-menu-button>
       <PixelGlyph name="menu" class="menu-button__open" />
@@ -41,7 +42,7 @@ const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
       <span class="visually-hidden"> home</span>
     </a>
     <a class="version-chip" href={specUrl}><span class="version-chip__word">Standard </span>v{version}</a>
-    <div class="site-header__search" data-search-slot></div>
+    <div class="site-header__search"><Search /></div>
     <a class="site-header__github btn btn--quiet" href={GITHUB_BASE}>
       <PixelGlyph name="code" />
       <span>GitHub</span>

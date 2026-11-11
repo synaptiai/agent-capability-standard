@@ -1,0 +1,202 @@
+---
+// Site search, built on Pagefind's JavaScript API with the site's own markup.
+// Pagefind indexes the built site after `astro build`, so search works on the
+// built site only; under `astro dev` the dialog says so.
+// - The trigger opens a dialog; "/" and Ctrl or Cmd+K open it from anywhere
+//   outside a text field. Escape closes it and focus returns to the trigger.
+// - Up and Down move between results, Enter follows one.
+// - One filter, the section a page belongs to.
+// - Without JavaScript the trigger is a plain link to a web search limited
+//   to this site.
+import { SITE_ORIGIN } from '../lib/links';
+import { SECTIONS } from '../lib/routes';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+
+const host = new URL(SITE_ORIGIN).host;
+const fallback = `https://duckduckgo.com/?q=${encodeURIComponent(`site:${host}`)}`;
+const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
+---
+<div class="search" data-search>
+  <a class="search-trigger" href={fallback} data-search-open aria-haspopup="dialog">
+    <PixelGlyph name="search" />
+    <span class="search-trigger__text">Search the standard</span>
+    <kbd class="search-trigger__key" aria-hidden="true">/</kbd>
+  </a>
+  <dialog class="search-dialog" aria-label="Search the standard" data-search-dialog>
+    <form class="search-dialog__form" role="search" data-search-form>
+      <label class="visually-hidden" for="search-input">Search the standard</label>
+      <PixelGlyph name="search" />
+      <input
+        id="search-input"
+        class="search-dialog__input"
+        type="search"
+        placeholder="Search the standard"
+        autocomplete="off"
+        spellcheck="false"
+        aria-controls="search-results"
+        aria-describedby="search-status"
+        data-search-input
+      />
+      <label class="visually-hidden" for="search-section">Section</label>
+      <select id="search-section" class="search-dialog__section" data-search-section>
+        <option value="">All sections</option>
+        {sections.map((s) => <option value={s}>{s}</option>)}
+      </select>
+      <button type="button" class="btn btn--quiet btn--small" data-search-close>
+        <PixelGlyph name="close" />
+        <span>Close</span>
+      </button>
+    </form>
+    <p id="search-status" class="search-dialog__status" role="status" aria-live="polite" data-search-status></p>
+    <ol id="search-results" class="search-dialog__results" data-search-results></ol>
+  </dialog>
+</div>
+
+<script>
+  interface PagefindResult {
+    url: string;
+    excerpt: string;
+    meta: Record<string, string>;
+    filters: Record<string, string[]>;
+  }
+  interface Pagefind {
+    options(o: Record<string, unknown>): Promise<void>;
+    debouncedSearch(
+      q: string,
+      o?: { filters?: Record<string, string> },
+      ms?: number,
+    ): Promise<{ results: { data(): Promise<PagefindResult> }[] } | null>;
+  }
+
+  const root = document.querySelector<HTMLElement>('[data-search]');
+  if (root) {
+    const trigger = root.querySelector<HTMLAnchorElement>('[data-search-open]')!;
+    const dialog = root.querySelector<HTMLDialogElement>('[data-search-dialog]')!;
+    const input = root.querySelector<HTMLInputElement>('[data-search-input]')!;
+    const section = root.querySelector<HTMLSelectElement>('[data-search-section]')!;
+    const status = root.querySelector<HTMLElement>('[data-search-status]')!;
+    const list = root.querySelector<HTMLOListElement>('[data-search-results]')!;
+    const form = root.querySelector<HTMLFormElement>('[data-search-form]')!;
+    const MAX = 12;
+    let pagefind: Pagefind | null = null;
+    let loading: Promise<Pagefind | null> | null = null;
+    let run = 0;
+
+    trigger.setAttribute('role', 'button');
+    trigger.setAttribute('aria-keyshortcuts', '/ Control+K Meta+K');
+
+    const load = (): Promise<Pagefind | null> => {
+      loading ??= (async () => {
+        try {
+          const url = '/pagefind/pagefind.js';
+          const mod = (await import(/* @vite-ignore */ url)) as Pagefind;
+          await mod.options({ excerptLength: 24 });
+          pagefind = mod;
+          return mod;
+        } catch {
+          status.textContent = 'Search works on the built site only. Run npm run build, then npm run preview.';
+          return null;
+        }
+      })();
+      return loading;
+    };
+
+    const open = () => {
+      if (dialog.open) return;
+      dialog.showModal();
+      input.focus();
+      input.select();
+      void load();
+    };
+
+    const results = () => [...list.querySelectorAll<HTMLAnchorElement>('a')];
+
+    const render = (items: PagefindResult[], total: number, query: string) => {
+      list.replaceChildren();
+      for (const r of items) {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.className = 'search-result';
+        a.href = r.url;
+        const where = document.createElement('span');
+        where.className = 'search-result__section';
+        where.textContent = r.filters.section?.[0] ?? '';
+        const title = document.createElement('span');
+        title.className = 'search-result__title';
+        title.textContent = r.meta.title ?? r.url;
+        const excerpt = document.createElement('span');
+        excerpt.className = 'search-result__excerpt';
+        // Pagefind's excerpt is escaped text with <mark> around the matches.
+        excerpt.innerHTML = r.excerpt;
+        a.append(where, title, excerpt);
+        li.append(a);
+        list.append(li);
+      }
+      status.textContent =
+        total === 0 ? `No pages match "${query}".` : total > items.length ? `${total} pages match. Showing the first ${items.length}.` : `${total} ${total === 1 ? 'page matches' : 'pages match'}.`;
+    };
+
+    const search = async () => {
+      const q = input.value.trim();
+      const mine = ++run;
+      if (q === '') {
+        list.replaceChildren();
+        status.textContent = '';
+        return;
+      }
+      const pf = pagefind ?? (await load());
+      if (!pf || mine !== run) return;
+      const filters: Record<string, string> = section.value ? { section: section.value } : {};
+      const found = await pf.debouncedSearch(q, { filters }, 150);
+      if (found === null || mine !== run) return;
+      const items = await Promise.all(found.results.slice(0, MAX).map((r) => r.data()));
+      if (mine !== run) return;
+      render(items, found.results.length, q);
+    };
+
+    trigger.addEventListener('click', (e) => {
+      e.preventDefault();
+      open();
+    });
+    trigger.addEventListener('keydown', (e) => {
+      if (e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+    root.querySelector('[data-search-close]')!.addEventListener('click', () => dialog.close());
+    input.addEventListener('input', () => void search());
+    section.addEventListener('change', () => void search());
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      results()[0]?.click();
+    });
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+    dialog.addEventListener('close', () => trigger.focus());
+
+    dialog.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      const links = results();
+      if (links.length === 0) return;
+      e.preventDefault();
+      const at = links.indexOf(document.activeElement as HTMLAnchorElement);
+      if (e.key === 'ArrowDown') (links[at + 1] ?? links[0])!.focus();
+      else if (at <= 0) input.focus();
+      else links[at - 1]!.focus();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+      if ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        e.preventDefault();
+        open();
+      } else if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        open();
+      }
+    });
+  }
+</script>

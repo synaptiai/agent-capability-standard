@@ -30,7 +30,7 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
 }));
 const mono = route.section === 'capabilities';
 ---
-<aside id="site-sidebar" class="sidebar" aria-label="Site navigation" data-sidebar>
+<aside id="site-sidebar" class="sidebar" aria-label="Site navigation" data-sidebar data-pagefind-ignore="all">
   <nav class="sidebar__sections" aria-label="Sections (menu)">
     <p class="sidebar__title">Sections</p>
     <ul>

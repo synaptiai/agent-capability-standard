@@ -80,9 +80,14 @@ const ogImage = new URL('/og.png', Astro.site);
     <Header route={route} />
     <div class="frame">
       <Sidebar route={route} />
-      <main id="content" class="doc-main" tabindex="-1">
+      <main
+        id="content"
+        class="doc-main"
+        tabindex="-1"
+        data-pagefind-filter={section ? `section:${section.label}` : undefined}
+      >
         {section && route.section !== 'home' && (
-          <nav class="breadcrumb" aria-label="Breadcrumb">
+          <nav class="breadcrumb" aria-label="Breadcrumb" data-pagefind-ignore="all">
             <ol>
               <li>{section.label}</li>
               {route.group && <li>{route.group}</li>}
@@ -96,7 +101,7 @@ const ogImage = new URL('/og.png', Astro.site);
         <PrevNext route={route} />
       </main>
     </div>
-    <footer class="site-footer">
+    <footer class="site-footer" data-pagefind-ignore="all">
       {sourceUrl && (
         <p class="site-footer__source">
           Source: <a href={sourceUrl}>{route.source}</a>

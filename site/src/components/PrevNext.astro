@@ -16,7 +16,7 @@ const next = i >= 0 && i < order.length - 1 ? order[i + 1] : undefined;
 const label = (r: Route) => SECTIONS.find((s) => s.id === r.section)?.label ?? '';
 ---
 {(prev || next) && (
-  <nav class="prev-next" aria-label="Previous and next page">
+  <nav class="prev-next" aria-label="Previous and next page" data-pagefind-ignore="all">
     {prev && (
       <a class="prev-next__link prev-next__link--prev" href={prev.url} rel="prev">
         <span class="eyebrow">Previous · {label(prev)}</span>
