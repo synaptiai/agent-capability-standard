@@ -3,17 +3,23 @@
 // Pagefind indexes the built site after `astro build`, so search works on the
 // built site only; under `astro dev` the dialog says so.
 // - The trigger opens a dialog; "/" and Ctrl or Cmd+K open it from anywhere
-//   outside a text field. Escape closes it and focus returns to the trigger.
-// - Up and Down move between results, Enter follows one.
-// - One filter, the section a page belongs to.
+//   outside a text field. One Escape closes it, also while the field has
+//   text, and focus returns to the trigger.
+// - Up and Down, in the field or on a result, move between results; Enter
+//   follows one. In the Section list they change the section as usual.
+// - One filter, the section a page belongs to. A page tagged with an older
+//   Standard version shows that version beside its section.
+// - Results matched only on a short prefix of a query word are dropped (see
+//   lib/search-match.ts), so a made-up word finds no pages.
+// - Another script can open the dialog with a query typed in by dispatching
+//   SEARCH_EVENT on document with { detail: { query } } (the 404 page does).
 // - Without JavaScript the trigger is a plain link to a web search limited
 //   to this site.
-import { SITE_ORIGIN } from '../lib/links';
+import { siteSearchUrl } from '../lib/search-url';
 import { SECTIONS } from '../lib/routes';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 
-const host = new URL(SITE_ORIGIN).host;
-const fallback = `https://duckduckgo.com/?q=${encodeURIComponent(`site:${host}`)}`;
+const fallback = siteSearchUrl();
 const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
 ---
 <div class="search" data-search>
@@ -53,9 +59,14 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
 </div>
 
 <script>
+  import { isRealMatch, wordsAt } from '../lib/search-match';
+  import { SEARCH_EVENT } from '../lib/search-url';
+
   interface PagefindResult {
     url: string;
     excerpt: string;
+    content: string;
+    locations: number[];
     meta: Record<string, string>;
     filters: Record<string, string[]>;
   }
@@ -121,7 +132,8 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
         a.href = r.url;
         const where = document.createElement('span');
         where.className = 'search-result__section';
-        where.textContent = r.filters.section?.[0] ?? '';
+        const version = r.filters.version?.[0];
+        where.textContent = [r.filters.section?.[0], version && `Standard v${version}`].filter(Boolean).join(' · ');
         const title = document.createElement('span');
         title.className = 'search-result__title';
         title.textContent = r.meta.title ?? r.url;
@@ -150,9 +162,12 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
       const filters: Record<string, string> = section.value ? { section: section.value } : {};
       const found = await pf.debouncedSearch(q, { filters }, 150);
       if (found === null || mine !== run) return;
-      const items = await Promise.all(found.results.slice(0, MAX).map((r) => r.data()));
+      const loaded = await Promise.all(found.results.slice(0, MAX).map((r) => r.data()));
       if (mine !== run) return;
-      render(items, found.results.length, q);
+      const items = loaded.filter((r) => isRealMatch(q, wordsAt(r.content, r.locations)));
+      // Loose matches rank last, so once one is dropped the rest of the list is loose too.
+      const total = items.length < loaded.length ? items.length : found.results.length;
+      render(items, total, q);
     };
 
     trigger.addEventListener('click', (e) => {
@@ -178,14 +193,29 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
     dialog.addEventListener('close', () => trigger.focus());
 
     dialog.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        // Without this, Chrome spends the first Escape clearing the field.
+        e.preventDefault();
+        dialog.close();
+        return;
+      }
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
       const links = results();
       if (links.length === 0) return;
+      if (e.target !== input && !links.includes(e.target as HTMLAnchorElement)) return;
       e.preventDefault();
       const at = links.indexOf(document.activeElement as HTMLAnchorElement);
       if (e.key === 'ArrowDown') (links[at + 1] ?? links[0])!.focus();
       else if (at <= 0) input.focus();
       else links[at - 1]!.focus();
+    });
+
+    document.addEventListener(SEARCH_EVENT, (e) => {
+      const query = (e as CustomEvent<{ query?: string }>).detail?.query ?? '';
+      open();
+      input.value = query;
+      input.select();
+      void search();
     });
 
     document.addEventListener('keydown', (e) => {

@@ -15,6 +15,7 @@ import PageActions from '../components/PageActions.astro';
 import PrevNext from '../components/PrevNext.astro';
 import Sidebar from '../components/Sidebar.astro';
 import Toc from '../components/Toc.astro';
+import { loadVersions } from '../data/versions';
 import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
 import { SECTIONS, type Route } from '../lib/routes';
 import { tocEntries } from '../lib/toc';
@@ -48,6 +49,9 @@ const hasMarkdownCopy = markdownEndpoints.length > 0 && route.template !== 'not-
 const light = pageColour('light');
 const dark = pageColour('dark');
 const ogImage = new URL('/og.png', Astro.site);
+// An older Standard is tagged with its version in search and ranked below
+// the current one (its words count for less).
+const olderStandard = loadVersions().standard.previous.find((p) => route.url === `/spec/${p.version}/`)?.version;
 ---
 <!doctype html>
 <html lang="en">
@@ -64,6 +68,7 @@ const ogImage = new URL('/og.png', Astro.site);
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
     <meta data-pagefind-meta="title[content]" content={headTitle ?? title} />
+    {olderStandard && <meta data-pagefind-filter="version[content]" content={olderStandard} />}
     {description && <meta name="description" content={description} />}
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={new URL(route.url, Astro.site)} />}
     <meta name="theme-color" content={light} media="(prefers-color-scheme: light)" data-light={light} data-dark={dark} />
@@ -100,7 +105,7 @@ const ogImage = new URL('/og.png', Astro.site);
         )}
         {hasMarkdownCopy && <PageActions url={route.url} />}
         <Toc entries={toc} />
-        <div class="doc-main__body"><Fragment set:html={body} /></div>
+        <div class="doc-main__body" data-pagefind-weight={olderStandard ? '0.5' : undefined}><Fragment set:html={body} /></div>
         <PrevNext route={route} />
       </main>
     </div>

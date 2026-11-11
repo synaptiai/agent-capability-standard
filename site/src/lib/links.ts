@@ -3,8 +3,9 @@
 import { GITHUB_BASE, readRepoFile, TRACKED_FILES } from './repo';
 import { createResolver, type LinkKind, type Resolver } from './resolve';
 import { DIRECTORY_MAP, routeForSource } from './routes';
+import { SITE_ORIGIN } from './origin';
 
-export const SITE_ORIGIN = 'https://acs.synapti.ai';
+export { SITE_ORIGIN };
 
 let resolver: Resolver | undefined;
 

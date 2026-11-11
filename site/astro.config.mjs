@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { checkDist, formatDistReport } from './src/lib/check-dist';
 import { checkBuiltSlugs } from './src/lib/check-slugs';
 import { formatLinkStats, linkStats } from './src/lib/links';
+import { spaceBuiltPages } from './src/lib/search-text';
 import { REDIRECTS_FILE, redirectsFile } from './src/lib/redirects';
 import { markdownSources } from './src/lib/routes';
 import { PROCESSOR_OPTIONS, SHIKI_CONFIG } from './src/lib/markdown';
@@ -67,6 +68,8 @@ export default defineConfig({
           if (distProblems.length > 0) {
             throw new Error(`built site:\n  ${distProblems.join('\n  ')}`);
           }
+          // Search breaks words only at some closing tags; add the missing spaces before Pagefind runs.
+          logger.info(`search: spaced table headers and term lists on ${spaceBuiltPages(fileURLToPath(dir))} pages`);
           // The /spec/ redirect names the current version, so it is written here rather than kept in public/.
           writeFileSync(new URL(REDIRECTS_FILE, dir), redirectsFile());
           logger.info(`redirects: ${redirectsFile().trim().split('\n').join('; ')}`);

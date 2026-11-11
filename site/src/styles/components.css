@@ -1535,6 +1535,7 @@
   .search-result__excerpt {
     color: var(--ink-2);
     font-size: 15px;
+    overflow-wrap: anywhere;
   }
 
   .search-result__excerpt mark {

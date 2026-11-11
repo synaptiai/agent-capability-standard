@@ -413,6 +413,30 @@ describe('agent files', () => {
     expect(want).toContain('/spec/diagnostics/index.md');
   });
 
+  it('leaves no closing th, caption, dt, dd, summary or figcaption tag directly before another tag', () => {
+    // Pagefind joins the words on either side of those tags (see lib/search-text.ts).
+    const bad: string[] = [];
+    for (const d of dirsWith('index.html')) {
+      const html = readFileSync(path.join(dist, d, 'index.html'), 'utf8');
+      const m = /<\/(th|caption|dt|dd|summary|figcaption)></.exec(html);
+      if (m) bad.push(`${d}: ${m[0]}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('tags each older Standard with its version for search and weights its words down; the current one has neither', () => {
+    const [current, ...older] = standardFileVersions();
+    expect(older.length).toBeGreaterThan(0);
+    for (const v of older) {
+      const html = readFileSync(path.join(dist, 'spec', v, 'index.html'), 'utf8');
+      expect(html).toContain(`<meta data-pagefind-filter="version[content]" content="${v}">`);
+      expect(html).toMatch(/class="doc-main__body" data-pagefind-weight="0\.\d+"/);
+    }
+    const html = readFileSync(path.join(dist, 'spec', current!, 'index.html'), 'utf8');
+    expect(html).not.toContain('data-pagefind-filter="version');
+    expect(html).not.toContain('data-pagefind-weight');
+  });
+
   it('lists every HTML page in the sitemap, minus the 404 page, and no Markdown or text file', () => {
     const xml = readFileSync(path.join(dist, 'sitemap.xml'), 'utf8');
     const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!.slice(ORIGIN.length)).sort();
