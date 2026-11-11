@@ -27,9 +27,17 @@ export function cell(text: string): string {
   return text.replace(/\s*\n\s*/g, ' ').replace(/(?<!\\)\|/g, '\\|').trim();
 }
 
+/**
+ * An inline code span that reads back as exactly `text`: its fence is one
+ * backtick longer than any backtick run inside, and it is padded with a space
+ * on each side (which CommonMark strips) when the text has a backtick or
+ * begins or ends with a space.
+ */
 export function code(text: string): string {
-  const ticks = text.includes('`') ? '``' : '`';
-  return `${ticks}${ticks.length > 1 ? ' ' : ''}${text}${ticks.length > 1 ? ' ' : ''}${ticks}`;
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const ticks = '`'.repeat(longest + 1);
+  const pad = /^ *$/.test(text) ? '' : longest > 0 || /^ | $/.test(text) ? ' ' : '';
+  return `${ticks}${pad}${text}${pad}${ticks}`;
 }
 
 export function table(headers: string[], rows: string[][]): string {
