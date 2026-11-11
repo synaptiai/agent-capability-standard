@@ -1,6 +1,6 @@
 // The text files for agents and crawlers: llms.txt (every page's Markdown
-// copy, by section, in the llmstxt.org layout), llms-full.txt (the current
-// Standard, the capabilities and the workflows in one file), robots.txt and
+// copy, by section, in the llmstxt.org layout), llms-full.txt (the
+// Specification, Capabilities and Workflows sections in one file), robots.txt and
 // the sitemap. All are built from the route table.
 import { loadVersions, olderVersionNote } from '../data/versions';
 import { readRepoFile } from './repo';
@@ -56,18 +56,22 @@ export async function llmsTxt(): Promise<string> {
   return `${out.join('\n')}\n`;
 }
 
-/** Routes in llms-full.txt: the current Standard, then the Capabilities and Workflows sections. */
+/**
+ * Routes in llms-full.txt: the Specification, Capabilities and Workflows
+ * sections in manifest order. Older Standards are left out, so the file holds
+ * one Standard; their own Markdown copies are listed in llms.txt.
+ */
 export function fullTextRoutes(): Route[] {
-  const current = loadVersions().standard.current.version;
+  const older = new Set(loadVersions().standard.previous.map((p) => `/spec/${p.version}/`));
   return [
-    ...ROUTES.filter((r) => r.url === `/spec/${current}/`),
+    ...ordered(ROUTES.filter((r) => r.section === 'spec' && !older.has(r.url))),
     ...ordered(ROUTES.filter((r) => r.section === 'capabilities')),
     ...ordered(ROUTES.filter((r) => r.section === 'workflows')),
   ];
 }
 
 export async function llmsFullTxt(): Promise<string> {
-  const parts = [`# Agent Capability Standard\n\n> ${summaryLine()}\n\n${versionsLine()}\n\nThis file holds the current Standard, every capability page and every workflow page. Each page starts with a comment that gives its URL.\n`];
+  const parts = [`# Agent Capability Standard\n\n> ${summaryLine()}\n\n${versionsLine()}\n\nThis file holds the current Standard and the rest of the Specification section, every capability page and every workflow page. Older Standards are left out; llms.txt links their Markdown copies. Each page starts with a comment that gives its URL.\n`];
   for (const r of fullTextRoutes()) {
     const t = await twinFor(r);
     parts.push(`<!-- ${mdUrl(r.url)} -->\n\n${t.markdown}`);

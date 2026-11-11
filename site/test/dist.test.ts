@@ -391,17 +391,26 @@ describe('agent files', () => {
     expect(new Set(listed).size).toBe(listed.length);
   });
 
-  it('puts the current Standard, by its own H1, first in llms-full.txt', () => {
+  it('puts the current Standard first in llms-full.txt, then the rest of the Specification, Capabilities and Workflows sections', () => {
     const version = standardFileVersions()[0]!;
     const title = /^# (.+)$/m.exec(repoText(`spec/STANDARD-v${version}.md`))![1]!;
     const full = readFileSync(path.join(dist, 'llms-full.txt'), 'utf8');
     expect(full).toContain(`\n# ${title}\n`);
     const first = /<!-- (\S+) -->/.exec(full)![1];
     expect(first).toBe(`${ORIGIN}/spec/${version}/index.md`);
-    // Only the Standard, capability and layer pages, and workflow pages.
+    // Every built page under /spec/, /capabilities/, /layers/ and /workflows/
+    // (the design's Specification, Capabilities and Workflows sections), each
+    // once, minus the older Standards named by the spec/STANDARD-v*.md files.
     const urls = [...full.matchAll(/^<!-- (\S+) -->$/gm)].map((m) => m[1]!.slice(ORIGIN.length));
-    expect(urls.filter((u) => !/^\/(spec\/\d+\.\d+\.\d+|capabilities|layers|workflows)\//.test(u))).toEqual([]);
-    expect(urls.filter((u) => u.startsWith('/spec/'))).toEqual([`/spec/${version}/index.md`]);
+    const older = new Set(standardFileVersions().slice(1).map((v) => `/spec/${v}/`));
+    const want = dirsWith('index.md')
+      .filter((d) => /^\/(spec|capabilities|layers|workflows)\//.test(d) && !older.has(d))
+      .map((d) => `${d}index.md`)
+      .sort();
+    expect(older.size).toBeGreaterThan(0);
+    expect([...urls].sort()).toEqual(want);
+    expect(new Set(urls).size).toBe(urls.length);
+    expect(want).toContain('/spec/diagnostics/index.md');
   });
 
   it('lists every HTML page in the sitemap, minus the 404 page, and no Markdown or text file', () => {
