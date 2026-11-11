@@ -612,6 +612,26 @@ The full list is in the
 - Removed the hooks reference from `plugin.json`, which made Claude Code
   report a duplicate hooks file
 
+## [v1.0.3] — 2026-01-25
+
+### Fixed
+- Removed the `$schema` key from `plugin.json`, which failed validation
+  when the plugin was installed
+
+### Changed
+- README installs the plugin from the Synapti marketplace
+
+## [v1.0.2] — 2026-01-25
+
+### Changed
+- README shows the Claude Code plugin as the main way to install
+
+## [v1.0.1] — 2026-01-25
+
+### Changed
+- README, quickstart, tutorial, FAQ, glossary, Grounded Agency, whitepaper
+  and Standard 1.0.0 explain why and when to use each feature
+
 ## [v1.0.0] — 2026-01-24
 
 ### Added
