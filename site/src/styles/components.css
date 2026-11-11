@@ -55,21 +55,16 @@
     margin-bottom: 0;
   }
 
-  /* Headers of generated tables: body font, bold capitals. Prose tables keep sentence case. */
-  .table-wrap thead th,
-  .doc:not(.doc--prose, .doc--spec, .doc--rfc) > .table-wrap thead th {
+  /* Table headers: body font, bold capitals. Identifiers keep their case. */
+  thead th {
     font-size: 13px;
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
 
-  .doc__body .table-wrap thead th,
-  .doc--prose thead th,
-  .doc--spec thead th,
-  .doc--rfc thead th {
-    font-size: 15px;
-    letter-spacing: 0;
+  thead th code {
     text-transform: none;
+    letter-spacing: 0;
   }
 
   /* ---------- buttons ---------- */

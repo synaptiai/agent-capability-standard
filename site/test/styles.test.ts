@@ -43,6 +43,17 @@ describe('typography', () => {
 });
 
 describe('tables', () => {
+  it('sets every table header in capitals and never turns that off (plan, Phase 5 accessibility rules)', () => {
+    const all = rules();
+    const upper = all.filter((r) => r.selectors.includes('thead th') && /text-transform:\s*uppercase/.test(r.body));
+    expect(upper.length).toBeGreaterThan(0);
+    const off = all
+      .filter((r) => /text-transform:\s*none/.test(r.body))
+      .flatMap((r) => r.selectors)
+      .filter((s) => /\bth\b/.test(s) && !/\bcode$/.test(s));
+    expect(off).toEqual([]);
+  });
+
   it('never sets a table to display: block, which drops its table semantics in some screen readers', () => {
     const block = rules()
       .filter((r) => /display:\s*block/.test(r.body))
