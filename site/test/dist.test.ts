@@ -123,7 +123,7 @@ describe('built site', () => {
     expect(values.map((v) => v.level)).toContain('none');
     for (const { page, level } of values) {
       const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
-      const dd = /<dt>Approved automatically<\/dt><dd>(.*?)<\/dd>/.exec(html)?.[1]?.replace(/<[^>]+>/g, '');
+      const dd = /<dt>Approved automatically<\/dt>\s*<dd>(.*?)<\/dd>/.exec(html)?.[1]?.replace(/<[^>]+>/g, '');
       expect(dd, page).toBe(level === 'none' ? 'Nothing' : `${level} risk`);
     }
   });
