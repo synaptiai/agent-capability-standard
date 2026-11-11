@@ -1,6 +1,6 @@
 /*
- * Component recipes. Square corners, 2px borders, hard shadows offset by 3,
- * 5 and 7px. The accent is a fill and always sits inside a --line border.
+ * Component recipes. Square corners, 2px borders, hard shadows offset by 3
+ * and 5px. The accent is a fill and always sits inside a --line border.
  * --indicator marks the current item; focus rings use --ink (base.css).
  * Badges, sidebar group titles and table headers use the body font in bold
  * capitals; Silkscreen is kept for eyebrows.
@@ -18,11 +18,6 @@
     width: var(--pip);
     height: var(--pip);
     background: currentColor;
-  }
-
-  .px-frame {
-    border: var(--border);
-    box-shadow: var(--shadow-2);
   }
 
   .eyebrow {

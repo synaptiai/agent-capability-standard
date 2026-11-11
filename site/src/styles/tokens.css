@@ -81,7 +81,6 @@
     --border: var(--px) solid var(--line);
     --shadow-1: 3px 3px 0 0 var(--shadow);
     --shadow-2: 5px 5px 0 0 var(--shadow);
-    --shadow-3: 7px 7px 0 0 var(--shadow);
     --radius: 0;
     --pip: calc(var(--px) * 2);
     --space-1: 4px;
@@ -106,7 +105,6 @@
 
     /* Motion */
     --step-hover: 120ms steps(2, end);
-    --step-enter: 240ms steps(4, end);
     --step-marker: 80ms steps(2, end);
 
     /* Shiki's css-variables theme reads these names */

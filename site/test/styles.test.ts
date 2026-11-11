@@ -1,7 +1,7 @@
 // Tests on the stylesheets against the design rules. Expected values come
 // from the design notes (design-system section 3, the typography table, and
 // the WorkflowDiagram recipe) and from the plan's Phase 5 accessibility rules.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const STYLES = ['tokens.css', 'base.css', 'components.css', 'motion.css'].map((f) => ({
@@ -53,3 +53,48 @@ describe('accessible names', () => {
     expect(hidden).toEqual([]);
   });
 });
+
+describe('definitions', () => {
+  // Tokens are used through var(); the contrast check also names palette
+  // tokens directly. Shiki's css-variables theme reads the --astro-code-*
+  // names, and --layer-<ID> is read through --layer on each .has-layer element.
+  const tokensCss = STYLES.find((s) => s.file === 'tokens.css')!.css;
+  const sources = [
+    ...STYLES.map((s) => s.css),
+    readFileSync('scripts/check-contrast.mjs', 'utf8'),
+    ...listFiles('src').filter((f) => /\.(astro|ts)$/.test(f)).map((f) => readFileSync(f, 'utf8')),
+  ].join('\n');
+
+  it('uses every custom property tokens.css defines', () => {
+    const defined = [...new Set([...tokensCss.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]!))];
+    const unused = defined.filter(
+      (t) =>
+        !t.startsWith('--astro-code-') &&
+        !t.startsWith('--layer-') &&
+        !sources.includes(`var(${t})`) &&
+        !sources.includes(`var(${t},`) &&
+        !sources.includes(`'${t}'`),
+    );
+    expect(unused).toEqual([]);
+  });
+
+  it('uses every class components.css defines on a single class selector', () => {
+    const css = STYLES.find((s) => s.file === 'components.css')!.css;
+    const markup = listFiles('src').filter((f) => /\.(astro|ts)$/.test(f)).map((f) => readFileSync(f, 'utf8')).join('\n');
+    const lone = rules()
+      .filter((r) => r.file === 'components.css')
+      .flatMap((r) => r.selectors)
+      .filter((s) => /^\.[a-z][\w-]*$/.test(s))
+      .map((s) => s.slice(1));
+    // A modifier such as callout--tip is used when the markup builds it from a value: `callout--${type}`.
+    const used = (c: string) => markup.includes(c) || (c.includes('--') && markup.includes(`${c.split('--')[0]}--\${`));
+    expect(css.length).toBeGreaterThan(0);
+    expect([...new Set(lone)].filter((c) => !used(c))).toEqual([]);
+  });
+});
+
+function listFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? listFiles(`${dir}/${e.name}`) : [`${dir}/${e.name}`],
+  );
+}
