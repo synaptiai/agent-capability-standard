@@ -101,10 +101,10 @@ assumptions: array[string]  # Conditions that affect findings
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `patterns` | array<object> | Discovered patterns, gaps and opportunities (empty when none) |
+| `patterns` | array\<object\> | Discovered patterns, gaps and opportunities (empty when none) |
 | `patterns[].type` | enum | `pattern`, `gap` or `opportunity` |
-| `relationships` | array<object> | Connections found between entities |
-| `anomalies` | array<object> | Outliers, inconsistencies, unusual structures |
+| `relationships` | array\<object\> | Connections found between entities |
+| `anomalies` | array\<object\> | Outliers, inconsistencies, unusual structures |
 | `*[].significance` | enum | Importance level (every discovery) |
 | `*[].novelty` | enum | How unexpected the finding is (every discovery) |
 | `methodology` | string | Exploration approach used |

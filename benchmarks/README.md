@@ -46,10 +46,10 @@ This prevents drift — ontology changes automatically propagate to benchmarks.
 | # | Scenario | Tests | Baseline Approach | GA Approach |
 |---|----------|-------|-------------------|-------------|
 | 1 | [Conflicting Sources](#scenario-1-conflicting-sources) | Grounding | Last-write-wins | Trust-weighted resolution |
-| 2 | [Mutation Failure Recovery](#scenario-2-mutation-failure-recovery) | Reversibility | Manual recovery | Checkpoint + rollback |
+| 2 | [Mutation Failure Recovery](#scenario-2-mutation-recovery) | Reversibility | Manual recovery | Checkpoint + rollback |
 | 3 | [Decision Audit](#scenario-3-decision-audit) | Explainability | No/hallucinated explanation | Evidence anchor traversal |
 | 4 | [Workflow Type Error](#scenario-4-workflow-type-error) | Typed contracts | Runtime crash | Design-time detection |
-| 5 | [Capability Gap Detection](#scenario-5-capability-gap-detection) | Dependency graph | Runtime failure | Pre-execution blocking |
+| 5 | [Capability Gap Detection](#scenario-5-capability-gap) | Dependency graph | Runtime failure | Pre-execution blocking |
 
 ## Metrics
 

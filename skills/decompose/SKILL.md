@@ -130,9 +130,9 @@ assumptions: []
 | Field | Type | Description |
 |-------|------|-------------|
 | `decomposition` | object | Summary of decomposition |
-| `subproblems` | array<object> | Flat list of all subproblems |
+| `subproblems` | array\<object\> | Flat list of all subproblems |
 | `structure` | object | Problem hierarchy: the goal and its tree of subproblems |
-| `dependencies` | array<object> | Subproblem dependency edges (`from` must finish before `to`) |
+| `dependencies` | array\<object\> | Subproblem dependency edges (`from` must finish before `to`) |
 | `constraints` | array | Boundaries affecting subproblems |
 | `gaps` | array | Missing coverage identified |
 | `overlaps` | array | Redundant coverage identified |
