@@ -1,13 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { checkRoutes, DIRECTORY_MAP, markdownPages, ROUTES, type Route, type Section } from '../src/lib/routes';
+import { checkRoutes, DIRECTORY_MAP, markdownPages, publicMarkdown, ROUTES, type Route, type Section } from '../src/lib/routes';
 import { claudeLayerTable, repoText, standardFileVersions, topLevelKeys } from './independent';
 
 // The public set is computed here from `git ls-files` and the plan's
 // exclusion list (plan "Recommended defaults" item 12), written out
 // independently of src/lib/routes.ts. `.github/` is added because its only
-// .md file is the pull request template.
+// .md file is the pull request template, and `.claude/` because it holds
+// agent configuration and memory.
 const REPO = path.resolve(process.cwd(), '..');
 const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: REPO, encoding: 'utf8' })
   .split('\0')
@@ -21,11 +22,21 @@ const PLAN_EXCLUDED = [
   /^skills\/[^/]+\/reference\//,
   /^CLAUDE\.md$/,
   /^\.github\//,
+  /^\.claude\//,
 ];
 const publicMd = tracked.filter((p) => p.endsWith('.md') && !PLAN_EXCLUDED.some((re) => re.test(p)));
 
 const bySource = new Map(ROUTES.filter((r) => r.source !== null).map((r) => [r.source!, r]));
 const byUrl = new Map(ROUTES.map((r) => [r.url, r]));
+
+describe('exclusions', () => {
+  it('gives no page to agent configuration and memory under .claude/', () => {
+    // The flow plugin commits its agent memory as Markdown under .claude/agent-memory/.
+    expect(publicMarkdown(['.claude/agent-memory/flow-convention-checker/MEMORY.md', '.claude/commands/x.md', 'docs/FAQ.md'])).toEqual([
+      'docs/FAQ.md',
+    ]);
+  });
+});
 
 describe('route table against the repository', () => {
   it('routes every public Markdown file exactly once', () => {

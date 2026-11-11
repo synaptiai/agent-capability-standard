@@ -89,7 +89,8 @@ export const DESCRIPTIONS: Readonly<Record<string, string>> = {
 
 /**
  * Paths that never get a page. From the plan's exclusion list, plus `.github/`
- * (the pull request template is repository plumbing, not documentation).
+ * (the pull request template is repository plumbing, not documentation) and
+ * `.claude/` (agent configuration and memory, which tools commit as Markdown).
  */
 export const EXCLUSIONS: readonly { pattern: RegExp; reason: string }[] = [
   { pattern: /^_archive\//, reason: 'archived v1 material' },
@@ -101,6 +102,7 @@ export const EXCLUSIONS: readonly { pattern: RegExp; reason: string }[] = [
   { pattern: /^skills\/[^/]+\/reference\//, reason: 'synced copies' },
   { pattern: /^CLAUDE\.md$/, reason: 'agent instructions' },
   { pattern: /^\.github\//, reason: 'repository plumbing' },
+  { pattern: /^\.claude\//, reason: 'agent configuration and memory' },
   { pattern: /^docs\/(MEDIUM_ARTICLE[^/]*|PROJECT_ARTICLE|TWITTER_THREAD)\.md$/, reason: 'drafts' },
   { pattern: /^docs\/proposals\/GROUNDED_HARNESS_V3\.md$/, reason: 'empty draft' },
 ];
