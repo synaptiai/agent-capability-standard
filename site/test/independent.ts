@@ -197,3 +197,27 @@ export function canonicalSchemaNames(): string[] {
   if (!block) throw new Error('independent: no CANONICAL_SCHEMAS list');
   return [...block[1]!.matchAll(/"([^"]+)"/g)].map((m) => `${m[1]}.yaml`);
 }
+
+/**
+ * For each workflow of a catalog file, the `on_error` codes of its failure
+ * modes in file order, by a line scan. Standard 1.1.0 §5.x allows a single
+ * code (`on_error: R401`) or a flow list (`on_error: [R401, R402]`).
+ */
+export function catalogOnErrorCodes(repoPath: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  let current: string[] | null = null;
+  for (const l of repoText(repoPath).split('\n')) {
+    const top = /^([A-Za-z_][A-Za-z0-9_-]*):/.exec(l);
+    if (top) {
+      current = top[1]!.startsWith('x-') ? null : [];
+      if (current) out.set(top[1]!, current);
+      continue;
+    }
+    const m = /^\s*(?:- )?on_error:\s*(.+?)\s*(?:#.*)?$/.exec(l);
+    if (!m || !current) continue;
+    const v = m[1]!;
+    if (v.startsWith('[')) current.push(...v.replace(/^\[|\]$/g, '').split(',').map((c) => c.trim()).filter(Boolean));
+    else current.push(v);
+  }
+  return out;
+}

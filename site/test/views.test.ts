@@ -4,7 +4,7 @@
 // on fixtures state where each expected value comes from.
 import { describe, expect, it } from 'vitest';
 import { EDGE_TYPES, loadOntology } from '../src/data/ontology';
-import { capabilityUsage, parseCatalog } from '../src/data/workflows';
+import { capabilityUsage, loadWorkflows, parseCatalog } from '../src/data/workflows';
 import { inlineMarkdown, refSlugger } from '../src/lib/generated';
 import { readRepoFile } from '../src/lib/repo';
 import {
@@ -21,10 +21,13 @@ import {
   capabilitySymbols,
   diagramRuns,
   diagramSteps,
+  failureRows,
 } from '../src/lib/views';
 import {
   allCatalogSteps,
   canonicalSchemaNames,
+  catalogFiles,
+  catalogOnErrorCodes,
   claudeLayerTable,
   ontologyEdgeTriples,
   repoText,
@@ -332,5 +335,26 @@ describe('other page helpers', () => {
   it('gives generated headings ref- ids that stay unique on a page', () => {
     const id = refSlugger();
     expect([id('Inputs'), id('Inputs'), id('Used in workflows')]).toEqual(['ref-inputs', 'ref-inputs-1', 'ref-used-in-workflows']);
+  });
+});
+
+describe('failure modes on workflow pages', () => {
+  // Expected: the on_error values of every catalog by line scan, which reads
+  // both the single-code and the list form that Standard 1.1.0 allows.
+  const { core, domain } = catalogFiles();
+  const scanned = new Map<string, string[]>();
+  for (const f of [core, ...domain]) for (const [k, v] of catalogOnErrorCodes(f)) scanned.set(k, v);
+
+  it('reads single codes as well as lists in the scan', () => {
+    expect(scanned.get('monitor_and_replan')).toContain('R402');
+  });
+
+  it('shows every on_error code of every workflow, in file order', () => {
+    const workflows = loadWorkflows();
+    for (const [id, want] of scanned) {
+      const wf = workflows.byId.get(id);
+      expect(wf, id).toBeDefined();
+      expect(wf!.steps.flatMap((s) => failureRows(s).flatMap((r) => r.codes)), id).toEqual(want);
+    }
   });
 });

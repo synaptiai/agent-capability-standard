@@ -299,7 +299,8 @@ export function failureRows(step: Step): FailureRow[] {
       when: typeof o.when === 'string' ? o.when : '',
       action: String(o.action ?? ''),
       recovery: typeof o.recovery === 'string' ? o.recovery : '',
-      codes: Array.isArray(o.on_error) ? o.on_error.map(String) : [],
+      // Standard 1.1.0 §5.x: `on_error` is a code or a list of codes.
+      codes: Array.isArray(o.on_error) ? o.on_error.map(String) : typeof o.on_error === 'string' ? [o.on_error] : [],
     };
   });
 }
