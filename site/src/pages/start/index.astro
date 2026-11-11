@@ -1,0 +1,7 @@
+---
+import { routeByUrl } from '../../lib/generated';
+import ListingPage from '../../templates/ListingPage.astro';
+
+const route = routeByUrl('/start/');
+---
+<ListingPage route={route} intro="Pages for a first look at the standard: what it is, how to install the plugin, a tutorial, common questions and the glossary." />

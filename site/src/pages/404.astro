@@ -1,0 +1,24 @@
+---
+// Shown for any path with no page. A short script fills in the path asked for.
+import DocLayout from '../layouts/DocLayout.astro';
+import { currentStandard, pageHref, refSlugger } from '../lib/generated';
+import type { Route } from '../lib/routes';
+
+const route: Route = { source: null, url: '/404/', section: 'home', order: 0, template: 'not-found', title: 'Page not found' };
+const id = refSlugger();
+---
+<DocLayout route={route} title="Page not found" description="There is no page at this address." noindex>
+  <article class="doc doc--not-found">
+    <h1 id={id('Page not found')}>Page not found</h1>
+    <p class="not-found__path">There is no page at <code id="not-found-path">this address</code>.</p>
+    <ul class="not-found__links">
+      <li><a href={pageHref('/')}>Home</a></li>
+      <li><a href={currentStandard().url}>Specification</a></li>
+      <li><a href={pageHref('/capabilities/')}>Capabilities</a></li>
+      <li><a href={pageHref('/workflows/')}>Workflows</a></li>
+    </ul>
+  </article>
+  <script is:inline>
+    document.getElementById('not-found-path').textContent = location.pathname;
+  </script>
+</DocLayout>

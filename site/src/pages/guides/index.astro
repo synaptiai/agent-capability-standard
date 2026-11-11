@@ -1,0 +1,7 @@
+---
+import { routeByUrl } from '../../lib/generated';
+import ListingPage from '../../templates/ListingPage.astro';
+
+const route = routeByUrl('/guides/');
+---
+<ListingPage route={route} intro="Guides to running workflows, the Claude Agent SDK, safety hooks, modality handling and writing skills." />

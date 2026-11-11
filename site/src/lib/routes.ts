@@ -47,7 +47,9 @@ export type Template =
   | 'diagnostics'
   | 'schemas'
   | 'rfcs-index'
-  | 'citation';
+  | 'citation'
+  /** The 404 page. No row uses it. */
+  | 'not-found';
 
 export interface Route {
   /** Repo path of the Markdown source, or null for a page generated from data only. */

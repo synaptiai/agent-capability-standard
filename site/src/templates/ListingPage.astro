@@ -1,0 +1,27 @@
+---
+// A section's overview page: an intro line and a card for every other page of
+// the section.
+import SectionIndex from '../components/SectionIndex.astro';
+import DocLayout from '../layouts/DocLayout.astro';
+import { refSlugger } from '../lib/generated';
+import { listingGroups } from '../lib/listing';
+import { SECTIONS, type Route } from '../lib/routes';
+
+interface Props {
+  route: Route;
+  intro: string;
+}
+
+const { route, intro } = Astro.props;
+const section = SECTIONS.find((s) => s.id === route.section)!;
+const groups = await listingGroups(route);
+const id = refSlugger();
+const h1 = id(section.label);
+---
+<DocLayout route={route} title={section.label} description={intro}>
+  <article class="doc doc--listing" data-section={route.section} data-pagefind-body>
+    <h1 id={h1}>{section.label}</h1>
+    <p class="lead">{intro}</p>
+    <SectionIndex groups={groups} id={id} />
+  </article>
+</DocLayout>

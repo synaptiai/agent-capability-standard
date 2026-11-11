@@ -1,0 +1,42 @@
+---
+// The home page. Phase 6 replaces this with the designed home page; for now
+// it states what the standard is, with counts from the data, and links to
+// each section.
+import CapabilityTable from '../components/CapabilityTable.astro';
+import { loadCounts } from '../data/counts';
+import { loadVersions } from '../data/versions';
+import DocLayout from '../layouts/DocLayout.astro';
+import { pageHref, refSlugger, routeByUrl } from '../lib/generated';
+import { ROUTES, SECTIONS } from '../lib/routes';
+
+const route = routeByUrl('/');
+const c = loadCounts();
+const v = loadVersions();
+const id = refSlugger();
+const description = `An open specification for composable AI agent capabilities: ${c.capabilityCount} capabilities in ${c.layerCount} layers, a typed workflow language, and a validator.`;
+const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
+  ...s,
+  url: ROUTES.filter((r) => r.section === s.id).sort((a, b) => a.order - b.order)[0]!.url,
+}));
+---
+<DocLayout route={route} title="Agent Capability Standard" description={description}>
+  <article class="doc doc--home" data-pagefind-body>
+    <h1 id={id('Agent Capability Standard')}>Agent Capability Standard</h1>
+    <p class="lead">{description}</p>
+    <p>
+      The current version is <a href={pageHref(`/spec/${v.standard.current.version}/`)}>Standard {v.standard.current.version}</a>
+      {' '}({v.standard.current.status}). The ontology is version {v.ontology}. The catalogs define {c.workflowCount}
+      {' '}workflows, and {c.profileCount} domain profiles tune them for specific fields.
+    </p>
+    <section class="home-sections">
+      <h2 id={id('Sections')}>Sections</h2>
+      <ul class="section-index__cards">
+        {sections.map((s) => <li class="section-index__card"><a href={s.url}>{s.label}</a></li>)}
+      </ul>
+    </section>
+    <section class="home-capabilities">
+      <h2 id={id('Capabilities')}>Capabilities</h2>
+      <CapabilityTable />
+    </section>
+  </article>
+</DocLayout>
