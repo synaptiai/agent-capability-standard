@@ -145,9 +145,18 @@ Rules:
 - **No YAML file under `site/`.** `tests/test_core_yaml.py` checks every
   tracked YAML file outside `.github/` as an Agent Capability Standard
   document. Use JSON or TypeScript instead.
-- **Every new public `.md` file needs a row in `site/src/lib/routes.ts`**, or
-  an entry in its `EXCLUSIONS` list. Once the file is tracked by git, the build
-  and the tests fail with `<path>: public Markdown with no route`.
+- **Every new public `.md` file needs a route.** These get one automatically,
+  so do not add a row for them: a capability's `skills/<id>/SKILL.md`,
+  `spec/RFC-NNNN-*.md`, `spec/STANDARD-v*.md`, and a domain profile's
+  `docs/domains/<domain>/README.md`. A composed skill's `SKILL.md` needs an
+  entry in `COMPOSED_SKILLS` in `site/src/data/skills.ts`. Any other public
+  `.md` file needs a row in `site/src/lib/routes.ts`, or an entry in its
+  `EXCLUSIONS` list. Once the file is tracked by git, the build and the tests
+  fail with `<path>: public Markdown with no route`; a second row for an
+  automatic route fails with `routed twice`.
+- **A workflow id a domain profile lists that no catalog defines** must be in
+  `PROPOSED_WORKFLOWS` in `site/src/data/proposed-workflows.ts`, or the build
+  fails. Remove it from there once a catalog defines it.
 
 The site tests read the live repository (the ontology, workflow catalogs,
 profiles, `CLAUDE.md`, `skills/README.md`, the Standard), so a change there can
