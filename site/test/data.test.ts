@@ -178,6 +178,24 @@ describe('workflows', () => {
   it('finds the root of every reference', () => {
     expect([...referenceRoots({ a: '${x.y} and ${ z }', b: ['${w}'] })]).toEqual(['x', 'z', 'w']);
   });
+
+  it('reads a hyphen as part of a root (Standard 1.1.0 §5.3: [A-Za-z_][A-Za-z0-9_-]*)', () => {
+    expect([...referenceRoots('${plan-result.x}')]).toEqual(['plan-result']);
+    // Both `plan` and `plan-result` are stored; the step reads only the second.
+    const text = [
+      'w:',
+      '  goal: g',
+      '  risk: low',
+      '  steps:',
+      '  - capability: plan',
+      '    store_as: plan',
+      '  - capability: plan',
+      '    store_as: plan-result',
+      '  - capability: explain',
+      '    input_bindings: {data: "${plan-result.x}"}',
+    ].join('\n');
+    expect(parseCatalog('t.yaml', text, 'core', loadOntology())[0]!.steps[2]!.consumes).toEqual(['plan-result']);
+  });
 });
 
 describe('profiles', () => {

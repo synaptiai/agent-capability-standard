@@ -94,10 +94,10 @@ export function workflowSlug(id: string): string {
   return id.replace(/_/g, '-');
 }
 
-/** Root names of every `${...}` reference inside a value. */
+/** Root names of every `${...}` reference inside a value. Roots follow Standard §5.3. */
 export function referenceRoots(value: unknown, out: Set<string> = new Set()): Set<string> {
   if (typeof value === 'string') {
-    for (const m of value.matchAll(/\$\{\s*([A-Za-z_][A-Za-z0-9_]*)/g)) out.add(m[1]!);
+    for (const m of value.matchAll(/\$\{\s*([A-Za-z_][A-Za-z0-9_-]*)/g)) out.add(m[1]!);
   } else if (Array.isArray(value)) {
     for (const v of value) referenceRoots(v, out);
   } else if (isObj(value)) {
