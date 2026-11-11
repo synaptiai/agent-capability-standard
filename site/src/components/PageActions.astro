@@ -24,20 +24,21 @@ const markdownUrl = `${Astro.props.url}index.md`;
 </div>
 
 <script>
+  import { copyMarkdown } from '../lib/copy-markdown';
+
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy-markdown]')) {
     const status = button.parentElement?.querySelector('.page-actions__status');
     button.addEventListener('click', async () => {
-      const say = (text: string) => {
-        if (status) status.textContent = text;
-      };
-      try {
-        const res = await fetch(button.dataset.copyMarkdown!);
-        if (!res.ok) throw new Error(String(res.status));
-        await navigator.clipboard.writeText(await res.text());
-        say('Copied');
-      } catch {
-        say('Could not copy the Markdown');
-      }
+      const clipboard = navigator.clipboard;
+      const message = await copyMarkdown(button.dataset.copyMarkdown!, {
+        fetch: (url) => fetch(url),
+        clipboard: {
+          write: typeof clipboard?.write === 'function' ? (items) => clipboard.write(items as ClipboardItem[]) : undefined,
+          writeText: (text) => (clipboard ? clipboard.writeText(text) : Promise.reject(new Error('no clipboard'))),
+        },
+        makeItem: typeof ClipboardItem === 'function' ? (data) => new ClipboardItem(data) : undefined,
+      });
+      if (status) status.textContent = message;
     });
   }
 </script>
