@@ -1,0 +1,91 @@
+---
+// The design preview: every glyph, the mark, the badges, the callouts, the
+// buttons, the token colours and the pixel fonts at each size, to check
+// which sizes stay sharp. Registered only by `astro dev` (see
+// astro.config.mjs), so it never reaches the built site.
+import Callout from '../components/Callout.astro';
+import FlagBadge from '../components/FlagBadge.astro';
+import LayerBadge from '../components/LayerBadge.astro';
+import RiskBadge from '../components/RiskBadge.astro';
+import StatusBadge from '../components/StatusBadge.astro';
+import { loadOntology, RISKS } from '../data/ontology';
+import DocLayout from '../layouts/DocLayout.astro';
+import { refSlugger } from '../lib/generated';
+import type { Route } from '../lib/routes';
+import { STATUS_STYLES } from '../lib/status';
+import Mark from '../pixel/Mark.astro';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+import { GLYPH_NAMES } from '../pixel/svg';
+
+const route: Route = { source: null, url: '/design-preview/', section: 'home', order: 0, template: 'not-found', title: 'Design preview' };
+const id = refSlugger();
+const layers = loadOntology().layers.map((l) => l.id);
+const TOKENS = ['--bg', '--bg-sub', '--bg-mut', '--bg-code', '--ink', '--ink-2', '--ink-3', '--link', '--accent', '--accent-soft', '--indicator', '--line', '--control', '--rule', '--risk-low', '--risk-medium', '--risk-high', '--ok', ...layers.map((l) => `--layer-${l}`)];
+const DISPLAY_SIZES = [16, 18, 20, 22, 24, 28, 32, 36, 40, 48];
+const EYEBROW_SIZES = [12, 16, 24, 32];
+const FLAGS = [
+  ['mutation', 'Mutates state'],
+  ['read-only', 'Read-only'],
+  ['checkpoint', 'Checkpoint required'],
+  ['approval', 'Approval required'],
+  ['overridable', 'Mutation can be declared false'],
+] as const;
+const CALLOUTS = ['note', 'tip', 'important', 'warning', 'caution', 'requirement'] as const;
+---
+<DocLayout route={route} title="Design preview" noindex>
+  <article class="doc doc--design-preview">
+    <h1 id={id('Design preview')}>Design preview</h1>
+    <p class="lead">This page exists only in local development. Compare each size at 1x and 2x pixel density and keep the sizes whose edges stay sharp.</p>
+
+    <h2 id={id('Pixel fonts')}>Pixel fonts</h2>
+    {DISPLAY_SIZES.map((s) => (
+      <p style={`font-family: var(--font-display); font-weight: 700; font-size: ${s}px; line-height: 1.3; margin: 0`}>{s}px Capability workflow checkpoint 0123456789</p>
+    ))}
+    {DISPLAY_SIZES.map((s) => (
+      <p style={`font-family: var(--font-display); font-weight: 500; font-size: ${s}px; line-height: 1.3; margin: 0`}>{s}px 500 Capability workflow checkpoint</p>
+    ))}
+    {EYEBROW_SIZES.map((s) => (
+      <p class="eyebrow" style={`font-size: ${s}px; display: flex; margin: 8px 0`}>{s}px Previous · Specification</p>
+    ))}
+
+    <h2 id={id('Glyphs')}>Glyphs</h2>
+    {[1, 2, 3, 4].map((scale) => (
+      <p style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
+        <span>{scale}x</span>
+        {GLYPH_NAMES.map((n) => <PixelGlyph name={n} scale={scale} label={n} layer={layers.includes(n) ? n : undefined} />)}
+      </p>
+    ))}
+
+    <h2 id={id('Mark')}>Mark</h2>
+    <p style="display: flex; gap: 24px; align-items: end">
+      {[1, 2, 3, 4, 8].map((s) => <Mark scale={s} />)}
+    </p>
+
+    <h2 id={id('Badges')}>Badges</h2>
+    <p style="display: flex; flex-wrap: wrap; gap: 8px">{RISKS.map((r) => <RiskBadge risk={r} />)}</p>
+    <p style="display: flex; flex-wrap: wrap; gap: 8px">{FLAGS.map(([k, l]) => <FlagBadge kind={k} label={l} />)}</p>
+    <p style="display: flex; flex-wrap: wrap; gap: 8px">{Object.keys(STATUS_STYLES).map((s) => <StatusBadge status={s} />)}</p>
+    <p style="display: flex; flex-wrap: wrap; gap: 8px">{layers.map((l) => <LayerBadge layer={l} link={false} />)}</p>
+
+    <h2 id={id('Buttons')}>Buttons</h2>
+    <p style="display: flex; gap: 16px">
+      <a class="btn" href="#">Primary</a>
+      <button type="button" class="btn btn--quiet">Quiet</button>
+    </p>
+
+    <h2 id={id('Callouts')}>Callouts</h2>
+    {CALLOUTS.map((c) => (
+      <Callout type={c}><p>A {c} callout with <a href="#">a link</a> and <code>code</code>.</p></Callout>
+    ))}
+
+    <h2 id={id('Colours')}>Colours</h2>
+    <ul style="display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 8px; list-style: none; padding: 0">
+      {TOKENS.map((t) => (
+        <li style="display: flex; gap: 8px; align-items: center; margin: 0">
+          <span style={`width: 32px; height: 32px; border: var(--border); background: var(${t})`}></span>
+          <code>{t}</code>
+        </li>
+      ))}
+    </ul>
+  </article>
+</DocLayout>

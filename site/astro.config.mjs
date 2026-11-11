@@ -32,6 +32,17 @@ export default defineConfig({
   },
   integrations: [
     {
+      // The design preview page, only while running `astro dev`; it is never built.
+      name: 'acs-design-preview',
+      hooks: {
+        'astro:config:setup': ({ command, injectRoute }) => {
+          if (command === 'dev') {
+            injectRoute({ pattern: '/design-preview', entrypoint: new URL('./src/dev/DesignPreview.astro', import.meta.url) });
+          }
+        },
+      },
+    },
+    {
       name: 'acs-markdown-report',
       hooks: {
         'astro:build:done': ({ dir, logger }) => {

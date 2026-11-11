@@ -7,9 +7,9 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build --force",
+    "build": "node scripts/check-contrast.mjs && node scripts/check-design-data.mjs && astro build --force",
     "preview": "astro preview",
-    "check": "astro check",
+    "check": "astro check && node scripts/check-contrast.mjs && node scripts/check-design-data.mjs",
     "test": "vitest run"
   },
   "dependencies": {
