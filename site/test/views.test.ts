@@ -76,17 +76,36 @@ describe('edge grouping on capability pages', () => {
     }
   });
 
-  it('lists exactly the edges that cross each layer boundary', () => {
+  it('lists exactly the edges that cross each layer boundary, a symmetric pair once', () => {
+    // Expected: the line-scanned triples; for a symmetric type the first declaration of each unordered pair.
     for (const layer of claudeLayerTable()) {
-      const want = EDGE_TYPES.map((type) => ({
-        type,
-        edges: triples
+      const want = EDGE_TYPES.map((type) => {
+        const seen = new Set<string>();
+        const edges = triples
           .filter((t) => t.type === type && (layerOf.get(t.from) === layer.id) !== (layerOf.get(t.to) === layer.id))
-          .map((t) => `${t.from}>${t.to}`),
-      })).filter((g) => g.edges.length > 0);
+          .filter((t) => {
+            if (!symmetric.includes(type)) return true;
+            const pair = [t.from, t.to].sort().join('|');
+            if (seen.has(pair)) return false;
+            seen.add(pair);
+            return true;
+          })
+          .map((t) => `${t.from}>${t.to}`);
+        return { type, edges };
+      }).filter((g) => g.edges.length > 0);
       const got = crossLayerEdges(layer.id).map((g) => ({ type: g.type, edges: g.edges.map((e) => `${e.from}>${e.to}`) }));
       expect(got, layer.id).toEqual(want);
     }
+  });
+
+  it('declares both directions of some cross-layer symmetric pair, so the test above can tell', () => {
+    const both = triples.filter(
+      (t) =>
+        symmetric.includes(t.type) &&
+        layerOf.get(t.from) !== layerOf.get(t.to) &&
+        triples.some((u) => u.type === t.type && u.from === t.to && u.to === t.from),
+    );
+    expect(both.map((t) => `${t.from}>${t.to}`)).toContain('rollback>persist');
   });
 });
 

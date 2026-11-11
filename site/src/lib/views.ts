@@ -167,21 +167,35 @@ export interface CrossLayerEdge {
   direction: 'out' | 'in';
 }
 
-/** Edges with one end in the layer and the other outside it, grouped by type. */
+/**
+ * Edges with one end in the layer and the other outside it, grouped by type.
+ * The ontology declares a symmetric relation (conflicts_with, alternative_to)
+ * in both directions; it is listed once, as first declared, as on capability
+ * pages.
+ */
 export function crossLayerEdges(
   layerId: string,
   ontology: Ontology = loadOntology(),
-): { type: EdgeType; edges: CrossLayerEdge[] }[] {
+): { type: EdgeType; symmetric: boolean; edges: CrossLayerEdge[] }[] {
   const layerOf = (id: string) => ontology.byId.get(id)!.layer;
-  return EDGE_TYPES.map((type) => ({
-    type,
-    edges: ontology.edges
+  return EDGE_TYPES.map((type) => {
+    const symmetric = ontology.edgeTypes.find((t) => t.id === type)!.symmetric;
+    const seen = new Set<string>();
+    const edges = ontology.edges
       .filter((e) => e.type === type && (layerOf(e.from) === layerId) !== (layerOf(e.to) === layerId))
+      .filter((e) => {
+        if (!symmetric) return true;
+        const pair = [e.from, e.to].sort().join('|');
+        if (seen.has(pair)) return false;
+        seen.add(pair);
+        return true;
+      })
       .map((e) => {
         const out = layerOf(e.from) === layerId;
         return { from: e.from, to: e.to, otherLayer: layerOf(out ? e.to : e.from), direction: out ? 'out' : 'in' } as const;
-      }),
-  })).filter((g) => g.edges.length > 0);
+      });
+    return { type, symmetric, edges };
+  }).filter((g) => g.edges.length > 0);
 }
 
 // ---------------------------------------------------------------- workflows

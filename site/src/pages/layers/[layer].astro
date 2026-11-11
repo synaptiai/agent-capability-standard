@@ -62,16 +62,36 @@ const sentence = `${layer.description.replace(/\.$/, '')}.`;
           <div class="table-wrap" data-edge-type={g.type}>
             <table class="edge-table">
               <caption><code>{g.type}</code> edges ({g.edges.length})</caption>
-              <thead><tr><th scope="col">From</th><th scope="col">To</th><th scope="col">Other layer</th></tr></thead>
-              <tbody>
-                {g.edges.map((e) => (
-                  <tr data-direction={e.direction}>
-                    <td><a href={capabilityHref(e.from)}><code>{e.from}</code></a></td>
-                    <td><a href={capabilityHref(e.to)}><code>{e.to}</code></a></td>
-                    <td><LayerBadge layer={e.otherLayer} /></td>
-                  </tr>
-                ))}
-              </tbody>
+              {g.symmetric ? (
+                <>
+                  <thead><tr><th scope="col">In this layer</th><th scope="col">In the other layer</th><th scope="col">Other layer</th></tr></thead>
+                  <tbody>
+                    {g.edges.map((e) => {
+                      const [here, there] = e.direction === 'out' ? [e.from, e.to] : [e.to, e.from];
+                      return (
+                        <tr data-direction="both">
+                          <td><a href={capabilityHref(here)}><code>{here}</code></a></td>
+                          <td><a href={capabilityHref(there)}><code>{there}</code></a></td>
+                          <td><LayerBadge layer={e.otherLayer} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </>
+              ) : (
+                <>
+                  <thead><tr><th scope="col">From</th><th scope="col">To</th><th scope="col">Other layer</th></tr></thead>
+                  <tbody>
+                    {g.edges.map((e) => (
+                      <tr data-direction={e.direction}>
+                        <td><a href={capabilityHref(e.from)}><code>{e.from}</code></a></td>
+                        <td><a href={capabilityHref(e.to)}><code>{e.to}</code></a></td>
+                        <td><LayerBadge layer={e.otherLayer} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </>
+              )}
             </table>
           </div>
         ))

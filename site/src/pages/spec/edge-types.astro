@@ -29,6 +29,8 @@ const typeId = new Map(ontology.edgeTypes.map((t) => [t.id, id(`Edges: ${t.id}`)
       <p>
         Generated from <a href={githubBlobUrl(ONTOLOGY_SOURCE)}><code>{ONTOLOGY_SOURCE}</code></a>, ontology version
         {' '}{ontology.version}. It has {ontology.edgeTypes.length} edge types and {ontology.edges.length} edges.
+        Edges are counted and listed as the ontology declares them, so a symmetric pair declared in both directions
+        appears twice. Capability and layer pages list such a pair once.
       </p>
       <div class="table-wrap">
         <table class="edge-type-table">
