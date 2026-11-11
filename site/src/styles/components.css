@@ -693,25 +693,33 @@
   .site-footer {
     border-top: var(--border);
     background: var(--bg-sub);
-    padding: var(--space-5) var(--space-4) var(--space-6);
+    padding: var(--space-5) 0 var(--space-6);
     font-size: 14px;
     color: var(--ink-2);
   }
 
+  /* Same frame and gutter as the header bar, so the footer text lines up
+     with the wordmark at every width. */
   .site-footer > p {
     max-width: var(--frame-max);
     margin: 0 auto var(--space-1);
+    padding: 0 var(--space-4);
   }
 
   .site-footer__agents {
     max-width: var(--frame-max);
     margin: 0 auto var(--space-4);
+    padding: 0 var(--space-4);
   }
 
   .site-footer__heading {
     margin: 0 0 var(--space-1);
     font-weight: 700;
     color: var(--ink);
+  }
+
+  .site-footer__agents li + li {
+    margin: 0;
   }
 
   .site-footer__agents ul {
