@@ -254,6 +254,36 @@ fixture_flow:
     expect(steps.map((d) => d.missingCheckpoint)).toEqual(['V102', null, null, null, null, null, null, null, null]);
   });
 
+  it('does not count a checkpoint in the same parallel group as running before', () => {
+    // Standard 1.1.0, terms table, "Runs before": A comes earlier in the step
+    // list and is not in B's parallel group. The validator reports V102 for
+    // the first mutate (core/src/validate/semantics.rs, ran_before), and the
+    // second mutate falls back to the checkpoint outside its group.
+    const grouped = `
+grouped_flow:
+  goal: test
+  risk: high
+  steps:
+    - capability: checkpoint
+      store_as: g1
+      parallel_group: a
+    - capability: mutate
+      store_as: m1
+      parallel_group: a
+    - capability: checkpoint
+      store_as: outside
+    - capability: checkpoint
+      store_as: g2
+      parallel_group: b
+    - capability: mutate
+      store_as: m2
+      parallel_group: b
+`;
+    const g = diagramSteps(parseCatalog('grouped.yaml', grouped, 'core', loadOntology())[0]!);
+    expect(g.map((d) => d.missingCheckpoint)).toEqual([null, 'V102', null, null, null]);
+    expect(g.map((d) => d.checkpointStep)).toEqual([null, null, null, null, 3]);
+  });
+
   it('draws steps with gates or a condition as branches', () => {
     expect(steps.map((d) => d.branch)).toEqual([false, false, false, true, true, false, false, false, false]);
   });

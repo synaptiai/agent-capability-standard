@@ -238,18 +238,24 @@ export interface DiagramStep {
   role: StepRole;
   /** The step has gates or a condition, so the diagram draws it as a branch. */
   branch: boolean;
-  /** Index of the nearest earlier checkpoint step, for mutating and rollback steps. */
+  /** Index of the nearest checkpoint step that runs before it, for mutating and rollback steps. */
   checkpointStep: number | null;
-  /** The step needs a checkpoint and none comes before it: the diagnostic a validator reports. */
+  /** The step needs a checkpoint and none runs before it: the diagnostic a validator reports. */
   missingCheckpoint: 'V102' | 'F501' | null;
 }
 
+/**
+ * Checkpoints count only when they run before the step (Standard terms table,
+ * "Runs before"): earlier in the list and not in the step's parallel group,
+ * as the validator reads it.
+ */
 export function diagramSteps(wf: Workflow): DiagramStep[] {
-  let lastCheckpoint: number | null = null;
+  const checkpoints: { index: number; group: string | null }[] = [];
   return wf.steps.map((step) => {
     const role = stepRole(step);
-    const cp = lastCheckpoint;
-    if (step.capability === 'checkpoint') lastCheckpoint = step.index;
+    const group = step.parallel_group ?? null;
+    const cp = checkpoints.findLast((c) => group === null || c.group !== group)?.index ?? null;
+    if (step.capability === 'checkpoint') checkpoints.push({ index: step.index, group });
     const branch = (step.gates?.length ?? 0) > 0 || (step.condition !== undefined && step.condition !== null);
     const missingCheckpoint = step.effective.checkpoint.needed && cp === null ? step.effective.checkpoint.code : null;
     return {
