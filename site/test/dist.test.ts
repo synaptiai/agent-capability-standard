@@ -14,6 +14,7 @@ import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds,
 import { ROUTES, type Route } from '../src/lib/routes';
 import {
   allCatalogSteps,
+  claudeLayerTable,
   diagnosticRowsPerSection,
   ontologyEdgeTriples,
   profileFiles,
@@ -191,6 +192,59 @@ describe('built site', () => {
 
   it('builds no page outside the route table except 404', () => {
     expect(checkRouteCoverage(dist)).toEqual({ missing: [], extra: [] });
+  });
+});
+
+describe('design system on the built site', () => {
+  const pages = () => [...ROUTES.map((r) => pageFile(r.url)), '404.html'];
+  const html = (file: string) => readFileSync(path.join(dist, file), 'utf8');
+
+  it('runs the theme script as the first child of <head> on every page', () => {
+    for (const f of pages()) {
+      expect(/^<!DOCTYPE html><html lang="en"><head><script>[^<]*localStorage\.getItem\('acs-theme'\)/i.test(html(f)), f).toBe(true);
+    }
+  });
+
+  it('shows the newest Standard file version in the header chip, and a skip link to the main content', () => {
+    // Expected: the highest version among spec/STANDARD-v*.md file names.
+    const chip = `>Standard v${standardFileVersions()[0]}</a>`;
+    for (const f of pages()) {
+      const h = html(f);
+      expect(h.includes(chip), f).toBe(true);
+      expect(h.includes('<a class="skip-link" href="#content">'), f).toBe(true);
+      expect(h.includes('<main id="content"'), f).toBe(true);
+    }
+  });
+
+  it('marks exactly one sidebar link as the current page, pointing at the page itself', () => {
+    for (const r of ROUTES.filter((x) => x.section !== 'home')) {
+      const current = [...html(pageFile(r.url)).matchAll(/<a href="([^"]+)" aria-current="page"/g)].map((m) => m[1]);
+      expect(current, r.url).toEqual([r.url]);
+    }
+  });
+
+  it('loads no font from Google and builds no design preview', () => {
+    for (const f of pages()) expect(html(f).includes('fonts.googleapis'), f).toBe(false);
+    expect(existsSync(path.join(dist, 'design-preview'))).toBe(false);
+  });
+
+  it('builds the favicon and the social image as PNG and SVG files of the stated sizes', () => {
+    const size = (f: string) => {
+      const b = readFileSync(path.join(dist, f));
+      expect([...b.subarray(1, 4)].map((c) => String.fromCharCode(c)).join(''), f).toBe('PNG');
+      return [b.readUInt32BE(16), b.readUInt32BE(20)];
+    };
+    // 1200x630 is the social image size the design names; the favicon is the
+    // 12-cell mark at 2px a cell inside a 4px gap and frame on each side: 12*2 + 8.
+    expect(size('og.png')).toEqual([1200, 630]);
+    expect(size('favicon.png')).toEqual([32, 32]);
+    expect(html('favicon.svg').startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"')).toBe(true);
+    expect(html('fonts/OFL.txt')).toContain('SIL Open Font License');
+  });
+
+  it('gives the capability table one wide column per layer in the CLAUDE.md table', () => {
+    const layers = claudeLayerTable().length;
+    expect(html('index.html')).toContain(`class="capability-table__grid" style="--layers: ${layers}"`);
   });
 });
 
