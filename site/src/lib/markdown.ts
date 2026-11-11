@@ -15,7 +15,7 @@ import rehypeKeywords from '../plugins/rehype-keywords';
 import remarkHtmlAllowlist from '../plugins/remark-html-allowlist';
 import remarkPageMeta from '../plugins/remark-page-meta';
 import remarkRepoLinks from '../plugins/remark-repo-links';
-import { ROUTES } from './routes';
+import { ROUTES, routeForSource } from './routes';
 
 /**
  * Pages whose requirement keywords are marked: both versions of the Standard,
@@ -29,6 +29,19 @@ export const KEYWORD_SOURCES: ReadonlySet<string> = new Set([
   'spec/EDGE_TYPES.md',
   'spec/SECURITY.md',
 ]);
+
+/** Keyword sources that have no route; a renamed file would otherwise lose its marking silently. */
+export function unroutedKeywordSources(
+  sources: Iterable<string>,
+  routeFor: (source: string) => unknown = routeForSource,
+): string[] {
+  return [...sources].filter((s) => routeFor(s) === undefined);
+}
+
+const unrouted = unroutedKeywordSources(KEYWORD_SOURCES);
+if (unrouted.length > 0) {
+  throw new Error(`markdown: KEYWORD_SOURCES names files with no route: ${unrouted.join(', ')}`);
+}
 
 /**
  * Code highlighting. The css-variables theme writes `var(--astro-code-*)`

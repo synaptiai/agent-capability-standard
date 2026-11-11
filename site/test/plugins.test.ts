@@ -2,7 +2,7 @@
 // expected values are read off the source files named in each case.
 import { describe, expect, it } from 'vitest';
 import { readRepoFile } from '../src/lib/repo';
-import { KEYWORD_SOURCES } from '../src/lib/markdown';
+import { KEYWORD_SOURCES, unroutedKeywordSources } from '../src/lib/markdown';
 import { checkHtml } from '../src/plugins/remark-html-allowlist';
 import type { PageMeta } from '../src/plugins/remark-page-meta';
 import { KEYWORDS, markKeywords } from '../src/plugins/rehype-keywords';
@@ -114,6 +114,13 @@ describe('rehype-keywords', () => {
     const spans = out!.filter((n) => n.type === 'element');
     expect(spans).toHaveLength(1);
     expect(spans[0]).toMatchObject({ properties: { className: ['kw', 'kw--must'] }, children: [{ value: 'MUST NOT' }] });
+  });
+
+  it('names every keyword source that has no route', () => {
+    expect(unroutedKeywordSources(KEYWORD_SOURCES)).toEqual([]);
+    expect(unroutedKeywordSources([...KEYWORD_SOURCES, 'spec/NO_SUCH_FILE.md'])).toEqual(['spec/NO_SUCH_FILE.md']);
+    // The three companions listed by path in markdown.ts are in the set.
+    for (const s of ['spec/CONFORMANCE.md', 'spec/EDGE_TYPES.md', 'spec/SECURITY.md']) expect(KEYWORD_SOURCES.has(s)).toBe(true);
   });
 
   it('marks the spec and RFCs but not prose pages', async () => {
