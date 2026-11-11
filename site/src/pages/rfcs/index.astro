@@ -1,0 +1,101 @@
+---
+// The RFC overview: a table of every numbered RFC with its status, target
+// and date, read from each RFC's header lines, then the proposals. An RFC
+// status outside the ones spec/GOVERNANCE.md allows fails the build.
+import { getEntry, render } from 'astro:content';
+import StatusBadge from '../../components/StatusBadge.astro';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { pageHref, refSlugger, routeByUrl, routesByTemplate } from '../../lib/generated';
+import { readRepoFile } from '../../lib/repo';
+import { governanceStatuses } from '../../lib/views';
+import type { PageMeta } from '../../plugins/remark-page-meta';
+import { ROUTES } from '../../lib/routes';
+
+const route = routeByUrl('/rfcs/');
+const allowed = governanceStatuses(readRepoFile('spec/GOVERNANCE.md'));
+const id = refSlugger();
+
+interface Row {
+  url: string;
+  label: string;
+  title: string;
+  status: string;
+  target: string | null;
+  targetUrl: string | null;
+  date: string | null;
+  numbered: boolean;
+}
+
+const rows: Row[] = [];
+for (const r of routesByTemplate('rfc')) {
+  const entry = await getEntry('docs', r.source!);
+  if (!entry) throw new Error(`rfcs: no docs entry for ${r.source}`);
+  const { remarkPluginFrontmatter } = await render(entry);
+  const page = remarkPluginFrontmatter.page as PageMeta | undefined;
+  if (!page?.title) throw new Error(`rfcs: ${r.source} has no title`);
+  const num = /^\/rfcs\/(\d{4})\/$/.exec(r.url)?.[1] ?? null;
+  const status = page.status;
+  if (!status) throw new Error(`rfcs: ${r.source} has no Status line`);
+  if (num !== null && !allowed.includes(status)) {
+    throw new Error(`rfcs: ${r.source} has status "${status}"; spec/GOVERNANCE.md allows ${allowed.join(', ')}`);
+  }
+  const target = page.meta.find((m) => m.key === 'Target')?.value ?? null;
+  const targetVersion = target ? /Standard v(\d+\.\d+\.\d+)/.exec(target)?.[1] : undefined;
+  const targetUrl = targetVersion && ROUTES.some((x) => x.url === `/spec/${targetVersion}/`) ? pageHref(`/spec/${targetVersion}/`) : null;
+  rows.push({
+    url: r.url,
+    label: num ? `RFC-${num}` : r.title,
+    title: num ? page.title.replace(/^RFC-\d{4}:\s*/, '') : page.title,
+    status,
+    target,
+    targetUrl,
+    date: page.date,
+    numbered: num !== null,
+  });
+}
+const rfcs = rows.filter((r) => r.numbered);
+const proposals = rows.filter((r) => !r.numbered);
+const description = 'Requests for comments that propose changes to the Agent Capability Standard, with the status, target version and date of each.';
+---
+<DocLayout route={route} title="RFCs" description={description}>
+  <article class="doc doc--rfcs" data-pagefind-body>
+    <h1 id={id('RFCs')}>RFCs</h1>
+    <p class="lead">
+      An RFC proposes a change to the standard. Its status is {allowed.slice(0, -1).join(', ')} or {allowed.at(-1)}.
+      The process is described on the <a href={pageHref('/community/governance/')}>Governance</a> page.
+    </p>
+    <div class="table-scroll">
+      <table class="rfc-table">
+        <caption>RFCs</caption>
+        <thead>
+          <tr><th scope="col">RFC</th><th scope="col">Title</th><th scope="col">Status</th><th scope="col">Target</th><th scope="col">Date</th></tr>
+        </thead>
+        <tbody>
+          {rfcs.map((r) => (
+            <tr data-status={r.status}>
+              <th scope="row"><a href={r.url}>{r.label}</a></th>
+              <td>{r.title}</td>
+              <td><StatusBadge status={r.status} /></td>
+              <td>{r.target && (r.targetUrl ? <a href={r.targetUrl}>{r.target}</a> : r.target)}</td>
+              <td>{r.date}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    {proposals.length > 0 && (
+      <section class="rfc-proposals">
+        <h2 id={id('Proposals')}>Proposals</h2>
+        <p>Proposals that are not numbered RFCs.</p>
+        <ul class="section-index__cards">
+          {proposals.map((r) => (
+            <li class="section-index__card">
+              <a href={r.url}>{r.title}</a> <StatusBadge status={r.status} />
+              {r.date && <p>Dated {r.date}.</p>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+  </article>
+</DocLayout>

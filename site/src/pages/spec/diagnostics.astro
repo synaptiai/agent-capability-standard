@@ -1,0 +1,54 @@
+---
+// Every diagnostic code of the current Standard, from its §9.2 to §9.7 tables
+// (checked against core/src/diag.rs when loaded). Each row has the code's
+// lowercase id, so /spec/diagnostics/#v102 links to it.
+import InlineMd from '../../components/InlineMd.astro';
+import { loadDiagnostics } from '../../data/diagnostics';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { currentStandard, refSlugger, routeByUrl } from '../../lib/generated';
+
+const route = routeByUrl('/spec/diagnostics/');
+const diagnostics = loadDiagnostics();
+const std = currentStandard();
+const id = refSlugger();
+const errors = diagnostics.filter((d) => d.severity === 'error').length;
+const warnings = diagnostics.length - errors;
+const description = `The ${diagnostics.length} diagnostic codes of Standard ${std.version}: what each one means, its category and whether it is an error or a warning.`;
+---
+<DocLayout route={route} title="Diagnostics" description={description}>
+  <article class="doc doc--diagnostics" data-pagefind-body>
+    <h1 id={id('Diagnostics')}>Diagnostics</h1>
+    <p class="lead">
+      A validator or runtime reports a problem as a diagnostic code. Standard {std.version} defines {diagnostics.length}{' '}
+      codes: {errors} errors, which reject a workflow, and {warnings} warnings, which do not. This table is read from
+      sections 9.2 to 9.7 of the <a href={std.url}>Standard</a>.
+    </p>
+    <div class="table-scroll">
+      <table class="diagnostics-table">
+        <caption>Diagnostic codes of Standard {std.version}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Code</th>
+            <th scope="col">Name</th>
+            <th scope="col">Category</th>
+            <th scope="col">Severity</th>
+            <th scope="col">Description</th>
+            <th scope="col">Section</th>
+          </tr>
+        </thead>
+        <tbody>
+          {diagnostics.map((d) => (
+            <tr id={d.anchor} class="diagnostics-table__row" data-code={d.code} data-severity={d.severity}>
+              <th scope="row"><a href={`#${d.anchor}`}><code>{d.code}</code></a></th>
+              <td><code>{d.name}</code></td>
+              <td>{d.category}</td>
+              <td><span class:list={['severity-badge', `severity-badge--${d.severity}`]}>{d.severity}</span></td>
+              <td><InlineMd md={d.descriptionMd} /></td>
+              <td><a href={`${std.url}#${d.sectionAnchor}`}>§{d.section}</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</DocLayout>

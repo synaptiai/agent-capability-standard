@@ -1,0 +1,53 @@
+---
+// The schema files under schemas/, each linked to GitHub. The files the
+// current Standard requires, and the supporting ones it names, are read from
+// its §6.1; the rest are grouped by folder. Workflow catalogs and domain
+// profiles have their own pages and are not listed here.
+import DocLayout from '../../layouts/DocLayout.astro';
+import { currentStandard, pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
+import { githubBlobUrl, readRepoFile } from '../../lib/repo';
+import { schemaListing, type SchemaEntry } from '../../lib/views';
+
+const route = routeByUrl('/spec/schemas/');
+const std = currentStandard();
+const entries = schemaListing(readRepoFile(std.source));
+const id = refSlugger();
+const GROUPS: { key: SchemaEntry['group']; label: string; intro: string }[] = [
+  { key: 'required', label: 'Required by the Standard', intro: `Section 6.1 of Standard ${std.version} requires every implementation to provide these schemas.` },
+  { key: 'supporting', label: 'Supporting schemas', intro: `Section 6.1 names these schemas as used by specific sections. They are not required of every implementation.` },
+  { key: 'ontology', label: 'Ontology and workflow catalog', intro: 'The capability ontology, the reference workflow catalog, and the JSON Schemas that check them.' },
+  { key: 'profiles', label: 'Domain profile format', intro: 'The schema every domain profile follows.' },
+  { key: 'interop', label: 'Interoperability', intro: 'Mappings to other agent frameworks.' },
+  { key: 'other', label: 'Other schemas', intro: 'Schema files the Standard does not name.' },
+  { key: 'transforms', label: 'Transforms', intro: 'Mappings the transform capability applies to coerce one type into another.' },
+];
+const description = `The schema files of the Agent Capability Standard, grouped by what the Standard requires of them, with a link to each file.`;
+---
+<DocLayout route={route} title="Schemas" description={description}>
+  <article class="doc doc--schemas" data-pagefind-body>
+    <h1 id={id('Schemas')}>Schemas</h1>
+    <p class="lead">
+      These are the schema files in the repository. Each links to the file on GitHub. See
+      {' '}<a href={specSectionHref('6.1')}>section 6.1 of the Standard</a> for what each required schema must hold.
+      Workflow catalogs are listed on the <a href={pageHref('/workflows/')}>workflows page</a> and domain profiles on
+      the <a href={pageHref('/domains/')}>domains page</a>.
+    </p>
+    {GROUPS.map((g) => {
+      const items = entries.filter((e) => e.group === g.key);
+      return items.length === 0 ? null : (
+        <section class="schema-group" data-group={g.key}>
+          <h2 id={id(g.label)}>{g.label}</h2>
+          <p>{g.intro}</p>
+          <ul class="section-index__cards">
+            {items.map((e) => (
+              <li class="section-index__card schema-card" data-schema={e.name}>
+                <a href={githubBlobUrl(e.source)}><code>{e.source}</code></a>
+                {e.description && <p>{e.description}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      );
+    })}
+  </article>
+</DocLayout>

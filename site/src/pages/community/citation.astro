@@ -1,0 +1,33 @@
+---
+// How to cite the standard, generated from CITATION.cff: the facts, the file
+// itself, and a BibTeX entry built from it.
+import { CITATION_SOURCE, loadCitation } from '../../data/citation';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { refSlugger, routeByUrl } from '../../lib/generated';
+import { githubBlobUrl, readRepoFile } from '../../lib/repo';
+
+const route = routeByUrl('/community/citation/');
+const c = loadCitation();
+const cff = readRepoFile(CITATION_SOURCE).trimEnd();
+const id = refSlugger();
+const authors = c.authors.map((a) => `${a.given} ${a.family}`).join(', ');
+const description = `How to cite ${c.title}, version ${c.version}, with the citation file and a BibTeX entry.`;
+---
+<DocLayout route={route} title="Cite this standard" description={description}>
+  <article class="doc doc--citation" data-pagefind-body>
+    <h1 id={id('Cite this standard')}>Cite this standard</h1>
+    <p class="lead">{c.message}</p>
+    <dl class="citation-facts">
+      <div><dt>Title</dt><dd>{c.title}</dd></div>
+      <div><dt>Version</dt><dd>{c.version}</dd></div>
+      <div><dt>Released</dt><dd>{c.date_released}</dd></div>
+      <div><dt>{c.authors.length === 1 ? 'Author' : 'Authors'}</dt><dd>{authors}</dd></div>
+      <div><dt>Licence</dt><dd>{c.license}</dd></div>
+    </dl>
+    <h2 id={id('BibTeX')}>BibTeX</h2>
+    <pre class="code-block code-block--bibtex"><code>{c.bibtex}</code></pre>
+    <h2 id={id('Citation file')}>Citation file</h2>
+    <p>The repository's <a href={githubBlobUrl(CITATION_SOURCE)}><code>{CITATION_SOURCE}</code></a>, in Citation File Format:</p>
+    <pre class="code-block code-block--yaml"><code>{cff}</code></pre>
+  </article>
+</DocLayout>
