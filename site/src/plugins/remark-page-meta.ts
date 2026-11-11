@@ -108,8 +108,10 @@ export function shortDescription(text: string, max = MAX_DESCRIPTION): string {
   const ends = [...window.matchAll(/[.!?](?=\s)/g)];
   const lastEnd = ends.at(-1);
   if (lastEnd?.index !== undefined && lastEnd.index > 40) return window.slice(0, lastEnd.index + 1);
-  const space = window.lastIndexOf(' ');
-  return `${window.slice(0, space > 0 ? space : max).replace(/[,;:]$/, '')}...`;
+  // Leave room for the ellipsis, so the result is never longer than max.
+  const room = t.slice(0, max - 3);
+  const space = room.lastIndexOf(' ');
+  return `${room.slice(0, space > 0 ? space : room.length).replace(/[,;:]$/, '')}...`;
 }
 
 function toDl(entries: Entry[]): RootContent {

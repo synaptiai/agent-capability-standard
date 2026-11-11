@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { readRepoFile } from '../src/lib/repo';
 import { KEYWORD_SOURCES, unroutedKeywordSources } from '../src/lib/markdown';
 import { checkHtml } from '../src/plugins/remark-html-allowlist';
-import type { PageMeta } from '../src/plugins/remark-page-meta';
+import { shortDescription, type PageMeta } from '../src/plugins/remark-page-meta';
 import { KEYWORDS, markKeywords } from '../src/plugins/rehype-keywords';
 import { tableLabel } from '../src/plugins/rehype-tables';
 import { standardVersions } from '../src/data/versions';
@@ -86,6 +86,24 @@ describe('remark-repo-links errors', () => {
     const text = `${readRepoFile(source).replace(/\n+$/, '')}\n\nSee [nothing](./missing.md).\n`;
     const line = text.split('\n').length - 1;
     await expect(renderRepoFile(source, text)).rejects.toThrow(`skills/detect/SKILL.md:${line}: ./missing.md -> `);
+  });
+});
+
+describe('shortDescription', () => {
+  // The limit routes.ts holds hand-written descriptions to (200 characters).
+  it('stays within the limit when it cuts at a word and adds an ellipsis', () => {
+    const words = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
+    const solid = 'x'.repeat(300);
+    for (const text of [words, solid, `${'a'.repeat(198)} bbbbbbbb`]) {
+      const d = shortDescription(text);
+      expect(d.length, d).toBeLessThanOrEqual(200);
+      expect(d.endsWith('...')).toBe(true);
+    }
+  });
+
+  it('cuts at a sentence end when there is one past character 40', () => {
+    const text = `${'A sentence that is long enough to count. '.repeat(3)}${'more words '.repeat(30)}`;
+    expect(shortDescription(text)).toBe('A sentence that is long enough to count. '.repeat(3).trim());
   });
 });
 
