@@ -138,32 +138,32 @@ impl SchemaStore {
         chain: &mut Vec<String>,
         budget: &mut usize,
     ) -> Result<Value, TooLarge> {
-        if let Value::Object(m) = node {
-            if let Some(Value::String(r)) = m.get("$ref") {
-                let abs = absolute(r, base);
-                let target = if chain.len() >= MAX_REF_DEPTH || chain.contains(&abs) {
-                    None
-                } else {
-                    self.resolve_ref(&abs)
-                };
-                let Some(Value::Object(target)) = target else {
-                    return charged(node, budget);
-                };
-                let mut merged = target;
-                for (k, v) in m {
-                    if k != "$ref" {
-                        merged.insert(k.clone(), v.clone());
-                    }
+        if let Value::Object(m) = node
+            && let Some(Value::String(r)) = m.get("$ref")
+        {
+            let abs = absolute(r, base);
+            let target = if chain.len() >= MAX_REF_DEPTH || chain.contains(&abs) {
+                None
+            } else {
+                self.resolve_ref(&abs)
+            };
+            let Some(Value::Object(target)) = target else {
+                return charged(node, budget);
+            };
+            let mut merged = target;
+            for (k, v) in m {
+                if k != "$ref" {
+                    merged.insert(k.clone(), v.clone());
                 }
-                let file = abs
-                    .split_once('#')
-                    .map_or(abs.as_str(), |(f, _)| f)
-                    .to_string();
-                chain.push(abs);
-                let out = self.expand(&Value::Object(merged), Some(&file), chain, budget);
-                chain.pop();
-                return out;
             }
+            let file = abs
+                .split_once('#')
+                .map_or(abs.as_str(), |(f, _)| f)
+                .to_string();
+            chain.push(abs);
+            let out = self.expand(&Value::Object(merged), Some(&file), chain, budget);
+            chain.pop();
+            return out;
         }
         *budget = budget.checked_sub(1).ok_or(TooLarge)?;
         Ok(match node {

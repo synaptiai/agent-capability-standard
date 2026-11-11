@@ -62,6 +62,14 @@ class TestClassifierNeverCrashes:
         result = mapper.map_tool("Bash", tool_input)
         assert isinstance(result, ToolMapping)
 
+    @pytest.mark.parametrize("command", [1, None, ["rm", "-rf", "/"], {"x": 1}])
+    def test_non_string_command_is_high_risk(self, command: object) -> None:
+        """A command that is not text cannot be checked, so it is treated as
+        an unknown, checkpoint-gated mutation rather than raising."""
+        result = ToolCapabilityMapper().map_tool("Bash", {"command": command})
+        assert result.risk == "high"
+        assert result.requires_checkpoint
+
 
 # ─── Word boundary false positive tests ───
 

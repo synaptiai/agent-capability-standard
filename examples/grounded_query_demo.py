@@ -8,7 +8,7 @@ cost tracking.
 
 Prerequisites:
     The grounded_agency package must be built and installed: it includes a
-    Rust extension (grounded_agency._core), so a Rust toolchain (rustc >= 1.86)
+    Rust extension (grounded_agency._core), so a Rust toolchain (rustc >= 1.88)
     is required. From the repository root:
         pip install -e ".[sdk]"    # or ".[dev]", which includes the SDK
 

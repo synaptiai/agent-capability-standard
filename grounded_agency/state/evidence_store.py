@@ -14,7 +14,7 @@ import threading
 from collections import defaultdict, deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import islice
 from typing import Any
 
@@ -197,7 +197,7 @@ class EvidenceAnchor:
         return cls(
             ref=f"tool:{tool_name}:{tool_use_id}",
             kind="tool_output",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             metadata={
                 "tool_name": tool_name,
                 "tool_input": tool_input,
@@ -226,7 +226,7 @@ class EvidenceAnchor:
         return cls(
             ref=f"file:{file_path}",
             kind="file",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             metadata={
                 "path": file_path,
                 "hash": file_hash,
@@ -252,11 +252,11 @@ class EvidenceAnchor:
         Returns:
             EvidenceAnchor for this command execution
         """
-        ref_id = tool_use_id or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        ref_id = tool_use_id or datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         return cls(
             ref=f"command:{ref_id}",
             kind="command",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             metadata={
                 "command": command,
                 "exit_code": exit_code,
@@ -284,7 +284,7 @@ class EvidenceAnchor:
         return cls(
             ref=f"mutation:{target}",
             kind="mutation",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             metadata={
                 "target": target,
                 "operation": operation,

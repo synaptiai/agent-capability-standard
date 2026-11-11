@@ -476,10 +476,10 @@ impl WorkflowCheck<'_> {
             if let Some(store) = step.get("store_as").and_then(Value::as_str) {
                 owners.entry(store).or_insert(i);
             }
-            if let Some(g) = step.get("parallel_group").and_then(Value::as_str) {
-                if !plan.handlers.contains(&i) {
-                    groups.entry(g).or_default().push(i);
-                }
+            if let Some(g) = step.get("parallel_group").and_then(Value::as_str)
+                && !plan.handlers.contains(&i)
+            {
+                groups.entry(g).or_default().push(i);
             }
         }
         let mut independence = quorum::Independence::new(steps);
@@ -615,17 +615,17 @@ impl WorkflowCheck<'_> {
             }
             self.check_files(&loc, step);
 
-            if let Some(store) = store {
-                if let Some(&first) = owners.get(store).filter(|&&first| first != i) {
-                    self.report.push(
-                        loc.diag(
-                            Code::DuplicateStoreAs,
-                            format!("duplicate store_as '{store}' (first used at step {first})"),
-                        )
-                        .at("store_as", store)
-                        .at("first_step", first),
-                    );
-                }
+            if let Some(store) = store
+                && let Some(&first) = owners.get(store).filter(|&&first| first != i)
+            {
+                self.report.push(
+                    loc.diag(
+                        Code::DuplicateStoreAs,
+                        format!("duplicate store_as '{store}' (first used at step {first})"),
+                    )
+                    .at("store_as", store)
+                    .at("first_step", first),
+                );
             }
 
             let checker = bindings::Checker {
@@ -751,10 +751,10 @@ impl WorkflowCheck<'_> {
                     }
                 }
             }
-            if let Some(store) = store {
-                if exprs::skippable(step, &gates) {
-                    scope.maybe_absent.insert(store.to_string());
-                }
+            if let Some(store) = store
+                && exprs::skippable(step, &gates)
+            {
+                scope.maybe_absent.insert(store.to_string());
             }
             if let Some(view) = view {
                 view.leave(scope);
@@ -814,14 +814,14 @@ impl WorkflowCheck<'_> {
                 self.report.push(d.at("field", key));
             }
         }
-        if let Some(r) = self.wf.get("risk") {
-            if !r.as_str().is_some_and(|r| Risk::parse(r).is_some()) {
-                let d = self.wdiag(
-                    Code::SchemaValidationFailed,
-                    "'risk' must be one of low, medium, high",
-                );
-                self.report.push(d.at("field", "risk"));
-            }
+        if let Some(r) = self.wf.get("risk")
+            && !r.as_str().is_some_and(|r| Risk::parse(r).is_some())
+        {
+            let d = self.wdiag(
+                Code::SchemaValidationFailed,
+                "'risk' must be one of low, medium, high",
+            );
+            self.report.push(d.at("field", "risk"));
         }
         for key in ["goal", "description", "success"] {
             let Some(v) = self.wf.get(key) else { continue };
@@ -864,20 +864,20 @@ impl WorkflowCheck<'_> {
             }
         }
         for &(key, shape) in STEP_FIELD_SHAPES {
-            if let Some(v) = step.get(key) {
-                if !shape.accepts(v) {
-                    self.report.push(
-                        loc.diag(
-                            Code::SchemaValidationFailed,
-                            format!(
-                                "'{key}' must be {}, found {}",
-                                shape.name(),
-                                yaml::kind_of(v)
-                            ),
-                        )
-                        .at("field", key),
-                    );
-                }
+            if let Some(v) = step.get(key)
+                && !shape.accepts(v)
+            {
+                self.report.push(
+                    loc.diag(
+                        Code::SchemaValidationFailed,
+                        format!(
+                            "'{key}' must be {}, found {}",
+                            shape.name(),
+                            yaml::kind_of(v)
+                        ),
+                    )
+                    .at("field", key),
+                );
             }
         }
         // The executor reads retry.backoff as one of three strategies:
@@ -886,40 +886,39 @@ impl WorkflowCheck<'_> {
             .get("retry")
             .and_then(|r| r.get("backoff"))
             .filter(|b| !b.is_null())
+            && !matches!(backoff.as_str(), Some("none" | "linear" | "exponential"))
         {
-            if !matches!(backoff.as_str(), Some("none" | "linear" | "exponential")) {
-                self.report.push(
-                    loc.diag(
-                        Code::SchemaValidationFailed,
-                        format!(
-                            "retry.backoff must be none, linear or exponential, found {}",
-                            backoff
-                        ),
-                    )
-                    .at("field", "retry.backoff"),
-                );
-            }
+            self.report.push(
+                loc.diag(
+                    Code::SchemaValidationFailed,
+                    format!(
+                        "retry.backoff must be none, linear or exponential, found {}",
+                        backoff
+                    ),
+                )
+                .at("field", "retry.backoff"),
+            );
         }
         // The executor reads retry.max as a count: anything else would
         // silently mean no retries. Like max_loops it is bounded, so the
         // run's worst case stays finite.
-        if let Some(max) = step.get("retry").and_then(|r| r.get("max")) {
-            if !count(max).is_some_and(|n| n <= MAX_RETRIES) {
-                self.report.push(
-                    loc.diag(
-                        Code::SchemaValidationFailed,
-                        format!(
-                            "retry.max must be an integer from 0 to {MAX_RETRIES}, found {}",
-                            if max.is_number() {
-                                max.to_string()
-                            } else {
-                                yaml::kind_of(max).to_string()
-                            }
-                        ),
-                    )
-                    .at("field", "retry.max"),
-                );
-            }
+        if let Some(max) = step.get("retry").and_then(|r| r.get("max"))
+            && !count(max).is_some_and(|n| n <= MAX_RETRIES)
+        {
+            self.report.push(
+                loc.diag(
+                    Code::SchemaValidationFailed,
+                    format!(
+                        "retry.max must be an integer from 0 to {MAX_RETRIES}, found {}",
+                        if max.is_number() {
+                            max.to_string()
+                        } else {
+                            yaml::kind_of(max).to_string()
+                        }
+                    ),
+                )
+                .at("field", "retry.max"),
+            );
         }
         if let Some(Value::String(s)) = step.get("store_as") {
             if !s.is_empty() && !refs::is_identifier(s) {
@@ -942,16 +941,16 @@ impl WorkflowCheck<'_> {
                 );
             }
         }
-        if let Some(Value::String(r)) = step.get("risk") {
-            if Risk::parse(r).is_none() {
-                self.report.push(
-                    loc.diag(
-                        Code::SchemaValidationFailed,
-                        "'risk' must be one of low, medium, high",
-                    )
-                    .at("field", "risk"),
-                );
-            }
+        if let Some(Value::String(r)) = step.get("risk")
+            && Risk::parse(r).is_none()
+        {
+            self.report.push(
+                loc.diag(
+                    Code::SchemaValidationFailed,
+                    "'risk' must be one of low, medium, high",
+                )
+                .at("field", "risk"),
+            );
         }
         for (list, required) in [
             ("gates", ["when", "action"]),
@@ -999,16 +998,16 @@ impl WorkflowCheck<'_> {
     }
 
     fn check_files(&mut self, loc: &StepLoc<'_>, step: &Map<String, Value>) {
-        if let Some(Value::String(m)) = step.get("mapping_ref") {
-            if !self.ctx.schemas.file_exists(m) {
-                self.report.push(
-                    loc.diag(
-                        Code::SchemaNotFound,
-                        format!("mapping_ref missing file: {m}"),
-                    )
-                    .at("field", "mapping_ref"),
-                );
-            }
+        if let Some(Value::String(m)) = step.get("mapping_ref")
+            && !self.ctx.schemas.file_exists(m)
+        {
+            self.report.push(
+                loc.diag(
+                    Code::SchemaNotFound,
+                    format!("mapping_ref missing file: {m}"),
+                )
+                .at("field", "mapping_ref"),
+            );
         }
         if let Some(Value::String(c)) = step.get("output_conforms_to") {
             let file = c.split('#').next().unwrap_or_default();

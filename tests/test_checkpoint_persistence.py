@@ -7,7 +7,7 @@ restore it in a new instance, surviving process restarts.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -239,7 +239,7 @@ class TestClearExpiredPersistence:
         tracker1.create_checkpoint(scope=["*"], reason="will expire", expiry_minutes=0)
         # Force expiry by setting expires_at to the past
         assert tracker1._active_checkpoint is not None
-        tracker1._active_checkpoint.expires_at = datetime.now(timezone.utc) - timedelta(
+        tracker1._active_checkpoint.expires_at = datetime.now(UTC) - timedelta(
             seconds=10
         )
         tracker1._persist_state()
@@ -259,7 +259,7 @@ class TestClearExpiredPersistence:
         # Create and consume a checkpoint (moves to history)
         tracker1.create_checkpoint(scope=["*"], reason="will expire", expiry_minutes=0)
         assert tracker1._active_checkpoint is not None
-        tracker1._active_checkpoint.expires_at = datetime.now(timezone.utc) - timedelta(
+        tracker1._active_checkpoint.expires_at = datetime.now(UTC) - timedelta(
             seconds=10
         )
         tracker1.consume_checkpoint()
@@ -300,7 +300,7 @@ class TestHistoryPruningPersistence:
         """Loading a state file with more entries than max_history caps on read."""
         entries = []
         for i in range(20):
-            ts = datetime(2025, 1, 1, 0, i, tzinfo=timezone.utc)
+            ts = datetime(2025, 1, 1, 0, i, tzinfo=UTC)
             entries.append(
                 {
                     "id": f"chk_old_{i}",
@@ -345,8 +345,8 @@ class TestCheckpointSerialization:
             id="chk_test_123",
             scope=["src/*.py"],
             reason="testing",
-            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
-            expires_at=datetime(2025, 1, 1, 0, 30, tzinfo=timezone.utc),
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
+            expires_at=datetime(2025, 1, 1, 0, 30, tzinfo=UTC),
             consumed=False,
             metadata={"key": "value"},
         )
@@ -367,9 +367,9 @@ class TestCheckpointSerialization:
             id="chk_consumed",
             scope=["*"],
             reason="consumed",
-            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
             consumed=True,
-            consumed_at=datetime(2025, 1, 1, 0, 5, tzinfo=timezone.utc),
+            consumed_at=datetime(2025, 1, 1, 0, 5, tzinfo=UTC),
         )
 
         d = chk.to_dict()
@@ -383,7 +383,7 @@ class TestCheckpointSerialization:
             id="chk_no_expiry",
             scope=["*"],
             reason="no expiry",
-            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
         d = chk.to_dict()
@@ -401,7 +401,7 @@ class TestFromDictValidation:
             "id": "chk_test",
             "scope": ["*"],
             "reason": "test",
-            "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
+            "created_at": datetime(2025, 1, 1, tzinfo=UTC).isoformat(),
             "metadata": {},
         }
 
@@ -450,7 +450,7 @@ class TestArchiveErrorHandling:
                 "id": "chk_good",
                 "scope": ["*"],
                 "reason": "good",
-                "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
+                "created_at": datetime(2025, 1, 1, tzinfo=UTC).isoformat(),
                 "metadata": {},
             }
         )
@@ -514,9 +514,7 @@ class TestSymlinkStateFileRejection:
                         "id": "chk_symlink",
                         "scope": ["*"],
                         "reason": "symlinked",
-                        "created_at": datetime(
-                            2025, 1, 1, tzinfo=timezone.utc
-                        ).isoformat(),
+                        "created_at": datetime(2025, 1, 1, tzinfo=UTC).isoformat(),
                         "metadata": {},
                     },
                     "history": [],

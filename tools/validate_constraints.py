@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -92,51 +93,15 @@ def satisfies(version: str, requirement: str) -> bool:
 
 
 def iter_declared_requirements(text: str) -> list[str]:
-    """Yield every requirement string in pyproject's dependency arrays.
+    """Return every requirement string in pyproject's dependency arrays.
 
-    Deliberately does not use ``tomllib``: that is stdlib only on 3.11+, and
-    this project supports 3.10, so importing it would make the validator crash
-    for part of its own supported range. The parse is narrow by design -- it
-    reads the ``[project]`` and ``[project.optional-dependencies]`` tables and
-    collects the quoted strings inside their arrays, which is all this check
-    needs.
+    Reads ``[project] dependencies`` and every array under
+    ``[project.optional-dependencies]``.
     """
-    requirements: list[str] = []
-    section = ""
-    in_array = False
-
-    for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip() if not raw.strip().startswith('"') else raw
-        stripped = line.strip()
-
-        header = re.match(r"^\[([^\]]+)\]$", stripped)
-        if header:
-            section = header.group(1)
-            in_array = False
-            continue
-
-        relevant = section == "project" or section.endswith("optional-dependencies")
-        if not relevant:
-            continue
-
-        if not in_array:
-            # `dependencies = [` under [project], or `<extra> = [` under
-            # [project.optional-dependencies].
-            key = re.match(r"^([A-Za-z0-9_-]+)\s*=\s*\[", stripped)
-            if key and (
-                section.endswith("optional-dependencies")
-                or key.group(1) == "dependencies"
-            ):
-                in_array = True
-                stripped = stripped[stripped.index("[") + 1 :]
-            else:
-                continue
-
-        if in_array:
-            requirements.extend(re.findall(r'"([^"]+)"', stripped))
-            if "]" in stripped:
-                in_array = False
-
+    project = tomllib.loads(text).get("project", {})
+    requirements: list[str] = list(project.get("dependencies", []))
+    for extra in project.get("optional-dependencies", {}).values():
+        requirements.extend(extra)
     return requirements
 
 
@@ -161,7 +126,11 @@ def main() -> int:
         print(f"ERROR: {PYPROJECT.name} not found at {PYPROJECT}")
         return 1
 
-    declared = collect_requirements()
+    try:
+        declared = collect_requirements()
+    except tomllib.TOMLDecodeError as exc:
+        print(f"ERROR: {PYPROJECT.name} is not valid TOML: {exc}")
+        return 1
     errors: list[str] = []
     checked = 0
 

@@ -261,16 +261,16 @@ pub(crate) fn legacy_timeout(
     at: &dyn Fn(Diagnostic) -> Diagnostic,
     report: &mut Report,
 ) {
-    if let Some(Value::String(t)) = step.get("timeout") {
-        if let Err(e) = duration::parse(t) {
-            report.push(
-                at(Diagnostic::new(
-                    Code::InvalidDuration,
-                    format!("timeout: {e}; it cannot be enforced"),
-                ))
-                .at("field", "timeout"),
-            );
-        }
+    if let Some(Value::String(t)) = step.get("timeout")
+        && let Err(e) = duration::parse(t)
+    {
+        report.push(
+            at(Diagnostic::new(
+                Code::InvalidDuration,
+                format!("timeout: {e}; it cannot be enforced"),
+            ))
+            .at("field", "timeout"),
+        );
     }
 }
 
@@ -385,14 +385,14 @@ fn schedule(
         )),
         (None, None) => report.push(s304(at, field, format!("{field} needs 'cron' or 'every'"))),
         (Some(_), None) => {
-            if let Some(c) = string_field(s, "cron", field, at, report) {
-                if let Err(e) = Cron::parse(c) {
-                    report.push(s303(
-                        at,
-                        &format!("{field}.cron"),
-                        format!("{field}.cron: {e}"),
-                    ));
-                }
+            if let Some(c) = string_field(s, "cron", field, at, report)
+                && let Err(e) = Cron::parse(c)
+            {
+                report.push(s303(
+                    at,
+                    &format!("{field}.cron"),
+                    format!("{field}.cron: {e}"),
+                ));
             }
         }
         (None, Some(every)) => {
@@ -402,14 +402,13 @@ fn schedule(
             }
         }
     }
-    if let Some(tz) = string_field(s, "timezone", field, at, report) {
-        if tz.parse::<chrono_tz::Tz>().is_err() {
-            report.push(s303(
-                at,
-                &format!("{field}.timezone"),
-                format!("{field}.timezone '{tz}' is not an IANA time zone name (e.g. 'Europe/Lisbon', 'UTC')"),
-            ));
-        }
+    if let Some(tz) = string_field(s, "timezone", field, at, report)
+        && tz.parse::<chrono_tz::Tz>().is_err()
+    {
+        let message = format!(
+            "{field}.timezone '{tz}' is not an IANA time zone name (e.g. 'Europe/Lisbon', 'UTC')"
+        );
+        report.push(s303(at, &format!("{field}.timezone"), message));
     }
     enum_field(
         s,

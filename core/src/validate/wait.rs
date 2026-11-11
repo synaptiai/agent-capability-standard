@@ -168,10 +168,10 @@ pub(crate) fn workflows_that_wait(workflows: &Map<String, Value>) -> HashSet<&st
         for s in steps {
             waits |= (declared.has("wait@1") && s.get("wait").is_some_and(Value::is_object))
                 || delay(s, &declared).is_some();
-            if s.get("capability").and_then(Value::as_str) == Some("invoke") {
-                if let Some((target, _)) = super::invoke::target(s) {
-                    callers.entry(target).or_default().push(name.as_str());
-                }
+            if s.get("capability").and_then(Value::as_str) == Some("invoke")
+                && let Some((target, _)) = super::invoke::target(s)
+            {
+                callers.entry(target).or_default().push(name.as_str());
             }
         }
         if waits {
@@ -383,7 +383,7 @@ fn liveness(
 
 fn show(d: Duration) -> String {
     let ms = d.as_millis();
-    if ms % 1000 == 0 {
+    if ms.is_multiple_of(1000) {
         format!("{}s", ms / 1000)
     } else {
         format!("{ms}ms")
@@ -506,10 +506,10 @@ pub(crate) fn spans_checkpoint(
         // before anything the step does; an invoke uses its checkpoint
         // before the run it invokes waits.
         let waits_before_acting = p.delays || (p.waits && !p.nested && p.capability != "delegate");
-        if p.requires_checkpoint {
-            if let Some(w) = covers(waits_before_acting) {
-                flag(p, w);
-            }
+        if p.requires_checkpoint
+            && let Some(w) = covers(waits_before_acting)
+        {
+            flag(p, w);
         }
         // A handler runs after its targeter, which may have waited, and
         // may delay itself before acting.

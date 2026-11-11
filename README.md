@@ -147,7 +147,7 @@ Use the validator independently:
 git clone https://github.com/synaptiai/agent-capability-standard.git
 cd agent-capability-standard
 
-# Set up Python environment (Python >= 3.10; builds the Rust core, so Rust >= 1.86 is required)
+# Set up Python environment (Python >= 3.14; builds the Rust core, so Rust >= 1.88 is required)
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
 
@@ -381,7 +381,7 @@ pip install grounded-agency
 pip install grounded-agency[sdk]
 ```
 
-The package includes a compiled Rust extension; installing from a source distribution needs a Rust toolchain (>= 1.86).
+The package includes a compiled Rust extension; installing from a source distribution needs a Rust toolchain (>= 1.88).
 
 ---
 
@@ -413,7 +413,7 @@ claude plugin install agent-capability-standard
 git clone https://github.com/synaptiai/agent-capability-standard.git
 cd agent-capability-standard
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]" -c constraints.txt   # needs Python >= 3.10 and Rust >= 1.86
+pip install -e ".[dev]" -c constraints.txt   # needs Python >= 3.14 and Rust >= 1.88
 ```
 
 ## Validation

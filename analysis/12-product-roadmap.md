@@ -645,7 +645,7 @@ Key investments:
 
 | Dependency | Version | Purpose | Risk |
 |------------|---------|---------|------|
-| Python | 3.10+ | SDK runtime | Low (stable) |
+| Python | 3.14+ | SDK runtime | Low (stable) |
 | PyYAML | 6.x | YAML parsing | Low (stable) |
 | Claude Agent SDK | Latest | Agent integration | Medium (evolving API) |
 | OASF | 0.8.0 | Interoperability | Medium (pre-1.0) |

@@ -263,7 +263,7 @@ def iter_markdown_files() -> list[Path]:
                 if p.is_file()
                 and not any(part in SKIP_DIRS for part in p.relative_to(ROOT).parts)
             )
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         pass  # Not a git checkout (or git unavailable) -- fall back to a walk.
 
     return sorted(

@@ -707,10 +707,10 @@ impl Run {
         }
         let value: Value = serde_json::from_str(&snapshot.state)
             .map_err(|e| RestoreError::Malformed(e.to_string()))?;
-        if let Some(v) = value.get("version").and_then(Value::as_u64) {
-            if v != u64::from(SNAPSHOT_VERSION) {
-                return Err(RestoreError::Version(v));
-            }
+        if let Some(v) = value.get("version").and_then(Value::as_u64)
+            && v != u64::from(SNAPSHOT_VERSION)
+        {
+            return Err(RestoreError::Version(v));
         }
         let state: State =
             serde_json::from_value(value).map_err(|e| RestoreError::Malformed(e.to_string()))?;
@@ -903,12 +903,12 @@ pub(crate) fn delegate_identity_error(delegation: &Value) -> Option<String> {
         return Some(format!("effective.identity: {e}"));
     }
     for key in ["model_family", "role"] {
-        if let (Some(a), Some(b)) = (identity.get(key), effective.get(key)) {
-            if a != b {
-                return Some(format!(
-                    "effective.identity.{key} {a} contradicts effective.{key} {b}"
-                ));
-            }
+        if let (Some(a), Some(b)) = (identity.get(key), effective.get(key))
+            && a != b
+        {
+            return Some(format!(
+                "effective.identity.{key} {a} contradicts effective.{key} {b}"
+            ));
         }
     }
     None
@@ -953,15 +953,15 @@ pub(crate) fn identity_error(v: &Value) -> Option<String> {
             return Some(format!("an identity's {key} must be a string"));
         }
     }
-    if let Some(a) = m.get("authenticated_by").and_then(Value::as_str) {
-        if !known_mechanism(a) {
-            return Some(format!("'{a}' is not an authenticated_by value"));
-        }
+    if let Some(a) = m.get("authenticated_by").and_then(Value::as_str)
+        && !known_mechanism(a)
+    {
+        return Some(format!("'{a}' is not an authenticated_by value"));
     }
-    if let Some(c) = m.get("trust_class").and_then(Value::as_str) {
-        if !TRUST_CLASSES.contains(&c) {
-            return Some(format!("'{c}' is not a trust class"));
-        }
+    if let Some(c) = m.get("trust_class").and_then(Value::as_str)
+        && !TRUST_CLASSES.contains(&c)
+    {
+        return Some(format!("'{c}' is not a trust class"));
     }
     None
 }

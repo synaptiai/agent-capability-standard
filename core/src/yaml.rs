@@ -274,10 +274,10 @@ fn classify<'a>(tag: Option<&'a Tag>) -> TagKind<'a> {
         return TagKind::Core(t.suffix.as_str());
     }
     // The verbatim form `!<tag:yaml.org,2002:str>` names the same tag as `!!str`.
-    if t.handle.is_empty() {
-        if let Some(rest) = t.suffix.strip_prefix(CORE_PREFIX) {
-            return TagKind::Core(rest);
-        }
+    if t.handle.is_empty()
+        && let Some(rest) = t.suffix.strip_prefix(CORE_PREFIX)
+    {
+        return TagKind::Core(rest);
     }
     TagKind::Other(format!("{}{}", t.handle, t.suffix))
 }

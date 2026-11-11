@@ -44,7 +44,7 @@ class TestPreToolUseCheckpointHook:
         self, strict_adapter: GroundedAgentAdapter
     ):
         """Test that Write is blocked when no checkpoint exists."""
-        hook = strict_adapter._make_pretooluse_checkpoint_hook()
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
             {"tool_name": "Write", "tool_input": {"file_path": "test.txt"}},
@@ -61,7 +61,7 @@ class TestPreToolUseCheckpointHook:
         self, strict_adapter: GroundedAgentAdapter
     ):
         """Test that Edit is blocked when no checkpoint exists."""
-        hook = strict_adapter._make_pretooluse_checkpoint_hook()
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
             {"tool_name": "Edit", "tool_input": {"file_path": "test.txt"}},
@@ -77,7 +77,7 @@ class TestPreToolUseCheckpointHook:
     ):
         """Test that Write is allowed when checkpoint exists."""
         strict_adapter.create_checkpoint(["*"], "Test checkpoint")
-        hook = strict_adapter._make_pretooluse_checkpoint_hook()
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
             {"tool_name": "Write", "tool_input": {"file_path": "test.txt"}},
@@ -91,7 +91,7 @@ class TestPreToolUseCheckpointHook:
     @pytest.mark.asyncio
     async def test_allows_read_always(self, strict_adapter: GroundedAgentAdapter):
         """Test that Read is always allowed (no checkpoint needed)."""
-        hook = strict_adapter._make_pretooluse_checkpoint_hook()
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
             {"tool_name": "Read", "tool_input": {"path": "test.txt"}},
@@ -104,7 +104,7 @@ class TestPreToolUseCheckpointHook:
     @pytest.mark.asyncio
     async def test_allows_grep_always(self, strict_adapter: GroundedAgentAdapter):
         """Test that Grep is always allowed."""
-        hook = strict_adapter._make_pretooluse_checkpoint_hook()
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
             {"tool_name": "Grep", "tool_input": {"pattern": "test"}},
@@ -119,7 +119,7 @@ class TestPreToolUseCheckpointHook:
         self, lenient_adapter: GroundedAgentAdapter
     ):
         """Test that non-strict mode doesn't deny mutations."""
-        hook = lenient_adapter._make_pretooluse_checkpoint_hook()
+        hook = lenient_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
             {"tool_name": "Write", "tool_input": {"file_path": "test.txt"}},
@@ -133,7 +133,7 @@ class TestPreToolUseCheckpointHook:
     @pytest.mark.asyncio
     async def test_blocks_destructive_bash(self, strict_adapter: GroundedAgentAdapter):
         """Test that destructive Bash commands are blocked."""
-        hook = strict_adapter._make_pretooluse_checkpoint_hook()
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
             {"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/test"}},
@@ -146,7 +146,7 @@ class TestPreToolUseCheckpointHook:
     @pytest.mark.asyncio
     async def test_allows_readonly_bash(self, strict_adapter: GroundedAgentAdapter):
         """Test that read-only Bash commands are allowed."""
-        hook = strict_adapter._make_pretooluse_checkpoint_hook()
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
             {"tool_name": "Bash", "tool_input": {"command": "ls -la"}},
@@ -197,9 +197,152 @@ class TestPreToolUseInWrapOptions:
         assert "PostToolUse" in wrapped.hooks
 
 
+def _hooks(entry) -> list:
+    return entry["hooks"] if isinstance(entry, dict) else entry.hooks
+
+
+async def _fire(wrapped, event: str, input_data: dict) -> None:
+    for entry in wrapped.hooks[event]:
+        for hook in _hooks(entry):
+            await hook(input_data, None, None)
+
+
+class TestTurnEndReleasesLeftoverReservation:
+    """A call another hook denies after the adapter's PreToolUse hook
+    reserved for it never runs, so nothing else ends its reservation. When
+    the session's turn (or the subagent) ends, it is released -- and only
+    reservations taken in that session by that agent."""
+
+    @staticmethod
+    def _write(session: str, agent: str | None = None) -> dict:
+        data = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "a.txt"},
+            "session_id": session,
+        }
+        if agent is not None:
+            data["agent_id"] = agent
+        return data
+
+    async def _reserve(self, adapter, wrapped, call: dict, holder: str) -> None:
+        (pre,) = _hooks(wrapped.hooks["PreToolUse"][-1])
+        assert await pre(call, holder, None) == {}
+        assert not adapter.checkpoint_tracker.validate_and_reserve("probe")[0]
+
+    @pytest.mark.asyncio
+    async def test_stop_releases_its_sessions_reservation(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        stop_calls: list[str] = []
+
+        async def caller_stop(input_data, tool_use_id, context):
+            stop_calls.append(input_data["session_id"])
+            return {}
+
+        wrapped = strict_adapter.wrap_options(
+            ClaudeAgentOptions(hooks={"Stop": [{"hooks": [caller_stop]}]})
+        )
+        strict_adapter.create_checkpoint(["*"], "Test")
+        await self._reserve(strict_adapter, wrapped, self._write("s1"), "denied")
+
+        await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
+
+        assert stop_calls == ["s1"]
+        assert strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
+
+    @pytest.mark.asyncio
+    async def test_stop_of_another_session_keeps_the_reservation(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
+        strict_adapter.create_checkpoint(["*"], "Test")
+        await self._reserve(strict_adapter, wrapped, self._write("s2"), "in_flight")
+
+        await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
+
+        assert not strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
+
+    @pytest.mark.asyncio
+    async def test_main_stop_keeps_a_subagents_reservation(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """A background subagent can still be mid-call when the main turn
+        ends; its own SubagentStop releases what it left."""
+        wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
+        strict_adapter.create_checkpoint(["*"], "Test")
+        await self._reserve(
+            strict_adapter, wrapped, self._write("s1", agent="sub1"), "sub_call"
+        )
+        tracker = strict_adapter.checkpoint_tracker
+
+        await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
+        assert not tracker.validate_and_reserve("next")[0]
+
+        await _fire(
+            wrapped,
+            "SubagentStop",
+            {"hook_event_name": "SubagentStop", "session_id": "s1", "agent_id": "sub1"},
+        )
+        assert tracker.validate_and_reserve("next")[0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    async def test_ledger_drops_calls_that_finished(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """Only calls still in flight stay in the ledger, so it does not
+        grow across turns that never reach Stop."""
+        wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
+        strict_adapter.create_checkpoint(["*"], "Test")
+        await self._reserve(strict_adapter, wrapped, self._write("s1"), "w1")
+        assert strict_adapter._reservations.take("s1", None) == ["w1"]
+        strict_adapter._reservations.record("w1", "s1", None)
+
+        for entry in wrapped.hooks["PostToolUse"]:
+            for hook in _hooks(entry):
+                await hook(
+                    {**self._write("s1"), "tool_response": {"is_error": False}},
+                    "w1",
+                    None,
+                )
+
+        assert strict_adapter._reservations.take("s1", None) == []
+
+    @pytest.mark.asyncio
+    async def test_stop_leaves_a_later_holders_reservation(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """A recorded call that already finished does not release a
+        reservation another call took afterwards."""
+        wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
+        strict_adapter.create_checkpoint(["*"], "Test")
+        tracker = strict_adapter.checkpoint_tracker
+        await self._reserve(strict_adapter, wrapped, self._write("s1"), "done")
+        assert tracker.release_reservation("done")
+        assert tracker.validate_and_reserve("other_session_call")[0]
+
+        await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
+
+        assert not tracker.validate_and_reserve("next")[0]
+
+
 # =============================================================================
 # PreToolUse Exception Handling Tests (Issue 12)
 # =============================================================================
+
+
+class TestMalformedBashInput:
+    """A Bash call whose input cannot be read is a checkpoint-gated
+    mutation, not a mapper error the hook would let through."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_input", [None, "rm -rf /", ["rm"], 7])
+    async def test_non_dict_bash_input_needs_a_checkpoint(
+        self, strict_adapter: GroundedAgentAdapter, tool_input: object
+    ):
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        result = await hook({"tool_name": "Bash", "tool_input": tool_input}, "b1", None)
+        assert _decision(result) == "deny"
 
 
 class TestPreToolUseExceptionHandling:
@@ -218,7 +361,7 @@ class TestPreToolUseExceptionHandling:
         """
         from unittest.mock import MagicMock
 
-        hook = strict_adapter._make_pretooluse_checkpoint_hook()
+        hook = strict_adapter._make_pretooluse_safety_hook()
 
         # Replace mapper with one that raises
         strict_adapter.mapper.map_tool = MagicMock(  # type: ignore[assignment]
@@ -233,6 +376,23 @@ class TestPreToolUseExceptionHandling:
 
         # Should return empty dict (no denial), not crash
         assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_exception_in_rate_limiter_denies(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """The rate limit fails closed, as it did in the permission callback."""
+        from unittest.mock import MagicMock
+
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        strict_adapter.rate_limiter.allow = MagicMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("limiter exploded")
+        )
+
+        result = await hook({"tool_name": "Read", "tool_input": {}}, "r1", None)
+
+        assert _decision(result) == "deny"
+        assert "Rate limit check failed" in _reason(result)
 
 
 # =============================================================================

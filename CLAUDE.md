@@ -89,7 +89,7 @@ pip install -e ".[dev]" -c constraints.txt
 
 The package is built with maturin: the validator and the executor live in
 the Rust crate under `core/` and
-compiles into `grounded_agency._core`, so a Rust toolchain (rustc >= 1.86) is
+compiles into `grounded_agency._core`, so a Rust toolchain (rustc >= 1.88) is
 required. After changing Rust code, re-run the `pip install -e` line to rebuild
 the extension.
 
@@ -107,8 +107,8 @@ CI pins the toolchain that runs these (`RUST_TOOLCHAIN` in
 
 Install the `dev` extra rather than individual packages, and pass
 `-c constraints.txt` — that file pins the exact tool versions CI runs, so the
-local formatter matches CI's exactly. Without it, `ruff>=0.16,<0.17` resolves
-to whatever 0.16.x is newest and a reformat can appear in CI that never
+local formatter matches CI's exactly. Without it, `ruff>=0.17,<0.18` resolves
+to whatever 0.17.x is newest and a reformat can appear in CI that never
 appeared locally.
 
 The bounds in `pyproject.toml` are the *supported range*; `constraints.txt` is

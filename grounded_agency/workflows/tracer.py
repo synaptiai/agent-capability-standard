@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .engine import StepStatus, WorkflowDefinition, WorkflowEngine, WorkflowStep
@@ -143,7 +143,7 @@ class WorkflowTracer:
         trace = StepTrace(
             capability=capability,
             domain=domain,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             input_data=input_data or {},
             output_data=output_data or {},
         )
@@ -241,7 +241,7 @@ class WorkflowTracer:
         trace = StepTrace(
             capability=self._workflow.steps[step_index].capability,
             domain=self._workflow.steps[step_index].domain,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             input_data={},
             output_data={},
             matched_step_index=step_index,

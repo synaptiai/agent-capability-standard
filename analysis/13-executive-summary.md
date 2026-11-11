@@ -274,7 +274,7 @@ A marketplace for community and commercial contributions:
 | Skill implementations | 41 |
 | Transform mappings | 7 |
 | Conformance levels | 4 (L1--L4) |
-| CI pipeline | `.github/workflows/ci.yml` (Python 3.10–3.12 matrix) |
+| CI pipeline | `.github/workflows/ci.yml` (Python 3.14–3.15 matrix) |
 
 ### 5.4 Quality Metrics
 

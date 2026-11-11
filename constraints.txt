@@ -16,4 +16,4 @@
 # broke CI on a commit that touched only .gitignore. A range cannot express
 # "the formatter this repository is formatted with"; only an exact version can.
 # When bumping, run `ruff format` and land the reformat in the same commit.
-ruff==0.16.5
+ruff==0.17.4

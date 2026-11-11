@@ -80,8 +80,8 @@ The `skills` field points Claude Code to the flat skill directory structure. Eac
 
 **Package name:** `grounded-agency`
 **Build system:** maturin (`maturin>=1.9,<2`); compiles the Rust crate `core/` (`acs-core`) into `grounded_agency._core`
-**Minimum Python:** 3.10+
-**Minimum Rust (building from source):** 1.86
+**Minimum Python:** 3.14+
+**Minimum Rust (building from source):** 1.88
 **License:** Apache-2.0
 
 **Install commands:**
@@ -102,7 +102,7 @@ pip install grounded-agency[all]
 
 **Package contents (wheel target):**
 
-The wheel includes the `grounded_agency/` Python package and the compiled `grounded_agency._core` extension. Wheels use the stable ABI (abi3, one wheel per platform covering Python >= 3.10). The sdist additionally bundles the Rust crate and the `schemas/` and `skills/` directories so consumers can access the ontology and skill definitions at build time; installing from the sdist needs a Rust toolchain.
+The wheel includes the `grounded_agency/` Python package and the compiled `grounded_agency._core` extension. Wheels use the stable ABI (abi3, one wheel per platform covering Python >= 3.14). The sdist additionally bundles the Rust crate and the `schemas/` and `skills/` directories so consumers can access the ontology and skill definitions at build time; installing from the sdist needs a Rust toolchain.
 
 ```toml
 # pyproject.toml build configuration
@@ -129,10 +129,10 @@ include = [
 | `pyyaml` | >=6.0,<7 | Core (ontology/schema parsing) |
 | `maturin` | >=1.9,<2 | Build only |
 | `claude-agent-sdk` | >=0.1.52,<0.3 | Optional `[sdk]` extra (also in `[dev]`) |
-| `pytest` | >=7.0,<9 | Optional `[dev]` extra |
-| `pytest-asyncio` | >=0.21,<1 | Optional `[dev]` extra |
-| `mypy` | >=1.0,<2 | Optional `[dev]` extra |
-| `ruff` | >=0.16,<0.17 | Optional `[dev]` extra (exact pin in `constraints.txt`) |
+| `pytest` | >=8.4.2,<10 | Optional `[dev]` extra |
+| `pytest-asyncio` | >=1.0,<2 | Optional `[dev]` extra |
+| `mypy` | >=1.19.1,<3 | Optional `[dev]` extra |
+| `ruff` | >=0.17,<0.18 | Optional `[dev]` extra (exact pin in `constraints.txt`) |
 | `types-PyYAML`, `hypothesis`, `jsonschema` | see `pyproject.toml` | Optional `[dev]` extra |
 
 **Key exported components:**
@@ -160,7 +160,7 @@ cd agent-capability-standard
 python -m venv .venv && source .venv/bin/activate
 pip install pyyaml   # enough for the standalone tools (not validate_workflows.py)
 
-# Editable install with dev tools and the SDK (builds the Rust core; rustc >= 1.86)
+# Editable install with dev tools and the SDK (builds the Rust core; rustc >= 1.88)
 pip install -e ".[dev]" -c constraints.txt
 ```
 
@@ -244,7 +244,7 @@ python tools/sync_skill_schemas.py --check
 (cd core && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test)
 ```
 
-CI additionally runs `validate_canonical_schemas.py`, `validate_rfcs.py`, `validate_constraints.py`, `validate_doc_links.py`, `validate_benchmark_deps.py`, clippy with `--features python`, an MSRV (1.86) build and the cel-go differential check.
+CI additionally runs `validate_canonical_schemas.py`, `validate_rfcs.py`, `validate_constraints.py`, `validate_doc_links.py`, `validate_benchmark_deps.py`, clippy with `--features python`, an MSRV (1.88) build and the cel-go differential check.
 
 **One-liner for CI:**
 
@@ -278,7 +278,7 @@ mypy grounded_agency/
 ```
 
 The mypy configuration in `pyproject.toml` enforces:
-- `python_version = "3.10"` (minimum supported version)
+- `python_version = "3.14"` (minimum supported version)
 - `warn_return_any = true`
 - `warn_unused_configs = true`
 - `disallow_untyped_defs = true`
@@ -292,7 +292,7 @@ Zero errors required for release.
 ruff check .
 ```
 
-The ruff configuration in `pyproject.toml` targets Python 3.10, enforces 88-character lines, and selects rule sets: E (pycodestyle errors), W (pycodestyle warnings), F (pyflakes), I (isort), B (flake8-bugbear), C4 (flake8-comprehensions), UP (pyupgrade). The only ignored rule is E501 (line length, handled by formatter).
+The ruff configuration in `pyproject.toml` targets Python 3.14, enforces 88-character lines, and selects rule sets: E (pycodestyle errors), W (pycodestyle warnings), F (pyflakes), I (isort), B (flake8-bugbear), C4 (flake8-comprehensions), UP (pyupgrade). The only ignored rule is E501 (line length, handled by formatter).
 
 Zero violations required for release.
 
@@ -330,9 +330,9 @@ python -m build
 
 This produces:
 - `dist/grounded_agency-0.2.0.tar.gz` (sdist with the Rust crate, schemas/ and skills/)
-- `dist/grounded_agency-0.2.0-cp310-abi3-<platform>.whl` (abi3 wheel with grounded_agency/ and the compiled `_core` extension, for the build machine's platform only)
+- `dist/grounded_agency-0.2.0-cp314-abi3-<platform>.whl` (abi3 wheel with grounded_agency/ and the compiled `_core` extension, for the build machine's platform only)
 
-Because the wheel contains native code, publishing wheels for every supported platform (Linux, macOS, Windows; x86_64 and arm64) needs one build per platform, e.g. a CI matrix running `maturin build --release` (or `maturin-action`). Platforms without a wheel fall back to the sdist and need Rust >= 1.86.
+Because the wheel contains native code, publishing wheels for every supported platform (Linux, macOS, Windows; x86_64 and arm64) needs one build per platform, e.g. a CI matrix running `maturin build --release` (or `maturin-action`). Platforms without a wheel fall back to the sdist and need Rust >= 1.88.
 
 Verify the built artifacts:
 
@@ -823,10 +823,10 @@ git commit -m "revert: rollback <domain> profile to previous version"
 
 ### 7.4 Build Failures
 
-**Symptom:** `python -m build` or `pip install -e .` fails while building the extension (e.g. `rustc` / `cargo` not found, or a "requires rustc 1.86" error).
+**Symptom:** `python -m build` or `pip install -e .` fails while building the extension (e.g. `rustc` / `cargo` not found, or a "requires rustc 1.88" error).
 
 **Diagnosis:**
-1. Verify a Rust toolchain of at least 1.86 is installed:
+1. Verify a Rust toolchain of at least 1.88 is installed:
    ```bash
    rustc --version
    cargo --version
@@ -948,10 +948,10 @@ on:
   pull_request and push (main branch) -- implemented in .github/workflows/ci.yml:
     - validate-schemas: all validators + sync_skill_schemas.py --check
     - rust-core: cargo fmt --check, clippy (x2, with and without --features python),
-      cargo test, MSRV (1.86) check
+      cargo test, MSRV (1.88) check
     - cel-differential: expression fixtures vs cel-go
     - lint: ruff check, ruff format --check, mypy grounded_agency/
-    - test: pytest tests/ on Python 3.10, 3.11, 3.12
+    - test: pytest tests/ on Python 3.14, 3.15
     - benchmarks: benchmark tests, runner, validate_benchmark_deps.py
     - conformance: run_conformance.py, upload build/conformance_results.json
 

@@ -827,7 +827,6 @@ options = adapter.wrap_options(base_options)
 # - enable_file_checkpointing=True
 # - can_use_tool callback (checkpoint enforcement)
 # - PostToolUse hooks (evidence collection, skill tracking, mutation consumption)
-# - Skill tool in allowed_tools
 # - "project" in setting_sources
 ```
 

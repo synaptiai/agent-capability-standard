@@ -29,8 +29,8 @@ Fixing these statically saves hours of runtime debugging and prevents data corru
 
 ## Prerequisites
 
-- Python 3.10+
-- Rust 1.86+ (the validator is a compiled Rust extension, built during install)
+- Python 3.14+
+- Rust 1.88+ (the validator is a compiled Rust extension, built during install)
 - Git
 
 ## Step 1: Clone and Setup (2 min)
@@ -339,7 +339,7 @@ Each domain provides:
 
 ### "ModuleNotFoundError: No module named 'grounded_agency._core'" (or 'yaml')
 
-The compiled Rust extension is missing or stale. Rebuild it from the repository root (requires Rust 1.86+):
+The compiled Rust extension is missing or stale. Rebuild it from the repository root (requires Rust 1.88+):
 ```bash
 pip install -e ".[dev]" -c constraints.txt
 ```

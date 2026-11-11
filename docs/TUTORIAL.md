@@ -4,7 +4,7 @@ This tutorial walks you through creating a custom workflow from scratch. By the 
 
 **Prerequisites:**
 - Completed the [Quickstart Guide](QUICKSTART.md)
-- Python 3.10+ with the package installed (`pip install -e ".[dev]" -c constraints.txt`, which needs Rust 1.86+)
+- Python 3.14+ with the package installed (`pip install -e ".[dev]" -c constraints.txt`, which needs Rust 1.88+)
 - Basic YAML knowledge
 
 ---

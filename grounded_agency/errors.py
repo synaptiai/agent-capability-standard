@@ -13,7 +13,7 @@ This is a leaf module -- zero imports from other grounded_agency modules.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     """Severity of a diagnostic, fixed per code. Errors make a workflow
     invalid; warnings do not unless a caller asks for strict validation."""
 
