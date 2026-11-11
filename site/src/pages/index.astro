@@ -10,7 +10,23 @@ import HomeStory from '../components/HomeStory.astro';
 import InlineText from '../components/InlineText.astro';
 import DocLayout from '../layouts/DocLayout.astro';
 import { pageHref, refSlugger, routeByUrl } from '../lib/generated';
-import { coverage, faq, getStarted, HOME_H1, homeDescription, opening, principles, WHY, type HomeLink } from '../lib/home';
+import {
+  AGENTS_HEADING,
+  AGENTS_LINE,
+  CAPABILITIES_DERIVED,
+  CAPABILITIES_INTRO,
+  coverage,
+  faq,
+  getStarted,
+  HOME_H1,
+  homeDescription,
+  opening,
+  principles,
+  STORY_HEADING,
+  storyIntro,
+  WHY,
+  type HomeLink,
+} from '../lib/home';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 
 const route = routeByUrl('/');
@@ -23,6 +39,7 @@ const g = getStarted();
 const description = homeDescription();
 /** A site page through the route check, or an outside URL as it is. */
 const href = (l: HomeLink) => (l.url.startsWith('/') ? pageHref(l.url) : l.url);
+const si = storyIntro();
 const groups = [
   { title: 'The standard', cards: cov.standard, glyph: 'note' },
   { title: 'Reference data', cards: cov.data, glyph: 'hash' },
@@ -50,7 +67,7 @@ const groups = [
     <section class="home-section home-section--alt home-principles">
       <h2 id={id('Design principles')}>Design principles</h2>
       <p>
-        {p.intro} They come from <a href={p.sectionUrl}>section 3 of the Standard</a>.
+        {p.intro} {p.source.before}<a href={href(p.source.link)}>{p.source.link.text}</a>{p.source.after}
       </p>
       <ol class="home-principles__list">
         {p.items.map((item) => (
@@ -74,10 +91,9 @@ const groups = [
     </section>
 
     <section class="home-section home-section--alt home-story">
-      <h2 id={id('How a workflow is built')}>How a workflow is built</h2>
+      <h2 id={id(STORY_HEADING)}>{STORY_HEADING}</h2>
       <p>
-        The steps below follow the reference workflow for deploying a model,{' '}
-        <a href={pageHref('/workflows/model-deployment/')}><code>model_deployment</code></a>.
+        {si.before}<a href={href(si.link)}>{si.link.code ? <code>{si.link.text}</code> : si.link.text}</a>{si.after}
       </p>
       <HomeStory id={id} />
     </section>
@@ -85,9 +101,7 @@ const groups = [
     <section class="home-section home-capabilities">
       <h2 id={id('The capabilities')}>The capabilities</h2>
       <p>
-        Domain variants are parameters, not new capabilities: <code>detect</code> with <code>domain: anomaly</code>,
-        {' '}not <code>detect-anomaly</code>.{' '}
-        <a href={pageHref('/background/methodology/first-principles-reassessment/')}>How the set was derived</a>.
+        <InlineText parts={CAPABILITIES_INTRO} /> <a href={href(CAPABILITIES_DERIVED)}>{CAPABILITIES_DERIVED.text}</a>.
       </p>
       <CapabilityTable />
     </section>
@@ -124,8 +138,8 @@ const groups = [
     <section class="home-section home-section--alt home-start">
       <h2 id={id('Get started')}>Get started</h2>
       <div class="home-agents">
-        <h3 id={id('For coding agents')}>For coding agents</h3>
-        <p>Paste this into Claude Code, Codex, Cursor or another coding agent.</p>
+        <h3 id={id(AGENTS_HEADING)}>{AGENTS_HEADING}</h3>
+        <p>{AGENTS_LINE}</p>
         <CopyBlock label="Prompt" text={g.prompt} />
       </div>
       <ul class="home-cards home-cards--start">

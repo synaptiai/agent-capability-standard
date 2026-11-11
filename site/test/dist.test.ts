@@ -437,6 +437,23 @@ describe('agent files', () => {
     expect(html).not.toContain('data-pagefind-weight');
   });
 
+  it('gives the home page and its Markdown copy the same H2 headings and section sentences', () => {
+    const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
+    const md = readFileSync(path.join(dist, 'index.md'), 'utf8');
+    const text = (h: string) => h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').trim();
+    const h2Html = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => text(m[1]!));
+    const h2Md = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]!.trim());
+    expect(h2Html.length).toBeGreaterThan(0);
+    expect(h2Md).toEqual(h2Html);
+    // The sentence under each of these headings, without its links, is in both.
+    const plain = (s: string) => s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/`/g, '').replace(/\s+/g, ' ');
+    const htmlText = text(html).replace(/\s+/g, ' ');
+    for (const sentence of ['They come from section', 'The steps below follow the reference workflow', 'Domain variants are parameters', 'Paste this into Claude Code']) {
+      expect(htmlText).toContain(sentence);
+      expect(plain(md)).toContain(sentence);
+    }
+  });
+
   it('lists every HTML page in the sitemap, minus the 404 page, and no Markdown or text file', () => {
     const xml = readFileSync(path.join(dist, 'sitemap.xml'), 'utf8');
     const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!.slice(ORIGIN.length)).sort();

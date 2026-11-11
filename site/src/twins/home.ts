@@ -1,6 +1,26 @@
 // The Markdown copy of the home page, from the same content module the page uses.
 import { loadOntology, capabilitiesOfLayer } from '../data/ontology';
-import { coverage, faq, getStarted, HOME_H1, homeDescription, inlineText, opening, principles, story, WHY, type Card, type HomeLink } from '../lib/home';
+import {
+  AGENTS_HEADING,
+  AGENTS_LINE,
+  CAPABILITIES_DERIVED,
+  CAPABILITIES_INTRO,
+  coverage,
+  faq,
+  getStarted,
+  HOME_H1,
+  homeDescription,
+  inlineText,
+  opening,
+  principles,
+  story,
+  STORY_HEADING,
+  storyIntro,
+  WHY,
+  type Card,
+  type HomeLink,
+  type LinkSentence,
+} from '../lib/home';
 import { kebab } from '../lib/routes';
 import { blocks, code, fence, mdLink, mdUrl } from './md';
 import type { Twin } from './types';
@@ -8,6 +28,10 @@ import type { Twin } from './types';
 /** A home link as Markdown: site pages go to their copies, other URLs stay. */
 function link(l: HomeLink): string {
   return l.url.startsWith('/') ? `[${l.text}](${mdUrl(l.url)})` : `[${l.text}](${l.url})`;
+}
+
+function sentence(x: LinkSentence): string {
+  return `${x.before}${link({ text: x.link.code ? code(x.link.text) : x.link.text, url: x.link.url })}${x.after}`;
 }
 
 function cards(list: (Card & { extra?: HomeLink })[]): string {
@@ -39,17 +63,18 @@ export function homeTwin(): Twin {
     `${o.install.label}:`,
     fence('sh', o.install.commands.join('\n')),
     '## Design principles',
-    `${p.intro} From [section 3 of the Standard](${mdUrl(p.sectionUrl)}).`,
+    `${p.intro} ${sentence(p.source)}`,
     p.items.map((i, n) => `${n + 1}. **${i.title}.**${i.markdown.startsWith('-') ? '\n\n' : ' '}${indent(i.markdown)}`).join('\n\n'),
     '## Why a standard',
     WHY,
-    `## How a workflow is built: ${code(s.workflow.id)}`,
+    `## ${STORY_HEADING}`,
+    sentence(storyIntro()),
     s.steps.map((st) => `${st.beat}. **${st.title}** ${inlineText(st.text)}`).join('\n'),
     '## The capabilities',
+    `${inlineText(CAPABILITIES_INTRO)} ${link(CAPABILITIES_DERIVED)}.`,
     ...ontology.layers.map(
       (l) => `- ${mdLink(l.id, `/layers/${l.slug}/`)}: ${capabilitiesOfLayer(ontology, l.id).map((c) => mdLink(code(c.id), `/capabilities/${kebab(c.id)}/`)).join(', ')}`,
     ),
-    `How the set was derived: ${mdLink('First-principles derivation', '/background/methodology/first-principles-reassessment/')}.`,
     '## What the standard covers',
     '### The standard',
     cards(cov.standard),
@@ -61,7 +86,8 @@ export function homeTwin(): Twin {
     f.items.map((i) => `### ${i.question}\n\n${inlineText(i.answer)}`).join('\n\n'),
     link(f.more),
     '## Get started',
-    'For coding agents. Paste this into Claude Code, Codex, Cursor or another coding agent:',
+    `### ${AGENTS_HEADING}`,
+    AGENTS_LINE,
     fence('text', g.prompt),
     cards(g.cards),
   );
