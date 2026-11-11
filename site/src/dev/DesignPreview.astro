@@ -39,10 +39,10 @@ const CALLOUTS = ['note', 'tip', 'important', 'warning', 'caution', 'requirement
 
     <h2 id={id('Pixel fonts')}>Pixel fonts</h2>
     {DISPLAY_SIZES.map((s) => (
-      <p style={`font-family: var(--font-display); font-weight: 700; font-size: ${s}px; line-height: 1.3; margin: 0`}>{s}px Capability workflow checkpoint 0123456789</p>
+      <p style={`font-family: var(--font-display); font-weight: 700; font-size: ${s}px; line-height: 1.3; margin: 0`}>{s}px weight 700: Capability workflow checkpoint 0123456789</p>
     ))}
     {DISPLAY_SIZES.map((s) => (
-      <p style={`font-family: var(--font-display); font-weight: 500; font-size: ${s}px; line-height: 1.3; margin: 0`}>{s}px 500 Capability workflow checkpoint</p>
+      <p style={`font-family: var(--font-display); font-weight: 500; font-size: ${s}px; line-height: 1.3; margin: 0`}>{s}px weight 500: Capability workflow checkpoint</p>
     ))}
     {EYEBROW_SIZES.map((s) => (
       <p class="eyebrow" style={`font-size: ${s}px; display: flex; margin: 8px 0`}>{s}px Previous · Specification</p>
