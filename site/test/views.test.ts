@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { EDGE_TYPES, loadOntology } from '../src/data/ontology';
 import { capabilityUsage, loadWorkflows, parseCatalog } from '../src/data/workflows';
-import { inlineMarkdown, refSlugger } from '../src/lib/generated';
+import { inlineMarkdown, pageHref, refSlugger } from '../src/lib/generated';
 import { readRepoFile } from '../src/lib/repo';
 import {
   crossLayerEdges,
@@ -375,5 +375,18 @@ describe('failure modes on workflow pages', () => {
       expect(wf, id).toBeDefined();
       expect(wf!.steps.flatMap((s) => failureRows(s).flatMap((r) => r.codes)), id).toEqual(want);
     }
+  });
+});
+
+describe('links to a part of a page', () => {
+  // Expected: the "## Decision-making" heading of spec/GOVERNANCE.md, slugged by hand as GitHub does
+  // (lower case, spaces to hyphens).
+  it('accepts a fragment that is a heading of the page source', () => {
+    expect(repoText('spec/GOVERNANCE.md').split('\n')).toContain('## Decision-making');
+    expect(pageHref('/community/governance/#decision-making')).toBe('/community/governance/#decision-making');
+  });
+
+  it('rejects a fragment that no heading of the page source has', () => {
+    expect(() => pageHref('/community/governance/#decision-process')).toThrow(/decision-process/);
   });
 });

@@ -26,11 +26,20 @@ export function refSlugger(): (text: string) => string {
 
 const URLS: ReadonlySet<string> = new Set(ROUTES.map((r) => r.url));
 
-/** A site URL, checked against the route table. */
+/**
+ * A site URL, checked against the route table. A fragment on a page that
+ * shows a Markdown source must be an anchor of that source; `ref-` fragments
+ * and fragments on pages with no source are the page's own.
+ */
 export function pageHref(url: string): string {
   const [path, frag] = url.split('#');
   if (!URLS.has(path!)) throw new Error(`generated: ${url} is not a route`);
-  return frag === undefined ? path! : `${path}#${frag}`;
+  if (frag === undefined) return path!;
+  const source = ROUTES.find((r) => r.url === path)!.source;
+  if (source?.endsWith('.md') && !frag.startsWith(REF_PREFIX) && !anchorsOf(source, readRepoFile).all.has(frag)) {
+    throw new Error(`generated: ${source} has no anchor #${frag} for ${url}`);
+  }
+  return `${path}#${frag}`;
 }
 
 export function routeByUrl(url: string): Route {

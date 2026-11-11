@@ -168,6 +168,11 @@ describe('built site', () => {
     expect(bare).toEqual([]);
   });
 
+  it('links the RFC index to the decision-making part of the governance page (design notes, ia-home RFCs 1)', () => {
+    const html = readFileSync(path.join(dist, 'rfcs', 'index.html'), 'utf8');
+    expect(html).toContain('href="/community/governance/#decision-making"');
+  });
+
   it('builds no page outside the route table except 404', () => {
     expect(checkRouteCoverage(dist)).toEqual({ missing: [], extra: [] });
   });
