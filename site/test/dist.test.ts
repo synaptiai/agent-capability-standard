@@ -454,6 +454,21 @@ describe('agent files', () => {
     }
   });
 
+  it('links llms.txt, llms-full.txt, the sitemap and the page\'s own Markdown copy from every page footer', () => {
+    const bad: string[] = [];
+    for (const d of dirsWith('index.html')) {
+      const html = readFileSync(path.join(dist, d, 'index.html'), 'utf8');
+      const footer = /<footer[\s\S]*?<\/footer>/.exec(html)?.[0] ?? '';
+      for (const href of ['/llms.txt', '/llms-full.txt', '/sitemap.xml', `${d}index.md`]) {
+        if (!footer.includes(`href="${href}"`)) bad.push(`${d}: ${href}`);
+      }
+    }
+    expect(bad).toEqual([]);
+    const notFound = readFileSync(path.join(dist, '404.html'), 'utf8');
+    expect(notFound).toContain('href="/llms.txt"');
+    expect(notFound).not.toMatch(/href="\/404\/index\.md"/);
+  });
+
   it('lists every HTML page in the sitemap, minus the 404 page, and no Markdown or text file', () => {
     const xml = readFileSync(path.join(dist, 'sitemap.xml'), 'utf8');
     const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!.slice(ORIGIN.length)).sort();

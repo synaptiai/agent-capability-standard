@@ -16,6 +16,7 @@ import PrevNext from '../components/PrevNext.astro';
 import Sidebar from '../components/Sidebar.astro';
 import Toc from '../components/Toc.astro';
 import { loadVersions } from '../data/versions';
+import { SITEMAP_PATH } from '../lib/agent-files';
 import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
 import { SECTIONS, type Route } from '../lib/routes';
 import { tocEntries } from '../lib/toc';
@@ -110,6 +111,15 @@ const olderStandard = loadVersions().standard.previous.find((p) => route.url ===
       </main>
     </div>
     <footer class="site-footer" data-pagefind-ignore="all">
+      <nav class="site-footer__agents" aria-label="For agents">
+        <p class="site-footer__heading">For agents</p>
+        <ul>
+          <li><a href="/llms.txt" type="text/plain">llms.txt</a></li>
+          <li><a href="/llms-full.txt" type="text/plain">llms-full.txt</a></li>
+          {hasMarkdownCopy && <li><a href={`${route.url}index.md`} type="text/markdown">Markdown of this page</a></li>}
+          <li><a href={SITEMAP_PATH}>Sitemap</a></li>
+        </ul>
+      </nav>
       {sourceUrl && (
         <p class="site-footer__source">
           Source: <a href={sourceUrl}>{route.source}</a>

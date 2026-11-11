@@ -685,6 +685,26 @@
     margin: 0 auto var(--space-1);
   }
 
+  .site-footer__agents {
+    max-width: var(--frame-max);
+    margin: 0 auto var(--space-4);
+  }
+
+  .site-footer__heading {
+    margin: 0 0 var(--space-1);
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .site-footer__agents ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
   /* ---------- callouts ---------- */
 
   .callout {
