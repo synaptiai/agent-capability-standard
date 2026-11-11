@@ -67,6 +67,17 @@ const storeText = (index: number, cap: string, name: string): string => {
   const room = Math.floor((RW - 11 - `${index} ${cap}`.length * 6 - 14) / 4.8);
   return name.length <= room ? name : `${name.slice(0, Math.max(0, room - 1))}…`;
 };
+// The line back from rollback enters the checkpoint block near its top,
+// above the line out to the step that changes state (which leaves at the
+// middle), and runs further left, so the two lines never cross or touch.
+const backY = rowY(cp) + 4;
+if (!(cp < ch && ch < rb)) throw new Error('HomeStory: expected checkpoint, then the change, then rollback');
+// Below 960px the diagram is drawn larger by showing one part at a time:
+// the capability grid for beat 1, the rail for the later beats. The box keeps
+// the rail's shape so the text below does not move when the view changes.
+const fullView = `0 0 ${W} ${H}`;
+const gridView = `0 0 ${W} ${gridBottom + 4}`;
+const railView = `0 ${railTop - 8} ${W} ${H - railTop + 8}`;
 const portsIn = s.contractInputs.length;
 const portsOut = s.contractOutputs.length;
 const first = s.contractStep.index;
@@ -76,7 +87,11 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
   <div class="story__canvas">
     <svg
       class="story__svg"
-      viewBox={`0 0 ${W} ${H}`}
+      viewBox={fullView}
+      style={`--rail-aspect: ${W} / ${H - railTop + 8}`}
+      data-view-full={fullView}
+      data-view-grid={gridView}
+      data-view-rail={railView}
       role="img"
       aria-labelledby={svgTitle}
       shape-rendering="crispEdges"
@@ -154,10 +169,10 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
 
       <g data-beat="6" class="story__mark">
         <rect x={34} y={mid(rb)} width={RX - 34} height={2} />
-        <rect x={34} y={mid(cp) + 4} width={2} height={mid(rb) - mid(cp) - 2} />
-        <rect x={34} y={mid(cp) + 4} width={RX - 40} height={2} />
-        <rect x={RX - 6} y={mid(cp) + 1} width={2} height={8} />
-        <rect x={RX - 4} y={mid(cp) + 3} width={2} height={4} />
+        <rect x={34} y={backY} width={2} height={mid(rb) - backY + 2} />
+        <rect x={34} y={backY} width={RX - 40} height={2} />
+        <rect x={RX - 6} y={backY - 3} width={2} height={8} />
+        <rect x={RX - 4} y={backY - 1} width={2} height={4} />
         <rect x={RX + RW + 9} y={mid(rb) - 4} width={8} height={8} transform={`rotate(45 ${RX + RW + 13} ${mid(rb)})`} />
       </g>
     </svg>
@@ -178,19 +193,27 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
   if (story && 'IntersectionObserver' in window && !reduce.matches) {
     const steps = [...story.querySelectorAll<HTMLElement>('[data-story-step]')];
     const parts = [...story.querySelectorAll<SVGElement>('[data-beat]')];
-    const show = (beat: number) => {
-      for (const p of parts) p.classList.toggle('is-off', Number(p.dataset.beat) > beat);
-      for (const s of steps) s.classList.toggle('is-current', Number(s.dataset.storyStep) === beat);
+    const svg = story.querySelector<SVGSVGElement>('[data-story-svg]')!;
+    const narrow = window.matchMedia('(max-width: 959px)');
+    let beat = 1;
+    const show = (b: number) => {
+      beat = b;
+      for (const p of parts) p.classList.toggle('is-off', Number(p.dataset.beat) > b);
+      for (const s of steps) s.classList.toggle('is-current', Number(s.dataset.storyStep) === b);
+      const view = !narrow.matches ? svg.dataset.viewFull : b === 1 ? svg.dataset.viewGrid : svg.dataset.viewRail;
+      if (view) svg.setAttribute('viewBox', view);
     };
+    narrow.addEventListener('change', () => show(beat));
     story.dataset.live = '';
     show(1);
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) if (e.isIntersecting) show(Number((e.target as HTMLElement).dataset.storyStep));
       },
-      // Below 960px the diagram sits on top of the screen, so the step that
-      // counts is the one in the band below it.
-      { rootMargin: window.matchMedia('(min-width: 960px)').matches ? '-45% 0px -45% 0px' : '-62% 0px -28% 0px' },
+      // Below 960px the diagram sits on top of the screen, so a step becomes
+      // current when its heading comes up into the lower part of the screen,
+      // and stays readable below the diagram while it is current.
+      { rootMargin: narrow.matches ? '-75% 0px -15% 0px' : '-45% 0px -45% 0px' },
     );
     for (const s of steps) io.observe(s);
     // A reader who turns on reduced motion mid-page gets the full diagram.
@@ -199,6 +222,7 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
       io.disconnect();
       delete story.dataset.live;
       for (const p of parts) p.classList.remove('is-off');
+      if (svg.dataset.viewFull) svg.setAttribute('viewBox', svg.dataset.viewFull);
     });
   }
 </script>

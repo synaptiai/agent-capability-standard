@@ -536,6 +536,25 @@
     min-height: 32px;
     display: flex;
     align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* The chevron is the only open/closed marker; the browser's is hidden. */
+  .toc__title {
+    list-style: none;
+  }
+
+  .toc__title::-webkit-details-marker {
+    display: none;
+  }
+
+  .toc__chevron {
+    flex: none;
+    transition: transform var(--step-hover);
+  }
+
+  .toc[open] .toc__chevron {
+    transform: rotate(90deg);
   }
 
   @media (min-width: 1280px) {
@@ -547,10 +566,9 @@
 
     .toc__title {
       pointer-events: none;
-      list-style: none;
     }
 
-    .toc__title::-webkit-details-marker {
+    .toc__chevron {
       display: none;
     }
   }
@@ -1753,9 +1771,11 @@
     margin-top: var(--space-5);
   }
 
+  /* Below 960px the diagram sticks right under the header and its 2px
+     bottom line, leaving no gap for text to show through. */
   .story__canvas {
     position: sticky;
-    top: calc(var(--chrome-h) + var(--space-2));
+    top: calc(var(--chrome-h) + var(--px));
     z-index: 1;
     border: var(--border);
     background: var(--bg);
@@ -1763,10 +1783,12 @@
     box-shadow: var(--shadow-1);
   }
 
+  /* Below 960px the diagram fills the top of the screen down to the band
+     the story script reads the current step from (62% of the height). */
   .story__svg {
     display: block;
     width: 100%;
-    max-height: 34vh;
+    max-height: calc(62vh - var(--chrome-h) - var(--space-5));
   }
 
   .story__steps {
@@ -1801,10 +1823,16 @@
     }
   }
 
+  /* Steps other than the current one are dimmed with --ink-3, which
+     check-contrast holds to 4.5:1 on every surface, not with opacity. */
   .story[data-live] .story__step {
     min-height: 45vh;
-    opacity: 0.45;
-    transition: opacity var(--step-hover);
+    color: var(--ink-3);
+    transition: color var(--step-hover);
+  }
+
+  .story[data-live] .story__step h3 {
+    color: inherit;
   }
 
   @media (min-width: 960px) {
@@ -1814,7 +1842,7 @@
   }
 
   .story[data-live] .story__step.is-current {
-    opacity: 1;
+    color: var(--ink);
   }
 
   .story [data-beat] {
@@ -1867,6 +1895,24 @@
     font-family: var(--font-mono);
     font-size: 8px;
     text-anchor: end;
+  }
+
+  /* Narrow: the story script shows one part of the diagram at a time in a
+     box of the rail's shape, the labels are larger, and the stored names,
+     which would be too small to read, are left out. */
+  @media (max-width: 959px) {
+    .story[data-live] .story__svg {
+      aspect-ratio: var(--rail-aspect);
+      max-height: none;
+    }
+
+    .story__label {
+      font-size: 13px;
+    }
+
+    .story__store {
+      display: none;
+    }
   }
 }
 

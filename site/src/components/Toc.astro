@@ -1,9 +1,11 @@
 ---
 // "On this page": the h2 and h3 headings of the page. From 1280px it is a
 // column beside the content; below that it is a block that starts closed.
+// Below 1280px a chevron beside the title shows that the block opens.
 // Without JavaScript the list is open and has no active marker. With many
 // entries (the Standard), only the h3 headings of the current h2 show.
 import type { TocEntry } from '../lib/toc';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
 
 interface Props {
   entries: TocEntry[];
@@ -19,7 +21,7 @@ for (const e of entries) {
 ---
 {entries.length > 1 && (
   <details class="toc" open data-toc data-compact={entries.length > COMPACT_AT ? 'true' : undefined}>
-    <summary class="toc__title">On this page</summary>
+    <summary class="toc__title"><PixelGlyph name="chevron-right" class="toc__chevron" /><span>On this page</span></summary>
     <ol class="toc__list">
       {tree.map((node) => (
         <li class="toc__item" data-depth={node.entry.depth}>

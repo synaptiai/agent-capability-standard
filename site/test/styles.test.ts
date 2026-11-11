@@ -160,3 +160,28 @@ function listFiles(dir: string): string[] {
     e.isDirectory() ? listFiles(`${dir}/${e.name}`) : [`${dir}/${e.name}`],
   );
 }
+
+describe('dimmed text', () => {
+  it('never fades with opacity between 0 and 1, which check-contrast cannot see', () => {
+    // Plan Phase 5: text meets 4.5:1. Opacity 0 (hidden) and 1 are fine; a
+    // fraction blends text into its background by an amount no token states.
+    const faded = rules()
+      .filter((r) => /(^|;|\s)opacity:\s*(0?\.\d*[1-9]\d*|0\.\d+)\s*(;|$)/.test(r.body))
+      .map((r) => `${r.file}: ${r.selectors.join(', ')}`);
+    expect(faded).toEqual([]);
+  });
+
+  it('dims story steps other than the current one with --ink-3, a checked text colour', () => {
+    const all = rules();
+    expect(all.some((r) => r.selectors.includes('.story[data-live] .story__step') && /color:\s*var\(--ink-3\)/.test(r.body))).toBe(true);
+  });
+});
+
+describe('contents list', () => {
+  it('shows a chevron that turns when the list is open, since the browser marker is hidden', () => {
+    const all = rules();
+    expect(all.some((r) => r.selectors.includes('.toc__title::-webkit-details-marker') && /display:\s*none/.test(r.body))).toBe(true);
+    expect(all.some((r) => r.selectors.includes('.toc[open] .toc__chevron') && /transform:\s*rotate\(90deg\)/.test(r.body))).toBe(true);
+  });
+});
+
