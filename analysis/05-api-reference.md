@@ -212,7 +212,7 @@ async with ClaudeSDKClient(options) as client:
 
 **Internal behavior of the PreToolUse safety hook**:
 
-PreToolUse runs for every tool call, including pre-approved ones that never reach `can_use_tool`. It first applies the per-risk rate limit (SEC-010) and denies a call over the limit in strict and non-strict mode alike. For a checkpoint-gated call it reserves the active checkpoint with `CheckpointTracker.validate_and_reserve(tool_use_id)`. If there is no valid checkpoint, or another call holds the reservation, it denies the call in strict mode by returning `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}`; in non-strict mode it logs a warning.
+PreToolUse runs for every tool call, including pre-approved ones that never reach `can_use_tool`. It first applies the per-risk rate limit (SEC-010) and denies a call over the limit in strict and non-strict mode alike. For a checkpoint-gated call it reserves the active checkpoint with `CheckpointTracker.validate_and_reserve(tool_use_id)`. If there is no valid checkpoint, or another call holds the reservation, it denies the call in strict mode by returning `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}`; in non-strict mode it logs a warning. An error inside the check (mapping the tool, reserving the checkpoint) denies the call in strict mode and is logged in non-strict mode; an error in the rate check denies it in both.
 
 **Internal behavior of the permission callback**:
 

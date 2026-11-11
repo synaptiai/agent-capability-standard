@@ -533,6 +533,10 @@ class GroundedAgentAdapter:
           checkpoint, keyed by its ``tool_use_id``. In strict mode the call
           is denied when there is no valid checkpoint or another call holds
           it.
+        - Any other error in the check denies the call in strict mode and
+          is logged in non-strict mode. For a tool in ``allowed_tools`` this
+          hook is the only check that runs, so allowing the call on error
+          would skip both the rate limit and the checkpoint.
 
         They share one hook so the rate check is guaranteed to run before
         the reservation. With two hooks nothing fixes their order, and a
@@ -606,7 +610,9 @@ class GroundedAgentAdapter:
                 logger.warning("PreToolUse warning (non-strict): %s", message)
 
             except Exception as e:
-                logger.warning("PreToolUse safety check failed: %s", e)
+                if strict:
+                    return deny(f"PreToolUse safety check failed: {e}")
+                logger.warning("PreToolUse safety check failed (non-strict): %s", e)
 
             return {}
 

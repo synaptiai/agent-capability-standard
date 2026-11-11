@@ -363,21 +363,14 @@ class TestPreToolUseExceptionHandling:
     """Tests for PreToolUse hook exception handling."""
 
     @pytest.mark.asyncio
-    async def test_exception_in_mapper_returns_empty_dict(
+    async def test_exception_in_mapper_denies_in_strict_mode(
         self, strict_adapter: GroundedAgentAdapter
     ):
-        """Test that an exception in the mapper returns {} (fail-open for hooks).
-
-        The catch-all except in the PreToolUse hook returns {} on error,
-        which means 'no opinion' — allowing the tool to proceed. This is
-        intentional: PreToolUse is defense-in-depth, and the permission
-        callback provides the primary enforcement.
-        """
+        """For a tool in allowed_tools this hook is the only check that
+        runs, so an error in it must not let the call through."""
         from unittest.mock import MagicMock
 
         hook = strict_adapter._make_pretooluse_safety_hook()
-
-        # Replace mapper with one that raises
         strict_adapter.mapper.map_tool = MagicMock(  # type: ignore[assignment]
             side_effect=RuntimeError("mapper exploded")
         )
@@ -388,7 +381,40 @@ class TestPreToolUseExceptionHandling:
             None,
         )
 
-        # Should return empty dict (no denial), not crash
+        assert _decision(result) == "deny"
+        assert "safety check failed" in _reason(result)
+
+    @pytest.mark.asyncio
+    async def test_exception_in_reservation_denies_in_strict_mode(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        from unittest.mock import MagicMock
+
+        strict_adapter.create_checkpoint(["*"], "Test")
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        strict_adapter.checkpoint_tracker.validate_and_reserve = MagicMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("tracker broken")
+        )
+
+        result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
+
+        assert _decision(result) == "deny"
+
+    @pytest.mark.asyncio
+    async def test_exception_in_mapper_allows_in_non_strict_mode(
+        self, lenient_adapter: GroundedAgentAdapter
+    ):
+        """Non-strict mode warns instead of denying, as it does for a
+        missing checkpoint."""
+        from unittest.mock import MagicMock
+
+        hook = lenient_adapter._make_pretooluse_safety_hook()
+        lenient_adapter.mapper.map_tool = MagicMock(  # type: ignore[assignment]
+            side_effect=RuntimeError("mapper exploded")
+        )
+
+        result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
+
         assert result == {}
 
     @pytest.mark.asyncio
