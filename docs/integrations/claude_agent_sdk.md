@@ -267,7 +267,7 @@ assert not adapter.has_valid_checkpoint()
 
 ## PreToolUse Hook Enforcement
 
-The adapter injects PreToolUse, PostToolUse and PostToolUseFailure hooks:
+The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop and SubagentStop hooks:
 
 - **PreToolUse**: First applies the per-risk rate limit to every call, denying a call over the limit in strict and non-strict mode alike. Then, for tools whose capability requires a checkpoint (Write, Edit, Bash with destructive commands), reserves the active checkpoint for the call, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`). It runs for every tool call, including pre-approved ones that never reach `can_use_tool`. When there is no valid checkpoint, or another in-flight call holds the reservation, strict mode denies the call with `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "..."}}`; non-strict mode logs a warning.
 - **PostToolUse**: Collects evidence anchors. After a successful mutation it consumes the checkpoint the call reserved; if the tool reported an error, or the checkpoint-gated tool does not mutate, it releases the reservation instead and the checkpoint stays valid.

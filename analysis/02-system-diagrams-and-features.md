@@ -383,6 +383,7 @@ classDiagram
         +get_active_checkpoint_id() str|None
         +validate_and_reserve(holder) tuple~bool,str|None~
         +release_reservation(holder) bool
+        +release_reservation_in_scope(scope) str
         +consume_checkpoint(holder) str|None
         +get_checkpoint_by_id(checkpoint_id) Checkpoint|None
         +get_history(limit) list~Checkpoint~

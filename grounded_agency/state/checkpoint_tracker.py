@@ -33,6 +33,8 @@ class _Reservation:
     checkpoint_id: str
     holder: str  # the tool call's tool_use_id, or an anonymous token
     reserved_at: float  # time.monotonic()
+    # (session_id, agent_id) of the call that took it, when known
+    scope: tuple[str | None, str | None] | None = None
 
 
 @dataclass(slots=True)
@@ -543,7 +545,9 @@ class CheckpointTracker:
         )
 
     def validate_and_reserve(
-        self, holder: str | None = None
+        self,
+        holder: str | None = None,
+        scope: tuple[str | None, str | None] | None = None,
     ) -> tuple[bool, str | None]:
         """Atomically check the active checkpoint and reserve it for one
         mutation.
@@ -563,6 +567,8 @@ class CheckpointTracker:
                 ``tool_use_id``. Omitted, an anonymous holder is used that
                 only ``release_reservation()`` / ``consume_checkpoint()``
                 without a holder can end.
+            scope: ``(session_id, agent_id)`` of the call, recorded on a new
+                reservation for ``release_reservation_in_scope()``.
 
         Returns:
             ``(True, checkpoint_id)``: reserved for ``holder``.
@@ -587,6 +593,7 @@ class CheckpointTracker:
                 checkpoint_id=checkpoint.id,
                 holder=holder if holder is not None else f"anon_{os.urandom(8).hex()}",
                 reserved_at=time.monotonic(),
+                scope=scope,
             )
             return True, checkpoint.id
 
@@ -604,6 +611,24 @@ class CheckpointTracker:
                 return False
             self._reservation = None
             return True
+
+    def release_reservation_in_scope(
+        self, scope: tuple[str | None, str | None]
+    ) -> str | None:
+        """Release the reservation if a call in ``scope`` (``(session_id,
+        agent_id)``) took it. For when that session's turn, or that agent,
+        has ended: none of its calls is in flight, so a reservation it still
+        holds belongs to a call that never ran.
+
+        Returns:
+            The released holder, or None
+        """
+        with self._lock:
+            r = self._reservation
+            if r is None or r.scope != scope:
+                return None
+            self._reservation = None
+            return r.holder
 
     def has_checkpoint_for_scope(self, target: str) -> bool:
         """

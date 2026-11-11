@@ -71,7 +71,7 @@ class TestWrapOptions:
         )
         once = adapter.wrap_options(ClaudeAgentOptions())
         twice = adapter.wrap_options(once)
-        assert twice is once
+        assert twice.hooks == once.hooks
         assert len(twice.hooks["PreToolUse"]) == 1
 
         call = {"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}
@@ -92,6 +92,24 @@ class TestWrapOptions:
         wrapped = adapter.wrap_options(base)
         assert wrapped.can_use_tool is not None
         assert callable(wrapped.can_use_tool)
+
+    def test_rewrapping_reinstalls_the_permission_callback(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        from dataclasses import replace
+
+        wrapped = adapter.wrap_options(ClaudeAgentOptions())
+        stripped = replace(wrapped, can_use_tool=None)
+        assert adapter.wrap_options(stripped).can_use_tool is not None
+
+    def test_wrapping_tolerates_odd_hook_entries(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        base = ClaudeAgentOptions(
+            hooks={"PreToolUse": [{"matcher": "Write", "hooks": None}]}
+        )
+        wrapped = adapter.wrap_options(base)
+        assert len(wrapped.hooks["PreToolUse"]) == 2
 
     def test_does_not_add_skill_to_allowed_tools(
         self, adapter: GroundedAgentAdapter

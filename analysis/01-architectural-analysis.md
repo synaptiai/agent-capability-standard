@@ -314,7 +314,7 @@ The core safety pattern for mutations:
 - `CheckpointTracker.has_valid_checkpoint()` checks: exists AND not consumed AND not expired
 - `Checkpoint.matches_scope(target)` validates target covered by scope patterns (supports `*` and fnmatch globs)
 - `CheckpointTracker.consume_checkpoint()` marks consumed with timestamp, moves to history
-- `CheckpointTracker.validate_and_reserve(holder)` reserves the active checkpoint for one tool call (keyed by `tool_use_id`, idempotent for the same holder, lapses after `reservation_seconds`, default 600); `release_reservation(holder)` gives it back; `consume_checkpoint(holder)` consumes only what that holder reserved
+- `CheckpointTracker.validate_and_reserve(holder)` reserves the active checkpoint for one tool call (keyed by `tool_use_id`, idempotent for the same holder, lapses after `reservation_seconds`, default 600); `release_reservation(holder)` gives it back; `release_reservation_in_scope((session_id, agent_id))` gives it back at the end of that session's turn or that subagent; `consume_checkpoint(holder)` consumes only what that holder reserved
 - `CheckpointTracker.invalidate_all()` clears all checkpoints (for rollback)
 
 ### 4.3 Dual-Layer Enforcement

@@ -287,26 +287,40 @@ class TestTurnEndReleasesLeftoverReservation:
 
     @pytest.mark.asyncio
     @pytest.mark.asyncio
-    async def test_ledger_drops_calls_that_finished(
+    async def test_reserves_under_the_input_tool_use_id(
         self, strict_adapter: GroundedAgentAdapter
     ):
-        """Only calls still in flight stay in the ledger, so it does not
-        grow across turns that never reach Stop."""
+        """With no tool_use_id argument the hook uses the one in the input,
+        so the reservation is named and scoped rather than anonymous."""
         wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
         strict_adapter.create_checkpoint(["*"], "Test")
-        await self._reserve(strict_adapter, wrapped, self._write("s1"), "w1")
-        assert strict_adapter._reservations.take("s1", None) == ["w1"]
-        strict_adapter._reservations.record("w1", "s1", None)
+        (pre,) = _hooks(wrapped.hooks["PreToolUse"][-1])
+        call = {**self._write("s1"), "tool_use_id": "w1"}
+        assert await pre(call, None, None) == {}
+        tracker = strict_adapter.checkpoint_tracker
+        assert tracker.validate_and_reserve("w1")[0]  # same holder
+        assert tracker.release_reservation_in_scope(("s1", None)) == "w1"
 
+    @pytest.mark.asyncio
+    async def test_post_hook_releases_when_the_run_input_is_not_gated(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """Another hook rewrote a destructive command to a read-only one:
+        PostToolUse sees the read-only input and still gives back the
+        reservation PreToolUse took for the original."""
+        wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
+        strict_adapter.create_checkpoint(["*"], "Test")
+        (pre,) = _hooks(wrapped.hooks["PreToolUse"][-1])
+        bash = {"tool_name": "Bash", "session_id": "s1"}
+        destructive = {**bash, "tool_input": {"command": "rm -rf build"}}
+        assert await pre(destructive, "b1", None) == {}
+
+        ran = {**bash, "tool_input": {"command": "ls"}, "tool_response": {}}
         for entry in wrapped.hooks["PostToolUse"]:
             for hook in _hooks(entry):
-                await hook(
-                    {**self._write("s1"), "tool_response": {"is_error": False}},
-                    "w1",
-                    None,
-                )
+                await hook(ran, "b1", None)
 
-        assert strict_adapter._reservations.take("s1", None) == []
+        assert strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
 
     @pytest.mark.asyncio
     async def test_stop_leaves_a_later_holders_reservation(

@@ -1104,6 +1104,7 @@ classDiagram
         +has_valid_checkpoint() bool
         +validate_and_reserve(holder) tuple
         +release_reservation(holder) bool
+        +release_reservation_in_scope(scope) str
         +consume_checkpoint(holder) str
         +get_history(limit) list~Checkpoint~
         +clear_expired() int

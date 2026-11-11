@@ -23,7 +23,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-import threading
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -190,45 +189,6 @@ class GroundedAgentConfig:
     checkpoint_reservation_seconds: float | None = None
 
 
-class _ReservationLedger:
-    """Which session and agent took each checkpoint reservation.
-
-    A reservation ends when the call it was taken for finishes
-    (PostToolUse / PostToolUseFailure) or is denied by ``can_use_tool``. A
-    call another PreToolUse hook denies after the adapter reserved for it
-    never runs, so nothing ends its reservation. When a session's turn
-    ends (Stop), or a subagent finishes (SubagentStop), none of its calls
-    is in flight, so any reservation one of them still holds is released.
-    Scoping by session and agent leaves other sessions sharing the adapter,
-    and background subagents, untouched.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        # holder -> (session_id, agent_id); only calls still in flight.
-        self._scopes: dict[str, tuple[str | None, str | None]] = {}
-
-    def record(self, holder: str, session_id: str | None, agent_id: str | None) -> None:
-        with self._lock:
-            self._scopes[holder] = (session_id, agent_id)
-
-    def forget(self, holder: str | None) -> None:
-        """Drop a holder whose reservation ended normally."""
-        if holder is None:
-            return
-        with self._lock:
-            self._scopes.pop(holder, None)
-
-    def take(self, session_id: str | None, agent_id: str | None) -> list[str]:
-        """Remove and return the holders recorded for one session and agent."""
-        scope = (session_id, agent_id)
-        with self._lock:
-            holders = [h for h, s in self._scopes.items() if s == scope]
-            for holder in holders:
-                del self._scopes[holder]
-            return holders
-
-
 def _checkpoint_denial(
     capability_id: str, tool_name: str, reserved_checkpoint: str | None
 ) -> str:
@@ -307,7 +267,6 @@ class GroundedAgentAdapter:
         )
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
-        self._reservations = _ReservationLedger()
 
         # Lazy-initialized by _get_or_create_workflow_engine
         self._workflow_engine: Any = None
@@ -355,8 +314,10 @@ class GroundedAgentAdapter:
         """
         # Build hooks dict
         existing_hooks = getattr(base, "hooks", None) or {}
-        if self._already_wrapped(existing_hooks):
-            return base
+        # Options this adapter already wrapped keep their hooks (adding a
+        # second safety hook would charge the rate limit twice per call);
+        # everything else below is applied again.
+        already_wrapped = self._already_wrapped(existing_hooks)
         post_hooks = list(existing_hooks.get("PostToolUse", []))
 
         # Add evidence collector
@@ -386,7 +347,7 @@ class GroundedAgentAdapter:
         pre_hooks.append(self._wrap_hook(safety_pre_hook))
 
         # Stop / SubagentStop: release a reservation left by a call that
-        # another hook denied (see _ReservationLedger).
+        # another hook denied (see _make_turn_end_releaser).
         stop_hooks = list(existing_hooks.get("Stop", []))
         stop_hooks.append(self._wrap_hook(self._make_turn_end_releaser()))
         subagent_stop_hooks = list(existing_hooks.get("SubagentStop", []))
@@ -408,14 +369,18 @@ class GroundedAgentAdapter:
             )
             pre_hooks.append(self._wrap_hook(discovery_hook))
 
-        merged_hooks = {
-            **existing_hooks,
-            "PreToolUse": pre_hooks,
-            "PostToolUse": post_hooks,
-            "PostToolUseFailure": failure_hooks,
-            "Stop": stop_hooks,
-            "SubagentStop": subagent_stop_hooks,
-        }
+        merged_hooks = (
+            existing_hooks
+            if already_wrapped
+            else {
+                **existing_hooks,
+                "PreToolUse": pre_hooks,
+                "PostToolUse": post_hooks,
+                "PostToolUseFailure": failure_hooks,
+                "Stop": stop_hooks,
+                "SubagentStop": subagent_stop_hooks,
+            }
+        )
 
         # Ensure setting_sources includes project (for skills)
         setting_sources = getattr(base, "setting_sources", None) or ["project"]
@@ -466,8 +431,11 @@ class GroundedAgentAdapter:
 
     def _already_wrapped(self, hooks: dict[str, Any]) -> bool:
         """Whether ``hooks`` already holds this adapter's safety hook."""
-        for entry in hooks.get("PreToolUse", []):
-            fns = entry.get("hooks", []) if isinstance(entry, dict) else entry.hooks
+        for entry in hooks.get("PreToolUse") or []:
+            if isinstance(entry, dict):
+                fns = entry.get("hooks") or []
+            else:
+                fns = getattr(entry, "hooks", None) or []
             if any(getattr(fn, "_grounded_adapter", None) is self for fn in fns):
                 return True
         return False
@@ -508,13 +476,21 @@ class GroundedAgentAdapter:
         """
         Create the Stop / SubagentStop hook that releases a checkpoint
         reservation still held by a call of the session (and agent) that
-        just finished. See ``_ReservationLedger``.
+        just finished.
+
+        A reservation ends when the call it was taken for finishes
+        (PostToolUse / PostToolUseFailure) or is denied by ``can_use_tool``.
+        A call another PreToolUse hook denies after the safety hook reserved
+        for it never runs, so nothing ends its reservation. When a session's
+        turn ends (Stop), or a subagent finishes (SubagentStop), none of its
+        calls is in flight, so a reservation one of them holds is released.
+        Other sessions sharing the adapter, and background subagents still
+        running, keep theirs.
 
         Returns:
             Async hook callback function
         """
         tracker = self.checkpoint_tracker
-        ledger = self._reservations
 
         async def release_at_turn_end(
             input_data: dict[str, Any],
@@ -522,15 +498,13 @@ class GroundedAgentAdapter:
             context: HookContext | None,
         ) -> dict[str, Any]:
             try:
-                holders = ledger.take(
-                    input_data.get("session_id"), input_data.get("agent_id")
+                holder = tracker.release_reservation_in_scope(
+                    (input_data.get("session_id"), input_data.get("agent_id"))
                 )
-                for holder in holders:
-                    if tracker.release_reservation(holder):
-                        logger.info(
-                            "Turn ended: released the reservation left by %s",
-                            holder,
-                        )
+                if holder is not None:
+                    logger.info(
+                        "Turn ended: released the reservation left by %s", holder
+                    )
             except Exception as e:
                 logger.warning("Turn-end releaser failed: %s", e)
             return {}
@@ -575,7 +549,6 @@ class GroundedAgentAdapter:
         mapper = self.mapper
         strict = self.config.strict_mode
         limiter = self.rate_limiter
-        ledger = self._reservations
 
         def deny(message: str) -> dict[str, Any]:
             logger.warning("PreToolUse denied: %s", message)
@@ -615,14 +588,12 @@ class GroundedAgentAdapter:
                 if not mapping.requires_checkpoint:
                     return {}
 
-                reserved, checkpoint_id = tracker.validate_and_reserve(tool_use_id)
+                holder = tool_use_id or input_data.get("tool_use_id")
+                reserved, checkpoint_id = tracker.validate_and_reserve(
+                    holder,
+                    scope=(input_data.get("session_id"), input_data.get("agent_id")),
+                )
                 if reserved:
-                    if tool_use_id is not None:
-                        ledger.record(
-                            tool_use_id,
-                            input_data.get("session_id"),
-                            input_data.get("agent_id"),
-                        )
                     return {}
 
                 message = "PreToolUse: " + _checkpoint_denial(
@@ -656,7 +627,6 @@ class GroundedAgentAdapter:
             Async hook callback function
         """
         tracker = self.checkpoint_tracker
-        ledger = self._reservations
         mapper = self.mapper
 
         async def consume_after_mutation(
@@ -672,6 +642,11 @@ class GroundedAgentAdapter:
 
                 mapping = mapper.map_tool(tool_name, tool_input)
                 if not mapping.requires_checkpoint:
+                    # The input it ran with (possibly rewritten by another
+                    # hook) is not checkpoint-gated, but PreToolUse may have
+                    # reserved for the original: give back only this call's.
+                    if tool_use_id is not None:
+                        tracker.release_reservation(tool_use_id)
                     return {}
 
                 # Check if the call was successful (no error in response)
@@ -685,12 +660,10 @@ class GroundedAgentAdapter:
                 if is_error or not mapping.mutation:
                     # Nothing changed - keep the checkpoint for a retry
                     tracker.release_reservation(tool_use_id)
-                    ledger.forget(tool_use_id)
                     logger.info("%s changed nothing, checkpoint preserved", tool_name)
                     return {}
 
                 consumed_id = tracker.consume_checkpoint(tool_use_id)
-                ledger.forget(tool_use_id)
                 if consumed_id is not None:
                     logger.info(
                         "Checkpoint %s consumed after %s", consumed_id, tool_name
@@ -713,7 +686,6 @@ class GroundedAgentAdapter:
             Async hook callback function
         """
         tracker = self.checkpoint_tracker
-        ledger = self._reservations
 
         async def release_after_failure(
             input_data: dict[str, Any],
@@ -723,7 +695,6 @@ class GroundedAgentAdapter:
             """PostToolUseFailure hook: release the call's reservation."""
             try:
                 holder = tool_use_id or input_data.get("tool_use_id")
-                ledger.forget(holder)
                 if holder and tracker.release_reservation(holder):
                     logger.info(
                         "%s failed, checkpoint reservation released",
@@ -749,7 +720,6 @@ class GroundedAgentAdapter:
         """
         # Capture state in closure
         tracker = self.checkpoint_tracker
-        ledger = self._reservations
         mapper = self.mapper
         strict = self.config.strict_mode
 
@@ -768,7 +738,6 @@ class GroundedAgentAdapter:
             # reservation_seconds. Only the call's own reservation is
             # touched; without a holder there is none to identify.
             if holder is not None:
-                ledger.forget(holder)
                 try:
                     tracker.release_reservation(holder)
                 except Exception as e:  # deny regardless; the hold lapses
