@@ -17,7 +17,7 @@ const fallback = `https://duckduckgo.com/?q=${encodeURIComponent(`site:${host}`)
 const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
 ---
 <div class="search" data-search>
-  <a class="search-trigger" href={fallback} data-search-open aria-haspopup="dialog">
+  <a class="search-trigger" href={fallback} data-search-open>
     <PixelGlyph name="search" />
     <span class="search-trigger__text">Search the standard</span>
     <kbd class="search-trigger__key" aria-hidden="true">/</kbd>
@@ -83,6 +83,7 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
     let run = 0;
 
     trigger.setAttribute('role', 'button');
+    trigger.setAttribute('aria-haspopup', 'dialog');
     trigger.setAttribute('aria-keyshortcuts', '/ Control+K Meta+K');
 
     const load = (): Promise<Pagefind | null> => {

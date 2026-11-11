@@ -1,6 +1,6 @@
 // The Markdown copy of the home page, from the same content module the page uses.
 import { loadOntology, capabilitiesOfLayer } from '../data/ontology';
-import { coverage, faq, getStarted, HOME_H1, inlineText, opening, principles, story, WHY, type Card, type HomeLink } from '../lib/home';
+import { coverage, faq, getStarted, HOME_H1, homeDescription, inlineText, opening, principles, story, WHY, type Card, type HomeLink } from '../lib/home';
 import { kebab } from '../lib/routes';
 import { blocks, code, fence, mdLink, mdUrl } from './md';
 import type { Twin } from './types';
@@ -65,5 +65,5 @@ export function homeTwin(): Twin {
     fence('text', g.prompt),
     cards(g.cards),
   );
-  return { title: 'Agent Capability Standard', description: summary, markdown };
+  return { title: 'Agent Capability Standard', description: homeDescription(), markdown };
 }

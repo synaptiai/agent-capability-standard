@@ -10,7 +10,7 @@ import HomeStory from '../components/HomeStory.astro';
 import InlineText from '../components/InlineText.astro';
 import DocLayout from '../layouts/DocLayout.astro';
 import { pageHref, refSlugger, routeByUrl } from '../lib/generated';
-import { coverage, faq, getStarted, HOME_H1, inlineText, opening, principles, WHY, type HomeLink } from '../lib/home';
+import { coverage, faq, getStarted, HOME_H1, homeDescription, opening, principles, WHY, type HomeLink } from '../lib/home';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 
 const route = routeByUrl('/');
@@ -20,7 +20,7 @@ const p = principles();
 const cov = coverage();
 const f = faq();
 const g = getStarted();
-const description = inlineText(o.summary);
+const description = homeDescription();
 /** A site page through the route check, or an outside URL as it is. */
 const href = (l: HomeLink) => (l.url.startsWith('/') ? pageHref(l.url) : l.url);
 const groups = [

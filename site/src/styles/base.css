@@ -100,23 +100,23 @@
   /* Sizes are multiples of 5px, so each pixel of the font lands on whole
      device pixels at 2x. */
   h1 {
-    font-size: 40px;
+    font-size: 45px;
     margin: 0 0 var(--space-4);
   }
 
   @media (min-width: 960px) {
     h1 {
-      font-size: 50px;
+      font-size: 55px;
     }
   }
 
   h2 {
-    font-size: 35px;
+    font-size: 40px;
     margin: var(--space-7) 0 var(--space-4);
   }
 
   h3 {
-    font-size: 25px;
+    font-size: 30px;
     margin: var(--space-6) 0 var(--space-3);
   }
 

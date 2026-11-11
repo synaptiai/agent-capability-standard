@@ -2,9 +2,9 @@
 // copy, by section, in the llmstxt.org layout), llms-full.txt (the current
 // Standard, the capabilities and the workflows in one file), robots.txt and
 // the sitemap. All are built from the route table.
-import { loadCounts } from '../data/counts';
 import { loadVersions, olderVersionNote } from '../data/versions';
 import { readRepoFile } from './repo';
+import { homeDescription } from './home';
 import { SITE_ORIGIN } from './links';
 import { ROUTES, SECTIONS, type Route } from './routes';
 import { shortDescription } from '../plugins/remark-page-meta';
@@ -13,10 +13,7 @@ import { mdUrl } from '../twins/md';
 
 export const SITEMAP_PATH = '/sitemap.xml';
 
-function summaryLine(): string {
-  const c = loadCounts();
-  return `An open specification for composable AI agent capabilities: ${c.capabilityCount} capabilities in ${c.layerCount} layers, a typed workflow language, and a validator.`;
-}
+const summaryLine = homeDescription;
 
 function versionsLine(): string {
   const v = loadVersions();

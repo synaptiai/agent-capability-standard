@@ -22,6 +22,7 @@ interface Props {
 
 const { id } = Astro.props;
 const s = story();
+const svgTitle = id('story-svg-title');
 const ontology = loadOntology();
 const used = new Set(s.workflow.steps.map((x) => x.capability));
 
@@ -77,11 +78,11 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
       class="story__svg"
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      aria-labelledby={id('story-svg-title')}
+      aria-labelledby={svgTitle}
       shape-rendering="crispEdges"
       data-story-svg
     >
-      <title id={id('story-svg-title')}>
+      <title id={svgTitle}>
         Diagram: the capabilities in a grid by layer, then the steps of the {s.workflow.id} workflow as a rail, with its
         checkpoint, the step that changes state, verify and rollback marked.
       </title>

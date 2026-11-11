@@ -14,6 +14,12 @@ import { SITE_ORIGIN } from './links';
 import { GITHUB_BASE, readRepoFile } from './repo';
 import { contractRows, gateRows, stepRole } from './views';
 
+/** The one-sentence summary used as the page description and in llms.txt. */
+export function homeDescription(): string {
+  const c = loadCounts();
+  return `An open specification for composable AI agent capabilities: ${c.capabilityCount} capabilities in ${c.layerCount} layers, a typed workflow language, and a validator.`;
+}
+
 export const HOME_H1 = 'The Agent Capability Standard defines what an AI agent can do, and what has to happen before it does it.';
 
 /** The workflow the scroll story is drawn from. */

@@ -63,6 +63,7 @@ const ogImage = new URL('/og.png', Astro.site);
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
+    <meta data-pagefind-meta="title[content]" content={headTitle ?? title} />
     {description && <meta name="description" content={description} />}
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={new URL(route.url, Astro.site)} />}
     <meta name="theme-color" content={light} media="(prefers-color-scheme: light)" data-light={light} data-dark={dark} />

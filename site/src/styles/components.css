@@ -1412,6 +1412,10 @@
     text-overflow: ellipsis;
   }
 
+  :root:not(.js) .search-trigger__key {
+    display: none;
+  }
+
   .search-trigger__key {
     padding: 0 var(--space-1);
     border: var(--px) solid var(--rule);
@@ -1419,8 +1423,8 @@
     line-height: 1.4;
   }
 
-  /* Below 640px the trigger keeps its glyph; its words stay for screen readers. */
-  @media (max-width: 639px) {
+  /* Below 1280px the trigger keeps its glyph; its words stay for screen readers. */
+  @media (max-width: 1279px) {
     .search-trigger {
       max-width: none;
       width: 40px;
@@ -1772,16 +1776,18 @@
     .story__svg {
       max-height: calc(100vh - var(--chrome-h) - var(--space-8) * 2);
     }
-
-    .story[data-live] .story__step {
-      min-height: 60vh;
-    }
   }
 
   .story[data-live] .story__step {
     min-height: 45vh;
     opacity: 0.45;
     transition: opacity var(--step-hover);
+  }
+
+  @media (min-width: 960px) {
+    .story[data-live] .story__step {
+      min-height: 60vh;
+    }
   }
 
   .story[data-live] .story__step.is-current {
