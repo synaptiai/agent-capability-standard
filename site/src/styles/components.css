@@ -1012,23 +1012,23 @@
   }
 
   /* Description lists of facts (skill, layer, workflow, profile values). */
-  :is(.skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) {
+  :is(.page-meta, .citation-facts, .workflow-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) {
     display: grid;
     grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr);
     gap: var(--space-1) var(--space-4);
     font-size: 15px;
   }
 
-  :is(.skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) > div {
+  :is(.page-meta, .citation-facts, .workflow-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) > div {
     display: contents;
   }
 
-  :is(.skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) dt {
+  :is(.page-meta, .citation-facts, .workflow-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) dt {
     font-weight: 700;
     color: var(--ink-2);
   }
 
-  :is(.skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) dd {
+  :is(.page-meta, .citation-facts, .workflow-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) dd {
     margin: 0;
     min-width: 0;
   }

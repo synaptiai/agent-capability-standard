@@ -185,3 +185,26 @@ describe('contents list', () => {
   });
 });
 
+
+describe('description lists', () => {
+  it('styles the terms of every description list a page renders', () => {
+    // Expected set: every class given to a <dl> in the page sources, read by
+    // walking src/ here. A <dl> with no dt rule renders terms and values in the
+    // same plain text, which was found on the RFC and compliance pages.
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(`${dir}/${e.name}`) : /\.(astro|ts)$/.test(e.name) ? [`${dir}/${e.name}`] : [],
+      );
+    const classes = new Set<string>();
+    for (const f of walk('src')) {
+      for (const m of readFileSync(f, 'utf8').matchAll(/<dl class="([^"]+)"/g)) classes.add(m[1]!.split(/\s+/)[0]!);
+    }
+    expect(classes.size).toBeGreaterThan(0);
+    // Whole selector texts, unsplit, so that `:is(.a, .b) dt` stays one entry.
+    const selectorTexts = STYLES.flatMap(({ css }) => [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1]!));
+    const missing = [...classes].filter(
+      (c) => !selectorTexts.some((t) => new RegExp(`\\.${c}(?![\\w-])`).test(t) && /\bdt\s*$/.test(t.trim())),
+    );
+    expect(missing).toEqual([]);
+  });
+});
