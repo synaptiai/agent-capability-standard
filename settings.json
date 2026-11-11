@@ -3,12 +3,12 @@
   "hooks": {
     "pretooluse_require_checkpoint": {
       "enabled": true,
-      "description": "Require checkpoint before high-impact file modifications (SAFETY layer)",
+      "description": "Require checkpoint before high-impact file modifications (VERIFY layer)",
       "configurable": true
     },
     "posttooluse_log_tool": {
       "enabled": true,
-      "description": "Log all tool usage for audit trail (SAFETY layer)",
+      "description": "Log all tool usage for audit trail (VERIFY layer)",
       "configurable": true
     }
   },
