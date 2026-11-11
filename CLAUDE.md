@@ -122,7 +122,8 @@ constraints file.
 
 The site in `site/` is an Astro project built from the repository's own files.
 Node is pinned in `site/.nvmrc`. `.github/workflows/site.yml` runs the same
-commands on every push and pull request, and deploys main to Cloudflare Pages.
+commands on pushes and pull requests to main and on manual runs, and deploys
+main to Cloudflare Pages.
 
 ```bash
 cd site

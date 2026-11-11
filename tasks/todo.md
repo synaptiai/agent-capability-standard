@@ -9,7 +9,7 @@ Epic: https://github.com/synaptiai/agent-capability-standard/issues/120
 - [x] 4. Generated reference pages: capability, layer, workflow, domain, edge type, diagnostics, schemas, RFC and citation pages from the repository data
 - [x] 5. Original pixel design system: tokens with a contrast check, pixel glyphs, page shell; display font Jersey 10
 - [x] 6. Home page, Markdown copies, llms.txt and search: a Markdown copy of every page, llms.txt, llms-full.txt, sitemap and Pagefind search
-- [x] 7. Post-build checks and CI: `scripts/check-dist.mjs` runs last in `npm run build`; `.github/workflows/site.yml` builds every push and pull request and deploys main once `SITE_DEPLOY_ENABLED` is true (not yet run on GitHub)
+- [x] 7. Post-build checks and CI: `scripts/check-dist.mjs` runs last in `npm run build`; `.github/workflows/site.yml` builds pushes and pull requests to main and deploys main once `SITE_DEPLOY_ENABLED` is true (not yet run on GitHub)
 - [ ] 8. Launch (Cloudflare project, domain and secrets need the maintainer)
 
 # Issue #114 — orchestration extensions + validator/engine unification
