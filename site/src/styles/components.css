@@ -373,6 +373,17 @@
     }
   }
 
+  /* Without JavaScript the menu button cannot open the panel, so below
+     1024px it is hidden and the section links stay in the header. The head
+     script sets .js on <html> before the page paints. */
+  :root:not(.js) .menu-button {
+    display: none;
+  }
+
+  :root:not(.js) .site-nav {
+    display: block;
+  }
+
   .site-nav ul {
     max-width: var(--frame-max);
     margin: 0 auto;

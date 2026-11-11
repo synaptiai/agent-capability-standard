@@ -1,7 +1,8 @@
 ---
-// The shell every page shares: the theme script (first child of <head>),
-// fonts and styles, the header, the sidebar, the page with its breadcrumb,
-// page actions, contents list and previous/next links, and the footer.
+// The shell every page shares: the theme script (first child of <head>; it
+// also sets .js on <html>), fonts and styles, the header, the sidebar, the
+// page with its breadcrumb, page actions, contents list and previous/next
+// links, and the footer.
 // The page body (including its own H1) comes in through the slot. The
 // contents list is read from the rendered body, so generated pages get one
 // the same way Markdown pages do.
@@ -51,6 +52,7 @@ const ogImage = new URL('/og.png', Astro.site);
   <head>
     <script is:inline>
       (() => {
+        document.documentElement.classList.add('js');
         let t = 'system';
         try { t = localStorage.getItem('acs-theme') || 'system'; } catch {}
         if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;

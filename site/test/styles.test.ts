@@ -63,6 +63,15 @@ describe('tables', () => {
   });
 });
 
+describe('menu without JavaScript', () => {
+  it('hides the menu button and shows the section links until the head script has set .js', () => {
+    const all = rules();
+    const has = (sel: string, decl: RegExp) => all.some((r) => r.selectors.includes(sel) && decl.test(r.body));
+    expect(has(':root:not(.js) .menu-button', /display:\s*none/)).toBe(true);
+    expect(has(':root:not(.js) .site-nav', /display:\s*block/)).toBe(true);
+  });
+});
+
 describe('accessible names', () => {
   it('never hides with display: none the only text of a control that has no aria-label', () => {
     // The GitHub link and the menu button have no aria-label: their words may

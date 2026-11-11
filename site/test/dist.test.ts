@@ -205,6 +205,12 @@ describe('design system on the built site', () => {
     }
   });
 
+  it('marks <html> with .js from the head script, which the no-JavaScript menu rules read', () => {
+    for (const f of pages()) {
+      expect(/^<!DOCTYPE html><html lang="en"><head><script>\s*\(\(\) => \{\s*document\.documentElement\.classList\.add\('js'\)/i.test(html(f)), f).toBe(true);
+    }
+  });
+
   it('shows the newest Standard file version in the header chip, and a skip link to the main content', () => {
     // Expected: the highest version among spec/STANDARD-v*.md file names.
     const chip = `><span class="version-chip__word">Standard </span>v${standardFileVersions()[0]}</a>`;
