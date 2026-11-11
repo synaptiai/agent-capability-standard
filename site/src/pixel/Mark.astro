@@ -1,0 +1,30 @@
+---
+// The mark: nine blocks, one per cognitive layer, with the accent in the
+// centre and the last block sliding into place. The sliding block is its own
+// group so the header can snap it into its slot on hover.
+import { MARK_GRID, placedRects } from './svg';
+
+interface Props {
+  /** Pixels per grid cell. */
+  scale?: number;
+  class?: string;
+}
+
+const { scale = 2, class: className } = Astro.props;
+if (!Number.isInteger(scale) || scale < 1) throw new Error(`Mark: scale must be a whole number, got ${scale}`);
+const rects = placedRects(MARK_GRID);
+const fixed = rects.filter((r) => r.paint !== 'fg2');
+const loose = rects.filter((r) => r.paint === 'fg2');
+---
+<svg
+  class:list={['mark', className]}
+  viewBox={`0 0 ${MARK_GRID.w} ${MARK_GRID.h}`}
+  width={MARK_GRID.w * scale}
+  height={MARK_GRID.h * scale}
+  shape-rendering="crispEdges"
+  focusable="false"
+  aria-hidden="true"
+>
+  {fixed.map((r) => <rect x={r.x} y={r.y} width={r.w} height={r.h} {...r.attrs} />)}
+  <g class="mark__loose">{loose.map((r) => <rect x={r.x} y={r.y} width={r.w} height={r.h} {...r.attrs} />)}</g>
+</svg>
