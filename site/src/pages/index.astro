@@ -1,42 +1,142 @@
 ---
-// The home page. Phase 6 replaces this with the designed home page; for now
-// it states what the standard is, with counts from the data, and links to
-// each section.
+// The home page (design notes, ia-home section 5; plan Phase 6). No sidebar.
+// Sections in order: opening, design principles, why a standard, the scroll
+// story, the capabilities, what the standard covers, questions, get started.
+// Everything it says comes from src/lib/home.ts, which its Markdown copy also
+// reads, and the counts, versions and names come from the data.
 import CapabilityTable from '../components/CapabilityTable.astro';
-import { loadCounts } from '../data/counts';
-import { loadVersions } from '../data/versions';
+import CopyBlock from '../components/CopyBlock.astro';
+import HomeStory from '../components/HomeStory.astro';
+import InlineText from '../components/InlineText.astro';
 import DocLayout from '../layouts/DocLayout.astro';
 import { pageHref, refSlugger, routeByUrl } from '../lib/generated';
-import { ROUTES, SECTIONS } from '../lib/routes';
+import { coverage, faq, getStarted, HOME_H1, inlineText, opening, principles, WHY, type HomeLink } from '../lib/home';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
 
 const route = routeByUrl('/');
-const c = loadCounts();
-const v = loadVersions();
 const id = refSlugger();
-const description = `An open specification for composable AI agent capabilities: ${c.capabilityCount} capabilities in ${c.layerCount} layers, a typed workflow language, and a validator.`;
-const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
-  ...s,
-  url: ROUTES.filter((r) => r.section === s.id).sort((a, b) => a.order - b.order)[0]!.url,
-}));
+const o = opening();
+const p = principles();
+const cov = coverage();
+const f = faq();
+const g = getStarted();
+const description = inlineText(o.summary);
+/** A site page through the route check, or an outside URL as it is. */
+const href = (l: HomeLink) => (l.url.startsWith('/') ? pageHref(l.url) : l.url);
+const groups = [
+  { title: 'The standard', cards: cov.standard, glyph: 'note' },
+  { title: 'Reference data', cards: cov.data, glyph: 'hash' },
+  { title: 'Tools', cards: cov.tools, glyph: 'code' },
+] as const;
 ---
-<DocLayout route={route} title="Agent Capability Standard" description={description}>
-  <article class="doc doc--home" data-pagefind-body>
-    <h1 id={id('Agent Capability Standard')}>Agent Capability Standard</h1>
-    <p class="lead">{description}</p>
-    <p>
-      The current version is <a href={pageHref(`/spec/${v.standard.current.version}/`)}>Standard {v.standard.current.version}</a>
-      {' '}({v.standard.current.status}). The ontology is version {v.ontology}. The catalogs define {c.workflowCount}
-      {' '}workflows, and {c.profileCount} domain profiles tune them for specific fields.
-    </p>
-    <section class="home-sections">
-      <h2 id={id('Sections')}>Sections</h2>
-      <ul class="section-index__cards">
-        {sections.map((s) => <li class="section-index__card"><a href={s.url}>{s.label}</a></li>)}
-      </ul>
+<DocLayout route={route} title="Agent Capability Standard" description={description} toc={false}>
+  <article class="doc doc--home home" data-pagefind-body>
+    <section class="home-opening">
+      <p class="eyebrow">Agent Capability Standard</p>
+      <h1 id={id(HOME_H1)}>{HOME_H1}</h1>
+      <p class="lead"><InlineText parts={o.summary} /></p>
+      <p class="home-opening__version">{o.versionLine}</p>
+      <p class="home-opening__links">
+        {o.links.map((l, i) => (
+          <a class:list={['btn', i > 0 && 'btn--quiet']} href={href(l)}>
+            {l.text}
+            <PixelGlyph name="arrow-right" />
+          </a>
+        ))}
+      </p>
+      <CopyBlock label={o.install.label} text={o.install.commands.join('\n')} />
     </section>
-    <section class="home-capabilities">
-      <h2 id={id('Capabilities')}>Capabilities</h2>
+
+    <section class="home-section home-section--alt home-principles">
+      <h2 id={id('Design principles')}>Design principles</h2>
+      <p>
+        {p.intro} They come from <a href={p.sectionUrl}>section 3 of the Standard</a>.
+      </p>
+      <ol class="home-principles__list">
+        {p.items.map((item) => (
+          <li>
+            <h3 id={id(item.title)}>{item.title}</h3>
+            {item.blocks.map((b) =>
+              b.kind === 'p' ? (
+                <p><InlineText parts={b.text} /></p>
+              ) : (
+                <ul>{b.items.map((line) => <li><InlineText parts={line} /></li>)}</ul>
+              ),
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <section class="home-section home-why">
+      <h2 id={id('Why a standard')}>Why a standard</h2>
+      <p>{WHY}</p>
+    </section>
+
+    <section class="home-section home-section--alt home-story">
+      <h2 id={id('How a workflow is built')}>How a workflow is built</h2>
+      <p>
+        The steps below follow the reference workflow for deploying a model,{' '}
+        <a href={pageHref('/workflows/model-deployment/')}><code>model_deployment</code></a>.
+      </p>
+      <HomeStory id={id} />
+    </section>
+
+    <section class="home-section home-capabilities">
+      <h2 id={id('The capabilities')}>The capabilities</h2>
+      <p>
+        Domain variants are parameters, not new capabilities: <code>detect</code> with <code>domain: anomaly</code>,
+        {' '}not <code>detect-anomaly</code>.{' '}
+        <a href={pageHref('/background/methodology/first-principles-reassessment/')}>How the set was derived</a>.
+      </p>
       <CapabilityTable />
+    </section>
+
+    <section class="home-section home-section--alt home-covers">
+      <h2 id={id('What the standard covers')}>What the standard covers</h2>
+      {groups.map((grp) => (
+        <section class="home-covers__group">
+          <h3 id={id(grp.title)}>{grp.title}</h3>
+          <ul class="home-cards">
+            {grp.cards.map((c) => (
+              <li class="home-card">
+                <PixelGlyph name={grp.glyph} />
+                <p class="home-card__title"><a href={href(c.link)}>{c.title}</a></p>
+                <p class="home-card__line">{c.line}{c.section && <> ({c.section})</>}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </section>
+
+    <section class="home-section home-faq">
+      <h2 id={id('Questions')}>Questions</h2>
+      {f.items.map((item) => (
+        <details class="home-faq__item">
+          <summary>{item.question}</summary>
+          <p><InlineText parts={item.answer} /></p>
+        </details>
+      ))}
+      <p><a href={href(f.more)}>{f.more.text}</a></p>
+    </section>
+
+    <section class="home-section home-section--alt home-start">
+      <h2 id={id('Get started')}>Get started</h2>
+      <div class="home-agents">
+        <h3 id={id('For coding agents')}>For coding agents</h3>
+        <p>Paste this into Claude Code, Codex, Cursor or another coding agent.</p>
+        <CopyBlock label="Prompt" text={g.prompt} />
+      </div>
+      <ul class="home-cards home-cards--start">
+        {g.cards.map((c) => (
+          <li class="home-card">
+            <p class="home-card__title"><a href={href(c.link)}>{c.title}</a></p>
+            <p class="home-card__line">{c.line}</p>
+            {c.extra && <p class="home-card__line"><a href={href(c.extra)}>{c.extra.text}</a></p>}
+          </li>
+        ))}
+      </ul>
     </section>
   </article>
 </DocLayout>

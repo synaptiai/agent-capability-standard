@@ -29,14 +29,16 @@ interface Props {
   description?: string | null;
   /** Keep the page out of search engines (the 404 page). */
   noindex?: boolean;
+  /** Show the "On this page" contents list (the home page has none). */
+  toc?: boolean;
 }
 
-const { route, title, headTitle, description, noindex = false } = Astro.props;
+const { route, title, headTitle, description, noindex = false, toc: showToc = true } = Astro.props;
 const section = SECTIONS.find((s) => s.id === route.section);
 const pageTitle = route.url === '/' ? 'Agent Capability Standard' : `${headTitle ?? title} - Agent Capability Standard`;
 const sourceUrl = route.source ? githubBlobUrl(route.source) : null;
 const body = await Astro.slots.render('default');
-const toc = tocEntries(body);
+const toc = showToc ? tocEntries(body) : [];
 const hasSidebar = route.section !== 'home';
 // The Markdown copy at <route>index.md exists only once an endpoint builds it
 // (src/pages/**/*.md.ts). Until then the page offers no copy actions and no

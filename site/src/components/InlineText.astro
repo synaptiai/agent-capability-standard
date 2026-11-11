@@ -1,0 +1,11 @@
+---
+// Text with inline code spans, from the parts the content modules build.
+import type { Inline } from '../lib/generated';
+
+interface Props {
+  parts: Inline;
+}
+
+const { parts } = Astro.props;
+---
+{parts.map((p) => (p.code ? <code>{p.text}</code> : p.text))}

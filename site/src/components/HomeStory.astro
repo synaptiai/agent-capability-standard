@@ -1,0 +1,203 @@
+---
+// The home page's scroll story: text steps beside a sticky pixel diagram that
+// builds as the reader scrolls. Everything is drawn here from the ontology and
+// the model_deployment workflow as SVG rects; nothing is copied or typed in.
+// - Beat 1: every capability as a square, in a column per layer; the ones the
+//   workflow uses are outlined.
+// - Beat 2: the workflow's steps as a rail, with the first step's contract
+//   shown as input and output ports.
+// - Beats 3 to 6: the checkpoint, the step that changes state (with a line
+//   from the checkpoint it depends on), verify, and rollback (with a line
+//   back to the checkpoint).
+// Without JavaScript, or with reduced motion, every beat shows at once and no
+// step is dimmed. With JavaScript an IntersectionObserver sets the current
+// beat from the text step in the middle of the screen.
+import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
+import { story } from '../lib/home';
+import InlineText from './InlineText.astro';
+
+interface Props {
+  id: (text: string) => string;
+}
+
+const { id } = Astro.props;
+const s = story();
+const ontology = loadOntology();
+const used = new Set(s.workflow.steps.map((x) => x.capability));
+
+// Grid of capabilities.
+const W = 320;
+const SQ = 14;
+const GAP = 3;
+const pitch = Math.floor((W - 20) / ontology.layers.length);
+const maxRows = Math.max(...ontology.layers.map((l) => l.capabilities.length));
+const gridTop = 12;
+const squares = ontology.layers.flatMap((layer, i) =>
+  capabilitiesOfLayer(ontology, layer.id).map((cap, j) => ({
+    id: cap.id,
+    layer: layer.id,
+    x: 10 + i * pitch + (pitch - SQ) / 2,
+    y: gridTop + j * (SQ + GAP),
+    used: used.has(cap.id),
+  })),
+);
+const gridBottom = gridTop + maxRows * (SQ + GAP);
+
+// Rail of steps.
+const railTop = gridBottom + 24;
+const ROW = 30;
+const BH = 22;
+const RX = 60;
+const RW = 196;
+const rowY = (index: number) => railTop + (index - 1) * ROW;
+const mid = (index: number) => rowY(index) + BH / 2;
+const H = railTop + s.workflow.steps.length * ROW + 6;
+
+const beatOf = (index: number): number | null =>
+  index === s.checkpointStep.index ? 3 : index === s.changeStep.index ? 4 : index === s.verifyStep.index ? 5 : index === s.rollbackStep.index ? 6 : null;
+
+const cp = s.checkpointStep.index;
+const ch = s.changeStep.index;
+const rb = s.rollbackStep.index;
+const vf = s.verifyStep.index;
+// A store_as name is cut to the room left beside the step's label (the mono
+// font is about 0.6em wide: 6px at the 10px label size, 4.8px at 8px).
+const storeText = (index: number, cap: string, name: string): string => {
+  const room = Math.floor((RW - 11 - `${index} ${cap}`.length * 6 - 14) / 4.8);
+  return name.length <= room ? name : `${name.slice(0, Math.max(0, room - 1))}…`;
+};
+const portsIn = s.contractInputs.length;
+const portsOut = s.contractOutputs.length;
+const first = s.contractStep.index;
+const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) - 2;
+---
+<div class="story" data-story>
+  <div class="story__canvas">
+    <svg
+      class="story__svg"
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-labelledby={id('story-svg-title')}
+      shape-rendering="crispEdges"
+      data-story-svg
+    >
+      <title id={id('story-svg-title')}>
+        Diagram: the capabilities in a grid by layer, then the steps of the {s.workflow.id} workflow as a rail, with its
+        checkpoint, the step that changes state, verify and rollback marked.
+      </title>
+      <g data-beat="1">
+        {squares.map((q) => (
+          <rect class="story__cap" x={q.x} y={q.y} width={SQ} height={SQ} style={`--layer: var(--layer-${q.layer})`} />
+        ))}
+      </g>
+      <g data-beat="1">
+        {squares.filter((q) => q.used).map((q) => (
+          <rect class="story__used" x={q.x - 2} y={q.y - 2} width={SQ + 4} height={SQ + 4} />
+        ))}
+      </g>
+
+      <g data-beat="2">
+        {s.workflow.steps.map((st) => (
+          <rect class="story__block" x={RX} y={rowY(st.index)} width={RW} height={BH} />
+        ))}
+      </g>
+      {s.workflow.steps.map((st) => {
+        const beat = beatOf(st.index);
+        return beat === null ? null : (
+          <rect
+            class="story__on"
+            x={RX}
+            y={rowY(st.index)}
+            width={RW}
+            height={BH}
+            style={`--layer: var(--layer-${st.layer})`}
+            data-beat={beat}
+          />
+        );
+      })}
+      <g data-beat="2">
+        {s.workflow.steps.map((st) => (
+          <>
+            <rect class="story__stripe" x={RX} y={rowY(st.index)} width={5} height={BH} style={`--layer: var(--layer-${st.layer})`} />
+            <text class="story__label" x={RX + 11} y={mid(st.index) + 3.5}>{st.index} {st.capability}</text>
+            {st.store_as && <text class="story__store" x={RX + RW - 6} y={mid(st.index) + 3}>{storeText(st.index, st.capability, st.store_as)}</text>}
+          </>
+        ))}
+        {Array.from({ length: portsIn }, (_, k) => <rect class="story__port" x={RX - 6} y={portY(portsIn, k)} width={6} height={4} />)}
+        {Array.from({ length: portsOut }, (_, k) => <rect class="story__port" x={RX + RW} y={portY(portsOut, k)} width={6} height={4} />)}
+      </g>
+
+      <g data-beat="3" class="story__mark">
+        <rect x={RX + RW + 8} y={mid(cp) - 6} width={12} height={3} />
+        <rect x={RX + RW + 8} y={mid(cp) - 1} width={12} height={3} />
+        <rect x={RX + RW + 8} y={mid(cp) + 4} width={12} height={3} />
+      </g>
+
+      <g data-beat="4" class="story__mark">
+        <rect x={46} y={mid(cp)} width={RX - 46} height={2} />
+        <rect x={46} y={mid(cp)} width={2} height={mid(ch) - mid(cp) + 2} />
+        <rect x={46} y={mid(ch)} width={RX - 46} height={2} />
+        <rect x={RX + RW + 9} y={mid(ch) - 1} width={10} height={8} />
+        <rect x={RX + RW + 11} y={mid(ch) - 6} width={2} height={5} />
+        <rect x={RX + RW + 15} y={mid(ch) - 6} width={2} height={5} />
+        <rect x={RX + RW + 11} y={mid(ch) - 7} width={6} height={2} />
+      </g>
+
+      <g data-beat="5" class="story__mark">
+        <rect x={RX + RW + 8} y={mid(vf) + 1} width={3} height={3} />
+        <rect x={RX + RW + 11} y={mid(vf) + 3} width={3} height={3} />
+        <rect x={RX + RW + 14} y={mid(vf)} width={3} height={3} />
+        <rect x={RX + RW + 17} y={mid(vf) - 3} width={3} height={3} />
+        <rect x={RX + RW + 20} y={mid(vf) - 6} width={3} height={3} />
+      </g>
+
+      <g data-beat="6" class="story__mark">
+        <rect x={34} y={mid(rb)} width={RX - 34} height={2} />
+        <rect x={34} y={mid(cp) + 4} width={2} height={mid(rb) - mid(cp) - 2} />
+        <rect x={34} y={mid(cp) + 4} width={RX - 40} height={2} />
+        <rect x={RX - 6} y={mid(cp) + 1} width={2} height={8} />
+        <rect x={RX - 4} y={mid(cp) + 3} width={2} height={4} />
+        <rect x={RX + RW + 9} y={mid(rb) - 4} width={8} height={8} transform={`rotate(45 ${RX + RW + 13} ${mid(rb)})`} />
+      </g>
+    </svg>
+  </div>
+  <ol class="story__steps">
+    {s.steps.map((st) => (
+      <li class="story__step" data-story-step={st.beat}>
+        <h3 id={id(st.title)}>{st.title}</h3>
+        <p><InlineText parts={st.text} /></p>
+      </li>
+    ))}
+  </ol>
+</div>
+
+<script>
+  const story = document.querySelector<HTMLElement>('[data-story]');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (story && 'IntersectionObserver' in window && !reduce.matches) {
+    const steps = [...story.querySelectorAll<HTMLElement>('[data-story-step]')];
+    const parts = [...story.querySelectorAll<SVGElement>('[data-beat]')];
+    const show = (beat: number) => {
+      for (const p of parts) p.classList.toggle('is-off', Number(p.dataset.beat) > beat);
+      for (const s of steps) s.classList.toggle('is-current', Number(s.dataset.storyStep) === beat);
+    };
+    story.dataset.live = '';
+    show(1);
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) show(Number((e.target as HTMLElement).dataset.storyStep));
+      },
+      // Below 960px the diagram sits on top of the screen, so the step that
+      // counts is the one in the band below it.
+      { rootMargin: window.matchMedia('(min-width: 960px)').matches ? '-45% 0px -45% 0px' : '-62% 0px -28% 0px' },
+    );
+    for (const s of steps) io.observe(s);
+    // A reader who turns on reduced motion mid-page gets the full diagram.
+    reduce.addEventListener('change', () => {
+      if (!reduce.matches) return;
+      io.disconnect();
+      delete story.dataset.live;
+      for (const p of parts) p.classList.remove('is-off');
+    });
+  }
+</script>
