@@ -20,6 +20,11 @@ describe('search matches', () => {
     expect(isRealMatch('debug_code_change', ['debug_code_change.'])).toBe(true);
     expect(isRealMatch('V102', ['(V102);'])).toBe(true);
     expect(isRealMatch('workflow dsl', ['Workflow', 'DSL.'])).toBe(true);
+    // A file path in the page matches a word of the path.
+    expect(isRealMatch('whitepaper', ['spec/WHITEPAPER.md,'])).toBe(true);
+    expect(isRealMatch('5.8', ['(§5.8);'])).toBe(true);
+    // A made-up word does not match through one part of a path.
+    expect(isRealMatch('zzzqqq', ['spec/z.md'])).toBe(false);
   });
 
   it('needs every query word to be matched', () => {

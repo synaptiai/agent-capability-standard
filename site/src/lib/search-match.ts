@@ -29,12 +29,17 @@ export function queryWords(query: string): string[] {
  * True when every query word shares enough leading letters with one of the
  * matched words. `matched` are the page's words at Pagefind's match locations.
  * An identifier joined by underscores or other marks ("debug_code_change")
- * is compared with those marks removed on both sides.
+ * is compared with those marks removed on both sides; a path or file name
+ * in the page ("spec/WHITEPAPER.md") is also compared part by part.
  */
 export function isRealMatch(query: string, matched: readonly string[]): boolean {
   const words = queryWords(query);
   if (words.length === 0) return false;
-  const found = matched.map(normalWord).filter((w) => w !== '');
+  // Each matched word whole ("debug_code_change" -> "debugcodechange") and in
+  // its parts ("spec/WHITEPAPER.md" -> "spec", "whitepaper", "md").
+  const found = matched
+    .flatMap((w) => [normalWord(w), ...w.split(/[^\p{L}\p{N}]+/u).map(normalWord)])
+    .filter((w) => w !== '');
   return words.every((q) => found.some((w) => shared(q, w) >= Math.min(MIN_SHARED, q.length)));
 }
 

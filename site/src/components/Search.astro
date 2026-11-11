@@ -10,7 +10,8 @@
 // - One filter, the section a page belongs to. A page tagged with an older
 //   Standard version shows that version beside its section.
 // - Results matched only on a short prefix of a query word are dropped (see
-//   lib/search-match.ts), so a made-up word finds no pages.
+//   lib/search-match.ts), so a made-up word finds no pages. When some are
+//   dropped and not every result was checked, the count says "At least".
 // - Another script can open the dialog with a query typed in by dispatching
 //   SEARCH_EVENT on document with { detail: { query } } (the 404 page does).
 // - Without JavaScript the trigger is a plain link to a web search limited
@@ -123,7 +124,11 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
 
     const results = () => [...list.querySelectorAll<HTMLAnchorElement>('a')];
 
-    const render = (items: PagefindResult[], total: number, query: string) => {
+    /**
+     * `total` is the number of matching pages; it is a lower bound when
+     * `exact` is false (some results were loose and not all were checked).
+     */
+    const render = (items: PagefindResult[], total: number, exact: boolean, query: string) => {
       list.replaceChildren();
       for (const r of items) {
         const li = document.createElement('li');
@@ -146,7 +151,13 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
         list.append(li);
       }
       status.textContent =
-        total === 0 ? `No pages match "${query}".` : total > items.length ? `${total} pages match. Showing the first ${items.length}.` : `${total} ${total === 1 ? 'page matches' : 'pages match'}.`;
+        !exact
+          ? `At least ${total} pages match. Showing the first ${items.length}.`
+          : total === 0
+            ? `No pages match "${query}".`
+            : total > items.length
+              ? `${total} pages match. Showing the first ${items.length}.`
+              : `${total} ${total === 1 ? 'page matches' : 'pages match'}.`;
     };
 
     const search = async () => {
@@ -162,12 +173,24 @@ const sections = SECTIONS.filter((s) => s.id !== 'home').map((s) => s.label);
       const filters: Record<string, string> = section.value ? { section: section.value } : {};
       const found = await pf.debouncedSearch(q, { filters }, 150);
       if (found === null || mine !== run) return;
-      const loaded = await Promise.all(found.results.slice(0, MAX).map((r) => r.data()));
-      if (mine !== run) return;
-      const items = loaded.filter((r) => isRealMatch(q, wordsAt(r.content, r.locations)));
-      // Loose matches rank last, so once one is dropped the rest of the list is loose too.
-      const total = items.length < loaded.length ? items.length : found.results.length;
-      render(items, total, q);
+      // Check results in batches until MAX real matches are found or none are
+      // left. The page title counts as matched text too.
+      const real = (r: PagefindResult) => isRealMatch(q, [...wordsAt(r.content, r.locations), ...(r.meta.title ?? '').split(/\s+/)]);
+      const items: PagefindResult[] = [];
+      let checked = 0;
+      let dropped = 0;
+      while (items.length < MAX && checked < found.results.length) {
+        const batch = await Promise.all(found.results.slice(checked, checked + MAX).map((r) => r.data()));
+        if (mine !== run) return;
+        checked += batch.length;
+        for (const r of batch) {
+          if (real(r)) items.push(r);
+          else dropped++;
+        }
+      }
+      const all = checked === found.results.length;
+      const total = all ? items.length : dropped === 0 ? found.results.length : items.length;
+      render(items.slice(0, MAX), total, all || dropped === 0, q);
     };
 
     trigger.addEventListener('click', (e) => {
