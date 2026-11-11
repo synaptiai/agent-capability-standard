@@ -9,6 +9,7 @@ import { KEYWORDS, markKeywords } from '../src/plugins/rehype-keywords';
 import { standardVersions } from '../src/data/versions';
 import { pageHead } from '../src/lib/page-head';
 import { DESCRIPTIONS, routeForSource } from '../src/lib/routes';
+import { sectionLines } from './independent';
 import { renderRepoFile } from './pipeline';
 
 async function pageOf(source: string, text?: string): Promise<{ page: PageMeta; html: string }> {
@@ -35,7 +36,8 @@ describe('remark-page-meta', () => {
 
   it('reads an RFC header written with hard breaks (RFC-0001 lines 2-4)', async () => {
     const source = 'spec/RFC-0001-agent-capability-ontology-and-workflow-dsl.md';
-    expect(readRepoFile(source).split('\n')[1]).toBe('**Status:** Accepted  ');
+    // The Status line ends in a hard break (two spaces).
+    expect(readRepoFile(source).split('\n')).toContain('**Status:** Accepted  ');
     const { page } = await pageOf(source);
     expect(page.status).toBe('Accepted');
     expect(page.meta).toEqual([
@@ -47,14 +49,16 @@ describe('remark-page-meta', () => {
 
   it('reads a Document Status written with the colon outside the bold', async () => {
     const source = 'docs/methodology/EXTENSION_GOVERNANCE.md';
-    expect(readRepoFile(source).split('\n')[2]).toBe('**Document Status**: Normative');
+    expect(readRepoFile(source).split('\n')).toContain('**Document Status**: Normative');
     const { page } = await pageOf(source);
     expect(page.documentStatus).toBe('Normative');
     expect(page.title).toBe('Extension Governance: Adding a New Capability');
   });
 
-  it('ignores a Status line that is not directly after the H1 (README.md:468)', async () => {
-    expect(readRepoFile('README.md').split('\n')[467]).toMatch(/^\*\*Status:\*\* Candidate Standard v1\.1\.0/);
+  it('ignores a Status line that is not directly after the H1 (README.md)', async () => {
+    // README.md has a Status line well below its H1 (line 468 at 9945a39).
+    const at = readRepoFile('README.md').split('\n').findIndex((l) => /^\*\*Status:\*\* /.test(l));
+    expect(at).toBeGreaterThan(2);
     const { page } = await pageOf('README.md');
     expect(page.status).toBeNull();
     expect(page.meta).toEqual([]);
@@ -106,8 +110,8 @@ describe('remark-html-allowlist', () => {
 
 describe('rehype-keywords', () => {
   it('uses the keyword list of spec §1.2 Notation', () => {
-    // spec/STANDARD-v1.1.0.md:45-47
-    const notation = readRepoFile('spec/STANDARD-v1.1.0.md').split('\n').slice(44, 47).join('\n');
+    // The lines of spec/STANDARD-v1.1.0.md from the "### 1.2 Notation" heading to the next heading.
+    const notation = sectionLines(readRepoFile('spec/STANDARD-v1.1.0.md'), /^### 1\.2 Notation$/).join('\n');
     const listed = [...notation.matchAll(/\*\*([A-Z ]+)\*\*/g)].map((m) => m[1]).sort();
     expect(Object.keys(KEYWORDS).sort()).toEqual(listed);
   });
@@ -139,12 +143,12 @@ describe('rehype-keywords', () => {
 
 describe('rehype-callouts', () => {
   it('turns every > **Note:** block of a file into a callout', async () => {
-    // docs/proposals/OASF_SAFETY_EXTENSIONS.md has six, at lines 259, 261, 272, 374, 564 and 603.
+    // docs/proposals/OASF_SAFETY_EXTENSIONS.md (six at 9945a39).
     const source = 'docs/proposals/OASF_SAFETY_EXTENSIONS.md';
     const inSource = readRepoFile(source).split('\n').filter((l) => l.startsWith('> **Note:**')).length;
-    expect(inSource).toBe(6);
+    expect(inSource).toBeGreaterThan(1);
     const { html } = await pageOf(source);
-    expect(html.match(/<div class="callout callout--note" role="note"><p class="callout__label">Note<\/p>/g)).toHaveLength(6);
+    expect(html.match(/<div class="callout callout--note" role="note"><p class="callout__label">Note<\/p>/g)).toHaveLength(inSource);
     expect(html).not.toContain('<strong>Note:</strong>');
   });
 

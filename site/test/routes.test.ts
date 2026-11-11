@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { checkRoutes, DIRECTORY_MAP, markdownPages, ROUTES, type Route, type Section } from '../src/lib/routes';
+import { claudeLayerTable, repoText, standardFileVersions, topLevelKeys } from './independent';
 
 // The public set is computed here from `git ls-files` and the plan's
 // exclusion list (plan "Recommended defaults" item 12), written out
@@ -111,8 +112,10 @@ describe('sidebar order', () => {
   const only = (urls: string[], keep: string[]) => urls.filter((u) => keep.includes(u));
 
   it('orders the Specification section', () => {
+    // Newest Standard first and older versions last, by the spec/ file names.
+    const [newest, ...older] = standardFileVersions();
     const expected = [
-      '/spec/1.1.0/',
+      `/spec/${newest}/`,
       '/spec/conformance/',
       '/spec/edge-types/',
       '/spec/diagnostics/',
@@ -120,7 +123,7 @@ describe('sidebar order', () => {
       '/spec/schemas/',
       '/spec/extending/',
       '/spec/changelog/',
-      '/spec/1.0.0/',
+      ...older.map((v) => `/spec/${v}/`),
     ];
     expect(only(urlsOf('spec'), expected)).toEqual(expected);
   });
@@ -141,20 +144,10 @@ describe('sidebar order', () => {
     const ref = ROUTES.filter((r) => r.group === 'Reference workflows')
       .sort((a, b) => a.order - b.order)
       .map((r) => r.url.split('/')[2]);
-    expect(ref).toEqual([
-      'monitor-and-replan',
-      'clarify-intent',
-      'debug-code-change',
-      'world-model-build',
-      'capability-gap-analysis',
-      'digital-twin-sync-loop',
-      'digital-twin-bootstrap',
-      'rag-pipeline',
-      'security-assessment',
-      'multi-agent-orchestration',
-      'data-quality-pipeline',
-      'model-deployment',
-    ]);
+    // Top-level keys of schemas/workflow_catalog.yaml by a line scan, '_' read as '-'.
+    const keys = topLevelKeys(repoText('schemas/workflow_catalog.yaml'));
+    expect(keys).toContain('debug_code_change');
+    expect(ref).toEqual(keys.map((k) => k.replace(/_/g, '-')));
   });
 
   it('orders the Community section', () => {
@@ -170,16 +163,16 @@ describe('sidebar order', () => {
   });
 
   it('puts each layer page before its capabilities, in ontology order', () => {
-    // schemas/capability_ontology.yaml layers.PERCEIVE.capabilities.
-    const caps = urlsOf('capabilities');
-    expect(caps.slice(0, 6)).toEqual([
+    // The CLAUDE.md layer table, which lists each layer's capabilities in ontology order.
+    const expected = [
       '/capabilities/',
-      '/layers/perceive/',
-      '/capabilities/retrieve/',
-      '/capabilities/search/',
-      '/capabilities/observe/',
-      '/capabilities/receive/',
-    ]);
+      ...claudeLayerTable().flatMap((l) => [
+        `/layers/${l.id.toLowerCase()}/`,
+        ...l.capabilities.map((c) => `/capabilities/${c}/`),
+      ]),
+    ];
+    const caps = urlsOf('capabilities');
+    expect(caps.slice(0, expected.length)).toEqual(expected);
   });
 });
 

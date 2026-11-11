@@ -4,8 +4,9 @@
 //   `rollback`, `checkpoint`, `audit`, `persist`, `observe`, and the three
 //   `requires` edges from `checkpoint` (to mutate, send, rollback);
 // - step declarations: schemas/workflow_catalog.yaml, workflow
-//   `debug_code_change` (steps 7 checkpoint, 8 execute, 10 rollback, 11 audit)
-//   and `clarify_intent` (its audit step);
+//   `debug_code_change` (its checkpoint, execute, rollback and audit steps)
+//   and `clarify_intent` (its audit step). Steps are found by capability, not
+//   by position, so adding a step elsewhere in the workflow does not matter;
 // - the rule: Standard 1.1.0 §5.2.1 and §4.4.
 import { describe, expect, it } from 'vitest';
 import { loadOntology } from '../src/data/ontology';
@@ -27,9 +28,8 @@ const step = (wf: string, capability: string): Step => {
 describe('effective flags on catalog steps', () => {
   it('debug_code_change execute: the step raises every flag, so the step values apply', () => {
     // Ontology execute: risk medium, mutation false, requires_approval true, no requires_checkpoint.
-    // Step 8 declares risk high, mutation true, requires_checkpoint true, requires_approval true.
+    // The step declares risk high, mutation true, requires_checkpoint true, requires_approval true.
     const s = step('debug_code_change', 'execute');
-    expect(s.index).toBe(8);
     expect(s.effective).toEqual({
       risk: 'high',
       mutation: true,
@@ -42,9 +42,8 @@ describe('effective flags on catalog steps', () => {
   });
 
   it('debug_code_change checkpoint: a higher declared risk takes effect', () => {
-    // Ontology checkpoint: risk low, mutation true. Step 7 declares risk medium and false for the rest.
+    // Ontology checkpoint: risk low, mutation true. The step declares risk medium and false for the rest.
     const s = step('debug_code_change', 'checkpoint');
-    expect(s.index).toBe(7);
     expect(s.effective).toEqual({
       risk: 'medium',
       mutation: true,
@@ -57,10 +56,9 @@ describe('effective flags on catalog steps', () => {
 
   it('debug_code_change rollback: needs a checkpoint through its requires edge, not its flag', () => {
     // Ontology rollback: risk medium, mutation true, no requires_checkpoint flag;
-    // edge checkpoint -requires-> rollback. Step 10 declares requires_checkpoint false,
+    // edge checkpoint -requires-> rollback. The step declares requires_checkpoint false,
     // which is not a downgrade because the ontology flag is false too.
     const s = step('debug_code_change', 'rollback');
-    expect(s.index).toBe(10);
     expect(s.effective.requires_checkpoint).toBe(false);
     expect(s.effective.downgrades).toEqual([]);
     expect(s.effective.checkpoint).toEqual({ needed: true, via: 'requires-edge', code: 'V102' });
@@ -76,7 +74,6 @@ describe('effective flags on catalog steps', () => {
 
   it('debug_code_change audit: mutation false honoured and risk raised to medium', () => {
     const s = step('debug_code_change', 'audit');
-    expect(s.index).toBe(11);
     expect(s.effective.mutation).toBe(false);
     expect(s.effective.risk).toBe('medium');
   });

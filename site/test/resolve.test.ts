@@ -1,6 +1,6 @@
 // The link resolver against real links in the repository. Each case names the
-// file and line the link is written on (checked below, so a moved line fails
-// loudly), and the expected URL comes from the site design, not from the
+// file the link is written in (checked below, so a removed link fails loudly),
+// and the expected URL comes from the site design, not from the
 // route table:
 // - page URLs: design notes, "ia-home" section 3 and "review" section 1
 //   (/start/, /guides/skills/, /rfcs/0001/ form, /spec/<version>/);
@@ -17,10 +17,9 @@ const resolve = repoResolver();
 const blob = (p: string) => `${GITHUB_BASE}/blob/main/${p}`;
 const tree = (p: string) => `${GITHUB_BASE}/tree/main/${p}`;
 
-/** Assert the link is really written on that line of that file. */
-function written(file: string, line: number, href: string): void {
-  const text = readRepoFile(file).split('\n')[line - 1] ?? '';
-  expect(text, `${file}:${line} should contain ](${href})`).toContain(`](${href})`);
+/** Assert the link is really written in that file. */
+function written(file: string, href: string): void {
+  expect(readRepoFile(file), `${file} should contain ](${href})`).toContain(`](${href})`);
 }
 
 function ok(r: Resolution): { kind: string; url: string; anchorChecked: boolean } {
@@ -30,7 +29,7 @@ function ok(r: Resolution): { kind: string; url: string; anchorChecked: boolean 
 
 describe('links to Markdown pages', () => {
   it('rewrites a sibling .md link to its route', () => {
-    written('spec/STANDARD-v1.1.0.md', 5, 'RFC-0003-orchestration-extensions.md');
+    written('spec/STANDARD-v1.1.0.md', 'RFC-0003-orchestration-extensions.md');
     expect(ok(resolve('spec/STANDARD-v1.1.0.md', 'RFC-0003-orchestration-extensions.md'))).toEqual({
       kind: 'route',
       url: '/rfcs/0003/',
@@ -39,26 +38,26 @@ describe('links to Markdown pages', () => {
   });
 
   it('keeps and checks the anchor of an anchored link', () => {
-    written('docs/guides/RUNNING_WORKFLOWS.md', 16, '../../spec/STANDARD-v1.1.0.md#5-workflow-dsl');
+    written('docs/guides/RUNNING_WORKFLOWS.md', '../../spec/STANDARD-v1.1.0.md#5-workflow-dsl');
     expect(ok(resolve('docs/guides/RUNNING_WORKFLOWS.md', '../../spec/STANDARD-v1.1.0.md#5-workflow-dsl'))).toEqual({
       kind: 'route',
       url: '/spec/1.1.0/#5-workflow-dsl',
       anchorChecked: true,
     });
-    written('README.md', 210, 'skills/README.md#composed-skills-6');
+    written('README.md', 'skills/README.md#composed-skills-6');
     expect(ok(resolve('README.md', 'skills/README.md#composed-skills-6')).url).toBe('/guides/skills/#composed-skills-6');
   });
 
   it('resolves three levels up from a nested research document', () => {
     const href = '../../../spec/STANDARD-v1.1.0.md#appendix-c-changes-from-100';
-    written('docs/research/analysis/validator-engine-disagreements-1.0.md', 12, href);
+    written('docs/research/analysis/validator-engine-disagreements-1.0.md', href);
     expect(ok(resolve('docs/research/analysis/validator-engine-disagreements-1.0.md', href)).url).toBe(
       '/spec/1.1.0/#appendix-c-changes-from-100',
     );
   });
 
   it('checks a same-page anchor against the file itself', () => {
-    written('benchmarks/README.md', 48, '#scenario-1-conflicting-sources');
+    written('benchmarks/README.md', '#scenario-1-conflicting-sources');
     expect(ok(resolve('benchmarks/README.md', '#scenario-1-conflicting-sources'))).toEqual({
       kind: 'same-page',
       url: '#scenario-1-conflicting-sources',
@@ -76,7 +75,7 @@ describe('links to Markdown pages', () => {
 
 describe('links to files the site does not render', () => {
   it('sends YAML to GitHub', () => {
-    written('skills/README.md', 116, '../schemas/workflow_catalog.yaml');
+    written('skills/README.md', '../schemas/workflow_catalog.yaml');
     expect(ok(resolve('skills/README.md', '../schemas/workflow_catalog.yaml'))).toEqual({
       kind: 'github-file',
       url: blob('schemas/workflow_catalog.yaml'),
@@ -85,7 +84,7 @@ describe('links to files the site does not render', () => {
   });
 
   it('sends LICENSE to GitHub', () => {
-    written('README.md', 447, 'LICENSE');
+    written('README.md', 'LICENSE');
     expect(ok(resolve('README.md', 'LICENSE')).url).toBe(blob('LICENSE'));
   });
 
@@ -109,7 +108,7 @@ describe('links to files the site does not render', () => {
 
 describe('links to directories', () => {
   it('maps a domain folder to its page', () => {
-    written('README.md', 233, 'docs/domains/healthcare/');
+    written('README.md', 'docs/domains/healthcare/');
     expect(ok(resolve('README.md', 'docs/domains/healthcare/'))).toEqual({
       kind: 'directory-route',
       url: '/domains/healthcare/',
@@ -122,7 +121,7 @@ describe('links to directories', () => {
   });
 
   it('sends an unmapped folder to its GitHub tree page', () => {
-    written('docs/research/failure_taxonomy.md', 430, './raw_data/');
+    written('docs/research/failure_taxonomy.md', './raw_data/');
     expect(ok(resolve('docs/research/failure_taxonomy.md', './raw_data/'))).toEqual({
       kind: 'github-tree',
       url: tree('docs/research/raw_data'),

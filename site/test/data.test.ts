@@ -1,4 +1,7 @@
 // Each expected value names its source. None is copied from the loaders' output.
+// Values that change with routine content or release work (counts, versions,
+// catalog order) are read at test time through ./independent; literals stay
+// only for inline fixtures and for facts the Standard itself fixes.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildCitation, loadCitation } from '../src/data/citation';
@@ -10,29 +13,49 @@ import { loadSkills, parseFrontmatter } from '../src/data/skills';
 import { loadVersions, olderVersionNote } from '../src/data/versions';
 import { readRepoFile } from '../src/lib/repo';
 import { loadWorkflows, parseCatalog, referenceRoots } from '../src/data/workflows';
+import {
+  catalogFiles,
+  claudeLayerTable,
+  diagnosticRowsPerSection,
+  profileFiles,
+  profileWorkflowIds,
+  repoText,
+  skillsReadme,
+  standardFileVersions,
+  stepLineCount,
+  topLevelKeys,
+} from './independent';
+
+const layerTable = claudeLayerTable();
+const capabilityTotal = layerTable.reduce((n, l) => n + l.count, 0);
+const catalogs = catalogFiles();
+const coreIds = topLevelKeys(repoText(catalogs.core));
+const domainIdsByFile = catalogs.domain.map((f) => topLevelKeys(repoText(f)));
+const allCatalogIds = new Set([...coreIds, ...domainIdsByFile.flat()]);
+const stepTotal = [catalogs.core, ...catalogs.domain].reduce((n, f) => n + stepLineCount(repoText(f)), 0);
+const ontologyText = repoText('schemas/capability_ontology.yaml');
+// `grep -c '^- from:' schemas/capability_ontology.yaml`
+const edgeLines = (ontologyText.match(/^- from:/gm) ?? []).length;
+const ontologyVersion = /^meta:\n(?:[ ].*\n)*?[ ]{2}version:\s*['"]?([^'"\s]+)/m.exec(ontologyText)?.[1];
+const undefinedProfileIds = profileFiles().flatMap((f) =>
+  profileWorkflowIds(repoText(`schemas/profiles/${f}`))
+    .filter((id) => !allCatalogIds.has(id))
+    .map((id) => [f.replace(/\.yaml$/, '').replace(/_/g, '-'), id] as const),
+);
+const readme = skillsReadme();
 
 describe('ontology', () => {
   const o = loadOntology();
 
-  it('has 36 capabilities in 9 layers with the layer sizes CLAUDE.md lists', () => {
-    // CLAUDE.md "Layer Architecture" table.
-    expect(o.capabilities).toHaveLength(36);
-    expect(o.layers.map((l) => [l.id, l.capabilities.length])).toEqual([
-      ['PERCEIVE', 4],
-      ['UNDERSTAND', 6],
-      ['REASON', 4],
-      ['MODEL', 5],
-      ['SYNTHESIZE', 3],
-      ['EXECUTE', 3],
-      ['VERIFY', 5],
-      ['REMEMBER', 2],
-      ['COORDINATE', 4],
-    ]);
-    expect(o.layers[0]!.capabilities).toEqual(['retrieve', 'search', 'observe', 'receive']);
+  it('has the layers, sizes and capabilities of the CLAUDE.md layer table', () => {
+    // CLAUDE.md "Layer Architecture" table (36 capabilities in 9 layers at 9945a39).
+    expect(o.capabilities).toHaveLength(capabilityTotal);
+    expect(o.layers.map((l) => [l.id, l.capabilities])).toEqual(layerTable.map((r) => [r.id, r.capabilities]));
   });
 
-  it('has 7 edge types (Standard §4.3) and 99 edges', () => {
-    // 99: `grep -c '^- from:' schemas/capability_ontology.yaml`, run 2026-11-11.
+  it('has 7 edge types (Standard §4.3) and one edge per `- from:` line', () => {
+    expect(edgeLines).toBeGreaterThan(0);
+    expect(o.edges).toHaveLength(edgeLines);
     expect(o.edgeTypes.map((t) => t.id)).toEqual([
       'requires',
       'soft_requires',
@@ -42,7 +65,6 @@ describe('ontology', () => {
       'alternative_to',
       'specializes',
     ]);
-    expect(o.edges).toHaveLength(99);
   });
 
   it('has requires edges only from checkpoint to mutate, send and rollback (Standard §4.4)', () => {
@@ -65,8 +87,10 @@ describe('ontology', () => {
     expect(o.capabilities.filter((c) => c.mutation_overridable).map((c) => c.id)).toEqual(['audit']);
   });
 
-  it('reads meta.version 2.1.0', () => {
-    expect(o.version).toBe('2.1.0');
+  it('reads meta.version', () => {
+    // The `version:` line under `meta:` (2.1.0 at 9945a39).
+    expect(ontologyVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(o.version).toBe(ontologyVersion);
   });
 
   it('rejects a layer list that disagrees with its nodes', () => {
@@ -84,46 +108,32 @@ describe('ontology', () => {
 describe('workflows', () => {
   const w = loadWorkflows();
 
-  it('has 28 workflows: 12 core and 16 domain (plan, "Context")', () => {
-    expect(w.all).toHaveLength(28);
-    expect(w.core).toHaveLength(12);
-    expect(w.domain).toHaveLength(16);
+  it('reads every top-level workflow of the core and domain catalogs', () => {
+    // Top-level keys by a line scan (12 core and 16 domain at 9945a39, plan "Context").
+    const domainTotal = domainIdsByFile.reduce((n, ids) => n + ids.length, 0);
+    expect(w.core).toHaveLength(coreIds.length);
+    expect(w.domain).toHaveLength(domainTotal);
+    expect(w.all).toHaveLength(coreIds.length + domainTotal);
   });
 
   it('keeps the core catalog in file order', () => {
-    // Top-level keys of schemas/workflow_catalog.yaml, in order.
-    expect(w.core.map((x) => x.id)).toEqual([
-      'monitor_and_replan',
-      'clarify_intent',
-      'debug_code_change',
-      'world_model_build',
-      'capability_gap_analysis',
-      'digital_twin_sync_loop',
-      'digital_twin_bootstrap',
-      'rag_pipeline',
-      'security_assessment',
-      'multi_agent_orchestration',
-      'data_quality_pipeline',
-      'model_deployment',
-    ]);
+    expect(w.core.map((x) => x.id)).toEqual(coreIds);
   });
 
-  it('reads four workflows from each domain file and nothing from examples/', () => {
-    // design.md "ia-home" section 3: four workflows per domain file.
-    expect(w.domainSources).toEqual([
-      'schemas/workflows/data_analysis_workflows.yaml',
-      'schemas/workflows/healthcare_workflows.yaml',
-      'schemas/workflows/manufacturing_workflows.yaml',
-      'schemas/workflows/personal_assistant_workflows.yaml',
-    ]);
-    for (const src of w.domainSources) expect(w.domain.filter((x) => x.source === src)).toHaveLength(4);
+  it('reads each domain file in file order and nothing from examples/', () => {
+    expect(w.domainSources).toEqual(catalogs.domain);
+    catalogs.domain.forEach((src, i) => {
+      expect(w.domain.filter((x) => x.source === src).map((x) => x.id)).toEqual(domainIdsByFile[i]);
+    });
     // examples/digital_twin_sync_loop.workflow_catalog.yaml repeats this id.
     expect(w.byId.get('digital_twin_sync_loop')!.source).toBe('schemas/workflow_catalog.yaml');
     expect(w.all.some((x) => x.source.startsWith('examples/'))).toBe(false);
   });
 
-  it('has 277 steps (design.md "review" section 2)', () => {
-    expect(w.all.reduce((n, x) => n + x.steps.length, 0)).toBe(277);
+  it('has one step per `- capability:` line of the catalogs', () => {
+    // 277 at 9945a39 (design.md "review" section 2).
+    expect(stepTotal).toBeGreaterThan(0);
+    expect(w.all.reduce((n, x) => n + x.steps.length, 0)).toBe(stepTotal);
   });
 
   it('turns ids into slugs and records the catalog header version', () => {
@@ -202,26 +212,18 @@ describe('workflows', () => {
 describe('profiles', () => {
   const p = loadProfiles();
 
-  it('has the seven domains keyed by the domain field (design.md "review" resolution 24)', () => {
-    expect(p.map((d) => d.key)).toEqual([
-      'audio',
-      'data-analysis',
-      'healthcare',
-      'manufacturing',
-      'multimodal',
-      'personal-assistant',
-      'vision',
-    ]);
+  it('has one domain per profile file, keyed by the domain field (design.md "review" resolution 24)', () => {
+    // File names with '_' read as '-' (seven domains at 9945a39).
+    expect(p.map((d) => d.key)).toEqual(profileFiles().map((f) => f.replace(/\.yaml$/, '').replace(/_/g, '-')));
     const da = p.find((d) => d.key === 'data-analysis')!;
     expect(da.profileFile).toBe('schemas/profiles/data_analysis.yaml');
     expect(da.readme).toBe('docs/domains/data-analysis/README.md');
   });
 
-  it('marks the 12 workflow ids no catalog defines, all in audio, multimodal and vision', () => {
-    // design.md "pipeline" section 0, "Profiles".
+  it('marks the workflow ids no catalog defines', () => {
+    // design.md "pipeline" section 0, "Profiles": 12 at 9945a39, in audio, multimodal and vision.
     const undefinedIds = p.flatMap((d) => d.workflows.filter((x) => !x.defined).map((x) => [d.key, x.id]));
-    expect(undefinedIds).toHaveLength(12);
-    expect(new Set(undefinedIds.map(([k]) => k))).toEqual(new Set(['audio', 'multimodal', 'vision']));
+    expect(undefinedIds).toEqual(undefinedProfileIds);
     // schemas/profiles/vision.yaml workflows list.
     expect(p.find((d) => d.key === 'vision')!.workflows.map((x) => x.id)).toContain('object_detection_pipeline');
   });
@@ -236,17 +238,14 @@ describe('profiles', () => {
 describe('skills', () => {
   const s = loadSkills();
 
-  it('has 42 skills: 36 capability skills and 6 composed (skills/README.md after Phase 1)', () => {
-    expect(s).toHaveLength(42);
-    expect(s.filter((x) => x.kind === 'capability')).toHaveLength(36);
-    expect(s.filter((x) => x.kind === 'composed').map((x) => x.dir)).toEqual([
-      'capability-gap-analysis',
-      'debug-workflow',
-      'digital-twin-bootstrap',
-      'digital-twin-sync-loop',
-      'discover-capabilities',
-      'perspective-validation',
-    ]);
+  it('has the skills skills/README.md counts and names', () => {
+    // The README's "Total" line (36 + 6 = 42 at 9945a39) and its Composed Skills table.
+    expect(readme.atomic).toBe(capabilityTotal);
+    expect(s).toHaveLength(readme.total);
+    expect(s.filter((x) => x.kind === 'capability')).toHaveLength(readme.atomic);
+    const composed = s.filter((x) => x.kind === 'composed');
+    expect(composed).toHaveLength(readme.composed);
+    expect(composed.map((x) => x.name).sort()).toEqual([...readme.composedNames].sort());
   });
 
   it('shows the frontmatter name and joins composed skills to workflows', () => {
@@ -268,14 +267,15 @@ describe('skills', () => {
 describe('diagnostics', () => {
   const d = loadDiagnostics();
 
-  it('has the 46 codes of Standard §9.2-§9.7, each section with its §9.1 severity', () => {
-    expect(d).toHaveLength(46);
-    const perSection = Object.fromEntries(
-      ['9.2', '9.3', '9.4', '9.5', '9.6', '9.7'].map((n) => [n, d.filter((x) => x.section === n).length]),
-    );
-    // Rows counted in each §9 table of spec/STANDARD-v1.1.0.md.
-    expect(perSection).toEqual({ '9.2': 9, '9.3': 6, '9.4': 4, '9.5': 6, '9.6': 5, '9.7': 16 });
-    expect(d.filter((x) => x.severity === 'warning').map((x) => x.section)).toEqual(Array(16).fill('9.7'));
+  it('has the codes of the current Standard §9.2-§9.7, each section with its §9.1 severity', () => {
+    // Table rows counted per section of the newest spec/STANDARD-v*.md
+    // (9, 6, 4, 6, 5 and 16, so 46 codes, in 1.1.0).
+    const rows = diagnosticRowsPerSection(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`));
+    const perSection = Object.fromEntries(Object.keys(rows).map((n) => [n, d.filter((x) => x.section === n).length]));
+    expect(perSection).toEqual(rows);
+    expect(d).toHaveLength(Object.values(rows).reduce((a, b) => a + b, 0));
+    // §9.1: only the §9.7 codes are warnings.
+    expect(d.filter((x) => x.severity === 'warning').map((x) => x.section)).toEqual(Array(rows['9.7']).fill('9.7'));
   });
 
   it('reads code, name, category and anchors from the tables', () => {
@@ -298,7 +298,7 @@ describe('diagnostics', () => {
 
   it('agrees with core/src/diag.rs', () => {
     const rs = parseDiagRs(readFileSync('../core/src/diag.rs', 'utf8'));
-    expect(rs).toHaveLength(46);
+    expect(rs).toHaveLength(d.length);
     expect(() => crossCheck(d, rs)).not.toThrow();
   });
 
@@ -334,17 +334,23 @@ describe('diagnostics', () => {
 });
 
 describe('citation, versions and counts', () => {
-  it('reads CITATION.cff (set in Phase 1: version 1.1.0, released 2026-10-28)', () => {
+  it('reads CITATION.cff', () => {
+    // The file's own `version:` and `date-released:` lines (1.1.0 and 2026-10-28 at 9945a39).
+    const cff = repoText('CITATION.cff');
+    const version = /^version:\s*"([^"]+)"/m.exec(cff)?.[1];
+    const released = /^date-released:\s*"(\d{4}-\d{2}-\d{2})"/m.exec(cff)?.[1];
+    expect(version).toBeDefined();
+    expect(released).toBeDefined();
     const c = loadCitation();
     expect(c).toMatchObject({
       title: 'Agent Capability Ontology + Workflow DSL',
-      version: '1.1.0',
-      date_released: '2026-10-28',
+      version,
+      date_released: released,
       authors: [{ given: 'Daniel', family: 'Bentes' }],
       license: 'Apache-2.0',
     });
     expect(c.bibtex).toContain('author={Bentes, Daniel}');
-    expect(c.bibtex).toContain('year={2026}');
+    expect(c.bibtex).toContain(`year={${released!.slice(0, 4)}}`);
   });
 
   it('rejects an unquoted date', () => {
@@ -354,32 +360,46 @@ describe('citation, versions and counts', () => {
 
   it('reads every version from its own file', () => {
     const v = loadVersions();
-    // spec/STANDARD-v1.1.0.md and -v1.0.0.md header lines; plugin.json; pyproject.toml.
-    expect(v.standard.current).toMatchObject({ version: '1.1.0', status: 'Candidate Standard', date: '2026-10-28' });
-    expect(v.standard.previous.map((x) => [x.version, x.status])).toEqual([['1.0.0', 'Candidate Standard']]);
-    expect(v.ontology).toBe('2.1.0');
-    expect(v.plugin).toBe('2.0.0');
-    expect(v.pythonPackage).toBe('0.1.0');
+    // The Standard versions come from the spec/ file names, newest first (1.1.0, then 1.0.0, at 9945a39).
+    const files = standardFileVersions();
+    expect([v.standard.current, ...v.standard.previous].map((x) => x.version)).toEqual(files);
+    for (const s of [v.standard.current, ...v.standard.previous]) {
+      // The status is the first clause of the file's Status line ("Candidate Standard" in both).
+      const text = repoText(s.source);
+      const statusLine = /^\*\*Status:\*\* (.+)$/m.exec(text)![1]!;
+      expect(s.status).not.toBe('');
+      expect(statusLine.startsWith(s.status)).toBe(true);
+      expect(s.status).not.toMatch(/[—–;]/);
+      expect(s.date).toBe(/^\*\*Date:\*\* (\S+)$/m.exec(text)?.[1] ?? null);
+    }
+    expect(v.ontology).toBe(ontologyVersion);
+    // plugin.json "version" and pyproject.toml [project] version change with each release; check their form.
+    const plugin = JSON.parse(repoText('.claude-plugin/plugin.json')) as { version: string };
+    expect(v.plugin).toBe(plugin.version);
+    expect(v.plugin).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(v.pythonPackage).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(repoText('pyproject.toml')).toContain(`version = "${v.pythonPackage}"`);
     expect(v.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it('computes the counts the plan states', () => {
-    // plan "Context": 36 capabilities, 9 layers, 99 edges, 28 workflows (12 core, 16 domain),
-    // 7 profiles, 46 diagnostic codes; skills/README.md: 42 skills, 6 composed.
+  it('computes the counts from the sources the other tests read', () => {
+    // At 9945a39: 36 capabilities, 9 layers, 99 edges, 7 edge types, 28 workflows
+    // (12 core, 16 domain), 277 steps, 7 profiles, 12 undefined profile workflows,
+    // 46 diagnostic codes, 42 skills, 6 composed.
     expect(loadCounts()).toMatchObject({
-      capabilityCount: 36,
-      layerCount: 9,
-      edgeCount: 99,
+      capabilityCount: capabilityTotal,
+      layerCount: layerTable.length,
+      edgeCount: edgeLines,
       edgeTypeCount: 7,
-      workflowCount: 28,
-      coreWorkflowCount: 12,
-      domainWorkflowCount: 16,
-      stepCount: 277,
-      profileCount: 7,
-      undefinedProfileWorkflowCount: 12,
-      diagnosticCount: 46,
-      skillCount: 42,
-      composedSkillCount: 6,
+      workflowCount: coreIds.length + domainIdsByFile.reduce((n, ids) => n + ids.length, 0),
+      coreWorkflowCount: coreIds.length,
+      domainWorkflowCount: domainIdsByFile.reduce((n, ids) => n + ids.length, 0),
+      stepCount: stepTotal,
+      profileCount: profileFiles().length,
+      undefinedProfileWorkflowCount: undefinedProfileIds.length,
+      diagnosticCount: Object.values(diagnosticRowsPerSection(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`))).reduce((a, b) => a + b, 0),
+      skillCount: readme.total,
+      composedSkillCount: readme.composed,
     });
   });
 });

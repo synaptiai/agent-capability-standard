@@ -1,8 +1,8 @@
 // Code fence languages. Every language a routed source uses must be one Shiki
 // ships, one of its plain-text names, or aliased in SHIKI_CONFIG. Languages are
 // read from parsed `code` nodes, not with a regex, because fences nest.
-// The ebnf case: spec/STANDARD-v1.1.0.md:450 opens an ebnf fence, Shiki 4.6.0
-// has no EBNF grammar (design notes, "pipeline" section 0), and the alias must
+// The ebnf case: spec/STANDARD-v1.1.0.md opens an ebnf fence (line 450 at
+// 9945a39), Shiki 4.6.0 has no EBNF grammar (design notes, "pipeline" section 0), and the alias must
 // make it render as plain text without Shiki's "doesn't exist" warning.
 import type { Code } from 'mdast';
 import { bundledLanguages, isSpecialLang } from 'shiki';
@@ -50,9 +50,15 @@ describe('code fence languages', () => {
     for (const from of Object.keys(alias)) expect(from in bundledLanguages, from).toBe(false);
   });
 
-  it('opens an ebnf fence at spec/STANDARD-v1.1.0.md:450', () => {
-    expect(readRepoFile('spec/STANDARD-v1.1.0.md').split('\n')[449]).toBe('```ebnf');
-    expect(langs.get('ebnf')).toEqual(['spec/STANDARD-v1.1.0.md:450']);
+  it('finds the ebnf fence of spec/STANDARD-v1.1.0.md where a line scan does', () => {
+    // A plain line scan for an opening ```ebnf, not the Markdown parser above.
+    const scanned = markdownSources().flatMap((s) =>
+      readRepoFile(s)
+        .split('\n')
+        .flatMap((l, i) => (/^```ebnf\s*$/.test(l) ? [`${s}:${i + 1}`] : [])),
+    );
+    expect(scanned.some((w) => w.startsWith('spec/STANDARD-v1.1.0.md:'))).toBe(true);
+    expect(langs.get('ebnf')).toEqual(scanned);
   });
 });
 
