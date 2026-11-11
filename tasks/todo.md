@@ -2,8 +2,8 @@
 
 Epic: https://github.com/synaptiai/agent-capability-standard/issues/120
 
-- [ ] 0. Spike: confirm the build approach works on real content
-- [ ] 1. Fix stale public content (branch `fix/issue-120-stale-docs`; pushed, PR not yet open)
+- [x] 0. Spike: confirm the build approach works on real content (phases 2 to 6 build every page from the repository's own content)
+- [ ] 1. Fix stale public content (branch `fix/issue-120-stale-docs`, merged into this branch; PR #121 open and awaiting review). Done when #121 merges
 - [x] 2. Scaffold and data loading: Astro project in `site/`, loaders for the ontology, workflows, profiles and versions, and a route table of 166 pages
 - [x] 3. Markdown rendering and prose pages: one Markdown pipeline whose link and anchor checks fail the build; heading ids match GitHub's
 - [x] 4. Generated reference pages: capability, layer, workflow, domain, edge type, diagnostics, schemas, RFC and citation pages from the repository data
