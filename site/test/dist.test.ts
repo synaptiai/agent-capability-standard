@@ -258,7 +258,7 @@ describe('design system on the built site', () => {
         .replace(/<svg[\s\S]*?<\/svg>/g, '')
         .replace(/<[^>]*aria-hidden="true"[^>]*>[\s\S]*?<\/span>/g, '')
         .replace(/<[^>]+>/g, '');
-      for (const word of ['Agent Capability Standard', 'ACS', 'home']) expect(text, f).toContain(word);
+      for (const word of ['Agent Capability Standard', 'ACS', ' home']) expect(text, f).toContain(word);
     }
   });
 
