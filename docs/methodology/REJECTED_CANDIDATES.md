@@ -21,7 +21,7 @@ This document records capabilities that were considered during ontology developm
 
 | Category | Criteria | Example |
 |----------|----------|---------|
-| **COMPOSITION** | Can be expressed as sequence of existing capabilities | `mitigate` = measure → plan → checkpoint → mutate |
+| **COMPOSITION** | Can be expressed as sequence of existing capabilities | `mitigate` = measure → plan → constrain → checkpoint → mutate |
 | **REDUNDANT** | Semantically equivalent to existing capability | `validate` = `verify` |
 | **PARAMETERIZABLE** | Domain specialization that should be a parameter | `detect-person` = `detect(domain: person)` |
 | **TOO VAGUE** | No clear, specific semantics | `process`, `handle` |
@@ -303,7 +303,7 @@ A decision is the output of comparison. You compare options to decide.
 
 These were considered but should be parameters of base capabilities.
 
-### 3.1 Domain Specializations of DIS Verbs
+### 3.1 Domain Specializations of Atomic Capabilities
 
 | Rejected Capability | Base Verb | Parameter |
 |---------------------|-----------|-----------|
@@ -355,7 +355,7 @@ These were considered but should be parameters of base capabilities.
 **Analysis**: These are not semantically distinct operations. `detect-person` is the same operation as `detect-entity`—just with different input domain. The domain should be a **parameter**, not a separate capability.
 
 **Why this matters**:
-1. **Reduces capability explosion**: 8 DIS verbs vs. 53 domain-specialized
+1. **Reduces capability explosion**: 7 capabilities vs. 42 domain-specialized
 2. **Clearer semantics**: One capability = one operation
 3. **Composability**: Same capability, different parameters
 
@@ -512,11 +512,11 @@ These were considered but are tied to specific frameworks.
 |----------|-------|----------|
 | COMPOSITION | 5 | mitigate, improve, optimize, digital-twin, generalize |
 | REDUNDANT | 11 | validate, evaluate, decide, prioritize, schedule, summarize, translate, provenance, uncertainty-model, map-relationships, diff-world-state |
-| PARAMETERIZABLE | 39 | All domain specializations of DIS verbs |
+| PARAMETERIZABLE | 44 | Domain specializations of atomic capabilities and of reasoning |
 | TOO VAGUE | 4 | process, handle, analyze, understand |
 | TOOL-SPECIFIC | 4 | query-postgres, call-api, read-file, run-shell |
 | FRAMEWORK-SPECIFIC | 2 | langchain-chain, autogen-conversation |
-| **TOTAL REJECTED** | **65** | |
+| **TOTAL REJECTED** | **70** | |
 
 ---
 
