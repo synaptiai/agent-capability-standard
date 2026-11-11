@@ -10,6 +10,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadCounts } from '../src/data/counts';
 import { RESERVED_WORKFLOW_SLUGS } from '../src/data/workflows';
+import { checkDistDir } from '../scripts/check-dist.mjs';
 import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
 import { ROUTES, type Route } from '../src/lib/routes';
 import {
@@ -563,4 +564,14 @@ describe('agent files', () => {
       expect(strip(copy), source).toBe(strip(src));
     }
   });
+});
+
+describe('check-dist.mjs on the built site', () => {
+  it('finds no problem once Pagefind has run, and counts one page per route', () => {
+    execFileSync('npx', ['pagefind', '--site', dist], { cwd: process.cwd(), stdio: 'pipe' });
+    const { problems, stats } = checkDistDir(dist);
+    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [] });
+    expect(stats.pages).toBe(ROUTES.length);
+    expect(stats.copies).toBe(ROUTES.length);
+  }, 120_000);
 });
