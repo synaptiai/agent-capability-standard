@@ -13,6 +13,7 @@ import {
   governanceStatuses,
   layerUsage,
   producerSteps,
+  schemaDescription,
   schemaListing,
   schemaRows,
   sortedTrustWeights,
@@ -222,7 +223,11 @@ describe('schemas listing', () => {
 
   it('reads the supporting schemas from the sentence after the table', () => {
     const text = '### 6.1 Required Schema Files\n\n| Schema | Purpose |\n|---|---|\n| `a.yaml` | A |\n\nSupporting schemas that some sections use: `b.yaml` (§1) and\n`c.yaml` (§2).\n\n### 6.2 Next\n| `d.yaml` | D |\n';
-    expect(standardSchemaNames(text)).toEqual({ required: ['a.yaml'], supporting: ['b.yaml', 'c.yaml'] });
+    expect(standardSchemaNames(text)).toEqual({
+      required: ['a.yaml'],
+      supporting: ['b.yaml', 'c.yaml'],
+      purposes: { 'a.yaml': 'A' },
+    });
   });
 
   it('puts every required schema in the required group and leaves out catalogs and profiles', () => {
@@ -230,6 +235,20 @@ describe('schemas listing', () => {
     expect(entries.filter((e) => e.group === 'required').map((e) => e.name).sort()).toEqual(canonicalSchemaNames().sort());
     expect(entries.some((e) => e.source.startsWith('schemas/workflows/'))).toBe(false);
     expect(entries.filter((e) => e.source.startsWith('schemas/profiles/')).map((e) => e.name)).toEqual(['profiles/profile_schema.yaml']);
+  });
+});
+
+describe('schema descriptions', () => {
+  // Hand-written inputs in the three header forms the files under schemas/ use.
+  it('reads the description under a top-level mapping', () => {
+    expect(schemaDescription('x.yaml', 'schema:\n  name: n\n  description: Who a party\n    is.\n')).toBe('Who a party is.');
+  });
+  it('reads the first comment line that is not a Key: value line, not a workflow description', () => {
+    const text = '# Standard version: 1.1.0\n# Workflow Catalog\n# More\nflow:\n  goal: g\n  description: A workflow\n';
+    expect(schemaDescription('x.yaml', text)).toBe('Workflow Catalog');
+  });
+  it('reads a JSON schema description', () => {
+    expect(schemaDescription('x.schema.json', '{"title": "T", "description": "D  two"}')).toBe('D two');
   });
 });
 

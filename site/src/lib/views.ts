@@ -1,6 +1,6 @@
 // Pure functions that turn the loaded data into what the generated pages show.
 // The templates stay thin and the tests check these functions directly.
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { loadOntology, EDGE_TYPES, type Capability, type EdgeType, type Ontology } from '../data/ontology';
 import { loadProfiles, type DomainProfile } from '../data/profiles';
 import { COMPOSED_SKILLS } from '../data/skills';
@@ -300,6 +300,8 @@ export interface SchemaEntry {
   name: string;
   group: 'required' | 'supporting' | 'ontology' | 'interop' | 'transforms' | 'profiles' | 'other';
   description: string;
+  /** The Purpose column of the Standard's §6.1 table, for a required schema. */
+  purpose?: string;
 }
 
 /**
@@ -307,46 +309,59 @@ export interface SchemaEntry {
  * ones, and the sentence after it names the supporting ones. Read from the
  * Standard's text so the listing follows it.
  */
-export function standardSchemaNames(specText: string): { required: string[]; supporting: string[] } {
+export function standardSchemaNames(specText: string): {
+  required: string[];
+  supporting: string[];
+  /** The Purpose column of the §6.1 table, by file name. */
+  purposes: Record<string, string>;
+} {
   const lines = specText.split('\n');
   const start = lines.findIndex((l) => /^### 6\.1 /.test(l));
   if (start === -1) throw new Error('views: the Standard has no §6.1');
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((l) => /^#{2,3} /.test(l));
   const body = end === -1 ? rest : rest.slice(0, end);
+  const purposes: Record<string, string> = {};
   const required = body.flatMap((l) => {
-    const m = /^\|\s*`([^`]+)`\s*\|/.exec(l);
-    return m ? [m[1]!] : [];
+    const m = /^\|\s*`([^`]+)`\s*\|\s*(.*?)\s*\|\s*$/.exec(l);
+    if (!m) return [];
+    purposes[m[1]!] = m[2]!;
+    return [m[1]!];
   });
   const prose = body.filter((l) => !l.startsWith('|')).join(' ');
   const supportingText = /Supporting schemas[^:]*:([\s\S]*)$/.exec(prose)?.[1] ?? '';
   const supporting = [...supportingText.matchAll(/`([^`]+\.(?:ya?ml|json))`/g)].map((m) => m[1]!);
   if (required.length === 0) throw new Error('views: §6.1 lists no schema files');
-  return { required, supporting };
+  return { required, supporting, purposes };
 }
 
-/** The first comment block of a YAML file, or a JSON schema's description, as one line. */
+/**
+ * What a schema file says it is: a JSON schema's description or title; for
+ * YAML, the `description` of the top-level mapping or of its header mapping
+ * (`schema:`, `meta:`, `registry:` or `mapping:`), else the first line of its
+ * leading comment that is not a "Key: value" line. Empty when it says nothing.
+ */
 export function schemaDescription(source: string, text: string): string {
+  const one = (v: string) => v.replace(/\s+/g, ' ').trim();
   if (source.endsWith('.json')) {
     const doc = JSON.parse(text) as Obj;
-    const d = typeof doc.description === 'string' ? doc.description : typeof doc.title === 'string' ? doc.title : '';
-    return d.replace(/\s+/g, ' ').trim();
+    return one(typeof doc.description === 'string' ? doc.description : typeof doc.title === 'string' ? doc.title : '');
   }
-  const lines: string[] = [];
+  const doc: unknown = parse(text);
+  if (isObj(doc)) {
+    if (typeof doc.description === 'string') return one(doc.description);
+    for (const key of ['schema', 'meta', 'registry', 'mapping']) {
+      const v = doc[key];
+      if (isObj(v) && typeof v.description === 'string') return one(v.description);
+    }
+  }
   for (const l of text.split('\n')) {
-    if (/^#/.test(l)) {
-      const t = l.replace(/^#+\s?/, '').trim();
-      if (/^[=\-#]+$/.test(t)) continue;
-      if (t === '') {
-        if (lines.length > 0) break;
-        continue;
-      }
-      lines.push(t);
-    } else if (l.trim() === '') {
-      if (lines.length > 0) break;
-    } else break;
+    if (!l.startsWith('#')) break;
+    const t = l.replace(/^#+\s?/, '').trim();
+    if (t === '' || /^[A-Za-z ]+:\s/.test(t)) continue;
+    return t;
   }
-  return lines.join(' ').trim();
+  return '';
 }
 
 /**
@@ -355,7 +370,7 @@ export function schemaDescription(source: string, text: string): string {
  * from the Standard's §6.1; the rest are grouped by folder.
  */
 export function schemaListing(specText: string): SchemaEntry[] {
-  const { required, supporting } = standardSchemaNames(specText);
+  const { required, supporting, purposes } = standardSchemaNames(specText);
   const files = [...TRACKED_FILES]
     .filter(
       (p) =>
@@ -383,7 +398,10 @@ export function schemaListing(specText: string): SchemaEntry[] {
               : /^(capability_ontology|workflow_catalog)\./.test(name)
                 ? 'ontology'
                 : 'other';
-    return { source, name, group, description: schemaDescription(source, readRepoFile(source)) };
+    const entry: SchemaEntry = { source, name, group, description: schemaDescription(source, readRepoFile(source)) };
+    const purpose = purposes[name];
+    if (purpose !== undefined) entry.purpose = purpose;
+    return entry;
   });
 }
 
