@@ -340,3 +340,129 @@ describe('dist checks on a fixture', () => {
     expect(checkGeneratedHeadings('/p/', '<h2 id="ref-x">X</h2>', ['ref-x'])).toHaveLength(2);
   });
 });
+
+// Phase 6: Markdown copies, llms.txt, llms-full.txt, the sitemap and the
+// redirect. Expected values come from walking the built directory and from
+// the repository's own files, not from the route table or the loaders.
+describe('agent files', () => {
+  const ORIGIN = 'https://acs.synapti.ai';
+
+  /** Directories (as URL paths like /a/b/) that hold a file with this name, by a walk of dist. */
+  function dirsWith(file: string, dir = '', out: string[] = []): string[] {
+    for (const e of readdirSync(path.join(dist, dir), { withFileTypes: true })) {
+      if (e.isDirectory()) dirsWith(file, path.posix.join(dir, e.name), out);
+      else if (e.name === file) out.push(dir === '' ? '/' : `/${dir}/`);
+    }
+    return out.sort();
+  }
+
+  /** Heading lines outside fenced code, as written. */
+  function headingLines(md: string): string[] {
+    const out: string[] = [];
+    let fence: string | null = null;
+    for (const line of md.split('\n')) {
+      const f = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+      if (f) {
+        if (fence === null) fence = f[0]!;
+        else if (f[0] === fence) fence = null;
+        continue;
+      }
+      if (fence === null && /^#{1,6}\s/.test(line)) out.push(line.trim());
+    }
+    return out;
+  }
+
+  it('builds a Markdown copy beside every HTML page except the 404 page, and no other copy', () => {
+    const html = dirsWith('index.html');
+    const md = dirsWith('index.md');
+    expect(html.length).toBeGreaterThan(0);
+    expect(md).toEqual(html);
+    expect(existsSync(path.join(dist, '404.html'))).toBe(true);
+    expect(existsSync(path.join(dist, '404', 'index.md'))).toBe(false);
+  });
+
+  it('lists exactly the Markdown copies in llms.txt, each once', () => {
+    const text = readFileSync(path.join(dist, 'llms.txt'), 'utf8');
+    expect(text.startsWith('# Agent Capability Standard\n')).toBe(true);
+    expect(text).toMatch(/^> /m);
+    const listed = [...text.matchAll(/^- \[[^\]]+\]\(([^)]+)\)/gm)].map((m) => m[1]!);
+    const want = dirsWith('index.md').map((d) => `${ORIGIN}${d}index.md`).sort();
+    expect([...listed].sort()).toEqual(want);
+    expect(new Set(listed).size).toBe(listed.length);
+  });
+
+  it('puts the current Standard, by its own H1, first in llms-full.txt', () => {
+    const version = standardFileVersions()[0]!;
+    const title = /^# (.+)$/m.exec(repoText(`spec/STANDARD-v${version}.md`))![1]!;
+    const full = readFileSync(path.join(dist, 'llms-full.txt'), 'utf8');
+    expect(full).toContain(`\n# ${title}\n`);
+    const first = /<!-- (\S+) -->/.exec(full)![1];
+    expect(first).toBe(`${ORIGIN}/spec/${version}/index.md`);
+    // Only the Standard, capability and layer pages, and workflow pages.
+    const urls = [...full.matchAll(/^<!-- (\S+) -->$/gm)].map((m) => m[1]!.slice(ORIGIN.length));
+    expect(urls.filter((u) => !/^\/(spec\/\d+\.\d+\.\d+|capabilities|layers|workflows)\//.test(u))).toEqual([]);
+    expect(urls.filter((u) => u.startsWith('/spec/'))).toEqual([`/spec/${version}/index.md`]);
+  });
+
+  it('lists every HTML page in the sitemap, minus the 404 page, and no Markdown or text file', () => {
+    const xml = readFileSync(path.join(dist, 'sitemap.xml'), 'utf8');
+    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!.slice(ORIGIN.length)).sort();
+    expect(locs).toEqual(dirsWith('index.html'));
+    expect(locs.filter((u) => /\.(md|txt)$|404/.test(u))).toEqual([]);
+    expect(readFileSync(path.join(dist, 'robots.txt'), 'utf8')).toContain(`Sitemap: ${ORIGIN}/sitemap.xml`);
+  });
+
+  it('redirects /spec/ to the newest Standard, by its file name, with a 302', () => {
+    const version = standardFileVersions()[0]!;
+    const rules = readFileSync(path.join(dist, '_redirects'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() !== '' && !l.startsWith('#'))
+      .map((l) => l.trim().split(/\s+/));
+    expect(rules).toContainEqual(['/spec/', `/spec/${version}/`, '302']);
+    expect(existsSync(path.join(dist, 'spec', version, 'index.html'))).toBe(true);
+  });
+
+  it('sets the Markdown and text content types and keeps pages.dev out of search engines', () => {
+    const headers = readFileSync(path.join(dist, '_headers'), 'utf8');
+    expect(headers).toMatch(/^\/\*\.md\n\s+Content-Type: text\/markdown/m);
+    expect(headers).toMatch(/^\/llms\.txt\n\s+Content-Type: text\/plain/m);
+    expect(headers).toMatch(/^\/llms-full\.txt\n\s+Content-Type: text\/plain/m);
+    expect(headers).toMatch(/^https:\/\/:project\.pages\.dev\/\*\n\s+X-Robots-Tag: noindex/m);
+  });
+
+  it('leaves no relative link to a .md file in any Markdown copy', () => {
+    const bad: string[] = [];
+    for (const d of dirsWith('index.md')) {
+      const text = readFileSync(path.join(dist, d, 'index.md'), 'utf8');
+      for (const m of text.matchAll(/\]\(([^)\s]+)/g)) {
+        const url = m[1]!;
+        if (/^[a-z]+:/i.test(url) || url.startsWith('#')) continue;
+        if (/\.md(#|$)/.test(url)) bad.push(`${d}: ${url}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('copies a Markdown page from its source, changing only link targets and adding a Source line', () => {
+    // Pairs from the design notes' URL scheme: source file -> page.
+    const version = standardFileVersions()[0]!;
+    const pairs: [string, string][] = [
+      ['docs/QUICKSTART.md', 'start/quickstart'],
+      ['spec/GOVERNANCE.md', 'community/governance'],
+      [`spec/STANDARD-v${version}.md`, `spec/${version}`],
+    ];
+    const strip = (md: string) =>
+      md
+        .replace(/^Source: .*\n\n/m, '')
+        .replace(/\]\([^)]*\)/g, ']()')
+        .replace(/^\[([^\]]+)\]:\s*\S+/gm, '[$1]:')
+        .trim();
+    for (const [source, page] of pairs) {
+      const src = repoText(source);
+      const copy = readFileSync(path.join(dist, page, 'index.md'), 'utf8');
+      expect(copy, source).toContain(`Source: [${source}](`);
+      expect(headingLines(copy), source).toEqual(headingLines(src));
+      expect(strip(copy), source).toBe(strip(src));
+    }
+  });
+});
