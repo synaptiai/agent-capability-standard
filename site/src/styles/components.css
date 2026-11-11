@@ -1783,12 +1783,19 @@
     box-shadow: var(--shadow-1);
   }
 
-  /* Below 960px the diagram fills the top of the screen down to the band
-     the story script reads the current step from (62% of the height). */
   .story__svg {
     display: block;
     width: 100%;
-    max-height: calc(62vh - var(--chrome-h) - var(--space-5));
+    max-height: 80vh;
+  }
+
+  /* Below 960px, without the story script (no JavaScript, or reduced
+     motion) nothing in the diagram changes, so it stays in the flow above
+     the steps instead of covering them. */
+  @media (max-width: 959px) {
+    .story:not([data-live]) .story__canvas {
+      position: static;
+    }
   }
 
   .story__steps {
@@ -1903,7 +1910,7 @@
   @media (max-width: 959px) {
     .story[data-live] .story__svg {
       aspect-ratio: var(--rail-aspect);
-      max-height: none;
+      max-height: 45vh;
     }
 
     .story__label {
