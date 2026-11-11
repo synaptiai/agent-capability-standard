@@ -12,6 +12,7 @@ import { anchorsOf, bodyLineOffset, computeAnchors } from '../src/lib/anchors';
 import { repoResolver, SITE_ORIGIN } from '../src/lib/links';
 import { GITHUB_BASE, readRepoFile, TRACKED_FILES } from '../src/lib/repo';
 import { createResolver, type Resolution } from '../src/lib/resolve';
+import { renderRepoFile } from './pipeline';
 
 const resolve = repoResolver();
 const blob = (p: string) => `${GITHUB_BASE}/blob/main/${p}`;
@@ -158,7 +159,35 @@ describe('links that must fail', () => {
       anchorChecked: false,
     });
     expect(ok(resolve('README.md', 'mailto:someone@example.org')).kind).toBe('external');
+    expect(ok(resolve('README.md', 'http://example.org/')).kind).toBe('external');
+    expect(ok(resolve('README.md', '//example.org/a')).kind).toBe('external');
   });
+
+  it('rejects a scheme that can run script or is not a web link', () => {
+    // GitHub drops these links, so a source that uses one looks harmless in
+    // review while the site would make it live.
+    for (const href of ['javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'vbscript:msgbox(1)', 'file:///etc/passwd']) {
+      expect(reason(resolve('README.md', href)), href).toMatch(/^unsafe link scheme/);
+    }
+  });
+
+  it('rejects a link that is only a query string, naming the real problem', () => {
+    expect(reason(resolve('README.md', '?tab=readme'))).toBe('a link with only a query string has no target');
+    expect(reason(resolve('README.md', '?tab=readme#top'))).toMatch(/no heading or anchor "#top"/);
+  });
+});
+
+describe('unsafe schemes through the real pipeline', () => {
+  for (const [label, md] of [
+    ['inline link', '[click](javascript:alert(1))'],
+    ['image', '![x](data:image/svg+xml,<svg/onload=alert(1)>)'],
+    ['link definition', '[click][j]\n\n[j]: javascript:alert(1)'],
+  ] as const) {
+    it(`fails the build on a javascript: or data: ${label}`, async () => {
+      const text = `${readRepoFile('docs/FAQ.md')}\n\n${md}\n`;
+      await expect(renderRepoFile('docs/FAQ.md', text)).rejects.toThrow(/unsafe link scheme/);
+    });
+  }
 });
 
 describe('resolver on a hand-made tree', () => {

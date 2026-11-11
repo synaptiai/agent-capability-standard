@@ -1,8 +1,11 @@
 // The one link resolver. The remark link plugin uses it for every link in a
 // Markdown source, and later the Markdown copies and generated pages use it for
 // paths found in YAML. Rules, in order:
-// 1. A link with a scheme (https:, mailto:) or starting with // is left alone.
-// 2. A bare #fragment must be an anchor of the same file.
+// 1. A link with an http:, https: or mailto: scheme, or starting with //, is
+//    left alone. Any other scheme (javascript:, data:, vbscript:, file:) is an
+//    error: GitHub drops such links, so the site must not make them live.
+// 2. A bare #fragment must be an anchor of the same file. A link with only a
+//    query string is an error.
 // 3. Anything else is a repository path. It is percent-decoded and resolved
 //    against the linking file's folder (or the root, for a leading /). A path
 //    that leaves the repository is an error. docs/schemas/ is a symlink to
@@ -49,7 +52,8 @@ export interface ResolverContext {
 /** `html` links to pages; `md` links to the pages' Markdown copies, absolutely. */
 export type LinkMode = 'html' | 'md';
 
-const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const SCHEME = /^([a-z][a-z0-9+.-]*):/i;
+const SAFE_SCHEMES: ReadonlySet<string> = new Set(['http', 'https', 'mailto']);
 
 function splitHref(href: string): { pathPart: string; fragment: string | null } {
   const hash = href.indexOf('#');
@@ -85,14 +89,19 @@ export function createResolver(ctx: ResolverContext) {
   return function resolve(from: string, href: string, mode: LinkMode = 'html'): Resolution {
     const raw = href.trim();
     if (raw === '') return { ok: false, reason: 'empty link' };
-    if (SCHEME.test(raw) || raw.startsWith('//')) {
+    const scheme = SCHEME.exec(raw)?.[1]?.toLowerCase();
+    if (scheme !== undefined && !SAFE_SCHEMES.has(scheme)) {
+      return { ok: false, reason: `unsafe link scheme "${scheme}:"; only http:, https: and mailto: are allowed` };
+    }
+    if (scheme !== undefined || raw.startsWith('//')) {
       return { ok: true, kind: 'external', url: raw, anchorChecked: false };
     }
     const { pathPart, fragment } = splitHref(raw);
     if (fragment !== null && fragment === '' && pathPart === '') return { ok: false, reason: 'empty fragment' };
 
     if (pathPart === '') {
-      if (!hasAnchor(from, fragment!)) return { ok: false, reason: `no heading or anchor "#${fragment}" in this file` };
+      if (fragment === null) return { ok: false, reason: 'a link with only a query string has no target' };
+      if (!hasAnchor(from, fragment)) return { ok: false, reason: `no heading or anchor "#${fragment}" in this file` };
       return { ok: true, kind: 'same-page', url: `#${fragment}`, anchorChecked: true };
     }
 
