@@ -7,9 +7,7 @@ This directory contains templates and shared patterns for skill development.
 | Template | Purpose |
 |----------|---------|
 | `SKILL_TEMPLATE_ENHANCED.md` | Complete skill template with all sections |
-| `capability_atoms.md` | Reference list of atomic capability names |
 | `output_contracts.md` | Quick reference for output contract types |
-| `output_contracts_full.md` | Comprehensive output contract documentation |
 | `composition_patterns.md` | Patterns for composing skills into workflows |
 | `verification_patterns.md` | Patterns for skill verification and testing |
 
@@ -17,7 +15,7 @@ This directory contains templates and shared patterns for skill development.
 
 1. Copy `SKILL_TEMPLATE_ENHANCED.md` to your skill directory:
    ```bash
-   cp templates/SKILL_TEMPLATE_ENHANCED.md skills/<layer>/<skill-name>/SKILL.md
+   cp templates/SKILL_TEMPLATE_ENHANCED.md skills/<skill-name>/SKILL.md
    ```
 
 2. Fill in required sections:
@@ -25,9 +23,12 @@ This directory contains templates and shared patterns for skill development.
    - **Description**: What the skill does
    - **Workflow**: Steps and bindings
 
-3. Reference `capability_atoms.md` for valid capability names
+3. Take valid capability names and their layers from
+   `schemas/capability_ontology.yaml`
 
-4. Use `output_contracts.md` for output type definitions
+4. Use `output_contracts.md` for output type definitions. Each capability's
+   full output schema is in the ontology, and `python tools/sync_skill_schemas.py`
+   writes it to `skills/<name>/schemas/output_schema.yaml`
 
 ## Composition Patterns
 

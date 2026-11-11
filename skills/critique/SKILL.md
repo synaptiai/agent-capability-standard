@@ -124,7 +124,7 @@ assumptions: []
 | `issues` | array | Weaknesses found at or above `severity_threshold` (empty when none; workflows gate on `${<step>.issues} == []`) |
 | `severity` | object | Issue severities, keyed by issue id |
 | `risk_summary` | object | Overall risk assessment |
-| `suggestions` | array<object> | Prioritized improvement suggestions, each referencing an issue |
+| `suggestions` | array\<object\> | Prioritized improvement suggestions, each referencing an issue |
 | `patterns_identified` | array | Recurring issues with systemic fixes |
 | `confidence` | number | 0.0-1.0 based on analysis completeness |
 | `evidence_anchors` | array | References to target locations |
@@ -356,12 +356,12 @@ assumptions:
 
 **Commonly follows:**
 - `plan` - Critique plans before execution
-- `inspect` - Understand target before critique
+- `observe` - Understand target before critique
 - `retrieve` - Gather context for critique
 
 **Commonly precedes:**
 - `plan` - Revise plan based on critique issues and suggestions
-- `mitigate` - Address identified risks
+- `constrain` - Apply limits that address identified risks
 - `verify` - Validate fixes for findings
 - `audit` - Record critique and responses
 

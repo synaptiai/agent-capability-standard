@@ -434,12 +434,12 @@ The `settings.json` at the project root configures Claude Code plugin behavior:
   "hooks": {
     "pretooluse_require_checkpoint": {
       "enabled": true,
-      "description": "Require checkpoint before high-impact file modifications",
+      "description": "Require checkpoint before high-impact file modifications (VERIFY layer)",
       "configurable": true
     },
     "posttooluse_log_tool": {
       "enabled": true,
-      "description": "Log all tool usage for audit trail",
+      "description": "Log skill invocations for audit trail (VERIFY layer)",
       "configurable": true
     }
   },
@@ -738,10 +738,8 @@ agent-capability-standard/
 |
 |-- templates/                       # Templates for creating new artifacts
 |   |-- SKILL_TEMPLATE_ENHANCED.md   #   Template for new capability skills
-|   |-- capability_atoms.md          #   Capability atom reference
 |   |-- composition_patterns.md      #   Pattern composition reference
 |   |-- output_contracts.md          #   Output contract summary
-|   |-- output_contracts_full.md     #   Full output contract documentation
 |   |-- verification_patterns.md     #   Verification pattern reference
 |   +-- README.md                    #   Template documentation
 |

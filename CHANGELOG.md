@@ -542,8 +542,7 @@ from this plugin release.
 ## [v1.2.0] — 2026-02-04
 
 The full list is in the
-[v1.2.0 release](https://github.com/synaptiai/agent-capability-standard/releases/tag/v1.2.0);
-v1.1.0 and v1.1.1 are documented in their GitHub releases.
+[v1.2.0 release](https://github.com/synaptiai/agent-capability-standard/releases/tag/v1.2.0).
 
 ### Added
 - `CapabilityRegistry.all_edges()` public method for enumerating ontology edges
@@ -555,18 +554,6 @@ v1.1.0 and v1.1.1 are documented in their GitHub releases.
 - Workflow execution engine (TD-006) (#94)
 - OASF GA extension mechanism for unmapped capabilities (TD-010) (#95)
 - Comprehensive analysis documentation package (13 documents, ~570KB)
-
-### Changed
-- Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
-
-### Fixed
-- Remediate benchmark suite drift from ontology and SDK (#100)
-- Use public `all_edges()` API in benchmark validator instead of private `_loaded_edges` (#100)
-- Install real SDK, remove all mock/skip patterns (#99)
-
-## [v1.0.5] — 2026-01-29
-
-### Added
 - Perspective validation checklist (PVC) system (#34)
 - OASF-to-Grounded-Agency capability mapping file (#32)
 - OASF compatibility adapter with full test suite (#33)
@@ -576,10 +563,23 @@ v1.1.0 and v1.1.1 are documented in their GitHub releases.
 - OASF safety extensions proposal (#29)
 - OASF coverage report and comparison documentation
 
+### Changed
+- Enhanced CLAUDE.md with workflow orchestration guidelines and core principles
+
 ### Fixed
+- Remediate benchmark suite drift from ontology and SDK (#100)
+- Use public `all_edges()` API in benchmark validator instead of private `_loaded_edges` (#100)
+- Install real SDK, remove all mock/skip patterns (#99)
 - Skills made self-contained with bundled transitive dependencies (#36)
 
-## [v1.0.4] — 2026-01-27
+## [v1.1.1] — 2026-01-27
+
+### Changed
+- Migrated capability ontology from JSON to YAML format
+- Updated capability count references from 35 to 36
+- Expanded the FAQ with the rationale for rejected layer proposals
+
+## [v1.1.0] — 2026-01-27
 
 ### Added
 - Domain-specific workflow templates and default profiles (#12, #17)
@@ -589,29 +589,73 @@ v1.1.0 and v1.1.1 are documented in their GitHub releases.
 - Agent failure taxonomy research (#8, #13)
 - Replanning and goal uncertainty capabilities (#9, #14)
 - Missing edge types to ontology (#2, #20)
-- Comprehensive FAQ with rationale for rejected proposals
+- Reference list of the 99 v1 capabilities (#6, #7)
+- Practitioner adoption appendix in Grounded Agency
 
 ### Fixed
 - Complete edge graph for 5 orphan capabilities (#1, #21)
-- Flattened skills directory structure for Claude Code compatibility
 
 ### Changed
-- Migrated capability ontology from JSON to YAML format
-- Updated capability count references from 35 to 36
 - Migrated from 99 to 36 atomic capabilities with domain parameterization
+- Grounded Agency evaluation section reports the 51 steps in the reference
+  workflows
+
+## [v1.0.5] — 2026-01-25
+
+### Changed
+- Flattened skills directory structure for Claude Code compatibility: skills
+  moved from `skills/<category>/<skill>/` to `skills/<skill>/`
+
+### Fixed
+- The PostToolUse hook reads its JSON from stdin instead of command-line
+  arguments, and its matcher is `Skill` instead of `*`
+
+## [v1.0.4] — 2026-01-25
+
+### Fixed
+- Removed the hooks reference from `plugin.json`, which made Claude Code
+  report a duplicate hooks file
+
+## [v1.0.3] — 2026-01-25
+
+### Fixed
+- Removed the `$schema` key from `plugin.json`, which failed validation
+  when the plugin was installed
+
+### Changed
+- README installs the plugin from the Synapti marketplace
+
+## [v1.0.2] — 2026-01-25
+
+### Changed
+- README shows the Claude Code plugin as the main way to install
+
+## [v1.0.1] — 2026-01-25
+
+### Added
+- `docs/GROUNDED_AGENCY.md`: the Grounded Agency paper in Markdown
+
+### Changed
+- README, quickstart, tutorial, FAQ, glossary, Grounded Agency, whitepaper
+  and Standard 1.0.0 explain why and when to use each feature
+- Grounded Agency layer counts corrected and its academic references checked
+
+### Removed
+- The LaTeX source and PDF of the Grounded Agency paper, replaced by the
+  Markdown version
+- `spec/RELEASE_CHECKLIST.md`
 
 ## [v1.0.0] — 2026-01-24
 
 ### Added
 - Initial publication candidate
-- Capability ontology with 36 atomic capabilities across 9 cognitive layers
+- Capability ontology with 99 atomic capabilities across 8 layers
 - Typed I/O contracts and explicit dependencies for all capabilities
 - Workflow DSL spec v2 with bindings, conditions, gates, recovery loops, parallel groups
 - Canonical world state and event schemas (provenance, uncertainty, retention, lineage)
 - Identity taxonomy and identity resolution policy
 - Authority trust model (weights, decay, field-specific authority)
 - Compiler-grade validator with $ref resolution, type inference, consumer input schema checking, and patch suggestions
-- 12 reference workflows in workflow catalog
+- 5 reference workflows in workflow catalog
 - Safety hooks (checkpoint enforcement, audit logging)
-- Domain profiles for healthcare, manufacturing, data analysis, and personal assistant
 - Conformance test suite with 5 fixture tests

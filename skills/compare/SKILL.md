@@ -110,7 +110,7 @@ assumptions: array[string]  # Conditions affecting comparison
 | `options` | array | List of alternatives with summaries |
 | `criteria` | array | Evaluation dimensions with weights |
 | `comparison_matrix` | array | Scores for each option on each criterion |
-| `ranking` | array<object> | Options ordered best-first, each with `option_id` and `weighted_score` |
+| `ranking` | array\<object\> | Options ordered best-first, each with `option_id` and `weighted_score` |
 | `scores` | object | Weighted score per option, keyed by option id |
 | `recommendation` | string | Recommended option ID (the top of `ranking` unless rationale says otherwise) |
 | `recommendation_rationale` | string | Why the recommended option was chosen |
@@ -388,15 +388,15 @@ assumptions:
 ## Composition Patterns
 
 **Commonly follows:**
-- `identify` - Compare identified alternatives
-- `estimate` - Use estimates as comparison inputs
-- `forecast` - Compare based on forecasted outcomes
+- `classify` - Compare classified alternatives
+- `measure` - Use measurements as comparison inputs
+- `predict` - Compare based on predicted outcomes
 - `discover` - Compare discovered options
 
 **Commonly precedes:**
 - `plan` - Comparison informs action planning
 - `generate` - Generate solution based on chosen option
-- `act` - Implement chosen option
+- `mutate` - Apply the chosen option
 
 **Anti-patterns:**
 - Never compare without explicit criteria (biased comparison)
@@ -404,5 +404,5 @@ assumptions:
 - Do not use compare for simple existence checking (use `detect`)
 
 **Workflow references:**
-- See `reference/composition_patterns.md#capability-gap-analysis` for compare-plans usage
+- See `reference/composition_patterns.md#capability-gap-analysis` for comparing plans
 - See `reference/composition_patterns.md#observe-model-act` for comparison in decision loops

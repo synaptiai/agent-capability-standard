@@ -307,7 +307,7 @@ The approval must be captured with a token that is recorded in this operation's 
 ## Composition Patterns
 
 **Commonly follows:**
-- `constrain` - Apply policy limits before sending (REQUIRED)
+- `constrain` - Apply policy limits before sending (recommended; warning W601 if no constrain step runs first)
 - `checkpoint` - Create recovery point before external send (REQUIRED)
 - `plan` - Sends are typically part of a larger plan
 - `transform` - Format data before sending

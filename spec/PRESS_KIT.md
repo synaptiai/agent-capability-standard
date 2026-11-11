@@ -14,8 +14,8 @@ A publishable open standard for **composable agent capabilities** with a **type-
 |--------|-------|
 | Atomic capabilities | 36 |
 | Cognitive layers | 9 |
-| Reference workflows | 12 |
-| Domain profiles | 8 (healthcare, manufacturing, data analysis, personal assistant, vision, audio, multimodal, general) |
+| Reference workflows | 12, plus 16 domain workflows |
+| Domain profiles | 7 (healthcare, manufacturing, data analysis, personal assistant, vision, audio, multimodal) |
 | Compliance frameworks | 3 (EU AI Act, NIST AI RMF, ISO 42001) |
 | Conformance levels | 4 (L1–L4) |
 | License | Apache 2.0 |

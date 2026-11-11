@@ -1,10 +1,10 @@
 # Safety Hooks
 
-This directory contains hooks that implement the SAFETY layer capabilities from the Agent Capability Standard.
+This directory contains hooks that implement the VERIFY layer capabilities from the Agent Capability Standard.
 
 ## Spec-Aligned Hooks
 
-These hooks directly implement capabilities defined in the standard's SAFETY layer:
+These hooks directly implement capabilities defined in the standard's VERIFY layer:
 
 | Hook | Capability | Purpose |
 |------|------------|---------|
@@ -97,7 +97,7 @@ manages this marker file, bridging the shell and Python safety layers.
 ## Audit Trail
 
 The `posttooluse_log_tool.sh` hook implements the `audit` capability:
-- Logs all tool invocations as JSON with timestamps
+- Logs each Skill invocation (the PostToolUse matcher is `Skill`) as JSON with timestamps
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
 - Each entry includes the HMAC of the previous entry, creating a hash chain
 - Records what was executed for provenance tracking
@@ -112,7 +112,7 @@ Set a custom HMAC key via the `AUDIT_HMAC_KEY` environment variable.
 
 ## Relationship to Spec
 
-These hooks implement runtime enforcement of SAFETY layer requirements:
+These hooks implement runtime enforcement of VERIFY layer requirements:
 
 | Spec Field | Hook Implementation |
 |------------|---------------------|

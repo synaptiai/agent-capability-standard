@@ -125,7 +125,7 @@ assumptions: []  # Explicit assumptions made
 |-------|------|-------------|
 | `plan_id` | string | Unique identifier for this plan |
 | `goal` | string | Clear statement of objective |
-| `steps` | array<object> | Ordered list of execution steps |
+| `steps` | array\<object\> | Ordered list of execution steps |
 | `checkpoints` | array | Recovery points in execution |
 | `estimated_risk` | enum | Overall risk assessment |
 | `dependencies` | object | Step dependencies: each step ID mapped to the step IDs it depends on |

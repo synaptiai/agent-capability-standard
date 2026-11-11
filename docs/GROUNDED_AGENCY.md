@@ -220,8 +220,8 @@ We began with the DIS '23 AI Capabilities framework [4], which identified 8 core
 Each DIS '23 verb was expanded along three axes:
 
 1. **Domain specialization**: `detect` → `detect-entity`, `detect-anomaly`, `detect-drift`, etc.
-2. **Operational requirements**: Added `world-state`, `checkpoint`, `rollback`, etc.
-3. **Evidence grounding**: Added `provenance`, `grounding`, `verify`, `audit`
+2. **Operational requirements**: Added `state`, `checkpoint`, `rollback`, etc.
+3. **Evidence grounding**: Added `ground`, `verify`, `audit`
 
 #### 3.4.3 Atomicity Criteria
 
@@ -231,7 +231,7 @@ A capability is included only if it:
 - Has a well-defined I/O contract
 - Is domain-general (not tool-specific or framework-specific)
 
-#### 3.4.4 The Number 35
+#### 3.4.4 The Number 36
 
 The derivation process yielded 36 atomic capabilities across 9 cognitive layers:
 - 4 Perceive (information acquisition)
@@ -316,7 +316,7 @@ provenance:
   - claim_id: c1
     created_at: 2026-01-24T00:00:00Z
     agent: world-state-builder
-    capability: inspect
+    capability: observe
     anchors:
       - ref: file:services/payments/README.md:12
         kind: file
@@ -694,7 +694,7 @@ This transparency is critical for deploying agents in high-stakes domains (healt
 
 **Learned trust weights**: Use reinforcement learning from conflict resolution feedback to calibrate source authority. Historical logs of which source "won" conflicts—and whether downstream verification succeeded—provide training signal.
 
-**Multi-agent protocols**: Extend the Coordination layer with formal protocols for delegation, negotiation, and consensus. This would enable principled composition of multiple Grounded Agency instances with explicit trust boundaries.
+**Multi-agent protocols**: Extend the COORDINATE layer with formal protocols for delegation, negotiation, and consensus. This would enable principled composition of multiple Grounded Agency instances with explicit trust boundaries.
 
 **Capability synthesis**: Generate capability implementations from natural language specifications using code generation models.
 

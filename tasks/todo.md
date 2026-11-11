@@ -1,3 +1,17 @@
+# Issue #120: documentation site
+
+Epic: https://github.com/synaptiai/agent-capability-standard/issues/120
+
+- [ ] 0. Spike: confirm the build approach works on real content
+- [ ] 1. Fix stale public content (branch `fix/issue-120-stale-docs`; pushed, PR not yet open)
+- [ ] 2. Scaffold and data loading
+- [ ] 3. Markdown rendering and prose pages
+- [ ] 4. Generated reference pages
+- [ ] 5. Original pixel design system
+- [ ] 6. Home page, Markdown copies, llms.txt and search
+- [ ] 7. Post-build checks and CI
+- [ ] 8. Launch (Cloudflare project, domain and secrets need the maintainer)
+
 # Issue #114 — orchestration extensions + validator/engine unification
 
 Branch: `claude/gifted-albattani-qwnlo3`. Base: `9e2f65b`.

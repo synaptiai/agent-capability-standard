@@ -130,9 +130,9 @@ assumptions: []
 | Field | Type | Description |
 |-------|------|-------------|
 | `decomposition` | object | Summary of decomposition |
-| `subproblems` | array<object> | Flat list of all subproblems |
+| `subproblems` | array\<object\> | Flat list of all subproblems |
 | `structure` | object | Problem hierarchy: the goal and its tree of subproblems |
-| `dependencies` | array<object> | Subproblem dependency edges (`from` must finish before `to`) |
+| `dependencies` | array\<object\> | Subproblem dependency edges (`from` must finish before `to`) |
 | `constraints` | array | Boundaries affecting subproblems |
 | `gaps` | array | Missing coverage identified |
 | `overlaps` | array | Redundant coverage identified |
@@ -393,13 +393,12 @@ assumptions:
 
 **Commonly follows:**
 - `retrieve` - Gather requirements
-- `inspect` - Understand existing system
+- `observe` - Understand existing system
 - `explain` - Clarify goal before decomposing
 
 **Commonly precedes:**
-- `plan` - Plan decomposed subproblems (REQUIRED by plan)
-- `prioritize` - Order subproblems
-- `schedule` - Time-order subproblems
+- `plan` - Plan and time-order decomposed subproblems
+- `compare` - Order subproblems by priority
 - `delegate` - Assign subproblems
 
 **Anti-patterns:**
@@ -408,4 +407,4 @@ assumptions:
 - Never skip acceptance criteria
 
 **Workflow references:**
-- See `reference/composition_patterns.md` for plan requiring decompose
+- See `reference/composition_patterns.md` for patterns that decompose a goal before planning

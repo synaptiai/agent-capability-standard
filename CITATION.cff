@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this standard, please cite it."
 title: "Agent Capability Ontology + Workflow DSL"
-version: "1.0.0"
-date-released: "2026-01-24"
+version: "1.1.0"
+date-released: "2026-10-28"
 authors:
   - family-names: "Bentes"
     given-names: "Daniel"

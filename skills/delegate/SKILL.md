@@ -414,7 +414,7 @@ assumptions:
 **Commonly follows:**
 - `plan` - Delegation is often part of plan execution (REQUIRES plan)
 - `decompose` - Break task before delegating
-- `prioritize` - Order subtasks by importance
+- `compare` - Order subtasks by importance
 
 **Commonly precedes:**
 - `synchronize` - Merge results from delegated subtasks

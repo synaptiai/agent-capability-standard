@@ -369,10 +369,10 @@ assumptions:
 ## Composition Patterns
 
 **Commonly follows:**
-- `decide` - Persist decisions for future reference
+- `compare` - Persist the option a comparison selected for future reference
 - `discover` - Save discovered patterns or relationships
 - `recall` - Update existing memories with new context
-- `summarize` - Save summary as durable knowledge
+- `generate` - Save a generated summary as durable knowledge
 
 **Commonly precedes:**
 - `recall` - Persisted content becomes available for recall

@@ -322,12 +322,12 @@ assumptions:
 **Commonly follows:**
 - `receive` - Transform incoming messages to canonical form
 - `retrieve` - Transform retrieved data to expected format
-- `inspect` - Understand source before transformation
+- `observe` - Understand source before transformation
 
 **Commonly precedes:**
 - `send` - Format data before external transmission
 - `integrate` - Prepare data for merging
-- `validate` - Check transformed output
+- `verify` - Check transformed output
 
 **Anti-patterns:**
 - Never transform without documenting losses

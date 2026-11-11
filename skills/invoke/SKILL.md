@@ -57,7 +57,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 
 5) **Handle failures**: Respond to step failures
    - The nested run's failure modes, recovery loops and rollbacks apply inside it
-   - If the nested run fails, the invoke step fails with R402 ("invoked workflow '<id>' failed with <code>: <message>"); its own failure modes apply to that R402
+   - If the nested run fails, the invoke step fails with R402 (`invoked workflow '<id>' failed with <code>: <message>`); its own failure modes apply to that R402
    - If the nested run escalates, the invoke step also fails with R402
    - If the nested run ends `deferred` (some of its steps were queued for approval), the invoke step is deferred too, and so is each later step that depends on it; the invocation's own record, if any, is `executed`, and the nested run's records are the queued actions
    - If the nested run ends `replan_required` (an approved source changed before a step acted, with `recheck.on_change: replan`), the whole run ends `replan_required`: the invoke step produces no output and no later step runs
