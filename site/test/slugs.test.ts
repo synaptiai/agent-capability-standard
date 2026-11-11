@@ -5,6 +5,7 @@
 // spike's check-slugs script do, not with src/lib/anchors.ts. This covers
 // the sources shown inside generated pages too, which `dist/` does not have yet.
 import { beforeAll, describe, expect, it } from 'vitest';
+import { computeAnchors } from '../src/lib/anchors';
 import { compareIds, githubHeadingIds, renderedHeadingIds } from '../src/lib/check-slugs';
 import { readRepoFile } from '../src/lib/repo';
 import { ROUTES } from '../src/lib/routes';
@@ -49,6 +50,19 @@ describe('every Markdown source through the build pipeline', () => {
     }
     expect(mismatches).toEqual([]);
     expect(compared).toBeGreaterThan(1000);
+  });
+
+  it('gives the link resolver the same heading anchors the pages render', () => {
+    // src/lib/anchors.ts decides which #fragments a link may use; it must
+    // agree with what is rendered, or a checked anchor could still be dead.
+    const mismatches: string[] = [];
+    for (const s of sources) {
+      const html = rendered.get(s);
+      if (html === undefined) continue;
+      const diff = compareIds(computeAnchors(readRepoFile(s)).headings, renderedHeadingIds(html));
+      if (diff) mismatches.push(`${s}: ${diff}`);
+    }
+    expect(mismatches).toEqual([]);
   });
 
   it('keeps the spec ids people already link to', () => {
