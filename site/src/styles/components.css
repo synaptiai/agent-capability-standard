@@ -488,9 +488,8 @@
   }
 
   .sidebar__title {
-    font-family: var(--font-display);
     font-weight: 700;
-    font-size: 18px;
+    font-size: 17px;
     margin-bottom: var(--space-2);
   }
 
@@ -905,9 +904,8 @@
   }
 
   .section-index__card > a:first-child {
-    font-family: var(--font-display);
     font-weight: 700;
-    font-size: 19px;
+    font-size: 18px;
     line-height: 1.25;
     color: var(--ink);
     text-decoration: none;
