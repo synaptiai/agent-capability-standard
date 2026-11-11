@@ -108,7 +108,7 @@ const title = page?.title ?? `${d.key} domain`;
             {typeof thresholds.auto_approve === 'string' && (
               <div>
                 <dt>Approved automatically</dt>
-                <dd>{thresholds.auto_approve === 'none' ? 'Nothing' : <><code>{thresholds.auto_approve}</code> risk and below</>}</dd>
+                <dd>{thresholds.auto_approve === 'none' ? 'Nothing' : <><code>{thresholds.auto_approve}</code> risk</>}</dd>
               </div>
             )}
             {typeof thresholds.require_review === 'string' && <div><dt>Needs review from</dt><dd><code>{thresholds.require_review}</code> risk</dd></div>}
