@@ -5,6 +5,7 @@ import CapabilityTable from '../../components/CapabilityTable.astro';
 import { loadOntology, RISKS } from '../../data/ontology';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
+import TableWrap from '../../components/TableWrap.astro';
 
 const route = routeByUrl('/capabilities/');
 const ontology = loadOntology();
@@ -28,7 +29,7 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
     </section>
     <section class="capabilities-counts">
       <h2 id={id('Counts')}>Counts</h2>
-      <div class="table-wrap">
+      <TableWrap label="Capabilities by risk level">
         <table class="count-table">
           <caption>Capabilities by risk level</caption>
           <thead><tr><th scope="col">Risk</th><th scope="col">Capabilities</th></tr></thead>
@@ -36,9 +37,9 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
             {byRisk.map((r) => <tr data-risk={r.risk}><th scope="row">{r.risk}</th><td>{r.count}</td></tr>)}
           </tbody>
         </table>
-      </div>
+      </TableWrap>
       <p>{mutating} of the {n} capabilities change state.</p>
-      <div class="table-wrap">
+      <TableWrap label="Edges by type">
         <table class="count-table">
           <caption>Edges by type (<a href={pageHref('/spec/edge-types/')}>edge types</a>)</caption>
           <thead><tr><th scope="col">Edge type</th><th scope="col">Edges</th></tr></thead>
@@ -46,7 +47,7 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
             {ontology.edgeTypes.map((t) => <tr data-edge-type={t.id}><th scope="row"><code>{t.id}</code></th><td>{t.edges.length}</td></tr>)}
           </tbody>
         </table>
-      </div>
+      </TableWrap>
     </section>
   </article>
 </DocLayout>

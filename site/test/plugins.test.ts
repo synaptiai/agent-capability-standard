@@ -6,6 +6,7 @@ import { KEYWORD_SOURCES, unroutedKeywordSources } from '../src/lib/markdown';
 import { checkHtml } from '../src/plugins/remark-html-allowlist';
 import type { PageMeta } from '../src/plugins/remark-page-meta';
 import { KEYWORDS, markKeywords } from '../src/plugins/rehype-keywords';
+import { tableLabel } from '../src/plugins/rehype-tables';
 import { standardVersions } from '../src/data/versions';
 import { pageHead } from '../src/lib/page-head';
 import { DESCRIPTIONS, routeForSource, type Route } from '../src/lib/routes';
@@ -204,5 +205,37 @@ describe('page title and description', () => {
       expect(h.description).toMatch(new RegExp(`^Version ${versions[i]!.version.replace(/\./g, '\\.')}\\. `));
     });
     expect(new Set(heads.map((h) => h.headTitle)).size).toBe(versions.length);
+  });
+});
+
+describe('rehype-tables', () => {
+  it('wraps every table of a file in a focusable, labelled region', async () => {
+    // Expected: one wrapper per GFM delimiter row outside code fences in the source.
+    const source = 'spec/STANDARD-v1.1.0.md';
+    let fenced = false;
+    const inSource = readRepoFile(source)
+      .split('\n')
+      .filter((l) => {
+        if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
+        return !fenced && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(l) && l.includes('|');
+      }).length;
+    expect(inSource).toBeGreaterThan(1);
+    const { html } = await pageOf(source);
+    expect(html.match(/<table/g)).toHaveLength(inSource);
+    expect(html.match(/<div class="table-wrap" role="region" tabindex="0" aria-label="[^"]+"><table>/g)).toHaveLength(inSource);
+  });
+
+  it('names a table from the heading before it, and leaves its display alone', async () => {
+    const text = `${readRepoFile('docs/FAQ.md')}\n\n## Odd *table* here\n\n| a | b |\n|---|---|\n| 1 | 2 |\n`;
+    const { html } = await pageOf('docs/FAQ.md', text);
+    expect(html).toContain('<div class="table-wrap" role="region" tabindex="0" aria-label="Table: Odd table here"><table>');
+  });
+});
+
+describe('tableLabel', () => {
+  it('prefers the caption, then the heading, then a plain word', () => {
+    expect(tableLabel(' Gates  of step 2 ', 'Steps')).toBe('Gates of step 2');
+    expect(tableLabel(null, ' Layer  architecture ')).toBe('Table: Layer architecture');
+    expect(tableLabel('', null)).toBe('Table');
   });
 });

@@ -5,13 +5,14 @@
 // - Astro runs Shiki after remark and before the rehype plugins listed here.
 // - rehype: rehypeHeadingIds runs first so the autolink plugin and everything
 //   after it see the ids (Astro's own later pass keeps ids already set).
-//   Keywords and callouts come last.
+//   Keywords and callouts come next, and tables are wrapped last.
 // SmartyPants is off so heading ids match GitHub's (it would turn "--" into an
 // en dash before the ids are made).
 import { rehypeHeadingIds, type ShikiConfig, type UnifiedProcessorOptions } from '@astrojs/markdown-remark';
 import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypeCallouts from '../plugins/rehype-callouts';
 import rehypeKeywords from '../plugins/rehype-keywords';
+import rehypeTables from '../plugins/rehype-tables';
 import remarkHtmlAllowlist from '../plugins/remark-html-allowlist';
 import remarkPageMeta from '../plugins/remark-page-meta';
 import remarkRepoLinks from '../plugins/remark-repo-links';
@@ -64,5 +65,6 @@ export const PROCESSOR_OPTIONS: UnifiedProcessorOptions = {
     ],
     [rehypeKeywords, { sources: KEYWORD_SOURCES }],
     rehypeCallouts,
+    rehypeTables,
   ],
 };

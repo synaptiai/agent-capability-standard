@@ -42,6 +42,16 @@ describe('typography', () => {
   });
 });
 
+describe('tables', () => {
+  it('never sets a table to display: block, which drops its table semantics in some screen readers', () => {
+    const block = rules()
+      .filter((r) => /display:\s*block/.test(r.body))
+      .flatMap((r) => r.selectors)
+      .filter((s) => /(^|[\s>])table\b(?![\w-])/.test(s.replace(/:not\([^)]*\)/g, '')));
+    expect(block).toEqual([]);
+  });
+});
+
 describe('accessible names', () => {
   it('never hides with display: none the only text of a control that has no aria-label', () => {
     // The GitHub link and the menu button have no aria-label: their words may

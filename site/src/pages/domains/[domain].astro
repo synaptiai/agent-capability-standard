@@ -17,6 +17,7 @@ import type { Route } from '../../lib/routes';
 import { PROFILE_SECTION_KEYS, sortedTrustWeights, splitAtFirstH2 } from '../../lib/views';
 import { loadOntology } from '../../data/ontology';
 import type { PageMeta } from '../../plugins/remark-page-meta';
+import TableWrap from '../../components/TableWrap.astro';
 
 export function getStaticPaths() {
   const profiles = loadProfiles();
@@ -154,7 +155,7 @@ const title = page?.title ?? `${d.key} domain`;
       {sources.length > 0 && (
         <>
           <h3 id={id('Domain sources')}>Domain sources</h3>
-          <div class="table-wrap">
+          <TableWrap label={`Sources in the ${d.key} profile`}>
             <table class="source-table">
               <caption>Sources in the {d.key} profile</caption>
               <thead><tr><th scope="col">Source</th><th scope="col">Type</th><th scope="col">Default trust</th></tr></thead>
@@ -164,7 +165,7 @@ const title = page?.title ?? `${d.key} domain`;
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableWrap>
         </>
       )}
 

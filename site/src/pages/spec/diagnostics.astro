@@ -6,6 +6,7 @@ import InlineMd from '../../components/InlineMd.astro';
 import { loadDiagnostics } from '../../data/diagnostics';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { currentStandard, refSlugger, routeByUrl } from '../../lib/generated';
+import TableWrap from '../../components/TableWrap.astro';
 
 const route = routeByUrl('/spec/diagnostics/');
 const diagnostics = loadDiagnostics();
@@ -24,7 +25,7 @@ const description = `The ${diagnostics.length} diagnostic codes of Standard ${st
       workflow that is accepted but suspect. Each code's severity is fixed. This table is read from sections 9.2 to 9.7
       of the <a href={std.url}>Standard</a>.
     </p>
-    <div class="table-wrap">
+    <TableWrap label={`Diagnostic codes of Standard ${std.version}`}>
       <table class="diagnostics-table">
         <caption>Diagnostic codes of Standard {std.version}</caption>
         <thead>
@@ -50,6 +51,6 @@ const description = `The ${diagnostics.length} diagnostic codes of Standard ${st
           ))}
         </tbody>
       </table>
-    </div>
+    </TableWrap>
   </article>
 </DocLayout>

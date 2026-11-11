@@ -16,6 +16,7 @@ import { capabilityHref, refSlugger, routesByTemplate, workflowHref } from '../.
 import { COMMIT_SHA, githubBlobUrl } from '../../lib/repo';
 import type { Route } from '../../lib/routes';
 import { contractRows, EDGE_LABELS, edgeGroups } from '../../lib/views';
+import TableWrap from '../../components/TableWrap.astro';
 
 export function getStaticPaths() {
   const ontology = loadOntology();
@@ -77,7 +78,7 @@ const skillFacts = (
       {groups.length === 0 ? (
         <p>No edge in the ontology starts or ends at this capability.</p>
       ) : (
-        <div class="table-wrap">
+        <TableWrap label={`Edges of ${cap.id} in the ontology, by type`}>
           <table class="edge-table">
             <caption>Edges of {cap.id} in the ontology, by type</caption>
             <thead>
@@ -126,7 +127,7 @@ const skillFacts = (
               ))}
             </tbody>
           </table>
-        </div>
+        </TableWrap>
       )}
     </section>
 

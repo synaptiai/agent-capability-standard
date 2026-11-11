@@ -45,6 +45,7 @@
     background: var(--layer);
   }
 
+  /* A table scrolls inside its wrapper, which takes keyboard focus. */
   .table-wrap {
     overflow-x: auto;
     margin-bottom: var(--space-4);
@@ -52,13 +53,6 @@
 
   .table-wrap > table {
     margin-bottom: 0;
-  }
-
-  /* Tables from Markdown have no wrapper: they scroll on their own. */
-  :is(.doc--prose, .doc--spec, .doc--rfc, .doc--skill, .doc__body) table:not(.table-wrap > table) {
-    display: block;
-    max-width: 100%;
-    overflow-x: auto;
   }
 
   /* Headers of generated tables: body font, bold capitals. Prose tables keep sentence case. */

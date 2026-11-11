@@ -10,6 +10,7 @@ import { readRepoFile } from '../../lib/repo';
 import { governanceStatuses } from '../../lib/views';
 import type { PageMeta } from '../../plugins/remark-page-meta';
 import { ROUTES } from '../../lib/routes';
+import TableWrap from '../../components/TableWrap.astro';
 
 const route = routeByUrl('/rfcs/');
 const allowed = governanceStatuses(readRepoFile('spec/GOVERNANCE.md'));
@@ -64,7 +65,7 @@ const description = 'Requests for comments that propose changes to the Agent Cap
       An RFC proposes a change to the standard. Its status is {allowed.slice(0, -1).join(', ')} or {allowed.at(-1)}.
       How an RFC is decided is described under <a href={pageHref('/community/governance/#decision-making')}>Decision-making</a> on the Governance page.
     </p>
-    <div class="table-wrap">
+    <TableWrap label="RFCs">
       <table class="rfc-table">
         <caption>RFCs</caption>
         <thead>
@@ -82,7 +83,7 @@ const description = 'Requests for comments that propose changes to the Agent Cap
           ))}
         </tbody>
       </table>
-    </div>
+    </TableWrap>
     {proposals.length > 0 && (
       <section class="rfc-proposals">
         <h2 id={id('Proposals')}>Proposals</h2>

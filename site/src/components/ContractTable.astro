@@ -3,6 +3,7 @@
 // top-level object are indented one level; deeper schema is shown as YAML.
 import { repoPathHref } from '../lib/generated';
 import type { SchemaRow } from '../lib/views';
+import TableWrap from './TableWrap.astro';
 
 interface Props {
   rows: SchemaRow[];
@@ -16,7 +17,7 @@ const { rows, caption, from } = Astro.props;
 {rows.length === 0 ? (
   <p class="contract-table__empty">No fields.</p>
 ) : (
-  <div class="table-wrap">
+  <TableWrap label={caption}>
     <table class="contract-table">
       <caption>{caption}</caption>
       <thead>
@@ -43,5 +44,5 @@ const { rows, caption, from } = Astro.props;
         ))}
       </tbody>
     </table>
-  </div>
+  </TableWrap>
 )}

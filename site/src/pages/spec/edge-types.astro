@@ -8,6 +8,7 @@ import DocLayout from '../../layouts/DocLayout.astro';
 import { capabilityHref, refSlugger, routeByUrl } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
 import type { PageMeta } from '../../plugins/remark-page-meta';
+import TableWrap from '../../components/TableWrap.astro';
 
 const route = routeByUrl('/spec/edge-types/');
 const entry = await getEntry('docs', route.source!);
@@ -32,7 +33,7 @@ const typeId = new Map(ontology.edgeTypes.map((t) => [t.id, id(`Edges: ${t.id}`)
         Edges are counted and listed as the ontology declares them, so a symmetric pair declared in both directions
         appears twice. Capability and layer pages list such a pair once.
       </p>
-      <div class="table-wrap">
+      <TableWrap label="Edge types and how many edges of each type the ontology has">
         <table class="edge-type-table">
           <caption>Edge types and how many edges of each type the ontology has</caption>
           <thead>
@@ -58,7 +59,7 @@ const typeId = new Map(ontology.edgeTypes.map((t) => [t.id, id(`Edges: ${t.id}`)
             ))}
           </tbody>
         </table>
-      </div>
+      </TableWrap>
     </section>
 
     <section class="edge-list">

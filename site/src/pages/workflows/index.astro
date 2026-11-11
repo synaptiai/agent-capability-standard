@@ -6,6 +6,7 @@ import { loadWorkflows } from '../../data/workflows';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { domainHref, pageHref, refSlugger, routeByUrl, specSectionHref, workflowHref } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
+import TableWrap from '../../components/TableWrap.astro';
 
 const route = routeByUrl('/workflows/');
 const wfs = loadWorkflows();
@@ -28,7 +29,7 @@ const groups = [
     {groups.map((g) => (
       <section class="workflow-group">
         <h2 id={id(g.label)}>{g.label}</h2>
-        <div class="table-wrap">
+        <TableWrap label={`${g.label} (${g.items.length})`}>
           <table class="workflow-table">
             <caption>{g.label} ({g.items.length})</caption>
             <thead>
@@ -48,7 +49,7 @@ const groups = [
               ))}
             </tbody>
           </table>
-        </div>
+        </TableWrap>
       </section>
     ))}
   </article>

@@ -256,6 +256,15 @@ describe('design system on the built site', () => {
     }
   });
 
+  it('puts every table in a focusable region named by a label', () => {
+    for (const f of pages()) {
+      const h = html(f);
+      const tables = (h.match(/<table[\s>]/g) ?? []).length;
+      const wrapped = (h.match(/<div class="table-wrap" role="region" tabindex="0" aria-label="[^"]+"[^>]*><table[\s>]/g) ?? []).length;
+      expect(wrapped, f).toBe(tables);
+    }
+  });
+
   it('gives the capability table one wide column per layer in the CLAUDE.md table', () => {
     const layers = claudeLayerTable().length;
     expect(html('index.html')).toContain(`class="capability-table__grid" style="--layers: ${layers}"`);

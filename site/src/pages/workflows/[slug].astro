@@ -33,6 +33,7 @@ import {
   profilesListing,
   schemaRows,
 } from '../../lib/views';
+import TableWrap from '../../components/TableWrap.astro';
 
 export function getStaticPaths() {
   const { all } = loadWorkflows();
@@ -153,7 +154,7 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
               </>
             )}
             {gates.length > 0 && (
-              <div class="table-wrap">
+              <TableWrap label={`Gates of step ${step.index}`}>
                 <table class="gate-table">
                   <caption><a href={gatesHref}>Gates</a> of step {step.index}</caption>
                   <thead><tr><th scope="col">When</th><th scope="col">Action</th><th scope="col">Message</th></tr></thead>
@@ -167,7 +168,7 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableWrap>
             )}
             {Object.keys(step.extra).length > 0 && (
               <>

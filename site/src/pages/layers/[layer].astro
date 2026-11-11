@@ -9,6 +9,7 @@ import DocLayout from '../../layouts/DocLayout.astro';
 import { capabilityHref, refSlugger, routesByTemplate, specSectionHref, workflowHref } from '../../lib/generated';
 import type { Route } from '../../lib/routes';
 import { crossLayerEdges, layerUsage } from '../../lib/views';
+import TableWrap from '../../components/TableWrap.astro';
 
 export function getStaticPaths() {
   const { layers } = loadOntology();
@@ -59,7 +60,7 @@ const sentence = `${layer.description.replace(/\.$/, '')}.`;
         <p>No edge connects this layer's capabilities to another layer.</p>
       ) : (
         crossing.map((g) => (
-          <div class="table-wrap" data-edge-type={g.type}>
+          <TableWrap label={`${g.type} edges (${g.edges.length})`} data-edge-type={g.type}>
             <table class="edge-table">
               <caption><code>{g.type}</code> edges ({g.edges.length})</caption>
               {g.symmetric ? (
@@ -93,7 +94,7 @@ const sentence = `${layer.description.replace(/\.$/, '')}.`;
                 </>
               )}
             </table>
-          </div>
+          </TableWrap>
         ))
       )}
     </section>
