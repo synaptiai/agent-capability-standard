@@ -441,6 +441,33 @@ export function markdownSources(): string[] {
   return ROUTES.flatMap((r) => (r.source === null ? [] : [r.source]));
 }
 
+const BY_SOURCE: ReadonlyMap<string, Route> = new Map(
+  ROUTES.flatMap((r) => (r.source === null ? [] : [[r.source, r] as const])),
+);
+
 export function routeForSource(source: string): Route | undefined {
-  return ROUTES.find((r) => r.source === source);
+  return BY_SOURCE.get(source);
+}
+
+/** Templates that render one Markdown source as its own page. */
+export const MARKDOWN_TEMPLATES: ReadonlySet<Template> = new Set(['prose', 'spec', 'rfc', 'skill', 'raw']);
+
+/**
+ * Templates of generated pages that show a Markdown source inside them: the
+ * embedded rows, plus the domains overview, which wraps its README in a
+ * generated listing.
+ */
+export const WRAPPING_TEMPLATES: ReadonlySet<Template> = new Set(['capability', 'edge-types', 'domain', 'domains-index']);
+
+/** Rows that `[...slug].astro` renders. Every Markdown row is either one of these or wrapped by a generated page. */
+export function markdownPages(rows: readonly Route[] = ROUTES): Route[] {
+  const pages: Route[] = [];
+  for (const r of rows) {
+    if (r.source === null) continue;
+    if (MARKDOWN_TEMPLATES.has(r.template) && !r.embed) pages.push(r);
+    else if (!WRAPPING_TEMPLATES.has(r.template)) {
+      throw new Error(`routes: ${r.source} uses template ${r.template}, which neither renders nor wraps Markdown`);
+    }
+  }
+  return pages;
 }

@@ -1,0 +1,48 @@
+---
+// One page per Markdown source that is not shown inside a generated page.
+// The route's template picks the wrapper; the body is the rendered source.
+import { getEntry, render } from 'astro:content';
+import DocLayout from '../layouts/DocLayout.astro';
+import { markdownPages, type Route } from '../lib/routes';
+import type { PageMeta } from '../plugins/remark-page-meta';
+import ProsePage from '../templates/ProsePage.astro';
+import RawPage from '../templates/RawPage.astro';
+import RfcPage from '../templates/RfcPage.astro';
+import SkillPage from '../templates/SkillPage.astro';
+import SpecPage from '../templates/SpecPage.astro';
+
+export function getStaticPaths() {
+  return markdownPages().map((route) => ({
+    params: { slug: route.url.replace(/^\/|\/$/g, '') || undefined },
+    props: { route },
+  }));
+}
+
+interface Props {
+  route: Route;
+}
+
+const { route } = Astro.props;
+const source = route.source!;
+const entry = await getEntry('docs', source);
+if (!entry) throw new Error(`[...slug]: no docs entry for ${source}`);
+const { Content, headings, remarkPluginFrontmatter } = await render(entry);
+const page = remarkPluginFrontmatter.page as PageMeta | undefined;
+if (!page) throw new Error(`[...slug]: remark-page-meta gave ${source} no page data`);
+const title = page.title ?? route.title;
+---
+<DocLayout route={route} title={title} description={page.description}>
+  {route.template === 'spec' && (
+    <SpecPage route={route} page={page} headings={headings}><Content /></SpecPage>
+  )}
+  {route.template === 'rfc' && (
+    <RfcPage route={route} page={page}><Content /></RfcPage>
+  )}
+  {route.template === 'skill' && (
+    <SkillPage route={route} page={page} frontmatter={entry.data}><Content /></SkillPage>
+  )}
+  {route.template === 'raw' && <RawPage route={route} page={page} />}
+  {route.template === 'prose' && (
+    <ProsePage route={route} page={page}><Content /></ProsePage>
+  )}
+</DocLayout>

@@ -1,0 +1,16 @@
+---
+// A Markdown document shown as it reads on GitHub. A `**Document Status**:`
+// line, where the source has one, is exposed for the status badge.
+import type { Route } from '../lib/routes';
+import type { PageMeta } from '../plugins/remark-page-meta';
+
+interface Props {
+  route: Route;
+  page: PageMeta;
+}
+
+const { page } = Astro.props;
+---
+<article class="doc doc--prose" data-document-status={page.documentStatus ?? undefined} data-pagefind-body>
+  <slot />
+</article>

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { checkRoutes, DIRECTORY_MAP, ROUTES, type Route, type Section } from '../src/lib/routes';
+import { checkRoutes, DIRECTORY_MAP, markdownPages, ROUTES, type Route, type Section } from '../src/lib/routes';
 
 // The public set is computed here from `git ls-files` and the plan's
 // exclusion list (plan "Recommended defaults" item 12), written out
@@ -254,5 +254,27 @@ describe('checkRoutes on a broken table', () => {
   it('reports a URL without the trailing slash', () => {
     const b: Route = { ...ok, source: 'docs/B.md', url: '/b' };
     expect(checkRoutes([ok, b], files)).toEqual(['/b: URL must look like /a/b/']);
+  });
+});
+
+describe('pages that render a Markdown source on their own', () => {
+  // Design notes, "ia-home" section 3: the prose, spec, RFC, skill and raw
+  // templates show one source each. Capability, domain and edge-type pages
+  // (and the domains overview) wrap their source in a generated page instead.
+  const own = new Set(['prose', 'spec', 'rfc', 'skill', 'raw']);
+
+  it('selects exactly the non-embedded rows with a Markdown template', () => {
+    const want = ROUTES.filter((r) => r.source !== null && !r.embed && own.has(r.template)).map((r) => r.url);
+    expect(markdownPages().map((r) => r.url)).toEqual(want);
+  });
+
+  it('builds the three pages the phase done-check names', () => {
+    const urls = markdownPages().map((r) => r.url);
+    for (const u of ['/spec/1.1.0/', '/start/overview/', '/rfcs/0002/']) expect(urls).toContain(u);
+  });
+
+  it('rejects a Markdown row whose template neither renders nor wraps it', () => {
+    const bad: Route = { source: 'docs/A.md', url: '/a/', section: 'start', order: 0, template: 'workflow', title: 'A' };
+    expect(() => markdownPages([bad])).toThrow(/neither renders nor wraps Markdown/);
   });
 });

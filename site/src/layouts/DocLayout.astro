@@ -1,0 +1,68 @@
+---
+// The shell every documentation page shares. Unstyled for now: the markup is
+// semantic and carries class hooks for the design system. The page body
+// (including its own H1) comes in through the slot.
+import { ROUTES, SECTIONS, type Route } from '../lib/routes';
+import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
+
+interface Props {
+  route: Route;
+  title: string;
+  description?: string | null;
+}
+
+const { route, title, description } = Astro.props;
+const section = SECTIONS.find((s) => s.id === route.section);
+const pageTitle = route.url === '/' ? 'Agent Capability Standard' : `${title} - Agent Capability Standard`;
+const sourceUrl = route.source ? githubBlobUrl(route.source) : null;
+// Each section links to its first page in sidebar order.
+const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
+  ...s,
+  url: ROUTES.find((r) => r.section === s.id && r.order === 0)?.url ?? '/',
+}));
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    {description && <meta name="description" content={description} />}
+    <link rel="canonical" href={new URL(route.url, Astro.site)} />
+  </head>
+  <body class:list={['page', `page--${route.template}`]} data-section={route.section}>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <a class="site-header__home" href="/">Agent Capability Standard</a>
+      <nav class="site-nav" aria-label="Sections">
+        <ul>
+          {nav.map((s) => (
+            <li>
+              <a href={s.url} aria-current={s.id === route.section ? 'true' : undefined}>{s.label}</a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </header>
+    <main id="content" class="doc-main">
+      {section && (
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+          <ol>
+            <li>{section.label}</li>
+            {route.group && <li>{route.group}</li>}
+            <li aria-current="page">{title}</li>
+          </ol>
+        </nav>
+      )}
+      <slot />
+    </main>
+    <footer class="site-footer">
+      {sourceUrl && (
+        <p class="site-footer__source">
+          Source: <a href={sourceUrl}>{route.source}</a>
+        </p>
+      )}
+      <p class="site-footer__build">Built from commit <code>{COMMIT_SHA.slice(0, 12)}</code>.</p>
+    </footer>
+  </body>
+</html>
