@@ -2,11 +2,19 @@
 // Every diagnostic code of the current Standard, from its §9.2 to §9.7 tables
 // (checked against core/src/diag.rs when loaded). Each row has the code's
 // lowercase id, so /spec/diagnostics/#v102 links to it.
+// Visual spec 3.8: the code grid (F-X1) shows each family's codes as tiles,
+// each linking to its row; the table is then given one family at a time,
+// each table a figure whose Code column holds the same tiles.
 import InlineMd from '../../components/InlineMd.astro';
 import { loadDiagnostics } from '../../data/diagnostics';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { currentStandard, refSlugger, routeByUrl } from '../../lib/generated';
+import { currentStandardText } from '../../lib/spec-figures';
+import { codeGridCaption, diagnosticFamilies, familyTableCaption } from '../../lib/spec-tail-figures';
 import TableWrap from '../../components/TableWrap.astro';
+import DiagnosticTile from '../../components/fig/DiagnosticTile.astro';
+import Figure from '../../components/fig/Figure.astro';
+import '../../styles/figures-spec.css';
 
 const route = routeByUrl('/spec/diagnostics/');
 const diagnostics = loadDiagnostics();
@@ -14,7 +22,14 @@ const std = currentStandard();
 const id = refSlugger();
 const errors = diagnostics.filter((d) => d.severity === 'error').length;
 const warnings = diagnostics.length - errors;
+const { source, text } = currentStandardText();
+const families = diagnosticFamilies(text, source);
+const listed = families.reduce((a, f) => a + f.codes.length, 0);
+if (listed !== diagnostics.length) throw new Error(`diagnostics: the §9.1 families hold ${listed} codes, the tables ${diagnostics.length}`);
 const description = `The ${diagnostics.length} diagnostic codes of Standard ${std.version}: what each one means, its category and whether it is an error or a warning.`;
+const familyIds = families.map((f) => id(`${f.name} codes`));
+let fig = 0;
+const figNo = () => ++fig;
 ---
 <DocLayout route={route} title="Diagnostics" description={description}>
   <article class="doc doc--diagnostics" data-pagefind-body>
@@ -25,32 +40,52 @@ const description = `The ${diagnostics.length} diagnostic codes of Standard ${st
       workflow that is accepted but suspect. Each code's severity is fixed. This table is read from sections 9.2 to 9.7
       of the <a href={std.url}>Standard</a>.
     </p>
-    <TableWrap label={`Diagnostic codes of Standard ${std.version}`}>
-      <table class="diagnostics-table">
-        <caption>Diagnostic codes of Standard {std.version}</caption>
-        <thead>
-          <tr>
-            <th scope="col">Code</th>
-            <th scope="col">Name</th>
-            <th scope="col">Category</th>
-            <th scope="col">Severity</th>
-            <th scope="col">Description</th>
-            <th scope="col">Section</th>
-          </tr>
-        </thead>
-        <tbody>
-          {diagnostics.map((d) => (
-            <tr id={d.anchor} class="diagnostics-table__row" data-code={d.code} data-severity={d.severity}>
-              <th scope="row"><a href={`#${d.anchor}`}><code>{d.code}</code></a></th>
-              <td><code>{d.name}</code></td>
-              <td>{d.category}</td>
-              <td><span class:list={['severity-badge', `severity-badge--${d.severity}`]}>{d.severity}</span></td>
-              <td><InlineMd md={d.descriptionMd} /></td>
-              <td><a href={`${std.url}#${d.sectionAnchor}`}>§{d.section}</a></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </TableWrap>
+    <Figure id={id('Figure: diagnostic codes by family')} n={figNo()} title={`${diagnostics.length} diagnostic codes by family: ${errors} errors, ${warnings} warnings`} caption={codeGridCaption(families)} kind="code-grid" wide>
+      <div class="code-grid">
+        {families.map((f, i) => (
+          <section class:list={['code-grid__family', `code-grid__family--${f.severity}`]} data-family={f.prefix} aria-labelledby={`${familyIds[i]}-head`}>
+            <p class="code-grid__head" id={`${familyIds[i]}-head`}><span class="diag-family" aria-hidden="true">{f.prefix}</span><span><a href={`#${familyIds[i]}`}>{f.name}</a><br /><span class="code-grid__range">{f.range}, {f.severity}</span></span></p>
+            <ul class="code-grid__tiles">
+              {f.codes.map((d) => <li><DiagnosticTile code={d.code} size="grid" href={`#${d.anchor}`} /></li>)}
+            </ul>
+          </section>
+        ))}
+      </div>
+      <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
+    </Figure>
+    {families.map((f, i) => (
+      <section class="diag-family-section">
+        <h2 id={familyIds[i]}>{f.name} codes</h2>
+        <Figure id={id(`Figure: ${f.name} codes`)} n={figNo()} title={`${f.name} codes, ${f.range}`} caption={familyTableCaption(f)} kind="code-table">
+          <TableWrap label={`${f.name} codes of Standard ${std.version}`}>
+            <table class="diagnostics-table">
+              <caption>{f.name} codes of Standard {std.version}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Code</th>
+                  <th scope="col">Name</th>
+                  <th scope="col">Category</th>
+                  <th scope="col">Severity</th>
+                  <th scope="col">Description</th>
+                  <th scope="col">Section</th>
+                </tr>
+              </thead>
+              <tbody>
+                {f.codes.map((d) => (
+                  <tr id={d.anchor} class="diagnostics-table__row" data-code={d.code} data-severity={d.severity}>
+                    <th scope="row"><DiagnosticTile code={d.code} href={`#${d.anchor}`} /></th>
+                    <td><code>{d.name}</code></td>
+                    <td>{d.category}</td>
+                    <td><span class:list={['severity-badge', `severity-badge--${d.severity}`]}>{d.severity}</span></td>
+                    <td><InlineMd md={d.descriptionMd} /></td>
+                    <td><a href={`${std.url}#${d.sectionAnchor}`}>§{d.section}</a></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
+        </Figure>
+      </section>
+    ))}
   </article>
 </DocLayout>

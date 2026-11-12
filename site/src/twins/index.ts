@@ -15,6 +15,8 @@ import { homeTwin } from './home';
 import { listingTwin } from './listing';
 import { blocks, markdownCopy } from './md';
 import { specFigureBlocks } from './edges-spec';
+import { specOlderBlocks } from './spec-figures';
+import { SLOTS_BY_VERSION } from '../lib/spec-slots';
 import { citationTwin, diagnosticsTwin, edgeTypesTwin, rfcsIndexTwin, schemasTwin } from './reference';
 import type { Twin } from './types';
 import { workflowsIndexTwin, workflowTwin } from './workflows';
@@ -45,7 +47,15 @@ async function buildTwin(route: Route): Promise<Twin> {
       const title = route.template === 'spec' ? route.title : meta.title;
       const copy = markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title });
       // The current Standard's site-drawn figures add their text equivalents (visual spec 3.9).
-      const figures = route.template === 'spec' && source === loadVersions().standard.current.source ? specFigureBlocks() : [];
+      const older = loadVersions().standard.previous.find((v) => v.source === source);
+      const figures =
+        route.template !== 'spec'
+          ? []
+          : source === loadVersions().standard.current.source
+            ? specFigureBlocks()
+            : older && SLOTS_BY_VERSION[older.version]
+              ? specOlderBlocks(source)
+              : [];
       return { title, description: meta.description, markdown: figures.length > 0 ? blocks(copy, ...figures) : copy };
     }
     case 'home':

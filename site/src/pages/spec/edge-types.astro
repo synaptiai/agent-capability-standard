@@ -10,7 +10,7 @@ import { getEntry, render } from 'astro:content';
 import { loadOntology, ONTOLOGY_SOURCE, type EdgeType } from '../../data/ontology';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { capabilityHref, refSlugger, routeByUrl } from '../../lib/generated';
-import { CHAIN_SECTIONS, EDGE_TYPES_SOURCE, fieldTable, fieldsCaption } from '../../lib/edge-figures';
+import { CHAIN_SECTIONS, EDGE_TYPES_SOURCE, declaredCaption, edgeCardCaption, summaryCaption, edgeExample, fieldTable, fieldsCaption } from '../../lib/edge-figures';
 import { cutAfterHeadings, foldFirstTable, type Anchor } from '../../lib/inject';
 import { githubBlobUrl, readRepoFile } from '../../lib/repo';
 import type { PageMeta } from '../../plugins/remark-page-meta';
@@ -21,7 +21,9 @@ import EdgeMatrix from '../../components/fig/EdgeMatrix.astro';
 import EdgeTypeCard from '../../components/fig/EdgeTypeCard.astro';
 import Figure from '../../components/fig/Figure.astro';
 import Port from '../../components/fig/Port.astro';
+import PixelBar from '../../components/fig/PixelBar.astro';
 import '../../styles/figures-edges-spec.css';
+import '../../styles/figures-spec.css';
 
 const route = routeByUrl('/spec/edge-types/');
 const entry = await getEntry('docs', route.source!);
@@ -37,10 +39,11 @@ const listsId = id('Edge lists');
 const typeId = new Map(ontology.edgeTypes.map((t) => [t.id, id(`Edges: ${t.id}`)]));
 
 // Where each figure goes in the rendered source, by heading.
-type Key = { kind: 'card'; type: EdgeType } | { kind: 'properties' } | { kind: 'chain'; heading: string } | { kind: 'changes' };
+type Key = { kind: 'card'; type: EdgeType } | { kind: 'summary' } | { kind: 'properties' } | { kind: 'chain'; heading: string } | { kind: 'changes' };
 const anchors: Anchor<Key>[] = [
   // "### 1. `requires` (Hard Dependency)": matched by the type id, not the number.
   ...ontology.edgeTypes.map((t) => ({ key: { kind: 'card', type: t.id } as Key, level: 3, startsWith: '' }) as Anchor<Key>),
+  { key: { kind: 'summary' }, level: 2, startsWith: 'Edge Type Summary' },
   { key: { kind: 'properties' }, level: 2, startsWith: 'Edge Properties' },
   ...CHAIN_SECTIONS.map((h) => ({ key: { kind: 'chain', heading: h } as Key, level: 3, startsWith: h })),
   { key: { kind: 'changes' }, level: 2, startsWith: "Changes to the ontology's edges in 1.1.0" },
@@ -55,9 +58,15 @@ for (const a of anchors) {
   a.startsWith = hits[0]!;
 }
 const segments = cutAfterHeadings(entry.rendered.html, anchors, EDGE_TYPES_SOURCE);
+// The summary table (F-E4: marks, flag glyphs and count bars from rehype-figure-marks) is drawn as a figure.
+const SUMMARY_TABLE = /^\s*(<div class="table-wrap"[^>]*>[\s\S]*?<\/table><\/div>)/;
+const summaryAt = segments.findIndex((s) => s.key?.kind === 'summary');
+const summaryTable = SUMMARY_TABLE.exec(segments[summaryAt + 1]?.html ?? '')?.[1];
+if (!summaryTable) throw new Error(`edge-types: no table directly under "Edge Type Summary" in ${EDGE_TYPES_SOURCE}`);
+segments[summaryAt + 1] = { ...segments[summaryAt + 1]!, html: segments[summaryAt + 1]!.html.replace(SUMMARY_TABLE, '') };
 const info = new Map(ontology.edgeTypes.map((t) => [t.id, t]));
 const properties = fieldTable(readRepoFile(EDGE_TYPES_SOURCE), 'Edge Properties', EDGE_TYPES_SOURCE);
-// Figures are numbered in page order; edge-type cards are not numbered figures.
+// Figures are numbered in page order, the edge-type cards among them.
 let fig = 0;
 const figNo = () => ++fig;
 ---
@@ -68,7 +77,14 @@ const figNo = () => ++fig;
         <>
           <Fragment set:html={i > 0 && segments[i - 1]!.key?.kind === 'changes' ? foldFirstTable(s.html, 'The same changes as the table in the source') : s.html} />
           {s.key?.kind === 'card' && (
-            <div class="edge-card-host"><EdgeTypeCard info={info.get(s.key.type)!} /></div>
+            <Figure id={id(`Figure: ${s.key.type}`)} n={figNo()} title={`${s.key.type}: ${edgeExample(info.get(s.key.type)!).sentence}`} caption={edgeCardCaption(info.get(s.key.type)!)} kind="edge-type-card" class="edge-card-fig">
+              <div class="edge-card-host"><EdgeTypeCard info={info.get(s.key.type)!} /></div>
+            </Figure>
+          )}
+          {s.key?.kind === 'summary' && (
+            <Figure id={id('Figure: edge type summary')} n={figNo()} title="Edge type summary, with counts" caption={summaryCaption(ontology)} kind="edge-summary">
+              <Fragment set:html={summaryTable} />
+            </Figure>
           )}
           {s.key?.kind === 'properties' && (
             <Figure id={id('Figure: edge properties')} n={figNo()} title="Edge properties" caption={fieldsCaption(properties, 'An edge has')} kind="edge-properties">
@@ -91,33 +107,35 @@ const figNo = () => ++fig;
         Edges are counted and listed as the ontology declares them, so a symmetric pair declared in both directions
         appears twice. Capability and layer pages list such a pair once.
       </p>
-      <TableWrap label="Edge types and how many edges of each type the ontology has">
-        <table class="edge-type-table">
-          <caption>Edge types and how many edges of each type the ontology has</caption>
-          <thead>
-            <tr>
-              <th scope="col">Type</th>
-              <th scope="col">Description</th>
-              <th scope="col">Semantics</th>
-              <th scope="col">Transitive</th>
-              <th scope="col">Symmetric</th>
-              <th scope="col">Edges</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ontology.edgeTypes.map((t) => (
-              <tr data-edge-type={t.id}>
-                <th scope="row"><a href={`#${typeId.get(t.id)}`}><code>{t.id}</code></a></th>
-                <td>{t.description}</td>
-                <td>{t.semantics}</td>
-                <td>{t.transitive ? 'Yes' : 'No'}</td>
-                <td>{t.symmetric ? 'Yes' : 'No'}</td>
-                <td>{t.edges.length}</td>
+      <Figure id={id('Figure: edges of each type')} n={figNo()} title="Edges of each type, as declared" caption={declaredCaption(ontology)} kind="edge-type-table">
+        <TableWrap label="Edge types and how many edges of each type the ontology has">
+          <table class="edge-type-table">
+            <caption>Edge types and how many edges of each type the ontology has</caption>
+            <thead>
+              <tr>
+                <th scope="col">Type</th>
+                <th scope="col">Description</th>
+                <th scope="col">Semantics</th>
+                <th scope="col">Transitive</th>
+                <th scope="col">Symmetric</th>
+                <th scope="col">Edges</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableWrap>
+            </thead>
+            <tbody>
+              {ontology.edgeTypes.map((t) => (
+                <tr data-edge-type={t.id}>
+                  <th scope="row"><a href={`#${typeId.get(t.id)}`}><code>{t.id}</code></a></th>
+                  <td>{t.description}</td>
+                  <td>{t.semantics}</td>
+                  <td>{t.transitive ? 'Yes' : 'No'}</td>
+                  <td>{t.symmetric ? 'Yes' : 'No'}</td>
+                  <td><PixelBar value={t.edges.length} max={Math.max(...ontology.edgeTypes.map((x) => x.edges.length))} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      </Figure>
     </section>
 
     <section class="edge-list">
