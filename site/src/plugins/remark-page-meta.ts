@@ -6,7 +6,8 @@
 // - description: the frontmatter `description`, or else the first paragraph
 //   after the H1 that has text (a row of badges does not count), cut at a
 //   sentence end before 200 characters. A paragraph ending in a colon takes
-//   the list after it along.
+//   the list after it along; one that introduces anything else gives way to
+//   the header block's Purpose line, when there is one.
 // - meta: the block of `**Key:** value` lines directly after the H1 (the spec's
 //   Version, Status and Date; an RFC's Status; a methodology document's
 //   `**Document Status**: Normative`). Only that block counts: a Status line
@@ -111,6 +112,10 @@ export function shortDescription(text: string, max = MAX_DESCRIPTION): string {
   const ends = [...window.matchAll(/(?<!\b(?:Art|Arts|No|Nos|vs|cf|e\.g|i\.e|Fig|Sec))[.!?](?=\s)/g)];
   const lastEnd = ends.at(-1);
   if (lastEnd?.index !== undefined && lastEnd.index > 40) return window.slice(0, lastEnd.index + 1);
+  // A list joined with "; " (a paragraph that introduced a list) is cut after
+  // its last whole item, not inside the next one.
+  const lastItem = window.lastIndexOf('; ', max - 3);
+  if (lastItem > 40) return `${window.slice(0, lastItem)}...`;
   // Leave room for the ellipsis, so the result is never longer than max.
   const room = t.slice(0, max - 3);
   const space = room.lastIndexOf(' ');
@@ -190,6 +195,11 @@ export default function remarkPageMeta() {
         const list = tree.children[at + 1];
         if (text.endsWith(':') && list?.type === 'list') {
           text = `${text} ${list.children.map((item) => blockText(item).replace(/\s+/g, ' ').trim()).join('; ')}`;
+        } else if (text.endsWith(':') && get('purpose') !== null) {
+          // A paragraph that introduces a table or a fence ("..., we find:")
+          // says nothing on its own; the header block's Purpose says what the
+          // page is for.
+          text = `${get('purpose')!.replace(/\.$/, '')}.`;
         }
         description = shortDescription(text);
       }

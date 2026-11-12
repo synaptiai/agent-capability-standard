@@ -114,6 +114,12 @@ describe('shortDescription', () => {
     expect(shortDescription(text)).toBe('A sentence that is long enough to count. '.repeat(3).trim());
   });
 
+  it('cuts a list joined with "; " after its last whole item', () => {
+    // The Standard's description: "This standard specifies:" and its §1 list.
+    const text = 'This standard specifies: A canonical capability ontology for agent systems; A workflow DSL for composing capabilities with safety and recovery semantics; A condition expression language for gates';
+    expect(shortDescription(text, 160)).toBe('This standard specifies: A canonical capability ontology for agent systems; A workflow DSL for composing capabilities with safety and recovery semantics...');
+  });
+
   it('does not end a sentence at the full stop of "Art." or "e.g."', () => {
     // docs/compliance/eu-ai-act/annex_iv_technical_documentation.md opens
     // "... requirements of EU AI Act Art. 11 and Annex IV ...".

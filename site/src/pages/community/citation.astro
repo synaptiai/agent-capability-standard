@@ -3,7 +3,7 @@
 // itself, and a BibTeX entry built from it.
 import { CITATION_SOURCE, loadCitation } from '../../data/citation';
 import DocLayout from '../../layouts/DocLayout.astro';
-import { refSlugger, routeByUrl } from '../../lib/generated';
+import { GENERATED_DESCRIPTIONS, refSlugger, routeByUrl } from '../../lib/generated';
 import { githubBlobUrl, readRepoFile } from '../../lib/repo';
 
 const route = routeByUrl('/community/citation/');
@@ -11,7 +11,7 @@ const c = loadCitation();
 const cff = readRepoFile(CITATION_SOURCE).trimEnd();
 const id = refSlugger();
 const authors = c.authors.map((a) => `${a.given} ${a.family}`).join(', ');
-const description = `How to cite ${c.title}, version ${c.version}, with the citation file and a BibTeX entry.`;
+const description = GENERATED_DESCRIPTIONS['/community/citation/']!();
 ---
 <DocLayout route={route} title="Cite this standard" description={description}>
   <article class="doc doc--citation" data-pagefind-body>

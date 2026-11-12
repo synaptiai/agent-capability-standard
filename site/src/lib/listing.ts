@@ -1,10 +1,11 @@
 // Cards for a section's listing page: every other page of the section, in
 // sidebar order, grouped by sidebar group. A card's description is the route's
 // own, else the one remark-page-meta read from the source, cut to 160
-// characters; a generated page passes its own.
+// characters; a page built from data has its own in GENERATED_DESCRIPTIONS.
 import { getEntry, render } from 'astro:content';
 import type { PageMeta } from '../plugins/remark-page-meta';
 import { shortDescription } from '../plugins/remark-page-meta';
+import { GENERATED_DESCRIPTIONS } from './generated';
 import { ROUTES, type Route } from './routes';
 
 export interface ListingItem {
@@ -50,7 +51,7 @@ export async function sourceMeta(route: Route): Promise<{ title: string; descrip
 
 export async function listingGroups(
   index: Route,
-  generated: Readonly<Record<string, string>> = {},
+  generated: Readonly<Record<string, string>> = Object.fromEntries(Object.entries(GENERATED_DESCRIPTIONS).map(([url, f]) => [url, f()])),
 ): Promise<ListingGroup[]> {
   const rows = ROUTES.filter((r) => r.section === index.section && r.url !== index.url).sort((a, b) => a.order - b.order);
   const groups: ListingGroup[] = [];

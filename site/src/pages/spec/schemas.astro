@@ -4,7 +4,7 @@
 // its §6.1; the rest are grouped by folder. Workflow catalogs and domain
 // profiles have their own pages and are not listed here.
 import DocLayout from '../../layouts/DocLayout.astro';
-import { currentStandard, pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
+import { GENERATED_DESCRIPTIONS, currentStandard, pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
 import { githubBlobUrl, readRepoFile } from '../../lib/repo';
 import { schemaGroups, schemaListing } from '../../lib/views';
 import TableWrap from '../../components/TableWrap.astro';
@@ -21,7 +21,7 @@ const id = refSlugger();
 const GROUPS = schemaGroups(std.version);
 const shelves = schemaShelves(entries, GROUPS);
 let fig = 0;
-const description = `The schema files of the Agent Capability Standard, grouped by what the Standard requires of them, with a link to each file.`;
+const description = GENERATED_DESCRIPTIONS['/spec/schemas/']!();
 ---
 <DocLayout route={route} title="Schemas" description={description}>
   <article class="doc doc--schemas" data-pagefind-body>

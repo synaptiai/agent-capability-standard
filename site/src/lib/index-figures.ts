@@ -246,11 +246,12 @@ export function backgroundLayerMatrix(pages: readonly Doc[], layers: readonly { 
   const none = rows.filter((r) => sum(r.counts) === 0).map((r) => r.label);
   return {
     title: 'How often each page names a capability as code, by layer',
-    caption: `Only a capability name set as code counts, since a plain word such as "plan" may not mean the capability. Across the ${rows.length} pages, capabilities of ${totals[0]!.id} are named most (${totals[0]!.n} times) and of ${totals.at(-1)!.id} least (${totals.at(-1)!.n}). The ${top.label} names the most (${sum(top.counts)}).${none.length ? ` ${joinAnd(none)} ${none.length === 1 ? 'names' : 'name'} none as code.` : ''}`,
+    caption: `Only a capability name set as code counts, since a plain word such as "plan" may not mean the capability. Across the ${rows.length} pages, capabilities of ${totals[0]!.id} are named most (${totals[0]!.n} times) and of ${totals.at(-1)!.id} least (${totals.at(-1)!.n}). The ${top.label} names the most (${sum(top.counts)}).${none.length ? ` ${joinAnd(none)} ${none.length === 1 ? 'names' : 'name'} none as code, so ${none.length === 1 ? 'it has' : 'they have'} no row.` : ''}`,
     rowHead: 'Page',
     unit: 'mentions',
     columns: layers.map((l) => ({ key: l.id, label: l.id, layer: l.id })),
-    rows,
+    // A page that names no capability as code has an empty row; the caption names it instead.
+    rows: rows.filter((r) => sum(r.counts) > 0),
   };
 }
 
@@ -441,11 +442,12 @@ export function suiteCoverage(parts: readonly SuitePart[], families: readonly Fa
   const full = rows.filter((r) => r.value === r.max).map((r) => r.f.name);
   const low = [...rows].sort((a, b) => share(a) - share(b))[0]!;
   const fixtures = sum(parts.map((p) => p.count));
+  const missing = families.flatMap((f) => f.codes.filter((c) => !expected.has(c)));
   return {
     title: COVERAGE_FIG_TITLE,
     caption: `The suite's ${fixtures} fixtures and cases (${joinAnd(parts.map((p) => `${p.count} ${p.label.charAt(0).toLowerCase()}${p.label.slice(1)}`))}) expect ${hit} of the ${all} diagnostic codes. ${
       full.length > 0 ? `Every ${joinAnd(full)} code is expected; ` : ''
-    }${low.f.name} has the smallest share, ${low.value} of ${low.max}.`,
+    }${low.f.name} has the smallest share, ${low.value} of ${low.max}.${missing.length === 0 ? '' : ` No fixture or case expects ${joinAnd(missing)}.`}`,
     head: ['Family', 'Codes the suite expects'],
     rows: rows.map(({ f: _f, ...r }) => r),
   };

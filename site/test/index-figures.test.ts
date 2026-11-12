@@ -130,6 +130,13 @@ describe('background layer matrix', () => {
     const m = backgroundLayerMatrix([{ label: 'P', url: '/p/', text: 'We `plan`, then plan again, then `mutate` and `mutate`.' }], layers);
     expect(m.rows[0]!.counts).toEqual([1, 2]);
   });
+
+  it('leaves out a page that names no capability as code, and names it in the caption', () => {
+    const layers = [{ id: 'REASON', capabilities: ['plan'] }];
+    const m = backgroundLayerMatrix([{ label: 'P', url: '/p/', text: '`plan`' }, { label: 'Q', url: '/q/', text: 'plan, in words only' }], layers);
+    expect(m.rows.map((r) => r.label)).toEqual(['P']);
+    expect(m.caption).toContain('Q names none as code, so it has no row.');
+  });
 });
 
 describe('/start/ reading times', () => {
@@ -193,7 +200,7 @@ describe('/spec/ conformance coverage', () => {
       { label: 'B2xx Binding', value: 2, max: 2, words: '2 of 2 codes' },
     ]);
     expect(b.caption).toBe(
-      "The suite's 5 fixtures and cases (3 a fixtures and 2 b cases) expect 3 of the 6 diagnostic codes. Every Binding code is expected; Validation has the smallest share, 1 of 4.",
+      "The suite's 5 fixtures and cases (3 a fixtures and 2 b cases) expect 3 of the 6 diagnostic codes. Every Binding code is expected; Validation has the smallest share, 1 of 4. No fixture or case expects V102, V103 and V104.",
     );
   });
 
