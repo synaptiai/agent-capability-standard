@@ -7,6 +7,10 @@ import DocLayout from '../../layouts/DocLayout.astro';
 import { domainHref, pageHref, refSlugger, routeByUrl, specSectionHref, workflowHref } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
 import TableWrap from '../../components/TableWrap.astro';
+import StepStrip from '../../components/fig/StepStrip.astro';
+import { indexStripLabel, layersUsed } from '../../lib/workflow-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import '../../styles/figures-workflow.css';
 
 const route = routeByUrl('/workflows/');
 const wfs = loadWorkflows();
@@ -38,7 +42,13 @@ const groups = [
             <tbody>
               {g.items.map((w) => (
                 <tr data-workflow={w.id} data-risk={w.risk} data-catalog={w.catalog}>
-                  <th scope="row"><a href={workflowHref(w.id)}><code>{w.id}</code></a></th>
+                  <th scope="row">
+                    <a href={workflowHref(w.id)}><code>{w.id}</code></a>
+                    <span class="wf-strip">
+                      <StepStrip wf={w} label={indexStripLabel(w)} />
+                      <span class="wf-strip__layers" aria-hidden="true">{layersUsed(w).map((l) => <PixelGlyph name={l} layer={l} />)}</span>
+                    </span>
+                  </th>
                   <td>{w.goal}</td>
                   <td><RiskBadge risk={w.risk} /></td>
                   <td>
