@@ -57,6 +57,18 @@
     --on-risk-high: #ffffff;
     --ok: #12733a;
 
+    /* Heat steps for counts (visual spec 1.2): --indicator mixed toward --bg at
+       50, 65, 80 and 100%. A heat cell always prints its count and has a 2px
+       --line border. Count text: --ink on steps 1 to 3, --bg on step 4. */
+    --heat-1: #81b4d0;
+    --heat-2: #5b9ec2;
+    --heat-3: #3587b4;
+    --heat-4: #0369a1;
+    --on-heat-1: var(--ink);
+    --on-heat-2: var(--ink);
+    --on-heat-3: var(--ink);
+    --on-heat-4: var(--bg);
+
     /* Requirement keywords share the risk colours */
     --kw-must: var(--risk-high);
     --kw-should: var(--risk-medium);
@@ -156,6 +168,15 @@
       --risk-high: #f87171;
       --on-risk-high: #0b111e;
       --ok: #86efac;
+      /* Count text: --ink on heat step 1, --bg on steps 2 to 4. */
+      --heat-1: #44728d;
+      --heat-2: #558fae;
+      --heat-3: #66acd0;
+      --heat-4: #7dd3fc;
+      --on-heat-1: var(--ink);
+      --on-heat-2: var(--bg);
+      --on-heat-3: var(--bg);
+      --on-heat-4: var(--bg);
       --callout-amount: 10%;
       --code-foreground: #eef2f8;
       --code-background: #0f1726;
@@ -204,6 +225,15 @@
     --risk-high: #f87171;
     --on-risk-high: #0b111e;
     --ok: #86efac;
+    /* Count text: --ink on heat step 1, --bg on steps 2 to 4. */
+    --heat-1: #44728d;
+    --heat-2: #558fae;
+    --heat-3: #66acd0;
+    --heat-4: #7dd3fc;
+    --on-heat-1: var(--ink);
+    --on-heat-2: var(--bg);
+    --on-heat-3: var(--bg);
+    --on-heat-4: var(--bg);
     --callout-amount: 10%;
     --code-foreground: #eef2f8;
     --code-background: #0f1726;

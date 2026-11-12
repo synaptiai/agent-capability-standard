@@ -3,8 +3,12 @@
 // spec/EDGE_TYPES.md, the ontology, the catalog schema) through
 // test/independent.ts or local line scans, never from the code under test.
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { renderRepoFile } from './pipeline';
-import { ontologyEdgeTriples, repoText, symmetricEdgeTypes } from './independent';
+import { claudeLayerTable, ontologyEdgeTriples, repoText, symmetricEdgeTypes } from './independent';
+import { parseTokens, pairRatio } from '../scripts/check-contrast.mjs';
+import { edgeChanges, exampleChains, heatRanges, heatStep, layerPairCounts, matrixCells, parseChains } from '../src/lib/edge-figures';
+import { cutAfterHeadings } from '../src/lib/inject';
 
 const STANDARDS = ['spec/STANDARD-v1.1.0.md', 'spec/STANDARD-v1.0.0.md'];
 
@@ -36,5 +40,96 @@ describe('edge type summary table (F-E4)', () => {
       const n = symmetric ? pairs : ofType.length;
       expect(row).toMatch(new RegExp(`data-value="${n}"`));
     }
+  });
+});
+
+describe('all edges matrix (F-E2)', () => {
+  const triples = ontologyEdgeTriples();
+
+  it('has one cell per (from, to) pair with every type of that pair, as a scan of the ontology edges gives', () => {
+    const want = new Map<string, Set<string>>();
+    for (const t of triples) want.set(`${t.from}>${t.to}`, (want.get(`${t.from}>${t.to}`) ?? new Set()).add(t.type));
+    const got = new Map(matrixCells().map((c) => [`${c.from}>${c.to}`, new Set(c.types)]));
+    expect(got).toEqual(want);
+    // Spec 3.7 names two of the split cells.
+    expect([...got.get('rollback>mutate')!].sort()).toEqual(['conflicts_with', 'specializes']);
+    expect([...got.get('measure>predict')!].sort()).toEqual(['alternative_to', 'enables']);
+  });
+
+  it('counts edges between layer pairs by the layers CLAUDE.md lists, a symmetric pair once', () => {
+    const layerOf = new Map(claudeLayerTable().flatMap((r) => r.capabilities.map((c) => [c, r.id] as const)));
+    const sym = symmetricEdgeTypes();
+    const seen = new Set<string>();
+    const want = new Map<string, number>();
+    for (const t of triples) {
+      if (sym.includes(t.type)) {
+        const k = `${t.type}|${[t.from, t.to].sort().join('|')}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+      }
+      const k = `${layerOf.get(t.from)}>${layerOf.get(t.to)}`;
+      want.set(k, (want.get(k) ?? 0) + 1);
+    }
+    const { layers, counts } = layerPairCounts();
+    const got = new Map<string, number>();
+    layers.forEach((a, i) => layers.forEach((b, j) => counts[i]![j]! > 0 && got.set(`${a}>${b}`, counts[i]![j]!)));
+    expect(got).toEqual(want);
+  });
+
+  it('puts counts on four heat steps that cover 1 to the maximum without gaps (fixture: max 11)', () => {
+    expect([0, 1, 2, 3, 5, 6, 8, 9, 11].map((c) => heatStep(c, 11))).toEqual([0, 1, 1, 2, 2, 3, 3, 4, 4]);
+    expect(heatRanges(11)).toEqual([
+      { step: 1, from: 1, to: 2 },
+      { step: 2, from: 3, to: 5 },
+      { step: 3, from: 6, to: 8 },
+      { step: 4, from: 9, to: 11 },
+    ]);
+  });
+
+  it('uses the heat values of visual spec 1.2, whose light first step is 2.24:1 against the page', () => {
+    const { light } = parseTokens(readFileSync('src/styles/tokens.css', 'utf8'));
+    expect(Number(pairRatio({ kind: 'edge', label: '', fg: 'var(--heat-1)', bg: 'var(--bg)' }, light).toFixed(2))).toBe(2.24);
+  });
+});
+
+describe('example chains (F-E3)', () => {
+  it('reads the three fences of EDGE_TYPES.md as their lines say', () => {
+    const pairs = (h: string) => exampleChains(h).map((c) => c.edges.map((e) => `${e.from} ${e.type} ${e.to}`));
+    expect(pairs('Safety-Critical Precedes Chain')).toEqual([
+      ['constrain precedes mutate'],
+      ['checkpoint precedes mutate', 'mutate precedes verify', 'verify precedes audit'],
+    ]);
+    // The tree's child specializes its parent (the ontology's direction).
+    expect(pairs('Specialization Hierarchy')).toEqual([['detect specializes observe', 'classify specializes detect']]);
+    expect(exampleChains('Specialization Hierarchy')[0]!.form).toBe('tree');
+    expect(pairs('Conflict Resolution').flat()).toHaveLength(2);
+  });
+
+  it('fails on a pair that is not an edge of the ontology (fixture)', () => {
+    expect(() => parseChains('observe --precedes--> audit')).toThrow(/observe --precedes--> audit is not an edge/);
+    expect(() => parseChains('observe\n  |\n  +--specializes-- audit')).toThrow(/is not an edge/);
+  });
+});
+
+describe('1.1.0 edge changes (F-E5)', () => {
+  it('has one row per target named in the table, by a line scan', () => {
+    const lines = repoText('spec/EDGE_TYPES.md').split('\n');
+    const start = lines.findIndex((l) => l.startsWith("## Changes to the ontology's edges in 1.1.0"));
+    const rows = lines.slice(start).filter((l) => /^\| [a-z_]+ → /.test(l));
+    const targets = rows.flatMap((r) => r.split('|')[1]!.split('→')[1]!.split(',').map((x) => x.trim()));
+    expect(targets.length).toBeGreaterThan(0);
+    expect(edgeChanges().map((c) => c.to)).toEqual(targets);
+  });
+});
+
+describe('figure anchors', () => {
+  const html = '<h2 id="a">A one</h2><p>x</p><h3 id="b">B <code>two</code><a class="heading-anchor"></a></h3><p>y</p>';
+  it('cuts after the matching heading', () => {
+    const s = cutAfterHeadings(html, [{ key: 'k', level: 3, startsWith: 'B two' }], 'fixture');
+    expect(s.map((x) => x.key)).toEqual(['k', null]);
+    expect(s[0]!.html.endsWith('</h3>')).toBe(true);
+  });
+  it('fails when an anchor matches no heading', () => {
+    expect(() => cutAfterHeadings(html, [{ key: 'k', level: 2, startsWith: 'Nope' }], 'fixture')).toThrow(/matches 0 headings/);
   });
 });

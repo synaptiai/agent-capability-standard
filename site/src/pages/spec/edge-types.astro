@@ -1,30 +1,87 @@
 ---
-// spec/EDGE_TYPES.md as written (its H1 is the page H1), then a table of the
-// ontology's edge types and every edge of each type, generated from
+// spec/EDGE_TYPES.md as written (its H1 is the page H1), with figures placed
+// under its headings (visual spec 3.7): an edge-type card under each type's
+// H3 (F-E1), the edge properties as ports, the example chains (F-E3) and the
+// 1.1.0 changes (F-E5). The summary table's marks and counts (F-E4) come from
+// the rehype-figure-marks step. Then a table of the ontology's edge types,
+// the all-edges matrix (F-E2) and every edge of each type, generated from
 // schemas/capability_ontology.yaml.
 import { getEntry, render } from 'astro:content';
-import { loadOntology, ONTOLOGY_SOURCE } from '../../data/ontology';
+import { loadOntology, ONTOLOGY_SOURCE, type EdgeType } from '../../data/ontology';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { capabilityHref, refSlugger, routeByUrl } from '../../lib/generated';
-import { githubBlobUrl } from '../../lib/repo';
+import { CHAIN_SECTIONS, EDGE_TYPES_SOURCE, fieldTable, fieldsCaption } from '../../lib/edge-figures';
+import { cutAfterHeadings, type Anchor } from '../../lib/inject';
+import { githubBlobUrl, readRepoFile } from '../../lib/repo';
 import type { PageMeta } from '../../plugins/remark-page-meta';
 import TableWrap from '../../components/TableWrap.astro';
+import EdgeChain from '../../components/fig/EdgeChain.astro';
+import EdgeChanges from '../../components/fig/EdgeChanges.astro';
+import EdgeMatrix from '../../components/fig/EdgeMatrix.astro';
+import EdgeTypeCard from '../../components/fig/EdgeTypeCard.astro';
+import Figure from '../../components/fig/Figure.astro';
+import Port from '../../components/fig/Port.astro';
 import '../../styles/figures-edges-spec.css';
 
 const route = routeByUrl('/spec/edge-types/');
 const entry = await getEntry('docs', route.source!);
 if (!entry) throw new Error(`edge-types: no docs entry for ${route.source}`);
-const { Content, remarkPluginFrontmatter } = await render(entry);
+const { remarkPluginFrontmatter } = await render(entry);
+if (typeof entry.rendered?.html !== 'string') throw new Error(`edge-types: ${route.source} has no rendered HTML`);
 const page = remarkPluginFrontmatter.page as PageMeta | undefined;
 const ontology = loadOntology();
 const id = refSlugger();
 const referenceId = id('Edge types in the ontology');
 const allId = id('All edges');
+const listsId = id('Edge lists');
 const typeId = new Map(ontology.edgeTypes.map((t) => [t.id, id(`Edges: ${t.id}`)]));
+
+// Where each figure goes in the rendered source, by heading.
+type Key = { kind: 'card'; type: EdgeType } | { kind: 'properties' } | { kind: 'chain'; heading: string } | { kind: 'changes' };
+const anchors: Anchor<Key>[] = [
+  // "### 1. `requires` (Hard Dependency)": matched by the type id, not the number.
+  ...ontology.edgeTypes.map((t) => ({ key: { kind: 'card', type: t.id } as Key, level: 3, startsWith: '' }) as Anchor<Key>),
+  { key: { kind: 'properties' }, level: 2, startsWith: 'Edge Properties' },
+  ...CHAIN_SECTIONS.map((h) => ({ key: { kind: 'chain', heading: h } as Key, level: 3, startsWith: h })),
+  { key: { kind: 'changes' }, level: 2, startsWith: "Changes to the ontology's edges in 1.1.0" },
+];
+// Type H3s read "N. type (Name)"; give each anchor its own heading's start.
+const typeHeadings = [...entry.rendered.html.matchAll(/<h3\b[^>]*>([\s\S]*?)<\/h3>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+for (const a of anchors) {
+  if (a.key.kind !== 'card') continue;
+  const type = a.key.type;
+  const hits = typeHeadings.filter((h) => new RegExp(`^\\d+\\. ${type} \\(`).test(h));
+  if (hits.length !== 1) throw new Error(`edge-types: ${hits.length} H3s of ${EDGE_TYPES_SOURCE} name the type ${type}, expected one`);
+  a.startsWith = hits[0]!;
+}
+const segments = cutAfterHeadings(entry.rendered.html, anchors, EDGE_TYPES_SOURCE);
+const info = new Map(ontology.edgeTypes.map((t) => [t.id, t]));
+const properties = fieldTable(readRepoFile(EDGE_TYPES_SOURCE), 'Edge Properties', EDGE_TYPES_SOURCE);
+// Figures are numbered in page order; edge-type cards are not numbered figures.
+let fig = 0;
+const figNo = () => ++fig;
 ---
 <DocLayout route={route} title={page?.title ?? route.title} description={route.description ?? page?.description}>
   <article class="doc doc--edge-types" data-pagefind-body>
-    <div class="doc__body"><Content /></div>
+    <div class="doc__body">
+      {segments.map((s) => (
+        <>
+          <Fragment set:html={s.html} />
+          {s.key?.kind === 'card' && (
+            <div class="edge-card-host"><EdgeTypeCard info={info.get(s.key.type)!} /></div>
+          )}
+          {s.key?.kind === 'properties' && (
+            <Figure id={id('Figure: edge properties')} n={figNo()} title="Edge properties" caption={fieldsCaption(properties, 'An edge has')} kind="edge-properties">
+              <ul class="ports ports--out edge-properties">
+                {properties.map((p) => <Port name={p.name} type={p.type} required={p.required} description={p.description} />)}
+              </ul>
+            </Figure>
+          )}
+          {s.key?.kind === 'chain' && <EdgeChain id={id(`Figure: ${s.key.heading}`)} n={figNo()} heading={s.key.heading} />}
+          {s.key?.kind === 'changes' && <EdgeChanges id={id('Figure: what changed in 1.1.0')} n={figNo()} />}
+        </>
+      ))}
+    </div>
 
     <section class="edge-type-reference">
       <h2 id={referenceId}>Edge types in the ontology</h2>
@@ -65,20 +122,26 @@ const typeId = new Map(ontology.edgeTypes.map((t) => [t.id, id(`Edges: ${t.id}`)
 
     <section class="edge-list">
       <h2 id={allId}>All edges</h2>
-      {ontology.edgeTypes.map((t) => (
+      <EdgeMatrix id={id('Figure: every edge as a matrix')} n={figNo()} listsId={listsId} />
+      <div id={listsId} class="edge-list__lists">
+        {ontology.edgeTypes.map((t) => (
           <section data-edge-type={t.id}>
             <h3 id={typeId.get(t.id)}><code>{t.id}</code> ({t.edges.length})</h3>
             {t.edges.length === 0 ? (
               <p>The ontology has no edges of this type.</p>
             ) : (
-              <ul class="edge-list__items">
-                {t.edges.map((e) => (
-                  <li><a href={capabilityHref(e.from)}><code>{e.from}</code></a> to <a href={capabilityHref(e.to)}><code>{e.to}</code></a></li>
-                ))}
-              </ul>
+              <details class="edge-list__details">
+                <summary>{t.edges.length === 1 ? 'The edge' : `All ${t.edges.length} edges`} of type <code>{t.id}</code></summary>
+                <ul class="edge-list__items">
+                  {t.edges.map((e) => (
+                    <li><a href={capabilityHref(e.from)}><code>{e.from}</code></a> to <a href={capabilityHref(e.to)}><code>{e.to}</code></a></li>
+                  ))}
+                </ul>
+              </details>
             )}
           </section>
-      ))}
+        ))}
+      </div>
     </section>
   </article>
 </DocLayout>
