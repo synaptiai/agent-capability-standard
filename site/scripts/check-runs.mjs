@@ -4,12 +4,14 @@
 // exempt runs of src/lib/runs.ts, and prints every run longer than two
 // viewport heights. It also reports each page's longest run at 360px.
 //
-// Report-only by default: it exits 0 whatever it finds. With
-// ACS_RUNS_ENFORCE=1 a run over the limit on a page in the enforced scope
-// fails the check. An exempt-run entry whose heading is missing fails the
-// check in either mode, so the map cannot go stale silently.
+// Enforcing: a run over the limit on a page in the enforced scope fails the
+// check (npm run check:axe, which CI runs). ACS_RUNS_ENFORCE=0 turns it into
+// a report that exits 0 on long runs, for local exploration only. An
+// exempt-run entry whose heading is missing, or a page that does not load,
+// fails the check in either mode, so the map cannot go stale silently.
 //
-// Run: node scripts/check-runs.mjs [path/to/dist] [--paths /a/,/b/]
+// Run: node scripts/check-runs.mjs [path/to/dist] [--paths /a/,/b/] [--all]
+// (--all also prints every page's longest run.)
 // The browser is Playwright's Chromium; ACS_CHROMIUM names another binary.
 import { isDeepStrictEqual } from 'node:util';
 import { readFileSync } from 'node:fs';
@@ -79,8 +81,13 @@ export function collectGeometry({ entries, selector, min, vh }) {
       exempt.push({ key: e.key, label, ...span });
       continue;
     }
-    // first-tall-fence: the first code block in the section taller than one viewport.
-    const fence = [...bodyEl.querySelectorAll('pre')].map(y).find((p) => p.top >= span.top && p.top < span.bottom);
+    // first-tall-fence: the first code block in the section taller than one
+    // viewport that a reader can see; a fence in a closed <details> still
+    // has a box, so it is skipped by its visibility, not its size.
+    const fence = [...bodyEl.querySelectorAll('pre')]
+      .filter((p) => p.checkVisibility())
+      .map(y)
+      .find((p) => p.top >= span.top && p.top < span.bottom);
     if (fence && fence.height > vh) exempt.push({ key: e.key, label, top: fence.top, bottom: fence.bottom });
   }
   const template = [...document.body.classList].find((c) => c.startsWith('page--') && !c.startsWith('page--with') && !c.startsWith('page--no-'));
@@ -231,15 +238,23 @@ if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const at = args.indexOf('--paths');
   const only = at === -1 ? null : (args.splice(at, 2)[1] ?? '').split(',').filter(Boolean);
+  const all = args.includes('--all');
+  if (all) args.splice(args.indexOf('--all'), 1);
   const dist = path.resolve(args[0] ?? fileURLToPath(new URL('../dist', import.meta.url)));
-  const enforce = process.env.ACS_RUNS_ENFORCE === '1';
+  const enforce = process.env.ACS_RUNS_ENFORCE !== '0';
   const summary = await runSweep(dist, { only, log: (m) => console.log(m) });
   for (const l of reportLines(summary)) console.log(`check-runs: ${l}`);
+  // --all: every page's longest run at 1440 (net of exempt runs) and at 360.
+  if (all)
+    for (const r of [...summary.results].sort((a, b) => a.url.localeCompare(b.url)))
+      console.log(
+        `check-runs: page ${r.url} [${r.template}] ${r.enforced ? 'enforced' : 'report'} longest ${Math.round(r.longest?.net ?? 0)}px at 1440, ${Math.round(r.narrow?.net ?? 0)}px at 360`,
+      );
   const failing = summary.results.filter((r) => r.failing.length > 0);
   const underTarget = summary.results.filter((r) => (r.longest?.net ?? 0) <= summary.target).length;
   console.log(
     `check-runs: ${summary.results.length} pages; ${underTarget} meet the ${summary.target}px target; ` +
-      `${failing.length} enforced page(s) have a run over ${summary.limit}px (${enforce ? 'enforced' : 'report only; set ACS_RUNS_ENFORCE=1 to fail'})`,
+      `${failing.length} enforced page(s) have a run over ${summary.limit}px (${enforce ? 'enforced' : 'report only, because ACS_RUNS_ENFORCE=0'})`,
   );
   for (const f of summary.failed) console.error(`check-runs: ${f}`);
   if (summary.failed.length > 0) process.exit(1);

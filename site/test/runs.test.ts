@@ -25,21 +25,21 @@ describe('measureRuns on the fixture page', () => {
   const runs = measureRuns(fixture.geometry);
 
   it('finds the runs before, between and after the two counted figures', () => {
-    // Body 100..7850; figures 1100..1400 and 6200..6300.
+    // Body 100..7900 (the closed details under #code adds its 50px summary); figures 1100..1400 and 6200..6300.
     expect(runs.map((r) => [r.top, r.bottom, r.height])).toEqual([
       [100, 1100, 1000],
       [1400, 6200, 4800],
-      [6300, 7850, 1550],
+      [6300, 7900, 1600],
     ]);
   });
 
   it('subtracts the exempt sections each run crosses', () => {
     // #notes 1400..4050 lies inside the second run: 4800 - 2650 = 2150.
-    // The tall fence 6450..7450 lies inside the third: 1550 - 1000 = 550.
+    // The visible tall fence 6500..7500 lies inside the third: 1600 - 1000 = 600.
     expect(runs.map((r) => [r.exempt, r.net, r.labels])).toEqual([
       [0, 1000, []],
       [2650, 2150, ['#notes (a)']],
-      [1000, 550, ['#code (b)']],
+      [1000, 600, ['#code (b)']],
     ]);
     expect(longestRun(runs)?.net).toBe(2150);
   });
@@ -98,8 +98,29 @@ describe('exempt runs and scope', () => {
       'license:c',
       'citation:c',
       'contributing:c',
+      // Not in the spec's table: added at integration, read from README.md
+      // (five tables of document links).
+      'documentation:a',
     ]);
-    expect(rows('/guides/claude-agent-sdk/')).toHaveLength(5);
+    expect(rows('/guides/claude-agent-sdk/')).toEqual([
+      'quick-start:b',
+      'using-groundedclient:b',
+      'using-wrap_options-low-level:b',
+      'configuration-options:b',
+      'using-with-capability-skills:b',
+      // Not in the spec's table: added at integration, read from
+      // docs/integrations/claude_agent_sdk.md (each section is code fences
+      // with a one-line lead-in).
+      'structured-output:b',
+      'budget-enforcement:b',
+      'evidence-anchors:b',
+      'validation:b',
+      'troubleshooting:b',
+      'api-reference:b',
+    ]);
+    // Added at integration: the Live Context command lists, and rollback's Intent.
+    expect(rows('template:capability')).toEqual(['examples:b', 'live-context:b']);
+    expect(rows('/capabilities/rollback/')).toEqual(['intent:a']);
     expect(rows('template:domain')).toEqual(['customization-guide:b', 'integration-examples:b']);
     expect(EXEMPT_RUNS.find((e) => e.page === 'template:capability')?.extent).toBe('first-tall-fence');
     expect(exemptRunsFor('/rfcs/0001/', 'rfc').map((e) => e.anchor)).toEqual(['*']);

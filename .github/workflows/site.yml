@@ -69,7 +69,9 @@ jobs:
       # theme, at 1440px and 360px, served from dist/; fails on any violation
       # and on a page that scrolls sideways at 360px (scripts/check-axe.mjs).
       # The same npm script then runs scripts/check-runs.mjs, the figure-gap
-      # sweep (visual spec 4.2): report only until ACS_RUNS_ENFORCE=1 is set.
+      # sweep (visual spec 4.2): it fails when a page in the enforced scope has
+      # a run over two viewport heights with no figure that is not listed in
+      # the exempt runs of site/src/lib/runs.ts.
       # The Chromium revision is the one the pinned playwright package names.
       - name: Install Chromium for the accessibility check
         run: npx playwright install --with-deps chromium

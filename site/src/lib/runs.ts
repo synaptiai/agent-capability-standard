@@ -71,6 +71,25 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
   { page: '/guides/claude-agent-sdk/', anchor: 'using-wrap_options-low-level', category: 'b', run: 'Using wrap_options()' },
   { page: '/guides/claude-agent-sdk/', anchor: 'configuration-options', category: 'b', run: 'Configuration Options' },
   { page: '/guides/claude-agent-sdk/', anchor: 'using-with-capability-skills', category: 'b', run: 'Using with Capability Skills' },
+  // Added at integration, read from the guide's source: each of these
+  // sections is code fences with a one-line lead-in (category b).
+  { page: '/guides/claude-agent-sdk/', anchor: 'structured-output', category: 'b', run: 'Structured Output (one config fence)' },
+  { page: '/guides/claude-agent-sdk/', anchor: 'budget-enforcement', category: 'b', run: 'Budget Enforcement (one config fence)' },
+  { page: '/guides/claude-agent-sdk/', anchor: 'evidence-anchors', category: 'b', run: 'Evidence Anchors and Evidence Format (two fences)' },
+  { page: '/guides/claude-agent-sdk/', anchor: 'validation', category: 'b', run: 'Validation (one shell fence)' },
+  { page: '/guides/claude-agent-sdk/', anchor: 'troubleshooting', category: 'b', run: 'Troubleshooting (three errors, each a fix as a fence)' },
+  { page: '/guides/claude-agent-sdk/', anchor: 'api-reference', category: 'b', run: 'API Reference (class and function signatures as fences)' },
+  // Added at integration: the overview's Documentation section is five
+  // tables of document links, each with a one-line purpose; nothing in it
+  // has an order, a count or an id to draw (category a).
+  { page: '/start/overview/', anchor: 'documentation', category: 'a', run: 'Documentation (tables of document links)' },
+  // Added at integration: rollback's Intent is one paragraph and two plain
+  // lists (success criteria, compatible schemas), the same narrative every
+  // capability page has (category a). It is listed for rollback only, the one
+  // capability page whose run through it is over the limit: rollback's skill
+  // has two inputs (too few for the Inputs table to count as a figure) and its
+  // procedure names a field in one step only (too few for F-C7).
+  { page: '/capabilities/rollback/', anchor: 'intent', category: 'a', run: 'Intent (paragraph and plain lists)' },
   {
     page: 'template:capability',
     anchor: 'examples',
@@ -78,6 +97,10 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
     extent: 'first-tall-fence',
     run: 'the open first example, when its fence alone is taller than one viewport',
   },
+  // Added at integration: the "Live Context" section of the audit, search and
+  // verify skills is a list of shell commands the skill runs at load time
+  // (category b); it has nothing else to draw.
+  { page: 'template:capability', anchor: 'live-context', category: 'b', run: 'Live Context (shell commands the skill runs)' },
   { page: 'template:domain', anchor: 'customization-guide', category: 'b', run: 'Customization Guide' },
   { page: 'template:domain', anchor: 'integration-examples', category: 'b', run: 'Integration Examples' },
   // The numbered RFCs only: the OASF proposal under /rfcs/proposals/ is a
