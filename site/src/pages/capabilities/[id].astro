@@ -12,7 +12,6 @@ import ContractDiagram from '../../components/fig/ContractDiagram.astro';
 import Neighbourhood from '../../components/fig/Neighbourhood.astro';
 import WhereItRuns from '../../components/fig/WhereItRuns.astro';
 import SafetyPanel from '../../components/fig/SafetyPanel.astro';
-import OutputFields from '../../components/fig/OutputFields.astro';
 import CompositionChain from '../../components/fig/CompositionChain.astro';
 import ExampleFields from '../../components/fig/ExampleFields.astro';
 import VerificationMap from '../../components/fig/VerificationMap.astro';
@@ -37,7 +36,7 @@ import {
   neighbours,
   outputFields,
   outputFieldsCaption,
-  outputFieldsIsFigure,
+  outputFieldsDiffer,
   procedureMap,
   procedureMapIsFigure,
   safetySequence,
@@ -111,30 +110,28 @@ const nTools = typeof fm['allowed-tools'] === 'string' ? next() : 0;
 // The skill's Inputs section gets no port figure: the contract figure above
 // already draws the same ports, and the skill's own table follows the
 // heading (the review counted each input four times); it gets F-C12 when its
-// inputs need different Standard extensions. Under Output Contract
-// the page draws what the contract figure does not: which of the skill's
-// output fields the contract declares (F-C6). Under Safety Constraints it
+// inputs need different Standard extensions. Under Output Contract a
+// sentence says how the skill's output fields compare with the contract
+// (F-C6), and the skill's Field Definitions table carries, row by row, what
+// the contract says of each (rehype-capability-skill): a chip figure there
+// listed the same field names as the table under it. Under Safety Constraints it
 // draws where the capability may run in a step list (F-C5). Under Procedure
 // it draws which inputs and output fields each step names (F-C7), under
 // Verification the same for each check (F-C11), under Examples which output
 // fields each example writes out (F-C9) and under Composition Patterns the
 // listed neighbours against the ontology and the catalogs. Under the skill's
 // heading it draws what the skill's tools can do (F-C10).
-type After = { kind: 'chain' | 'examples' | 'xworkflows' | 'verification' | 'inputs' | 'output' | 'sequence' | 'procedure'; n: number; lead?: string } | { kind: 'sentence'; text: string };
+type After = { kind: 'chain' | 'examples' | 'xworkflows' | 'verification' | 'inputs' | 'sequence' | 'procedure'; n: number; lead?: string } | { kind: 'sentence'; text: string };
 const after: Record<string, After> = {};
 for (const part of skill.parts) {
   if (part.id === 'inputs' && inputGroupsIsFigure(igroups)) after[part.id] = { kind: 'inputs', n: next() };
   // F-C7 only where two or more steps use a field's name; elsewhere nothing, since a count of one word match says little.
   if (part.id === 'procedure' && procedureMapIsFigure(procedure)) after[part.id] = { kind: 'procedure', n: next() };
   // F-C9 (the examples against the output) sits under Output Contract when
-  // F-C6 there is only a sentence, and under Examples otherwise.
-  const examplesUnderOutput = !outputFieldsIsFigure(fields) && exampleFieldsIsFigure(examples);
+  // the skill's output fields match the contract, and under Examples otherwise.
+  const examplesUnderOutput = !outputFieldsDiffer(fields) && exampleFieldsIsFigure(examples);
   if (part.id === 'output-contract')
-    after[part.id] = outputFieldsIsFigure(fields)
-      ? { kind: 'output', n: next() }
-      : examplesUnderOutput
-        ? { kind: 'examples', n: next(), lead: outputFieldsCaption(cap, fields) }
-        : { kind: 'sentence', text: outputFieldsCaption(cap, fields) };
+    after[part.id] = examplesUnderOutput ? { kind: 'examples', n: next(), lead: outputFieldsCaption(cap, fields) } : { kind: 'sentence', text: outputFieldsCaption(cap, fields) };
   // When every example writes out the same fields, one sentence says so in place of F-C9.
   const sameLead = exampleFieldsSame(examples) ? exampleFieldsCaption(cap, examples) : undefined;
   if (part.id === 'examples' && exampleFieldsIsFigure(examples) && !examplesUnderOutput) after[part.id] = { kind: 'examples', n: next() };
@@ -284,7 +281,6 @@ const skillFacts = (
               {fig?.kind === 'verification' && <VerificationMap cap={cap} map={checks} n={fig.n} />}
               {fig?.kind === 'chain' && <CompositionChain cap={cap} chain={chain} n={fig.n} />}
               {fig?.kind === 'procedure' && <ProcedureMap cap={cap} map={procedure} n={fig.n} />}
-              {fig?.kind === 'output' && <OutputFields cap={cap} fields={fields} n={fig.n} />}
               {fig?.kind === 'sequence' && <SafetySequence cap={cap} n={fig.n} />}
               {fig?.kind === 'sentence' && <p>{fig.text}</p>}
               <Fragment set:html={part.body} />

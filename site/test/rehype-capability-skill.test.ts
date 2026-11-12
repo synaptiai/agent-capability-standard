@@ -4,6 +4,7 @@
 // (debug-workflow), which the step must leave alone. Expected values are
 // read off the fixture below.
 import { describe, expect, it } from 'vitest';
+import { loadOntology } from '../src/data/ontology';
 import { renderRepoFile } from './pipeline';
 
 const FIXTURE = [
@@ -90,11 +91,33 @@ describe('rehype-capability-skill', () => {
     expect(section).not.toContain('data-info-figure');
   });
 
-  it('leaves the Field Definitions table as written; the output-fields figure says which fields the contract declares', async () => {
+  it("marks each top-level Field Definitions row with mutate's output contract, and leaves a nested path unmarked", async () => {
+    // mutate's output contract (ontology): success, rollback_command and new_state are fields of it, so
+    // each gets a pin; previous_state.hash is a nested path and gets an empty cell.
     const html = await render('skills/mutate/SKILL.md');
     const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
-    expect(section).not.toContain('In the contract');
-    expect(section).not.toContain('data-info-figure');
+    expect(section).toContain('<th>In the output contract</th>');
+    expect(section).toMatch(/<table[^>]*data-info-figure="enriched-table"/);
+    const cellsIn = [...section.matchAll(/<td class="skill-contract-cell">([\s\S]*?)<\/td>/g)].map((m) => m[1]!);
+    expect(cellsIn).toHaveLength(4);
+    expect(cellsIn[3]).toBe('');
+    const out = loadOntology().byId.get('mutate')!.output_schema as { properties: Record<string, unknown>; required?: string[] };
+    ['success', 'new_state', 'rollback_command'].forEach((name, i) => {
+      const want = !(name in out.properties) ? "no, the skill's own" : (out.required ?? []).includes(name) ? 'required' : 'optional';
+      expect(cellsIn[i]).toContain(want);
+    });
+  });
+
+  it("adds the output contract's required and optional marks to Field Definitions when the skill's fields all match it", async () => {
+    // invoke's skill names every field of its output contract, so F-C6 is a sentence and the table carries the contract.
+    const html = (await renderRepoFile('skills/invoke/SKILL.md')).code;
+    const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
+    expect(section).toContain('<th>In the output contract</th>');
+    expect(section).toMatch(/<table[^>]*data-info-figure="enriched-table"/);
+    const out = loadOntology().byId.get('invoke')!.output_schema as { properties: Record<string, unknown>; required?: string[] };
+    const rows = [...section.matchAll(/<tr>\s*<td><code>([a-z_]+)<\/code><\/td>[\s\S]*?<td class="skill-contract-cell">([\s\S]*?)<\/td><\/tr>/g)].map((m) => [m[1], /required/.test(m[2]!) ? 'required' : /optional/.test(m[2]!) ? 'optional' : '']);
+    expect(rows.length).toBeGreaterThanOrEqual(3);
+    for (const [name, mark] of rows) expect([name, mark]).toEqual([name, name! in out.properties ? ((out.required ?? []).includes(name!) ? 'required' : 'optional') : '']);
   });
 
   it('makes each example a closed details whose summary keeps the H3 and its id, with no anchor link', async () => {

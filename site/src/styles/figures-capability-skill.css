@@ -124,7 +124,7 @@
     color: var(--ink-2);
   }
 
-  /* ---------- F-C6: the skill's output fields against the contract ---------- */
+  /* ---------- chip rows: F-C12, the inputs by the extension they need ---------- */
 
   .ofields {
     display: grid;
@@ -173,15 +173,6 @@
     padding: 2px var(--space-2);
     border: var(--px) solid var(--ink-3);
     background: var(--bg);
-  }
-
-  .ofields__row[data-row='contract'] .ofields__chip {
-    border-color: var(--layer);
-  }
-
-  .ofields__row[data-row='own'] .ofields__chip,
-  .ofields__row[data-row='missing'] .ofields__chip {
-    background: var(--bg-mut);
   }
 
   .ofields__chip code {
@@ -323,6 +314,27 @@
 
   .skill-fence {
     margin: var(--space-3) 0;
+  }
+
+  /* The Field Definitions table's contract column: the port pin, filled when
+     the output contract requires the field and outlined when it is optional;
+     a cross when the field is the skill's own. */
+  .skill-contract {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--ink);
+    vertical-align: 0;
+  }
+
+  .skill-contract--required {
+    background: var(--ink);
+  }
+
+  .skill-contract-own {
+    vertical-align: -2px;
+    color: var(--ink-3);
   }
 
   /* ---------- the procedure in two columns when the column is wide ---------- */

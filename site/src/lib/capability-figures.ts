@@ -440,23 +440,21 @@ export function outputFields(cap: Capability, skillText: string, where: string):
   };
 }
 
-/** True when the comparison is worth a figure: the skill adds fields or leaves some out. */
-export function outputFieldsIsFigure(f: OutputFields): boolean {
+/** True when the skill's output differs from the contract: it adds fields or leaves some out. */
+export function outputFieldsDiffer(f: OutputFields): boolean {
   return f.missing.length > 0 || f.skill.some((x) => !x.inContract);
 }
 
-/** F-C6's title. */
-export function outputFieldsTitle(cap: Capability, f: OutputFields): string {
-  const inC = f.skill.filter((x) => x.inContract).length;
-  return `Fields of the ${cap.id} skill's output: ${inC} of ${f.skill.length} in the contract`;
-}
-
-/** F-C6's caption, or the sentence printed in its place. */
+/** F-C6, the sentence under the skill's Output Contract heading; the Field Definitions table marks each field (rehype-capability-skill). */
 export function outputFieldsCaption(cap: Capability, f: OutputFields): string {
   const inC = f.skill.filter((x) => x.inContract);
   const req = inC.filter((x) => x.required).length;
   const added = f.skill.length - inC.length;
-  if (!outputFieldsIsFigure(f)) return `Every field of the skill's output is a field of ${cap.id}'s output contract, and the skill names all of them.`;
+  if (!outputFieldsDiffer(f)) {
+    const opt = f.skill.length - req;
+    const which = req === 0 ? 'the contract requires none of them' : opt === 0 ? 'the contract requires all of them' : `the contract requires ${wordList(inC.filter((x) => x.required).map((x) => x.name))} and leaves the other ${opt} optional`;
+    return `Every field of the skill's output is a field of ${cap.id}'s output contract, and the skill names all of them; ${which}.`;
+  }
   const missing = f.missing.length === 0 ? '' : `; it leaves out ${plural(f.missing.length, 'contract field', 'contract fields')} (${f.missing.join(', ')})`;
   return `The skill returns ${plural(f.skill.length, 'field', 'fields')}: ${inC.length} ${inC.length === 1 ? 'is' : 'are'} in ${cap.id}'s output contract (${req} required) and ${added} ${added === 1 ? 'is' : 'are'} the skill's own, outside the contract${missing}.`;
 }

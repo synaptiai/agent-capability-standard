@@ -13,8 +13,7 @@ import {
   neighbourGroupLabel,
   outputFields,
   outputFieldsCaption,
-  outputFieldsIsFigure,
-  outputFieldsTitle,
+  outputFieldsDiffer,
   procedureMap,
   procedureMapCaption,
   procedureMapIsFigure,
@@ -111,19 +110,17 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
   const summary = contractSummary(cap);
   const skillText = readRepoFile(skillSource);
   const fields = outputFields(cap, skillText, skillSource);
-  const outputBlock = outputFieldsIsFigure(fields)
-    ? figure(
-        outputFieldsTitle(cap, fields),
-        outputFieldsCaption(cap, fields),
-        table(
-          ['Field of the skill\'s output', 'In the contract'],
-          [
-            ...fields.skill.map((f) => [code(f.name), f.inContract ? (f.required ? 'Yes, required' : 'Yes, optional') : 'No, the skill\'s own']),
-            ...fields.missing.map((m) => [code(m), 'Yes, but the skill leaves it out']),
-          ],
-        ),
-      )
-    : outputFieldsCaption(cap, fields);
+  // The page marks these in the skill's Field Definitions table; the copy keeps the source table as written, so it lists them here.
+  const outputBlock = [
+    outputFieldsCaption(cap, fields),
+    table(
+      ['Field of the skill\'s output', 'In the output contract'],
+      [
+        ...fields.skill.map((f) => [code(f.name), f.inContract ? (f.required ? 'Yes, required' : 'Yes, optional') : 'No, the skill\'s own']),
+        ...fields.missing.map((m) => [code(m), 'Yes, but the skill leaves it out']),
+      ],
+    ),
+  ].join('\n\n');
   const proc = procedureMap(skillText, skillSource);
   const procedureBlock = procedureMapIsFigure(proc)
     ? figure(
@@ -164,7 +161,7 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
     : null;
   const xw = exampleWorkflows(skillText);
   const xwBlock =
-    xw.length === 0 || exampleFieldsIsFigure(exampleFields(skillText, skillSource)) && outputFieldsIsFigure(fields)
+    xw.length === 0 || exampleFieldsIsFigure(exampleFields(skillText, skillSource)) && outputFieldsDiffer(fields)
       ? null
       : figure(`The catalog workflows the examples of the ${cap.id} skill run`, exampleWorkflowsCaption(cap, xw), table(['Workflow', 'Steps', 'Examples'], xw.map((r) => [mdLink(code(r.id), `/workflows/${loadWorkflows().byId.get(r.id)!.slug}/`), String(loadWorkflows().byId.get(r.id)!.steps.length), r.examples.join(', ')])));
   const vm = verificationMap(skillText, skillSource);

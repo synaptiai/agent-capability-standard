@@ -406,12 +406,6 @@
     color: var(--ink-2);
   }
 
-  /* ---------- Standard: capability fields (F-S2) ---------- */
-
-  .spec-ports {
-    max-width: 40rem;
-  }
-
   /* ---------- Standard: layer model (F-S3) ---------- */
 
   .layer-model {

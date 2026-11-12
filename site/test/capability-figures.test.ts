@@ -18,7 +18,7 @@ import {
   edgeRules,
   outputFields,
   outputFieldsCaption,
-  outputFieldsIsFigure,
+  outputFieldsDiffer,
   procedureMap,
   procedureMapCaption,
   procedureMapIsFigure,
@@ -320,7 +320,7 @@ describe('outputFields (F-C6)', () => {
 
   it('prints a sentence when every field of the fence is in the contract and none is missing', () => {
     const f = { skill: [{ name: 'a', inContract: true, required: true }], missing: [] };
-    expect(outputFieldsIsFigure(f)).toBe(false);
+    expect(outputFieldsDiffer(f)).toBe(false);
   });
 });
 

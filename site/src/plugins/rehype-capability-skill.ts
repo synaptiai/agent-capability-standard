@@ -17,13 +17,18 @@
 // - Safety Constraints: the section's content sits in a panel with the
 //   caution glyph.
 // - Output Contract: the section's first code block folds into a
-//   <details>, under the page's figure of the same fields (F-C6, which says
-//   which of the skill's fields the contract declares, so the Field
-//   Definitions table is left as written).
+//   <details>, and the Field Definitions table gets a column with what the
+//   ontology's output contract says of each top-level field: a filled pin
+//   when it requires the field, an outlined pin when the field is optional,
+//   and a cross when the field is the skill's own. The skill's table does not
+//   say this, so the table is an information figure (visual spec 4.2); the
+//   page's sentence above it (F-C6) counts them and names any contract field
+//   the skill leaves out.
 // The port columns and the composition chain are Astro figures, which the
 // page puts under their headings.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
-import { loadOntology } from '../data/ontology';
+import { loadOntology, type Capability } from '../data/ontology';
+import { contractRows } from '../lib/views';
 import { glyphElement } from '../pixel/hast';
 import { sourceOf } from './source';
 
@@ -90,7 +95,8 @@ export default function rehypeCapabilitySkill() {
     }
 
     // Output Contract: the section's first code block folds under a summary,
-    // because the page draws its fields as a figure (F-C6) above it.
+    // because the page draws its fields as a figure (F-C6) or marks them in
+    // the Field Definitions table.
     const output = sections(kids).get('output-contract');
     if (output) {
       const [s, e] = output;
@@ -108,6 +114,14 @@ export default function rehypeCapabilitySkill() {
         };
         kids.splice(i, 1, fold);
       }
+      const repoPath = sourceOf(file, 'rehype-capability-skill').repoPath;
+      const cap = loadOntology().byId.get(SKILL.exec(repoPath)![1]!)!;
+      const [s2, e2] = sections(kids).get('output-contract')!;
+      const table = kids
+        .slice(s2 + 1, e2)
+        .map(tableOf)
+        .find((t) => t !== undefined);
+      if (table) markContract(table, cap);
     }
 
     // Inputs: check and cross glyphs on the Required column.
@@ -179,5 +193,52 @@ export function markRequired(table: Element): number {
   // The glyphs repeat the column's Yes and No, so the table is a glyph aid,
   // not an information figure (issue #125 review).
   if (marked > 0) table.properties = { ...table.properties, dataEnriched: String(marked) };
+  return marked;
+}
+
+/** Rows a table must mark before it counts as an information figure (visual spec 4.2). */
+const CONTRACT_MIN_ROWS = 3;
+
+/**
+ * Adds an "In the output contract" column to a skill's Field Definitions
+ * table: for each top-level field, a filled pin and "required" or an
+ * outlined pin and "optional" when the ontology's output contract declares
+ * it, and a cross and "no, the skill's own" when it does not. A nested path
+ * (`result.<store_as>`, `data[].key`) gets an empty cell. Returns the rows
+ * marked.
+ */
+export function markContract(table: Element, cap: Capability): number {
+  const part = (tag: string) => table.children.find((c): c is Element => isEl(c, tag));
+  const rows = (sec: Element | undefined) => (sec ? sec.children.filter((c): c is Element => isEl(c, 'tr')) : []);
+  const cells = (tr: Element) => tr.children.filter((c): c is Element => isEl(c, 'td') || isEl(c, 'th'));
+  const head = rows(part('thead'))[0];
+  if (!head || text(cells(head)[0]!).trim() !== 'Field') return 0;
+  const contract = new Map(contractRows(cap.output_schema).filter((r) => r.depth === 0).map((r) => [r.name, r.required]));
+  const body = rows(part('tbody'));
+  // 'required' | 'optional' | 'own', or null for a nested path.
+  const marks = body.map((tr) => {
+    const name = text(cells(tr)[0]!).replace(/`/g, '').trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
+    const req = contract.get(name);
+    return req === undefined ? 'own' : req ? 'required' : 'optional';
+  });
+  if (marks.filter((m) => m !== null).length < CONTRACT_MIN_ROWS) return 0;
+  head.children.push({ type: 'element', tagName: 'th', properties: {}, children: [txt('In the output contract')] });
+  body.forEach((tr, i) => {
+    const m = marks[i];
+    tr.children.push({
+      type: 'element',
+      tagName: 'td',
+      properties: { className: ['skill-contract-cell'] },
+      children:
+        m === null
+          ? []
+          : m === 'own'
+            ? [glyphElement('close', { className: 'skill-contract-own' }), txt(" no, the skill's own")]
+            : [{ type: 'element', tagName: 'span', properties: { className: ['skill-contract', `skill-contract--${m}`], ariaHidden: 'true' }, children: [] }, txt(` ${m}`)],
+    });
+  });
+  const marked = marks.filter((m) => m !== null).length;
+  table.properties = { ...table.properties, dataEnriched: String(marked), dataInfoFigure: 'enriched-table' };
   return marked;
 }
