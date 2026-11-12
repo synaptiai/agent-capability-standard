@@ -4,6 +4,10 @@
 // two-letter symbol and id. The accessible name says the layer, the risk and
 // which safety flags apply; the data attributes carry the same facts.
 // Search indexes only the id: the number and symbol would join onto it.
+// The name is the link's own text (the id, then visually hidden words), not
+// an aria-label: an aria-label that leaves out the visible number and symbol
+// fails WCAG 2.5.3 (axe label-content-name-mismatch), so those are hidden
+// from assistive technology instead.
 import type { Capability } from '../data/ontology';
 import { capabilityNeedsCheckpoint } from '../lib/flags';
 import { capabilityHref } from '../lib/generated';
@@ -18,8 +22,8 @@ interface Props {
 const { cap, index, symbol } = Astro.props;
 const checkpoint = capabilityNeedsCheckpoint(cap);
 const pips = { low: 1, medium: 2, high: 3 }[cap.risk];
-const name = [
-  `${cap.id}, ${cap.layer} layer, ${cap.risk} risk`,
+const facts = [
+  `${cap.layer} layer, ${cap.risk} risk`,
   ...(cap.mutation ? ['mutates'] : []),
   ...(checkpoint ? ['needs checkpoint'] : []),
   ...(cap.requires_approval ? ['needs approval'] : []),
@@ -28,7 +32,6 @@ const name = [
 <a
   class="capability-tile has-layer"
   href={capabilityHref(cap.id)}
-  aria-label={name}
   style={`--layer: var(--layer-${cap.layer})`}
   data-capability={cap.id}
   data-layer={cap.layer.toLowerCase()}
@@ -37,8 +40,8 @@ const name = [
   data-checkpoint={checkpoint ? 'true' : 'false'}
   data-approval={cap.requires_approval ? 'true' : 'false'}
 >
-  <span class="capability-tile__index" data-pagefind-ignore>{index}</span>
+  <span class="capability-tile__index" aria-hidden="true" data-pagefind-ignore>{index}</span>
   <span class="risk-pips" data-level={pips} aria-hidden="true">{Array.from({ length: pips }, () => <span class="risk-pips__pip"></span>)}</span>
   <span class="capability-tile__symbol" aria-hidden="true" data-pagefind-ignore>{symbol}</span>
-  <code class="capability-tile__id">{cap.id}</code>
+  <code class="capability-tile__id">{cap.id}</code><span class="visually-hidden" data-pagefind-ignore>, {facts}</span>
 </a>
