@@ -83,40 +83,22 @@ export function fieldGroupsCaption(rows: FieldRow[], what: string): string {
 // ---------------------------------------------- field tables shown as figures
 
 /**
- * Field tables the page shows as figures (a `wrap` slot): the table itself is
- * the drawing, so the figure does not draw the same fields a second time.
- * `what` starts the caption; `of` is the table's index in its section.
+ * Field tables the page draws as a `Port` column (F-S2 for §4.1, F-S24 for
+ * §6.3): one row per field, required filled and optional outlined, with its
+ * type glyph and type string, grouped by dotted prefix. The figure wraps
+ * the source table and keeps it, folded, under the drawing, so the page
+ * does not show the same fields twice. `what` starts the caption.
  */
 export const TABLE_FIGURES: Readonly<Record<string, { section: string; name: string; what: string }>> = {
   'table-4.1': { section: '4.1 ', name: 'Capability fields', what: 'A capability' },
-  'table-5.1': { section: '5.1 ', name: 'Workflow fields', what: 'A workflow' },
-  'table-5.2': { section: '5.2 ', name: 'Required step fields', what: 'A step' },
-  'table-6.2': { section: '6.2 ', name: 'Event fields', what: 'A canonical event' },
   'table-6.3': { section: '6.3 ', name: 'World-state fields', what: 'A world state snapshot' },
-  'table-10.1': { section: '10.1 ', name: 'Conformance levels', what: '' },
 };
 
-/**
- * The caption of a table figure. §5.2 has a second table, of the fields a
- * step may define, and its caption counts both; §10.1's counts the §10.2
- * requirements of each level.
- */
+/** The caption of a field-table figure. */
 export function tableFigureCaption(key: string, text: string, where: string): string {
   const t = TABLE_FIGURES[key];
   if (!t) throw new Error(`${where}: no table figure ${key}`);
-  if (key === 'table-10.1') {
-    const cols = conformanceLevels(text, where);
-    return `${plural(cols.length, 'level', 'levels')}, each with a one-line summary; §10.2 lists the requirements of each in full (${list(cols.map((c) => `${c.level} ${c.items.length}`))}).`;
-  }
-  const rows = fieldRows(text, t.section, where);
-  if (key === 'table-5.2') {
-    const may = tableRows(sectionTable(text, t.section, 1, where));
-    if (may[0]!.join('|') !== 'Field|Type|Description') throw new Error(`${where}: §5.2's second table is not "Field | Type | Description"`);
-    const optional = may.length - 1;
-    const req = rows.filter((r) => r.required).length;
-    return `${t.what} must define ${plural(req, 'field', 'fields')}; the second table of §5.2 lists ${optional} more that a step may define, ${rows.length + optional} fields in all.`;
-  }
-  return fieldGroupsCaption(rows, t.what);
+  return fieldGroupsCaption(fieldRows(text, t.section, where), t.what);
 }
 
 // ---------------------------------------------- F-S24b merge thresholds

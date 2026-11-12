@@ -152,7 +152,7 @@ export function slotBlock(slot: SpecSlot, source: string): string {
     }
   }
   if (slot.key.startsWith('codes-')) return figure(title, T.sectionCodesCaption(T.sectionCodes(text, slot.key.slice(6), where)), drawn('table'));
-  if (slot.key in T.TABLE_FIGURES) return figure(title, T.tableFigureCaption(slot.key, text, where), `The figure is the table of ${at} above.`);
+  if (slot.key in T.TABLE_FIGURES) return figure(title, T.tableFigureCaption(slot.key, text, where), drawn('field table'));
   if (slot.key.startsWith('pattern-')) {
     const p = T.patternStrips(text, where)[Number(slot.key.slice(8))]!;
     return figure(

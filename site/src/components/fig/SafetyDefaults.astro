@@ -5,14 +5,17 @@
 // needs approval, each a filled --ink square with its glyph when on and an
 // outline when off. In a narrow frame the 36 rows become 4 columns of 9,
 // each a 24px tile with its four marks under it. Each row is a list item
-// whose hidden text says the same in words; the drawing is aria-hidden.
+// whose hidden text says the same in words; the drawing is aria-hidden. A
+// capability that needs a checkpoint only through a requires edge from
+// checkpoint (rollback) gets an outlined cell with the requires mark, as §4.4
+// and its own page say "Yes, via requires edge".
 //
 // Props:
 // - id: string, required. A ref- id.
 // - n: number, required.
 // - title: string, required.
 import { loadOntology } from '../../data/ontology';
-import { FLAG_ROWS, flagWords, safetyDefaults, safetyDefaultsCaption } from '../../lib/spec-dsl-figures';
+import { checkpointViaEdge, FLAG_ROWS, flagState, flagWords, safetyDefaults, safetyDefaultsCaption } from '../../lib/spec-dsl-figures';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import Figure from './Figure.astro';
 import MiniTile from './MiniTile.astro';
@@ -28,11 +31,14 @@ const o = loadOntology();
 const rows = safetyDefaults(o).flatMap((g) => g.caps.map((c, i) => ({ c, layer: g.layer, first: i === 0 })));
 const PIPS = { low: 1, medium: 2, high: 3 } as const;
 const RISKS = Object.keys(PIPS) as (keyof typeof PIPS)[];
+// A key entry for "via a requires edge" only when some capability needs one that way.
+const anyViaEdge = o.capabilities.some(checkpointViaEdge);
 ---
 <Figure id={id} n={n} title={title} caption={safetyDefaultsCaption(o)} kind="safety-defaults">
   <ul class="flag-key" aria-label="Key">
     <li><span class="flag-key__pips" aria-hidden="true">{RISKS.map((risk) => <span class="risk-pips flag-pips" data-risk={risk}>{Array.from({ length: PIPS[risk] }, () => <span class="risk-pips__pip"></span>)}</span>)}</span>Risk: low, medium, high</li>
     {FLAG_ROWS.map((f) => <li><span class="flag-cell flag-cell--on" aria-hidden="true"><PixelGlyph name={f.glyph} scale={1} /></span>{f.label}</li>)}
+    {anyViaEdge && <li><span class="flag-cell flag-cell--edge" aria-hidden="true"><PixelGlyph name="mark:requires" scale={1} /></span>Needs checkpoint via a requires edge</li>}
     <li><span class="flag-cell flag-cell--off" aria-hidden="true"></span>Off</li>
   </ul>
   <div class="flag-strip">
@@ -45,7 +51,7 @@ const RISKS = Object.keys(PIPS) as (keyof typeof PIPS)[];
           <span class="flag-row__cap" aria-hidden="true"><MiniTile id={c.id} size={24} link={false} /><code class="flag-row__id">{c.id}</code></span>
           <span class="flag-row__risk" aria-hidden="true"><span class="risk-pips flag-pips" data-risk={c.risk}>{Array.from({ length: PIPS[c.risk] }, () => <span class="risk-pips__pip"></span>)}</span><span class="flag-row__word">{c.risk}</span></span>
           {FLAG_ROWS.map((f) => (
-            <span class:list={['flag-cell', c[f.id] ? 'flag-cell--on' : 'flag-cell--off']} data-flag={f.id} aria-hidden="true">{c[f.id] && <PixelGlyph name={f.glyph} scale={1} />}</span>
+            <span class:list={['flag-cell', `flag-cell--${flagState(c, f.id)}`]} data-flag={f.id} data-state={flagState(c, f.id)} aria-hidden="true">{flagState(c, f.id) === 'on' ? <PixelGlyph name={f.glyph} scale={1} /> : flagState(c, f.id) === 'edge' ? <PixelGlyph name="mark:requires" scale={1} /> : null}</span>
           ))}
           <span class="visually-hidden">{c.id}: {flagWords(c)}</span>
         </li>

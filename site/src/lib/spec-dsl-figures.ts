@@ -152,16 +152,21 @@ export interface OrderLayout {
   ports: { id: string; from: number; to: number }[];
 }
 
-/** F-S1 geometry (visual spec 3.9 and 2.4): a gutter for the lane marks, one 80px column per target. */
-export const ORDER_GEOM = { gutter: 24, col: 104, gap: 16, tile: 32, label: 18, laneGap: 20, chevron: { requires: 20, other: 10 }, slotGap: 2 } as const;
+/**
+ * F-S1 geometry (visual spec 3.9 and 2.4): a gutter for each lane's source
+ * symbol and edge mark, one column per target.
+ */
+export const ORDER_GEOM = { gutter: 48, col: 100, gap: 16, tile: 32, label: 18, laneGap: 20, chevron: { requires: 20, other: 10 }, slotGap: 2 } as const;
 
 /**
  * Sources on top and targets below, joined by one horizontal lane per
  * (source, edge type): a drop from the source to its lane, the lane, and a
  * drop from the lane to each target, ending in the type's chevron on the
- * target's port bar. Targets are in table order; sources sit over columns
- * spread evenly across them. A target's drops sit side by side on its port,
- * requires first, each as wide as its chevron.
+ * target's port bar. Targets are in table order; sources sit over the gaps
+ * between target columns, spread evenly, so a source's drop never runs
+ * beside a target's drop and reads as an edge it does not have. A target's
+ * drops sit side by side on its port, requires first, each as wide as its
+ * chevron.
  */
 export function safetyOrderLayout(groups: OrderGroup[], o: Ontology = loadOntology()): OrderLayout {
   const g = ORDER_GEOM;
@@ -169,8 +174,10 @@ export function safetyOrderLayout(groups: OrderGroup[], o: Ontology = loadOntolo
   const targetIds = [...new Set(groups.flatMap((x) => x.edges.flatMap((e) => e.targets)))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const cx = (i: number) => g.gutter + i * (g.col + g.gap) + g.col / 2;
   const width = g.gutter + targetIds.length * g.col + (targetIds.length - 1) * g.gap;
-  const span = Math.max(1, targetIds.length - 1);
-  const sourceCols = groups.map((_, j) => (groups.length === 1 ? 0 : Math.round((j * span) / (groups.length - 1))));
+  // The gaps between target columns; a source sits over gap k, between columns k and k + 1.
+  const gaps = Math.max(1, targetIds.length - 1);
+  const sourceGap = groups.map((_, j) => (groups.length === 1 ? 0 : Math.round((j * (gaps - 1)) / (groups.length - 1))));
+  const sourceX = (j: number) => cx(sourceGap[j]!) + (g.col + g.gap) / 2;
   const sourceTop = g.label;
   const laneTop = sourceTop + g.tile + 14;
   const raw = groups.flatMap((grp, j) => grp.edges.map((e, k) => ({ source: grp.source, type: e.type, targets: e.targets, j, k, n: grp.edges.length })));
@@ -179,7 +186,7 @@ export function safetyOrderLayout(groups: OrderGroup[], o: Ontology = loadOntolo
     type: l.type,
     targets: l.targets,
     y: laneTop + i * g.laneGap,
-    sx: cx(sourceCols[l.j]!) + (l.n === 1 ? 0 : (l.k - (l.n - 1) / 2) * 16),
+    sx: sourceX(l.j) + (l.n === 1 ? 0 : (l.k - (l.n - 1) / 2) * 8),
     tx: [],
   }));
   const portY = laneTop + (lanes.length - 1) * g.laneGap + 18;
@@ -201,7 +208,7 @@ export function safetyOrderLayout(groups: OrderGroup[], o: Ontology = loadOntolo
   return {
     width,
     height: targetTop + g.tile + g.label + 2,
-    sources: groups.map((grp, j) => ({ id: grp.source, x: cx(sourceCols[j]!) })),
+    sources: groups.map((grp, j) => ({ id: grp.source, x: sourceX(j) })),
     targets,
     lanes,
     sourceTop,
@@ -224,13 +231,35 @@ export function safetyDefaults(o: Ontology = loadOntology()): { layer: string; c
   return o.layers.map((l) => ({ layer: l.id, caps: order.filter((id) => o.byId.get(id)!.layer === l.id).map((id) => o.byId.get(id)!) }));
 }
 
+/**
+ * True when a capability needs a checkpoint only through a `requires` edge
+ * from checkpoint, with its requires_checkpoint flag off (rollback). §4.4
+ * and the capability's own page say "Yes, via requires edge"; F-S6 marks
+ * the cell the same way rather than showing it off.
+ */
+export function checkpointViaEdge(c: Capability): boolean {
+  return !c.requires_checkpoint && c.edgesIn.requires.includes('checkpoint');
+}
+
+/** A flag cell's state: on (the ontology flag), via an edge (checkpoint only), or off. */
+export function flagState(c: Capability, flag: (typeof FLAG_ROWS)[number]['id']): 'on' | 'edge' | 'off' {
+  if (c[flag]) return 'on';
+  return flag === 'requires_checkpoint' && checkpointViaEdge(c) ? 'edge' : 'off';
+}
+
 export function flagWords(c: Capability): string {
-  return [`${c.risk} risk`, ...FLAG_ROWS.map((f) => (c[f.id] ? f.label.toLowerCase() : f.off))].join(', ');
+  const word = (f: (typeof FLAG_ROWS)[number]) => {
+    const st = flagState(c, f.id);
+    return st === 'on' ? f.label.toLowerCase() : st === 'edge' ? 'needs checkpoint through a requires edge from checkpoint' : f.off;
+  };
+  return [`${c.risk} risk`, ...FLAG_ROWS.map(word)].join(', ');
 }
 
 export function safetyDefaultsCaption(o: Ontology = loadOntology()): string {
   const n = (f: (c: Capability) => boolean) => o.capabilities.filter(f).length;
-  return `Of ${o.capabilities.length} capabilities, ${n((c) => c.risk === 'high')} are high risk, ${n((c) => c.mutation)} change state, ${n((c) => c.requires_checkpoint)} need a checkpoint and ${n((c) => c.requires_approval)} need approval; a step may raise any of these, and a weaker value is ignored with W602.`;
+  const viaEdge = o.capabilities.filter(checkpointViaEdge).map((c) => c.id);
+  const edge = viaEdge.length > 0 ? ` (${n((c) => c.requires_checkpoint)} by their flag, and ${list(viaEdge)} through a requires edge from checkpoint)` : '';
+  return `Of ${o.capabilities.length} capabilities, ${n((c) => c.risk === 'high')} are high risk, ${n((c) => c.mutation)} change state, ${n((c) => c.requires_checkpoint || checkpointViaEdge(c))} need a checkpoint${edge} and ${n((c) => c.requires_approval)} need approval; a step may raise any of these, and a weaker value is ignored with W602.`;
 }
 
 // ------------------------------------------------ F-S11 operator precedence
@@ -396,6 +425,33 @@ export function maxLoopsRange(text: string, where: string): { min: number; max: 
   const m = /max_loops \(integer from (\d+) to (\d+), default (\d+)/.exec(prose);
   if (!m) throw new Error(`${where}: §5.12 no longer gives max_loops as "integer from N to M, default D"`);
   return { min: Number(m[1]), max: Number(m[2]), def: Number(m[3]) };
+}
+
+/** A table cell's first clause: the text before the first comma, semicolon or parenthesis. */
+export function firstClause(cell: string): string {
+  return cell.split(/\s*[,;(]\s*/)[0]!.trim();
+}
+
+export interface RecoveryBranch {
+  /** The branch's short label: the Recovery cell's first clause. */
+  label: string;
+  /** Where it goes: the Outcome cell's first clause. */
+  to: string;
+  codes: string[];
+}
+
+/**
+ * F-S14's three branches out of a step whose failure mode fired, in the
+ * table's order: the goto_step loop, then the two ways out (loops
+ * exhausted, no loop). Short labels only; the table under the figure holds
+ * the full words. Throws when the table no longer has those three rows.
+ */
+export function recoveryBranches(text: string, where: string): { loop: RecoveryBranch; exits: RecoveryBranch[] } {
+  const rows = recoveryRows(text, where).map((r) => ({ label: firstClause(r.recovery), to: firstClause(r.outcome), codes: [...new Set(r.codes)] }));
+  const [loop, ...exits] = rows;
+  if (!loop || !/goto_step/.test(loop.label)) throw new Error(`${where}: §5.12's Recovery table no longer starts with the goto_step loop`);
+  if (exits.length !== 2) throw new Error(`${where}: §5.12's Recovery table has ${exits.length} ways out of the loop; F-S14 draws two`);
+  return { loop, exits };
 }
 
 export function recoveryCaption(rows: { recovery: string; codes: string[] }[]): string {

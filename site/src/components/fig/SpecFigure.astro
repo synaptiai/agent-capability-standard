@@ -107,7 +107,7 @@ if (slot === 'safety-order') D.checkSafetyOrder(text, where, order);
 const orderLayout = slot === 'safety-order' ? D.safetyOrderLayout(order, o) : null;
 // F-S1 in rects: each lane in its edge type's 2.4 style, the drops from the
 // source and to each target, the chevrons on the targets' port bars, and the
-// lane's mark in the gutter.
+// lane's source symbol and mark in the gutter.
 const orderRects: (FigRect & { opacity?: number })[] = orderLayout
   ? [
       ...orderLayout.ports.flatMap((p) => run(p.from, orderLayout.portY, p.to, orderLayout.portY, 'ink-3', 2)),
@@ -116,8 +116,8 @@ const orderRects: (FigRect & { opacity?: number })[] = orderLayout
         const cell = st.weight === 4 ? 4 : 2;
         const right = Math.max(l.sx, ...l.tx) + st.weight / 2;
         return [
-          ...glyphRects(`mark:${l.type}`, 2, l.y - 7, 2),
-          ...run(20, l.y, right, l.y, st.ink, st.weight, st.pattern),
+          ...glyphRects(`mark:${l.type}`, 26, l.y - 7, 2),
+          ...run(44, l.y, right, l.y, st.ink, st.weight, st.pattern),
           ...run(l.sx, orderLayout.sourceTop + 32, l.sx, l.y, st.ink, st.weight, st.pattern),
           ...l.tx.flatMap((x) => [...run(x, l.y, x, orderLayout.portY - 1 - cell, st.ink, st.weight, st.pattern), ...chevron(x, orderLayout.portY - 1 - cell / 2, 'down', st.ink, cell)]),
         ];
@@ -268,6 +268,7 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
     </ul>
     <div class="order-draw" aria-hidden="true" style={`width: ${orderLayout.width}px; height: ${orderLayout.height}px`}>
       <svg viewBox={`0 0 ${orderLayout.width} ${orderLayout.height}`} width={orderLayout.width} height={orderLayout.height} shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={orderRects} /></svg>
+      {orderLayout.lanes.map((l) => <span class="order-draw__lane" style={`top: ${l.y - 9}px`} data-lane-source={l.source}>{capabilitySymbol(l.source)}</span>)}
       {orderLayout.sources.map((x) => (
         <span class="order-draw__node" style={`left: ${x.x - 48}px; top: 0`} data-source={x.id}><code>{x.id}</code><MiniTile id={x.id} size={32} link={false} /></span>
       ))}
@@ -354,44 +355,31 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
   </Figure>
 )}
 {slot === 'recovery-loop' && loopRange && (() => {
-  // The table's first row is the loop, the others the ways out of it.
-  const [loop, ...exits] = rec;
-  if (!loop || !/goto_step/.test(loop.recovery)) throw new Error(`${where}: §5.12's Recovery table no longer starts with the goto_step loop`);
+  // One step tile with three branches out of it: the goto_step loop back up
+  // to its target (a return bracket carrying the max_loops counter), and
+  // the two ways out, drawn side by side because they are alternatives.
+  const { loop, exits } = D.recoveryBranches(text, where);
+  // The table's cells come as plain text; a field name (snake_case) is set as code.
+  const inline = (s: string) => s.split(/\b([a-z]+_[a-z_]+)\b/).map((part, i) => (i % 2 === 1 ? <code>{part.split(/(?<=_)/).map((p, k) => (k > 0 ? <><wbr />{p}</> : p))}</code> : part));
   return (
     <Figure id={idOf('recovery loop')} n={n} title={titled('Recovery loop')} caption={D.recoveryCaption(rec)} kind="recovery-loop">
       <div class="rloop">
-        <ol class="rloop__rows">
-          <li class="rloop__row rloop__row--target">
-            <span class="rloop__lane" aria-hidden="true"><svg class="rloop__tip" viewBox="0 0 12 12" width="12" height="12" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={chevron(10, 6, 'right', 'ink', 2)} /></svg></span>
-            <p class="rloop__box"><code>goto_step</code> target: this step or an earlier one</p>
-          </li>
-          <li class="rloop__row rloop__row--loop" data-branch="0">
-            <span class="rloop__lane" aria-hidden="true"></span>
-            <div class="rloop__loop">
-              <p class="rloop__when">{loop.recovery}</p>
-              <p class="rloop__then"><PixelGlyph name="undo" /> {loop.outcome}</p>
-              <p class="rloop__counter">
-                <span class="rloop__cells" aria-hidden="true">
-                  {Array.from({ length: loopRange.def }, () => <span class="rloop__cell"></span>)}
-                  <span class="rloop__cell rloop__cell--more"></span>
-                </span>
-                <span><code>max_loops</code>: default {loopRange.def}, from {loopRange.min} to {loopRange.max}</span>
-              </p>
-            </div>
-          </li>
-          <li class="rloop__row rloop__row--step">
-            <span class="rloop__lane" aria-hidden="true"></span>
-            <p class="rloop__box rloop__box--step"><PixelGlyph name="flow:run" /> The step: a failure mode fires</p>
-          </li>
-        </ol>
+        <p class="rloop__tile rloop__tile--target"><code>goto_step</code> target</p>
+        <span class="rloop__bracket rloop__bracket--top" aria-hidden="true"><svg class="rloop__tip" viewBox="0 0 12 20" width="12" height="20" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={chevron(2, 10, 'left', 'ink', 4)} /></svg></span>
+        <span class="rloop__flow" aria-hidden="true"></span>
+        <p class="rloop__note" data-branch="0">
+          <span class="rloop__label">{inline(loop.label)}</span>
+          <span class="rloop__counter"><span class="rloop__cells" aria-hidden="true">{Array.from({ length: loopRange.def }, () => <span class="rloop__cell"></span>)}<span class="rloop__cell rloop__cell--more"></span></span><code>max_loops</code> {loopRange.def}<span class="rloop__range">({loopRange.min}–{loopRange.max})</span></span>
+        </p>
+        <span class="rloop__bracket rloop__bracket--mid" aria-hidden="true"></span>
+        <p class="rloop__tile rloop__tile--step"><PixelGlyph name="flow:run" /> Failure mode fires</p>
+        <span class="rloop__bracket rloop__bracket--bottom" aria-hidden="true"></span>
         <ul class="rloop__exits">
           {exits.map((r, i) => (
             <li class="rloop__exit" data-branch={i + 1}>
-              <FlowArrow dir="down" length={16} />
-              <div class="rloop__exit-body">
-                <p class="rloop__when">{r.recovery}</p>
-                <p class="rloop__then">{r.outcome}{[...new Set(r.codes)].map((c) => <> <DiagnosticTile code={c} /></>)}</p>
-              </div>
+              <span class="rloop__drop" aria-hidden="true"><svg viewBox="0 0 20 24" width="20" height="24" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={[{ x: 8, y: 0, w: 4, h: 14, ink: 'ink' }, ...chevron(10, 22, 'down', 'ink', 4)]} /></svg></span>
+              <span class="rloop__label">{inline(r.label)}</span>
+              <p class="rloop__tile rloop__tile--exit">{inline(r.to)}{r.codes.map((c) => <> <DiagnosticTile code={c} /></>)}</p>
             </li>
           ))}
         </ul>
@@ -448,23 +436,36 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
     <div class="approval-flow">
       <div class="approval-flow__part">
         <p class="approval-flow__head">1. Is the approver asked?</p>
-        <TableWrap label="Whether each kind of approver is asked, by run attendance">
-        <table class="approval-asked">
-          <thead><tr><th scope="col">approver.kind</th>{loadCatalogEnums().attendance.map((a) => <th scope="col">{a} run</th>)}</tr></thead>
-          <tbody>
-            {asked.map((a) => (
-              <tr data-kind={a.kind}>
-                <th scope="row"><code>{a.kind}</code></th>
-                {[a.attended, a.unattended].map((yes) => <td><span class="asked"><PixelGlyph name={yes ? 'check' : 'close'} />{yes ? 'asked' : 'not asked'}</span></td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </TableWrap>
+        <ul class="approval-asked" aria-label="Whether each kind of approver is asked, by run attendance">
+          {asked.flatMap((a) =>
+            loadCatalogEnums().attendance.map((att) => {
+              const yes = att === 'unattended' ? a.unattended : a.attended;
+              return (
+                <li class:list={['approval-asked__tile', !yes && 'approval-asked__tile--no']} data-kind={a.kind} data-attendance={att}>
+                  <code>{a.kind}</code>
+                  <span class="approval-asked__att">{att} run</span>
+                  <span class="asked"><PixelGlyph name={yes ? 'check' : 'close'} />{yes ? 'asked' : 'not asked'}</span>
+                </li>
+              );
+            }),
+          )}
+        </ul>
       </div>
       <div class="approval-flow__part">
         <p class="approval-flow__head">2. The decision an action record holds</p>
         <ul class="approval-flow__chips">{loadWorldStateSchema().approvalDecisions.map((d) => <li class="chip"><code>{d}</code></li>)}</ul>
+      </div>
+      <div class="approval-flow__part">
+        <p class="approval-flow__head">3. Unattended, with no approval: <code>when_unattended</code></p>
+        <ul class="approval-plans">
+          {plans.map((p) => (
+            <li class="approval-plans__tile" data-plan={p.plan}>
+              <span><code>{p.plan.split(/(?<=_)/).map((x, k) => (k > 0 ? <><wbr />{x}</> : x))}</code>{p.isDefault && <span class="approval-plans__default"> (default)</span>}</span>
+              <FlowArrow dir="down" length={12} />
+              <span class="approval-plans__result">{/^[A-Z]\d{3}$/.test(p.result) ? <DiagnosticTile code={p.result} /> : D.firstClause(p.result)}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   </Figure>
@@ -665,7 +666,7 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
           <tbody>
             {heat.sections.map((s, j) => (
               <tr>
-                <th scope="row"><a href={sectionLink(s.n)}>§{s.n}</a> {s.title}</th>
+                <th scope="row" title={`§${s.n} ${s.title}`}><a href={sectionLink(s.n)}>§{s.n}<span class="visually-hidden"> {s.title}</span></a></th>
                 {heat.families.map((_, i) => {
                   const c = heat.counts[i]![j]!;
                   return <td class:list={['heat__cell', c > 0 && `heat__cell--${heatStep(c, heat.max)}`]} data-count={c}>{c > 0 ? c : ''}</td>;
@@ -776,7 +777,18 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
 )}
 {tableFig && inner && (
   <Figure id={idOf(tableFig.name)} n={n} title={titled(tableFig.name)} caption={T.tableFigureCaption(slot, text, where)} kind="field-table">
-    <Fragment set:html={inner} />
+    <div class="field-port">
+      {T.fieldGroups(T.fieldRows(text, tableFig.section, where)).map((g) => (
+        <div class="field-port__group" data-prefix={g.prefix ?? undefined}>
+          {g.prefix && <p class="field-port__prefix"><code>{g.prefix}.</code></p>}
+          <ul class="ports ports--out">{g.rows.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} depth={g.prefix ? 1 : 0} />)}</ul>
+        </div>
+      ))}
+    </div>
+    <details class="fig-details">
+      <summary>Text version: the table in the source</summary>
+      <Fragment set:html={inner} />
+    </details>
   </Figure>
 )}
 {slot === 'categories' && (

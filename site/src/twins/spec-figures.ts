@@ -56,7 +56,7 @@ export function specEarlyBlocks(): string[] {
       D.safetyDefaultsCaption(o),
       table(
         ['Capability', 'Layer', 'Risk', 'Changes state', 'Needs checkpoint', 'Needs approval'],
-        D.safetyDefaults(o).flatMap((g) => g.caps.map((c) => [code(c.id), g.layer, c.risk, yes(c.mutation), yes(c.requires_checkpoint), yes(c.requires_approval)])),
+        D.safetyDefaults(o).flatMap((g) => g.caps.map((c) => [code(c.id), g.layer, c.risk, yes(c.mutation), D.checkpointViaEdge(c) ? 'Yes, via requires edge' : yes(c.requires_checkpoint), yes(c.requires_approval)])),
       ),
     ),
   ];

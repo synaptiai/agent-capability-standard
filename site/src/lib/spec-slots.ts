@@ -26,7 +26,7 @@ export interface SpecSlot {
 }
 
 const after = (block: SlotBlock, index: number, startsWith: string) => ({ place: 'after' as const, block, index, startsWith });
-// A field table shown as its own figure (TABLE_FIGURES in spec-tail-figures).
+// A field table drawn as a Port column, the table folded under it (TABLE_FIGURES in spec-tail-figures).
 const fieldTable = (index = 0) => ({ place: 'wrap' as const, block: 'table' as const, index, startsWith: 'Field Type Required Description' });
 
 export const SPEC_SLOTS: readonly SpecSlot[] = [
@@ -83,19 +83,14 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
  * Standard 1.0.0: only figures drawn from its own text (visual spec 3.9 gives
  * the older version chapter icons; these add what its tables, lists and
  * fences support). The ontology, schemas and fixtures are 1.1 data and are
- * not drawn here. Its field tables are shown as figures rather than drawn
- * again above themselves; so is its §10.1 table, since its §10.2 lists carry
- * no section or code a figure could add.
+ * not drawn here. Its §4.1 and §6.3 field tables are drawn as Port columns,
+ * as on the current Standard; its other tables stay plain tables.
  */
 export const SPEC_SLOTS_100: readonly SpecSlot[] = [
   { key: 'requirements', level: 3, section: '1.2 ', at: after('list', 0, 'MUST, MUST NOT, SHALL, SHALL NOT: Absolu') },
   { key: 'table-4.1', level: 3, section: '4.1 ', at: fieldTable() },
-  { key: 'table-5.1', level: 3, section: '5.1 ', at: fieldTable() },
-  { key: 'table-5.2', level: 3, section: '5.2 ', at: fieldTable() },
-  { key: 'table-6.2', level: 3, section: '6.2 ', at: fieldTable() },
   { key: 'table-6.3', level: 3, section: '6.3 ', at: fieldTable() },
   { key: 'categories', level: 3, section: '9.1 ', at: 'heading' },
-  { key: 'table-10.1', level: 3, section: '10.1 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Level Requirements' } },
   { key: 'bumps', level: 3, section: '11.4 ', at: 'heading' },
   { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' } },
   { key: 'pattern-0', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 0, startsWith: '- capability: plan' } },

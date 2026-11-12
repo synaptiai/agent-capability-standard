@@ -191,6 +191,18 @@
     padding: 0;
   }
 
+  /* Each lane's source, as its two-letter symbol, at the lane's left end. */
+  .order-draw__lane {
+    position: absolute;
+    left: 0;
+    width: 22px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: left;
+  }
+
   .order-cells__head {
     margin: 0 0 var(--space-1);
     font-family: var(--font-eyebrow);
@@ -225,7 +237,7 @@
     line-height: 14px;
   }
 
-  /* The drawing is 608px wide (ORDER_GEOM); the frame adds no scroll. */
+  /* The drawing is 612px wide (ORDER_GEOM); the frame adds no scroll. */
   @container (min-width: 620px) {
     .order-draw {
       display: block;
@@ -268,6 +280,13 @@
   .flag-cell--on {
     border-color: var(--ink);
     background: var(--ink);
+  }
+
+  /* Needed through a requires edge, not the flag: outlined in ink, the
+     requires mark in ink. */
+  .flag-cell--edge {
+    border-color: var(--ink);
+    color: var(--ink);
   }
 
   .flag-cell--inherit {
@@ -538,108 +557,120 @@
 
   /* ---------- F-S14 recovery loop, F-S16 silent source ---------- */
 
-  /* F-S14: the goto_step loop as a return bracket in a lane on the left,
-     from the step back up to its target, with the max_loops counter on the
-     loop; the ways out drop below the step. */
-  .rloop__rows {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .rloop__row {
-    position: relative;
+  /* F-S14: one step tile with three branches out of it. On the right, the
+     goto_step loop: a return bracket of 4px rects from the step back up to
+     its target, labelled with the max_loops counter. Below, the two ways
+     out side by side, since they are alternatives, not steps in order. */
+  .rloop {
     display: grid;
-    grid-template-columns: 28px minmax(0, 1fr);
-    margin: 0;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    max-width: 34rem;
   }
 
-  .rloop__lane {
-    position: relative;
-  }
-
-  /* The bracket: 4px rects, square ends, as F-W1's rollback lane. */
-  .rloop__row--target .rloop__lane::before,
-  .rloop__row--step .rloop__lane::before {
-    content: '';
-    position: absolute;
-    left: 6px;
-    right: 4px;
-    border-left: 4px solid var(--ink);
-  }
-
-  .rloop__row--target .rloop__lane::before {
-    top: calc(50% - 2px);
-    bottom: 0;
-    border-top: 4px solid var(--ink);
-  }
-
-  .rloop__row--step .rloop__lane::before {
-    top: 0;
-    height: calc(50% + 2px);
-    border-bottom: 4px solid var(--ink);
-  }
-
-  .rloop__row--loop .rloop__lane {
-    border-left: 4px solid var(--ink);
-    margin-left: 6px;
-  }
-
-  .rloop__tip {
-    position: absolute;
-    top: calc(50% - 6px);
-    right: -2px;
-  }
-
-  .rloop__box {
+  .rloop__tile {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1) var(--space-2);
-    margin: var(--space-1) 0;
+    margin: 0;
     padding: var(--space-2) var(--space-3);
     border: 2px solid var(--ink-2);
     background: var(--bg);
   }
 
-  .rloop__box--step {
+  .rloop__tile--step {
     border: var(--border);
     font-weight: 700;
   }
 
-  .rloop__loop {
-    display: grid;
-    gap: var(--space-1);
-    margin: var(--space-1) 0;
-    padding: var(--space-2) var(--space-3);
-    border: 2px solid var(--ink);
-    border-left-width: 0;
-    background: var(--bg);
+  .rloop__bracket {
+    position: relative;
+    border-right: 4px solid var(--ink);
+    margin-right: 6px;
   }
 
-  .rloop__when,
-  .rloop__then,
-  .rloop__counter {
+  .rloop__bracket--top::before,
+  .rloop__bracket--bottom::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-top: 4px solid var(--ink);
+  }
+
+  .rloop__bracket--top {
+    align-self: end;
+    height: calc(50% + 2px);
+  }
+
+  .rloop__bracket--top::before {
+    top: 0;
+  }
+
+  .rloop__bracket--bottom {
+    align-self: start;
+    height: calc(50% + 2px);
+  }
+
+  .rloop__bracket--bottom::before {
+    bottom: 0;
+  }
+
+  .rloop__tip {
+    position: absolute;
+    top: -8px;
+    left: 0;
+  }
+
+  @container (max-width: 520px) {
+    .rloop__tile {
+      padding: var(--space-2);
+    }
+  }
+
+  /* Between the target and the step: the normal flow, which may pass other
+     steps, as a dotted line; the loop's label sits against the bracket. */
+  .rloop__flow {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+    width: 0;
+    margin-left: var(--space-5);
+    border-left: 2px dotted var(--ink-3);
+  }
+
+  .rloop__note {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
     margin: 0;
+    padding: var(--space-3) var(--space-2) var(--space-3) var(--space-6);
+    text-align: right;
   }
 
-  .rloop__when {
+  .rloop__bracket--mid {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .rloop__label {
     font-weight: 700;
   }
 
-  .rloop__then {
-    display: flex;
+  .rloop__counter {
+    display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-1) var(--space-2);
+    gap: var(--space-1);
+    font-size: 14px;
+    color: var(--ink-2);
   }
 
-  .rloop__counter {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-1) var(--space-2);
-    font-size: 14px;
+  .rloop__range {
     color: var(--ink-2);
   }
 
@@ -659,23 +690,71 @@
     border-color: var(--ink-3);
   }
 
+  /* The ways out: a stem from the step to a bar, and a drop to each. */
   .rloop__exits {
+    grid-column: 1 / -1;
+    position: relative;
     display: grid;
-    gap: var(--space-1);
-    margin: 0 0 0 28px;
-    padding: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    margin: 0;
+    padding: var(--space-3) 0 0;
     list-style: none;
   }
 
-  .rloop__exit {
-    display: grid;
-    justify-items: start;
-    gap: var(--space-1);
-    margin: 0;
+  .rloop__exits::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: calc(50% - 16px);
+    height: var(--space-3);
+    border-left: 4px solid var(--ink);
   }
 
-  .rloop__exit .flow-arrow {
-    margin-left: var(--space-3);
+  .rloop__exit {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    align-content: start;
+    gap: var(--space-1);
+    margin: 0;
+    text-align: center;
+  }
+
+  /* Half of the bar on each side of the gap meets at the stem. */
+  .rloop__exit::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    border-top: 4px solid var(--ink);
+  }
+
+  .rloop__exit:first-child::before {
+    left: 50%;
+    right: calc(-1 * var(--space-4) / 2);
+  }
+
+  .rloop__exit:last-child::before {
+    left: calc(-1 * var(--space-4) / 2);
+    right: 50%;
+  }
+
+  /* The drop from the bar: a 4px line ending in a chevron, centred on the
+     bar's end above the exit. */
+  .rloop__drop {
+    display: block;
+    height: 24px;
+    margin-top: -2px;
+  }
+
+  .rloop__drop svg {
+    display: block;
+  }
+
+  .rloop__tile--exit {
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .silent__mode {
@@ -684,16 +763,6 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2);
-    border: 2px solid var(--line);
-    background: var(--bg);
-  }
-
-  .rloop__exit-body {
-    display: grid;
-    gap: var(--space-1);
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--space-2) var(--space-3);
     border: 2px solid var(--line);
     background: var(--bg);
   }
@@ -820,8 +889,67 @@
     font-weight: 700;
   }
 
+  /* Stage 1: a 2x2 grid of tiles, kind by attendance, that wraps to one
+     column in a narrow frame so the "not asked" answer is never scrolled
+     out of view. */
   .approval-asked {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+    gap: var(--space-2);
+    max-width: 30rem;
     margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .approval-asked__tile {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid var(--ink);
+    background: var(--bg);
+  }
+
+  .approval-asked__tile--no {
+    border-style: dashed;
+    border-color: var(--ink-2);
+  }
+
+  .approval-asked__att {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .approval-asked__tile .asked {
+    font-weight: 700;
+  }
+
+  /* Stage 3: one tile per when_unattended plan, with what it leads to. */
+  .approval-plans {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .approval-plans__tile {
+    display: grid;
+    justify-items: center;
+    align-content: start;
+    gap: var(--space-1);
+    margin: 0;
+    padding: var(--space-2);
+    border: 2px solid var(--ink-2);
+    background: var(--bg);
+    text-align: center;
+  }
+
+  .approval-plans__default {
+    font-size: 14px;
+    color: var(--ink-2);
   }
 
   .asked {
@@ -844,6 +972,15 @@
   .deleg {
     display: grid;
     gap: var(--space-4);
+  }
+
+  /* Inputs on the left with their pins on the right edge, the attested
+     output on the right: side by side when the frame has room, so the input
+     rows do not sit right-aligned in an empty full-width column. */
+  @container (min-width: 600px) {
+    .deleg {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   .deleg__head {
@@ -1927,8 +2064,8 @@
 
   /* A table drawn as a figure sits in a narrower frame than the text column,
      so its cells take less side padding (issue #125 review: tables counted as
-     figures scrolled at 1440 and hid their last column). */
-  /* The data-flow grid sets its own zero padding; it is not one of these. */
+     figures scrolled at 1440 and hid their last column). The data-flow grid
+     sets its own zero padding and is left out. */
   .fig__drawing .table-wrap table:not(.flow-grid) :is(th, td) {
     padding-inline: var(--space-2);
   }
@@ -2174,6 +2311,37 @@
 @layer components {
   /* A Standard field table shown as a figure: field names stay whole, so a
      narrow table scrolls inside its wrapper rather than splitting a name. */
+  /* F-S2 and F-S24: a field table as Port columns, grouped by prefix. */
+  .field-port {
+    display: grid;
+    gap: var(--space-2);
+    max-width: 40rem;
+  }
+
+  /* Every row prints its description, so the drawing says all the table
+     says and the table can stay folded. */
+  .field-port .port__desc,
+  .field-port .port:is(:hover, :focus-within) .port__desc {
+    position: static;
+    flex-basis: 100%;
+    width: auto;
+    max-width: none;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .field-port__prefix {
+    margin: 0;
+    font-weight: 700;
+  }
+
   .fig[data-fig-kind='field-table'] td:first-child code {
     white-space: nowrap;
     overflow-wrap: normal;

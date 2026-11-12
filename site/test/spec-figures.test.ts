@@ -275,6 +275,10 @@ describe('Standard figures built to visual spec 3.9 (round 4)', () => {
     }
     // The drawing fits the 620px frame the stylesheet gives it.
     expect(layout.width).toBeLessThanOrEqual(620);
+    // No source's drop runs down inside a target's column (review: constrain
+    // over rollback read as an edge between them that the ontology lacks).
+    const half = D.ORDER_GEOM.col / 2;
+    for (const l of layout.lanes) for (const t of layout.targets) expect(Math.abs(l.sx - t.x), `${l.source} over ${t.id}`).toBeGreaterThan(half);
   });
 
   it('lists every capability once, in table order (F-S6)', () => {
@@ -287,6 +291,41 @@ describe('Standard figures built to visual spec 3.9 (round 4)', () => {
     const caps = loadOntology().capabilities;
     expect(order).toHaveLength(caps.length);
     expect(new Set(order).size).toBe(order.length);
+  });
+
+  it('draws one step with three branches: the loop and two alternative ways out (F-S14)', () => {
+    // Expected values read by hand from the §5.12 "Recovery | Outcome" table.
+    const std = repoText('spec/STANDARD-v1.1.0.md');
+    const b = D.recoveryBranches(std, 'spec/STANDARD-v1.1.0.md');
+    expect(b.loop).toEqual({ label: 'goto_step loop', to: 'Back to the target', codes: [] });
+    expect(b.exits).toEqual([
+      { label: 'Loops exhausted', to: 'on_exhausted handler', codes: ['R404'] },
+      { label: 'No loop', to: "The run ends with the step's code", codes: ['R402'] },
+    ]);
+    // A fourth row would be a branch the figure does not draw.
+    const extra = std.replace('| Loops exhausted |', '| Loops paused | Nothing |\n| Loops exhausted |');
+    expect(() => D.recoveryBranches(extra, 'x')).toThrow(/ways out/);
+  });
+
+  it('marks a checkpoint needed only through a requires edge, as §4.4 does (F-S6)', () => {
+    const onto = repoText('schemas/capability_ontology.yaml');
+    // The edge list in the ontology's own text: "- from: checkpoint / to: X / type: requires".
+    const viaRequires = [...onto.matchAll(/^- from: checkpoint\n {2}to: (\w+)\n {2}type: requires$/gm)].map((m) => m[1]!);
+    // Capabilities whose own block sets requires_checkpoint: true.
+    const flagged = new Set([...onto.matchAll(/^- id: (\w+)\n(?:(?!- id:).*\n)*?\s+requires_checkpoint: true$/gm)].map((m) => m[1]!));
+    const edgeOnly = viaRequires.filter((id) => !flagged.has(id));
+    expect(edgeOnly.length).toBeGreaterThan(0);
+    const caps = loadOntology().capabilities;
+    for (const c of caps) {
+      const st = D.flagState(c, 'requires_checkpoint');
+      expect(st, c.id).toBe(flagged.has(c.id) ? 'on' : edgeOnly.includes(c.id) ? 'edge' : 'off');
+    }
+    // The §4.4 table lists each of them as requiring `checkpoint`.
+    const std = repoText('spec/STANDARD-v1.1.0.md');
+    for (const id of edgeOnly) expect(std).toContain(`| \`${id}\` | \`checkpoint\` |`);
+    const caption = D.safetyDefaultsCaption();
+    expect(caption).toContain(`${flagged.size + edgeOnly.length} need a checkpoint`);
+    for (const id of edgeOnly) expect(caption).toContain(`${id} through a requires edge from checkpoint`);
   });
 
   it('marks the step whose failure mode fired, and the exit when its loops run out (F-S14b)', () => {
