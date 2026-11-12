@@ -111,7 +111,88 @@
     margin-right: var(--space-1);
   }
 
-  /* ---------- F-SC1 the schema files, one enriched table per group ---------- */
+  /* ---------- F-SC1 schema shelf: every file as a tile in its group's column ---------- */
+
+  .sc-shelf {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .sc-shelf__group {
+    margin: 0;
+    padding-top: var(--space-2);
+    border-top: var(--px) solid var(--line);
+  }
+
+  .sc-shelf__label {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .sc-shelf__count {
+    font-family: var(--font-mono);
+    color: var(--ink-2);
+  }
+
+  .sc-shelf__tiles {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* A file: the schema glyph, its name, and a stamp when the Standard requires it. */
+  .sc-tile {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 40px;
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    border: var(--px) solid var(--line);
+    background: var(--bg);
+  }
+
+  .sc-tile--required {
+    box-shadow: 2px 2px 0 var(--line);
+  }
+
+  /* The name breaks after "_" or "." (BreakCode), never inside a word. */
+  .sc-tile code {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  .sc-tile__stamp {
+    display: inline-flex;
+  }
+
+  /* Narrow: the groups stack, one tile a row. Two a row (the spec's
+     narrow layout) leaves 150px a tile, which breaks most names three or
+     four times. */
+  @container (max-width: 639px) {
+    .sc-shelf {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* ---------- the schema files, one enriched table per group ---------- */
 
   /* Fixed columns, so a long file name wraps in its own column instead of
      squeezing the description to one letter a line. */

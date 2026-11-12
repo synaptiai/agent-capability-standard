@@ -11,7 +11,7 @@ import { allowedRfcStatuses, rfcRows } from '../lib/rfcs';
 import { kebab } from '../lib/routes';
 import { schemaGroups, schemaListing } from '../lib/views';
 import { blocks, cell, code, fence, figure, generatedLine, markdownCopy, mdLink, mdUrl, table } from './md';
-import { RFC_FIG_TITLE, rfcLanes, rfcLanesCaption, SHELF_MIN_ROWS, schemaShelves, shelfCaption, shelfTitle } from '../lib/index-figures';
+import { RFC_FIG_TITLE, rfcLanes, rfcLanesCaption, SHELF_MIN_ROWS, SHELF_OVERVIEW_TITLE, schemaShelves, shelfCaption, shelfOverviewCaption, shelfTitle } from '../lib/index-figures';
 import { edgeMatrixBlock, edgeTypesFigureBlocks } from './edges-spec';
 import { declaredCaption } from '../lib/edge-figures';
 import type { Twin } from './types';
@@ -85,6 +85,14 @@ export function schemasTwin(): Twin {
     '# Schemas',
     `These are the schema files in the repository, each linked to GitHub. Section 6.1 of the ${mdLink('Standard', `${std.url}`)} says what each required schema must hold. Workflow catalogs are listed under ${mdLink('Workflows', '/workflows/')} and domain profiles under ${mdLink('Domains', '/domains/')}.`,
     generatedLine([std.source]),
+    (() => {
+      const shelves = schemaShelves(entries, schemaGroups(std.version));
+      return figure(
+        SHELF_OVERVIEW_TITLE,
+        shelfOverviewCaption(shelves),
+        shelves.map((sh) => `- ${sh.label}: ${sh.tiles.map((t) => `${code(t.file)}${sh.key === 'required' ? ' (required)' : ''}`).join(', ')}`).join('\n'),
+      );
+    })(),
     ...(() => {
       const groups = schemaGroups(std.version);
       const shelves = schemaShelves(entries, groups);

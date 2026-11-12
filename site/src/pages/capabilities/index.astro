@@ -1,8 +1,10 @@
 ---
-// The capabilities overview: the periodic table generated from the ontology,
-// risk by layer as a heat table (F-CI1) with the counts by risk level and by
+// The capabilities overview: the periodic table generated from the ontology
+// (Fig 1, framed as on the home page, so the page has a drawn figure and not
+// only the heat table), risk by layer as a heat table (F-CI1, Fig 2) with the counts by risk level and by
 // edge type folded under it, then one card per layer (visual spec 3.11).
 import CapabilityTable from '../../components/CapabilityTable.astro';
+import Figure from '../../components/fig/Figure.astro';
 import IconCard from '../../components/fig/IconCard.astro';
 import RiskByLayer from '../../components/fig/RiskByLayer.astro';
 import '../../styles/figures-layer.css';
@@ -10,6 +12,8 @@ import { loadOntology, RISKS } from '../../data/ontology';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { layerHref, pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
 import TableWrap from '../../components/TableWrap.astro';
+import { TABLE_FIG_TITLE, tableCaption } from '../../lib/home';
+import '../../styles/figures-home.css';
 
 const route = routeByUrl('/capabilities/');
 const ontology = loadOntology();
@@ -29,11 +33,13 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
     </p>
     <section class="capabilities-table">
       <h2 id={id('By layer')}>By layer</h2>
-      <CapabilityTable />
+      <Figure id={id('fig-table')} n={1} title={TABLE_FIG_TITLE} caption={tableCaption()} kind="periodic-table" class="home-table__fig">
+        <CapabilityTable />
+      </Figure>
     </section>
     <section class="capabilities-counts">
       <h2 id={id('Risk by layer')}>Risk by layer</h2>
-      <RiskByLayer n={1} />
+      <RiskByLayer n={2} />
       <details class="fig-details">
       <summary>Counts by risk level and by edge type</summary>
       <TableWrap label="Capabilities by risk level">
