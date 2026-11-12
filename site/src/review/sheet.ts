@@ -63,6 +63,7 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
       'policy:always', 'type:boolean', 'type:list', 'type:record', 'status:candidate', 'fail:request_more_context',
       'tool:executor', 'source:system_log', 'source:document', 'section:rfcs', 'section:spec', 'chapter:scope',
       'domain:multimodal', 'domain:personal_assistant', 'group:skill-authoring', 'skill:composed', 'chapter:references',
+      'status:template',
     ],
   },
   {
@@ -89,7 +90,7 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
     title: 'Rings and round shapes',
     keys: [
       'eye', 'half', 'moon', 'stop', 'caution', 'search', 'section:domains', 'domain:vision', 'domain:manufacturing', 'source:sensor',
-      'group:standard-cert', 'chapter:identity-resolution-policy', 'approve:review',
+      'group:standard-cert', 'chapter:identity-resolution-policy', 'approve:review', 'status:ready',
     ],
   },
   {
@@ -105,6 +106,7 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
       'chapter:authority-trust-model', 'chapter:diagnostic-model', 'chapter:versioning-and-compatibility',
       'chapter:decision-frameworks', 'principle:grounded-claims', 'principle:auditable-transforms', 'principle:composable-atoms',
       'principle:explicit-contracts', 'group:regulation', 'flow:condition', 'flag:overridable', 'approve:human',
+      'status:implementation', 'status:guide', 'status:integrated',
     ],
   },
   // The one-per-page icons of the listing cards and home cards

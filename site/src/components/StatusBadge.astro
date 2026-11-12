@@ -1,8 +1,10 @@
 ---
 // The status of a document, an RFC, a proposal, the Standard or a profile
 // workflow, as written in its source. The style comes from src/lib/status.ts;
-// a value with no style there fails the build.
+// a value with no style there fails the build. Each style has its own
+// `status:` glyph, drawn before the word.
 import { statusStyle } from '../lib/status';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
 
 interface Props {
   status: string;
@@ -11,4 +13,4 @@ interface Props {
 const status = Astro.props.status.trim();
 const style = statusStyle(status);
 ---
-<span class:list={['status-badge', `status-badge--${style}`]} data-status={status}>{status}</span>
+<span class:list={['status-badge', `status-badge--${style}`]} data-status={status}><PixelGlyph name={`status:${style}`} />{status}</span>

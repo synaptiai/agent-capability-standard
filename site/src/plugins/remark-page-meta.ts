@@ -13,11 +13,18 @@
 //   `**Document Status**: Normative`). Only that block counts: a Status line
 //   further down the page is ordinary text. The block is turned into a
 //   `<dl class="page-meta">` in place, so links inside a value still render.
+// - status badges: a `**Status:**` line's first clause (statusClause) is
+//   drawn as a status badge with its glyph, in the header block and in the
+//   body (a "**Status**: SDK-integrated | ..." line at the end of a page).
+//   The RFC and Standard templates show their status in the page head
+//   instead, so their header rows stay text.
 // Runs after remark-repo-links, so links in the block are already rewritten.
 import type { Paragraph, PhrasingContent, Root, RootContent } from 'mdast';
 import { toString } from 'mdast-util-to-string';
 import type { VFile } from 'vfile';
 import { headingText } from '../lib/anchors';
+import { statusClause, statusStyle } from '../lib/status';
+import { glyphElement } from '../pixel/hast';
 import { blockText } from '../lib/md-sections';
 import { sourceOf } from './source';
 
@@ -122,6 +129,53 @@ export function shortDescription(text: string, max = MAX_DESCRIPTION): string {
   return `${room.slice(0, space > 0 ? space : room.length).replace(/[,;:]$/, '')}...`;
 }
 
+/** True for a source whose template shows its status in the page head (RFCs, proposals, the Standard). */
+function headShowsStatus(source: string): boolean {
+  return (/^spec\/RFC-\d{4}-/.test(source) || source.startsWith('docs/proposals/') || /^spec\/STANDARD-v/.test(source));
+}
+
+/**
+ * The value of a Status line with its first clause drawn as a status badge
+ * (the markup of StatusBadge.astro). Unchanged when the value does not start
+ * with plain text holding that clause.
+ */
+export function badgeStatus(value: PhrasingContent[]): PhrasingContent[] {
+  const [head, ...rest] = value;
+  if (head?.type !== 'text') return value;
+  const clause = statusClause(head.value);
+  if (clause === '' || !head.value.startsWith(clause)) return value;
+  const style = statusStyle(clause);
+  const badge = {
+    type: 'emphasis',
+    data: {
+      hName: 'span',
+      hProperties: { className: ['status-badge', `status-badge--${style}`], dataStatus: clause },
+      hChildren: [glyphElement(`status:${style}`), { type: 'text', value: clause }],
+    },
+    children: [{ type: 'text', value: clause }],
+  } as unknown as PhrasingContent;
+  const after = head.value.slice(clause.length);
+  return [badge, ...(after ? [{ type: 'text', value: after } as PhrasingContent] : []), ...rest];
+}
+
+/** A body paragraph's Status lines, each first clause as a badge. */
+function badgeStatusLines(p: Paragraph): void {
+  const lines = splitLines(p);
+  const out: PhrasingContent[] = [];
+  lines.forEach((line, i) => {
+    if (i > 0) out.push({ type: 'break' });
+    const [first, second] = line;
+    const key = first?.type === 'strong' ? toString(first).trim() : '';
+    if (key === 'Status:' && line.length > 1) {
+      const v = second?.type === 'text' ? [{ type: 'text', value: second.value.replace(/^\s+/, '') } as PhrasingContent, ...line.slice(2)] : line.slice(1);
+      out.push(first!, { type: 'text', value: ' ' }, ...badgeStatus(v));
+    } else if (key === 'Status' && second?.type === 'text' && second.value.startsWith(':')) {
+      out.push(first!, { type: 'text', value: ': ' }, ...badgeStatus([{ type: 'text', value: second.value.slice(1).replace(/^\s+/, '') }, ...line.slice(2)]));
+    } else out.push(...line);
+  });
+  p.children = out;
+}
+
 function toDl(entries: Entry[]): RootContent {
   return {
     type: 'paragraph',
@@ -146,7 +200,7 @@ function str(v: unknown): string | null {
 
 export default function remarkPageMeta() {
   return (tree: Root, file: VFile): void => {
-    sourceOf(file, 'remark-page-meta');
+    const { repoPath } = sourceOf(file, 'remark-page-meta');
     const astro = ((file.data as { astro?: { frontmatter?: Record<string, unknown> } }).astro ??= {});
     const fm = (astro.frontmatter ??= {});
 
@@ -207,6 +261,14 @@ export default function remarkPageMeta() {
       description = shortDescription(description);
     }
 
+    if (!headShowsStatus(repoPath)) {
+      for (const e of entries) if (e.key === 'Status') e.value = badgeStatus(e.value);
+      tree.children.forEach((n, i) => {
+        if (i === headerIndex || n.type !== 'paragraph') return;
+        const [first] = n.children;
+        if (first?.type === 'strong' && /^Status:?$/.test(toString(first).trim())) badgeStatusLines(n);
+      });
+    }
     if (headerIndex !== -1) tree.children[headerIndex] = toDl(entries);
 
     const page: PageMeta = {

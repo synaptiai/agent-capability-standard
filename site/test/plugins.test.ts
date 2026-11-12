@@ -317,6 +317,28 @@ describe('rehype-tables', () => {
   });
 });
 
+describe('remark-page-meta status badges', () => {
+  it("draws the first clause of a compliance document's Status as a badge with its glyph, and keeps the rest", async () => {
+    const source = 'docs/compliance/eu-ai-act/post_market_monitoring.md';
+    // The source line (line 6): "**Status:** Reference implementation — Defines ..."
+    expect(readRepoFile(source)).toMatch(/^\*\*Status:\*\* Reference implementation — /m);
+    const { html } = await pageOf(source);
+    expect(html).toMatch(/<dt>Status<\/dt><dd><span class="status-badge status-badge--implementation" data-status="Reference implementation"><svg[^>]*data-glyph="status:implementation"[^>]*>.*?<\/svg>Reference implementation<\/span> — Defines/);
+  });
+
+  it('draws a Status line in the body as a badge too (benchmarks/README.md)', async () => {
+    const source = 'benchmarks/README.md';
+    expect(readRepoFile(source)).toMatch(/^\*\*Status\*\*: SDK-integrated \| /m);
+    const { html } = await pageOf(source);
+    expect(html).toMatch(/<strong>Status<\/strong>: <span class="status-badge status-badge--integrated" data-status="SDK-integrated"><svg[^>]*>.*?<\/svg>SDK-integrated<\/span> \| /);
+  });
+
+  it('leaves the RFC and Standard header rows as text, since their page head shows the badge', async () => {
+    const { html } = await pageOf('spec/RFC-0002-agent-reliability-profile.md');
+    expect(html).toContain('<dt>Status</dt><dd>Draft</dd>');
+  });
+});
+
 describe('tableLabel', () => {
   it('prefers the caption, then the heading, then a plain word', () => {
     expect(tableLabel(' Gates  of step 2 ', 'Steps')).toBe('Gates of step 2');

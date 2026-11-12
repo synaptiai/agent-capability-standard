@@ -28,7 +28,7 @@ import { CONCEPT_GLYPHS, GLYPH_ALIASES, LAYER_GLYPHS, LETTERS, MARK, UI_GLYPHS }
 import { ALL_GRIDS, chapterKey, principleKey, resolveGlyphKey } from '../src/pixel/keys.ts';
 import { parseGrid } from '../src/pixel/grid.ts';
 import { governanceStatuses } from '../src/lib/governance.ts';
-import { PROPOSED_WORKFLOW_STATUS, STATUS_STYLES } from '../src/lib/status.ts';
+import { PROPOSED_WORKFLOW_STATUS, STATUS_STYLES, statusClause } from '../src/lib/status.ts';
 import { isMain } from './is-main.mjs';
 
 const SITE = fileURLToPath(new URL('..', import.meta.url));
@@ -143,20 +143,18 @@ export { governanceStatuses };
 /**
  * Status values the site shows a badge for, from the sources:
  * - every `**Document Status**:` value;
- * - the `**Status:**` value of each RFC and proposal;
- * - the first clause of each Standard's `**Status:**` line.
+ * - the first clause of every `**Status:**` (or `**Status**:`) line, as
+ *   statusClause() reads it: an RFC's whole value, the Standard's
+ *   "Candidate Standard", a compliance document's "Template".
  */
 export function sourceStatuses(files) {
   const out = new Map();
   const add = (value, where) => {
-    if (!out.has(value)) out.set(value, where);
+    if (value && !out.has(value)) out.set(value, where);
   };
   for (const { path: p, text } of files) {
     for (const m of text.matchAll(/^\*\*Document Status\*\*:\s*(.+)$/gm)) add(m[1].trim(), p);
-    const status = /^\*\*Status:\*\*\s*(.+)$/m.exec(text)?.[1];
-    if (!status) continue;
-    if (/^spec\/RFC-\d{4}-/.test(p) || p.startsWith('docs/proposals/')) add(status.trim(), p);
-    if (/^spec\/STANDARD-v\d+\.\d+\.\d+\.md$/.test(p)) add(status.split(/\s+[—–-]\s+|;/)[0].trim(), p); // as versions.ts reads it
+    for (const m of text.matchAll(/^\*\*Status(?::\*\*|\*\*:)\s*(.+)$/gm)) add(statusClause(m[1]), p);
   }
   return out;
 }

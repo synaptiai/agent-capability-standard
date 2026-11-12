@@ -208,6 +208,16 @@ export const UI_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   // candidate: a ballot box with a slip going into its slot, a text put to
   // a vote (apart from the two joined squares of policy:always).
   'status:candidate': ['..###..', '..#.#..', '##...##', '#.....#', '#.....#', '#.....#', '#######'],
+  // template: a page with a folded corner and one blank line to fill in.
+  'status:template': ['####...', '#..##..', '#...##.', '#....#.', '#.#.##.', '#....#.', '######.'],
+  // implementation (a reference implementation): a gear, a working part.
+  'status:implementation': ['.#.#.#.', '#######', '.##.##.', '###.###', '.##.##.', '#######', '.#.#.#.'],
+  // ready (for use): a power button, switched on and ready.
+  'status:ready': ['...#...', '.#.#.#.', '#..#..#', '#.....#', '#.....#', '.#...#.', '..###..'],
+  // guide: a signpost on a base.
+  'status:guide': ['...#...', '#####..', '######.', '#####..', '...#...', '...#...', '.#####.'],
+  // integrated (SDK-integrated): a plug with two prongs.
+  'status:integrated': ['.#...#.', '.#...#.', '#######', '#######', '.#####.', '...#...', '...#...'],
   // Skills and agents. capability: an outline tile lifted by a shadow;
   // general-purpose: a wrench, its open jaw at the top left and a handle
   // three cells wide running down to the right.

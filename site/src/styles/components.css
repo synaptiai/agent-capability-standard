@@ -912,6 +912,30 @@
     color: var(--on-accent);
   }
 
+  .status-badge--template {
+    --c: var(--ink-2);
+    background: transparent;
+  }
+
+  .status-badge--implementation {
+    --c: var(--link);
+  }
+
+  .status-badge--ready {
+    --c: var(--ok);
+    background: transparent;
+  }
+
+  .status-badge--guide {
+    --c: var(--link);
+    background: transparent;
+  }
+
+  .status-badge--integrated {
+    --c: var(--ink);
+    background: transparent;
+  }
+
   .status-badge--proposed {
     --c: var(--ink-2);
     background: transparent;
