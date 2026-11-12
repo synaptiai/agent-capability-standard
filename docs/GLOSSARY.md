@@ -104,18 +104,6 @@ The systematic process by which capabilities are identified and justified. Groun
 3. Operational requirements for production agents
 4. Atomicity validation (ensure each is truly irreducible)
 
-```mermaid
----
-title: How capabilities are derived
----
-flowchart TB
-  accDescr: Capabilities come from the eight foundational verbs of the DIS '23 framework, from domain specialization, a verb plus a domain, and from operational requirements for production agents; atomicity validation checks that each one is irreducible.
-  dis["DIS '23 AI Capabilities framework: 8 foundational verbs"] -->|"verb + domain"| dom[Domain specialization]
-  dis --> atom["Atomicity validation: each is irreducible"]
-  dom --> atom
-  ops[Operational requirements for production agents] --> atom
-```
-
 See [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
 
 ### Extension Governance

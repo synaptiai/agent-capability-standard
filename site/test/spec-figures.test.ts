@@ -300,7 +300,8 @@ describe('Standard figures built to visual spec 3.9 (round 4)', () => {
     expect(b.loop).toEqual({ label: 'goto_step loop', to: 'Back to the target', codes: [] });
     expect(b.exits).toEqual([
       { label: 'Loops exhausted', to: 'on_exhausted handler', codes: ['R404'] },
-      { label: 'No loop', to: "The run ends with the step's code", codes: ['R402'] },
+      // R402 is in the cell's second clause, for a failure mode fired by `when` only.
+      { label: 'No loop', to: "The run ends with the step's code", codes: [] },
     ]);
     // A fourth row would be a branch the figure does not draw.
     const extra = std.replace('| Loops exhausted |', '| Loops paused | Nothing |\n| Loops exhausted |');

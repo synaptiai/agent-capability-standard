@@ -447,7 +447,10 @@ export interface RecoveryBranch {
  * the full words. Throws when the table no longer has those three rows.
  */
 export function recoveryBranches(text: string, where: string): { loop: RecoveryBranch; exits: RecoveryBranch[] } {
-  const rows = recoveryRows(text, where).map((r) => ({ label: firstClause(r.recovery), to: firstClause(r.outcome), codes: [...new Set(r.codes)] }));
+  // Codes from the outcome's main clause (before its first semicolon): the
+  // no-loop row's R402 applies only to a failure mode fired by `when` on a
+  // step that did not fail, a case the short tile does not state.
+  const rows = recoveryRows(text, where).map((r) => ({ label: firstClause(r.recovery), to: firstClause(r.outcome), codes: [...new Set([...r.outcome.split(';')[0]!.matchAll(/\b[A-Z]\d{3}\b/g)].map((m) => m[0]))] }));
   const [loop, ...exits] = rows;
   if (!loop || !/goto_step/.test(loop.label)) throw new Error(`${where}: §5.12's Recovery table no longer starts with the goto_step loop`);
   if (exits.length !== 2) throw new Error(`${where}: §5.12's Recovery table has ${exits.length} ways out of the loop; F-S14 draws two`);
