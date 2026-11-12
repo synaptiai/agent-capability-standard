@@ -1,0 +1,60 @@
+---
+// The guarded steps of the workflow a composed skill runs, drawn under the
+// skill's "Preconditions (hard gates)" heading: one row per step that runs
+// only when a condition holds, has gates, needs a checkpoint before it or
+// needs approval, from the catalog. Each row: the step number and tile
+// (dashed when the step has a condition, as on the step map), the
+// capability, chips for checkpoint and approval, the condition as written,
+// and each gate's `when` with its action's glyph and word. Each row links to
+// the step's card on the workflow's page.
+//
+// Props:
+// - wf: Workflow, required.
+// - steps: GuardedStep[], required. From guardedSteps().
+// - n: number, required. The figure's number on the page.
+import '../../styles/figures-skill.css';
+import type { Workflow } from '../../data/workflows';
+import { workflowHref } from '../../lib/generated';
+import { guardedStepsCaption, guardedStepsTitle, type GuardedStep } from '../../lib/skill-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  wf: Workflow;
+  steps: GuardedStep[];
+  n: number;
+}
+
+const { wf, steps, n } = Astro.props;
+const page = workflowHref(wf.id);
+---
+<Figure id="ref-fig-guards" n={n} title={guardedStepsTitle(wf)} caption={guardedStepsCaption(wf, steps)} kind="guarded-steps">
+  <ol class="guards" aria-label={`Guarded steps of ${wf.id}`}>
+    {steps.map((s) => (
+      <li class="guards__row" data-step={s.index}>
+        <a class="guards__step" href={`${page}#ref-step-${s.index}`}>
+          <span class="guards__n">{s.index}</span>
+          <span
+            class:list={['mini-tile', 'mini-tile--24', 'has-layer', s.condition !== null && 'guards__tile--condition']}
+            style={`--layer: var(--layer-${s.layer})`}
+            aria-hidden="true"
+            data-pagefind-ignore
+          ><span class="mini-tile__symbol">{s.symbol}</span></span>
+          <code>{s.capability}</code>
+        </a>
+        <span class="guards__needs">
+          {s.checkpoint && <span class="guards__chip"><PixelGlyph name="role:checkpoint" />checkpoint first</span>}
+          {s.approval && <span class="guards__chip"><PixelGlyph name="approve:human" />approval</span>}
+        </span>
+        <span class="guards__rules">
+          {s.condition !== null && (
+            <span class="guards__rule"><PixelGlyph name="flow:condition" /><span>runs only when <code>{s.condition}</code></span></span>
+          )}
+          {s.gates.map((g) => (
+            <span class="guards__rule"><PixelGlyph name={`gate:${g.action}`} /><span>{g.action} when <code>{g.when}</code></span></span>
+          ))}
+        </span>
+      </li>
+    ))}
+  </ol>
+</Figure>

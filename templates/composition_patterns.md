@@ -179,7 +179,6 @@ retrieve → observe → detect → classify → integrate → state → transit
 
 Identity resolution (a single v1 capability) is the composition `detect` (domain: entity) → `classify` → `integrate`.
 
-
 ```mermaid
 ---
 title: Identity resolution as a composition
@@ -424,7 +423,6 @@ verify:
 
 Other failure modes, which have neither `on_error` nor `when` and so only document the response: `receive` "No messages/events available" → `stop`; `integrate` "Conflicts exceed threshold" → `request_more_context`.
 
-
 ### Success Criteria
 
 - Twin snapshot updated and grounded
@@ -517,7 +515,6 @@ ${world_state_out} != null:  invoke(digital_twin_sync_loop)
 
 All three conditions use `skip_if_false: true`, so exactly one branch runs: steps 1-2 or step 3.
 
-
 ### Data Flow
 
 ```text
@@ -557,7 +554,6 @@ checkpoint → mutate | execute | send → verify → rollback (gate: skip when 
 - When the side effect can be skipped, gate every step that only checks it (a verification suite, `verify`) on its output being present too, so a check cannot run, or roll back, when nothing changed.
 - Give the side effect, any step that checks it, and `verify` a failure mode with `on_error: [R401, R402]` and `action: rollback`, so a step that cannot finish leaves no unverified change in place; the run then ends with that step's code. Do not also give the FAIL verdict a `rollback` failure mode: the gated `rollback` step handles it, once.
 - `mutate` and `rollback` `conflicts_with` each other: never in the same `parallel_group` (F504).
-
 
 ### Observe-Model-Act
 

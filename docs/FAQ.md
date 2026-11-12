@@ -283,7 +283,7 @@ The analogy captures the design philosophy:
 
 **What the analogy means**: Capabilities are composable primitives. The goal is better workflows (molecules), not more capabilities (atoms).
 
-**What it doesn't mean**: We don't claim physical law derivation or that 35 is fixed forever.
+**What it doesn't mean**: We don't claim physical law derivation or that 36 is fixed forever.
 
 ---
 

@@ -36,18 +36,6 @@ checks:
     message: "Uncertain conclusions must list assumptions"
 ```
 
-```mermaid
----
-title: The four evidence grounding checks
----
-flowchart LR
-  accDescr: An output passes evidence grounding when it has at least one evidence anchor and every anchor is in a valid format, both high severity, and when high confidence rests on at least two anchors and uncertain conclusions list their assumptions, both medium severity.
-  out[An output] --> c1["High: at least one evidence anchor"]
-  out --> c2["High: every anchor in a valid format"]
-  out --> c3["Medium: confidence 0.7 or more needs two anchors"]
-  out --> c4["Medium: uncertainty lists assumptions"]
-```
-
 ### Invariants
 
 - `evidence_anchors.length > 0` for any output with `confidence > 0.5`
@@ -122,19 +110,6 @@ checks:
     message: "Rollback did not restore to checkpoint state"
 ```
 
-```mermaid
----
-title: State assertion around one run
----
-flowchart TB
-  accDescr: The pre-state is hashed and snapshotted, the capability runs, the post-state is hashed and snapshotted, and the delta is asserted: equal hashes for a non-mutating capability, only the expected changes for a mutating one.
-  pre["Capture pre-state: hash, snapshot"] --> run[Execute the capability]
-  run --> post["Capture post-state: hash, snapshot"]
-  post --> q{mutation?}
-  q -->|false| eq[pre_hash equals post_hash]
-  q -->|true| delta[The delta matches the expected changes]
-```
-
 ### Invariants
 
 - Non-mutating capabilities leave state unchanged
@@ -195,18 +170,6 @@ checks:
     condition: set(output_1.evidence_anchors) == set(output_2.evidence_anchors)
     severity: medium
     message: "Evidence anchors differ between executions"
-```
-
-```mermaid
----
-title: The idempotency check
----
-flowchart TB
-  accDescr: The capability runs twice on the same input X, and the two outputs must be equal apart from timestamps.
-  x[Input X] --> r1[First run] --> o1[output_1]
-  x --> r2[Second run] --> o2[output_2]
-  o1 --> eq["Assert output_1 equals output_2, modulo timestamps"]
-  o2 --> eq
 ```
 
 ### Invariants
@@ -277,18 +240,6 @@ checks:
     message: "Git state not clean after rollback"
 ```
 
-```mermaid
----
-title: Rollback verification
----
-flowchart TB
-  accDescr: The pre-action state is captured or taken from the checkpoint, the mutation runs and is verified, the rollback runs, and the post-rollback state must equal the pre-action state.
-  pre["Capture the pre-action state, or use the checkpoint"] --> act["Execute the action (mutate)"]
-  act --> ok[Verify the action succeeded]
-  ok --> rb[Execute rollback]
-  rb --> eq[Assert the post-rollback state equals the pre-action state]
-```
-
 ### Invariants
 
 - Checkpoint must exist before any mutating operation
@@ -357,15 +308,6 @@ checks:
     condition: evidence_anchors is array (may be empty only if confidence < 0.3)
     severity: medium
     message: "Evidence anchors should be non-empty for confident outputs"
-```
-
-```mermaid
----
-title: Contract validation
----
-flowchart LR
-  accDescr: Contract validation loads the capability's output contract schema, validates the output against it, then checks that the required fields are present and the field types match.
-  load[Load the output contract schema] --> val[Validate the output against it] --> req[Check required fields] --> typ[Check field types]
 ```
 
 ### Required Fields (All Capabilities)
@@ -446,19 +388,6 @@ checks:
     message: "Send without approval"
 ```
 
-```mermaid
----
-title: The five safety boundary checks
----
-flowchart LR
-  accDescr: Every safety boundary check is critical: no secrets file read or written, every path inside the workspace, no destructive git command, a checkpoint before any mutation, and approval before any send.
-  cap[A capability run] --> b1[No secrets file accessed]
-  cap --> b2[Every path inside the workspace]
-  cap --> b3[No destructive git command]
-  cap --> b4[A checkpoint before any mutation]
-  cap --> b5[Approval before any send]
-```
-
 ### Invariants
 
 - Never access paths matching `**/.env`, `**/credentials.*`, `**/secrets.*`
@@ -530,20 +459,6 @@ checks:
     condition: capability.requires all executed before
     severity: high
     message: "Dependency not satisfied"
-```
-
-```mermaid
----
-title: The order composition validity checks
----
-flowchart TB
-  accDescr: mutate and send always come after a checkpoint, rollback always has a valid checkpoint reference, and mutate, execute and send are followed by verify.
-  checkpoint[checkpoint] --> mutate[mutate]
-  checkpoint --> send[send]
-  checkpoint -.->|valid reference| rollback[rollback]
-  mutate --> verify[verify]
-  send --> verify
-  execute[execute] --> verify
 ```
 
 ### Anti-Patterns

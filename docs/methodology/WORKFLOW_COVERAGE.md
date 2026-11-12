@@ -16,9 +16,9 @@ This document tracks which capabilities are exercised by reference workflows, id
 
 | Metric | Value |
 |--------|-------|
-| Total Capabilities | 35 |
-| Used in Workflows | 29 (83%) |
-| Unused | 6 (17%) |
+| Total Capabilities | 36 |
+| Used in Workflows | 29 (81%) |
+| Unused | 7 (19%) |
 | Reference Workflows | 5 |
 | Total Workflow Steps | 51 |
 
@@ -123,15 +123,16 @@ This document tracks which capabilities are exercised by reference workflows, id
 
 **Coverage**: 0/2 (0%)
 
-### COORDINATE Layer (3 capabilities)
+### COORDINATE Layer (4 capabilities)
 
 | Capability | debug_code | world_model | gap_analysis | twin_sync | twin_bootstrap | Count |
 |------------|------------|-------------|--------------|-----------|----------------|-------|
 | delegate | ○ | ○ | ○ | ○ | ○ | 0 |
 | synchronize | ○ | ○ | ○ | ○ | ○ | 0 |
 | invoke | ○ | ○ | ○ | ○ | ● | 1 |
+| inquire | ○ | ○ | ○ | ○ | ○ | 0 |
 
-**Coverage**: 1/3 (33%)
+**Coverage**: 1/4 (25%)
 
 ---
 
@@ -152,7 +153,7 @@ This document tracks which capabilities are exercised by reference workflows, id
 
 ---
 
-## 4. Unused Capabilities (6)
+## 4. Unused Capabilities (7)
 
 | Capability | Layer | Suggested Workflow |
 |------------|-------|-------------------|
@@ -162,6 +163,7 @@ This document tracks which capabilities are exercised by reference workflows, id
 | `recall` | REMEMBER | Context retrieval, knowledge lookup |
 | `delegate` | COORDINATE | Multi-agent collaboration |
 | `synchronize` | COORDINATE | Parallel execution coordination |
+| `inquire` | COORDINATE | Clarifying an ambiguous request before acting |
 
 ---
 
@@ -188,7 +190,7 @@ This document tracks which capabilities are exercised by reference workflows, id
 
 ---
 
-## 6. Proposed Workflows for 100% Coverage
+## 6. Proposed Workflows to Close the Gaps
 
 ### GitHub Issue #12: Domain-Specific Workflow Templates
 
@@ -197,7 +199,7 @@ This document tracks which capabilities are exercised by reference workflows, id
 | Personal Assistant | persist, recall, send | +3 capabilities |
 | Multi-Agent Task Delegation | delegate, synchronize, decompose | +3 capabilities |
 
-Implementing these 2 workflows would achieve **100% coverage** (35/35).
+Implementing these 2 workflows would raise coverage to **35/36 (97%)**; `inquire` would remain unused.
 
 ```mermaid
 ---
@@ -213,13 +215,13 @@ flowchart LR
 
 ## 7. Comparison: Old vs New Model
 
-| Metric | Old (99 caps) | New (35 caps) |
+| Metric | Old (99 caps) | New (36 caps) |
 |--------|---------------|---------------|
-| Total Capabilities | 99 | 35 |
-| Used in Workflows | 34 (34%) | 29 (83%) |
-| Unused | 65 (66%) | 6 (17%) |
+| Total Capabilities | 99 | 36 |
+| Used in Workflows | 34 (34%) | 29 (81%) |
+| Unused | 65 (66%) | 7 (19%) |
 | Layers with 0% coverage | 2 | 1 |
-| Layers with 100% coverage | 1 | 6 |
+| Layers with 100% coverage | 1 | 5 |
 
 The 36-capability model achieves **higher coverage with fewer primitives** because domain parameterization eliminates redundant variants.
 
@@ -229,9 +231,9 @@ The 36-capability model achieves **higher coverage with fewer primitives** becau
 
 Current coverage is **29/36 (81%)**. This indicates:
 
-1. **Strong foundation**: 6 of 9 layers have 100% coverage
+1. **Strong foundation**: 5 of 9 layers have 100% coverage
 2. **Focused gaps**: Only 7 capabilities remain unused
-3. **Clear path to 100%**: Two targeted workflows can close the gap
+3. **Clear path to near-full coverage**: Two targeted workflows would cover 35 of 36; `inquire` needs a workflow of its own
 
 The [Extension Governance](EXTENSION_GOVERNANCE.md) process includes usage requirements, which ensures any proposed new capability must demonstrate coverage gaps that existing capabilities cannot address.
 

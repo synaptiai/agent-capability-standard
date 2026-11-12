@@ -1,0 +1,54 @@
+---
+// A composed skill's examples against what they matched: one block per
+// example, headed by its number, title and task, then one row per
+// capability its output lists, with the capability's tile, its domain
+// when the example gives one, its confidence as a bar on a 0 to 1 scale
+// shared by every row, and a mark on the capabilities the skill added for
+// safety (the example's reasoning starts "Auto-added"). Drawn from the
+// examples' own YAML fences, which stay on the page folded under it.
+//
+// Props:
+// - dir: string, required. The skill's directory under skills/.
+// - matches: ExampleMatches, required. From exampleMatches().
+// - n: number, required. The figure's number on the page.
+import '../../styles/figures-skill.css';
+import { exampleMatchesCaption, exampleMatchesTitle, type ExampleMatches } from '../../lib/skill-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+import PixelBar from './PixelBar.astro';
+
+interface Props {
+  dir: string;
+  matches: ExampleMatches;
+  n: number;
+}
+
+const { dir, matches, n } = Astro.props;
+---
+<Figure id="ref-fig-example-matches" n={n} title={exampleMatchesTitle(dir)} caption={exampleMatchesCaption(matches)} kind="example-matches">
+  <div class="xmatch">
+    {matches.examples.map((e) => (
+      <section class="xmatch__ex" aria-label={`Example ${e.n}: ${e.title}`}>
+        <p class="xmatch__head">
+          <span class="xmatch__n" aria-hidden="true">{e.n}</span>
+          <span><span class="xmatch__title">{e.title}</span>{e.task && <span class="xmatch__task">“{e.task}”</span>}</span>
+        </p>
+        <ul class="xmatch__rows">
+          {e.matches.map((m) => (
+            <li class="xmatch__row" data-auto={m.auto ? 'true' : undefined}>
+              <MiniTile id={m.id} size={24} />
+              <span class="xmatch__id"><code>{m.id}</code>{m.domain && <span class="xmatch__domain"> ({m.domain})</span>}</span>
+              <span class="xmatch__bar"><span class="fig-sr">confidence </span><PixelBar value={m.confidence} max={1} digits={2} /></span>
+              {m.auto ? (
+                <span class="xmatch__auto"><PixelGlyph name="principle:safety-by-construction" />added for safety</span>
+              ) : (
+                <span class="xmatch__auto xmatch__auto--none" aria-hidden="true"></span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
+  </div>
+</Figure>
