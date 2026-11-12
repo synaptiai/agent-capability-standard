@@ -46,8 +46,8 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:digital-twin-sync-loop': ['..#......', '.#######.', '..#....#.', '.......#.', '.#.....#.', '.#.......', '.#....#..', '.#######.', '......#..'],
   // Binoculars.
   'page:discover-capabilities': ['.........', '.##...##.', '.#######.', '####.####', '#..#.#..#', '#..#.#..#', '#..#.#..#', '####.####', '.........'],
-  // A cube drawn in perspective.
-  'page:perspective-validation': ['...######', '..#....##', '.#....#.#', '######..#', '#....#..#', '#....#..#', '#....#.#.', '#....##..', '######...'],
+  // One block looked at from three sides: a change seen from several points of view.
+  'page:perspective-validation': ['....#....', '....#....', '...###...', '.........', '#..###..#', '##.###.##', '#..###..#', '.........', '.........'],
   // Three tick boxes, each with a line beside it.
   'page:perspective-checklist': ['##.######', '##.......', '.........', '##.######', '##.......', '.........', '##.######', '##.......', '.........'],
   // A dashed outline with one tile placed in it: a template to fill.
@@ -56,34 +56,34 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:output-contracts': ['........#', '........#', '###..#..#', '#.#..##.#', '#.#####.#', '#.#..##.#', '###..#..#', '........#', '........#'],
   // Two L-shaped pieces locked together above a base.
   'page:skill-composition-patterns': ['######...', '######...', '##....###', '##....###', '##.######', '##.######', '.........', '#########', '#########'],
-  // Two ticks, one after the other.
-  'page:verification-patterns': ['.........', '........#', '.......##', '#.....##.', '##...##.#', '.##.##.##', '..###.##.', '...#.##..', '.....#...'],
+  // An equals sign: the output matches what was expected.
+  'page:verification-patterns': ['.........', '.........', '#########', '#########', '.........', '#########', '#########', '.........', '.........'],
 
   // ---- Compliance
   // A gauge: a half dial with its needle.
   'page:risk-classification': ['.........', '.........', '..#####..', '.#.....#.', '#.#.....#', '#..#....#', '#...##..#', '#########', '.........'],
-  // A ring binder with two label windows.
-  'page:annex-iv': ['..#######', '###.....#', '..#.###.#', '..#.....#', '###.....#', '..#.###.#', '..#.....#', '###.....#', '..#######'],
+  // A filing cabinet of three drawers, each with a handle.
+  'page:annex-iv': ['.#######.', '.#.###.#.', '.#.....#.', '.#######.', '.#.###.#.', '.#.....#.', '.#######.', '.#.....#.', '.#.....#.'],
   // Four boxes in a loop: plan, do, check, act.
   'page:quality-management-system': ['###...###', '#.#####.#', '###...###', '.#.....#.', '.#.....#.', '.#.....#.', '###...###', '#.#####.#', '###...###'],
   // A monitor on a stand, showing bars.
   'page:post-market-monitoring': ['#########', '#.......#', '#.....#.#', '#...#.#.#', '#.#.#.#.#', '#########', '....#....', '..#####..', '.........'],
   // An identity badge on a clip: photo square and two lines.
   'page:notified-body-assessment': ['...###...', '#########', '#########', '#.##.##.#', '#.##....#', '#.##.##.#', '#.......#', '#########', '.........'],
-  // A hub with four parties around it.
-  'page:stakeholder-analysis': ['##.....##', '##.....##', '..#...#..', '...###...', '...###...', '...###...', '..#...#..', '##.....##', '##.....##'],
+  // The organisation inside a dotted ring of interested parties.
+  'page:stakeholder-analysis': ['#.#.#.#.#', '.........', '#.......#', '...###...', '#..###..#', '...###...', '#.......#', '.........', '#.#.#.#.#'],
   // A padlock.
   'page:ai-policy-template': ['..#####..', '.##...##.', '.#.....#.', '#########', '#########', '####.####', '####.####', '#########', '#########'],
   // A sticking plaster.
   'page:risk-treatment-plan': ['.........', '.........', '.#######.', '###.#.###', '####.####', '###.#.###', '.#######.', '.........', '.........'],
   // A ladder.
   'page:competency-framework': ['#.......#', '#########', '#.......#', '#########', '#.......#', '#########', '#.......#', '#########', '#.......#'],
-  // A clipboard with ticked rows.
-  'page:internal-audit-checklist': ['...###...', '##.#.#.##', '#.......#', '#.#.###.#', '#.......#', '#.#.###.#', '#.......#', '#.#.###.#', '#########'],
+  // A tally: four strokes struck through, counted as the audit goes.
+  'page:internal-audit-checklist': ['.........', '.#.#.#.#.', '.#.#.#.#.', '.#.#.#.#.', '#########', '.#.#.#.#.', '.#.#.#.#.', '.#.#.#.#.', '.........'],
   // A pie chart with one quarter filled.
   'page:management-review': ['..#####..', '.#..####.', '#...#####', '#...#####', '#...#####', '#.......#', '#.......#', '.#.....#.', '..#####..'],
-  // A cross in a box.
-  'page:nonconformity-procedure': ['#########', '##.....##', '#.#...#.#', '#..#.#..#', '#...#...#', '#..#.#..#', '#.#...#.#', '##.....##', '#########'],
+  // An exclamation mark in a box: something that does not conform.
+  'page:nonconformity-procedure': ['#########', '#..###..#', '#..###..#', '#..###..#', '#...#...#', '#.......#', '#..###..#', '#.......#', '#########'],
   // Govern above map, measure and manage: one block over a hub of three.
   'page:nist-ai-rmf': ['..#####..', '..#####..', '....#....', '...###...', '...###...', '..#...#..', '###...###', '###...###', '.........'],
 
@@ -106,8 +106,8 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:failure-taxonomy': ['...###...', '...###...', '....#....', '.#######.', '.#.....#.', '###...###', '###...###', '.........', '.........'],
   // A U-turn arrow.
   'page:replanning': ['..###....', '.#...#...', '#.....#..', '#.....#..', '#...#####', '#....###.', '#.....#..', '#........', '#........'],
-  // Two overlapping rings.
-  'page:oasf-comparison': ['.........', '.###.###.', '#...#...#', '#..#.#..#', '#..#.#..#', '#..#.#..#', '#...#...#', '.###.###.', '.........'],
+  // Two tiles set side by side and offset, one solid and one in outline: a comparison.
+  'page:oasf-comparison': ['.........', '####.....', '####.....', '####.####', '####.#..#', '.....#..#', '.....#..#', '.....####', '.........'],
   // A map pin.
   'page:capability-mapping': ['..#####..', '.#######.', '###...###', '###...###', '.#######.', '..#####..', '...###...', '....#....', '.........'],
   // A stopwatch.
