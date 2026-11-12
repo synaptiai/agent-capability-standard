@@ -9,13 +9,23 @@ import {
   contractCaption,
   contractSummary,
   contractTitle,
+  edgeRules,
   neighbourGroupLabel,
+  outputFields,
+  outputFieldsCaption,
+  outputFieldsIsFigure,
+  outputFieldsTitle,
+  safetySequence,
+  sequenceCaption,
+  sequenceIsFigure,
+  sequenceTitle,
   neighbourhoodCaption,
   neighbourhoodTitle,
   neighbours,
   stepWords,
   usageCaption,
 } from '../lib/capability-figures';
+import { currentStandardText } from '../lib/spec-figures';
 import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle } from '../lib/layer-figures';
 import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, layerUsage, safetyRows, type SchemaRow } from '../lib/views';
 import { blocks, cell, code, figure, generatedLine, markdownCopy, mdLink, table } from './md';
@@ -72,6 +82,33 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
           ),
         );
   const summary = contractSummary(cap);
+  const skillText = readRepoFile(skillSource);
+  const fields = outputFields(cap, skillText, skillSource);
+  const outputBlock = outputFieldsIsFigure(fields)
+    ? figure(
+        outputFieldsTitle(cap, fields),
+        outputFieldsCaption(cap, fields),
+        table(
+          ['Field of the skill\'s output', 'In the contract'],
+          [
+            ...fields.skill.map((f) => [code(f.name), f.inContract ? (f.required ? 'Yes, required' : 'Yes, optional') : 'No, the skill\'s own']),
+            ...fields.missing.map((m) => [code(m), 'Yes, but the skill leaves it out']),
+          ],
+        ),
+      )
+    : outputFieldsCaption(cap, fields);
+  const std = currentStandardText();
+  const rules = edgeRules(std.text, std.source);
+  const seq = safetySequence(cap, ontology);
+  const seqRows = [
+    ...seq.before.flatMap((x) => x.types.map((t) => [`Before ${cap.id}`, capLink(x.id), code(t), rules[t].level, rules[t].code])),
+    ...(seq.approval ? [['Approval', 'Each use needs approval', code('requires_approval'), '', '']] : []),
+    ...seq.after.flatMap((x) => x.types.map((t) => [`After ${cap.id}`, capLink(x.id), code(t), rules[t].level, rules[t].code])),
+    ...seq.apart.map((id) => ['Never in the same parallel group', capLink(id), code('conflicts_with'), rules.conflicts_with.level, rules.conflicts_with.code]),
+  ];
+  const sequenceBlock = sequenceIsFigure(seq)
+    ? figure(sequenceTitle(cap), sequenceCaption(cap, seq, rules), table(['Where', 'Capability', 'Rule', 'Enforcement', 'Diagnostic'], seqRows))
+    : sequenceCaption(cap, seq, rules);
   const usedList = usage.map((u) => `- ${mdLink(code(u.workflowId), `/workflows/${u.slug}/`)}: ${stepWords(u.steps)}`).join('\n');
   const used = usage.length === 0 ? usageCaption(cap, usage) : figure(`${cap.id} in workflows`, usageCaption(cap, usage), usedList);
   const markdown = blocks(
@@ -81,6 +118,7 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
     `Layer: ${mdLink(cap.layer, `/layers/${ontology.layers.find((l) => l.id === cap.layer)!.slug}/`)}`,
     '## Safety',
     table(['Property', 'Value'], safetyRows(cap).map((r) => [r.term, r.value])),
+    sequenceBlock,
     '## Relationships',
     neighbourhood,
     relationships,
@@ -90,10 +128,11 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
     contractTable(contractRows(cap.input_schema)),
     '### Outputs',
     contractTable(contractRows(cap.output_schema)),
+    outputBlock,
     '## Used in workflows',
     used,
     '## Claude Code skill',
-    markdownCopy(skillSource, readRepoFile(skillSource), { shiftHeadings: 1 }),
+    markdownCopy(skillSource, skillText, { shiftHeadings: 1 }),
   );
   return { title: cap.id, description: cap.description, markdown };
 }

@@ -1,0 +1,232 @@
+/*
+ * Figures the capability page adds inside the skill's prose: where the
+ * capability may run in a step list (F-C5, under Safety Constraints) and the
+ * skill's output fields against the contract (F-C6, under Output Contract),
+ * plus the folded output fence and the two-column procedure. Kept apart from
+ * figures-capability.css so the rollout's branches merge cleanly. Each
+ * figure lays itself out by the width of its own .fig container.
+ *
+ * Pages import this file, and a page's styles can load before the layout's
+ * tokens.css, so the layer order is declared here too (the same order).
+ */
+@layer reset, tokens, base, components, utilities;
+
+@layer components {
+  /* ---------- F-C5: where the capability may run ---------- */
+
+  .seq {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .seq__row {
+    margin: 0;
+  }
+
+  .seq__down {
+    display: block;
+    margin: var(--space-1) 0 var(--space-1) 12px;
+  }
+
+  .seq__label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .seq__note {
+    display: inline-block;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: var(--px) solid var(--ink);
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  .seq__row--approval .seq__label {
+    margin-bottom: var(--space-1);
+  }
+
+  .seq__items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .seq__item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .seq__rules {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink-2);
+  }
+
+  .seq__rule {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+  }
+
+  .seq__rule code {
+    font-size: 12px;
+    background: none;
+    padding: 0;
+  }
+
+  .seq__level {
+    font-family: var(--font-eyebrow);
+    color: var(--ink);
+  }
+
+  .seq__self {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    box-sizing: border-box;
+    min-height: 64px;
+    padding: 6px var(--space-4) 6px 6px;
+    border: var(--px) solid var(--layer);
+    background: var(--bg);
+  }
+
+  .seq__self-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .seq__self-text code {
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .seq__key {
+    margin: var(--space-3) 0 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-C6: the skill's output fields against the contract ---------- */
+
+  .ofields {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .ofields__row {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .ofields__label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .ofields__count {
+    font-family: var(--font-mono);
+    font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  .ofields__bar {
+    display: block;
+    max-width: 24rem;
+  }
+
+  .ofields__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ofields__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 2px var(--space-2);
+    border: var(--px) solid var(--ink-3);
+    background: var(--bg);
+  }
+
+  .ofields__row[data-row='contract'] .ofields__chip {
+    border-color: var(--layer);
+  }
+
+  .ofields__row[data-row='own'] .ofields__chip,
+  .ofields__row[data-row='missing'] .ofields__chip {
+    background: var(--bg-mut);
+  }
+
+  .ofields__chip code {
+    background: none;
+    padding: 0;
+    font-size: 14px;
+  }
+
+  .ofields__chip[data-pin='required'] .ofields__pin {
+    background: var(--ink);
+  }
+
+  /* ---------- the folded output fence ---------- */
+
+  .skill-fence {
+    margin: var(--space-3) 0;
+  }
+
+  /* ---------- the procedure in two columns when the column is wide ---------- */
+
+  .capability-skill {
+    container-type: inline-size;
+  }
+
+  .skill-steps > li > p {
+    margin: 0;
+  }
+
+  .skill-steps > li > ul {
+    margin: var(--space-1) 0 0;
+  }
+
+  .skill-steps > li > ul > li {
+    margin: 0;
+  }
+
+  @container (min-width: 640px) {
+    .skill-steps {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-4) var(--space-5);
+    }
+
+    .skill-steps > li + li {
+      margin-top: 0;
+    }
+  }
+}

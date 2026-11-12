@@ -5,6 +5,7 @@
 // in its own file.
 import { EDGE_TYPES, loadOntology, type Capability, type EdgeType, type Ontology } from '../data/ontology';
 import { capabilityUsage, type CapabilityUse } from '../data/workflows';
+import { sectionFence, sectionTableByHeader, tableRows } from './md-sections';
 import { contractRows, tableOrder, type SchemaRow } from './views';
 
 // ------------------------------------------------------------ F-C1 neighbours
@@ -246,3 +247,173 @@ export function splitAtH2s(html: string): { lead: string; parts: { id: string; h
   });
   return { lead, parts };
 }
+
+// ------------------------------------------------- F-C5 ordering and safety
+
+/** The edge types that place one step before another (Standard §4.3). */
+export const ORDERING_TYPES = ['requires', 'soft_requires', 'precedes'] as const;
+export type OrderingType = (typeof ORDERING_TYPES)[number];
+
+export interface EdgeRule {
+  /** The word in the §4.3 "Enforcement" column: MUST, SHOULD. */
+  level: string;
+  /** The first diagnostic code in the §4.3 "Diagnostic" column, e.g. V102. */
+  code: string;
+}
+
+/**
+ * The enforcement level and diagnostic of each ordering edge type and of
+ * conflicts_with, read from the two tables of the Standard's §4.3. Throws
+ * when a type has no row, so a renamed table cannot leave the figure blank.
+ */
+export function edgeRules(standardText: string, where: string): Record<OrderingType | 'conflicts_with', EdgeRule> {
+  const levels = new Map<string, string>();
+  for (const row of tableRows(sectionTableByHeader(standardText, '4.3 ', 'Edge Type', where)).slice(1)) {
+    levels.set(row[0]!.replace(/`/g, ''), row[1]!.trim());
+  }
+  const codes = new Map<string, string>();
+  for (const row of tableRows(sectionTableByHeader(standardText, '4.3 ', 'Edge', where)).slice(1)) {
+    const code = /\b[A-Z]\d{3}\b/.exec(row[2] ?? '')?.[0];
+    for (const t of row[0]!.replace(/`/g, '').split(/,\s*/)) if (code) codes.set(t.trim(), code);
+  }
+  const out = {} as Record<OrderingType | 'conflicts_with', EdgeRule>;
+  for (const t of [...ORDERING_TYPES, 'conflicts_with'] as const) {
+    const level = levels.get(t);
+    const code = codes.get(t);
+    if (!level || !code) throw new Error(`${where}: §4.3 gives no enforcement level or diagnostic for ${t}`);
+    out[t] = { level, code };
+  }
+  return out;
+}
+
+export interface OrderedNeighbour {
+  id: string;
+  /** In ORDERING_TYPES order. */
+  types: OrderingType[];
+}
+
+export interface SafetySequence {
+  /** Capabilities with an ordering edge into this one: they run before it. */
+  before: OrderedNeighbour[];
+  /** Capabilities this one has an ordering edge to: they run after it. */
+  after: OrderedNeighbour[];
+  approval: boolean;
+  /** The ontology flag, as against a checkpoint that comes only from a requires edge. */
+  checkpointFlag: boolean;
+  /** Capabilities joined by conflicts_with: never in the same parallel_group. */
+  apart: string[];
+}
+
+/**
+ * Where a capability may sit in a workflow's step list, from its ordering
+ * edges (requires, soft_requires, precedes) and its approval and checkpoint
+ * flags. Neighbours are in periodic-table order.
+ */
+export function safetySequence(cap: Capability, ontology: Ontology = loadOntology()): SafetySequence {
+  const order = tableOrder(ontology);
+  const side = (edges: Capability['edgesIn']): OrderedNeighbour[] => {
+    const ids = [...new Set(ORDERING_TYPES.flatMap((t) => edges[t]))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    return ids.map((id) => ({ id, types: ORDERING_TYPES.filter((t) => edges[t].includes(id)) }));
+  };
+  const apart = [...new Set([...cap.edgesOut.conflicts_with, ...cap.edgesIn.conflicts_with])].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return {
+    before: side(cap.edgesIn),
+    after: side(cap.edgesOut),
+    approval: cap.requires_approval,
+    checkpointFlag: cap.requires_checkpoint,
+    apart,
+  };
+}
+
+/** How many ordering rules the sequence draws: one per (neighbour, type). */
+export function sequenceRuleCount(s: SafetySequence): number {
+  return [...s.before, ...s.after].reduce((k, n) => k + n.types.length, 0) + s.apart.length;
+}
+
+/** True when the sequence is worth a figure; otherwise the page prints sequenceSentence(). */
+export function sequenceIsFigure(s: SafetySequence): boolean {
+  return s.approval || s.checkpointFlag || sequenceRuleCount(s) >= 2;
+}
+
+/** F-C5's title. */
+export function sequenceTitle(cap: Capability): string {
+  return `Ordering rules for ${cap.id} in a workflow`;
+}
+
+/**
+ * F-C5's caption, or the sentence printed in its place: what must, should
+ * or may come before and after the capability, in plain words.
+ */
+export function sequenceCaption(cap: Capability, s: SafetySequence, rules: Record<OrderingType | 'conflicts_with', EdgeRule>): string {
+  const names = (ids: string[]) => (ids.length === 1 ? ids[0]! : `${ids.slice(0, -1).join(', ')} and ${ids.at(-1)}`);
+  const withType = (side: OrderedNeighbour[], t: OrderingType) => side.filter((n) => n.types.includes(t)).map((n) => n.id);
+  const parts: string[] = [];
+  const must = withType(s.before, 'requires');
+  if (must.length > 0) parts.push(`${names(must)} must run before it (${rules.requires.code})`);
+  const should = withType(s.before, 'soft_requires');
+  if (should.length > 0) parts.push(`${should.length === 1 ? should[0] : `one of ${names(should)}`} should run before it (${rules.soft_requires.code})`);
+  const first = withType(s.before, 'precedes').filter((id) => !must.includes(id));
+  if (first.length > 0) parts.push(`${names(first)}, where the workflow has ${first.length === 1 ? 'it' : 'them'}, must come first (${rules.precedes.code})`);
+  const needs = withType(s.after, 'requires');
+  if (needs.length > 0) parts.push(`it must run before ${names(needs)} (${rules.requires.code})`);
+  const helps = withType(s.after, 'soft_requires');
+  if (helps.length > 0) parts.push(`it is a recommended step before ${names(helps)}`);
+  const then = withType(s.after, 'precedes');
+  if (then.length > 0) parts.push(`where the workflow has ${names(then)}, ${cap.id} must come before ${then.length === 1 ? 'it' : 'them'} (${rules.precedes.code})`);
+  if (s.approval) parts.push('each use needs approval');
+  if (s.checkpointFlag && !must.includes('checkpoint')) parts.push('a checkpoint must run before it');
+  if (s.apart.length > 0) parts.push(`it never shares a parallel group with ${names(s.apart)} (${rules.conflicts_with.code})`);
+  if (parts.length === 0) return `No ordering edge and no approval or checkpoint flag constrains where ${cap.id} runs in a step list, and no conflicts_with edge keeps it out of a parallel group.`;
+  const text = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join('; ')}; and ${parts.at(-1)}`;
+  return `In a workflow, ${text}.`;
+}
+
+// ---------------------------------------------------- F-C6 skill output fields
+
+export interface OutputFields {
+  /** Top-level fields of the skill's Output Contract fence, in its order. */
+  skill: { name: string; inContract: boolean; required: boolean }[];
+  /** Top-level contract outputs the skill's fence does not name. */
+  missing: string[];
+}
+
+/** Top-level keys of the first YAML fence under the skill's "Output Contract" heading. */
+export function skillOutputKeys(skillText: string, where: string): string[] {
+  const fence = sectionFence(skillText, 'Output Contract', 0, where);
+  return [...new Set(fence.value.split('\n').flatMap((l) => /^([A-Za-z_][A-Za-z0-9_]*)\s*:/.exec(l)?.[1] ?? []))];
+}
+
+/** The skill's output fields against the capability's output contract. */
+export function outputFields(cap: Capability, skillText: string, where: string): OutputFields {
+  const contract = contractRows(cap.output_schema).filter((r) => r.depth === 0);
+  const keys = skillOutputKeys(skillText, where);
+  return {
+    skill: keys.map((name) => {
+      const row = contract.find((r) => r.name === name);
+      return { name, inContract: row !== undefined, required: row?.required ?? false };
+    }),
+    missing: contract.filter((r) => !keys.includes(r.name)).map((r) => r.name),
+  };
+}
+
+/** True when the comparison is worth a figure: the skill adds fields or leaves some out. */
+export function outputFieldsIsFigure(f: OutputFields): boolean {
+  return f.missing.length > 0 || f.skill.some((x) => !x.inContract);
+}
+
+/** F-C6's title. */
+export function outputFieldsTitle(cap: Capability, f: OutputFields): string {
+  const inC = f.skill.filter((x) => x.inContract).length;
+  return `Fields of the ${cap.id} skill's output: ${inC} of ${f.skill.length} in the contract`;
+}
+
+/** F-C6's caption, or the sentence printed in its place. */
+export function outputFieldsCaption(cap: Capability, f: OutputFields): string {
+  const inC = f.skill.filter((x) => x.inContract);
+  const req = inC.filter((x) => x.required).length;
+  const added = f.skill.length - inC.length;
+  if (!outputFieldsIsFigure(f)) return `Every field of the skill's output is a field of ${cap.id}'s output contract, and the skill names all of them.`;
+  const missing = f.missing.length === 0 ? '' : `; it leaves out ${plural(f.missing.length, 'contract field', 'contract fields')} (${f.missing.join(', ')})`;
+  return `The skill returns ${plural(f.skill.length, 'field', 'fields')}: ${inC.length} ${inC.length === 1 ? 'is' : 'are'} in ${cap.id}'s output contract (${req} required) and ${added} ${added === 1 ? 'is' : 'are'} the skill's own, outside the contract${missing}.`;
+}
+

@@ -1,0 +1,94 @@
+---
+// F-C5, the ordering rules for a capability in a workflow (the rollout's
+// figure for the skill's Safety Constraints section): a vertical sequence of
+// what must or should run before it, the approval gate when the ontology
+// flags one, the capability itself, what it must run before, and, without a
+// chevron because no order is implied, the capabilities it may not share a
+// parallel group with. Every row comes from an ontology edge or
+// flag, and every rule carries the edge type's mark, its enforcement word
+// and its diagnostic code as the Standard's §4.3 tables give them. Drawn
+// only when sequenceIsFigure() says so; the page prints the caption alone
+// otherwise.
+//
+// Props:
+// - cap: Capability, required.
+// - n: number, required. The figure number on the page.
+import type { Capability, EdgeType } from '../../data/ontology';
+import { edgeRules, safetySequence, sequenceCaption, sequenceTitle, type OrderedNeighbour } from '../../lib/capability-figures';
+import { diagnosticHref, specSectionHref } from '../../lib/generated';
+import { currentStandardText } from '../../lib/spec-figures';
+import { chevron, run } from '../../pixel/lines';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+import Rects from './Rects.astro';
+
+interface Props {
+  cap: Capability;
+  n: number;
+}
+
+const { cap, n } = Astro.props;
+const std = currentStandardText();
+const rules = edgeRules(std.text, std.source);
+const s = safetySequence(cap);
+const down = [...run(12, 0, 12, 10, 'ink-2'), ...chevron(12, 11, 'down', 'ink-2')];
+type Item = { id: string; marks: { type: EdgeType; level: string; code: string }[] };
+const items = (side: OrderedNeighbour[]): Item[] => side.map((x) => ({ id: x.id, marks: x.types.map((t) => ({ type: t, ...rules[t] })) }));
+type Row = { key: string; label: string; glyph: string; items?: Item[]; note?: string };
+const rows: Row[] = [
+  ...(s.before.length > 0 ? [{ key: 'before', label: `Runs before ${cap.id}`, glyph: 'chevron-right', items: items(s.before) }] : []),
+  ...(s.approval ? [{ key: 'approval', label: 'Approval', glyph: 'stamp', note: 'Each use needs approval (requires_approval).' }] : []),
+  { key: 'self', label: cap.id, glyph: cap.layer },
+  ...(s.after.length > 0 ? [{ key: 'after', label: `Runs after ${cap.id}`, glyph: 'chevron-right', items: items(s.after) }] : []),
+  ...(s.apart.length > 0 ? [{ key: 'apart', label: 'Never in the same parallel group', glyph: 'mark:conflicts_with', items: s.apart.map((id) => ({ id, marks: [{ type: 'conflicts_with' as const, ...rules.conflicts_with }] })) }] : []),
+];
+const codes = [...new Set(rows.flatMap((r) => r.items ?? []).flatMap((x) => x.marks.map((m) => m.code)))];
+const words = (m: Item['marks'][number]) => `${m.type}, ${m.level}, ${m.code}`;
+---
+<Figure id="ref-fig-sequence" n={n} title={sequenceTitle(cap)} caption={sequenceCaption(cap, s, rules)} kind="sequence">
+  <ol class="seq has-layer" style={`--layer: var(--layer-${cap.layer})`} data-rows={rows.length}>
+    {rows.map((row, i) => (
+      <li class:list={['seq__row', `seq__row--${row.key}`]} data-row={row.key}>
+        {i > 0 && row.key !== 'apart' && (
+          <svg class="seq__down" viewBox="0 0 24 18" width="24" height="18" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={down} /></svg>
+        )}
+        {row.key === 'self' ? (
+          <div class="seq__self">
+            <MiniTile id={cap.id} size={48} current link={false} />
+            <span class="seq__self-text"><code>{cap.id}</code><span>{cap.mutation ? 'changes state' : 'does not change state'}, {cap.risk} risk</span></span>
+          </div>
+        ) : (
+          <>
+            <p class="seq__label" id={`ref-seq-${row.key}`}><PixelGlyph name={row.glyph} />{row.label}</p>
+            {row.note && <p class="seq__note">{row.note}</p>}
+            {row.items && (
+              <ul class="seq__items" aria-labelledby={`ref-seq-${row.key}`}>
+                {row.items.map((x) => (
+                  <li class="seq__item" data-capability={x.id}>
+                    <MiniTile id={x.id} size={32} relation={x.marks.map(words).join('; ')} />
+                    <span class="seq__rules" aria-hidden="true">
+                      {x.marks.map((m) => (
+                        <span class="seq__rule" data-type={m.type}>
+                          <PixelGlyph name={`mark:${m.type}`} />
+                          <code>{m.type}</code>
+                          <span class="seq__level">{m.level}</span>
+                        </span>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </li>
+    ))}
+  </ol>
+  {codes.length > 0 && <p class="seq__key">
+    MUST and SHOULD are the enforcement words of the <a href={specSectionHref('4.3')}>Standard's §4.3</a>. Breaking a rule is reported as{' '}
+    {codes.map((c, i, all) => (
+      <>{i > 0 && (i === all.length - 1 ? ' or ' : ', ')}<a href={diagnosticHref(c)}><code>{c}</code></a></>
+    ))}.
+  </p>}
+</Figure>
