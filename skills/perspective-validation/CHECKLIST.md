@@ -93,7 +93,6 @@ flowchart TB
   s2 --> q{Any FAIL or PARTIAL?}
   q -->|yes| fix["Pick a remediation pattern, add an artifact"]
   fix -->|re-run the report| s2
-  q -->|no| done[No remediation left]
 ```
 
 ---
@@ -384,9 +383,8 @@ flowchart LR
 title: A runtime invariant monitor
 ---
 flowchart LR
-  accDescr: A monitor rule detects a violated critical invariant at run time, raises an alert with an escalation path, and the default response halts, rolls back or escalates.
+  accDescr: A monitor rule detects a violated critical invariant at run time, with an alert and an escalation path.
   viol[Invariant violated at run time] --> mon[Monitor rule] --> alert[Alert and escalation path]
-  alert --> resp["Halt, roll back or escalate"]
 ```
 
 ---

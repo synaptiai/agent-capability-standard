@@ -105,12 +105,10 @@ are recorded in it.
 title: What the runner does with a host method's result
 ---
 flowchart LR
-  accDescr: A response is submitted to the run; None means nothing yet, so the runner waits poll_interval_ms or until the deadline and asks again; an exception from invoke_capability fails the step with R402 and its retries and failure modes apply; NotImplementedError stops the runner.
+  accDescr: A response is submitted to the run; None means nothing yet, so the runner waits poll_interval_ms or until the deadline and asks again.
   m[Host method] -->|response| sub[Submitted to the run]
   m -->|None| wait["Wait, then ask again"]
   wait --> m
-  m -->|exception| fail["Step fails, R402: retries and failure modes apply"]
-  m -->|"not implemented"| stop[The runner stops]
 ```
 
 Values you hand the run must be I-JSON: integers within ±2^53 and at most

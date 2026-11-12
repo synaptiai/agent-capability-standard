@@ -48,11 +48,10 @@ workflow and silently ignore, for example, a wait or an approval.
 title: Extensions are must-understand
 ---
 flowchart TB
-  accDescr: A workflow that uses an extension's fields without listing it in workflow_extensions.requires is rejected with V106, and so is one that lists an extension the validator does not know; otherwise the validator checks it.
+  accDescr: A workflow that uses an extension's fields without listing it in workflow_extensions.requires is rejected with V106, and so is one that lists an extension the validator does not know.
   q1{"Uses an extension's fields without listing it?"} -->|yes| v1[V106: rejected]
   q1 -->|no| q2{"Lists an extension the validator does not know?"}
   q2 -->|yes| v2[V106: rejected]
-  q2 -->|no| ok[Validated]
 ```
 
 ## Triggers (`triggers@1`)

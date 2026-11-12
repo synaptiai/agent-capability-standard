@@ -78,9 +78,8 @@ error:
 title: A domain the implementation does not support
 ---
 flowchart TB
-  accDescr: When the implementation has a processing pipeline for the step's domain value it runs it; otherwise it returns an unsupported_domain error naming the domain, so the gap is found rather than failing silently.
+  accDescr: When the implementation has no processing pipeline for the step's domain value, it returns an unsupported_domain error naming the domain, so the gap is found rather than failing silently.
   step["Step with domain: haptic.pressure"] --> has{"Pipeline for this domain?"}
-  has -->|yes| run[Run the modality pipeline]
   has -->|no| err["Error unsupported_domain, naming the domain"]
 ```
 
