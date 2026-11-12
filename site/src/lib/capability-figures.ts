@@ -94,16 +94,28 @@ export function neighbourhoodTitle(cap: Capability, list: Neighbour[]): string {
   return `Relationships of ${cap.id}: ${plural(c.relations, 'relationship', 'relationships')} with ${plural(c.capabilities, 'capability', 'capabilities')}`;
 }
 
-/** F-C1's caption: "{id} has {r} relationships with {n} capabilities: {i} point into it, {o} point out of it, and {b} run both ways." */
+/**
+ * F-C1's caption. It counts capabilities per row, as the row headings do, so
+ * the two never disagree: "{id} has {r} relationships with {n} capabilities:
+ * {i} with edges into it and {o} with edges out of it". A symmetric edge drawn
+ * in a directed row (its tile sits there for its directed edge) is named after
+ * a semicolon: "its conflicts_with edge with rollback runs both ways".
+ */
 export function neighbourhoodCaption(cap: Capability, list: Neighbour[]): string {
   const c = neighbourCounts(list);
-  const parts = [
-    ...(c.into > 0 ? [`${c.into} ${c.into === 1 ? 'points' : 'point'} into it`] : []),
-    ...(c.out > 0 ? [`${c.out} ${c.out === 1 ? 'points' : 'point'} out of it`] : []),
-    ...(c.bothWays > 0 ? [`${c.bothWays} ${c.bothWays === 1 ? 'runs' : 'run'} both ways`] : []),
-  ];
+  const words: Record<NeighbourGroup, string> = {
+    into: 'with edges into it',
+    out: 'with edges out of it',
+    both: 'with edges both into it and out of it',
+    either: 'joined to it only by edges that run both ways',
+  };
+  const parts = NEIGHBOUR_GROUPS.map((g) => ({ g, n: list.filter((x) => x.group === g).length })).filter((x) => x.n > 0).map((x) => `${x.n} ${words[x.g]}`);
   const joined = parts.length <= 1 ? parts.join('') : `${parts.slice(0, -1).join(', ')}${parts.length > 2 ? ',' : ''} and ${parts.at(-1)}`;
-  return `${cap.id} has ${plural(c.relations, 'relationship', 'relationships')} with ${plural(c.capabilities, 'capability', 'capabilities')}: ${joined}.`;
+  const tucked = list
+    .filter((x) => x.group !== 'either')
+    .flatMap((x) => x.relations.filter((r) => r.direction === 'both-ways').map((r) => `${r.type} edge with ${x.id}`));
+  const tail = tucked.length === 0 ? '' : `; its ${tucked.length === 1 ? tucked[0] : `${tucked.slice(0, -1).join(', ')} and ${tucked.at(-1)}`} ${tucked.length === 1 ? 'runs' : 'run'} both ways`;
+  return `${cap.id} has ${plural(c.relations, 'relationship', 'relationships')} with ${plural(c.capabilities, 'capability', 'capabilities')}: ${joined}${tail}.`;
 }
 
 // --------------------------------------------------------------- F-C2 contract

@@ -62,9 +62,13 @@ describe('neighbours (F-C1)', () => {
     const rollback = got.find((n) => n.id === 'rollback')!;
     expect(rollback.relations.map((r) => r.type).sort()).toEqual(['conflicts_with', 'specializes']);
     expect(neighbourCounts(got)).toEqual({ relations: 12, capabilities: 8, into: 8, out: 3, bothWays: 1 });
-    // Visual spec 6.1 gives this sentence word for word.
+    // Visual spec 6.1's sentence counted relations (8 into, 3 out, 1 both
+    // ways) while the row headings count tiles (5, 3), and no "both ways" row
+    // is drawn, so the review found they did not add up. The caption now counts
+    // tiles per row, as the headings do, and names the symmetric edge drawn in
+    // a directed row. Expected words from the edge list above, by hand.
     expect(neighbourhoodCaption(cap('mutate'), got)).toBe(
-      'mutate has 12 relationships with 8 capabilities: 8 point into it, 3 point out of it, and 1 runs both ways.',
+      'mutate has 12 relationships with 8 capabilities: 5 with edges into it and 3 with edges out of it; its conflicts_with edge with rollback runs both ways.',
     );
   });
 
