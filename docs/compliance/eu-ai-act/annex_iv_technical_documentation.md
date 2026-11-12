@@ -476,11 +476,11 @@ Before placing a high-risk AI system on the market, the provider shall register 
 title: What the EU database registration draws on, before market placement
 ---
 flowchart LR
-  accDescr: Before a high-risk AI system is placed on the market, the provider registers it in the EU database, drawing on the risk classification, the assessment route, the QMS documentation and this technical documentation.
+  accDescr: Before a high-risk AI system is placed on the market, the provider registers it in the EU database, drawing on the risk classification, the conformity assessment route, the QMS documentation and the AI system description.
   cls[Risk classification] --> reg["EU database registration (Art. 49)"]
-  ntb[Assessment route] --> reg
+  ntb[Conformity assessment route] --> reg
   qms[QMS documentation] --> reg
-  tec[System description] --> reg
+  tec[AI system description] --> reg
 ```
 
 ---
