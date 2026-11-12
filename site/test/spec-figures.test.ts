@@ -11,6 +11,7 @@ import { placeSlots } from '../src/plugins/rehype-spec-slots';
 import { REPLAY_FIXTURES, replay } from '../src/lib/run-replay';
 import * as D from '../src/lib/spec-dsl-figures';
 import * as T from '../src/lib/spec-tail-figures';
+import { loadOntology } from '../src/data/ontology';
 
 const STD = 'spec/STANDARD-v1.1.0.md';
 const text = repoText(STD);
@@ -209,5 +210,100 @@ describe('Standard figure data', () => {
   it('reads the precedence ladder of §5.8.1 loosest first (F-S11)', () => {
     // Expected: the spec's ladder (visual spec 3.9 F-S11).
     expect(D.precedenceLadder(text, STD).map((r) => r.rule)).toEqual(['or_expr', 'and_expr', 'cmp_expr', 'unary', 'primary']);
+  });
+});
+
+describe('Standard figures built to visual spec 3.9 (round 4)', () => {
+  it('cuts each §10.2 bullet into its text and one chip per § reference or code, and keeps every word (F-S28)', () => {
+    const lines = section(text, '10.2');
+    const bullets: { level: string; text: string }[] = [];
+    let cur = '';
+    for (const l of lines) {
+      const m = /^\*\*(L\d) /.exec(l);
+      if (m) cur = m[1]!;
+      else if (cur && l.startsWith('- ')) bullets.push({ level: cur, text: l.slice(2) });
+      else if (cur && /^ {2}\S/.test(l)) bullets.at(-1)!.text += ` ${l.trim()}`;
+    }
+    const cols = T.conformanceLevels(text, STD);
+    const items = cols.flatMap((c) => c.items);
+    expect(items).toHaveLength(bullets.length);
+    for (const [i, b] of bullets.entries()) {
+      const refs = [...b.text.matchAll(/§\d+(?:\.\d+)*|\b[A-Z]\d{3}\b/g)].map((m) => m[0]);
+      const chips = items[i]!.parts.filter((p) => p.kind !== 'text').map((p) => (p.kind === 'section' ? `§${p.value}` : p.value));
+      expect(chips, b.text).toEqual(refs);
+      // The text parts are the bullet without its bracketed references and backticks.
+      const words = b.text.replace(/`/g, '').replace(/\s?\((?:§[\d.]+|[A-Z]\d{3})(?:,\s*(?:§[\d.]+|[A-Z]\d{3}))*\)/g, '');
+      expect(items[i]!.parts.filter((p) => p.kind === 'text').map((p) => p.value).join('').replace(/\s+/g, ' ').trim(), b.text).toBe(words.replace(/\s+/g, ' ').trim());
+    }
+    // Placed under §10.1, the section the spec lists it against.
+    expect(SPEC_SLOTS.find((x) => x.key === 'levels')!.section).toBe('10.1 ');
+  });
+
+  it('names the merge bands by the action each threshold of the policy file leads to (F-S24b)', () => {
+    const policy = repoText('schemas/identity_resolution_policy.yaml');
+    const block = /^ {2}thresholds:\n((?: {4}\w+: [\d.]+\n)+)/m.exec(policy)![1]!;
+    const t = Object.fromEntries([...block.matchAll(/(\w+): ([\d.]+)/g)].map((m) => [m[1]!, Number(m[2])]));
+    const actions = /^ {4}action: (.+)$/m.exec(policy)![1]!.split('|');
+    // The reading the figure states: merge and suggest at or above their
+    // thresholds, ignore below no_merge, split_review below force_split_review
+    // ("Confidence drops below force_split_review threshold").
+    expect(actions).toEqual(['merge', 'suggest', 'ignore', 'split_review']);
+    expect(policy).toContain('Confidence drops below force_split_review threshold');
+    const want = [
+      { from: 0, to: t.force_split_review, action: 'split_review' },
+      { from: t.force_split_review, to: t.no_merge, action: 'ignore' },
+      { from: t.no_merge, to: t.suggest_merge, action: null },
+      { from: t.suggest_merge, to: t.auto_merge, action: 'suggest' },
+      { from: t.auto_merge, to: 1, action: 'merge' },
+    ];
+    expect(T.mergeBands().map((b) => ({ from: b.from, to: b.to, action: b.action }))).toEqual(want);
+  });
+
+  it('draws a lane for every ordering edge §3.3 names, with each target drop on its own slot (F-S1)', () => {
+    const onto = repoText('schemas/capability_ontology.yaml');
+    const edges = [...onto.matchAll(/^- from: (\w+)\n {2}to: (\w+)\n {2}type: (\w+)/gm)]
+      .map((m) => ({ from: m[1]!, to: m[2]!, type: m[3]! }))
+      .filter((e) => ['checkpoint', 'plan', 'constrain'].includes(e.from) && ['requires', 'precedes', 'soft_requires'].includes(e.type));
+    const layout = D.safetyOrderLayout(D.safetyOrder());
+    const drawn = layout.lanes.flatMap((l) => l.targets.map((to) => ({ from: l.source, to, type: l.type })));
+    const key = (e: { from: string; to: string; type: string }) => `${e.from} ${e.type} ${e.to}`;
+    expect(drawn.map(key).sort()).toEqual(edges.map(key).sort());
+    for (const tgt of layout.targets) {
+      const xs = layout.lanes.flatMap((l) => l.targets.flatMap((to, i) => (to === tgt.id ? [{ x: l.tx[i]!, w: l.type === 'requires' ? 20 : 10 }] : []))).sort((a, b) => a.x - b.x);
+      // Chevrons of neighbouring drops never overlap.
+      for (let i = 1; i < xs.length; i++) expect(xs[i]!.x - xs[i]!.w / 2, tgt.id).toBeGreaterThanOrEqual(xs[i - 1]!.x + xs[i - 1]!.w / 2);
+    }
+    // The drawing fits the 620px frame the stylesheet gives it.
+    expect(layout.width).toBeLessThanOrEqual(620);
+  });
+
+  it('lists every capability once, in table order (F-S6)', () => {
+    const onto = repoText('schemas/capability_ontology.yaml');
+    // The layers block lists each layer's capabilities, in table order, as "    - id" lines.
+    const layers = /^layers:\n((?: .*\n)+)/m.exec(onto)![1]!;
+    const layerCaps = [...layers.matchAll(/^ {4}- (\w+)$/gm)].map((m) => m[1]!);
+    const order = D.safetyDefaults().flatMap((g) => g.caps.map((c) => c.id));
+    expect(order).toEqual(layerCaps);
+    const caps = loadOntology().capabilities;
+    expect(order).toHaveLength(caps.length);
+    expect(new Set(order).size).toBe(order.length);
+  });
+
+  it('marks the step whose failure mode fired, and the exit when its loops run out (F-S14b)', () => {
+    const f = JSON.parse(repoText('tests/conformance/runtime/recovery_loop_exhausted.json')) as {
+      catalog: Record<string, { steps: { capability: string; failure_modes?: { condition: string; recovery: Record<string, unknown> }[] }[] }>;
+      workflow: string;
+      script: { expect: { capability?: string } }[];
+    };
+    const steps = f.catalog[f.workflow]!.steps;
+    const failing = steps.findIndex((s) => (s.failure_modes ?? []).length > 0);
+    const fm = steps[failing]!.failure_modes![0]!;
+    const r = replay('recovery_loop_exhausted');
+    // Each run of the failing step after the first loops back or, the last time, runs out.
+    const runs = f.script.filter((x) => x.expect.capability === steps[failing]!.capability).length;
+    expect(r.steps[failing]!.fired).toBe(runs);
+    expect(r.steps[failing]!.condition).toBe(fm.condition);
+    expect(r.exhausted).toEqual({ from: failing + 1, handler: 'on_exhausted' in fm.recovery ? expect.any(Number) : null });
+    expect(r.steps.filter((_, i) => i !== failing).every((s) => s.fired === 0)).toBe(true);
   });
 });
