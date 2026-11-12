@@ -16,8 +16,10 @@ import {
   ladderCaption,
   OUTCOME_WORD,
   policyWord,
+  profilesCaption,
   rankedSources,
   sourcesCaption,
+  thresholdsSentence,
   trustCaption,
   workflowCardCaption,
 } from '../lib/domain-figures';
@@ -97,6 +99,27 @@ export function domainsIndexTwin(source: string, description: string | null): Tw
     readme,
     '## Domain profiles',
     generatedLine(profiles.map((p) => p.profileFile)),
+    figure(
+      'Trust weights of each profile',
+      profilesCaption(profiles),
+      table(
+        ['Domain', 'Sources', 'Lowest weight', 'Highest weight', 'Minimum confidence', 'Low risk', 'Medium risk', 'High risk'],
+        profiles.map((p) => {
+          const w = sortedTrustWeights(p.profile);
+          const conf = evidencePolicy(p.profile)?.minimumConfidence ?? null;
+          const ladder = approvalLadder(p.profile);
+          return [
+            mdLink(p.key, `/domains/${p.key}/`),
+            String(rankedSources(p.profile).length),
+            w.length > 0 ? w.at(-1)!.weight.toFixed(2) : '',
+            w.length > 0 ? w[0]!.weight.toFixed(2) : '',
+            conf === null ? '' : conf.toFixed(2),
+            ...(ladder ? ladder.rows.map((r) => OUTCOME_WORD[r.outcome]) : ['', '', '']),
+          ];
+        }),
+      ),
+    ),
+    thresholdsSentence(profiles),
     table(
       ['Domain', 'Description', 'Workflows in a catalog'],
       profiles.map((p) => [mdLink(p.key, `/domains/${p.key}/`), cell(p.description), String(p.workflows.filter((w) => w.defined).length)]),
