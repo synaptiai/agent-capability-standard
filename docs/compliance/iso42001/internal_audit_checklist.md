@@ -228,10 +228,10 @@ flowchart LR
 title: From risk assessment to working controls
 ---
 flowchart TB
-  accDescr: Risk assessment at defined intervals feeds treatment planning, the risk treatment plan is implemented, and the structural controls are tested by attempting a Write without a checkpoint, which must be blocked.
+  accDescr: Risk assessment results, at defined intervals, are used for treatment planning, the risk treatment plan is implemented, and whether the structural controls function is checked by attempting a Write without a checkpoint, which must be blocked.
   ra["Risk assessment, at defined intervals"] -->|results used for| tp[Treatment planning]
   tp --> impl["Risk treatment plan implemented: hooks, profiles, approvals"]
-  impl --> test["Test: a Write without a checkpoint must be blocked"]
+  impl -->|structural controls checked by| test["Test: a Write without a checkpoint must be blocked"]
 ```
 
 ### 8.4 AI System Lifecycle
@@ -312,15 +312,6 @@ flowchart TB
 | 10.1.6 | Are nonconformity records maintained? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | NCR register | |
 | 10.1.7 | Are corrective actions effective (recurrence check)? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Verification records, recurrence analysis | |
 | 10.1.8 | Is root cause analysis performed for major/critical NCRs? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | RCA records in NCRs | |
-
-```mermaid
----
-title: What the nonconformity procedure must cover
----
-flowchart LR
-  accDescr: The nonconformity procedure must cover identification, evaluation by severity, corrective action with root cause and prevention, and follow-up that verifies effectiveness.
-  id[Identification] --> ev[Severity evaluation] --> ca["Corrective action: root cause, prevention"] --> fu["Follow-up: effectiveness"]
-```
 
 ### 10.2 Continual Improvement
 

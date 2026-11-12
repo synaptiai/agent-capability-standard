@@ -65,11 +65,9 @@ title: The hard constraints on a merge
 ---
 flowchart TB
   accDescr: A candidate merge is never made when the unique identifiers conflict or the entity types are incompatible; otherwise the merge is made and recorded in lineage.
-  c[Candidate merge] --> id{Conflicting unique identifiers?}
-  id -->|yes| no1[Never merged]
-  id -->|no| ty{Incompatible entity types?}
-  ty -->|yes| no2[Never merged]
-  ty -->|no| m[Merge]
+  c[Candidate merge] --> q{"Conflicting unique identifiers, or incompatible entity types?"}
+  q -->|yes| no[Never merged]
+  q -->|no| m[Merge]
   m --> lin[Recorded in lineage]
 ```
 
