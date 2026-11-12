@@ -1,0 +1,47 @@
+---
+// F-L4, workflow steps per layer (visual spec 3.2): one bar per layer,
+// ranked high to low, on one scale. This page's layer is drawn in its layer
+// colour; the other layers are in --ink-3. Every row carries its layer glyph
+// and name, so the colour is never the only cue. The same numbers are in
+// the table under the bars.
+//
+// Props:
+// - layerId: string, required.
+// - n: number, required. The figure number on the page.
+import { layerHref } from '../../lib/generated';
+import { stepsCaption, stepsPerLayer, stepsTitle } from '../../lib/layer-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import TableWrap from '../TableWrap.astro';
+import Figure from './Figure.astro';
+import PixelBar from './PixelBar.astro';
+
+interface Props {
+  layerId: string;
+  n: number;
+}
+
+const { layerId, n } = Astro.props;
+const rows = stepsPerLayer();
+const max = Math.max(1, ...rows.map((r) => r.steps));
+---
+<Figure id="ref-fig-layer-steps" n={n} title={stepsTitle(layerId, rows)} caption={stepsCaption(layerId, rows)} describedby="ref-layer-steps-table" kind="layer-steps">
+  <ul class="lbars" aria-label="Steps per layer, highest first">
+    {rows.map((r) => (
+      <li class:list={['lbars__row', r.layer === layerId && 'lbars__row--current has-layer']} style={r.layer === layerId ? `--layer: var(--layer-${r.layer})` : undefined} data-layer={r.layer} data-steps={r.steps}>
+        <PixelGlyph name={r.layer} scale={2} class="lbars__glyph" />
+        {r.layer === layerId ? <span class="lbars__name">{r.layer}</span> : <a class="lbars__name" href={layerHref(r.layer)}>{r.layer}</a>}
+        <PixelBar value={r.steps} max={max} />
+      </li>
+    ))}
+  </ul>
+  <details class="fig-details lbars__table" id="ref-layer-steps-table">
+    <summary>The same numbers as a table</summary>
+    <TableWrap label="Workflow steps per layer">
+      <table>
+        <caption>Workflow steps per layer</caption>
+        <thead><tr><th scope="col">Layer</th><th scope="col">Steps</th></tr></thead>
+        <tbody>{rows.map((r) => <tr><th scope="row">{r.layer}</th><td>{r.steps}</td></tr>)}</tbody>
+      </table>
+    </TableWrap>
+  </details>
+</Figure>

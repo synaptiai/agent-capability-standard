@@ -16,6 +16,7 @@ import {
   stepWords,
   usageCaption,
 } from '../lib/capability-figures';
+import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle } from '../lib/layer-figures';
 import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, layerUsage, safetyRows, type SchemaRow } from '../lib/views';
 import { blocks, cell, code, figure, generatedLine, markdownCopy, mdLink, table } from './md';
 import type { Twin } from './types';
@@ -129,10 +130,23 @@ export function layerTwin(layerId: string): Twin {
     '## Edges to other layers',
     crossing.length === 0
       ? 'No edge connects this layer to another layer.'
+      : figure(
+          `Edges between ${layer.id} and other layers`,
+          layerLinksCaption(layer.id, layerLinks(layer.id, ontology)),
+          table(
+            ['Direction', 'Other layer', 'Edges', 'Types'],
+            (['into', 'out'] as const).flatMap((d) =>
+              layerLinks(layer.id, ontology)[d].map((l) => [d === 'into' ? `Into ${layer.id}` : `Out of ${layer.id}`, l.layer, String(l.edges.length), l.types.map(code).join(', ')]),
+            ),
+          ),
+        ),
+    crossing.length === 0
+      ? null
       : crossing
           .map((g) => [`### ${g.type}`, ...g.edges.map((e) => `- ${capLink(e.from)} to ${capLink(e.to)} (${e.otherLayer})`)].join('\n\n'))
           .join('\n\n'),
     '## Workflows that use this layer',
+    figure(stepsTitle(layer.id, stepsPerLayer()), stepsCaption(layer.id, stepsPerLayer()), table(['Layer', 'Steps'], stepsPerLayer().map((r) => [r.layer, String(r.steps)]))),
     usage.length === 0
       ? 'No workflow uses a capability of this layer.'
       : usage

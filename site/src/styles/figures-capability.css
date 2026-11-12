@@ -3,7 +3,9 @@
  * safety panel, the relationships stack (F-C1), the contract block diagram
  * (F-C2), the workflow strips (F-C4), and the aids in the skill's prose
  * (port columns, composition chain, numbered procedure, collapsed examples,
- * the safety panel). Shared parts are styled in figures.css. Each figure lays
+ * the safety panel), and the layer page's hero, edge map (F-L2) and
+ * steps-per-layer bars (F-L4), which reuse the same rail and tiles (visual
+ * spec 3.2). Shared parts are styled in figures.css. Each figure lays
  * itself out by the width of its own .fig container, never the viewport.
  *
  * Pages import this file, and a page's styles can load before the layout's
@@ -529,6 +531,162 @@
   }
 
   .skill-safety__body > :last-child {
+    margin-bottom: 0;
+  }
+
+  /* ---------- layer page: hero (F-L1) ---------- */
+
+  .layer-hero {
+    display: grid;
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  @media (min-width: 1100px) {
+    .layer-hero {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+  }
+
+  .layer-hero__text {
+    min-width: 0;
+  }
+
+  .layer-hero__title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .layer-hero__title h1 {
+    margin: 0;
+  }
+
+  .layer-hero__glyph {
+    display: inline-grid;
+    flex: none;
+    color: var(--layer);
+  }
+
+  /* Six 48px tiles a row at most: 6 x 48 + 5 x 4 = 308px, the narrow budget. */
+  .layer-hero__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 308px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .layer-hero__tiles > li {
+    margin: 0;
+  }
+
+  /* ---------- layer page: edges to other layers (F-L2) ---------- */
+
+  .llinks__list {
+    display: grid;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .llinks__row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 7rem) minmax(80px, 1fr) 64px;
+    align-items: center;
+    gap: 4px var(--space-2);
+    margin: 0;
+  }
+
+  .llinks__tile {
+    display: inline-grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: 32px;
+    height: 32px;
+    border: var(--px) solid var(--layer);
+    background: var(--tint);
+    color: var(--layer);
+  }
+
+  .llinks__tile--centre {
+    width: 48px;
+    height: 48px;
+  }
+
+  .llinks__name {
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  .llinks__marks {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    color: var(--ink);
+  }
+
+  /* Narrow: the marks go under the bar when there is no room beside it. */
+  @container (max-width: 420px) {
+    .llinks__row {
+      grid-template-columns: 32px minmax(0, 1fr);
+    }
+
+    .llinks__row > .pixel-bar,
+    .llinks__marks {
+      grid-column: 2;
+    }
+  }
+
+  /* ---------- layer page: steps per layer (F-L4) ---------- */
+
+  .lbars {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .lbars__row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 7.5rem) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .lbars__glyph {
+    color: var(--ink-2);
+  }
+
+  .lbars__name {
+    font-size: 14px;
+    font-family: var(--font-mono);
+  }
+
+  /* The other layers recede; this page's layer keeps its colour, glyph and name. */
+  .lbars .pixel-bar__fill {
+    background: var(--ink-3);
+  }
+
+  .lbars__row--current .pixel-bar__fill {
+    background: var(--layer);
+  }
+
+  .lbars__row--current .lbars__glyph {
+    color: var(--layer);
+  }
+
+  .lbars__row--current .lbars__name {
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .lbars__table {
     margin-bottom: 0;
   }
 }

@@ -14,7 +14,7 @@
 import type { Capability } from '../../data/ontology';
 import { neighbourGroupLabel, neighbourhoodCaption, neighbourhoodTitle, neighbours, NEIGHBOUR_GROUPS, relationWords, type NeighbourGroup } from '../../lib/capability-figures';
 import { EDGE_LABELS } from '../../lib/views';
-import { chevron, run, type FigRect } from '../../pixel/lines';
+import { railStub as stub, STUB_H, STUB_W } from '../../pixel/rail';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import Figure from './Figure.astro';
 import MiniTile from './MiniTile.astro';
@@ -39,20 +39,6 @@ const rows: Row[] = [
 const types = [...new Set(list.flatMap((x) => x.relations.map((r) => r.type)))];
 const legendOrder = Object.keys(EDGE_LABELS).filter((t) => types.includes(t as never)) as (keyof typeof EDGE_LABELS)[];
 
-// The stub from the rail (x = 11) to the row, 32px wide, its line at y = 7.
-// "into" points at the rail, "out" at the row, "both" at each, "either" at neither.
-const STUB_W = 32;
-const STUB_H = 14;
-function stub(kind: NeighbourGroup | 'centre'): FigRect[] {
-  const y = STUB_H / 2;
-  const line = run(11, y, STUB_W, y, 'ink-2');
-  const left = chevron(12, y, 'left', 'ink-2');
-  const right = chevron(STUB_W - 1, y, 'right', 'ink-2');
-  if (kind === 'into') return [...line, ...left];
-  if (kind === 'out') return [...line, ...right];
-  if (kind === 'both') return [...line, ...left, ...right];
-  return line;
-}
 const head = (g: NeighbourGroup) => `ref-nbhd-${g}`;
 ---
 {list.length === 0 ? (
