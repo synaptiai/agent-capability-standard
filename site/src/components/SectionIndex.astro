@@ -4,6 +4,7 @@
 // to (visual spec 2.2, "Listing groups"). Group headings get `ref-` ids.
 import type { ListingGroup, ListingItem } from '../lib/listing';
 import { LISTING_GROUP_GLYPHS } from '../pixel/glyphs-groups';
+import { PAGE_GLYPHS } from '../pixel/glyphs-pages';
 import { resolveGlyphKey } from '../pixel/keys';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 import IconCard from './fig/IconCard.astro';
@@ -17,10 +18,12 @@ interface Props {
 
 const { groups, id } = Astro.props;
 
-/** Templates whose card takes the glyph of the page's site section. */
-const SECTION_GLYPH_TEMPLATES = new Set(['prose', 'raw', 'listing', 'citation']);
-
-/** A card's glyph, by the template of the page it links to. */
+/**
+ * A card's glyph, by the page it links to: a capability or layer its layer
+ * glyph, a workflow, domain or Standard version the glyph of its kind, and
+ * any other page its own glyph from PAGE_GLYPHS, so no two cards for
+ * different pages share a picture (issue #125).
+ */
 function cardGlyph(item: ListingItem): string {
   const r = item.route;
   const key =
@@ -30,17 +33,11 @@ function cardGlyph(item: ListingItem): string {
         ? 'section:workflows'
         : r.template === 'domain'
           ? `domain:${r.title}`
-          : r.template === 'skill'
-            ? 'skill:composed'
-            : r.template === 'rfc'
-              ? 'section:rfcs'
-              : r.template === 'spec'
-                ? 'section:spec'
-                : SECTION_GLYPH_TEMPLATES.has(r.template)
-                  ? `section:${r.section}`
-                  : null;
+          : r.template === 'spec'
+            ? 'section:spec'
+            : (PAGE_GLYPHS[r.url] ?? null);
   if (key === null || resolveGlyphKey(key) === null) {
-    throw new Error(`SectionIndex: no glyph for the card of ${r.url} (template ${r.template}, key ${key})`);
+    throw new Error(`SectionIndex: no glyph for the card of ${r.url} (template ${r.template}); add it to PAGE_GLYPHS in src/pixel/glyphs-pages.ts`);
   }
   return key;
 }
