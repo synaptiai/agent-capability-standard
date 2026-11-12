@@ -36,7 +36,7 @@ title: The three questions and their answers
 flowchart LR
   accDescr: Q1, how to add fields, is answered by named, versioned extensions that a workflow must declare; Q2, how E2 relates to identity, by shipping the identity-free parts of E2 now and naming an agent later; Q3, why the validator and engine disagree, by specifying the rules and keeping one reference implementation.
   q1["Q1: how to add fields"] --> a1["Named, versioned extensions that a workflow declares"]
-  q2["Q2: E2 and identity"] --> a2["E2 split: identity-free hints now, a named agent later"]
+  q2["Q2: E2 and identity"] --> a2["E2 split: the parts that need no identity now, a named agent later"]
   q3["Q3: validator and engine disagree"] --> a3["Rules specified, one reference implementation"]
 ```
 
@@ -115,9 +115,9 @@ title: The effective safety flag
 ---
 flowchart LR
   accDescr: An omitted flag inherits from the ontology; a declared flag that is stricter than the ontology takes effect, and a weaker one is warning W602 and has no effect.
-  d{Step declares the flag?} -->|no| inh[Inherits the ontology value]
-  d -->|stricter| str[The declaration takes effect]
-  d -->|weaker| w["W602, no effect: the ontology value holds"]
+  d{"The step's flag"} -->|omitted| inh[Inherits the ontology value]
+  d -->|"declared, stricter"| str[The declaration takes effect]
+  d -->|"declared, weaker"| w["W602, no effect: the ontology value holds"]
 ```
 
 ### 4) Diagnostics have fixed severities
@@ -315,7 +315,7 @@ more gaps on the standard's side, closed in the candidate:
 title: What a deferral holds back
 ---
 flowchart LR
-  accDescr: A deferred step holds back the steps that read its output, the steps that may act on the world and the steps the ontology orders after it; a step marked after_deferral run is exempt from the last two but is still deferred when it reads a deferred output; steps that only read, reason or record run.
+  accDescr: A deferred step holds back the steps that read its output, the steps that may act on the world and the steps the ontology orders after it; a step marked after_deferral run is exempt from the last two, but reading a deferred output still defers it.
   def[A deferred step] --> r[Steps that read its output]
   def --> w[Steps that may act on the world]
   def --> o[Steps the ontology orders after it]

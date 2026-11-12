@@ -86,9 +86,9 @@ the Rust core in `core/`).
 title: How a workflow fixture is checked
 ---
 flowchart TB
-  accDescr: A fixture's emitted error and warning codes must equal the sets EXPECTATIONS.json lists for it, exactly, along with should_pass; an absent or empty warning list means no warning may be emitted.
+  accDescr: The error and warning codes a fixture emits are compared with the expected_error_codes and expected_warning_codes EXPECTATIONS.json lists for it; the fixture passes only when they are exactly equal.
   fx["Fixture: pass_* or fail_*"] --> codes[Emitted error and warning codes]
-  ex["EXPECTATIONS.json: should_pass, expected_error_codes, expected_warning_codes"] --> eq{"Exactly equal?"}
+  ex["EXPECTATIONS.json: expected_error_codes, expected_warning_codes"] --> eq{"Exactly equal?"}
   codes --> eq
   eq -->|yes| pass[Fixture passes]
   eq -->|no| fail[Fixture fails]

@@ -26,21 +26,6 @@
 | **Major NC** | Systematic failure or deviation that undermines AIMS effectiveness |
 | **N/A** | Not applicable (with documented justification) |
 
-```mermaid
----
-title: Where a finding goes
----
-flowchart LR
-  accDescr: Each check is classified as conforming, an opportunity for improvement, a minor or major nonconformity, or not applicable with a justification; nonconformities are documented as NCRs under the nonconformity procedure.
-  chk[Check] --> c["C: conforming"]
-  chk --> ofi["OFI: could be enhanced"]
-  chk --> mi[Minor NC]
-  chk --> ma[Major NC]
-  chk --> na["N/A: justified"]
-  mi --> ncr[An NCR]
-  ma --> ncr
-```
-
 ---
 
 ## Clause 1–3: Scope, Normative References, Terms and Definitions
@@ -154,18 +139,6 @@ flowchart LR
 | 6.1.6 | Are domain-specific risk treatments documented? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Risk treatment plan Section 5, domain profiles | |
 | 6.1.7 | Is residual risk assessed and accepted? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Risk treatment plan Section 7 | |
 
-```mermaid
----
-title: The risk steps that Clause 6.1 checks
----
-flowchart TB
-  accDescr: The Clause 6.1 checks follow AI risk from identification, through classification on the three-tier model and treatments for every tier with structural controls for the high-risk capabilities, to residual risk that is assessed and accepted.
-  id[Risks and opportunities identified] --> cl[Classified on the three-tier model]
-  cl --> tr[Treatments defined for low, medium and high]
-  tr --> sc[Structural controls for high-risk capabilities]
-  sc --> rr[Residual risk assessed and accepted]
-```
-
 ### 6.2 AI Objectives and Planning to Achieve Them
 
 | # | Check | Finding | Evidence | Notes |
@@ -255,10 +228,10 @@ flowchart TB
 title: From risk assessment to working controls
 ---
 flowchart TB
-  accDescr: Risk assessment at defined intervals feeds treatment planning, the risk treatment plan is implemented, and the structural controls are tested by attempting a Write without a checkpoint, which must be blocked.
+  accDescr: Risk assessment results, at defined intervals, are used for treatment planning, the risk treatment plan is implemented, and whether the structural controls function is checked by attempting a Write without a checkpoint, which must be blocked.
   ra["Risk assessment, at defined intervals"] -->|results used for| tp[Treatment planning]
   tp --> impl["Risk treatment plan implemented: hooks, profiles, approvals"]
-  impl --> test["Test: a Write without a checkpoint must be blocked"]
+  impl -->|structural controls checked by| test["Test: a Write without a checkpoint must be blocked"]
 ```
 
 ### 8.4 AI System Lifecycle
@@ -339,15 +312,6 @@ flowchart TB
 | 10.1.6 | Are nonconformity records maintained? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | NCR register | |
 | 10.1.7 | Are corrective actions effective (recurrence check)? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Verification records, recurrence analysis | |
 | 10.1.8 | Is root cause analysis performed for major/critical NCRs? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | RCA records in NCRs | |
-
-```mermaid
----
-title: What the nonconformity procedure must cover
----
-flowchart LR
-  accDescr: The nonconformity procedure must cover identification, evaluation by severity, corrective action with root cause and prevention, and follow-up that verifies effectiveness.
-  id[Identification] --> ev[Severity evaluation] --> ca["Corrective action: root cause, prevention"] --> fu["Follow-up: effectiveness"]
-```
 
 ### 10.2 Continual Improvement
 

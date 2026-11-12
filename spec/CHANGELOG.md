@@ -151,7 +151,7 @@ flowchart TB
   ev["Event with the host's agent_identity"] --> f{"sender_check, accept_trust_classes"}
   f -->|other items| drop[Dropped]
   f -->|kept, with sender_identity| m{"always_ask_trust_classes"}
-  m -->|"marked, or no trust class"| mark["Mark follows the data"]
+  m -->|"of those classes, or with no trust class: marked"| mark["Mark follows the data"]
   mark --> ask["A step that requires approval is asked of a person"]
 ```
 
@@ -341,7 +341,7 @@ flowchart TB
 title: W606 through invoke
 ---
 flowchart TB
-  accDescr: A workflow invoked, directly or transitively, from one with an unattended trigger runs unattended, so its approval steps warn W606 as its caller's would; x- vendor entries never run.
+  accDescr: A workflow invoked, directly or transitively, from one with an unattended trigger runs unattended, so its approval steps warn W606 as its caller's would.
   trig[Workflow with an unattended trigger] -->|invoke| a[Invoked workflow: unattended]
   a -->|invoke| b[Transitively invoked: unattended]
   a --> w["Approval steps warn W606"]
