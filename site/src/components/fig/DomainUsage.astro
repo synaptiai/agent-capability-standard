@@ -1,0 +1,76 @@
+---
+// One example of a domain README's "Capability Usage" section, set against
+// the profile's evidence policy (visual spec 1.1 rule 3: drawn from the YAML
+// fence of the same section). The capability as a periodic tile with its
+// domain parameter, then each anchor type the profile requires with a check
+// when the example's evidence anchors carry it and a cross when they do not,
+// then the example's other anchor types, and whether the profile requires
+// the capability to cite evidence. The fence stays under the figure as its
+// text equivalent.
+//
+// Props:
+// - usage: UsageExample, required.
+// - profile: the profile object, required.
+// - domain: the profile key, required.
+// - n: number, required. The figure's number on the page.
+// - id: string, required. A `ref-` id.
+import '../../styles/figures-domain-usage.css';
+import { usageCaption, usageCheck, usageTitle, type UsageExample } from '../../lib/domain-usage';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+
+interface Props {
+  usage: UsageExample;
+  profile: Record<string, unknown>;
+  domain: string;
+  n: number;
+  id: string;
+}
+
+const { usage, profile, domain, n, id } = Astro.props;
+const check = usageCheck(usage, profile);
+---
+<Figure id={id} n={n} title={usageTitle(usage)} caption={usageCaption(usage, check, domain)} kind="domain-usage" class="usage">
+  <div class="usage__head">
+    <MiniTile id={usage.capability} size={32} />
+    <code class="usage__cap">{usage.capability}</code>
+    {usage.domain && <span class="usage__domain">domain <code>{usage.domain}</code></span>}
+    <span class="usage__cite">
+      <PixelGlyph name={check.mustCite ? 'check' : 'close'} />
+      {check.mustCite ? 'must cite evidence' : 'need not cite evidence'}
+    </span>
+  </div>
+  <dl class="usage__rows">
+    <div>
+      <dt>Reads</dt>
+      <dd>{usage.inputs.length === 0 ? 'nothing' : usage.inputs.map((k, i) => <>{i > 0 && ' '}<code>{k}</code></>)}</dd>
+    </div>
+    <div>
+      <dt>Returns</dt>
+      <dd>{usage.outputs.length === 0 ? 'nothing' : usage.outputs.map((k, i) => <>{i > 0 && ' '}<code>{k}</code></>)}</dd>
+    </div>
+    {check.required.length > 0 && (
+      <div>
+        <dt>Required anchors</dt>
+        <dd>
+          <ul class="usage__chips">
+            {check.required.map((r) => (
+              <li class:list={['usage__chip', r.present ? 'usage__chip--yes' : 'usage__chip--no']}>
+                <PixelGlyph name={r.present ? 'check' : 'close'} />
+                <code>{r.type}</code>
+                <span class="fig-sr">{r.present ? 'carried' : 'not carried'}</span>
+              </li>
+            ))}
+          </ul>
+        </dd>
+      </div>
+    )}
+    {check.other.length > 0 && (
+      <div>
+        <dt>Other anchors</dt>
+        <dd>{check.other.map((k, i) => <>{i > 0 && ' '}<code>{k}</code></>)}</dd>
+      </div>
+    )}
+  </dl>
+</Figure>
