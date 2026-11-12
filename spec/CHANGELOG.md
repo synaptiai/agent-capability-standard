@@ -424,6 +424,20 @@ list them.
   distinct from the capability-I/O namespace of §4.1, so an event's `anchors`
   is not a capability's `evidence_anchors`. Clarification only — no field
   changed shape. (#107)
+
+```mermaid
+---
+title: The names section 6.2 and 6.3 now use
+---
+flowchart LR
+  accDescr: Section 6.2's observation fields id, raw_payload, canonical_payload and evidence_anchors are now the canonical event's event_id, raw, canonical and anchors, and section 6.3's snapshot identity moves from the top level to meta.
+  a[id] --> a2[event_id]
+  b[raw_payload] --> b2[raw]
+  c[canonical_payload] --> c2[canonical]
+  d[evidence_anchors] --> d2[anchors]
+  e[Snapshot identity at the top level] --> e2[Under meta]
+```
+
 - **Three fields the spec marks MUST are now `required` in the schemas.**
   `event.provenance` (§6.2), and `world_state.meta.version_id` and
   `meta.lineage` (§6.3), were declared but optional. Per §11.4 adding a required
