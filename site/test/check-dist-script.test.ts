@@ -163,6 +163,51 @@ describe('check-dist.mjs', () => {
     delete s['pagefind/pagefind.js'];
     expect(problems(s)).toEqual(['[files] pagefind/pagefind.js is missing from dist']);
   });
+
+  // Visual spec 6.1: each numbered figure has a "**Figure: {title}.**" block in the page's Markdown copy.
+  const fig = (id: string, n: number, title: string) =>
+    `<figure class="fig" id="${id}" aria-labelledby="${id}-title"><p class="fig__eyebrow" aria-hidden="true">Fig ${n}</p><p class="fig__title" id="${id}-title">${title}</p><div></div><figcaption class="fig__caption">c</figcaption></figure>`;
+
+  it('passes a figure whose block is in the copy, in a list item, with its code span undone', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', `</h1>${fig('ref-a', 1, 'Steps of <code>x</code> &amp; y')}`);
+    s['guide/index.md'] = '# Guide\n\n- item\n\n  **Figure: Steps of `x` & y.** c\n';
+    expect(problems(s)).toEqual([]);
+  });
+
+  it('fails a numbered figure with no block, and a block with no figure', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', `</h1>${fig('ref-a', 1, 'Edge properties')}`);
+    s['index.md'] = '# Home\n\n**Figure: Old chart.** gone\n';
+    expect(problems(s)).toEqual([
+      '[figures] /guide/: Fig 1 "Edge properties" has no "**Figure: Edge properties.**" block in /guide/index.md',
+      '[figures] /index.md: the block "**Figure: Old chart.**" names no figure on the page',
+    ]);
+  });
+
+  it('names a box diagram by its aria-label, and does not count a block written inside a code fence', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace(
+      '</h1>',
+      '</h1><figure class="fig fig-ascii" aria-label="Diagram: Setup"><p class="fig__eyebrow" aria-hidden="true">Fig 1</p><pre>┌─┐</pre></figure>',
+    );
+    s['guide/index.md'] = '# Guide\n\n```md\n**Figure: Diagram: Setup.** x\n```\n';
+    expect(problems(s)).toEqual(['[figures] /guide/: Fig 1 "Diagram: Setup" has no "**Figure: Diagram: Setup.**" block in /guide/index.md']);
+  });
+
+  it('leaves out a figure whose eyebrow is not a number (a folded text version)', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', '</h1><figure class="fig fig-ascii" aria-label="Diagram: Setup"><p class="fig__eyebrow">Text version</p></figure>');
+    expect(problems(s)).toEqual([]);
+  });
+
+  it('fails a built file that links to the review pages, which the deploy removes', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', '</h1><a href="/_review/glyphs/">Glyphs</a>');
+    s['_review/glyphs/index.html'] = page('<h1 id="g">Glyph sheet</h1>');
+    const p = problems(s);
+    expect(p).toContain('[review] guide/index.html points at the review pages (/_review/), which are not deployed');
+  });
 });
 
 describe('link parsing', () => {

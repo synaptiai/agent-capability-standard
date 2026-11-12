@@ -35,5 +35,9 @@ export function sitemapPaths(xml: string, origin?: string): { paths: string[]; f
 export function llmsTxtCopies(text: string, origin?: string): { copies: string[]; other: string[] };
 export function checkCopies(fileList: string[], llmsTxt: string): string[];
 export function checkSitemap(fileList: string[], xml: string): string[];
+export function pageFigures(html: string): { n: number; title: string | null }[];
+export function copyFigureTitles(md: string): string[];
+export function checkFigureCopies(fileList: string[], read: (file: string) => string): string[];
+export function checkReviewLinks(fileList: string[], read: (file: string) => string): string[];
 export function checkDistDir(distDir: string): { problems: Record<string, string[]>; stats: DistStats };
 export function formatStats(stats: DistStats): string[];

@@ -18,6 +18,10 @@ import { specFigureBlocks } from './edges-spec';
 import { specOlderBlocks } from './spec-figures';
 import { SLOTS_BY_VERSION } from '../lib/spec-slots';
 import { proseFigureBlocks } from './prose';
+import { proseFigureEdits } from './prose-blocks';
+import type { Root } from 'mdast';
+import { PROSE_TEMPLATES } from '../plugins/rehype-prose-figures';
+import { OVERVIEW_SOURCE, PERIODIC_ANCHOR } from '../lib/prose-figures';
 import { citationTwin, diagnosticsTwin, edgeTypesTwin, rfcsIndexTwin, schemasTwin } from './reference';
 import type { Twin } from './types';
 import { workflowsIndexTwin, workflowTwin } from './workflows';
@@ -46,7 +50,11 @@ async function buildTwin(route: Route): Promise<Twin> {
       const source = route.source!;
       const meta = await sourceMeta(route);
       const title = route.template === 'spec' ? route.title : meta.title;
-      const copy = markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title });
+      // Prose, RFC and skill pages draw figures from their own fences; each gets its block before the fence.
+      const extraEdits = PROSE_TEMPLATES.has(route.template)
+        ? (tree: Root) => proseFigureEdits(tree, { foldBoxAfter: source === OVERVIEW_SOURCE ? PERIODIC_ANCHOR : undefined })
+        : undefined;
+      const copy = markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title, extraEdits });
       // The Standard's site-drawn figures add their text equivalents (visual spec 3.9),
       // and so do the prose and RFC figures whose words are not in the source (3.10).
       const older = loadVersions().standard.previous.find((v) => v.source === source);

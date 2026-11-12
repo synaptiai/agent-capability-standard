@@ -38,9 +38,13 @@ export function domainTwin(key: string, description: string | null): Twin {
   const readme = d.readme ? markdownCopy(d.readme, readRepoFile(d.readme), { sourceNote: true }) : `# ${d.key} domain\n`;
   const title = /^# (.+)$/m.exec(readme)?.[1] ?? `${d.key} domain`;
   const readmeText = d.readme ? readRepoFile(d.readme) : '';
+  // A defined workflow is the page's "Steps of" card figure; a proposed one is a line.
   const workflows = d.workflows.map((w) => {
     const wf = wfs.byId.get(w.id);
-    if (w.defined && wf) return `- ${mdLink(code(w.id), `/workflows/${wf.slug}/`)}: ${wf.goal} ${workflowCardCaption(wf)}`;
+    if (w.defined && wf) {
+      const steps = wf.steps.map((st) => `${st.index}. ${code(st.capability)}${st.purpose ? `: ${st.purpose}` : ''}`).join('\n');
+      return figure(`Steps of ${w.id}`, workflowCardCaption(wf), `${mdLink(code(w.id), `/workflows/${wf.slug}/`)}: ${wf.goal}\n\n${steps}`);
+    }
     return `- ${code(w.id)}: ${PROPOSED_WORKFLOW_STATUS}`;
   });
   const proposedFigures = d.workflows.flatMap((w) => {
@@ -68,7 +72,7 @@ export function domainTwin(key: string, description: string | null): Twin {
     usageFigures.length > 0 && '## Capability usage, against the evidence policy',
     ...usageFigures,
     '## Workflows in this profile',
-    workflows.length === 0 ? 'The profile lists no workflows.' : workflows.join('\n'),
+    ...(workflows.length === 0 ? ['The profile lists no workflows.'] : workflows),
     ...proposedFigures,
   );
   return { title, description: description ?? d.description, markdown };
