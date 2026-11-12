@@ -161,9 +161,9 @@ title: Adding a scenario
 flowchart TB
   accDescr: A new scenario module in scenarios/ subclasses BenchmarkScenario and defines setup, which prepares the fixtures, run_baseline and run_ga, which execute each approach and return metrics, and compare, which takes both results and returns the improvement. The scenario is then registered in scenarios/__init__.py and documented in this README.
   subgraph mod["1. scenarios/new_scenario.py"]
-    setup["setup: prepare fixtures"]
-    rb["run_baseline: baseline metrics"] --> cmp["compare: improvement"]
-    rg["run_ga: GA metrics"] --> cmp
+    setup[setup]
+    rb[run_baseline] --> cmp["compare: improvement"]
+    rg[run_ga] --> cmp
   end
   cmp --> reg["2. Register in scenarios/__init__.py"] --> doc[3. Document in this README]
 ```
