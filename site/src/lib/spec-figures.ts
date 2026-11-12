@@ -40,15 +40,22 @@ export function edgeTypesCaption(o: Ontology = loadOntology()): string {
 
 // ------------------------------------------------ §4.4 safety-critical panels
 
-/** Capabilities whose ontology entry sets requires_checkpoint or requires_approval, in table order. */
+/**
+ * Capabilities that need a checkpoint or approval before each use, in table
+ * order: those whose ontology entry sets requires_checkpoint or
+ * requires_approval, and those with a `requires` edge from checkpoint (the
+ * Standard's §4.4 table lists rollback for that edge alone).
+ */
 export function safetyCritical(o: Ontology = loadOntology()): Capability[] {
   const order = o.layers.flatMap((l) => l.capabilities);
-  return order.map((id) => o.byId.get(id)!).filter((c) => c.requires_checkpoint || c.requires_approval);
+  return order.map((id) => o.byId.get(id)!).filter((c) => c.requires_checkpoint || c.requires_approval || c.edgesIn.requires.includes('checkpoint'));
 }
 
 export function safetyCriticalCaption(o: Ontology = loadOntology()): string {
   const caps = safetyCritical(o);
-  return `In the ontology, ${plural(caps.length, 'capability needs', 'capabilities need')} a checkpoint or approval before each use: ${list(caps.map((c) => c.id))}.`;
+  const viaEdge = caps.filter((c) => !c.requires_checkpoint && !c.requires_approval).map((c) => c.id);
+  const tail = viaEdge.length > 0 ? `; ${list(viaEdge)} ${viaEdge.length === 1 ? 'needs' : 'need'} one only through a requires edge from checkpoint` : '';
+  return `In the ontology, ${plural(caps.length, 'capability needs', 'capabilities need')} a checkpoint or approval before each use: ${list(caps.map((c) => c.id))}${tail}.`;
 }
 
 // ------------------------------------------------------ F-S5 step anatomy

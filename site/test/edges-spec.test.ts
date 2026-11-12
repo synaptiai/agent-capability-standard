@@ -10,7 +10,7 @@ import { parseTokens, pairRatio } from '../scripts/check-contrast.mjs';
 import { edgeChanges, exampleChains, heatRanges, heatStep, layerPairCounts, matrixCells, parseChains } from '../src/lib/edge-figures';
 import { cutAfterHeadings } from '../src/lib/inject';
 import { loadCatalogSchema } from '../src/data/catalog-schema';
-import { annotationGrammar, bindingExamples, failureBranches, gateBranches, referenceParts, stepAnatomy, stepFieldRows } from '../src/lib/spec-figures';
+import { annotationGrammar, bindingExamples, failureBranches, gateBranches, referenceParts, safetyCritical, safetyCriticalCaption, stepAnatomy, stepFieldRows } from '../src/lib/spec-figures';
 
 const STANDARDS = ['spec/STANDARD-v1.1.0.md', 'spec/STANDARD-v1.0.0.md'];
 
@@ -133,6 +133,18 @@ describe('figure anchors', () => {
   });
   it('fails when an anchor matches no heading', () => {
     expect(() => cutAfterHeadings(html, [{ key: 'k', level: 2, startsWith: 'Nope' }], 'fixture')).toThrow(/matches 0 headings/);
+  });
+});
+
+describe('safety-critical capabilities (§4.4)', () => {
+  it('includes every capability the §4.4 table says requires checkpoint, by a line scan', () => {
+    const text = repoText('spec/STANDARD-v1.1.0.md');
+    const sec = text.slice(text.indexOf('### 4.4 '), text.indexOf('\n## 5.'));
+    const rows = [...sec.matchAll(/^\| `(\w+)` \| `checkpoint` \|/gm)].map((m) => m[1]!);
+    expect(rows.length).toBeGreaterThan(0);
+    const ids = safetyCritical().map((c) => c.id);
+    for (const r of rows) expect(ids).toContain(r);
+    for (const r of rows) expect(safetyCriticalCaption()).toContain(r);
   });
 });
 
