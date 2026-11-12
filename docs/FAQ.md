@@ -41,11 +41,11 @@ Incremental adoption works. You don't need to adopt everything at once.
 title: The adoption path
 ---
 flowchart TB
-  accDescr: Week 1 runs the validator, week 2 adds checkpoints, month 1 adds grounding for high-risk capabilities, quarter 1 reaches L2 conformance, and quarter 2 adds the trust model.
-  w1["Week 1: run the validator"] -->|hidden issues found| w2["Week 2: add checkpoints"]
-  w2 -->|rollback enabled| m1["Month 1: grounding for high-risk capabilities"]
-  m1 -->|traceable decisions| q1["Quarter 1: L2 conformance"]
-  q1 -->|full type safety| q2["Quarter 2: trust model"]
+  accDescr: Week 1 runs the validator on existing workflows and finds hidden issues; week 2 adds checkpoints to mutation-heavy workflows and enables rollback; month 1 adds grounding for high-risk capabilities for traceable decisions; quarter 1 reaches L2 conformance for full type safety; and quarter 2 adds the trust model for conflict resolution.
+  w1["Week 1: run the validator. Finds hidden issues"] --> w2["Week 2: add checkpoints. Enables rollback"]
+  w2 --> m1["Month 1: grounding for high-risk capabilities. Traceable decisions"]
+  m1 --> q1["Quarter 1: L2 conformance. Full type safety"]
+  q1 --> q2["Quarter 2: trust model. Conflict resolution"]
 ```
 
 ### What if we only need part of it?
@@ -75,8 +75,8 @@ Issues #3, #4, and #5 proposed additional capabilities for these layers. After f
 title: Proposals that are workflow patterns
 ---
 flowchart LR
-  accDescr: Each proposal on the left is a composition of the existing capabilities it points to, as the list above says.
-  listen["listen"] --> receive["receive"]
+  accDescr: listen is a loop of receive, and each other proposal on the left is a composition of the existing capabilities it points to, as the list above says.
+  listen["listen: a loop"] --> receive["receive"]
   coordinate["coordinate"] --> decompose["decompose"]
   coordinate --> delegate["delegate"]
   coordinate --> synchronize["synchronize"]
@@ -100,7 +100,7 @@ flowchart LR
   accDescr: Each proposal on the left is an existing capability with a parameter set, as the list above says.
   sample["sample"] -->|with limit| search["search"]
   scan["scan"] -->|exhaustive query| search
-  broadcast["broadcast"] -->|many destinations| send["send"]
+  broadcast["broadcast"] -->|multiple destinations| send["send"]
 ```
 
 **Proposals covered by existing capabilities:**
@@ -115,11 +115,12 @@ flowchart LR
 title: Proposals covered by existing capabilities
 ---
 flowchart LR
-  accDescr: Each proposal on the left is covered by the existing capability it points to, as the list above says.
+  accDescr: negotiate is covered by synchronize, handoff by delegate with context, forget by persist with ttl 0 or mutate with delete, and index and associate by the MODEL layer capabilities; observe already exists.
   negotiate["negotiate"] --> synchronize["synchronize"]
-  handoff["handoff"] --> delegate["delegate"]
-  forget["forget"] --> persist["persist"]
-  forget --> mutate["mutate"]
+  handoff["handoff"] --> delegate["delegate, with context"]
+  forget["forget"] --> persist["persist, ttl: 0"]
+  forget --> mutate["mutate, delete"]
+  ia["index, associate"] --> model[MODEL layer capabilities]
 ```
 
 The 36-capability model represents genuinely **irreducible cognitive operations**. Workflow patterns belong in `schemas/workflow_catalog.yaml`, not as atomic capabilities.
