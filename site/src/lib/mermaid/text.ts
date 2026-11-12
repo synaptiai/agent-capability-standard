@@ -29,12 +29,11 @@ function edgeWords(d: Diagram, e: MermaidEdge): string {
  */
 export function describeDiagram(d: Diagram, heading: string): TextVersion {
   const title = d.title ?? `Diagram: ${heading}`;
-  const reading = d.direction === 'LR' ? 'left to right' : 'top to bottom';
   const caption =
     d.description ??
     `${plural(d.nodes.length, 'box', 'boxes')} joined by ${plural(d.edges.length, 'link', 'links')}${
       d.groups.length > 0 ? `, in ${plural(d.groups.length, 'group', 'groups')}` : ''
-    }, read ${reading}.`;
+    }.`;
   const items: string[] = [];
   for (const g of d.groups) {
     const members = d.nodes.filter((n) => n.group === g.id).map((n) => n.label);

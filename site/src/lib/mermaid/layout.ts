@@ -192,7 +192,10 @@ export async function layoutDiagram(d: Diagram, options: LayoutOptions = {}): Pr
   const elkNodes = new Map<string, ElkNode>();
   for (const n of d.nodes) {
     const lines = nodeLines.get(n.id)!;
-    const w = up4(Math.max(sp.minW, textWidth(lines, f) + 2 * (sp.padX + BORDER + shapeInset(n.shape))));
+    // A decision box's sides slant one 2px step per 2px row, so its top and
+    // bottom text lines sit half the text's height in from the widest point.
+    const inset = n.shape === 'decision' ? Math.max(shapeInset(n.shape), Math.ceil((lines.length * f.lineH) / 2)) : shapeInset(n.shape);
+    const w = up4(Math.max(sp.minW, textWidth(lines, f) + 2 * (sp.padX + BORDER + inset)));
     const h = up4(lines.length * f.lineH + 2 * (sp.padY + BORDER) + (n.shape === 'cylinder' ? 6 : 0));
     elkNodes.set(n.id, { id: n.id, width: w, height: h });
   }

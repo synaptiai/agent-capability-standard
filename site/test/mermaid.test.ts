@@ -238,7 +238,7 @@ describe('drawing', async () => {
       'Start here → Report',
       'Store → Report',
     ]);
-    expect(tv.caption).toBe('6 boxes joined by 8 links, in 1 group, read top to bottom.');
+    expect(tv.caption).toBe('6 boxes joined by 8 links, in 1 group.');
     for (const item of tv.items) expect(html).toContain(`<li>${item.replace(/&/g, '&#x26;')}</li>`);
   });
 
@@ -259,6 +259,18 @@ describe('drawing', async () => {
       { x: 6, y: 26, w: 10, h: 2 },
       { x: 4, y: 24, w: 14, h: 2 },
     ]);
+  });
+
+  it('makes a decision box wide enough that its slanted sides clear every text line', async () => {
+    const l = await layoutDiagram(parseMermaid('flowchart TB\n q{"Is this question long enough to wrap?"}'), { wrapAt: 10, fontSize: 12 });
+    const n = l.nodes[0]!;
+    expect(n.lines.length).toBeGreaterThanOrEqual(3);
+    const textW = Math.max(...n.lines.map((s) => s.length)) * l.font.charW;
+    const top = (n.h - n.lines.length * l.font.lineH) / 2;
+    // The inside of the box on the 2px row where the first text line starts.
+    const row = shapeRects('decision', n.w, n.h).fill.filter((r) => r.y <= top && r.y + r.h > top);
+    const inside = Math.max(...row.map((r) => r.x + r.w)) - Math.min(...row.map((r) => r.x));
+    expect(inside).toBeGreaterThanOrEqual(textW);
   });
 
   it('steps the corners of a round box instead of curving them', () => {
@@ -290,6 +302,6 @@ describe('in the build', () => {
   it('keeps each fence in the Markdown copy and adds its text version', () => {
     const text = '# Title\n\n## Process\n\n```mermaid\nflowchart LR\n  a[Load] -->|data| b[Save]\n```\n\nAfter.\n';
     const copy = markdownCopy('docs/WORKFLOW_PATTERNS.md', text);
-    expect(copy).toContain('```mermaid\nflowchart LR\n  a[Load] -->|data| b[Save]\n```\n\n**Figure: Diagram: Process.** 2 boxes joined by 1 link, read left to right.\n\n- Load → Save: data\n\nAfter.');
+    expect(copy).toContain('```mermaid\nflowchart LR\n  a[Load] -->|data| b[Save]\n```\n\n**Figure: Diagram: Process.** 2 boxes joined by 1 link.\n\n- Load → Save: data\n\nAfter.');
   });
 });
