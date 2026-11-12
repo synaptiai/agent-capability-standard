@@ -153,6 +153,20 @@ The [Value of Information framework](https://arxiv.org/html/2601.06407) (2026) f
 3. **Intent Inference**: Use context to disambiguate when clarification isn't possible
 4. **Confidence Threshold**: Act only when confidence exceeds threshold
 
+```mermaid
+---
+title: The goal clarification mechanisms
+---
+flowchart TB
+  accDescr: Ambiguity detection classifies whether the request has enough information; if not, the agent generates clarifying questions, or infers the intent from context when it cannot ask; it acts only when its confidence exceeds the threshold.
+  det{"Ambiguity detection: enough information?"} -->|no| q[Generate clarifying questions]
+  det -->|"no, and it cannot ask"| inf[Infer the intent from context]
+  det -->|yes| conf
+  q --> conf{"Confidence above the threshold?"}
+  inf --> conf
+  conf -->|yes| act[Act]
+```
+
 From [Training LLMs to Ask Clarifying Questions](https://openreview.net/forum?id=cwuSAR7EKd):
 
 > "Existing LLMs often respond by presupposing a single interpretation of such ambiguous requests, frustrating users who intended a different interpretation."
@@ -246,6 +260,16 @@ flowchart TB
 **Decomposition analysis**:
 ```
 inquire = measure(ambiguity) → generate(clarifying_questions) → receive(clarification)
+```
+
+```mermaid
+---
+title: The decomposition first considered for inquire
+---
+flowchart TB
+  accDescr: The first decomposition considered for inquire is measure the ambiguity, generate clarifying questions, and receive the clarification; the analysis below finds it debatable.
+  measure -->|ambiguity| generate
+  generate -->|clarifying questions| receive
 ```
 
 Wait — let's reconsider. The generation of clarifying questions is specialized:
