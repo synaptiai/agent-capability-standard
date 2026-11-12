@@ -261,6 +261,26 @@ Catalog id: `digital_twin_sync_loop`
 receive → search → transform → integrate → detect(entity) → classify → state → compare(state_diff) → transition → detect(anomaly) → measure(risk) → predict(risk) → plan → constrain → checkpoint → mutate (skipped when not compliant) → execute (skipped when nothing was mutated) → verify (skipped when nothing was mutated) → rollback (skipped when nothing was mutated or verify passed) → audit → explain
 ```
 
+```mermaid
+---
+title: Digital Twin Sync Loop, gates and recovery
+---
+flowchart TB
+  accDescr: After constrain and checkpoint, mutate runs only when the plan is compliant and stops if no checkpoint was created; when mutate is skipped, execute, verify and rollback are skipped too; otherwise a FAIL verdict sends the run through rollback, and both paths go on to audit and explain.
+  constrain[constrain] --> checkpoint[checkpoint] --> g1{Compliant?}
+  g1 -->|"no: skip to audit"| audit[audit]
+  g1 -->|yes| g0{Checkpoint created?}
+  g0 -->|no| halt[stop]
+  g0 -->|yes| mutate[mutate]
+  mutate --> execute[execute]
+  execute --> verify[verify]
+  verify --> g2{Passed?}
+  g2 -->|yes| audit
+  g2 -->|FAIL| rollback[rollback]
+  rollback --> audit
+  audit --> explain[explain]
+```
+
 ### Detailed Steps
 
 | Step | Capability | Purpose | Stores As | Risk |
@@ -404,26 +424,6 @@ verify:
 
 Other failure modes, which have neither `on_error` nor `when` and so only document the response: `receive` "No messages/events available" → `stop`; `integrate` "Conflicts exceed threshold" → `request_more_context`.
 
-
-```mermaid
----
-title: Digital Twin Sync Loop, gates and recovery
----
-flowchart TB
-  accDescr: After constrain and checkpoint, mutate runs only when the plan is compliant and stops if no checkpoint was created; when mutate is skipped, execute, verify and rollback are skipped too; otherwise a FAIL verdict sends the run through rollback, and both paths go on to audit and explain.
-  constrain[constrain] --> checkpoint[checkpoint] --> g1{Compliant?}
-  g1 -->|"no: skip to audit"| audit[audit]
-  g1 -->|yes| g0{Checkpoint created?}
-  g0 -->|no| halt[stop]
-  g0 -->|yes| mutate[mutate]
-  mutate --> execute[execute]
-  execute --> verify[verify]
-  verify --> g2{Passed?}
-  g2 -->|yes| audit
-  g2 -->|FAIL| rollback[rollback]
-  rollback --> audit
-  audit --> explain[explain]
-```
 
 ### Success Criteria
 

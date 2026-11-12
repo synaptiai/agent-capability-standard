@@ -68,6 +68,18 @@ Beyond existing telemetry, the following data points should be collected at the 
 | **Quarterly** | Comprehensive performance review, risk model reassessment, regulatory compliance check | AI Safety Officer + AI System Owner | Quarterly review report (input to AIMS-MGR-001 management review) |
 | **Annual** | Full system audit, risk classification review (EUAIA-CLS-001 reassessment), regulatory update incorporation | AI System Owner + external audit (if applicable) | Annual conformity assessment update |
 
+```mermaid
+---
+title: Who monitors at each cadence
+---
+flowchart TB
+  accDescr: Continuous checks are automated by hooks and the SDK, daily and weekly monitoring falls to the AI System Operator, monthly and quarterly reviews to the AI Safety Officer, with the AI System Owner joining quarterly, and the annual audit to the AI System Owner; the quarterly report feeds the AIMS-MGR-001 management review.
+  c["Continuous: automated, hooks and SDK"] --> d["Daily: AI System Operator"] --> w["Weekly: AI System Operator"]
+  w --> m["Monthly: AI Safety Officer"] --> q["Quarterly: AI Safety Officer and AI System Owner"]
+  q --> a["Annual: AI System Owner, external audit if applicable"]
+  q -->|quarterly review report| mgr["Management review (AIMS-MGR-001)"]
+```
+
 ### 4.2 Event-Triggered Monitoring
 
 In addition to scheduled monitoring, the following events trigger immediate monitoring activities:
