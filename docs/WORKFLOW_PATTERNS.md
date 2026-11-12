@@ -149,6 +149,18 @@ strategize:
     5. plan(phases) → strategy
 ```
 
+```mermaid
+---
+title: Strategize pattern flow
+---
+flowchart TB
+  accDescr: Each step hands its result to the next, from the observed state through predicted outcomes and the best approach to phases and the strategy.
+  observe["observe(environment)"] -->|current_state| predict["predict(scenarios)"]
+  predict -->|outcomes| compare["compare(outcomes, criteria)"]
+  compare -->|best_approach| decompose["decompose(best_approach)"]
+  decompose -->|phases| plan["plan(phases)"]
+```
+
 ### 2.2 Prioritize Pattern
 
 **Purpose**: Order items by importance.
@@ -352,6 +364,17 @@ validate:
     4. explain(issues) → report
 ```
 
+```mermaid
+---
+title: Validate pattern flow
+---
+flowchart TB
+  accDescr: The subject is checked against the criteria, the results are searched for violations, and explain reports the issues found.
+  retrieve["retrieve(subject)"] -->|data| verify["verify(data, criteria)"]
+  verify -->|results| detect["detect(results, violations)"]
+  detect -->|issues| explain["explain(issues)"]
+```
+
 ### 4.2 Test Pattern
 
 **Purpose**: Execute tests and report results.
@@ -373,6 +396,21 @@ test:
        b. compare(actual, test.expected) → result
     3. measure(results, coverage) → metrics
     4. generate(results, metrics) → report
+```
+
+```mermaid
+---
+title: Test pattern flow
+---
+flowchart TB
+  accDescr: Each test is executed and its actual result compared with the expected one; the results are measured for coverage and generate writes the report.
+  retrieve["retrieve(test_suite)"]
+  subgraph each [For each test]
+    execute["execute(test.code)"] -->|actual| compare["compare(actual, test.expected)"]
+  end
+  retrieve -->|tests| execute
+  compare -->|results| measure["measure(results, coverage)"]
+  measure -->|metrics| generate["generate(results, metrics)"]
 ```
 
 ### 4.3 Review Pattern
@@ -521,6 +559,21 @@ orchestrate:
     4. integrate(results) → final
 ```
 
+```mermaid
+---
+title: Orchestrate pattern flow
+---
+flowchart TB
+  accDescr: The task is split into subtasks, each subtask is delegated to an agent, synchronize waits for every task, and integrate merges their results.
+  decompose["decompose(task)"]
+  subgraph each [For each subtask]
+    delegate["delegate(subtask, agent)"]
+  end
+  decompose -->|subtasks| delegate
+  delegate -->|task_ids| synchronize["synchronize(task_ids)"]
+  synchronize -->|results| integrate["integrate(results)"]
+```
+
 ### 6.2 Handoff Pattern
 
 **Purpose**: Transfer work between agents.
@@ -604,6 +657,18 @@ research:
     3. profile(findings) → structured
     4. ground(structured, sources) → grounded
     5. explain(grounded) → synthesis
+```
+
+```mermaid
+---
+title: Research pattern flow
+---
+flowchart TB
+  accDescr: Research runs two other patterns, analyze and profile, between a search for sources and a grounded explanation; the double-edged boxes are patterns, not capabilities.
+  search["search(topic)"] -->|sources| analyze[["analyze pattern"]]
+  analyze -->|findings| profile[["profile pattern"]]
+  profile -->|structured| ground["ground(structured, sources)"]
+  ground -->|grounded| explain["explain(grounded)"]
 ```
 
 ### 7.2 Build Pattern
@@ -703,6 +768,16 @@ High-risk patterns must include safety capabilities:
 | Low | verify |
 | Medium | checkpoint, verify |
 | High | checkpoint, verify, rollback, audit |
+
+```mermaid
+---
+title: Safety capabilities by pattern risk
+---
+flowchart LR
+  accDescr: A low-risk pattern needs verify; a medium-risk one adds checkpoint, and a high-risk one adds rollback and audit as well.
+  low["Low: verify"] -->|adds checkpoint| medium["Medium: checkpoint, verify"]
+  medium -->|adds rollback, audit| high["High: checkpoint, verify, rollback, audit"]
+```
 
 ### 3. Evidence Requirements
 
