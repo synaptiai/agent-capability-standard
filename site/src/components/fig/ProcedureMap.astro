@@ -1,0 +1,50 @@
+---
+// F-C7, the skill's procedure against its fields (the rollout's figure for
+// the skill's Procedure section): one row per numbered step, with its number
+// tile and title, then the skill's inputs its text names (outlined chips) and
+// the skill's output fields its text names (chips on the layer tint). A field
+// is named when the step or its sub-items contain it as a whole word. The
+// numbered list stays on the page under the figure.
+//
+// Props:
+// - cap: Capability, required.
+// - map: ProcedureMap, required. From procedureMap().
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { procedureMapCaption, procedureMapTitle, type ProcedureMap } from '../../lib/capability-figures';
+import Figure from './Figure.astro';
+
+interface Props {
+  cap: Capability;
+  map: ProcedureMap;
+  n: number;
+}
+
+const { cap, map, n } = Astro.props;
+---
+<Figure id="ref-fig-procedure" n={n} title={procedureMapTitle(cap)} caption={procedureMapCaption(cap, map)} kind="procedure-map">
+  <div class="pmap has-layer" style={`--layer: var(--layer-${cap.layer})`}>
+    <p class="pmap__head" aria-hidden="true">
+      <span>Step</span>
+      <span>Inputs it names</span>
+      <span>Output fields it names</span>
+    </p>
+    <ol class="pmap__steps" aria-label={`The ${map.steps.length} steps of the procedure, with the fields each names`}>
+      {map.steps.map((s) => (
+        <li class="pmap__step" data-step={s.n} data-names={s.reads.length + s.writes.length}>
+          <span class="pmap__title"><span class="pmap__n" aria-hidden="true">{s.n}</span><span>{s.title}</span></span>
+          <span class="pmap__cell pmap__cell--in">
+            <span class="pmap__label" aria-hidden="true">In</span>
+            <span class="fig-sr">; inputs it names: {s.reads.length === 0 ? 'none' : s.reads.join(', ')}</span>
+            {s.reads.map((f) => <code class="pmap__chip pmap__chip--in" aria-hidden="true">{f}</code>)}
+          </span>
+          <span class="pmap__cell pmap__cell--out">
+            <span class="pmap__label" aria-hidden="true">Out</span>
+            <span class="fig-sr">; output fields it names: {s.writes.length === 0 ? 'none' : s.writes.join(', ')}</span>
+            {s.writes.map((f) => <code class="pmap__chip pmap__chip--out" aria-hidden="true">{f}</code>)}
+          </span>
+        </li>
+      ))}
+    </ol>
+  </div>
+</Figure>

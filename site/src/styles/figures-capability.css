@@ -397,21 +397,55 @@
   .chain {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2) 4px;
+    align-items: flex-end;
+    gap: var(--space-3) var(--space-2);
+  }
+
+  .chain__group {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .chain__set {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .chain__label {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .chain__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px var(--space-2);
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
   .chain__item {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+    display: grid;
+    justify-items: center;
+    gap: 2px;
     margin: 0;
   }
 
+  .chain__id {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
   .chain__arrow {
+    margin-bottom: 26px;
     color: var(--ink-2);
   }
 

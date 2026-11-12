@@ -5,7 +5,7 @@
 // in its own file.
 import { EDGE_TYPES, loadOntology, type Capability, type EdgeType, type Ontology } from '../data/ontology';
 import { capabilityUsage, type CapabilityUse } from '../data/workflows';
-import { sectionFence, sectionTableByHeader, tableRows } from './md-sections';
+import { sectionFence, sectionOrderedItems, sectionTableByHeader, tableRows } from './md-sections';
 import { contractRows, tableOrder, type SchemaRow } from './views';
 
 // ------------------------------------------------------------ F-C1 neighbours
@@ -417,3 +417,78 @@ export function outputFieldsCaption(cap: Capability, f: OutputFields): string {
   return `The skill returns ${plural(f.skill.length, 'field', 'fields')}: ${inC.length} ${inC.length === 1 ? 'is' : 'are'} in ${cap.id}'s output contract (${req} required) and ${added} ${added === 1 ? 'is' : 'are'} the skill's own, outside the contract${missing}.`;
 }
 
+
+// ------------------------------------------------------------ F-C7 procedure map
+
+export interface ProcedureStep {
+  /** 1-based position in the procedure. */
+  n: number;
+  /** The step's bold title, or its first words when it has none. */
+  title: string;
+  /** The skill's inputs the step's text names, in the Inputs table's order. */
+  reads: string[];
+  /** The skill's output fields the step's text names, in the Output Contract fence's order. */
+  writes: string[];
+}
+
+export interface ProcedureMap {
+  steps: ProcedureStep[];
+  inputs: string[];
+  outputs: string[];
+}
+
+/** The parameter names of the skill's Inputs table (its first column, without backticks). */
+export function skillInputNames(skillText: string, where: string): string[] {
+  const rows = tableRows(sectionTableByHeader(skillText, 'Inputs', 'Parameter', where)).slice(1);
+  return rows.map((r) => r[0]!.replace(/`/g, '').trim()).filter((x) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(x));
+}
+
+/** True when `text` names `field` as a whole word (not part of a longer name). */
+function names(text: string, field: string): boolean {
+  return new RegExp(`(?<![A-Za-z0-9_])${field}(?![A-Za-z0-9_])`).test(text);
+}
+
+/**
+ * F-C7: for each step of the skill's Procedure, the skill's inputs and output
+ * fields its text names, matched as whole words in the step and its sub-items.
+ */
+export function procedureMap(skillText: string, where: string): ProcedureMap {
+  const inputs = skillInputNames(skillText, where);
+  const outputs = skillOutputKeys(skillText, where);
+  const steps = sectionOrderedItems(skillText, 'Procedure', where).map((item, i) => ({
+    n: i + 1,
+    title: item.title ?? item.text.split(/\s+/).slice(0, 6).join(' '),
+    reads: inputs.filter((f) => names(item.text, f)),
+    writes: outputs.filter((f) => names(item.text, f)),
+  }));
+  return { steps, inputs, outputs };
+}
+
+/** Steps that name at least one field. */
+const naming = (m: ProcedureMap) => m.steps.filter((s) => s.reads.length + s.writes.length > 0);
+
+/** A figure only when two or more steps name a field; otherwise one sentence says so. */
+export function procedureMapIsFigure(m: ProcedureMap): boolean {
+  return naming(m).length >= 2;
+}
+
+/** F-C7's title. */
+export function procedureMapTitle(cap: Capability): string {
+  return `The fields each step of the ${cap.id} procedure names`;
+}
+
+/** F-C7's caption, or the sentence printed in its place. */
+export function procedureMapCaption(cap: Capability, m: ProcedureMap): string {
+  const k = naming(m).length;
+  const named = new Set(m.steps.flatMap((s) => s.writes));
+  const silent = m.outputs.filter((f) => !named.has(f));
+  const lead = `${k} of the procedure's ${plural(m.steps.length, 'step', 'steps')} ${k === 1 ? 'names' : 'name'} an input or output field of the ${cap.id} skill`;
+  if (!procedureMapIsFigure(m)) return `${lead}.`;
+  const tail =
+    silent.length === 0
+      ? '; every output field is named by at least one step.'
+      : silent.length === m.outputs.length
+        ? '; no step names an output field.'
+        : `; ${plural(silent.length, 'output field', 'output fields')} of ${m.outputs.length} ${silent.length === 1 ? 'is' : 'are'} named by no step (${silent.join(', ')}).`;
+  return lead + tail;
+}

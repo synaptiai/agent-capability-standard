@@ -14,6 +14,7 @@ import Neighbourhood from '../../components/fig/Neighbourhood.astro';
 import WhereItRuns from '../../components/fig/WhereItRuns.astro';
 import SafetyPanel from '../../components/fig/SafetyPanel.astro';
 import OutputFields from '../../components/fig/OutputFields.astro';
+import ProcedureMap from '../../components/fig/ProcedureMap.astro';
 import SafetySequence from '../../components/fig/SafetySequence.astro';
 import {
   compositionChain,
@@ -22,6 +23,9 @@ import {
   outputFields,
   outputFieldsCaption,
   outputFieldsIsFigure,
+  procedureMap,
+  procedureMapCaption,
+  procedureMapIsFigure,
   safetySequence,
   sequenceCaption,
   sequenceIsFigure,
@@ -75,6 +79,7 @@ const chain = compositionChain(skillText);
 const chainLength = chain.follows.length + chain.precedes.length + 1;
 const fields = outputFields(cap, skillText, route.source!);
 const sequence = safetySequence(cap, ontology);
+const procedure = procedureMap(skillText, route.source!);
 const std = currentStandardText();
 
 // Figures are numbered in page order; a figure that falls back to a sentence takes no number.
@@ -88,10 +93,12 @@ const nUsage = usage.length > 0 ? next() : 0;
 // heading (the review counted each input four times). Under Output Contract
 // the page draws what the contract figure does not: which of the skill's
 // output fields the contract declares (F-C6). Under Safety Constraints it
-// draws where the capability may run in a step list (F-C5).
-type After = { kind: 'chain' | 'output' | 'sequence'; n: number } | { kind: 'sentence'; text: string };
+// draws where the capability may run in a step list (F-C5). Under Procedure
+// it draws which inputs and output fields each step names (F-C7).
+type After = { kind: 'chain' | 'output' | 'sequence' | 'procedure'; n: number } | { kind: 'sentence'; text: string };
 const after: Record<string, After> = {};
 for (const part of skill.parts) {
+  if (part.id === 'procedure') after[part.id] = procedureMapIsFigure(procedure) ? { kind: 'procedure', n: next() } : { kind: 'sentence', text: procedureMapCaption(cap, procedure) };
   if (part.id === 'output-contract') after[part.id] = outputFieldsIsFigure(fields) ? { kind: 'output', n: next() } : { kind: 'sentence', text: outputFieldsCaption(cap, fields) };
   if (part.id === 'safety-constraints')
     after[part.id] = sequenceIsFigure(sequence) ? { kind: 'sequence', n: next() } : { kind: 'sentence', text: sequenceCaption(cap, sequence, edgeRules(std.text, std.source)) };
@@ -228,6 +235,7 @@ const skillFacts = (
             <>
               <Fragment set:html={part.head} />
               {fig?.kind === 'chain' && <CompositionChain cap={cap} chain={chain} n={fig.n} />}
+              {fig?.kind === 'procedure' && <ProcedureMap cap={cap} map={procedure} n={fig.n} />}
               {fig?.kind === 'output' && <OutputFields cap={cap} fields={fields} n={fig.n} />}
               {fig?.kind === 'sequence' && <SafetySequence cap={cap} n={fig.n} />}
               {fig?.kind === 'sentence' && <p>{fig.text}</p>}

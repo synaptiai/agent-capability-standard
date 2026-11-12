@@ -11,6 +11,14 @@ const FIXTURE = [
   'name: fixture',
   '---',
   '',
+  '## Inputs',
+  '',
+  '| Parameter | Required | Type |',
+  '|---|---|---|',
+  '| `target` | Yes | string |',
+  '| `content` | Yes | string |',
+  '| `mode` | No | string |',
+  '',
   '## Procedure',
   '',
   '1. **First**: a',
@@ -29,6 +37,8 @@ const FIXTURE = [
   '| Field | Type |',
   '|---|---|',
   '| `success` | boolean |',
+  '| `new_state` | object |',
+  '| `rollback_command` | string |',
   '',
   '## Examples',
   '',
@@ -67,6 +77,34 @@ describe('rehype-capability-skill', () => {
     expect(section).toContain('<p>Return:</p>');
     expect(section).toMatch(/<table/);
     expect(section.indexOf('</details>')).toBeLessThan(section.indexOf('<table'));
+  });
+
+  it('marks the Inputs table Required column with check and cross glyphs', async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    const section = html.slice(html.indexOf('id="inputs"'), html.indexOf('id="procedure"'));
+    const marks = [...section.matchAll(/class="pg skill-req skill-req--(yes|no)"/g)].map((m) => m[1]);
+    expect(marks).toEqual(['yes', 'yes', 'no']);
+    expect(section).toMatch(/<table[^>]*data-enriched="3"[^>]*data-info-figure="enriched-table"/);
+  });
+
+  it('adds an "In the contract" column to Field Definitions from the ontology', async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
+    expect(section).toContain('<th>In the contract</th>');
+    // Expected from mutate's output_schema in schemas/capability_ontology.yaml:
+    // success is a required boolean, new_state an optional any, and
+    // rollback_command is not in the contract.
+    const cells = [...section.matchAll(/<td class="skill-fd__contract" data-in-contract="(yes|no)">([^]*?)<\/td>/g)].map((m) => [
+      m[1],
+      m[2]!.replace(/<svg[^]*?<\/svg>/g, '').trim(),
+    ]);
+    expect(cells).toEqual([
+      ['yes', 'Yes: <code>boolean</code>, required'],
+      ['yes', 'Yes: <code>any</code>, optional'],
+      ['no', "No, the skill's own"],
+    ]);
+    // Three rows carry a glyph, so it counts as an information figure (visual spec 4.2).
+    expect(section).toMatch(/<table[^>]*data-enriched="3"[^>]*data-info-figure="enriched-table"/);
   });
 
   it('makes each example a closed details whose summary keeps the H3 and its id, with no anchor link', async () => {

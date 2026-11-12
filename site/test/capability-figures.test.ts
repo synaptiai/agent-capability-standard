@@ -13,6 +13,9 @@ import {
   outputFields,
   outputFieldsCaption,
   outputFieldsIsFigure,
+  procedureMap,
+  procedureMapCaption,
+  procedureMapIsFigure,
   safetySequence,
   sequenceCaption,
   sequenceIsFigure,
@@ -233,5 +236,62 @@ describe('outputFields (F-C6)', () => {
   it('prints a sentence when every field of the fence is in the contract and none is missing', () => {
     const f = { skill: [{ name: 'a', inContract: true, required: true }], missing: [] };
     expect(outputFieldsIsFigure(f)).toBe(false);
+  });
+});
+
+describe('procedureMap (F-C7)', () => {
+  // A hand-written skill: two inputs, three output fields, three steps.
+  // Expected values are read off the text by hand.
+  const SKILL = [
+    '## Inputs',
+    '',
+    '| Parameter | Required | Type | Description |',
+    '|---|---|---|---|',
+    '| `target` | Yes | string | What to read |',
+    '| `limit` | No | integer | How many |',
+    '',
+    '## Procedure',
+    '',
+    '1) **Resolve target**: find `target`',
+    '   - Respect limit when given',
+    '',
+    '2) **Read it**: no field named here (limits and targets are other words)',
+    '',
+    '3) **Return**: fill `result` and evidence_anchors',
+    '',
+    '## Output Contract',
+    '',
+    '```yaml',
+    'result: object',
+    'evidence_anchors: array',
+    'confidence: number',
+    '```',
+    '',
+  ].join('\n');
+
+  it('lists, per step, the inputs and output fields its text names as whole words', () => {
+    const m = procedureMap(SKILL, 'fixture');
+    expect(m.inputs).toEqual(['target', 'limit']);
+    expect(m.outputs).toEqual(['result', 'evidence_anchors', 'confidence']);
+    expect(m.steps).toEqual([
+      { n: 1, title: 'Resolve target', reads: ['target', 'limit'], writes: [] },
+      { n: 2, title: 'Read it', reads: [], writes: [] },
+      { n: 3, title: 'Return', reads: [], writes: ['result', 'evidence_anchors'] },
+    ]);
+  });
+
+  it('is a figure when two steps name a field, and says which output fields no step names', () => {
+    const m = procedureMap(SKILL, 'fixture');
+    expect(procedureMapIsFigure(m)).toBe(true);
+    expect(procedureMapCaption(cap('retrieve'), m)).toBe(
+      "2 of the procedure's 3 steps name an input or output field of the retrieve skill; 1 output field of 3 is named by no step (confidence).",
+    );
+  });
+
+  it('falls back to a sentence when fewer than two steps name a field', () => {
+    const one = SKILL.replace('fill `result` and evidence_anchors', 'finish');
+    const m = procedureMap(one, 'fixture');
+    expect(procedureMapIsFigure(m)).toBe(false);
+    expect(procedureMapCaption(cap('retrieve'), m)).toBe("1 of the procedure's 3 steps names an input or output field of the retrieve skill.");
   });
 });

@@ -3,7 +3,7 @@
 // A section is a heading and everything up to the next heading of the same
 // or a higher level. Headings are matched by the start of their text, so
 // "5.2 " finds "5.2 Step Definition" and nothing else.
-import type { Code, Heading, Root, RootContent, Table } from 'mdast';
+import type { Code, Heading, List, Root, RootContent, Table } from 'mdast';
 import { toString } from 'mdast-util-to-string';
 import { headingText, parseMarkdown } from './anchors';
 
@@ -78,4 +78,19 @@ export function sectionParagraphs(text: string, prefix: string, where: string): 
   return sectionBlocks(text, prefix, where)
     .filter((n) => n.type === 'paragraph')
     .map((n) => toString(n));
+}
+
+/**
+ * The items of the ordered lists directly under a section, in order, each as
+ * the text of its first strong span (its title, or null) and its whole text.
+ */
+export function sectionOrderedItems(text: string, prefix: string, where: string): { title: string | null; text: string }[] {
+  return sectionBlocks(text, prefix, where)
+    .filter((n): n is List => n.type === 'list' && n.ordered === true)
+    .flatMap((l) => l.children)
+    .map((item) => {
+      const first = item.children[0];
+      const strong = first?.type === 'paragraph' ? first.children.find((c) => c.type === 'strong') : undefined;
+      return { title: strong ? toString(strong).trim() : null, text: toString(item) };
+    });
 }

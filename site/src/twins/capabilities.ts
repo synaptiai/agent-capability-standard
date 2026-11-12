@@ -15,6 +15,10 @@ import {
   outputFieldsCaption,
   outputFieldsIsFigure,
   outputFieldsTitle,
+  procedureMap,
+  procedureMapCaption,
+  procedureMapIsFigure,
+  procedureMapTitle,
   safetySequence,
   sequenceCaption,
   sequenceIsFigure,
@@ -97,6 +101,17 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
         ),
       )
     : outputFieldsCaption(cap, fields);
+  const proc = procedureMap(skillText, skillSource);
+  const procedureBlock = procedureMapIsFigure(proc)
+    ? figure(
+        procedureMapTitle(cap),
+        procedureMapCaption(cap, proc),
+        table(
+          ['Step', 'Inputs it names', 'Output fields it names'],
+          proc.steps.map((s) => [`${s.n}. ${s.title}`, s.reads.map(code).join(', '), s.writes.map(code).join(', ')]),
+        ),
+      )
+    : procedureMapCaption(cap, proc);
   const std = currentStandardText();
   const rules = edgeRules(std.text, std.source);
   const seq = safetySequence(cap, ontology);
@@ -132,6 +147,7 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
     '## Used in workflows',
     used,
     '## Claude Code skill',
+    procedureBlock,
     markdownCopy(skillSource, skillText, { shiftHeadings: 1 }),
   );
   return { title: cap.id, description: cap.description, markdown };
