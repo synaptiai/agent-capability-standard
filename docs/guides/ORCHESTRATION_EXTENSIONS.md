@@ -48,11 +48,10 @@ workflow and silently ignore, for example, a wait or an approval.
 title: Extensions are must-understand
 ---
 flowchart TB
-  accDescr: A workflow that uses an extension's fields without listing it in workflow_extensions.requires is rejected with V106, and so is one that lists an extension the validator does not know; otherwise the validator checks it.
+  accDescr: A workflow that uses an extension's fields without listing it in workflow_extensions.requires is rejected with V106, and so is one that lists an extension the validator does not know.
   q1{"Uses an extension's fields without listing it?"} -->|yes| v1[V106: rejected]
   q1 -->|no| q2{"Lists an extension the validator does not know?"}
   q2 -->|yes| v2[V106: rejected]
-  q2 -->|no| ok[Validated]
 ```
 
 ## Triggers (`triggers@1`)
@@ -74,7 +73,7 @@ approval steps: an unattended run cannot wait for a person in the session.
 title: Each trigger kind's default attendance
 ---
 flowchart LR
-  accDescr: Schedule and event triggers start unattended runs, a manual trigger starts an attended run, and an invoked run takes the invoker's attendance; attendance overrides the default.
+  accDescr: By default, schedule and event triggers start unattended runs, a manual trigger starts an attended run, and an invoked run takes the invoker's attendance.
   sch[schedule] --> un[unattended]
   ev[event] --> un
   man[manual] --> at[attended]
@@ -401,10 +400,10 @@ and what the decision binds to:
   title: The nightly sweep with no mandate for the send
   ---
   flowchart TB
-    accDescr: When no mandate covers the send, it is deferred to the queue; the independent read-only retrieve still runs, the mutate that acts on the world is queued too, and the run ends deferred, listing every deferral.
-    send["send: deferred to the queue"] --> retrieve["retrieve: read-only and independent, runs"]
-    retrieve --> mutate["mutate: acts on the world, queued too"]
-    mutate --> end1["Run ends deferred, listing every deferral"]
+    accDescr: When no mandate covers the send, it is deferred to the queue; the mutate, a later step that acts on the world, waits too and is queued; the read-only retrieve depends on neither and runs; the run ends deferred, listing every deferral.
+    send["send: deferred to the queue"] -->|"a later step that acts on the world waits too"| mutate["mutate: queued too"]
+    retrieve["retrieve: read-only and independent, runs"] --> end1["Run ends deferred, listing every deferral"]
+    mutate --> end1
   ```
 - A step that must run whether or not an earlier action was deferred,
   such as an escalation to a person, can say so with

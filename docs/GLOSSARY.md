@@ -109,10 +109,11 @@ The systematic process by which capabilities are identified and justified. Groun
 title: How capabilities are derived
 ---
 flowchart TB
-  accDescr: The derivation starts from the eight foundational verbs of the DIS '23 framework, specialises each verb with a domain, adds operational requirements for production agents, and validates that each capability is irreducible.
-  dis["DIS '23 AI Capabilities framework: 8 foundational verbs"] --> dom["Domain specialization: verb + domain"]
-  dom --> ops[Operational requirements for production agents]
-  ops --> atom["Atomicity validation: each is irreducible"]
+  accDescr: Capabilities come from the eight foundational verbs of the DIS '23 framework, from domain specialization, a verb plus a domain, and from operational requirements for production agents; atomicity validation checks that each one is irreducible.
+  dis["DIS '23 AI Capabilities framework: 8 foundational verbs"] -->|"verb + domain"| dom[Domain specialization]
+  dis --> atom["Atomicity validation: each is irreducible"]
+  dom --> atom
+  ops[Operational requirements for production agents] --> atom
 ```
 
 See [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
@@ -283,15 +284,15 @@ A documented way a step can fail, with recovery instructions:
 title: Gates, failure modes and recovery loops
 ---
 flowchart TB
-  accDescr: A gate checks its when condition before the step by default and takes its action when the condition matches; a gate with phase after checks it after the step and cannot skip; a failure mode's when is evaluated after the step and fires its action and its recovery, and a recovery loop resumes at goto_step with inject_context, up to max_loops times.
-  gate{"gate when, phase before"} -->|matches| gact["action: stop, rollback, skip, warn or end"]
-  gate -->|no match| step[Step runs]
-  step --> ag{"gate when, phase after"}
-  ag -->|matches| aact["action, not skip"]
-  step --> fm{"failure mode when"}
-  fm -->|fires| fact[action]
-  fact --> rec["recovery: prose or a recovery loop"]
-  rec -->|"condition: goto_step, inject_context, up to max_loops"| goto[Resume at goto_step]
+  accDescr: A gate checks its when condition before the step, or after it with phase after, and takes its action when the condition matches; an after-gate cannot skip. A failure mode's when is evaluated after the step; when it fires, its action runs and then its recovery, which may be a recovery loop that resumes at goto_step with inject_context, up to max_loops times.
+  gate{"Gate, phase before: when matches?"} -->|yes| gact["action: stop, rollback, skip, warn or end"]
+  gate -->|no| step[Step runs]
+  step --> ag{"After-gate: when matches?"}
+  ag -->|yes| aact["action, not skip"]
+  step --> fm{"Failure mode: when matches?"}
+  fm -->|yes| fact[action]
+  fact --> rec["recovery: prose, or a recovery loop"]
+  rec -->|recovery loop| goto["Resume at goto_step with inject_context, up to max_loops"]
 ```
 
 ### Store As
