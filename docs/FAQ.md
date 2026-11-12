@@ -314,10 +314,11 @@ The standard is language-agnostic. The reference validator is written in Rust (`
 ---
 title: The reference validator
 ---
-flowchart LR
-  accDescr: The reference validator is written in Rust under core/ and exposed to Python as grounded_agency._core; the specification itself can be implemented in any language.
-  rust["Rust validator, core/"] -->|exposed as| py["Python: grounded_agency._core"]
-  spec[Specification] -.->|any language| other[Other implementations]
+flowchart TB
+  accDescr: The reference validator implements the specification in Rust under core/ and is exposed to Python as grounded_agency._core; the specification can also be implemented in any other language.
+  spec[Specification] -->|reference validator| rust["Rust, core/"]
+  rust -->|exposed as| py["Python: grounded_agency._core"]
+  spec -.->|any language| other[Other implementations]
 ```
 
 ### How do I validate my workflows?
