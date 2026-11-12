@@ -28,7 +28,7 @@ const sources = rankedSources(profile);
     <TableWrap label="Sources and their default trust">
       <table class="meter-table meter-table--sources">
         <caption class="fig-sr">Sources and their default trust</caption>
-        <thead class="fig-sr"><tr><th scope="col">Source</th><th scope="col">Type</th><th scope="col">Default trust</th></tr></thead>
+        <thead><tr><th scope="col">Source</th><th scope="col">Type</th><th scope="col">Trust</th></tr></thead>
         <tbody>
           {sources.map((s) => {
             const g = glyphOrNull(`source:${s.type}`);

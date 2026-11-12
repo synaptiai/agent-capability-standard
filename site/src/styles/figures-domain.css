@@ -35,6 +35,13 @@
     font-size: 15px;
   }
 
+  .meter-table thead th {
+    padding-top: 0;
+    white-space: nowrap;
+    font-weight: 700;
+    color: var(--ink-2);
+  }
+
   .meter-table th,
   .meter-table td {
     padding: 6px 0;
@@ -473,9 +480,13 @@
   }
 
   .wf-card--proposed {
-    border-style: dashed;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3);
+    border: var(--px) dashed var(--line);
     background: var(--bg);
-    box-shadow: none;
   }
 
   .wf-card__glyph {

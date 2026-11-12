@@ -29,7 +29,7 @@ const weights = sortedTrustWeights(profile);
   <TableWrap label="Trust weight per source, highest first">
     <table class="meter-table">
       <caption class="fig-sr">Trust weight per source, highest first</caption>
-      <thead class="fig-sr"><tr><th scope="col">Source</th><th scope="col">Weight</th></tr></thead>
+      <thead><tr><th scope="col">Source</th><th scope="col">Weight</th></tr></thead>
       <tbody>
         {weights.map((w) => (
           <tr data-source={w.source}>

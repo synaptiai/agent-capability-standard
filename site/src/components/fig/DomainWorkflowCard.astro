@@ -4,8 +4,9 @@
 // card adds one tab stop), the step count, the risk pips and a link to the
 // workflow page. The spec draws a StepStrip here; the tiles say which
 // capability each step runs, which the README's list under the card names. A
-// workflow no catalog defines gets a dashed outline, the status:proposed
-// glyph and the PROPOSED_WORKFLOW_STATUS badge instead. The page puts each
+// workflow no catalog defines has no steps to draw, so it gets a plain card,
+// not a figure: a dashed outline, the status:proposed glyph and the
+// PROPOSED_WORKFLOW_STATUS badge. The page puts each
 // card under the matching H3 of the README's "Available Workflows".
 //
 // Props:
@@ -45,11 +46,9 @@ const known = new Set(loadOntology().capabilities.map((c) => c.id));
     </div>
   </Figure>
 ) : (
-  <Figure id={figId} n={n} title={`Steps of ${id}`} caption="The profile lists this workflow, but no catalog defines its steps yet." kind="workflow-card" class="wf-card wf-card--proposed">
-    <div class="wf-card__body" data-workflow={id}>
-      <span class="wf-card__glyph"><PixelGlyph name="status:proposed" scale={3} /></span>
-      <code>{id}</code>
-      <StatusBadge status={PROPOSED_WORKFLOW_STATUS} />
-    </div>
-  </Figure>
+  <div class="wf-card wf-card--proposed" data-workflow={id}>
+    <span class="wf-card__glyph"><PixelGlyph name="status:proposed" scale={3} /></span>
+    <code>{id}</code>
+    <StatusBadge status={PROPOSED_WORKFLOW_STATUS} />
+  </div>
 )}

@@ -231,13 +231,13 @@ describe('built site', () => {
       const ids = profileWorkflowIds(repoText(`schemas/profiles/${f}`));
       expect(ids.length, f).toBeGreaterThan(0);
       for (const id of ids) {
-        const card = html.indexOf(`<div class="wf-card__body" data-workflow="${id}"`);
+        const card = html.search(new RegExp(`<div class="wf-card[^"]*" data-workflow="${id}"`));
         expect(card, `${page} ${id}`).toBeGreaterThan(0);
         const before = html.slice(0, card);
         const lastH3 = [...before.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].at(-1)!;
         const title = lastH3[1]!.replace(/<[^>]*>/g, '').replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
         expect(title, `${page} ${id}`).toBe(id);
-        expect(before.slice(lastH3.index! + lastH3[0].length, before.lastIndexOf('<figure')), `${page} ${id}`).not.toMatch(/<(p|ul|ol|pre|table)[\s>]/);
+        expect(before.slice(lastH3.index! + lastH3[0].length).replace(/<figure[\s\S]*$/, ''), `${page} ${id}`).not.toMatch(/<(p|ul|ol|pre|table)[\s>]/);
       }
     }
   });
