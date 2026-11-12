@@ -22,17 +22,19 @@ const steps = diagramSteps(workflow);
 const runs = diagramRuns(steps);
 const branches = steps.filter((d) => d.branch).map((d) => d.step.index);
 ---
-{branches.length > 0 && (
-  <p class="wf-key">
-    <span class="wf-key__swatch" aria-hidden="true"></span>
-    {`A dashed card set in from the rail is a step with gates or a condition, so it may be skipped or end the run: ${branches.length === 1 ? 'step' : 'steps'} ${branches.length === 1 ? branches[0] : `${branches.slice(0, -1).join(', ')} and ${branches.at(-1)}`}.`}
-  </p>
-)}
-<p class="wf-toggle"><button type="button" class="btn btn--quiet" data-wf-toggle data-open="false">Open every step</button></p>
+<div class="wf-intro">
+  {branches.length > 0 && (
+    <p class="wf-key">
+      <span class="wf-key__swatch" aria-hidden="true"></span>
+      {`A dashed card set in from the rail is a step with gates or a condition, so it may be skipped or end the run: ${branches.length === 1 ? 'step' : 'steps'} ${branches.length === 1 ? branches[0] : `${branches.slice(0, -1).join(', ')} and ${branches.at(-1)}`}.`}
+    </p>
+  )}
+  <p class="wf-toggle"><button type="button" class="btn btn--quiet" data-wf-toggle data-open="false">Open every step</button></p>
+</div>
 <ol class="wf" aria-label={`Steps of ${workflow.id}`} data-workflow={workflow.id}>
   {runs.map((run) =>
     run.group === null ? (
-      run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} />)
+      run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} open={d === steps[0]} />)
     ) : (
       <li class="wf-parallel" data-group={run.group}>
         <p class="wf-parallel__label">
@@ -40,7 +42,7 @@ const branches = steps.filter((d) => d.branch).map((d) => d.step.index);
           {run.join !== undefined && run.join !== null && <>, join: <code>{typeof run.join === 'string' ? run.join : JSON.stringify(run.join)}</code></>}
         </p>
         <ol class="wf wf--parallel">
-          {run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} />)}
+          {run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} open={d === steps[0]} />)}
         </ol>
       </li>
     ),
@@ -67,7 +69,7 @@ const branches = steps.filter((d) => d.branch).map((d) => d.step.index);
     if (a && a.getAttribute('href') === location.hash) openTarget();
   });
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-wf-toggle]')) {
-    const list = button.parentElement?.nextElementSibling;
+    const list = button.closest('.wf-intro')?.nextElementSibling;
     button.addEventListener('click', () => {
       const open = button.dataset.open !== 'true';
       for (const d of list?.querySelectorAll<HTMLDetailsElement>('details.wf-step__card') ?? []) d.open = open;

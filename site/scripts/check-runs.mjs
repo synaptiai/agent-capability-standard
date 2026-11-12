@@ -81,14 +81,18 @@ export function collectGeometry({ entries, selector, min, vh }) {
       exempt.push({ key: e.key, label, ...span });
       continue;
     }
-    // first-tall-fence: the first code block in the section taller than one
-    // viewport that a reader can see; a fence in a closed <details> still
-    // has a box, so it is skipped by its visibility, not its size.
-    const fence = [...bodyEl.querySelectorAll('pre')]
-      .filter((p) => p.checkVisibility())
-      .map(y)
-      .find((p) => p.top >= span.top && p.top < span.bottom);
-    if (fence && fence.height > vh) exempt.push({ key: e.key, label, top: fence.top, bottom: fence.bottom });
+    // open-first-example: the first open <details> in the section, whole,
+    // when the code blocks in it are together taller than one viewport (the
+    // example's code without its sentences). A closed <details> is passed
+    // over: its fences have no height a reader sees.
+    const open = [...bodyEl.querySelectorAll('details[open]')].find((d) => {
+      const t = y(d).top;
+      return t >= span.top && t < span.bottom;
+    });
+    if (!open) continue;
+    const code = [...open.querySelectorAll('pre')].filter((p) => p.checkVisibility()).reduce((sum, p) => sum + y(p).height, 0);
+    const box = y(open);
+    if (code > vh) exempt.push({ key: e.key, label, top: box.top, bottom: box.bottom });
   }
   const template = [...document.body.classList].find((c) => c.startsWith('page--') && !c.startsWith('page--with') && !c.startsWith('page--no-'));
   return { template: template ? template.slice('page--'.length) : '', geometry: { body, figures, exempt }, small, missing };

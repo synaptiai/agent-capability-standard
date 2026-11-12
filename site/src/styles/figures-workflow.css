@@ -19,10 +19,27 @@
     min-width: 0;
   }
 
-  .spine__lanes {
-    flex: none;
-    overflow: visible;
+  /* The left lanes, row by row: the row's slice of the brackets in its
+     first 28px, and each line that runs on drawn to the row's bottom. */
+  .spine__lane {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: var(--spine-lanes);
     color: var(--ink-2);
+    pointer-events: none;
+  }
+
+  .spine__lane svg {
+    display: block;
+    overflow: visible;
+  }
+
+  .spine__lane-run {
+    position: absolute;
+    top: 28px;
+    bottom: 0;
   }
 
   .spine__rows,
@@ -32,11 +49,18 @@
     list-style: none;
   }
 
+  /* A row is at least 28px; at wide widths its purpose wraps and the row
+     grows, with every mark kept in its first 28px. */
   .spine__rows {
     display: grid;
-    grid-auto-rows: 28px;
+    grid-auto-rows: minmax(28px, auto);
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  .spine__rows > li {
+    position: relative;
+    padding-left: var(--spine-lanes);
   }
 
   .spine__row,
@@ -49,11 +73,27 @@
   .spine__link {
     display: grid;
     grid-template-columns: var(--spine-cols);
-    align-items: center;
+    align-items: start;
     column-gap: 6px;
-    height: 28px;
+    min-height: 28px;
     color: var(--ink);
     text-decoration: none;
+  }
+
+  .spine__link > :is(.spine__n, .spine__role, .spine__gates, .spine__fail) {
+    height: 28px;
+  }
+
+  .spine__link > .spine__n {
+    line-height: 28px;
+  }
+
+  .spine__link > .spine__tile {
+    margin-top: 2px;
+  }
+
+  .spine__link > .spine__risk {
+    margin-top: 6px;
   }
 
   .spine__link:hover {
@@ -74,37 +114,32 @@
 
   .spine__role {
     display: inline-flex;
+    align-items: center;
     color: var(--ink);
   }
 
+  /* Wide: the id, then the purpose, wrapping under it; the first line sits
+     in the middle of the row's first 28px. */
   .spine__text {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
+    display: block;
     min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
+    padding: 4px 0;
+    line-height: 20px;
+    overflow-wrap: anywhere;
   }
 
   .spine__cap {
-    flex: none;
-    max-width: 100%;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
     font-weight: 700;
   }
 
   .spine__nested {
-    flex: none;
+    margin-left: var(--space-1);
+    vertical-align: -2px;
     color: var(--ink-2);
   }
 
   .spine__purpose {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    margin-left: var(--space-2);
     color: var(--ink-2);
     font-size: 14px;
   }
@@ -150,45 +185,67 @@
     color: var(--risk-high);
   }
 
-  /* The steps a row reads from: drawn only while the row is pointed at or focused. */
-  .spine__reads {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: calc((var(--up) + 1) * 28px);
-    pointer-events: none;
-    visibility: hidden;
-  }
-
-  .spine__row:is(:hover, :focus-within) > .spine__reads {
-    visibility: visible;
-  }
-
-  .spine__reads svg {
+  /* The read lane, row by row: each piece is shown by the workflow's own
+     rules (WorkflowSpine) while a row that reads is pointed at or focused. */
+  .spine__rl {
     position: absolute;
     top: 0;
     right: 0;
+    bottom: 0;
+    width: var(--spine-read);
     color: var(--ink);
+    pointer-events: none;
   }
 
-  .spine__producer {
+  /* .spine in front, to win over the figure rule that shows every svg. */
+  .spine .spine__rl > * {
+    display: none;
     position: absolute;
+    background: currentColor;
+  }
+
+  .spine__rl-top {
+    left: 7px;
+    width: 2px;
+    top: 13px;
+    bottom: 0;
+  }
+
+  .spine__rl-through {
+    left: 7px;
+    width: 2px;
+    top: 0;
+    bottom: 0;
+  }
+
+  .spine__rl-bottom {
+    left: 7px;
+    width: 2px;
+    top: 0;
+    height: 15px;
+  }
+
+  .spine__rl-stub {
+    left: 2px;
+    width: 6px;
+    top: 13px;
+    height: 2px;
+  }
+
+  .spine__rl > .spine__rl-chev {
+    top: 0;
     left: 0;
-    right: var(--spine-read);
-    top: calc(var(--at) * 28px);
-    height: 28px;
-    box-sizing: border-box;
-    border: var(--px) solid var(--ink);
+    background: none;
   }
 
   /* Parallel groups: a fork bar, the steps side by side, a join bar. */
-  .spine__bar {
+  .spine__rows > .spine__bar {
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    min-height: 28px;
     margin: 0;
-    padding-left: calc(var(--spine-n) + 6px);
+    padding-left: calc(var(--spine-lanes) + var(--spine-n) + 6px);
     color: var(--ink-2);
     font-size: 14px;
     white-space: nowrap;
@@ -218,6 +275,14 @@
 
   .spine__group--multi :is(.spine__gates, .spine__fail, .spine__purpose) {
     display: none;
+  }
+
+  /* Without the purpose a row is one line: a long id is cut with an ellipsis
+     (its full id is in the row's accessible name). */
+  .spine__group--multi .spine__text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .spine-legend {
@@ -262,9 +327,15 @@
        a narrow inset the longest capability id (11 letters) fits beside the
        gate and failure lanes. */
     .spine__cap {
-      flex: 0 1 auto;
       padding-inline: 2px;
       font-size: 13px;
+    }
+
+    /* Narrow, a row is one line: the purpose is in the step cards below. */
+    .spine__text {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
 
     /* Narrow, a group's bar keeps its glyph and ids (the fork and join glyphs

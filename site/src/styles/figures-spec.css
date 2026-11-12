@@ -1710,21 +1710,25 @@
   }
 
   .heat__cell--1 {
+    border-color: var(--heat-line);
     background: var(--heat-1);
     color: var(--on-heat-1);
   }
 
   .heat__cell--2 {
+    border-color: var(--heat-line);
     background: var(--heat-2);
     color: var(--on-heat-2);
   }
 
   .heat__cell--3 {
+    border-color: var(--heat-line);
     background: var(--heat-3);
     color: var(--on-heat-3);
   }
 
   .heat__cell--4 {
+    border-color: var(--heat-line);
     background: var(--heat-4);
     color: var(--on-heat-4);
   }

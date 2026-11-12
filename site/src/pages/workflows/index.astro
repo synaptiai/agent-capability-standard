@@ -6,6 +6,8 @@
 // the ones a profile proposes.
 import RiskBadge from '../../components/RiskBadge.astro';
 import { loadWorkflows } from '../../data/workflows';
+import PageHero from '../../components/PageHero.astro';
+import { sectionHero } from '../../lib/prose-page';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { domainHref, pageHref, refSlugger, routeByUrl, specSectionHref, workflowHref } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
@@ -39,13 +41,15 @@ const coreSources = [...new Set(wfs.core.map((w) => w.source))];
 ---
 <DocLayout route={route} title="Workflows" description={description}>
   <article class="doc doc--workflows" data-pagefind-body>
-    <h1 id={id('Workflows')}>Workflows</h1>
-    <p class="lead">
-      A workflow composes capabilities into ordered steps with typed bindings, gates and failure modes
-      (<a href={specSectionHref('5')}>Standard §5</a>). The catalogs define {wfs.all.length} workflows:
-      {' '}{wfs.core.length} reference workflows and {wfs.domain.length} domain workflows. See also
-      {' '}<a href={pageHref('/workflows/patterns/')}>composition patterns</a>.
-    </p>
+    <PageHero glyph={sectionHero(route.section).glyph} eyebrow="Section" section={route.section}>
+      <h1 id={id('Workflows')}>Workflows</h1>
+      <p class="lead">
+        A workflow composes capabilities into ordered steps with typed bindings, gates and failure modes
+        (<a href={specSectionHref('5')}>Standard §5</a>). The catalogs define {wfs.all.length} workflows:
+        {' '}{wfs.core.length} reference workflows and {wfs.domain.length} domain workflows. See also
+        {' '}<a href={pageHref('/workflows/patterns/')}>composition patterns</a>.
+      </p>
+    </PageHero>
     {groups.map((g, i) => (
       <section class="workflow-group">
         <h2 id={id(g.label)}>{g.label}</h2>

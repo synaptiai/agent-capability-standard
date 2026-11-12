@@ -2,15 +2,18 @@
 // The schema files under schemas/, each linked to GitHub. The files the
 // current Standard requires, and the supporting ones it names, are read from
 // its §6.1; the rest are grouped by folder. Workflow catalogs and domain
-// profiles have their own pages and are not listed here.
+// profiles have their own pages and are not listed here. F-SC1 (visual spec
+// 3.11) draws every file as a tile in its group's column, with a stamp on
+// the required ones, above the per-group tables.
 import DocLayout from '../../layouts/DocLayout.astro';
 import { GENERATED_DESCRIPTIONS, currentStandard, pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
 import { githubBlobUrl, readRepoFile } from '../../lib/repo';
 import { schemaGroups, schemaListing } from '../../lib/views';
+import BreakCode from '../../components/BreakCode.astro';
 import TableWrap from '../../components/TableWrap.astro';
 import Figure from '../../components/fig/Figure.astro';
 import PixelBar from '../../components/fig/PixelBar.astro';
-import { SHELF_MIN_ROWS, schemaShelves, shelfCaption, shelfMax, shelfTitle } from '../../lib/index-figures';
+import { SHELF_MIN_ROWS, SHELF_OVERVIEW_TITLE, schemaShelves, shelfCaption, shelfMax, shelfOverviewCaption, shelfTitle } from '../../lib/index-figures';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import '../../styles/figures-indexes.css';
 
@@ -20,6 +23,8 @@ const entries = schemaListing(readRepoFile(std.source));
 const id = refSlugger();
 const GROUPS = schemaGroups(std.version);
 const shelves = schemaShelves(entries, GROUPS);
+// Each group's heading id, made once so the shelf above can link to it.
+const groupIds = new Map(shelves.map((sh) => [sh.key, id(sh.label)]));
 let fig = 0;
 const description = GENERATED_DESCRIPTIONS['/spec/schemas/']!();
 ---
@@ -32,6 +37,24 @@ const description = GENERATED_DESCRIPTIONS['/spec/schemas/']!();
       Workflow catalogs are listed on the <a href={pageHref('/workflows/')}>workflows page</a> and domain profiles on
       the <a href={pageHref('/domains/')}>domains page</a>.
     </p>
+    <Figure id="ref-fig-schema-shelf" n={++fig} title={SHELF_OVERVIEW_TITLE} caption={shelfOverviewCaption(shelves)} kind="schema-shelf-overview" class="sc-shelf__fig">
+      <ol class="sc-shelf">
+        {shelves.map((sh) => (
+          <li class="sc-shelf__group" data-group={sh.key}>
+            <p class="sc-shelf__label"><a href={`#${groupIds.get(sh.key)}`}>{sh.label}</a> <span class="sc-shelf__count">{sh.tiles.length}</span></p>
+            <ul class="sc-shelf__tiles">
+              {sh.tiles.map((t) => (
+                <li class:list={['sc-tile', sh.key === 'required' && 'sc-tile--required']} data-schema={t.entry.name}>
+                  <PixelGlyph name="chapter:canonical-schemas" scale={2} />
+                  <a href={githubBlobUrl(t.entry.source)}><BreakCode text={t.file} /></a>
+                  {sh.key === 'required' && <span class="sc-tile__stamp"><PixelGlyph name="mark:required" label="required" /></span>}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </Figure>
     {shelves.map((sh) => {
       const g = GROUPS.find((x) => x.key === sh.key)!;
       const table = (
@@ -65,7 +88,7 @@ const description = GENERATED_DESCRIPTIONS['/spec/schemas/']!();
       );
       return (
         <section class="schema-group" data-group={sh.key}>
-          <h2 id={id(g.label)}>{g.label}</h2>
+          <h2 id={groupIds.get(sh.key)}>{g.label}</h2>
           <p>{g.intro}{sh.tiles[0]!.entry.source.includes('/', 'schemas/'.length) && <> In <code>{sh.tiles[0]!.entry.source.split('/').slice(0, -1).join('/')}/</code>.</>}</p>
           {sh.tiles.length >= SHELF_MIN_ROWS ? (
             <Figure id={id(`fig-${g.label}`)} n={++fig} title={shelfTitle(sh)} caption={shelfCaption(sh)} kind="schema-shelf">{table}</Figure>

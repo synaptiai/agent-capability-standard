@@ -9,6 +9,7 @@
 // periodic table is shown there and the drawing kept in a <details> (3.10.6).
 import Callout from '../components/Callout.astro';
 import CapabilityTable from '../components/CapabilityTable.astro';
+import PageHero from '../components/PageHero.astro';
 import StatusBadge from '../components/StatusBadge.astro';
 import Figure from '../components/fig/Figure.astro';
 import { loadOntology } from '../data/ontology';
@@ -18,7 +19,6 @@ import { sectionHero, splitH1 } from '../lib/prose-page';
 import { periodicCaption, OVERVIEW_SOURCE, PERIODIC_ANCHOR, foldFirstBox } from '../lib/prose-figures';
 import type { Route } from '../lib/routes';
 import { statusStyle } from '../lib/status';
-import PixelGlyph from '../pixel/PixelGlyph.astro';
 import type { PageMeta } from '../plugins/remark-page-meta';
 import '../styles/figures-prose.css';
 
@@ -38,14 +38,10 @@ const id = refSlugger();
 const o = loadOntology();
 ---
 <article class="doc doc--prose" data-document-status={page.documentStatus ?? undefined} data-pagefind-body>
-  <header class="page-hero" data-section={route.section}>
-    <span class="page-hero__tile" aria-hidden="true"><PixelGlyph name={hero.glyph} scale={4} /></span>
-    <div class="page-hero__text">
-      <p class="eyebrow page-hero__eyebrow">{hero.label}</p>
-      {h1 ? <Fragment set:html={h1} /> : null}
-      {page.documentStatus && <p class="doc-status page-hero__status"><StatusBadge status={page.documentStatus} /></p>}
-    </div>
-  </header>
+  <PageHero glyph={hero.glyph} eyebrow={hero.label} section={route.section}>
+    {h1 ? <Fragment set:html={h1} /> : null}
+    {page.documentStatus && <p class="doc-status page-hero__status"><StatusBadge status={page.documentStatus} /></p>}
+  </PageHero>
   {historical && (
     <Callout type="note" label="Historical document">
       <p>This is a historical document. It describes the project as it was when it was written.</p>

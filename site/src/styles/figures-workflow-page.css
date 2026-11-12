@@ -8,8 +8,25 @@
 @layer reset, tokens, base, components, utilities;
 
 @layer components {
+  /* The key and the open-every-step button share one row when there is
+     room; the button wraps under the key on a narrow column. */
+  .wf-intro {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-4);
+    margin: 0 0 var(--space-4);
+  }
+
+  .wf-intro .wf-key {
+    flex: 1 1 24rem;
+    margin: 0;
+  }
+
   .wf-toggle {
-    margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+    flex: none;
+    margin: 0;
   }
 
   :root:not(.js) .wf-toggle {

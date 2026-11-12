@@ -111,6 +111,17 @@ export function schemaShelves(entries: readonly SchemaEntry[], groups: readonly 
  */
 export const SHELF_MIN_ROWS = 3;
 
+/** F-SC1's title: every schema file, one column per group (visual spec 3.11). */
+export const SHELF_OVERVIEW_TITLE = 'Schema files by group';
+
+/** "20 schema files in 6 groups; 5 are required by the Standard; the largest group is Transforms, with 7." */
+export function shelfOverviewCaption(shelves: readonly Shelf[]): string {
+  const files = sum(shelves.map((s) => s.tiles.length));
+  const required = shelves.find((s) => s.key === 'required')?.tiles.length ?? 0;
+  const largest = [...shelves].sort((a, b) => b.tiles.length - a.tiles.length)[0]!;
+  return `${plural(files, 'schema file', 'schema files')} in ${plural(shelves.length, 'group', 'groups')}; ${required === 0 ? 'none is' : `${required} ${required === 1 ? 'is' : 'are'}`} required by the Standard, marked with a stamp; the largest group is ${largest.label}, with ${largest.tiles.length}.`;
+}
+
 export function shelfTitle(sh: Shelf): string {
   return `${sh.label}: the files and their length`;
 }
@@ -463,13 +474,20 @@ export function listingFigures(section: string, routes: readonly Route[], layers
   switch (section) {
     case 'guides':
       return [{ at: 'Skills', kind: 'skills' }];
+    // The count matrices are tables; every section index also gets a drawn
+    // figure (scripts/check-dist.mjs, "drawn"), here how long each page takes
+    // to read, as on the start index.
     case 'compliance':
       return [
+        { at: 'top', kind: 'bars', bars: readingBars(sectionDocs(routes, 'compliance')) },
         { at: 'EU AI Act', kind: 'matrix', matrix: euArticleMatrix(sectionDocs(routes, 'compliance', 'EU AI Act')) },
         { at: 'ISO/IEC 42001', kind: 'matrix', matrix: isoClauseMatrix(sectionDocs(routes, 'compliance', 'ISO/IEC 42001')) },
       ];
     case 'background':
-      return [{ at: 'Methodology', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'background'), layers) }];
+      return [
+        { at: 'top', kind: 'bars', bars: readingBars(sectionDocs(routes, 'background')) },
+        { at: 'Methodology', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'background'), layers) },
+      ];
     // The start pages are read in order by a newcomer, so the figure is how long each takes; counting
     // capability names in code spans scored the overview, which shows all 36 in a drawing, as 0.
     case 'start':

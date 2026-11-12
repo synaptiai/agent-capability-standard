@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkDistDir, internalTarget, linkValues, markdownLinkValues } from '../scripts/check-dist.mjs';
+import { checkDistDir, drawnFigure, internalTarget, linkValues, markdownLinkValues } from '../scripts/check-dist.mjs';
 
 const O = 'https://acs.synapti.ai';
 
@@ -239,6 +239,38 @@ describe('check-dist.mjs', () => {
     s['_review/glyphs/index.html'] = page('<h1 id="g">Glyph sheet</h1>');
     const p = problems(s);
     expect(p).toContain('[review] guide/index.html points at the review pages (/_review/), which are not deployed');
+  });
+});
+
+describe('drawn figures', () => {
+  const fig = (n: number, drawing: string) =>
+    `<figure class="fig" aria-labelledby="f${n}-t"><p class="fig__eyebrow" aria-hidden="true">Fig ${n}</p><p class="fig__title" id="f${n}-t">F${n}</p><div class="fig__drawing">${drawing}</div><figcaption class="fig__caption">c</figcaption></figure>`;
+  const svg = '<svg viewBox="0 0 1 1"><rect width="1" height="1"/></svg>';
+  const table = (cell: string) => `<div class="table-wrap"><table><tbody><tr><td>${cell}</td></tr></tbody></table></div>`;
+
+  it('counts an SVG drawing, or HTML marks with no table, as drawn', () => {
+    expect(drawnFigure(fig(1, svg))).toBe(true);
+    expect(drawnFigure(fig(1, '<ul class="bar-list"><li><span class="pixel-bar__fill" style="width: 40%"></span>4 min</li></ul>'))).toBe(true);
+    expect(drawnFigure(fig(1, `${svg}${table('x')}`))).toBe(true);
+  });
+
+  it('does not count a table, even with glyphs in its cells, a legend beside it or a drawing folded under it', () => {
+    expect(drawnFigure(fig(1, table('x')))).toBe(false);
+    expect(drawnFigure(fig(1, table(`${svg} yes`)))).toBe(false);
+    expect(drawnFigure(fig(1, `${table('3')}<p class="heat-legend">${svg} 1 to 3</p>`))).toBe(false);
+    expect(drawnFigure(fig(1, `${table('3')}<details><summary>s</summary>${svg}</details>`))).toBe(false);
+  });
+
+  it('fails a generated page whose numbered figures are all tables, and leaves prose pages alone', () => {
+    const files = cleanSite();
+    files['guide/index.html'] = files['guide/index.html']!.replace('<body>', '<body class="page page--listing page--with-sidebar">').replace('</body>', `${fig(1, table('x'))}</body>`);
+    files['guide/index.md'] = '# Guide\n\n**Figure: F1.** c\n';
+    expect(problems(files)).toEqual(['[drawn] /guide/ [listing]: none of its 1 numbered figure(s) is drawn; each is only a table']);
+    files['guide/index.html'] = files['guide/index.html']!.replace('page--listing', 'page--prose');
+    expect(problems(files)).toEqual([]);
+    files['guide/index.html'] = files['guide/index.html']!.replace('page--prose', 'page--listing').replace('</body>', `${fig(2, svg)}</body>`);
+    files['guide/index.md'] += '\n**Figure: F2.** c\n';
+    expect(problems(files)).toEqual([]);
   });
 });
 

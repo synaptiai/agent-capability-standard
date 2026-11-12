@@ -51,6 +51,7 @@ import {
   TOOL_POWER_WORDS,
 } from '../lib/capability-figures';
 import { currentStandardText } from '../lib/spec-figures';
+import { TABLE_FIG_TITLE, tableCaption } from '../lib/home';
 import { LAYER_LINK_SIDES, layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle, riskByLayer, riskByLayerCaption, usageMatrix, usageMatrixCaption } from '../lib/layer-figures';
 import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, safetyRows, type SchemaRow } from '../lib/views';
 import { loadWorkflows } from '../data/workflows';
@@ -279,6 +280,7 @@ export function capabilitiesIndexTwin(): Twin {
     '# Capabilities',
     `The ontology defines ${n} atomic capabilities in ${ontology.layers.length} layers. Each capability has a typed input and output contract, a risk level and safety flags. Workflows compose them; see ${mdLink('Workflows', '/workflows/')}.`,
     generatedLine([ONTOLOGY_SOURCE]),
+    `**Figure: ${TABLE_FIG_TITLE}.** ${tableCaption()} The tables below list each layer's capabilities.`,
     ...ontology.layers.map((l) =>
       blocks(
         `## ${mdLink(l.id, `/layers/${l.slug}/`)}`,

@@ -745,10 +745,12 @@
 
   /* ---------- callouts ---------- */
 
+  /* A panel with a 6px bar in the callout colour (visual spec 3.10.3). */
   .callout {
     --c: var(--link);
     background: color-mix(in srgb, var(--c) var(--callout-amount), var(--bg));
-    border-left: 4px solid var(--c);
+    border-left: 6px solid var(--c);
+    box-shadow: var(--shadow-1);
     padding: var(--space-3) var(--space-4);
     margin: var(--space-5) 0;
     color: var(--ink);
@@ -786,7 +788,8 @@
     text-transform: uppercase;
   }
 
-  /* Markdown callouts have no glyph in their label; they get the eyebrow's dash. */
+  /* A label without a glyph gets the eyebrow's dash; every callout type has
+     a glyph today (CALLOUT_GLYPHS), so this is a fallback. */
   .callout__label:not(:has(svg))::before {
     content: '';
     width: 12px;

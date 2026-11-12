@@ -5,7 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { loadOntology } from '../src/data/ontology';
 import { loadWorkflows, parseCatalog } from '../src/data/workflows';
-import { dataFlowGrid, indexStripLabel, readsList, riskSummary, stripKey, workflowSpine } from '../src/lib/workflow-figures';
+import { dataFlowGrid, indexStripLabel, readLane, readsList, riskSummary, stripKey, workflowSpine } from '../src/lib/workflow-figures';
+import { rowSlices } from '../src/pixel/lines';
 import { workflowsIndexTwin, workflowTwin } from '../src/twins/workflows';
 import { allCatalogSteps, catalogFiles, repoText } from './independent';
 import { ALL_GRIDS, resolveGlyphKey } from '../src/pixel/keys';
@@ -139,6 +140,28 @@ function scanActions(): Map<string, { gates: string[]; failures: string[] }[]> {
   }
   return out;
 }
+
+describe('spine lanes drawn row by row (F-W1, wrapped rows)', () => {
+  it('cuts a drawing into rows, each in its own coordinates, and carries a line on past a row it crosses', () => {
+    // A 2px line from y 10 to y 50 on 28px rows: 18px of it in row 0, which it leaves at the bottom,
+    // and 22px in row 1, where it ends; nothing in row 2.
+    const slices = rowSlices([{ x: 0, y: 10, w: 2, h: 40, ink: 'ink' }], 3, 28);
+    expect(slices.map((s) => s.rects.map((r) => [r.y, r.h]))).toEqual([[[10, 18]], [[0, 22]], []]);
+    expect(slices.map((s) => s.continues)).toEqual([[{ x: 0, w: 2, ink: 'ink' }], [], []]);
+  });
+
+  it("draws each reader's bracket from its first producer's row down to its own, with a tick in every producer row", () => {
+    // Fixture rows: 0 step 1, 1 fork, 2 steps 2 and 3, 3 join, 4 step 4, 5 step 5.
+    // Step 2 reads step 1; step 4 reads steps 2 and 3 (one row); step 5 reads steps 4 and 1. Step 3 reads only an input.
+    const lane = readLane(workflowSpine(fixture()));
+    const show = (k: number) => lane.find((x) => x.step === k)!.pieces.map((p) => `${p.row}:${p.line}${p.stub ? '+stub' : ''}`);
+    expect(lane.map((x) => x.step)).toEqual([2, 4, 5]);
+    expect(show(2)).toEqual(['0:top+stub', '1:through', '2:bottom+stub']);
+    expect(show(4)).toEqual(['2:top+stub', '3:through', '4:bottom+stub']);
+    expect(show(5)).toEqual(['0:top+stub', '1:through', '2:through', '3:through', '4:through+stub', '5:bottom+stub']);
+    expect(lane.find((x) => x.step === 5)!.producers).toEqual([1, 4]);
+  });
+});
 
 describe('step spine on the catalogs (F-W1)', () => {
   const scans = scanActions();

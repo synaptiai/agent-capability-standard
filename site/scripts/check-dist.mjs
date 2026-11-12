@@ -15,6 +15,10 @@
 // - figures: every numbered figure on a page ("Fig n") has a
 //   "**Figure: {title}.**" block in the page's Markdown copy, and the copy has
 //   no block for a figure the page does not draw (visual spec 6.1);
+// - drawn: every page of a generated template (home, capability, layer,
+//   workflow, domain, edge types, diagnostics, the section indexes, schemas
+//   and the Standard) has at least one numbered figure that is drawn, not
+//   only a table (DRAWN_TEMPLATES, drawnFigure());
 // - legends: no legend or key on a page draws the same glyph (or glyph pair) for two
 //   different entries;
 // - review: no built file outside the review pages (dist/_review/) points at
@@ -413,6 +417,85 @@ export function checkFigureCopies(fileList, read) {
 }
 
 /**
+ * The page templates whose every page needs a drawn figure: the generated
+ * pages and the Standard. Prose, RFC and skill pages draw from their own
+ * sources and are left to the figure-gap sweep (scripts/check-runs.mjs).
+ */
+export const DRAWN_TEMPLATES = [
+  'home',
+  'capability',
+  'capabilities-index',
+  'layer',
+  'workflow',
+  'workflows-index',
+  'domain',
+  'domains-index',
+  'edge-types',
+  'diagnostics',
+  'listing',
+  'rfcs-index',
+  'schemas',
+  'spec',
+];
+
+/** A page's template, from its body's `page--<template>` class. */
+export function pageTemplate(html) {
+  const cls = /<body\b[^>]*\sclass="([^"]*)"/.exec(html)?.[1] ?? '';
+  const t = cls.split(/\s+/).find((c) => c.startsWith('page--') && !c.startsWith('page--with') && !c.startsWith('page--no-'));
+  return t ? t.slice('page--'.length) : null;
+}
+
+/** `html` with every element whose tag is `name`, or whose class matches `cls`, cut out. */
+function without(html, { name, cls }) {
+  let out = html;
+  for (;;) {
+    const re = name ? new RegExp(`<${name}\\b`, 'i') : new RegExp(`<[a-zA-Z][\\w-]*\\b[^>]*\\sclass="[^"]*${cls}[^"]*"`);
+    const m = re.exec(out);
+    if (!m) return out;
+    const el = elementAt(out, m.index);
+    out = out.slice(0, m.index) + out.slice(el.end);
+  }
+}
+
+/**
+ * Whether a numbered figure is drawn: its drawing, less any folded
+ * <details> and any legend or key, is not a table, or holds an SVG outside
+ * its tables. A table with glyphs or heat fills in its cells is still a
+ * table: the reader reads it row by row.
+ */
+export function drawnFigure(figureHtml) {
+  const at = figureHtml.search(/<div\b[^>]*class="[^"]*\bfig__drawing\b/);
+  if (at === -1) return false;
+  const d = elementAt(figureHtml, at);
+  let drawing = figureHtml.slice(d.open, d.close);
+  drawing = without(drawing, { name: 'details' });
+  drawing = without(drawing, { cls: '(?:legend|-key|__key)\\b' });
+  if (!/<table\b/i.test(drawing)) return plainText(drawing) !== '' || /<svg\b/i.test(drawing);
+  return /<svg\b/i.test(without(drawing, { name: 'table' }));
+}
+
+/** Every page of a DRAWN_TEMPLATES template has a drawn numbered figure. */
+export function checkDrawnFigures(fileList, read) {
+  const problems = [];
+  for (const u of htmlPages(fileList)) {
+    const html = read(`${u.slice(1)}index.html`);
+    const t = pageTemplate(html);
+    if (!DRAWN_TEMPLATES.includes(t)) continue;
+    let numbered = 0;
+    let drawn = 0;
+    for (const m of html.matchAll(/<figure\b[^>]*>/g)) {
+      const el = elementAt(html, m.index);
+      const inner = html.slice(m.index, el.end);
+      if (!/<p\b[^>]*class="[^"]*eyebrow[^"]*"[^>]*>\s*Fig \d+\s*<\/p>/.test(inner.split(/<figure\b/).slice(0, 2).join(''))) continue;
+      numbered += 1;
+      if (drawnFigure(inner)) drawn += 1;
+    }
+    if (drawn === 0) problems.push(`${u} [${t}]: none of its ${numbered} numbered figure(s) is drawn; each is only a table`);
+  }
+  return problems;
+}
+
+/**
  * No legend draws one glyph for two entries with different words. A legend
  * is an element with a class ending in "legend" or "key"; an entry is a child element
  * with at least one SVG, keyed by the marks of all its SVGs, so two glyph keys
@@ -469,6 +552,7 @@ export function checkDistDir(distDir) {
     copies: has.has('llms.txt') ? checkCopies(fileList, read('llms.txt')) : [],
     sitemap: has.has('sitemap.xml') ? checkSitemap(fileList, read('sitemap.xml')) : [],
     figures: checkFigureCopies(fileList, read),
+    drawn: checkDrawnFigures(fileList, read),
     legends: checkLegends(fileList, read),
     review: checkReviewLinks(fileList, read),
   };

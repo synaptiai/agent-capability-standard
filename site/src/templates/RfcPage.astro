@@ -6,6 +6,7 @@
 // names, fills the current one, and shows the RFC's one `**Date:**` on that
 // state only, labelled "Dated": the RFC records no other date. Only numbered
 // RFCs get the track; a proposal is not held to GOVERNANCE.md's statuses.
+import PageHero from '../components/PageHero.astro';
 import StatusBadge from '../components/StatusBadge.astro';
 import { allowedRfcStatuses } from '../lib/rfcs';
 import { isNumberedRfc, lifecycleSentence, rfcLifecycle, sectionHero, splitH1, type LifecycleState } from '../lib/prose-page';
@@ -27,15 +28,11 @@ const life = page.status && isNumberedRfc(route.source) ? rfcLifecycle(page.stat
 const states: { s: LifecycleState; outcome: boolean }[] = life ? [{ s: life.start, outcome: false }, ...life.outcomes.map((s) => ({ s, outcome: true }))] : [];
 ---
 <article class="doc doc--rfc" data-status={page.status ?? undefined} data-pagefind-body>
-  <header class="page-hero" data-section={route.section}>
-    <span class="page-hero__tile" aria-hidden="true"><PixelGlyph name={hero.glyph} scale={4} /></span>
-    <div class="page-hero__text">
-      <p class="eyebrow page-hero__eyebrow">{hero.label}</p>
-      {h1 ? <Fragment set:html={h1} /> : null}
-      {page.status && <p class="doc-status page-hero__status"><StatusBadge status={page.status} /></p>}
-    </div>
+  <PageHero glyph={hero.glyph} eyebrow={hero.label} section={route.section}>
+    {h1 ? <Fragment set:html={h1} /> : null}
+    {page.status && <p class="doc-status page-hero__status"><StatusBadge status={page.status} /></p>}
     {life && (
-      <div class="rfc-track">
+      <div class="rfc-track" slot="after">
         <p class="rfc-track__label" id="rfc-track-label">Lifecycle</p>
         <ol class="rfc-track__states" aria-labelledby="rfc-track-label" aria-describedby="rfc-track-text">
           {states.map(({ s, outcome }, i) => (
@@ -57,6 +54,6 @@ const states: { s: LifecycleState; outcome: boolean }[] = life ? [{ s: life.star
         <p class="visually-hidden" id="rfc-track-text">{lifecycleSentence(life, page.date)}</p>
       </div>
     )}
-  </header>
+  </PageHero>
   <Fragment set:html={rest} />
 </article>

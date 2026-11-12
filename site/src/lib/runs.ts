@@ -43,11 +43,14 @@ export interface ExemptRun {
   anchor: string;
   category: RunCategory;
   /**
-   * 'section' (the default) exempts the whole section. 'first-tall-fence'
-   * exempts only the first code block in the section that is taller than one
-   * viewport, and nothing when there is none.
+   * 'section' (the default) exempts the whole section. 'open-first-example'
+   * exempts only the first open <details> in the section (a capability
+   * page's open first example), and only when the code blocks in it are
+   * together taller than one viewport: the spec's "the open first example,
+   * when its fence alone is taller than 1 VH", where "its fence alone" is
+   * the example's code without its sentences. Nothing when there is none.
    */
-  extent?: 'section' | 'first-tall-fence';
+  extent?: 'section' | 'open-first-example';
   /** The spec's words for the run. */
   run: string;
 }
@@ -94,7 +97,7 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
     page: 'template:capability',
     anchor: 'examples',
     category: 'b',
-    extent: 'first-tall-fence',
+    extent: 'open-first-example',
     run: 'the open first example, when its fence alone is taller than one viewport',
   },
   { page: 'template:domain', anchor: 'customization-guide', category: 'b', run: 'Customization Guide' },
