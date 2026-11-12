@@ -21,7 +21,8 @@ import TrustWeights from '../../components/fig/DomainTrustWeights.astro';
 import WorkflowCard from '../../components/fig/DomainWorkflowCard.astro';
 import { loadProfiles } from '../../data/profiles';
 import DocLayout from '../../layouts/DocLayout.astro';
-import { splitReadme, type ReadmeParts } from '../../lib/domain-figures';
+import { approvalLadder, domainGlyph, foldCapabilityList, splitReadme, type ReadmeParts } from '../../lib/domain-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import { refSlugger, routesByTemplate } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
 import type { Route } from '../../lib/routes';
@@ -78,6 +79,15 @@ if (d.readme) {
 const unplaced = parts ? parts.unplaced : d.workflows.map((w) => w.id);
 if (parts && unplaced.length > 0) console.warn(`domains: ${d.key}: no README heading for ${unplaced.join(', ')}; their cards go at the end`);
 const title = page?.title ?? `${d.key} domain`;
+// The hero under the title: the domain's glyph and four facts from the profile.
+const ladder = approvalLadder(p);
+const blockedCount = ladder?.blocked.length ?? 0;
+const facts = [
+  { term: 'Trust sources', value: String(weights.length) },
+  { term: 'Domain sources', value: String(sources.length) },
+  { term: 'Workflows', value: String(d.workflows.length) },
+  ...(ladder ? [{ term: 'Never run on their own', value: String(blockedCount) }] : []),
+];
 ---
 <DocLayout route={route} title={title} description={d.description || page?.description}>
   <article class="doc doc--domain" data-domain={d.key} data-pagefind-body>
@@ -86,6 +96,12 @@ const title = page?.title ?? `${d.key} domain`;
     ) : (
       <h1 id={id(title)}>{title}</h1>
     )}
+    <div class="domain-hero">
+      <PixelGlyph name={domainGlyph(d.key)} scale={6} class="domain-hero__glyph" />
+      <dl class="domain-hero__facts">
+        {facts.map((f) => <div><dt>{f.term}</dt><dd>{f.value}</dd></div>)}
+      </dl>
+    </div>
     {parts && parts.before !== '' && <div class="doc__body" set:html={parts.before} />}
 
     <section class="profile-values" data-profile={d.profileFile}>
@@ -160,9 +176,9 @@ const title = page?.title ?? `${d.key} domain`;
       )}
     </section>
 
-    {parts && parts.segments.map((seg) => (
+    {parts && parts.segments.map((seg, i) => (
       <>
-        <div class="doc__body" set:html={seg.html} />
+        <div class="doc__body" set:html={i > 0 && parts!.segments[i - 1]!.after ? foldCapabilityList(seg.html) : seg.html} />
         {seg.after && <WorkflowCard id={seg.after} n={fig()} figId={id(`Figure workflow ${seg.after}`)} />}
       </>
     ))}

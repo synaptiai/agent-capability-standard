@@ -109,7 +109,7 @@ export function trustCaption(profile: Obj): string {
   const top = w[0]!;
   const low = w.at(-1)!;
   if (w.length === 1) return `One source, ${top.source}, with weight ${top.weight.toFixed(2)}.`;
-  return `${w.length} sources, from ${top.source} at ${top.weight.toFixed(2)} down to ${low.source} at ${low.weight.toFixed(2)}, on a scale from 0 to 1.`;
+  return `${w.length} sources, from ${top.source} at ${top.weight.toFixed(2)} down to ${low.source} at ${low.weight.toFixed(2)}; the scale runs only over that range.`;
 }
 
 // ---------------------------------------------------- F-D3 checkpoint policy
@@ -340,6 +340,20 @@ export function splitReadme(rest: string, workflowIds: readonly string[]): Readm
   }
   segments.push({ html: html.slice(cursor), after: null });
   return { before, profileHeading, profileBody, segments, unplaced: workflowIds.filter((id) => !placed.has(id)) };
+}
+
+/**
+ * A README's "**Capabilities used:**" list under a workflow heading, folded
+ * into a <details>: the workflow card above it already draws the same steps
+ * as tiles, so the list (which adds a few words per step) is kept but closed.
+ * Only the first such list in `html` is folded; html without one is returned
+ * unchanged.
+ */
+export function foldCapabilityList(html: string): string {
+  const m = /<p><strong>Capabilities used:?<\/strong><\/p>\s*(<ul>[\s\S]*?<\/ul>)/.exec(html);
+  if (!m) return html;
+  const folded = `<details class="domain-guide"><summary>Capabilities used, with what each step does</summary>${m[1]}</details>`;
+  return html.slice(0, m.index) + folded + html.slice(m.index + m[0].length);
 }
 
 // ------------------------------------------- domains index (visual spec 3.6)

@@ -26,6 +26,47 @@
     margin-bottom: 0;
   }
 
+  /* ---------- hero: the domain glyph and four counts ---------- */
+
+  .domain-hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-4) var(--space-5);
+    margin: var(--space-4) 0 var(--space-5);
+    padding: var(--space-4);
+    border: var(--border);
+    background: var(--bg-sub);
+    box-shadow: var(--shadow-1);
+  }
+
+  .domain-hero__glyph {
+    flex: none;
+    color: var(--ink);
+  }
+
+  .domain-hero__facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-5);
+    margin: 0;
+  }
+
+  .domain-hero__facts dt {
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  .domain-hero__facts dd {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 32px;
+    font-weight: 400;
+    font-synthesis: none;
+    line-height: 1;
+    color: var(--ink);
+  }
+
   /* ---------- meter lists (F-D1, F-D5) ---------- */
 
   .meter-table {
@@ -109,6 +150,64 @@
       grid-template-columns: 13rem minmax(0, 1fr);
       gap: var(--space-3);
     }
+  }
+
+  /* F-D1 dot scale: a 2px track with a tick every 0.05 and a 10px square at
+     the weight; the header row labels the ends and the middle. The track is
+     inset by half a mark each side, so a mark at either end stays inside. */
+  .dot-track,
+  .dot-scale {
+    position: relative;
+    display: block;
+    margin: 0 5px;
+  }
+
+  .dot-track {
+    height: 14px;
+    background: linear-gradient(var(--line), var(--line)) 0 6px / 100% 2px no-repeat;
+  }
+
+  .dot-track__tick {
+    position: absolute;
+    top: 3px;
+    width: 2px;
+    height: 8px;
+    margin-left: -1px;
+    background: var(--line);
+  }
+
+  .dot-track__mark {
+    position: absolute;
+    top: 2px;
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    background: var(--indicator);
+  }
+
+  .dot-scale {
+    height: 1.2em;
+  }
+
+  .dot-scale__label {
+    position: absolute;
+    transform: translateX(-50%);
+  }
+
+  /* The end labels sit inside the scale, so the last does not reach the Weight column. */
+  .dot-scale__label--start {
+    transform: translateX(-5px);
+  }
+
+  .dot-scale__label--end {
+    transform: translateX(calc(-100% + 5px));
+  }
+
+  .dot-scale__label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--ink-2);
   }
 
   /* ---------- approval ladder (F-D2) ---------- */
@@ -375,6 +474,23 @@
     .compliance-panel__row {
       grid-template-columns: 13rem minmax(0, 1fr);
       align-items: center;
+    }
+
+    /* Compliance keys are long identifiers: the name column takes the
+       longest key's width on one line, and every row shares it (subgrid),
+       so the values line up and no key breaks inside a word. */
+    .compliance-panel {
+      grid-template-columns: max-content minmax(0, 1fr);
+      column-gap: var(--space-4);
+    }
+
+    .compliance-panel__row {
+      grid-column: 1 / -1;
+      grid-template-columns: subgrid;
+    }
+
+    .compliance-panel dt code {
+      white-space: nowrap;
     }
   }
 

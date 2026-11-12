@@ -55,6 +55,10 @@ describe('typography', () => {
       // Visual spec 3.11 (issue #125): the home page's get-started steps are
       // numbered with pixel step badges in the display font.
       '.home-step__number',
+      // Issue #125 visual review: a domain page's hero counts (trust
+      // sources, workflows and so on) are hero numbers, like the domains
+      // index card number above.
+      '.domain-hero__facts dd',
     ]);
     const display = rules()
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))

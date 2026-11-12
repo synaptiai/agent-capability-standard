@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadProfiles } from '../src/data/profiles';
 import {
+  foldCapabilityList,
   approvalLadder,
   checkpointCaption,
   checkpointHeader,
@@ -186,5 +187,15 @@ describe('domains index (3.6)', () => {
     expect(common.length).toBeGreaterThan(1);
     expect(sentence).toContain(`${common.length} profiles go auto, review, human`);
     for (const x of outcomes.filter((y) => y.o.every((v) => v === 'human'))) expect(sentence).toContain(`${x.key} is human at every level`);
+  });
+});
+
+describe('README capability lists under a workflow card', () => {
+  it('folds the first "Capabilities used" list into a details element and leaves the rest (fixture)', () => {
+    const html = '<p><strong>Goal:</strong> g</p>\n<p><strong>Capabilities used:</strong></p>\n<ul>\n<li><code>a</code> — x</li>\n</ul>\n<p>After</p>';
+    expect(foldCapabilityList(html)).toBe(
+      '<p><strong>Goal:</strong> g</p>\n<details class="domain-guide"><summary>Capabilities used, with what each step does</summary><ul>\n<li><code>a</code> — x</li>\n</ul></details>\n<p>After</p>',
+    );
+    expect(foldCapabilityList('<p>No list</p>')).toBe('<p>No list</p>');
   });
 });
