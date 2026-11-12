@@ -21,6 +21,18 @@ The four proposed extensions are:
 
 These extensions are designed to be backward-compatible with the existing OASF skill taxonomy. They do not replace any current skills; rather, they add safety infrastructure that strengthens every existing OASF category.
 
+```mermaid
+---
+title: The four proposed extensions
+---
+flowchart LR
+  accDescr: Evidence anchoring, the checkpoint and rollback primitives, and pre-execution constraints add safety infrastructure to every existing OASF category without replacing any skill.
+  ev["Evidence anchoring: traceable evidence on every output"] --> all[Every existing OASF category]
+  cp["Checkpoint: state saved before high-risk operations"] --> all
+  rb["Rollback: recovery when an operation fails"] --> all
+  con["Pre-execution constraints: policies enforced first"] --> all
+```
+
 ---
 
 ## 2. Motivation
@@ -159,6 +171,16 @@ output:
 - **Phase 2 (target):** Make `evidence_anchors` required for skills in Categories 5 (Analytical), 6 (RAG), 8 (Security & Privacy), 13 (Governance & Compliance), and 15 (Advanced Reasoning & Planning).
 - **Phase 3 (aspirational):** Make `evidence_anchors` required for all skill categories.
 
+```mermaid
+---
+title: Adopting evidence anchors in three phases
+---
+flowchart TB
+  accDescr: evidence_anchors starts as an optional field on every output, becomes required in five categories, and finally becomes required in all of them.
+  p1["Phase 1, recommended: optional on all skill outputs; an empty array and confidence 0.0 when there is no evidence"] --> p2["Phase 2, target: required in Categories 5, 6, 8, 13 and 15"]
+  p2 --> p3["Phase 3, aspirational: required in all categories"]
+```
+
 ---
 
 ### 3.2 Checkpoint Primitive
@@ -270,6 +292,16 @@ skill:
 The checkpoint skill should be invoked before any skill classified as high-risk. OASF does not currently assign risk levels to skills, so this proposal also recommends adding a `risk` attribute (see Section 4). Example integration:
 
 > **Note:** OASF skill IDs used in examples (e.g., `120301`, `110201`) are illustrative and should be verified against the OASF skill catalog for the target version.
+
+```mermaid
+---
+title: The checkpoint goes before the high-risk skill
+---
+flowchart LR
+  accDescr: In the example a checkpoint of the production namespace runs before the infrastructure deployment, and performance monitoring follows it.
+  cp["160101 checkpoint: production namespace"] --> dep["120301 infrastructure deployment"]
+  dep --> mon["110201 performance monitoring"]
+```
 
 ```yaml
 # Workflow: Safe Infrastructure Deployment
@@ -417,6 +449,18 @@ steps:
           event: "Schema migration completed successfully"
 ```
 
+```mermaid
+---
+title: The atomic data pipeline update
+---
+flowchart TB
+  accDescr: The pipeline is checkpointed, the schema migration runs and data quality is assessed; a score under 0.95 rolls back to the checkpoint, and otherwise the success is audited.
+  cp["160101 checkpoint: pipeline/etl-main"] --> mig["090201 schema migration"]
+  mig --> q["090301 data quality assessment"]
+  q -->|"score < 0.95"| rb["160102 rollback to the checkpoint"]
+  q -->|"score ≥ 0.95"| audit["130401 audit: migration completed"]
+```
+
 #### Error Handling
 
 If a rollback operation fails:
@@ -424,6 +468,18 @@ If a rollback operation fails:
 2. Retry is permitted up to a maximum of 2 attempts with exponential backoff
 3. If all retries fail, the system MUST alert a human operator with the checkpoint ID and failure details
 4. A failed rollback MUST NOT trigger another checkpoint (to avoid infinite loops)
+
+```mermaid
+---
+title: When a rollback fails
+---
+flowchart TB
+  accDescr: A failed rollback is logged with the checkpoint ID and partial restoration status, retried at most twice with exponential backoff, and when every retry fails a human operator is alerted; it never triggers another checkpoint.
+  fail[Rollback fails] --> log["Log the failure: checkpoint ID, partial restoration status"]
+  log --> retry["Retry, at most 2 attempts, exponential backoff"]
+  retry -->|succeeds| done[Restored]
+  retry -->|all retries fail| human["Alert a human operator with the checkpoint ID and details"]
+```
 
 ---
 
@@ -436,6 +492,16 @@ OASF has governance and compliance skills (Category 13), but these are invoked a
 #### Proposed Solution
 
 Introduce a `constrain` skill that checks a set of policy conditions before allowing a subsequent operation to proceed. If any constraint is violated, the operation is blocked and the violation is recorded.
+
+```mermaid
+---
+title: What constrain does before an operation
+---
+flowchart LR
+  accDescr: constrain checks the policy conditions before the operation; when all hold the operation proceeds, and when one is violated the operation is blocked and the violation recorded.
+  con[constrain checks the policy conditions] -->|all hold| go[The operation proceeds]
+  con -->|one is violated| block[Blocked, and the violation is recorded]
+```
 
 #### Schema Divergences from Base Ontology
 
@@ -627,6 +693,17 @@ risk:
             verification after execution
 ```
 
+```mermaid
+---
+title: What each risk level requires
+---
+flowchart LR
+  accDescr: A low-risk skill has no additional requirements, a medium-risk skill needs approval before it runs, and a high-risk skill needs a checkpoint before it runs and verification after.
+  low[risk: low] --> r0[No additional requirements]
+  med[risk: medium] --> r1[Approval before execution]
+  high[risk: high] --> r2["Checkpoint before, verification after"]
+```
+
 For context, the Grounded Agency ontology classifies only 2 of its 36 capabilities (`mutate` and `send`) as high-risk. The following category-level defaults are intentionally conservative starting points.
 
 **Suggested risk classifications for existing OASF categories:**
@@ -699,6 +776,19 @@ category:
 ```
 
 Evidence anchoring is not a separate skill but a schema extension that applies to all existing skills.
+
+```mermaid
+---
+title: Category 16, Safety and Recovery
+---
+flowchart LR
+  accDescr: Category 16 has a State Management subcategory, 1601, with checkpoint and rollback, and a Policy Enforcement subcategory, 1602, with constrain.
+  c16[Category 16] --> s1601[1601 State Management]
+  c16 --> s1602[1602 Policy Enforcement]
+  s1601 --> cp[160101 checkpoint]
+  s1601 --> rb[160102 rollback]
+  s1602 --> con[160103 constrain]
+```
 
 **Versioning:** Category 16 skills follow OASF's existing semantic versioning scheme. The category should be stabilized and reviewed before OASF reaches 1.0. Breaking changes to safety primitives require a major version increment at the category level.
 
@@ -859,6 +949,18 @@ steps:
         input:
           checkpoint_id: "${cp.output.checkpoint_id}"
           reason: "Post-deployment health check failed"
+```
+
+```mermaid
+---
+title: The safe model deployment
+---
+flowchart TB
+  accDescr: The deployment policies are checked first; only when they pass is a checkpoint taken, then the model is deployed and its health checked, and a failed health check rolls back to the checkpoint.
+  con["1 constrain: maintenance window, SRE approval"] -->|compliant| cp["2 checkpoint the production namespace"]
+  cp --> dep["3 deploy model-serving-v2.3.1"]
+  dep --> health["4 performance monitoring: error rate, latency"]
+  health -->|"passed == false"| rb["5 rollback to the checkpoint"]
 ```
 
 ### 5.3 Category 16 Skills Summary

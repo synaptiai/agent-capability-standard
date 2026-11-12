@@ -1,27 +1,68 @@
 ---
-// A Markdown document shown as it reads on GitHub. A `**Document Status**:`
-// line, where the source has one, shows as a status badge; a historical
-// document also gets a callout saying so.
+// A Markdown document shown as it reads on GitHub. The page opens with a hero
+// band (visual spec 3.10.1): the section glyph in a tile, the section name as
+// the eyebrow, the source's own H1, and a `**Document Status**:` line, where
+// the source has one, as a status badge. A historical document also gets a
+// callout saying so.
+// On the overview (README.md), the box drawing under "The Periodic Table of
+// Agent Capabilities" is the data figure the site already draws, so the full
+// periodic table is shown there and the drawing kept in a <details> (3.10.6).
 import Callout from '../components/Callout.astro';
+import CapabilityTable from '../components/CapabilityTable.astro';
 import StatusBadge from '../components/StatusBadge.astro';
+import Figure from '../components/fig/Figure.astro';
+import { loadOntology } from '../data/ontology';
+import { refSlugger } from '../lib/generated';
+import { cutAfterHeadings } from '../lib/inject';
+import { sectionHero, splitH1 } from '../lib/prose-page';
+import { periodicCaption, OVERVIEW_SOURCE, PERIODIC_ANCHOR, foldFirstBox } from '../lib/prose-figures';
 import type { Route } from '../lib/routes';
 import { statusStyle } from '../lib/status';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
 import type { PageMeta } from '../plugins/remark-page-meta';
+import '../styles/figures-prose.css';
 
 interface Props {
   route: Route;
   page: PageMeta;
 }
 
-const { page } = Astro.props;
+const { route, page } = Astro.props;
 const historical = page.documentStatus !== null && statusStyle(page.documentStatus) === 'historical';
+const html = await Astro.slots.render('default');
+const { h1, rest } = splitH1(html);
+const hero = sectionHero(route.section);
+const overview = route.source === OVERVIEW_SOURCE;
+const segments = overview ? cutAfterHeadings(rest, [{ key: 'periodic', level: 2, startsWith: PERIODIC_ANCHOR }], route.source!) : [];
+const id = refSlugger();
+const o = loadOntology();
 ---
 <article class="doc doc--prose" data-document-status={page.documentStatus ?? undefined} data-pagefind-body>
-  {page.documentStatus && <p class="doc-status"><StatusBadge status={page.documentStatus} /></p>}
+  <header class="page-hero" data-section={route.section}>
+    <span class="page-hero__tile" aria-hidden="true"><PixelGlyph name={hero.glyph} scale={4} /></span>
+    <div class="page-hero__text">
+      <p class="eyebrow page-hero__eyebrow">{hero.label}</p>
+      {h1 ? <Fragment set:html={h1} /> : null}
+      {page.documentStatus && <p class="doc-status page-hero__status"><StatusBadge status={page.documentStatus} /></p>}
+    </div>
+  </header>
   {historical && (
     <Callout type="note" label="Historical document">
       <p>This is a historical document. It describes the project as it was when it was written.</p>
     </Callout>
   )}
-  <slot />
+  {overview ? (
+    segments.map((sg, i) => (
+      <>
+        <Fragment set:html={i > 0 ? foldFirstBox(sg.html, 'Text version: the box drawing in the source') : sg.html} />
+        {sg.key === 'periodic' && (
+          <Figure id={id('Figure: the periodic table')} n={1} title="The periodic table of agent capabilities" caption={periodicCaption(o)} kind="periodic-table">
+            <CapabilityTable />
+          </Figure>
+        )}
+      </>
+    ))
+  ) : (
+    <Fragment set:html={rest} />
+  )}
 </article>

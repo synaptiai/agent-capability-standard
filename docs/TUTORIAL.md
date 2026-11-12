@@ -135,6 +135,17 @@ analyze_file:
           type: string
 ```
 
+```mermaid
+---
+title: The three steps and what each stores
+---
+flowchart TB
+  accDescr: observe stores observe_out, which detect reads as its data and stores as anomaly_out, which explain reads to store summary_out.
+  observe -->|observe_out| detect
+  detect -->|anomaly_out| explain
+  explain --> s[summary_out]
+```
+
 ### 2.2 Understand the Structure
 
 | Field | Purpose |
@@ -204,6 +215,16 @@ If you get errors, check:
 | High-value data modifications | Checkpoint + verify + audit for full protection |
 
 The cost of a checkpoint (saving state) is almost always less than the cost of manual recovery from a failed mutation.
+
+```mermaid
+---
+title: A failure at step 7, with and without a checkpoint
+---
+flowchart TB
+  accDescr: When a workflow fails at step 7, without checkpoints the state left by steps 1 to 6 needs manual cleanup; with a checkpoint it rolls back automatically and the state is consistent within seconds.
+  fail[Workflow fails at step 7] -->|without checkpoints| manual["Steps 1-6 already changed state: manual cleanup"]
+  fail -->|with a checkpoint| auto["Automatic rollback to the last checkpoint: consistent within seconds"]
+```
 
 ---
 
@@ -311,6 +332,19 @@ fix_and_verify:
           type: string
 ```
 
+```mermaid
+---
+title: The fix_and_verify workflow
+---
+flowchart TB
+  accDescr: The workflow observes, detects, plans, states the invariants and checkpoints before the mutation, which a gate stops when there is no checkpoint; verify then checks the fix, a failed check rolls back to the plan step, and audit records the change.
+  observe --> detect --> plan --> constrain --> checkpoint
+  checkpoint -->|"gate: stop if no checkpoint_id"| mutate
+  mutate --> verify
+  verify -->|"passed == false: rollback"| plan
+  verify -->|passed| audit
+```
+
 ### 3.2 Key Safety Elements
 
 **Checkpoint before mutation:**
@@ -406,6 +440,20 @@ steps:
       sources:
         - ${log_search}
         - ${code_search}
+```
+
+```mermaid
+---
+title: The parallel group in the example
+---
+flowchart LR
+  accDescr: The log search and the code search run together in the gather_context group, which joins when both are complete, and integrate combines the two results.
+  subgraph gather_context [parallel_group gather_context]
+    logs["search: logs"]
+    code["search: src"]
+  end
+  logs -->|log_search| integrate
+  code -->|"code_search, join: all_complete"| integrate
 ```
 
 ### 4.2 Conditional Execution

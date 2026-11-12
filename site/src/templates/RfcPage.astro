@@ -1,18 +1,62 @@
 ---
-// An RFC or proposal. Its `**Status:**` line (Draft, Accepted, Draft Proposal)
-// shows as a status badge.
+// An RFC or proposal. The page opens with a hero band (visual spec 3.10.1 and
+// 3.10.12): the RFCs section glyph, the eyebrow, the source's H1, its
+// `**Status:**` line (Draft, Accepted, Draft Proposal) as a status badge, and
+// the lifecycle track (F-R2). The track lists the states spec/GOVERNANCE.md
+// names, fills the current one, and shows the RFC's one `**Date:**` on that
+// state only, labelled "Dated": the RFC records no other date. Only numbered
+// RFCs get the track; a proposal is not held to GOVERNANCE.md's statuses.
 import StatusBadge from '../components/StatusBadge.astro';
+import { allowedRfcStatuses } from '../lib/rfcs';
+import { isNumberedRfc, lifecycleSentence, rfcLifecycle, sectionHero, splitH1, type LifecycleState } from '../lib/prose-page';
 import type { Route } from '../lib/routes';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
 import type { PageMeta } from '../plugins/remark-page-meta';
+import '../styles/figures-prose.css';
 
 interface Props {
   route: Route;
   page: PageMeta;
 }
 
-const { page } = Astro.props;
+const { route, page } = Astro.props;
+const html = await Astro.slots.render('default');
+const { h1, rest } = splitH1(html);
+const hero = sectionHero(route.section);
+const life = page.status && isNumberedRfc(route.source) ? rfcLifecycle(page.status, allowedRfcStatuses(), route.source!) : null;
+const states: { s: LifecycleState; outcome: boolean }[] = life ? [{ s: life.start, outcome: false }, ...life.outcomes.map((s) => ({ s, outcome: true }))] : [];
 ---
 <article class="doc doc--rfc" data-status={page.status ?? undefined} data-pagefind-body>
-  {page.status && <p class="doc-status"><StatusBadge status={page.status} /></p>}
-  <slot />
+  <header class="page-hero" data-section={route.section}>
+    <span class="page-hero__tile" aria-hidden="true"><PixelGlyph name={hero.glyph} scale={4} /></span>
+    <div class="page-hero__text">
+      <p class="eyebrow page-hero__eyebrow">{hero.label}</p>
+      {h1 ? <Fragment set:html={h1} /> : null}
+      {page.status && <p class="doc-status page-hero__status"><StatusBadge status={page.status} /></p>}
+    </div>
+    {life && (
+      <div class="rfc-track">
+        <p class="rfc-track__label" id="rfc-track-label">Lifecycle</p>
+        <ol class="rfc-track__states" aria-labelledby="rfc-track-label" aria-describedby="rfc-track-text">
+          {states.map(({ s, outcome }, i) => (
+            <li
+              class:list={['rfc-track__state', s.current && 'rfc-track__state--current', outcome && 'rfc-track__state--outcome']}
+              aria-current={s.current ? 'step' : undefined}
+              data-status={s.status}
+            >
+              {i === 1 && <PixelGlyph name="chevron-right" class="rfc-track__then" />}
+              {i === 1 && <span class="rfc-track__or">then one of</span>}
+              <span class="rfc-track__box">
+                <PixelGlyph name={s.glyph} />
+                <span>{s.status}</span>
+              </span>
+              {s.current && page.date && <span class="rfc-track__date">Dated {page.date}</span>}
+            </li>
+          ))}
+        </ol>
+        <p class="visually-hidden" id="rfc-track-text">{lifecycleSentence(life, page.date)}</p>
+      </div>
+    )}
+  </header>
+  <Fragment set:html={rest} />
 </article>

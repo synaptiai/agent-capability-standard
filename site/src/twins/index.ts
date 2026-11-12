@@ -17,6 +17,7 @@ import { blocks, markdownCopy } from './md';
 import { specFigureBlocks } from './edges-spec';
 import { specOlderBlocks } from './spec-figures';
 import { SLOTS_BY_VERSION } from '../lib/spec-slots';
+import { proseFigureBlocks } from './prose';
 import { citationTwin, diagnosticsTwin, edgeTypesTwin, rfcsIndexTwin, schemasTwin } from './reference';
 import type { Twin } from './types';
 import { workflowsIndexTwin, workflowTwin } from './workflows';
@@ -46,11 +47,12 @@ async function buildTwin(route: Route): Promise<Twin> {
       const meta = await sourceMeta(route);
       const title = route.template === 'spec' ? route.title : meta.title;
       const copy = markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title });
-      // The current Standard's site-drawn figures add their text equivalents (visual spec 3.9).
+      // The Standard's site-drawn figures add their text equivalents (visual spec 3.9),
+      // and so do the prose and RFC figures whose words are not in the source (3.10).
       const older = loadVersions().standard.previous.find((v) => v.source === source);
       const figures =
         route.template !== 'spec'
-          ? []
+          ? await proseFigureBlocks(route)
           : source === loadVersions().standard.current.source
             ? specFigureBlocks()
             : older && SLOTS_BY_VERSION[older.version]

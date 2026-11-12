@@ -1,10 +1,18 @@
 ---
 // A composed skill. SKILL.md files have no H1, so the page heading is the
-// frontmatter `name` (the name the skill is invoked by), followed by its
-// description and the frontmatter fields a reader needs to run it.
-import { refSlugger } from '../lib/generated';
+// frontmatter `name` (the name the skill is invoked by). The hero band
+// (visual spec 3.10.13) shows the composed-skill glyph, the heading and the
+// description, then the frontmatter fields a reader needs to run it, with
+// the allowed tools as chips. A skill that runs a catalog workflow also shows
+// that workflow's steps as a strip linked to the workflow's page.
+import StepStrip from '../components/fig/StepStrip.astro';
+import { COMPOSED_SKILLS } from '../data/skills';
+import { loadWorkflows } from '../data/workflows';
+import { refSlugger, workflowHref } from '../lib/generated';
 import type { Route } from '../lib/routes';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
 import type { PageMeta } from '../plugins/remark-page-meta';
+import '../styles/figures-prose.css';
 
 interface Props {
   route: Route;
@@ -15,7 +23,6 @@ interface Props {
 const { route, page, frontmatter } = Astro.props;
 const FIELDS: [string, string][] = [
   ['argument-hint', 'Arguments'],
-  ['allowed-tools', 'Allowed tools'],
   ['agent', 'Agent'],
   ['context', 'Context'],
 ];
@@ -23,24 +30,45 @@ const facts = FIELDS.flatMap(([key, label]) => {
   const v = frontmatter[key];
   return typeof v === 'string' && v.trim() !== '' ? [{ label, value: v }] : [];
 });
+const toolsRaw = frontmatter['allowed-tools'];
+const tools = typeof toolsRaw === 'string' ? toolsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
 const dir = route.source?.split('/')[1];
+const wfId = dir ? (COMPOSED_SKILLS[dir] ?? null) : null;
+const wf = wfId ? loadWorkflows().byId.get(wfId) : undefined;
+if (wfId && !wf) throw new Error(`SkillPage: ${route.source} runs ${wfId}, which no catalog defines`);
 const id = refSlugger();
 const title = page.title ?? route.title;
 ---
 <article class="doc doc--skill" data-skill={dir} data-pagefind-body>
-  <header class="skill-header">
-    <h1 id={id(title)}>{title}</h1>
-    {page.description && <p class="lead">{page.description}</p>}
-    {facts.length > 0 && (
-      <dl class="skill-meta">
-        {facts.map((f) => (
-          <div>
-            <dt>{f.label}</dt>
-            <dd><code>{f.value}</code></dd>
-          </div>
-        ))}
-      </dl>
-    )}
+  <header class="page-hero skill-header" data-section={route.section}>
+    <span class="page-hero__tile" aria-hidden="true"><PixelGlyph name="skill:composed" scale={4} /></span>
+    <div class="page-hero__text">
+      <p class="eyebrow page-hero__eyebrow">Composed skill</p>
+      <h1 id={id(title)}>{title}</h1>
+      {page.description && <p class="lead">{page.description}</p>}
+      {(facts.length > 0 || tools.length > 0) && (
+        <dl class="skill-meta">
+          {tools.length > 0 && (
+            <div>
+              <dt>Allowed tools</dt>
+              <dd><ul class="skill-tools">{tools.map((t) => <li><code>{t}</code></li>)}</ul></dd>
+            </div>
+          )}
+          {facts.map((f) => (
+            <div>
+              <dt>{f.label}</dt>
+              <dd><code>{f.value}</code></dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {wf && (
+        <p class="skill-runs">
+          <span>Runs <a href={workflowHref(wf.id)}><code>{wf.id}</code></a></span>
+          <StepStrip wf={wf} size={20} symbols />
+        </p>
+      )}
+    </div>
   </header>
   <slot />
 </article>

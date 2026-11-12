@@ -691,6 +691,23 @@ build:
     5. test(product) → final_results
 ```
 
+```mermaid
+---
+title: Build pattern flow
+---
+flowchart TB
+  accDescr: Plan turns the requirements into a design and decompose splits it into components; each component is generated and tested, and refined when it fails, then the artifacts are integrated and the product is tested.
+  plan["plan(requirements)"] -->|design| decompose["decompose(design)"]
+  subgraph each [For each component]
+    generate["generate(component_spec)"] -->|artifact| test["test(artifact)"]
+    test -->|not passed| refine["refine(artifact)"]
+  end
+  decompose -->|components| generate
+  test -->|passed| integrate["integrate(artifacts)"]
+  refine -->|artifact| integrate
+  integrate -->|product| final["test(product)"]
+```
+
 ### 7.3 Monitor Pattern
 
 **Purpose**: Continuous observation with alerting.
@@ -710,6 +727,22 @@ monitor:
             mitigate(alerts) → response
          c. audit(alerts, response) → logged
       4. persist(state) → history
+```
+
+```mermaid
+---
+title: Monitor pattern loop
+---
+flowchart TB
+  accDescr: The loop observes the system and checks the state for alert conditions; alerts are classified, critical ones are mitigated, and every alert is audited; the state is persisted to history on each pass.
+  observe["observe(system)"] -->|state| detect["detect(state, alert_conditions)"]
+  detect -->|alerts| classify["classify(alerts)"]
+  classify -->|critical| mitigate["mitigate(alerts)"]
+  classify -->|not critical| audit["audit(alerts, response)"]
+  mitigate -->|response| audit
+  detect -->|no alerts| persist["persist(state)"]
+  audit -->|logged| persist
+  persist -->|history, loop again| observe
 ```
 
 ---
@@ -791,6 +824,15 @@ Every capability output includes:
 Pattern outputs should aggregate:
   - All evidence from component capabilities
   - Lowest confidence from chain
+```
+
+```mermaid
+---
+title: How a pattern carries evidence
+---
+flowchart LR
+  accDescr: Each capability output carries evidence anchors and a confidence from 0 to 1; the pattern output gathers all the evidence and takes the lowest confidence in the chain.
+  caps["Each capability output: evidence_anchors, confidence (0-1)"] -->|aggregated| out["Pattern output: all the evidence, the lowest confidence in the chain"]
 ```
 
 ---

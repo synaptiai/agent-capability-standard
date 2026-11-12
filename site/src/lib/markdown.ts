@@ -7,7 +7,9 @@
 // - rehype: rehypeHeadingIds runs first so the autolink plugin and everything
 //   after it see the ids (Astro's own later pass keeps ids already set).
 //   Keywords and callouts come next, then the figure marks (chapter glyphs,
-//   the edge summary table), then tables are wrapped and task lists marked.
+//   the edge summary table), then the prose figures (box diagrams, pattern
+//   chains, table marks; prose, RFC and skill pages only), then tables are
+//   wrapped and task lists marked.
 //   The capability-skill step (numbered procedure steps, collapsed examples)
 //   runs last, on the finished tree of each capability skill.
 // SmartyPants is off so heading ids match GitHub's (it would turn "--" into an
@@ -18,6 +20,7 @@ import rehypeCallouts from '../plugins/rehype-callouts';
 import rehypeCapabilitySkill from '../plugins/rehype-capability-skill';
 import rehypeFigureMarks from '../plugins/rehype-figure-marks';
 import rehypeKeywords from '../plugins/rehype-keywords';
+import rehypeProseFigures from '../plugins/rehype-prose-figures';
 import rehypeSpecSlots from '../plugins/rehype-spec-slots';
 import { SLOTS_BY_VERSION } from './spec-slots';
 import rehypeTables from '../plugins/rehype-tables';
@@ -95,6 +98,7 @@ export const PROCESSOR_OPTIONS: UnifiedProcessorOptions = {
         ),
       },
     ],
+    rehypeProseFigures,
     rehypeTables,
     rehypeTaskLists,
     rehypeCapabilitySkill,
