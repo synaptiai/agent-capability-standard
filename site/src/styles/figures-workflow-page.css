@@ -85,6 +85,19 @@
 
   .wf-step__summary .wf-step__head > code {
     font-weight: 700;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  /* On a phone the card is too narrow for the risk to float beside the
+     name, so it leads the row instead and the name never breaks. */
+  @media (max-width: 599px) {
+    .wf-step__summary .risk-badge {
+      float: none;
+      margin: 0 var(--space-2) 0 0;
+      vertical-align: middle;
+    }
   }
 
   .wf-step__domain {
