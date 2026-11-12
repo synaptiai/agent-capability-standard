@@ -81,6 +81,18 @@ export function sectionParagraphs(text: string, prefix: string, where: string): 
 }
 
 /**
+ * The text of a block node with its child blocks (paragraphs, sub-lists,
+ * sub-items) joined by newlines. `toString` joins them with nothing, so a
+ * word that ends one line runs into the first word of the next.
+ */
+export function blockText(n: RootContent | Root): string {
+  if (n.type === 'list' || n.type === 'listItem' || n.type === 'blockquote' || n.type === 'root') {
+    return (n.children as RootContent[]).map((c) => blockText(c)).join('\n');
+  }
+  return toString(n);
+}
+
+/**
  * The items of the ordered lists directly under a section, in order, each as
  * the text of its first strong span (its title, or null) and its whole text.
  */
@@ -91,6 +103,6 @@ export function sectionOrderedItems(text: string, prefix: string, where: string)
     .map((item) => {
       const first = item.children[0];
       const strong = first?.type === 'paragraph' ? first.children.find((c) => c.type === 'strong') : undefined;
-      return { title: strong ? toString(strong).trim() : null, text: toString(item) };
+      return { title: strong ? toString(strong).trim() : null, text: blockText(item) };
     });
 }

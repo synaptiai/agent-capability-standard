@@ -288,6 +288,16 @@ describe('procedureMap (F-C7)', () => {
     );
   });
 
+  it('matches a field name that ends a line followed by a sub-item', () => {
+    // mdast's toString joins a paragraph and its sub-list with no space, so
+    // "covers the target" + "STOP if" read as "targetSTOP"; the step still names target.
+    const text = SKILL.replace('2) **Read it**: no field named here (limits and targets are other words)', '2) **Read it**: check the checkpoint covers the target\n   - STOP if not')
+      .replace('3) **Return**: fill `result` and evidence_anchors', '3) **Return**: fill result\n   - STOP on error');
+    const m = procedureMap(text, 'fixture');
+    expect(m.steps[1]!.reads).toEqual(['target']);
+    expect(m.steps[2]!.writes).toEqual(['result']);
+  });
+
   it('falls back to a sentence when fewer than two steps name a field', () => {
     const one = SKILL.replace('fill `result` and evidence_anchors', 'finish');
     const m = procedureMap(one, 'fixture');
