@@ -1,0 +1,55 @@
+---
+// F-S6, safety defaults by capability (visual spec 3.9): every capability
+// in table order, grouped by layer, as a column of four marks under its
+// 24px tile: risk pips (1 to 3), then changes state, needs checkpoint and
+// needs approval, each a filled square with its glyph when on and an
+// outline when off. Each column is a list item whose text says the same in
+// words.
+//
+// Props:
+// - id: string, required. A ref- id.
+// - n: number, required.
+// - title: string, required.
+import { loadOntology } from '../../data/ontology';
+import { FLAG_ROWS, flagWords, safetyDefaults, safetyDefaultsCaption } from '../../lib/spec-dsl-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+
+interface Props {
+  id: string;
+  n: number;
+  title: string;
+}
+
+const { id, n, title } = Astro.props;
+const o = loadOntology();
+const groups = safetyDefaults(o);
+const PIPS = { low: 1, medium: 2, high: 3 } as const;
+---
+<Figure id={id} n={n} title={title} caption={safetyDefaultsCaption(o)} kind="safety-defaults">
+  <ul class="flag-key" aria-label="Rows, top to bottom">
+    <li><span class="flag-key__pips" aria-hidden="true"><span></span><span></span><span></span></span>Risk, 1 to 3 pips</li>
+    {FLAG_ROWS.map((f) => <li><span class="flag-cell flag-cell--on" aria-hidden="true"><PixelGlyph name={f.glyph} scale={1} /></span>{f.label}</li>)}
+    <li><span class="flag-cell flag-cell--off" aria-hidden="true"></span>Off</li>
+  </ul>
+  <ul class="flag-groups">
+    {groups.map((g) => (
+      <li class="flag-group" data-layer={g.layer}>
+        <p class="flag-group__head"><PixelGlyph name={g.layer} scale={1} />{g.layer}</p>
+        <ul class="flag-group__caps">
+          {g.caps.map((c) => (
+            <li class="flag-col" data-capability={c.id} data-risk={c.risk} data-mutation={String(c.mutation)} data-checkpoint={String(c.requires_checkpoint)} data-approval={String(c.requires_approval)}>
+              <MiniTile id={c.id} size={24} />
+              <span class="flag-col__pips" aria-hidden="true">{[1, 2, 3].map((k) => <span class:list={[k <= PIPS[c.risk] && 'is-on']}></span>)}</span>
+              {FLAG_ROWS.map((f) => (
+                <span class:list={['flag-cell', c[f.id] ? 'flag-cell--on' : 'flag-cell--off']} aria-hidden="true">{c[f.id] && <PixelGlyph name={f.glyph} scale={1} />}</span>
+              ))}
+              <span class="visually-hidden">: {flagWords(c)}</span>
+            </li>
+          ))}
+        </ul>
+      </li>
+    ))}
+  </ul>
+</Figure>

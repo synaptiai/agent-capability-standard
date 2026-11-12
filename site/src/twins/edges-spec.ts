@@ -8,6 +8,7 @@ import { edgeTypesCaption, gateBranches, gateCaption, layerModelCaption, safetyC
 import { edgeExample, edgeMatrixCaption, layerPairCounts } from '../lib/edge-figures';
 import { edgeTypeCount, safetyRows } from '../lib/views';
 import { cell, code, figure, table } from './md';
+import { specEarlyBlocks, specLateBlocks } from './spec-figures';
 
 /** The edge types page: each type card's example sentence, and the matrix as layer-pair counts. */
 export function edgeTypesFigureBlocks(): string[] {
@@ -50,6 +51,7 @@ export function specFigureBlocks(): string[] {
   const yes = (b: boolean) => (b ? 'Yes' : 'No');
   return [
     '## Figures on this page',
+    ...specEarlyBlocks().slice(0, 2),
     figure(
       'Layer model, from §4.2',
       layerModelCaption(o),
@@ -82,10 +84,12 @@ export function specFigureBlocks(): string[] {
         stepAnatomy(schema).flatMap((g) => g.slots.map((s) => [g.title, code(s.name), code(s.type), yes(s.required)])),
       ),
     ),
+    ...specEarlyBlocks().slice(2),
     figure(
       'Gate outcomes, from §5.6',
       gateCaption(schema),
       table(['Phase', 'Actions'], gateBranches(schema).map((b) => [b.phase, b.actions.map(code).join(', ')])),
     ),
+    ...specLateBlocks(),
   ];
 }

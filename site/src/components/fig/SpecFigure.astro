@@ -1,0 +1,437 @@
+---
+// One site-drawn figure of the current Standard (visual spec 3.9), chosen by
+// its slot key in SPEC_SLOTS. Each is named "{title}, from §{n}" and draws
+// from the Standard's own section (a table, fence, list or sentence), the
+// ontology, the schemas or a runtime conformance fixture, checking the two
+// against each other where both say the same thing. A `wrap` slot passes the
+// block it wraps as `inner`, and the figure shows it enriched in place.
+//
+// Props:
+// - slot: string, required. A key of SPEC_SLOTS.
+// - n: number, required. The figure's number on the page.
+// - inner: string | null, required. The wrapped block's HTML, or null.
+// - source: string, required. The Standard's repo path.
+import { fieldTable, fieldsCaption } from '../../lib/edge-figures';
+import {
+  annotationGrammar,
+  bindingExamples,
+  edgeTypesCaption,
+  failureBranches,
+  failureCaption,
+  gateBranches,
+  gateCaption,
+  rootRule,
+  safetyCritical,
+  safetyCriticalCaption,
+  stepFieldRows,
+} from '../../lib/spec-figures';
+import { SPEC_SLOTS } from '../../lib/spec-slots';
+import * as D from '../../lib/spec-dsl-figures';
+import { REPLAY_FIXTURES } from '../../lib/run-replay';
+import { loadCatalogEnums, loadWorldStateSchema } from '../../data/spec-sources';
+import { edgeRects } from '../../pixel/lines';
+import { refSlugger, specSectionHref } from '../../lib/generated';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import PixelBar from './PixelBar.astro';
+import Rects from './Rects.astro';
+import DiagnosticTile from './DiagnosticTile.astro';
+import FlowArrow from './FlowArrow.astro';
+import RunReplay from './RunReplay.astro';
+import SafetyDefaults from './SafetyDefaults.astro';
+import TableWrap from '../TableWrap.astro';
+import { loadCatalogSchema } from '../../data/catalog-schema';
+import { loadOntology } from '../../data/ontology';
+import { readRepoFile } from '../../lib/repo';
+import ActionBranches from './ActionBranches.astro';
+import AnnotationTypes from './AnnotationTypes.astro';
+import EdgeTypeCard from './EdgeTypeCard.astro';
+import Figure from './Figure.astro';
+import LayerModel from './LayerModel.astro';
+import MiniTile from './MiniTile.astro';
+import Port from './Port.astro';
+import ReferenceAnatomy from './ReferenceAnatomy.astro';
+import SafetyPanel from './SafetyPanel.astro';
+import StepAnatomy from './StepAnatomy.astro';
+
+interface Props {
+  slot: string;
+  n: number;
+  inner: string | null;
+  source: string;
+}
+
+const { slot, n, inner, source } = Astro.props;
+const def = SPEC_SLOTS.find((s) => s.key === slot);
+if (!def) throw new Error(`SpecFigure: no slot ${slot}`);
+const text = readRepoFile(source);
+const where = source;
+// "{figure title}, from §{n}" (visual spec 3.9).
+const titled = (name: string) => `${name}, from §${def.section.trim()}`;
+const idOf = (name: string) => refSlugger()(`Figure: ${name}`);
+const o = loadOntology();
+const schema = loadCatalogSchema();
+const KNOWN = ['fields', 'layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
+const NEW = ['quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
+if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
+const REPLAY_TITLES: Record<string, string> = {
+  'recovery-replay': 'A recovery that runs out',
+  'wait-replay': 'A wait that loses its source',
+  'deferral-replay': 'What a deferral reaches',
+};
+const sectionLink = (sec: string) => specSectionHref(sec);
+const sectionTitle = (sec: string) => {
+  const m = new RegExp(`^#{2,4} ${sec.replace(/\./g, '\\.')}\\.? (.+)$`, 'm').exec(text);
+  return m ? m[1]!.trim() : '';
+};
+const chapters = slot === 'requirements' ? D.chapterKeywords(text) : [];
+const kwMax = Math.max(1, ...chapters.flatMap((c) => Object.values(c.counts)));
+const order = slot === 'safety-order' ? D.safetyOrder(o) : [];
+if (slot === 'safety-order') D.checkSafetyOrder(text, where, order);
+const ladder = slot === 'precedence' ? D.precedenceLadder(text, where) : [];
+const exts = slot === 'extensions' ? D.extensionTiles(text, where) : [];
+const trig = slot === 'triggers' ? D.triggerTiles(text, where) : null;
+const rec = slot === 'recovery-loop' ? D.recoveryRows(text, where) : [];
+const loopRange = slot === 'recovery-loop' ? D.maxLoopsRange(text, where) : null;
+const wait = slot === 'wait-timeline' ? D.waitTimeline(text, where) : null;
+const silent = slot === 'silent-source' ? D.silentSource(text, where) : null;
+const plans = slot === 'approval' ? D.approvalPlans(text, where) : [];
+const asked = slot === 'approval' ? D.approverAsked(text, where) : [];
+const deleg = slot === 'delegate' ? D.delegateGroups(text, where) : null;
+const quorum = slot === 'quorum' ? D.quorumExample(text, where) : null;
+const trust = slot === 'trust-classes' ? D.trustClassBars(text, where) : [];
+const sender = slot === 'sender-filter' ? D.senderFilter(text, where) : [];
+const pct = (v: number, max: number) => `${((v / max) * 100).toFixed(3)}%`;
+const line = (type: string) => edgeRects(type, 2, 8, 46, 8).rects;
+const fields = slot === 'fields' ? fieldTable(text, '4.1 ', where) : [];
+const grammar = slot === 'annotations' ? annotationGrammar(text, where) : null;
+const failures = slot === 'failures' ? failureBranches(text, where, schema) : [];
+---
+{slot === 'fields' && (
+  <Figure id={idOf('capability fields')} n={n} title={titled('Capability fields')} caption={fieldsCaption(fields, 'A capability has')} kind="capability-fields">
+    <ul class="ports ports--out spec-ports">
+      {fields.map((f) => <Port name={f.name} type={f.type} required={f.required} description={f.description} />)}
+    </ul>
+  </Figure>
+)}
+{slot === 'layers' && <LayerModel id={idOf('layer model')} n={n} title={titled('Layer model')} />}
+{slot === 'edges' && (
+  <Figure id={idOf('edge types')} n={n} title={titled('Edge types')} caption={edgeTypesCaption(o)} kind="edge-types">
+    <ul class="edge-card-grid">
+      {o.edgeTypes.map((t) => <li><EdgeTypeCard info={t} /></li>)}
+    </ul>
+  </Figure>
+)}
+{slot === 'safety' && (
+  <Figure id={idOf('safety-critical capabilities')} n={n} title={titled('Safety-critical capabilities')} caption={safetyCriticalCaption(o)} kind="safety-critical">
+    <ul class="safety-grid">
+      {safetyCritical(o).map((c) => (
+        <li class="safety-grid__item">
+          <p class="safety-grid__name"><MiniTile id={c.id} size={32} /><code>{c.id}</code></p>
+          <SafetyPanel cap={c} compact />
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'step' && <StepAnatomy id={idOf('step anatomy')} n={n} title={titled('Step anatomy')} rows={stepFieldRows(text, where)} />}
+{slot === 'reference' && (
+  <ReferenceAnatomy id={idOf('anatomy of a reference')} n={n} title={titled('Anatomy of a reference')} examples={bindingExamples(text, where)} rule={rootRule(text, where)} />
+)}
+{slot === 'annotations' && grammar && (
+  <AnnotationTypes id={idOf('annotation types')} n={n} title={titled('Annotation types')} names={grammar.names} subtype={grammar.subtype} />
+)}
+{slot === 'gates' && (
+  <ActionBranches
+    id={idOf('gate outcomes')}
+    n={n}
+    title={titled('Gate outcomes')}
+    caption={gateCaption(schema)}
+    kind="gate"
+    points={gateBranches(schema).map((b) => ({
+      label: `when holds, ${b.phase} the step`,
+      at: b.phase === 'after' ? 'after' : 'before',
+      branches: b.actions.map((a) => ({ action: a })),
+    }))}
+  />
+)}
+{slot === 'failures' && (
+  <ActionBranches
+    id={idOf('failure actions')}
+    n={n}
+    title={titled('Failure actions')}
+    caption={failureCaption(failures)}
+    kind="fail"
+    points={[{ label: 'the step failed, or a failure mode\'s when holds', at: 'after', branches: failures }]}
+  />
+)}
+
+{slot === 'requirements' && (
+  <Figure id={idOf('where the requirements are')} n={n} title={titled('Where the requirements are')} caption={D.keywordsCaption(chapters)} kind="requirements">
+    <ul class="kw-chart">
+      <li class="kw-chart__row kw-chart__head" aria-hidden="true"><span>Chapter</span>{D.KEYWORD_GROUPS.map((g) => <span>{g.label}</span>)}</li>
+      {chapters.map((c) => (
+        <li class="kw-chart__row" data-chapter={c.n}>
+          <a class="kw-chart__chapter" href={sectionLink(String(c.n))}><PixelGlyph name={c.glyph} scale={2} /><span>{c.n}. {c.title}</span></a>
+          {D.KEYWORD_GROUPS.map((g) => (
+            <span class="kw-chart__bar" data-keyword={g.id}><span class="visually-hidden">{g.label}</span><PixelBar value={c.counts[g.id]} max={kwMax} /></span>
+          ))}
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'safety-order' && (
+  <Figure id={idOf('safety ordering')} n={n} title={titled('Safety ordering')} caption={D.safetyOrderCaption(order)} kind="safety-order">
+    <ul class="order-groups">
+      {order.map((g) => (
+        <li class="order-group" data-source={g.source}>
+          <p class="order-group__src"><MiniTile id={g.source} size={32} /><code>{g.source}</code></p>
+          <ul class="order-edges">
+            {g.edges.map((e) => (
+              <li class="order-edge" data-type={e.type}>
+                <span class="order-edge__type"><PixelGlyph name={`mark:${e.type}`} /><code>{e.type}</code></span>
+                <svg class="order-edge__line" viewBox="0 0 48 16" width="48" height="16" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={line(e.type)} /></svg>
+                <ul class="order-edge__targets" aria-label={`${g.source} ${e.type}`}>
+                  {e.targets.map((t) => <li><MiniTile id={t} size={32} relation={`${g.source} ${e.type} it`} /></li>)}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'safety-defaults' && <SafetyDefaults id={idOf('safety defaults by capability')} n={n} title={titled('Safety defaults by capability')} />}
+{slot === 'precedence' && (
+  <Figure id={idOf('operator precedence')} n={n} title={titled('Operator precedence')} caption={D.precedenceCaption(ladder)} kind="precedence">
+    <ol class="ladder">
+      {ladder.map((r, i) => (
+        <li class:list={['ladder__rung', i === ladder.length - 1 && 'ladder__rung--operand']} data-rule={r.rule}>
+          <code class="ladder__rule">{r.rule}</code>
+          <ul class="ladder__ops" aria-label={i === ladder.length - 1 ? 'operands' : 'operators'}>
+            {r.operators.map((op) => <li class="chip"><code>{op}</code></li>)}
+          </ul>
+          {r.note && <span class="ladder__note">{r.note}: does not chain</span>}
+        </li>
+      ))}
+    </ol>
+    <p class="ladder__scale"><span>Top: binds loosest</span><span>Bottom: binds tightest</span></p>
+  </Figure>
+)}
+{slot === 'static-checks' && inner && (
+  <Figure id={idOf('static checks')} n={n} title={titled('Static checks and their codes')} caption={D.staticChecksCaption(text, where)} kind="static-checks">
+    <Fragment set:html={inner} />
+    <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
+  </Figure>
+)}
+{slot === 'extensions' && (
+  <Figure id={idOf('extensions and what they unlock')} n={n} title={titled('Extensions and what they unlock')} caption={D.extensionsCaption(exts)} kind="extensions">
+    <ul class="ext-tiles">
+      {exts.map((e) => (
+        <li class="ext-tile" data-extension={e.id}>
+          <code class="ext-tile__id">{e.id}</code>
+          <ul class="ext-tile__secs">
+            {e.sections.map((sec) => <li><a href={sectionLink(sec)}>§{sec} {sectionTitle(sec)}</a></li>)}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'triggers' && trig && (
+  <Figure id={idOf('how runs start')} n={n} title={titled('How runs start')} caption={D.triggersCaption(trig.tiles)} kind="triggers">
+    <ul class="trig-tiles">
+      {trig.tiles.map((t) => (
+        <li class="trig-tile" data-kind={t.kind} data-attendance={t.attendance}>
+          <code class="trig-tile__kind">{t.kind}</code>
+          <span class="trig-tile__att"><span class:list={['flag-cell', t.attendance === 'attended' ? 'flag-cell--on' : 'flag-cell--off']} aria-hidden="true">{t.attendance === 'attended' && <PixelGlyph name="source:human" scale={1} />}</span>{t.attendance === "the invoker's" ? 'as the invoker' : t.attendance}</span>
+          {t.kind === 'schedule' && (
+            <span class="trig-tile__overlap">overlap:{' '}{trig.overlap.map((v) => <span class:list={['chip', 'chip--inner', v === trig.overlapDefault && 'chip--default']}><code>{v}</code>{v === trig.overlapDefault && ' (default)'}</span>)}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+    <p class="trig-key"><span class="flag-cell flag-cell--on" aria-hidden="true"><PixelGlyph name="source:human" scale={1} /></span>someone is there to approve <span class="flag-cell flag-cell--off" aria-hidden="true"></span>no one is</p>
+  </Figure>
+)}
+{slot === 'recovery-loop' && loopRange && (
+  <Figure id={idOf('recovery loop')} n={n} title={titled('Recovery loop')} caption={D.recoveryCaption(rec)} kind="recovery-loop">
+    <div class="rloop">
+      <p class="rloop__step"><PixelGlyph name="nested" /><span>The step's failure mode fires</span></p>
+      <ul class="rloop__branches">
+        {rec.map((r, i) => (
+          <li class:list={['rloop__branch', i === 0 && 'rloop__branch--loop']} data-branch={i}>
+            <span class="rloop__when">{r.recovery}</span>
+            <FlowArrow dir="right" length={16} />
+            <span class="rloop__then">{r.outcome}</span>
+            {[...new Set(r.codes)].map((c) => <DiagnosticTile code={c} />)}
+            {i === 0 && (
+              <span class="rloop__counter" aria-label={`max_loops: ${loopRange.min} to ${loopRange.max}, default ${loopRange.def}`}>
+                <span>max_loops: {loopRange.min} to {loopRange.max}, default {loopRange.def}</span>
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  </Figure>
+)}
+{slot === 'wait-timeline' && wait && (
+  <Figure id={idOf('a wait on a timeline')} n={n} title={titled('A wait on a timeline')} caption={D.waitCaption(wait)} kind="wait-timeline">
+    <div class="wait-tl">
+      <p class="wait-tl__modes">liveness.mode:{' '}{wait.modes.map((m) => <span class:list={['chip', 'chip--inner', m === wait.mode && 'chip--default']}><code>{m}</code>{m === wait.mode && ' (this example)'}</span>)}</p>
+      <div class="wait-tl__lane" data-lane="silent">
+        <p class="wait-tl__label">Source silent from the start: a probe every {wait.interval}</p>
+        <div class="wait-tl__track" aria-hidden="true">
+          {Array.from({ length: Math.floor(wait.timeoutMin / wait.intervalMin) }, (_, k) => (k + 1) * wait.intervalMin).map((t) => (
+            <span class:list={['wait-tl__probe', t <= wait.lostAt ? 'is-missed' : 'is-after']} style={`left: ${pct(t, wait.timeoutMin)}`}></span>
+          ))}
+          <span class="wait-tl__stop" style={`left: ${pct(wait.lostAt, wait.timeoutMin)}`}></span>
+        </div>
+      </div>
+      <div class="wait-tl__lane" data-lane="timeout">
+        <p class="wait-tl__label">No event and no lost liveness: the timeout</p>
+        <div class="wait-tl__track" aria-hidden="true"><span class="wait-tl__span"></span><span class="wait-tl__stop" style="left: 100%"></span></div>
+      </div>
+      <p class="wait-tl__axis" aria-hidden="true">{[0, 0.25, 0.5, 0.75, 1].map((f) => <span style={`left: ${pct(f, 1)}`}>{D.fmtMinutes(f * wait.timeoutMin)}</span>)}</p>
+      <ul class="wait-tl__ends">
+        <li>At {D.fmtMinutes(wait.lostAt)}, after {wait.threshold} missed probes: <DiagnosticTile code="R406" /></li>
+        <li>At {wait.timeout}, the timeout: <DiagnosticTile code="R401" /></li>
+      </ul>
+    </div>
+  </Figure>
+)}
+{slot === 'silent-source' && silent && (
+  <Figure id={idOf('recovering a silent source')} n={n} title={titled('Recovering a silent source')} caption={D.silentCaption(silent)} kind="silent-source">
+    <ul class="silent">
+      {silent.modes.map((m) => (
+        <li class="silent__mode" data-code={m.code}>
+          <DiagnosticTile code={m.code} />
+          <FlowArrow dir="right" length={16} />
+          <span class="silent__action"><PixelGlyph name={`fail:${m.action}`} /><code>{m.action}</code></span>
+          <FlowArrow dir="right" length={16} />
+          {m.goto === silent.wait ? (
+            <span class="silent__to">back to the wait <code>{m.goto}</code>{m.maxLoops !== null && `, up to ${m.maxLoops} ${m.maxLoops === 1 ? 'time' : 'times'}`}{m.onExhausted && <>, then the handler <code>{m.onExhausted}</code></>}</span>
+          ) : (
+            <span class="silent__to">the handler <code>{m.goto}</code>, once</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'approval' && (
+  <Figure id={idOf('who decides and what then')} n={n} title={titled('Who decides, and what then')} caption={D.approvalCaption(plans)} kind="approval">
+    <div class="approval-flow">
+      <div class="approval-flow__part">
+        <p class="approval-flow__head">1. Is the approver asked?</p>
+        <TableWrap label="Whether each kind of approver is asked, by run attendance">
+        <table class="approval-asked">
+          <thead><tr><th scope="col">approver.kind</th>{loadCatalogEnums().attendance.map((a) => <th scope="col">{a} run</th>)}</tr></thead>
+          <tbody>
+            {asked.map((a) => (
+              <tr data-kind={a.kind}>
+                <th scope="row"><code>{a.kind}</code></th>
+                {[a.attended, a.unattended].map((yes) => <td><span class="asked"><PixelGlyph name={yes ? 'check' : 'close'} />{yes ? 'asked' : 'not asked'}</span></td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        </TableWrap>
+      </div>
+      <div class="approval-flow__part">
+        <p class="approval-flow__head">2. Asked: the decision</p>
+        <ul class="approval-flow__chips">{loadWorldStateSchema().approvalDecisions.map((d) => <li class="chip"><code>{d}</code></li>)}</ul>
+      </div>
+      <div class="approval-flow__part">
+        <p class="approval-flow__head">3. Unattended and not asked, or unavailable: <code>when_unattended</code></p>
+        <ul class="approval-flow__plans">
+          {plans.map((p) => (
+            <li data-plan={p.plan}><code>{p.plan}</code>{p.isDefault && ' (default)'}<FlowArrow dir="right" length={16} /><span>{/^[A-Z]\d{3}$/.test(p.result) ? <DiagnosticTile code={p.result} /> : p.result}</span></li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </Figure>
+)}
+{slot in REPLAY_FIXTURES && <RunReplay fixture={REPLAY_FIXTURES[slot]!} id={idOf(REPLAY_TITLES[slot]!)} n={n} title={titled(REPLAY_TITLES[slot]!)} />}
+{slot === 'delegate' && deleg && (
+  <Figure id={idOf('what a delegate binds')} n={n} title={titled('What a delegate binds')} caption={D.delegateCaption(deleg)} kind="delegate">
+    <div class="deleg">
+      <div class="deleg__side">
+        <p class="deleg__head"><MiniTile id="delegate" size={24} /> Inputs</p>
+        {deleg.inputs.map((g) => (
+          <div class="deleg__group" data-extension={g.extension ?? 'base'}>
+            <p class="deleg__ext">{g.extension ? <>needs <code>{g.extension}</code></> : 'base'}</p>
+            <ul class="ports">{g.rows.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} />)}</ul>
+          </div>
+        ))}
+      </div>
+      <div class="deleg__side">
+        <p class="deleg__head">Output the host attests</p>
+        <ul class="ports ports--out">{deleg.outputs.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} depth={r.depth === 0 ? 0 : 1} />)}</ul>
+      </div>
+    </div>
+  </Figure>
+)}
+{slot === 'quorum' && quorum && (
+  <Figure id={idOf('a quorum tally')} n={n} title={titled('A quorum tally')} caption={D.quorumCaption(quorum)} kind="quorum">
+    <div class="quorum">
+      <p class="quorum__head">Reviewers</p>
+      <ul class="quorum__reviewers">{quorum.reviewers.map((r) => <li><MiniTile id="delegate" size={24} link={false} /><code>{r}</code></li>)}</ul>
+      <p class="quorum__head">Verdict values</p>
+      <ul class="quorum__vocab">
+        <li data-side="pass"><span class="quorum__side"><PixelGlyph name="check" />pass</span>{quorum.pass.map((v) => <code class="chip chip--inner">{v}</code>)}</li>
+        <li data-side="blocking"><span class="quorum__side"><PixelGlyph name="close" />blocking</span>{quorum.blocking.map((v) => <code class="chip chip--inner">{v}</code>)}</li>
+        <li data-side="other"><span class="quorum__side">neither</span>{quorum.other.map((v) => <code class="chip chip--inner">{v}</code>)}</li>
+      </ul>
+      <p class="quorum__head">To pass</p>
+      <ul class="quorum__needs">
+        <li><span class="quorum__slots" aria-hidden="true">{Array.from({ length: quorum.minPass }, () => <span></span>)}</span><code>min_pass: {quorum.minPass}</code> passing verdicts</li>
+        {quorum.minFull !== null && <li><span class="quorum__slots" aria-hidden="true">{Array.from({ length: quorum.minFull }, () => <span></span>)}</span><code>min_full: {quorum.minFull}</code> of them with scope full</li>}
+        <li><span class="quorum__slots quorum__slots--none" aria-hidden="true"><span></span></span>no blocking verdict</li>
+        {quorum.freshContext && <li class="quorum__badge"><PixelGlyph name="check" />every reviewer binds <code>fresh_context: true</code></li>}
+        {quorum.families.length > 0 && <li class="quorum__badge"><PixelGlyph name="check" />model families covered: {quorum.families.map((f) => <code class="chip chip--inner">{f}</code>)}</li>}
+      </ul>
+    </div>
+  </Figure>
+)}
+{slot === 'trust-classes' && (
+  <Figure id={idOf('trust classes')} n={n} title={titled('Trust classes')} caption={D.trustCaption(trust)} kind="trust-classes">
+    <ul class="trust-bars">
+      {trust.map((b) => (
+        <li class="trust-bars__row" data-class={b.cls}>
+          <code class="trust-bars__name">{b.cls}</code>
+          <PixelBar value={b.weight} max={1} digits={2} />
+          <span class="trust-bars__marks">
+            {b.accepted && <span class="trust-bars__mark"><PixelGlyph name="check" />accepted</span>}
+            {b.alwaysAsk && <span class="trust-bars__mark"><PixelGlyph name="eye" />always ask</span>}
+          </span>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'sender-filter' && (
+  <Figure id={idOf('the sender filter')} n={n} title={titled('The sender filter')} caption={D.senderCaption(sender)} kind="sender-filter">
+    <ol class="sender">
+      <li class="sender__item">An item arrives from a sender</li>
+      {sender.map((g) => (
+        <li class="sender__gate" data-input={g.input}>
+          <FlowArrow />
+          <p class="sender__check"><PixelGlyph name="diamond" /><code>{g.input}</code></p>
+          <p class="sender__effect">{g.effect}</p>
+          {g.drops && <p class="sender__drop"><PixelGlyph name="close" />otherwise dropped and counted</p>}
+        </li>
+      ))}
+      <li class="sender__item"><FlowArrow /><span>The item is kept, carrying <code>sender</code> and <code>sender_identity</code></span></li>
+    </ol>
+  </Figure>
+)}
+{slot === 'quorum-fields' && inner && (
+  <Figure id={idOf('quorum fields and their codes')} n={n} title={titled('Quorum fields and the codes they raise')} caption={D.quorumFieldsCaption(D.quorumFieldCodes(text, where))} kind="quorum-fields">
+    <Fragment set:html={inner} />
+    <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
+  </Figure>
+)}

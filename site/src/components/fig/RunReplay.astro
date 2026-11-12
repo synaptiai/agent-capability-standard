@@ -1,0 +1,63 @@
+---
+// One runtime conformance fixture drawn as a run (visual spec 3.0): its own
+// workflow as a spine of step rows, each marked by what the fixture's
+// `script` and `end` record (ran, how many times, deferred with its reason,
+// skipped, not reached), a row for each loop back, and an outcome tile with
+// the run's end. Steps are numbered from 1. The fixture is named in
+// REPLAY_FIXTURES; a missing file or a workflow that no longer parses fails
+// the build (run-replay.ts).
+//
+// Props:
+// - fixture: string, required. A file name in tests/conformance/runtime, without .json.
+// - id: string, required. A ref- id.
+// - n: number, required.
+// - title: string, required.
+import { ANSWER_WORDS, replay, replayCaption } from '../../lib/run-replay';
+import { githubBlobUrl } from '../../lib/repo';
+import DiagnosticTile from './DiagnosticTile.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+
+interface Props {
+  fixture: string;
+  id: string;
+  n: number;
+  title: string;
+}
+
+const { fixture, id, n, title } = Astro.props;
+const r = replay(fixture);
+const STATUS_WORDS = { ran: 'ran', deferred: 'deferred', skipped: 'skipped', 'not-reached': 'not reached' } as const;
+const loopsAfter = (stepN: number) => r.loops.filter((l) => l.from === stepN);
+const storeOf = (stepN: number) => r.steps[stepN - 1]!.step.store_as;
+---
+<Figure id={id} n={n} title={title} caption={replayCaption(r)} kind="run-replay">
+  <p class="replay__source">
+    Fixture <a href={githubBlobUrl(r.fixture.file)}><code>{r.fixture.name}</code></a>, an {r.fixture.attendance} run: {r.fixture.description}
+  </p>
+  <ol class="replay" aria-label={`Steps of ${r.fixture.name}`}>
+    {r.steps.map((s) => (
+      <>
+        <li class="replay__row" data-status={s.status} data-step={s.n} data-requests={s.requests}>
+          <span class="replay__n" aria-hidden="true">{s.n}</span>
+          <MiniTile id={s.step.capability} size={24} link={false} />
+          <span class="replay__name"><span class="visually-hidden">Step {s.n}, </span><code>{s.step.capability}</code>{s.step.store_as && <span class="replay__store"> as <code>{s.step.store_as}</code></span>}</span>
+          <span class="replay__status"><span class="replay__mark" aria-hidden="true"></span>{STATUS_WORDS[s.status]}{s.requests > 1 && ` ${s.requests} times`}</span>
+          {(s.reason || s.answers.length > 0) && (
+            <span class="replay__why">{s.reason ?? [...new Set(s.answers.map((a) => ANSWER_WORDS[a] ?? a))].join('; ')}</span>
+          )}
+        </li>
+        {loopsAfter(s.n).map((l) => (
+          <li class="replay__loop" data-from={l.from} data-to={l.to}>
+            <span class="replay__loop-line" aria-hidden="true"></span>
+            <span>Loop {l.count}{l.maxLoops !== null && ` of max_loops ${l.maxLoops}`}: back to step {l.to}{storeOf(l.to) && <> (<code>{storeOf(l.to)}</code>)</>}</span>
+          </li>
+        ))}
+      </>
+    ))}
+  </ol>
+  <p class="replay__end" data-end={r.end.kind}>
+    <span class="replay__end-label">Run ends</span>
+    {r.end.code ? <><span>failed:</span> <DiagnosticTile code={r.end.code} /></> : <><span>{r.end.kind.toLowerCase()}, outcome</span> <code class="replay__outcome">{r.end.outcome}</code></>}
+  </p>
+</Figure>

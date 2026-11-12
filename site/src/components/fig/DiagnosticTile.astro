@@ -1,0 +1,36 @@
+---
+// A diagnostic code as a tile (visual spec 3.8 and 3.9): the code, its
+// severity glyph (caution for an error, warning for a warning) and a solid
+// (error) or dashed (warning) border. Severity is not risk, so no risk
+// colour. A link to the code's entry on the diagnostics page unless `link`
+// is false. The same markup as diagnosticTileElement() in
+// rehype-spec-slots, which draws it inside rendered Markdown tables.
+//
+// Props:
+// - code: string, required. A code of the current Standard; throws otherwise.
+// - link: boolean, default true.
+// - size: 'inline' | 'grid', default 'inline'. 'grid' is the 56x40 tile of
+//   the diagnostics code grid, with the code in the display font.
+// - href: string, optional. Overrides the link (the code grid links to its own table row).
+import { loadDiagnostics } from '../../data/diagnostics';
+import { diagnosticHref } from '../../lib/generated';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+
+interface Props {
+  code: string;
+  link?: boolean;
+  size?: 'inline' | 'grid';
+  href?: string;
+}
+
+const { code, link = true, size = 'inline', href } = Astro.props;
+const d = loadDiagnostics().find((x) => x.code === code);
+if (!d) throw new Error(`DiagnosticTile: ${code} is not a diagnostic code of the current Standard`);
+const Tag = link ? 'a' : 'span';
+---
+<Tag
+  class:list={['diag-tile', `diag-tile--${d.severity}`, size === 'grid' && 'diag-tile--grid']}
+  href={link ? (href ?? diagnosticHref(code)) : undefined}
+  data-code={code}
+  title={size === 'grid' ? `${code} ${d.name}, ${d.severity}` : undefined}
+><code class="diag-tile__code">{code}</code><PixelGlyph name={`severity:${d.severity}`} class="diag-tile__severity" /><span class="visually-hidden">{size === 'grid' ? ` ${d.name}, ${d.severity}` : `, ${d.severity}`}</span></Tag>
