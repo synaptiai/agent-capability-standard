@@ -16,6 +16,9 @@
 // - mark: string, optional. An extra glyph key drawn after the name, with
 //   `markLabel` as its accessible text (e.g. 'principle:grounded-claims').
 // - markLabel: string, required with mark.
+// - more: boolean, default false. The field has fields nested deeper than
+//   the figure draws: a "+" after the type says so, and the name's link
+//   leads to the table row that shows them.
 import { typeGlyphs } from '../../lib/views';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 
@@ -28,9 +31,10 @@ interface Props {
   depth?: 0 | 1;
   mark?: string;
   markLabel?: string;
+  more?: boolean;
 }
 
-const { name, type, required = false, description, href, depth = 0, mark, markLabel } = Astro.props;
+const { name, type, required = false, description, href, depth = 0, mark, markLabel, more = false } = Astro.props;
 if (mark && !markLabel) throw new Error(`Port ${name}: mark ${mark} needs a markLabel`);
 const glyphs = typeGlyphs(type);
 ---
@@ -40,6 +44,8 @@ const glyphs = typeGlyphs(type);
   <code class="port__name">{href ? <a href={href}>{name}</a> : name}</code>
   {mark && <PixelGlyph name={mark} label={markLabel} class="port__mark" />}
   <code class="port__type">{type}</code>
+  {more && <span class="port__more" aria-hidden="true">+</span>}
+  {more && <span class="fig-sr">, has nested fields, listed in the table</span>}
   <span class="fig-sr">{required ? ', required' : ', optional'}</span>
   {description && <span class="port__desc">{description}</span>}
 </li>

@@ -194,6 +194,18 @@
     background: var(--ink);
   }
 
+  /* ---------- F-C1: a hovered or focused tile marks its edge types in the legend ---------- */
+
+  .fig:has(.nbhd__cell[data-types~='requires']:is(:hover, :focus-within)) .nbhd-legend li[data-type='requires'],
+  .fig:has(.nbhd__cell[data-types~='soft_requires']:is(:hover, :focus-within)) .nbhd-legend li[data-type='soft_requires'],
+  .fig:has(.nbhd__cell[data-types~='enables']:is(:hover, :focus-within)) .nbhd-legend li[data-type='enables'],
+  .fig:has(.nbhd__cell[data-types~='precedes']:is(:hover, :focus-within)) .nbhd-legend li[data-type='precedes'],
+  .fig:has(.nbhd__cell[data-types~='conflicts_with']:is(:hover, :focus-within)) .nbhd-legend li[data-type='conflicts_with'],
+  .fig:has(.nbhd__cell[data-types~='alternative_to']:is(:hover, :focus-within)) .nbhd-legend li[data-type='alternative_to'],
+  .fig:has(.nbhd__cell[data-types~='specializes']:is(:hover, :focus-within)) .nbhd-legend li[data-type='specializes'] {
+    box-shadow: inset 0 -4px 0 var(--ink);
+  }
+
   /* ---------- the folded output fence ---------- */
 
   .skill-fence {

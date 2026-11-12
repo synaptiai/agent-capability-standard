@@ -4,7 +4,8 @@
 // input ports and its output ports side by side with a chevron from one to
 // the other, read as a signature. Filled pins are required fields, outlined
 // pins optional ones. Each port links to its row in the contract tables
-// below. When the figure is narrower than 640px it stacks: inputs, a down
+// below; a field with fields nested deeper than one level gets a "+",
+// and its row in the table shows them. When the figure is narrower than 640px it stacks: inputs, a down
 // chevron, the band, a down chevron, outputs.
 //
 // Props:
@@ -35,6 +36,7 @@ const port = (side: 'in' | 'out', r: SchemaRow) => ({
   description: r.description,
   href: `#${contractRowId(side, r.path)}`,
   depth: (r.depth > 0 ? 1 : 0) as 0 | 1,
+  more: r.nested !== undefined,
   ...(GROUNDED_FIELDS.has(r.path) ? { mark: 'principle:grounded-claims', markLabel: 'grounded claim' } : {}),
 });
 const down = [...run(12, 0, 12, 14, 'ink-2'), ...chevron(12, 15, 'down', 'ink-2')];
