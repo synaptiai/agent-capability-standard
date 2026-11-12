@@ -15,6 +15,7 @@ import SafetyPanel from '../../components/fig/SafetyPanel.astro';
 import CompositionChain from '../../components/fig/CompositionChain.astro';
 import ExampleFields from '../../components/fig/ExampleFields.astro';
 import VerificationMap from '../../components/fig/VerificationMap.astro';
+import { foldFirstTaskList } from '../../lib/inject';
 import InputGroupsFig from '../../components/fig/InputGroups.astro';
 import ExampleWorkflowsFig from '../../components/fig/ExampleWorkflows.astro';
 import SkillToolsFig from '../../components/fig/SkillTools.astro';
@@ -283,7 +284,7 @@ const skillFacts = (
               {fig?.kind === 'procedure' && <ProcedureMap cap={cap} map={procedure} n={fig.n} />}
               {fig?.kind === 'sequence' && <SafetySequence cap={cap} n={fig.n} />}
               {fig?.kind === 'sentence' && <p>{fig.text}</p>}
-              <Fragment set:html={part.body} />
+              <Fragment set:html={fig?.kind === 'verification' ? foldFirstTaskList(part.body, 'Text version: the checklist as the skill writes it') : part.body} />
             </>
           );
         })}

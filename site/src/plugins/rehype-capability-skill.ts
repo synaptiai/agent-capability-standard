@@ -14,8 +14,10 @@
 //   heading's hidden anchor link is dropped, so the summary holds no link.
 //   The first example starts open and the others closed (visual spec 3.1), so
 //   a reader sees one worked example without a click and the summaries list
-//   the rest. When the open example's fence alone is taller than a screen,
-//   the run it makes is exempt (category b, spec 3.12).
+//   the rest. In the open example, an Output fence longer than about two
+//   screens folds under its own summary, so the example stays open without
+//   several screens of YAML. When the open example's code is still taller than a
+//   screen, the run it makes is exempt (category b, spec 3.12).
 // - Safety Constraints: the section's content sits in a panel with the
 //   caution glyph.
 // - Output Contract: the section's first code block folds into a
@@ -175,9 +177,12 @@ const CONTRACT_MIN_ROWS = 3;
 
 /**
  * Adds an "In the output contract" column to a skill's Field Definitions
- * table: for each top-level field, a filled pin and "required" or an
- * outlined pin and "optional" when the ontology's output contract declares
- * it, and a cross and "no, the skill's own" when it does not. A nested path
+ * table: for each field, a filled pin and "required" or an outlined pin and
+ * "optional" when the ontology's output contract declares it, and a cross
+ * and "no, the skill's own" when it does not. A dotted path
+ * (`verification.match`) is looked up by its whole path, one level in as the
+ * contract table shows it; a row naming two fields (`sender` / `sender_identity`)
+ * gets a mark for each, with its name. A path with a placeholder or an index
  * (`result.<store_as>`, `data[].key`) gets an empty cell. Returns the rows
  * marked.
  */
@@ -187,17 +192,26 @@ export function markContract(table: Element, cap: Capability): number {
   const cells = (tr: Element) => tr.children.filter((c): c is Element => isEl(c, 'td') || isEl(c, 'th'));
   const head = rows(part('thead'))[0];
   if (!head || text(cells(head)[0]!).trim() !== 'Field') return 0;
-  const contract = new Map(contractRows(cap.output_schema).filter((r) => r.depth === 0).map((r) => [r.name, r.required]));
+  const contract = new Map(contractRows(cap.output_schema).filter((r) => r.depth <= 1).map((r) => [r.path, r.required]));
   const body = rows(part('tbody'));
-  // 'required' | 'optional' | 'own', or null for a nested path.
-  const marks = body.map((tr) => {
-    const name = text(cells(tr)[0]!).replace(/`/g, '').trim();
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
-    const req = contract.get(name);
+  type Mark = 'required' | 'optional' | 'own';
+  const markOf = (path: string): Mark | null => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(path)) return null;
+    const req = contract.get(path);
     return req === undefined ? 'own' : req ? 'required' : 'optional';
+  };
+  // One entry per field the row names, or null when the row names a path the column cannot mark.
+  const marks = body.map((tr): { name: string; mark: Mark }[] | null => {
+    const names = text(cells(tr)[0]!).replace(/`/g, '').split('/').map((x) => x.trim());
+    const out = names.map((name) => ({ name, mark: markOf(name) }));
+    return out.every((x) => x.mark !== null) ? (out as { name: string; mark: Mark }[]) : null;
   });
   if (marks.filter((m) => m !== null).length < CONTRACT_MIN_ROWS) return 0;
   head.children.push({ type: 'element', tagName: 'th', properties: {}, children: [txt('In the output contract')] });
+  const markEls = (m: Mark): ElementContent[] =>
+    m === 'own'
+      ? [glyphElement('close', { className: 'skill-contract-own' }), txt(" no, the skill's own")]
+      : [{ type: 'element', tagName: 'span', properties: { className: ['skill-contract', `skill-contract--${m}`], ariaHidden: 'true' }, children: [] }, txt(` ${m}`)];
   body.forEach((tr, i) => {
     const m = marks[i];
     tr.children.push({
@@ -205,11 +219,11 @@ export function markContract(table: Element, cap: Capability): number {
       tagName: 'td',
       properties: { className: ['skill-contract-cell'] },
       children:
-        m === null
+        m == null
           ? []
-          : m === 'own'
-            ? [glyphElement('close', { className: 'skill-contract-own' }), txt(" no, the skill's own")]
-            : [{ type: 'element', tagName: 'span', properties: { className: ['skill-contract', `skill-contract--${m}`], ariaHidden: 'true' }, children: [] }, txt(` ${m}`)],
+          : m.length === 1
+            ? markEls(m[0]!.mark)
+            : m.map((x): ElementContent => ({ type: 'element', tagName: 'span', properties: { className: ['skill-contract-part'] }, children: [{ type: 'element', tagName: 'code', properties: {}, children: [txt(x.name)] }, txt(':'), ...markEls(x.mark)] })),
     });
   });
   const marked = marks.filter((m) => m !== null).length;
@@ -235,6 +249,35 @@ function foldOutputFence(kids: RootContent[]): void {
     ],
   };
   kids.splice(i, 1, fold);
+}
+
+/**
+ * Code lines above which the open example's Output fence is folded: about
+ * two screens of YAML at the code block's line height. A shorter output
+ * stays open, and the run it makes is exempt when it is over a screen.
+ */
+export const LONG_OUTPUT_LINES = 100;
+
+/**
+ * In the open first example, an "**Output:**" fence longer than
+ * LONG_OUTPUT_LINES folds under a summary that gives its length, so the
+ * example stays open (input, output summary, evidence) without putting a
+ * screen or more of YAML in front of the reader.
+ */
+function foldLongOutput(body: RootContent[]): void {
+  body.forEach((c, i) => {
+    if (!isEl(c, 'pre')) return;
+    const lines = text(c).replace(/\n$/, '').split('\n').length;
+    if (lines <= LONG_OUTPUT_LINES) return;
+    const lead = body.slice(0, i).reverse().find((x) => isEl(x));
+    if (!lead || !/^\s*Output\b/.test(text(lead))) return;
+    body[i] = {
+      type: 'element',
+      tagName: 'details',
+      properties: { className: ['fig-details', 'skill-fence'], dataLongOutput: String(lines) },
+      children: [{ type: 'element', tagName: 'summary', properties: {}, children: [{ type: 'text', value: `Show the whole output, ${lines} lines of YAML` }] }, c as ElementContent],
+    };
+  });
 }
 
 /**
@@ -264,6 +307,7 @@ function foldExamples(kids: RootContent[], openFirst = false): void {
       else break;
     }
   }
+  if (openFirst) foldLongOutput(groups[0]!.body);
   const details = groups.map(({ h3, body }, n): Element => {
     h3.children = h3.children.filter((c) => !(isEl(c, 'a') && ((c.properties?.className as string[]) ?? []).includes('heading-anchor')));
     const failure = /failure/i.test(text(h3));

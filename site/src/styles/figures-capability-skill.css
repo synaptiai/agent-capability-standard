@@ -252,6 +252,13 @@
     color: var(--ink-2);
   }
 
+  .pmap__none {
+    grid-column: 2 / -1;
+    align-self: center;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
   .pmap__chip {
     padding: 0 var(--space-1);
     border: var(--px) solid var(--ink-3);
@@ -273,6 +280,10 @@
 
     .pmap__step {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .pmap__none {
+      grid-column: auto;
     }
 
     .pmap__cell:has(.pmap__chip) .pmap__label {
@@ -335,6 +346,15 @@
   .skill-contract-own {
     vertical-align: -2px;
     color: var(--ink-3);
+  }
+
+  /* A row naming two fields gets one mark per field, each on its own line. */
+  .skill-contract-part {
+    display: block;
+  }
+
+  .skill-contract-part > code {
+    margin-right: var(--space-1);
   }
 
   /* ---------- the procedure in two columns when the column is wide ---------- */

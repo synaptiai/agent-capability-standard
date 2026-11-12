@@ -81,3 +81,14 @@ export function foldFirstTable(html: string, summary: string): string {
   const esc = summary.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${m[0]}</details>${html.slice(m.index + m[0].length)}`;
 }
+
+/**
+ * The first task list of rendered HTML folded into a <details> under
+ * `summary`: a checklist that a figure above it already shows item by item.
+ */
+export function foldFirstTaskList(html: string, summary: string): string {
+  const m = /<ul class="contains-task-list">[\s\S]*?<\/ul>/.exec(html);
+  if (!m) return html;
+  const esc = summary.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${m[0]}</details>${html.slice(m.index + m[0].length)}`;
+}

@@ -93,21 +93,34 @@ describe('rehype-capability-skill', () => {
     expect(section).not.toContain('data-info-figure');
   });
 
-  it("marks each top-level Field Definitions row with mutate's output contract, and leaves a nested path unmarked", async () => {
-    // mutate's output contract (ontology): success, rollback_command and new_state are fields of it, so
-    // each gets a pin; previous_state.hash is a nested path and gets an empty cell.
+  it("marks each Field Definitions row with mutate's output contract, a dotted path by its whole path", async () => {
+    // mutate's output contract (ontology): success, rollback_command and new_state
+    // are top-level fields; previous_state.hash is looked up one level in.
     const html = await render('skills/mutate/SKILL.md');
     const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
     expect(section).toContain('<th>In the output contract</th>');
     expect(section).toMatch(/<table[^>]*data-info-figure="enriched-table"/);
     const cellsIn = [...section.matchAll(/<td class="skill-contract-cell">([\s\S]*?)<\/td>/g)].map((m) => m[1]!);
     expect(cellsIn).toHaveLength(4);
-    expect(cellsIn[3]).toBe('');
-    const out = loadOntology().byId.get('mutate')!.output_schema as { properties: Record<string, unknown>; required?: string[] };
-    ['success', 'new_state', 'rollback_command'].forEach((name, i) => {
-      const want = !(name in out.properties) ? "no, the skill's own" : (out.required ?? []).includes(name) ? 'required' : 'optional';
-      expect(cellsIn[i]).toContain(want);
-    });
+    type S = { properties: Record<string, S>; required?: string[] };
+    const out = loadOntology().byId.get('mutate')!.output_schema as unknown as S;
+    const want = (s: S | undefined, name: string) => (!s || !(name in s.properties) ? "no, the skill's own" : (s.required ?? []).includes(name) ? 'required' : 'optional');
+    ['success', 'new_state', 'rollback_command'].forEach((name, i) => expect(cellsIn[i]).toContain(want(out, name)));
+    const prev = out.properties.previous_state;
+    expect(cellsIn[3]).toContain(want(prev?.properties ? prev : undefined, 'hash'));
+  });
+
+  it('marks each field of a row that names two, and leaves a placeholder path empty', async () => {
+    const two = FIXTURE.replace('| `previous_state.hash` | string |', '| `success` / `own_field` | boolean / string |\n| `result.<store_as>` | object |');
+    const html = (await renderRepoFile('skills/mutate/SKILL.md', two)).code;
+    const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
+    const cellsIn = [...section.matchAll(/<td class="skill-contract-cell">([\s\S]*?)<\/td>/g)].map((m) => m[1]!);
+    expect(cellsIn).toHaveLength(5);
+    // success is required by mutate's contract (ontology); own_field is in no contract.
+    const out = loadOntology().byId.get('mutate')!.output_schema as { required?: string[] };
+    expect(out.required).toContain('success');
+    expect(cellsIn[3]).toMatch(/<code>success<\/code>:.*required.*<code>own_field<\/code>:.*no, the skill's own/s);
+    expect(cellsIn[4]).toBe('');
   });
 
   it("adds the output contract's required and optional marks to Field Definitions when the skill's fields all match it", async () => {
@@ -132,6 +145,21 @@ describe('rehype-capability-skill', () => {
     expect(summaries.some((s) => s.includes('heading-anchor'))).toBe(false);
     // The lead-in paragraph stays outside the examples.
     expect(html).toMatch(/<p>Lead-in.<\/p>\s*<details class="skill-example" open>/);
+  });
+
+  it('folds a long Output fence of the open first example under its own summary, and leaves a short one', async () => {
+    // 101 lines of output (one over the limit of 100) in example 1, and a
+    // copy where example 1's output is 3 lines.
+    const long = Array.from({ length: 101 }, (_, i) => `k${i}: ${i}`).join('\n');
+    const withOutput = (body: string) => FIXTURE.replace('one\n', `**Input:**\n\n\`\`\`yaml\na: 1\n\`\`\`\n\n**Output:**\n\n\`\`\`yaml\n${body}\n\`\`\`\n`);
+    const html = (await renderRepoFile('skills/mutate/SKILL.md', withOutput(long))).code;
+    const first = html.slice(html.indexOf('<details class="skill-example" open>'), html.indexOf('<details class="skill-example">'));
+    expect(first).toMatch(/<details class="fig-details skill-fence" data-long-output="101"><summary>Show the whole output, 101 lines of YAML<\/summary><pre/);
+    // The input fence stays open.
+    expect(first.match(/<pre/g)).toHaveLength(2);
+    expect(first.match(/data-long-output/g)).toHaveLength(1);
+    const short = (await renderRepoFile('skills/mutate/SKILL.md', withOutput('k: 1\nl: 2\nm: 3'))).code;
+    expect(short).not.toContain('data-long-output');
   });
 
   it("drops the thematic break that ended an example in the Markdown, and keeps the example's text", async () => {
