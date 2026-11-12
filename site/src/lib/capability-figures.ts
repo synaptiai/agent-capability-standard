@@ -593,9 +593,19 @@ export function exampleFields(skillText: string, where: string): ExampleFields {
   };
 }
 
-/** A figure when the skill has two or more examples and at least one names an output field. */
+/** True when the skill has two or more examples, each writes out the same output fields, and that is at least one. */
+export function exampleFieldsSame(f: ExampleFields): boolean {
+  const key = (e: { shows: string[] }) => e.shows.join(',');
+  return f.examples.length >= 2 && f.examples[0]!.shows.length > 0 && f.examples.every((e) => key(e) === key(f.examples[0]!));
+}
+
+/**
+ * A figure when the skill has two or more examples, at least one names an
+ * output field, and they do not all write out the same fields: a grid of
+ * identical rows says no more than one sentence (exampleFieldsCaption).
+ */
 export function exampleFieldsIsFigure(f: ExampleFields): boolean {
-  return f.examples.length >= 2 && f.examples.some((e) => e.shows.length > 0);
+  return f.examples.length >= 2 && f.examples.some((e) => e.shows.length > 0) && !exampleFieldsSame(f);
 }
 
 export function exampleFieldsTitle(cap: Capability): string {
@@ -606,6 +616,13 @@ export function exampleFieldsCaption(_cap: Capability, f: ExampleFields): string
   const all = f.outputs.filter((o) => f.examples.every((e) => e.shows.includes(o)));
   const none = f.outputs.filter((o) => f.examples.every((e) => !e.shows.includes(o)));
   const lead = `${plural(f.examples.length, 'example', 'examples')} against the skill's ${plural(f.outputs.length, 'output field', 'output fields')}`;
+  if (exampleFieldsSame(f)) {
+    const shown = f.examples[0]!.shows;
+    const all = f.examples.length === 2 ? 'Both examples' : `All ${f.examples.length} examples`;
+    return shown.length === f.outputs.length
+      ? `${all} of the skill write out every one of its ${plural(f.outputs.length, 'output field', 'output fields')}.`
+      : `${all} of the skill write out the same ${shown.length} of its ${plural(f.outputs.length, 'output field', 'output fields')}, and ${f.examples.length === 2 ? 'neither' : 'none'} writes out ${wordList(none)}.`;
+  }
   if (!exampleFieldsIsFigure(f)) return `${lead}: no example writes out an output field by name.`;
   return `${lead}: ${all.length === 0 ? 'no field is in every example' : `${wordList(all)} ${all.length === 1 ? 'is' : 'are'} in every example`}${none.length === 0 ? '' : `, and ${wordList(none)} ${none.length === 1 ? 'is' : 'are'} in none`}.`;
 }

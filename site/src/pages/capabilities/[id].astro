@@ -25,6 +25,8 @@ import {
   compositionChain,
   exampleFields,
   exampleFieldsIsFigure,
+  exampleFieldsSame,
+  exampleFieldsCaption,
   skillTools,
   verificationMap,
   verificationMapIsFigure,
@@ -133,8 +135,11 @@ for (const part of skill.parts) {
       : examplesUnderOutput
         ? { kind: 'examples', n: next(), lead: outputFieldsCaption(cap, fields) }
         : { kind: 'sentence', text: outputFieldsCaption(cap, fields) };
+  // When every example writes out the same fields, one sentence says so in place of F-C9.
+  const sameLead = exampleFieldsSame(examples) ? exampleFieldsCaption(cap, examples) : undefined;
   if (part.id === 'examples' && exampleFieldsIsFigure(examples) && !examplesUnderOutput) after[part.id] = { kind: 'examples', n: next() };
-  else if (part.id === 'examples' && xworkflows.length > 0) after[part.id] = { kind: 'xworkflows', n: next() };
+  else if (part.id === 'examples' && xworkflows.length > 0) after[part.id] = { kind: 'xworkflows', n: next(), lead: sameLead };
+  else if (part.id === 'examples' && sameLead) after[part.id] = { kind: 'sentence', text: sameLead };
   if (part.id === 'verification' && verificationMapIsFigure(checks)) after[part.id] = { kind: 'verification', n: next() };
   if (part.id === 'composition-patterns' && chainLength >= 2) after[part.id] = { kind: 'chain', n: next() };
   if (part.id === 'safety-constraints')
@@ -273,6 +278,7 @@ const skillFacts = (
               <Fragment set:html={part.head} />
               {fig?.kind === 'examples' && fig.lead && <p>{fig.lead}</p>}
               {fig?.kind === 'examples' && <ExampleFields cap={cap} fields={examples} n={fig.n} />}
+              {fig?.kind === 'xworkflows' && fig.lead && <p>{fig.lead}</p>}
               {fig?.kind === 'xworkflows' && <ExampleWorkflowsFig cap={cap} rows={xworkflows} n={fig.n} />}
               {fig?.kind === 'inputs' && <InputGroupsFig cap={cap} groups={igroups} n={fig.n} />}
               {fig?.kind === 'verification' && <VerificationMap cap={cap} map={checks} n={fig.n} />}

@@ -11,6 +11,8 @@ import {
   compositionChain,
   exampleFields,
   exampleFieldsIsFigure,
+  exampleFieldsSame,
+  exampleFieldsCaption,
   contractRowId,
   contractSummary,
   edgeRules,
@@ -128,6 +130,17 @@ describe('exampleFields (F-C9)', () => {
       { title: 'Example 2: JSON', shows: ['result', 'notes'] },
     ]);
     expect(exampleFieldsIsFigure(f)).toBe(true);
+  });
+
+  it('is a sentence, not a figure, when every example writes out the same fields', () => {
+    const fence = '```yaml\nresult: 1\nconfidence: 0.9\n```';
+    const text = ['## Output Contract', '', '```yaml', 'result: object', 'confidence: number', 'notes: string', '```', '', '## Examples', '', '### Example 1: A', '', fence, '', '### Example 2: B', '', fence, ''].join('\n');
+    const f = exampleFields(text, 'fixture');
+    expect(exampleFieldsSame(f)).toBe(true);
+    expect(exampleFieldsIsFigure(f)).toBe(false);
+    expect(exampleFieldsCaption(cap('retrieve'), f)).toBe('Both examples of the skill write out the same 2 of its 3 output fields, and neither writes out notes.');
+    const all = exampleFields(text.replace('notes: string\n', ''), 'fixture');
+    expect(exampleFieldsCaption(cap('retrieve'), all)).toBe('Both examples of the skill write out every one of its 2 output fields.');
   });
 });
 

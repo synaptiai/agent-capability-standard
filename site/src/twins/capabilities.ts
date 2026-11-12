@@ -34,6 +34,7 @@ import {
   exampleFields,
   exampleFieldsCaption,
   exampleFieldsIsFigure,
+  exampleFieldsSame,
   exampleFieldsTitle,
   skillTools,
   exampleWorkflows,
@@ -173,7 +174,9 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
   const ex = exampleFields(skillText, skillSource);
   const examplesBlock = exampleFieldsIsFigure(ex)
     ? figure(exampleFieldsTitle(cap), exampleFieldsCaption(cap, ex), table(['Example', 'Output fields it writes out'], ex.examples.map((e) => [cell(e.title), e.shows.map(code).join(', ') || 'none'])))
-    : null;
+    : exampleFieldsSame(ex)
+      ? exampleFieldsCaption(cap, ex)
+      : null;
   const std = currentStandardText();
   const rules = edgeRules(std.text, std.source);
   const seq = safetySequence(cap, ontology);
