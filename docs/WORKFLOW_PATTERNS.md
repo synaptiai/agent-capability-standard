@@ -10,21 +10,17 @@
 
 The 36 atomic capabilities are **primitives**. Real agent behaviors emerge by **composing** these primitives into workflow patterns. This document catalogs common patterns that can be implemented as Skills.
 
-```
-┌─────────────────────────────────────────────────┐
-│  SKILLS (packaged workflows)                    │
-│  pdf-processing, data-analysis, code-review     │
-└─────────────────────────────────────────────────┘
-                    ↓ implement
-┌─────────────────────────────────────────────────┐
-│  WORKFLOW PATTERNS (reusable compositions)      │
-│  analyze, mitigate, optimize, validate          │
-└─────────────────────────────────────────────────┘
-                    ↓ compose from
-┌─────────────────────────────────────────────────┐
-│  ATOMIC CAPABILITIES (36 primitives)            │
-│  detect, classify, plan, verify, execute...     │
-└─────────────────────────────────────────────────┘
+```mermaid
+---
+title: From capabilities to skills
+---
+flowchart TB
+  accDescr: Skills implement workflow patterns, and workflow patterns are composed from the atomic capabilities.
+  skills["Skills (packaged workflows): pdf-processing, data-analysis, code-review"]
+  patterns["Workflow patterns (reusable compositions): analyze, mitigate, optimize, validate"]
+  atoms["Atomic capabilities (primitives): detect, classify, plan, verify, execute"]
+  skills -->|implement| patterns
+  patterns -->|compose from| atoms
 ```
 
 ---
@@ -66,6 +62,19 @@ analyze:
     4. measure(data, metrics) → values
     5. compare(values, baseline) → assessment
     6. explain(assessment) → report
+```
+
+```mermaid
+---
+title: Analyze pattern flow
+---
+flowchart TB
+  accDescr: The retrieved data goes two ways, to detect and classify for patterns and to measure and compare against a baseline, and explain reports the assessment.
+  retrieve["retrieve(target)"] -->|data| detect["detect(data, patterns)"]
+  detect -->|occurrences| classify["classify(occurrences)"]
+  retrieve -->|data| measure["measure(data, metrics)"]
+  measure -->|values| compare["compare(values, baseline)"]
+  compare -->|assessment| explain["explain(assessment)"]
 ```
 
 **Example uses**:
@@ -182,6 +191,19 @@ schedule:
     5. constrain(draft_schedule, resources) → schedule
 ```
 
+```mermaid
+---
+title: Schedule pattern flow
+---
+flowchart TB
+  accDescr: The task list feeds both a duration estimate and a dependency search, plan combines the tasks with both into a draft, and constrain fits the draft to the resources.
+  retrieve["retrieve(tasks)"] -->|task_list| measure["measure(tasks, duration)"]
+  retrieve -->|task_list| detect["detect(tasks, dependencies)"]
+  measure -->|estimates| plan["plan(tasks, estimates, deps)"]
+  detect -->|deps| plan
+  plan -->|draft_schedule| constrain["constrain(draft_schedule, resources)"]
+```
+
 ---
 
 ## 3. Execution Patterns
@@ -213,6 +235,7 @@ process:
 title: Process pattern flow
 ---
 flowchart TB
+  accDescr: A checkpoint is saved before the data is transformed; a valid result is persisted, and an invalid one is rolled back to the checkpoint's recovery point.
   retrieve["retrieve(input)"] -->|data| checkpoint["checkpoint(data)"]
   checkpoint --> transform["transform(data, steps)"]
   transform -->|result| verify{"verify(result, criteria)"}
@@ -247,6 +270,21 @@ migrate:
     7. if !success: rollback(recovery_point)
 ```
 
+```mermaid
+---
+title: Migrate pattern flow
+---
+flowchart TB
+  accDescr: The data is converted and checked against the schema before a checkpoint is saved and the target is written; if the result is not a success, rollback restores the recovery point.
+  retrieve["retrieve(source)"] -->|data| transform["transform(data, target_format)"]
+  transform -->|converted| check{"verify(converted, schema)"}
+  check -->|valid| checkpoint["checkpoint(target_state)"]
+  checkpoint --> mutate["mutate(target, converted)"]
+  mutate -->|result| confirm{"verify(result, expectations)"}
+  confirm -->|not success| rollback["rollback(recovery_point)"]
+  checkpoint -.->|recovery_point| rollback
+```
+
 ### 3.3 Execute-Verify-Retry Pattern
 
 **Purpose**: Run operation with validation and retry.
@@ -277,6 +315,7 @@ execute_verify_retry:
 title: Execute-verify-retry loop
 ---
 flowchart TB
+  accDescr: Each attempt saves a checkpoint, executes and verifies; a failed check rolls back and plans the next attempt, and explain reports the outcome on success or once the attempts run out.
   subgraph attempt [Loop, up to max_attempts]
     checkpoint["checkpoint(state)"] -->|recovery| execute["execute(operation)"]
     execute -->|result| verify{"verify(result, criteria)"}
@@ -285,6 +324,7 @@ flowchart TB
     replan -->|retry_plan| checkpoint
   end
   verify -->|valid: success| explain["explain(outcome)"]
+  replan -->|attempts used up| explain
 ```
 
 
@@ -387,6 +427,23 @@ optimize:
          b. mutate(state, best) → new_state
          c. verify(new_state) → improved?
          d. if !improved: rollback()
+```
+
+```mermaid
+---
+title: Optimize pattern loop
+---
+flowchart TB
+  accDescr: Each round scores candidate changes against the objective; when the best beats the current state it is applied after a checkpoint and verified, and rolled back if it did not improve.
+  subgraph round [Loop until converged]
+    observe["observe(state)"] -->|current| discover["discover(current, possibilities)"]
+    discover -->|candidates| measure["measure(candidates, objective)"]
+    measure -->|scores| compare["compare(scores)"]
+    compare -->|best beats current| checkpoint["checkpoint(state)"]
+    checkpoint --> mutate["mutate(state, best)"]
+    mutate -->|new_state| verify{"verify(new_state)"}
+    verify -->|not improved| rollback["rollback()"]
+  end
 ```
 
 ### 5.2 Refine Pattern
@@ -514,6 +571,7 @@ consensus:
 title: Consensus loop
 ---
 flowchart TB
+  accDescr: The proposal is sent to the agents and their votes compared; while agreement is below the threshold a revised proposal goes out again, and at consensus synchronize shares the final proposal.
   generate["generate(options)"]
   subgraph round [Loop until consensus]
     send["send(proposal, agents)"] -->|distributed| receive["receive(votes)"]
@@ -622,7 +680,8 @@ enables (informational):
 title: What requires demands
 ---
 flowchart LR
-  checkpoint ==>|requires| mutate & send & rollback
+  accDescr: A checkpoint step must run before every mutate, send and rollback step, or the workflow fails with V102.
+  checkpoint ==>|must run first| mutate & send & rollback
 ```
 
 ```mermaid
@@ -630,7 +689,8 @@ flowchart LR
 title: What soft_requires asks for
 ---
 flowchart LR
-  constrain -.->|soft_requires| execute & mutate & send
+  accDescr: A constrain step should run before execute, mutate and send steps; without it the workflow still validates, with warning W601.
+  constrain -.->|should run first| execute & mutate & send
 ```
 
 

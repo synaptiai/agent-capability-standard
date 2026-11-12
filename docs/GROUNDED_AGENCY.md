@@ -395,6 +395,7 @@ Tie-breakers apply in order: (1) prefer authoritative source for the specific fi
 title: Choosing between conflicting claims
 ---
 flowchart TB
+  accDescr: The claim with the highest score wins; a tie goes to the authoritative source for the field, then to higher confidence, then to a human.
   claims[Conflicting claims] --> score["score(claim) = trust(source) × confidence × recency(t)"]
   score -->|highest score| win[Winning claim]
   score -->|tie| t1["1. Prefer the authoritative source for the field"]
@@ -469,10 +470,11 @@ Based on confidence score:
 title: What the alias confidence score decides
 ---
 flowchart LR
-  score[Score] -->|"> 0.90"| auto[Auto-merge]
-  score -->|"0.75–0.90"| suggest["Suggest merge (human review)"]
-  score -->|"0.60–0.75"| none[No action]
-  score -->|"< 0.40"| split[Force split review]
+  accDescr: Above 0.90 two entities merge automatically, from 0.75 to 0.90 a merge is suggested for human review, from 0.60 to 0.75 nothing happens, and below 0.40 a split is reviewed.
+  score[Alias confidence score] --> auto["Above 0.90: auto-merge"]
+  score --> suggest["0.75–0.90: suggest merge (human review)"]
+  score --> none["0.60–0.75: no action"]
+  score --> split["Below 0.40: force split review"]
 ```
 
 
@@ -564,6 +566,7 @@ failure_modes:
 title: The recovery loop in the example above
 ---
 flowchart TB
+  accDescr: When the verify step's result has passed == false, the step rolls back and the run goes back to the step that stores plan_out, carrying the failure evidence, at most 3 times.
   plan["Step that stores plan_out"] --> verify[verify step]
   verify -->|"passed == false"| rollback[Action: rollback]
   rollback -->|"goto_step: plan_out, with failure_evidence, at most 3 loops"| plan
@@ -969,17 +972,6 @@ This appendix bridges academic concepts to practical application. If you're eval
 - Low-stakes decisions with easy manual override
 
 ### D.3 Adoption Path
-
-```mermaid
----
-title: Adoption path
----
-flowchart TB
-  p1["Phase 1: Validation only (Week 1)"] --> p2["Phase 2: Safety layer (Weeks 2–4)"]
-  p2 --> p3["Phase 3: Grounding (Month 2)"]
-  p3 --> p4["Phase 4: Full conformance (Quarter 2)"]
-```
-
 
 **Phase 1: Validation only (Week 1)**
 - Add validator to CI/CD pipeline
