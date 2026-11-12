@@ -154,10 +154,10 @@ export const UI_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   'risk:high': ['#####.#', '......#', '#####.#', '#####.#', '.......', '#####..', '#####.#'],
   // Gate actions. skip: a hop over a post; end: an arrow into a bar.
   'gate:skip': ['..###..', '.#...#.', '.#...#.', '.#..###', '.....#.', '.......', '#######'],
-  // A no-entry sign (an outlined octagon with a bar across), not the solid
-  // square of visual spec 2.3: a solid square already means "required" on
-  // input pins, and a page that shows both read as one mark with two meanings.
-  stop: ['.#####.', '#.....#', '#.....#', '#######', '#.....#', '#.....#', '.#####.'],
+  // A stop sign's outline (a thick octagon ring), not the solid square of
+  // visual spec 2.3: a solid square already means "required" on input pins,
+  // and a page that showed both read as one mark with two meanings.
+  stop: ['.#####.', '#######', '##...##', '##...##', '##...##', '#######', '.#####.'],
   'gate:end': ['......#', '..#...#', '..##..#', '#####.#', '..##..#', '..#...#', '......#'],
   // Failure actions.
   'fail:request_more_context': ['#######', '##...##', '####.##', '###.###', '#######', '###.###', '##.....'],
