@@ -287,6 +287,20 @@ flowchart TB
   verdict per attested principal, read from that reviewer's result,
   fail-closed. A quorum's model
   families count only as attested, no longer as requested.
+
+```mermaid
+---
+title: Results a waiting delegate keeps under identity@1
+---
+flowchart TB
+  accDescr: With identity@1, effective.identity attests who took a delegation; a malformed or contradicting identity is R402, and a waiting delegate keeps only results from the attested principal and drops the rest with the reason delegate_identity.
+  del[Delegation taken] --> id{"effective.identity"}
+  id -->|"malformed or contradicting"| r402[R402]
+  id -->|attested principal| wait[Waiting delegate]
+  wait -->|result from that principal| keep[Kept]
+  wait -->|result from anyone else| drop["Dropped: delegate_identity"]
+```
+
 - **W608 through `invoke` (§5.13):** an `invoke` of a catalog workflow
   that can wait counts as a wait, since the run it invokes invalidates the
   caller's checkpoints.
@@ -321,6 +335,19 @@ flowchart TB
   transitively, from one with an unattended trigger runs unattended, so its
   approval steps warn as its caller's would. `x-` vendor entries are never
   run, so they make nothing unattended.
+
+```mermaid
+---
+title: W606 through invoke
+---
+flowchart TB
+  accDescr: A workflow invoked, directly or transitively, from one with an unattended trigger runs unattended, so its approval steps warn W606 as its caller's would; x- vendor entries never run.
+  trig[Workflow with an unattended trigger] -->|invoke| a[Invoked workflow: unattended]
+  a -->|invoke| b[Transitively invoked: unattended]
+  a --> w["Approval steps warn W606"]
+  b --> w
+```
+
 - **Smaller rules made explicit, each S303:** a literal empty
   `accept_from` (§5.15); a `synchronize` wait whose `agents` repeat one
   (§5.13); an `invoke` that names different targets in `workflow_id` and
