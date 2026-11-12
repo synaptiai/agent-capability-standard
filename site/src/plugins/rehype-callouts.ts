@@ -3,14 +3,24 @@
 // GitHub's alert form `> [!NOTE]`. The labels are Note, Tip, Important, Warning
 // and Caution. The result is
 //   <div class="callout callout--note" role="note">
-//     <p class="callout__label">Note</p> ...the rest of the quote...
+//     <p class="callout__label"><svg …glyph…/> Note</p> ...the rest of the quote...
 //   </div>
 // Any other blockquote is left as it is.
 import type { Element, ElementContent, Root } from 'hast';
 import { visit } from 'unist-util-visit';
+import { glyphElement } from '../pixel/hast';
 
 export const CALLOUT_TYPES = ['note', 'tip', 'important', 'warning', 'caution'] as const;
 export type CalloutType = (typeof CALLOUT_TYPES)[number];
+
+/** The label glyph of each type, the same as the generated Callout component's (visual spec 3.10.3). */
+export const CALLOUT_GLYPHS: Readonly<Record<CalloutType, string>> = {
+  note: 'note',
+  tip: 'check',
+  important: 'note',
+  warning: 'warning',
+  caution: 'caution',
+};
 
 const LABEL = /^(note|tip|important|warning|caution)\s*(:?)$/i;
 const ALERT = /^\[!(note|tip|important|warning|caution)\]\s*/i;
@@ -73,7 +83,7 @@ export default function rehypeCallouts() {
         type: 'element',
         tagName: 'p',
         properties: { className: ['callout__label'] },
-        children: [{ type: 'text', value: label }],
+        children: [glyphElement(CALLOUT_GLYPHS[type]), { type: 'text', value: ` ${label}` }],
       });
     });
   };
