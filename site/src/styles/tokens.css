@@ -50,9 +50,13 @@
     --layer-COORDINATE: #1d4ed8;
     --tint-amount: 12%;
     /* The fill of a "yes" cell in a safety panel: the layer mixed toward --bg.
-       The cell also takes a layer-coloured border and top bar, so the fill
-       stays faint; in dark a stronger mix of the warm layers reads as brown. */
+       In dark a stronger mix of the warm layers reads as brown, so the fill
+       stays faint there and the cell takes a layer-coloured border and bar. */
     --safety-on-amount: 12%;
+    /* How much of the layer colour the "yes" cell's border and 4px top bar
+       take: none in light (a --line border, no bar, as approved), all of it
+       in dark, where the faint fill alone does not mark the cell. */
+    --safety-on-edge: 0%;
 
     /* Risk (red and gold are used for nothing else) */
     --risk-low: #3f5168;
@@ -172,6 +176,7 @@
       --layer-COORDINATE: #6f9cff;
       --tint-amount: 20%;
       --safety-on-amount: 8%;
+      --safety-on-edge: 100%;
       --risk-low: #b4c0d0;
       --risk-medium: #facc15;
       --risk-high: #f87171;
@@ -231,6 +236,7 @@
     --layer-COORDINATE: #6f9cff;
     --tint-amount: 20%;
     --safety-on-amount: 8%;
+    --safety-on-edge: 100%;
     --risk-low: #b4c0d0;
     --risk-medium: #facc15;
     --risk-high: #f87171;

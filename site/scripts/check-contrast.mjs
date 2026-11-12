@@ -226,12 +226,15 @@ function figurePairs(tokens, layers) {
     add('text', `figure: --ink-2 on ${l} tint`, 'var(--ink-2)', tint(c));
     // The layer glyph and the current bar of the layer-bars figure on a --bg-mut track.
     add('edge', `figure: ${l} glyph or bar on --bg-mut`, c, 'var(--bg-mut)');
-    // A "yes" cell of a safety panel: --ink text on its faint fill, and its
-    // layer border and top bar against the fill and against the panel.
+    // A "yes" cell of a safety panel: --ink text on its fill, and its border
+    // (layer-coloured in dark, --line in light) against the fill.
     const on = tint(c, 'var(--safety-on-amount)');
     add('text', `figure: --ink on ${l} safety "yes" cell`, 'var(--ink)', on);
     add('text', `figure: --ink-2 on ${l} safety "yes" cell`, 'var(--ink-2)', on);
-    add('edge', `figure: ${l} border on its safety "yes" cell`, c, on);
+    add('edge', `figure: ${l} safety "yes" border on its fill`, `color-mix(in srgb, ${c} var(--safety-on-edge), var(--line))`, on);
+    // The home story's marked steps: --ink labels on the layer mixed 22% into
+    // --bg (.story__on in components.css).
+    add('text', `figure: --ink on ${l} home-story step`, 'var(--ink)', tint(c, '22%'));
   }
   // Recessive bars (the other layers in the layer-bars figure) on their track,
   // and the --indicator bar of PixelBar on its track (also in the site pairs).
