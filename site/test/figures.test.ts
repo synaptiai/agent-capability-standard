@@ -156,3 +156,35 @@ describe('figure blocks in Markdown copies (visual spec 6.1)', () => {
     );
   });
 });
+
+describe('figure parts as hast, for rehype steps', () => {
+  it('draws a glyph as the same rects as its grid, hidden unless labelled', async () => {
+    const { glyphElement } = await import('../src/pixel/hast');
+    const { toRects, parseGrid } = await import('../src/pixel/grid');
+    const { UI_GLYPHS } = await import('../src/pixel/glyphs');
+    const g = glyphElement('flag', { scale: 3 });
+    expect(g.children).toHaveLength(toRects(parseGrid('flag', UI_GLYPHS.flag!)).length);
+    expect(g.properties.width).toBe(21);
+    expect(g.properties.ariaHidden).toBe('true');
+    expect(glyphElement('gate:stop', { label: 'stop' }).properties).toMatchObject({ role: 'img', ariaLabel: 'stop', dataGlyph: 'gate:stop' });
+  });
+
+  it('names a tile by its id and the layer the ontology gives it', async () => {
+    const { miniTileElement } = await import('../src/pixel/hast');
+    const layer = /^- id: mutate\n {2}layer: (\w+)$/m.exec(repoText('schemas/capability_ontology.yaml'))![1];
+    const t = miniTileElement('mutate', { size: 32, relation: 'requires' });
+    expect(t.tagName).toBe('a');
+    expect(t.properties.ariaLabel).toBe(`mutate, ${layer} layer: requires`);
+    expect(t.properties.className).toEqual(['mini-tile', 'mini-tile--32', 'has-layer']);
+    expect(t.children).toHaveLength(2);
+    expect(() => miniTileElement('teleport')).toThrow('not a capability');
+  });
+
+  it('fills a bar to its share of the scale and prints the value', async () => {
+    const { pixelBarElement } = await import('../src/pixel/hast');
+    const b = pixelBarElement(0.25, 1, { digits: 2 });
+    const track = b.children[0] as import('hast').Element;
+    expect((track.children[0] as import('hast').Element).properties.style).toBe('width: 25.000%');
+    expect(JSON.stringify(b.children[1])).toContain('0.25');
+  });
+});

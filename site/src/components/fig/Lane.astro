@@ -14,6 +14,8 @@
 //   indices (0-based) joined by a bracket; `glyph` is drawn at 1x beside the
 //   bracket's first row (e.g. 'flag' for a checkpoint, 'undo' for a rollback).
 // - marks: { row: number; glyph: string }[], default []. A glyph centred on a row.
+//   Lanes are 8px and the glyph 7px, so glyphs in two adjacent lanes sit
+//   1px apart; offset their rows or put the role glyph on the tile instead.
 // - side: 'left' | 'right', default 'right'. Which way the bracket ticks point.
 // - ink: Ink, default 'ink-2'.
 import { bracket, glyphRects, LANE_W, type Ink } from '../../pixel/lines';
