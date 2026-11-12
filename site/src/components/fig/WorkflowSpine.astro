@@ -154,7 +154,7 @@ const stepId = (k: number) => `ref-step-${k}`;
                 <span class="spine__role" aria-hidden="true">{role && <PixelGlyph name={role} />}</span>
                 <span class="spine__text">
                   <code class="spine__cap">{s.capability}</code>
-                  {s.workflowId !== null && <PixelGlyph name="nested" class="spine__nested" />}
+                  {s.workflowId !== null && <PixelGlyph name="flow:invoke" class="spine__nested" />}
                   {s.purpose && <span class="spine__purpose">{s.purpose}</span>}
                 </span>
                 <span class="fig-sr">; {spineStepWords(s)}</span>

@@ -62,7 +62,7 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
       'nested', 'note', 'copy', 'status:proposed', 'empty', 'folder', 'group', 'skill:capability', 'flow:store', 'flow:read',
       'policy:always', 'type:boolean', 'type:list', 'type:record', 'status:candidate', 'fail:request_more_context',
       'tool:executor', 'source:system_log', 'source:document', 'section:rfcs', 'section:spec', 'chapter:scope',
-      'domain:multimodal', 'domain:personal_assistant', 'group:skill-authoring',
+      'domain:multimodal', 'domain:personal_assistant', 'group:skill-authoring', 'skill:composed', 'chapter:references',
     ],
   },
   {
@@ -70,11 +70,12 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
     keys: [
       'chevron-left', 'chevron-right', 'mark:requires', 'mark:soft_requires', 'mark:enables', 'mark:precedes', 'mark:conflicts_with',
       'mark:alternative_to', 'undo', 'external', 'gate:end', 'gate:skip', 'fail:escalate', 'source:api', 'status:superseded', 'code',
+      'flow:invoke', 'count:edges',
     ],
   },
   {
     title: 'Crosses, stars and rays',
-    keys: ['close', 'status:rejected', 'type:open', 'sun', 'hash', 'status:analysis', 'chapter:design-principles', 'domain:healthcare'],
+    keys: ['close', 'status:rejected', 'type:open', 'sun', 'hash', 'status:analysis', 'chapter:design-principles', 'domain:healthcare', 'mark:required', 'flow:run'],
   },
   {
     title: 'Bars and stacks',
@@ -88,7 +89,7 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
     title: 'Rings and round shapes',
     keys: [
       'eye', 'half', 'moon', 'stop', 'caution', 'search', 'section:domains', 'domain:vision', 'domain:manufacturing', 'source:sensor',
-      'group:standard-cert', 'chapter:identity-resolution-policy',
+      'group:standard-cert', 'chapter:identity-resolution-policy', 'approve:review',
     ],
   },
   {
@@ -103,7 +104,7 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
       'tool:plugin', 'tool:sdk', 'section:start', 'section:guides', 'section:compliance', 'section:community', 'chapter:terms',
       'chapter:authority-trust-model', 'chapter:diagnostic-model', 'chapter:versioning-and-compatibility',
       'chapter:decision-frameworks', 'principle:grounded-claims', 'principle:auditable-transforms', 'principle:composable-atoms',
-      'principle:explicit-contracts', 'group:regulation',
+      'principle:explicit-contracts', 'group:regulation', 'flow:condition', 'flag:overridable',
     ],
   },
   // The one-per-page icons of the listing cards and home cards

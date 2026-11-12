@@ -50,7 +50,7 @@ describe('step spine on the fixture (F-W1)', () => {
     const glyphs = s.legend.map((l) => l.glyph);
     for (const a of ['stop', 'rollback', 'skip', 'warn', 'end']) expect(glyphs).toContain(`gate:${a}`);
     for (const a of ['stop', 'rollback', 'request_more_context', 'pause_and_checkpoint', 'escalate']) expect(glyphs).toContain(`fail:${a}`);
-    expect(glyphs).toEqual(expect.arrayContaining(['fork', 'flow:join', 'nested', 'role:checkpoint', 'role:mutating']));
+    expect(glyphs).toEqual(expect.arrayContaining(['fork', 'flow:join', 'flow:invoke', 'role:checkpoint', 'role:mutating']));
     expect(s.maxGates).toBe(3);
     expect(s.maxFailures).toBe(2);
   });

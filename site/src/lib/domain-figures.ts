@@ -210,7 +210,7 @@ export function sourcesCaption(s: DomainSource[]): string {
 // --------------------------------------------------------- F-D7 compliance
 
 /** The status glyph of each compliance value (visual spec 3.5, F-D7). */
-export const COMPLIANCE_GLYPH: Readonly<Record<string, string>> = { required: 'stamp', advisory_only: 'note', recommended: 'check' };
+export const COMPLIANCE_GLYPH: Readonly<Record<string, string>> = { required: 'mark:required', advisory_only: 'note', recommended: 'check' };
 export const COMPLIANCE_WORD: Readonly<Record<string, string>> = { required: 'required', advisory_only: 'advisory only', recommended: 'recommended' };
 const DAYS_PER_YEAR = 365;
 

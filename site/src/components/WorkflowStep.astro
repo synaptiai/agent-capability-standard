@@ -88,7 +88,7 @@ const has = (v: unknown) => v !== undefined && v !== null;
           </div>
         )}
         {step.workflow_id && (
-          <div><dt>Runs workflow</dt><dd><PixelGlyph name="nested" /> <a href={workflowHref(step.workflow_id)}><code>{step.workflow_id}</code></a></dd></div>
+          <div><dt>Runs workflow</dt><dd><PixelGlyph name="flow:invoke" /> <a href={workflowHref(step.workflow_id)}><code>{step.workflow_id}</code></a></dd></div>
         )}
         {step.parallel_group && <div><dt>Parallel group</dt><dd><code>{step.parallel_group}</code></dd></div>}
         {step.mapping_ref && (
@@ -116,7 +116,7 @@ const has = (v: unknown) => v !== undefined && v !== null;
       )}
       {has(step.condition) && (
         <p class="wf-step__branch">
-          <PixelGlyph name="diamond" /><span class="wf-step__only-if">Only if</span> <BreakCode text={String(step.condition)} />
+          <PixelGlyph name="flow:condition" /><span class="wf-step__only-if">Only if</span> <BreakCode text={String(step.condition)} />
           {step.skip_if_false === true && ' (skipped when false)'}
         </p>
       )}

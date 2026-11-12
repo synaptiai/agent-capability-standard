@@ -43,7 +43,7 @@ const after = points.filter((p) => p.at === 'after');
   <div class="branches" data-kind={kind}>
     {[...before.map((p) => ({ p })), { step: true as const }, ...after.map((p) => ({ p }))].map((item) =>
       'step' in item ? (
-        <p class="branches__step"><PixelGlyph name="nested" /><span>The step runs</span></p>
+        <p class="branches__step"><PixelGlyph name="flow:run" /><span>The step runs</span></p>
       ) : (
         <div class="branches__point" data-at={item.p.at}>
           <p class="branches__decision"><PixelGlyph name="diamond" /><span>{item.p.label}</span></p>

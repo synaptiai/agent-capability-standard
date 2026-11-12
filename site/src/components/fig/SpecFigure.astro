@@ -317,7 +317,7 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
 {slot === 'recovery-loop' && loopRange && (
   <Figure id={idOf('recovery loop')} n={n} title={titled('Recovery loop')} caption={D.recoveryCaption(rec)} kind="recovery-loop">
     <div class="rloop">
-      <p class="rloop__step"><PixelGlyph name="nested" /><span>The step's failure mode fires</span></p>
+      <p class="rloop__step"><PixelGlyph name="flow:run" /><span>The step's failure mode fires</span></p>
       <ul class="rloop__branches">
         {rec.map((r, i) => (
           <li class:list={['rloop__branch', i === 0 && 'rloop__branch--loop']} data-branch={i}>
@@ -465,7 +465,7 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
           <PixelBar value={b.weight} max={1} digits={2} />
           <span class="trust-bars__marks">
             {b.accepted && <span class="trust-bars__mark"><PixelGlyph name="check" />accepted</span>}
-            {b.alwaysAsk && <span class="trust-bars__mark"><PixelGlyph name="eye" />always ask</span>}
+            {b.alwaysAsk && <span class="trust-bars__mark"><PixelGlyph name="approve:review" />always ask</span>}
           </span>
         </li>
       ))}

@@ -15,8 +15,8 @@ const GLYPHS: Record<string, string> = {
   'read-only': 'eye',
   checkpoint: 'flag',
   approval: 'stamp',
-  overridable: 'undo',
-  'catalog-core': 'nested',
+  overridable: 'flag:overridable',
+  'catalog-core': 'status:reference',
   'catalog-domain': 'fork',
 };
 const { kind, label, href } = Astro.props;

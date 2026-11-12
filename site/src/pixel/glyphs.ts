@@ -228,6 +228,22 @@ export const UI_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   'mark:conflicts_with': ['...#...', '#..#..#', '##.#.##', '#######', '##.#.##', '#..#..#', '...#...'],
   'mark:alternative_to': ['.......', '.#...#.', '##...##', '#######', '##...##', '.#...#.', '.......'],
   'mark:specializes': ['...#...', '..#.#..', '.#...#.', '#######', '...#...', '...#...', '..###..'],
+  // Concepts that used to borrow another concept's glyph (issue #125 review:
+  // no two concepts share an icon).
+  // condition: a question mark ("runs only if"), apart from the gate diamond.
+  'flow:condition': ['..###..', '.#...#.', '.....#.', '....#..', '...#...', '.......', '...#...'],
+  // run: a gear ("the step runs").
+  'flow:run': ['.#.#.#.', '.#####.', '###.###', '.#...#.', '###.###', '.#####.', '.#.#.#.'],
+  // invoke: an arrow into two stacked step tiles ("runs another workflow").
+  'flow:invoke': ['....###', '....#=#', '..#.###', '#####..', '..#.###', '....#=#', '....###'],
+  // review: a pair of spectacles ("a person reviews it"), apart from the read-only eye.
+  'approve:review': ['#.....#', '#.....#', '###.###', '#=###=#', '###.###', '.......', '.......'],
+  // required: an asterisk ("this must be present"), apart from the approval stamp.
+  'mark:required': ['...#...', '##.#.##', '.#####.', '..###..', '.#####.', '##.#.##', '...#...'],
+  // overridable: an open padlock ("a step may set it to false"), apart from rollback's undo arrow.
+  'flag:overridable': ['.###...', '#...#..', '#...#..', '#......', '#######', '##.####', '#######'],
+  // composed: four tiles in a square, a skill built from several capabilities.
+  'skill:composed': ['###.###', '#=#.#=#', '###.###', '.......', '###.###', '#=#.#=#', '###.###'],
   pip: ['##', '##'],
 };
 
@@ -278,6 +294,8 @@ export const CONCEPT_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   'chapter:versioning-and-compatibility': ['.........', '...######', '..#######', '.########', '###.#####', '.########', '..#######', '...######', '.........'],
   // A signpost: a pole and two long arms pointing opposite ways (not a
   // solid block, so it reads apart from the stop ring).
+  // References: a list of entries between square brackets, a citation list.
+  'chapter:references': ['###...###', '#.......#', '#.#####.#', '#.......#', '#.#####.#', '#.......#', '#.#####.#', '#.......#', '###...###'],
   'chapter:decision-frameworks': ['....#....', '#######..', '########.', '#######..', '....#....', '..#######', '.########', '..#######', '....#....'],
 
   // ---- Domain profiles, keyed by profile file stem
@@ -337,6 +355,8 @@ export const CONCEPT_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   // ---- Counts on the home page
   // Three slabs stacked with a gap.
   'count:layers': ['.........', '#########', '#########', '.........', '#########', '#########', '.........', '#########', '#########'],
+  // Two nodes joined by a line.
+  'count:edges': ['###......', '#=#......', '###......', '...#.....', '....#....', '.....#...', '......###', '......#=#', '......###'],
 
   // ---- Listing groups (glyphs-groups.ts)
   ...GROUP_GLYPHS,
@@ -354,7 +374,6 @@ export const CONCEPT_GLYPHS: Readonly<Record<string, readonly string[]>> = {
 export const GLYPH_ALIASES: Readonly<Record<string, string>> = {
   'chapter:capability-ontology': 'section:capabilities',
   'chapter:workflow-dsl': 'section:workflows',
-  'chapter:references': 'section:guides',
   'severity:error': 'caution',
   'severity:warning': 'warning',
   'gate:stop': 'stop',
@@ -362,19 +381,15 @@ export const GLYPH_ALIASES: Readonly<Record<string, string>> = {
   'gate:rollback': 'undo',
   'fail:stop': 'stop',
   'fail:rollback': 'undo',
-  'flow:condition': 'diamond',
   'approve:auto': 'check',
-  'approve:review': 'eye',
-  'approve:human': 'stamp',
+  'approve:human': 'source:human',
   'policy:high_risk': 'risk:high',
   'policy:medium_risk': 'risk:medium',
   'role:checkpoint': 'flag',
   'role:verify': 'check',
   'role:rollback': 'undo',
   'role:mutating': 'pencil',
-  'skill:composed': 'nested',
   'agent:explore': 'search',
-  'count:edges': 'mark:enables',
   'count:profiles': 'section:domains',
   'count:skills': 'skill:composed',
   ...GROUP_ALIASES,

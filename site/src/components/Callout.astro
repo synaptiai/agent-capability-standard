@@ -18,7 +18,7 @@ const GLYPH: Record<Kind, string> = {
   important: 'note',
   warning: 'warning',
   caution: 'caution',
-  requirement: 'stamp',
+  requirement: 'mark:required',
 };
 const { type, label } = Astro.props;
 const word = label ?? type.charAt(0).toUpperCase() + type.slice(1);

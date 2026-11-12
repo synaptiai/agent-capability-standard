@@ -211,7 +211,7 @@ export function workflowSpine(wf: Workflow): Spine {
   for (const a of gateActions) legend.push({ glyph: `gate:${a}`, label: GATE_WORDS[a] ?? `gate action ${a}` });
   const failActions = [...new Set(steps.flatMap((s) => s.failures))];
   for (const a of failActions) legend.push({ glyph: `fail:${a}`, label: FAILURE_WORDS[a] ?? `on failure, ${a}` });
-  if (steps.some((s) => s.workflowId !== null)) legend.push({ glyph: 'nested', label: 'runs another workflow' });
+  if (steps.some((s) => s.workflowId !== null)) legend.push({ glyph: 'flow:invoke', label: 'runs another workflow' });
   if (rows.some((r) => r.kind === 'fork')) {
     legend.push({ glyph: 'fork', label: 'parallel group starts' }, { glyph: 'flow:join', label: 'parallel group joins' });
   }

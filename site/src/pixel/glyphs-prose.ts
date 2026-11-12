@@ -8,7 +8,7 @@
  * - direct, a 1:1 correspondence: the right chevron, straight across;
  * - domain, the same capability specialized by a domain parameter: the
  *   specializes mark;
- * - composition, several capabilities together: the nested squares of a
+ * - composition, several capabilities together: the four tiles of a
  *   composed skill;
  * - workflow, a composed workflow pattern: the workflows section glyph;
  * - ga_extension, a GA-native capability given a synthetic GA-xxx code: the
@@ -17,7 +17,7 @@
 export const PROSE_ALIASES: Readonly<Record<string, string>> = {
   'map:direct': 'chevron-right',
   'map:domain': 'mark:specializes',
-  'map:composition': 'nested',
+  'map:composition': 'skill:composed',
   'map:workflow': 'section:workflows',
   'map:ga_extension': 'hash',
   // F-R2, the RFC lifecycle track: a draft is still being written (the

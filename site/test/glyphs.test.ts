@@ -73,6 +73,25 @@ describe('glyph distinctness', () => {
     expect(close).toEqual([]);
   });
 
+  it('draws concepts the visual review found sharing an icon with different grids', () => {
+    // The issue #125 visual review: one glyph meant two things on the same
+    // page or legend. Each pair below is two different concepts.
+    const pairs = [
+      ['flow:condition', 'diamond'], // runs only if / has gates
+      ['mark:required', 'stamp'], // required field / needs approval
+      ['approve:human', 'stamp'], // a person carries it out / needs approval
+      ['flag:overridable', 'undo'], // mutation may be declared false / rollback
+      ['skill:composed', 'nested'], // composed skill / nested field
+      ['flow:invoke', 'nested'], // runs another workflow / nested field
+      ['flow:run', 'nested'], // the step runs / nested field
+      ['count:edges', 'mark:enables'], // edge types / the enables edge
+      ['chapter:references', 'section:guides'], // References chapter / Guides section
+      ['approve:review', 'eye'], // a person reviews it / read-only
+    ];
+    const same = pairs.filter(([a, b]) => resolveGlyphKey(a!) === resolveGlyphKey(b!)).map(([a, b]) => `${a} = ${b}`);
+    expect(same).toEqual([]);
+  });
+
   it('agrees with the pair list the glyph sheet shows', () => {
     const pairs = gridPairs(ALL_GRIDS);
     const a = pairs[0]!;

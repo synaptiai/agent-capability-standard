@@ -631,7 +631,7 @@ export function safetyRows(cap: Capability, profiles: DomainProfile[] = loadProf
     { key: 'mutation', term: 'Changes state', on: cap.mutation, value: yes(cap.mutation), glyph: cap.mutation ? 'pencil' : 'eye' },
     { key: 'checkpoint', term: 'Needs checkpoint', on: needsCheckpoint, value: viaEdge ? 'Yes, via requires edge' : yes(needsCheckpoint), glyph: 'flag' },
     { key: 'approval', term: 'Needs approval', on: cap.requires_approval, value: yes(cap.requires_approval), glyph: 'stamp' },
-    { key: 'overridable', term: 'Overridable', on: cap.mutation_overridable, value: yes(cap.mutation_overridable), glyph: 'undo' },
+    { key: 'overridable', term: 'Overridable', on: cap.mutation_overridable, value: yes(cap.mutation_overridable), glyph: 'flag:overridable' },
     {
       key: 'autonomy',
       term: 'Blocked from autonomy',

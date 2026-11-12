@@ -40,7 +40,7 @@ const caption = ref?.caption ?? dom!.caption;
     <div class="fam__body">
       {ref.families.length > 0 && (
         <section class="fam__group" aria-labelledby={`${id}-runs`}>
-          <p class="fam__label" id={`${id}-runs`}><PixelGlyph name="nested" /> Runs other workflows</p>
+          <p class="fam__label" id={`${id}-runs`}><PixelGlyph name="flow:invoke" /> Runs other workflows</p>
           {ref.families.map((f) => (
             <div class="fam-family" data-parent={f.parent.id}>
               <a class="fam-tile" href={workflowHref(f.parent.id)} data-workflow={f.parent.id}>
@@ -50,7 +50,7 @@ const caption = ref?.caption ?? dom!.caption;
               <ul class="fam-family__children" aria-label={`Workflows ${f.parent.id} runs`}>
                 {f.children.map((c) => (
                   <li class="fam-family__child">
-                    <span class="fam-family__edge"><PixelGlyph name="nested" /> {stepList(c.steps)}</span>
+                    <span class="fam-family__edge"><PixelGlyph name="flow:invoke" /> {stepList(c.steps)}</span>
                     <a class="fam-tile" href={workflowHref(c.workflow.id)} data-workflow={c.workflow.id}>
                       <code class="fam-tile__id">{idPieces(c.workflow.id).map((p, i) => <>{i > 0 && <wbr />}{p}</>)}</code>
                       <span class="fam-tile__facts"><span>{c.workflow.steps.length} {c.workflow.steps.length === 1 ? 'step' : 'steps'}</span><RiskBadge risk={c.workflow.risk} /></span>

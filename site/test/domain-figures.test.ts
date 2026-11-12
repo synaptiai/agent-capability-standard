@@ -116,7 +116,7 @@ describe('domain sources (F-D5) and compliance (F-D7)', () => {
   it('reads retention days as years to one decimal (2555 days is about 7.0 years, spec 3.5)', () => {
     const rows = complianceRows({ compliance: { hipaa: 'required', audit_retention_days: 2555, other: 'something_else' } })!;
     expect(rows).toEqual([
-      { key: 'hipaa', value: 'required', glyph: 'stamp' },
+      { key: 'hipaa', value: 'required', glyph: 'mark:required' },
       { key: 'audit_retention_days', value: '2555 days', glyph: null, years: 7 },
       { key: 'other', value: 'something else', glyph: null },
     ]);
