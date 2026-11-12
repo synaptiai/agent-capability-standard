@@ -413,7 +413,7 @@ function enrichTable(table: Element): number {
       cells.forEach((c, r) => {
         const strip = wfs[r] ? stepStripElement(wfs[r]!) : null;
         if (!strip) return;
-        c!.children.push(text(' '), strip);
+        c!.children.push(strip);
         c!.properties = { ...c!.properties, className: [...classes(c!), 'prose-wf-cell'] };
         marked.add(r);
       });
@@ -427,6 +427,7 @@ function enrichTable(table: Element): number {
         const lv = risks[r];
         if (!lv) return;
         c!.children.unshift(riskPips(lv), text(' '));
+        c!.properties = { ...c!.properties, className: [...classes(c!), 'prose-risk-cell'] };
         marked.add(r);
       });
       return;

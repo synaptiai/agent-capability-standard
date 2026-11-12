@@ -131,12 +131,18 @@
     color: var(--risk-high);
   }
 
-  .prose-strip {
-    margin-left: var(--space-1);
-    vertical-align: middle;
+  /* The strip goes on its own line under the id and wraps inside the cell. */
+  .step-strip.prose-strip {
+    display: flex;
+    max-width: 100%;
+    margin-top: var(--space-1);
   }
 
   .prose-wf-cell {
+    min-width: 10rem;
+  }
+
+  .prose-risk-cell {
     white-space: nowrap;
   }
 
