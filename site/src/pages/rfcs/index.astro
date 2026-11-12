@@ -3,6 +3,8 @@
 // and date, read from each RFC's header lines, then the proposals. An RFC
 // status outside the ones spec/GOVERNANCE.md allows fails the build.
 import StatusBadge from '../../components/StatusBadge.astro';
+import PageHero from '../../components/PageHero.astro';
+import { sectionHero } from '../../lib/prose-page';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { pageHref, refSlugger, routeByUrl } from '../../lib/generated';
 import { allowedRfcStatuses, rfcRows } from '../../lib/rfcs';
@@ -31,11 +33,13 @@ const description = 'Requests for comments that propose changes to the Agent Cap
 ---
 <DocLayout route={route} title="RFCs" description={description}>
   <article class="doc doc--rfcs" data-pagefind-body>
-    <h1 id={id('RFCs')}>RFCs</h1>
-    <p class="lead">
-      An RFC proposes a change to the standard. Its status is {allowed.slice(0, -1).join(', ')} or {allowed.at(-1)}.
-      How an RFC is decided is described under <a href={pageHref('/community/governance/#decision-making')}>Decision-making</a> on the Governance page.
-    </p>
+    <PageHero glyph={sectionHero(route.section).glyph} eyebrow="Section" section={route.section}>
+      <h1 id={id('RFCs')}>RFCs</h1>
+      <p class="lead">
+        An RFC proposes a change to the standard. Its status is {allowed.slice(0, -1).join(', ')} or {allowed.at(-1)}.
+        How an RFC is decided is described under <a href={pageHref('/community/governance/#decision-making')}>Decision-making</a> on the Governance page.
+      </p>
+    </PageHero>
     <Figure id={id('fig-rfc-lanes')} n={1} title={RFC_FIG_TITLE} caption={rfcLanesCaption(lanes)} describedby={tableId} kind="rfc-lanes">
       <ol class="rfc-lanes">
         {lanes.map((lane) => (

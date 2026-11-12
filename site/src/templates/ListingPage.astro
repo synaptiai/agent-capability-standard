@@ -1,10 +1,12 @@
 ---
-// A section's overview page: an intro line and a card for every other page of
-// the section.
+// A section's overview page: a hero band with the section's glyph and the
+// intro line, then a card for every other page of the section.
+import PageHero from '../components/PageHero.astro';
 import SectionIndex from '../components/SectionIndex.astro';
 import DocLayout from '../layouts/DocLayout.astro';
 import { refSlugger } from '../lib/generated';
 import { listingGroups } from '../lib/listing';
+import { sectionHero } from '../lib/prose-page';
 import { SECTIONS, type Route } from '../lib/routes';
 
 interface Props {
@@ -20,8 +22,10 @@ const h1 = id(section.label);
 ---
 <DocLayout route={route} title={section.label} description={intro}>
   <article class="doc doc--listing" data-section={route.section} data-pagefind-body>
-    <h1 id={h1}>{section.label}</h1>
-    <p class="lead">{intro}</p>
+    <PageHero glyph={sectionHero(route.section).glyph} eyebrow="Section" section={route.section}>
+      <h1 id={h1}>{section.label}</h1>
+      <p class="lead">{intro}</p>
+    </PageHero>
     <SectionIndex groups={groups} id={id} />
   </article>
 </DocLayout>

@@ -6,11 +6,11 @@
 // the allowed tools as chips. A skill that runs a catalog workflow also shows
 // that workflow's steps as a strip linked to the workflow's page.
 import StepStrip from '../components/fig/StepStrip.astro';
+import PageHero from '../components/PageHero.astro';
 import { COMPOSED_SKILLS } from '../data/skills';
 import { loadWorkflows } from '../data/workflows';
 import { refSlugger, workflowHref } from '../lib/generated';
 import type { Route } from '../lib/routes';
-import PixelGlyph from '../pixel/PixelGlyph.astro';
 import type { PageMeta } from '../plugins/remark-page-meta';
 import '../styles/figures-prose.css';
 // The folded output fence and examples of rehype-capability-skill.
@@ -43,10 +43,7 @@ const id = refSlugger();
 const title = page.title ?? route.title;
 ---
 <article class="doc doc--skill" data-skill={dir} data-pagefind-body>
-  <header class="page-hero skill-header" data-section={route.section}>
-    <span class="page-hero__tile" aria-hidden="true"><PixelGlyph name="skill:composed" scale={4} /></span>
-    <div class="page-hero__text">
-      <p class="eyebrow page-hero__eyebrow">Composed skill</p>
+  <PageHero glyph="skill:composed" eyebrow="Composed skill" section={route.section} class="skill-header">
       <h1 id={id(title)}>{title}</h1>
       {page.description && <p class="lead">{page.description}</p>}
       {(facts.length > 0 || tools.length > 0) && (
@@ -71,7 +68,6 @@ const title = page.title ?? route.title;
           <StepStrip wf={wf} size={20} symbols />
         </p>
       )}
-    </div>
-  </header>
+  </PageHero>
   <slot />
 </article>

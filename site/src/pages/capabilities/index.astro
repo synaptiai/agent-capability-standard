@@ -5,6 +5,8 @@
 // edge type folded under it, then one card per layer (visual spec 3.11).
 import CapabilityTable from '../../components/CapabilityTable.astro';
 import Figure from '../../components/fig/Figure.astro';
+import PageHero from '../../components/PageHero.astro';
+import { sectionHero } from '../../lib/prose-page';
 import IconCard from '../../components/fig/IconCard.astro';
 import RiskByLayer from '../../components/fig/RiskByLayer.astro';
 import '../../styles/figures-layer.css';
@@ -25,12 +27,14 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
 ---
 <DocLayout route={route} title="Capabilities" description={description}>
   <article class="doc doc--capabilities" data-pagefind-body>
-    <h1 id={id('Capabilities')}>Capabilities</h1>
-    <p class="lead">
-      The ontology defines {n} atomic capabilities in {ontology.layers.length} layers. Each capability has a typed
-      input and output contract, a risk level and safety flags (<a href={specSectionHref('4.1')}>Standard §4.1</a>).
-      Workflows compose them (<a href={pageHref('/workflows/')}>see workflows</a>).
-    </p>
+    <PageHero glyph={sectionHero(route.section).glyph} eyebrow="Section" section={route.section}>
+      <h1 id={id('Capabilities')}>Capabilities</h1>
+      <p class="lead">
+        The ontology defines {n} atomic capabilities in {ontology.layers.length} layers. Each capability has a typed
+        input and output contract, a risk level and safety flags (<a href={specSectionHref('4.1')}>Standard §4.1</a>).
+        Workflows compose them (<a href={pageHref('/workflows/')}>see workflows</a>).
+      </p>
+    </PageHero>
     <section class="capabilities-table">
       <h2 id={id('By layer')}>By layer</h2>
       <Figure id={id('fig-table')} n={1} title={TABLE_FIG_TITLE} caption={tableCaption()} kind="periodic-table" class="home-table__fig">

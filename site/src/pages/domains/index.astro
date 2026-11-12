@@ -10,6 +10,8 @@
 // domain parameter the capability it names takes in each catalog.
 import { getEntry, render } from 'astro:content';
 import Figure from '../../components/fig/Figure.astro';
+import PageHero from '../../components/PageHero.astro';
+import { sectionHero, splitH1 } from '../../lib/prose-page';
 import DomainGlance from '../../components/fig/DomainGlance.astro';
 import DomainParameter from '../../components/fig/DomainParameter.astro';
 import { AGNOSTIC_ANCHOR, headingProfileKey, parameterAcross } from '../../lib/domain-index';
@@ -36,6 +38,9 @@ const html = entry.rendered.html;
 const at = h2Section(html, CHOOSING_ANCHOR)?.start ?? html.length;
 if (at === html.length) console.warn(`domains: ${route.source} has no #${CHOOSING_ANCHOR}; the profile cards follow the README`);
 const page = remarkPluginFrontmatter.page as PageMeta | undefined;
+// The README's H1 goes in the hero band with the section glyph; the rest of
+// its opening stays as written.
+const head = splitH1(html.slice(0, at));
 const profiles = loadProfiles();
 const id = refSlugger();
 const axis = trustAxis(profiles);
@@ -54,7 +59,10 @@ const pct = (v: number) => `${(((v - axis.min) / (axis.max - axis.min)) * 100).t
 ---
 <DocLayout route={route} title={page?.title ?? route.title} description={route.description ?? page?.description}>
   <article class="doc doc--domains" data-pagefind-body>
-    <div class="doc__body" set:html={html.slice(0, at)} />
+    <PageHero glyph={sectionHero(route.section).glyph} eyebrow="Section" section={route.section}>
+      {head.h1 && <Fragment set:html={head.h1} />}
+    </PageHero>
+    <div class="doc__body" set:html={head.rest} />
     <section class="domain-profiles">
       <h2 id={id('Domain profiles')}>Domain profiles</h2>
       <Figure id={id('Figure profile cards')} n={1} title="Trust weights of each profile" caption={profilesCaption(profiles)} kind="profile-cards">
