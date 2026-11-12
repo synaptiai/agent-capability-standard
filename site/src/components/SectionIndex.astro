@@ -75,7 +75,7 @@ function groupGlyph(label: string): string {
           {f.bars.rows.map((r) => (
             <li class="bar-list__row">
               <span class="bar-list__label">{r.url ? <a href={r.url}>{r.label}</a> : r.label}</span>
-              <PixelBar value={r.value} max={Math.max(...f.bars.rows.map((x) => x.value))} label={r.words} />
+              <PixelBar value={r.value} max={r.max ?? Math.max(...f.bars.rows.map((x) => x.value))} label={r.words} />
             </li>
           ))}
         </ul>
