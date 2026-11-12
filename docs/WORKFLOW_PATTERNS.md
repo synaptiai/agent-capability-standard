@@ -64,6 +64,19 @@ analyze:
     6. explain(assessment) → report
 ```
 
+```mermaid
+---
+title: Analyze pattern flow
+---
+flowchart TB
+  accDescr: The steps run in the numbered order, and the arrows follow the data: the retrieved data goes two ways, to detect and then classify, and to measure and then compare against a baseline, and explain reports the assessment.
+  retrieve["retrieve(target)"] -->|data| detect["detect(data, patterns)"]
+  detect -->|occurrences| classify["classify(occurrences)"]
+  retrieve -->|data| measure["measure(data, metrics)"]
+  measure -->|values| compare["compare(values, baseline)"]
+  compare -->|assessment| explain["explain(assessment)"]
+```
+
 **Example uses**:
 - Code analysis
 - Data profiling

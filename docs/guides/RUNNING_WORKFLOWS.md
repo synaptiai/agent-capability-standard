@@ -287,6 +287,19 @@ times (default 100,000, about 28 hours at the default 1 s
 `RunIncomplete` is raised with the live run in `.run`, so you can snapshot
 it or drive it on. `HostResponseError` is a `RunIncomplete`.
 
+```mermaid
+---
+title: Driving a run by hand
+---
+flowchart TB
+  accDescr: start returns the run without driving it; next returns the pending action until it is answered, your code acts and submit answers it; to carry a run across processes or days it is saved as a signed snapshot and restored with the same key, and restore refuses a tampered one.
+  st["runner.start()"] --> nx["run.next(): the pending action"]
+  nx --> act[Your code acts]
+  act --> sb["run.submit(): the response"]
+  sb --> nx
+  sb -.->|across processes or days| snap["run.snapshot(key), then runner.restore(): refuses a tampered one"]
+```
+
 ## Conformance
 
 `tests/conformance/runtime/*.json` are scripted runs. Each one has a

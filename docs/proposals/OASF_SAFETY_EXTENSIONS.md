@@ -440,6 +440,18 @@ steps:
           event: "Schema migration completed successfully"
 ```
 
+```mermaid
+---
+title: The atomic data pipeline update
+---
+flowchart TB
+  accDescr: The pipeline is checkpointed, the schema migration runs and data quality is assessed; a score under 0.95 rolls back to the checkpoint, and otherwise the success is audited.
+  cp["160101 checkpoint: pipeline/etl-main"] --> mig["090201 schema migration"]
+  mig --> q["090301 data quality assessment"]
+  q -->|"score < 0.95"| rb["160102 rollback to the checkpoint"]
+  q -->|"score ≥ 0.95"| audit["130401 audit: migration completed"]
+```
+
 #### Error Handling
 
 If a rollback operation fails:
@@ -932,6 +944,18 @@ steps:
         input:
           checkpoint_id: "${cp.output.checkpoint_id}"
           reason: "Post-deployment health check failed"
+```
+
+```mermaid
+---
+title: The safe model deployment
+---
+flowchart TB
+  accDescr: The deployment policies are checked first; only when they pass is a checkpoint taken, then the model is deployed and its health checked, and a failed health check rolls back to the checkpoint.
+  con["1 constrain: maintenance window, SRE approval"] -->|compliant| cp["2 checkpoint the production namespace"]
+  cp --> dep["3 deploy model-serving-v2.3.1"]
+  dep --> health["4 performance monitoring: error rate, latency"]
+  health -->|"passed == false"| rb["5 rollback to the checkpoint"]
 ```
 
 ### 5.3 Category 16 Skills Summary

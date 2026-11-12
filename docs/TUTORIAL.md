@@ -484,6 +484,20 @@ steps:
         - ${code_search}
 ```
 
+```mermaid
+---
+title: The parallel group in the example
+---
+flowchart LR
+  accDescr: The log search and the code search run together in the gather_context group, which joins when both are complete, and integrate combines the two results.
+  subgraph gather_context [parallel_group gather_context]
+    logs["search: logs"]
+    code["search: src"]
+  end
+  logs -->|log_search| integrate
+  code -->|"code_search, join: all_complete"| integrate
+```
+
 ### 4.2 Conditional Execution
 
 Skip steps based on conditions:

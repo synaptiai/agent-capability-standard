@@ -347,6 +347,17 @@ confidence: 0.95
       speaker_diarization: true
 ```
 
+```mermaid
+---
+title: Speech detection, then transcription
+---
+flowchart TB
+  accDescr: detect with domain audio.speech finds speech segments in the retrieved audio, and transform turns those segments from audio.speech into text.transcript.
+  r["retrieve_out.data"] --> d["detect, domain: audio.speech"]
+  d -->|speech_segments_out.matches| t["transform: audio.speech to text.transcript"]
+  t --> o[transcript_out]
+```
+
 Output for detect step:
 ```yaml
 detected: true
@@ -789,6 +800,28 @@ When no specialization is needed, the modality alone suffices:
 ## Appendix B: Complete Workflow -- Multi-Modal Content Moderation
 
 This appendix demonstrates a full workflow that uses domain parameters across multiple modalities.
+
+```mermaid
+---
+title: The content moderation workflow
+---
+flowchart TB
+  accDescr: The workflow retrieves the submission, detects speech in the audio, classifies text and images in one parallel group, transcribes the speech, looks for cross-modal evasion, integrates the signals, decides, explains and audits.
+  retrieve["1 retrieve the submission"] --> det["2 detect speech in the audio"]
+  subgraph modality_analysis [parallel_group modality_analysis]
+    ct["3 classify the text"]
+    ci["4 classify the images"]
+  end
+  det --> ct
+  det --> ci
+  ct --> tr["5 transform speech to text"]
+  ci --> tr
+  tr --> ev["6 detect cross-modal evasion"]
+  ev --> integ["7 integrate all signals"]
+  integ --> verdict["8 classify, domain: moderation.decision"]
+  verdict --> explain["9 explain the decision"]
+  explain --> audit["10 audit the decision"]
+```
 
 ```yaml
 # Standard version: 1.1.0

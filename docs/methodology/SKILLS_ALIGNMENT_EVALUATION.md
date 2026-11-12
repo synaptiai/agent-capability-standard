@@ -304,6 +304,18 @@ Skills documentation shows common workflow patterns. Let's validate:
 
 **Our capabilities cover this**: ✅ (verify + conditional logic in workflow)
 
+```mermaid
+---
+title: Pattern 2, the feedback loop
+---
+flowchart TB
+  accDescr: Make edits with mutate, validate with verify, fix and validate again while validation fails, and proceed when it passes.
+  e["Make edits: mutate"] --> v{"Validate: verify"}
+  v -->|fails| fix[Fix]
+  fix --> v
+  v -->|passes| go[Proceed]
+```
+
 **Pattern 3: Progressive Disclosure**
 ```
 1. Read main instructions (retrieve)

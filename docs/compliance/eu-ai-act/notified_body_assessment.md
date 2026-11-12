@@ -188,6 +188,19 @@ When notified body engagement is required or recommended, the provider should se
 | CE marking (Art. 48) | Provider affixes CE marking | Upon declaration |
 | Post-market monitoring (EUAIA-PMM-001) | Ongoing monitoring commences | Continuous |
 
+```mermaid
+---
+title: The conformity assessment milestones in order
+---
+flowchart TB
+  accDescr: The milestones run from risk classification and route determination through documentation and the two assessments to the declaration of conformity, the CE marking and continuous monitoring; a certificate is issued only on the notified body route.
+  cls[Risk classification] --> route[Route determination] --> docs[Technical documentation preparation] --> qms[QMS assessment] --> rev[Technical documentation review]
+  rev -->|notified body route| cert[Certificate issuance]
+  cert --> decl["Declaration of conformity (Art. 47)"]
+  rev -->|internal control route| decl
+  decl --> ce["CE marking (Art. 48)"] --> pmm["Post-market monitoring, continuous"]
+```
+
 ---
 
 ## Document Control

@@ -415,6 +415,16 @@ transition_rules:
         - "restore prior status"
 ```
 
+```mermaid
+---
+title: The example transition rule
+---
+flowchart LR
+  accDescr: An anomaly_detected event whose message contains 500, with an error rate over 0.01, sets the payments API to degraded and raises the alert level; the rollback restores the prior status.
+  prior[Prior status] -->|"anomaly_detected, message contains 500, error_rate_5m > 0.01"| degraded["degraded, alert_level high"]
+  degraded -.->|rollback| prior
+```
+
 ---
 
 ## 5. Trust-Aware Conflict Resolution
