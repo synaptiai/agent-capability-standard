@@ -208,6 +208,20 @@ process:
     6. else: rollback(recovery_point)
 ```
 
+```mermaid
+---
+title: Process pattern flow
+---
+flowchart TB
+  retrieve["retrieve(input)"] -->|data| checkpoint["checkpoint(data)"]
+  checkpoint --> transform["transform(data, steps)"]
+  transform -->|result| verify{"verify(result, criteria)"}
+  verify -->|valid| persist["persist(result)"]
+  verify -->|not valid| rollback["rollback(recovery_point)"]
+  checkpoint -.->|recovery_point| rollback
+```
+
+
 ### 3.2 Migrate Pattern
 
 **Purpose**: Move data/state from one system to another.
@@ -257,6 +271,22 @@ execute_verify_retry:
       6. plan(failure, adjustments) → retry_plan
     7. explain(outcome) → report
 ```
+
+```mermaid
+---
+title: Execute-verify-retry loop
+---
+flowchart TB
+  subgraph attempt [Loop, up to max_attempts]
+    checkpoint["checkpoint(state)"] -->|recovery| execute["execute(operation)"]
+    execute -->|result| verify{"verify(result, criteria)"}
+    verify -->|not valid| rollback["rollback(recovery)"]
+    rollback --> replan["plan(failure, adjustments)"]
+    replan -->|retry_plan| checkpoint
+  end
+  verify -->|valid: success| explain["explain(outcome)"]
+```
+
 
 ---
 
@@ -479,6 +509,24 @@ consensus:
     6. synchronize(agents, final_proposal) → consensus
 ```
 
+```mermaid
+---
+title: Consensus loop
+---
+flowchart TB
+  generate["generate(options)"]
+  subgraph round [Loop until consensus]
+    send["send(proposal, agents)"] -->|distributed| receive["receive(votes)"]
+    receive -->|responses| compare["compare(responses)"]
+    compare -->|agreement_level| check{Below threshold?}
+    check -->|yes| revise["generate(revised_proposal)"]
+  end
+  generate -->|proposal| send
+  revise -->|proposal| send
+  check -->|consensus| sync["synchronize(agents, final_proposal)"]
+```
+
+
 ---
 
 ## 7. Compound Patterns
@@ -568,6 +616,23 @@ enables (informational):
   retrieve → detect
   decompose → delegate
 ```
+
+```mermaid
+---
+title: What requires demands
+---
+flowchart LR
+  checkpoint ==>|requires| mutate & send & rollback
+```
+
+```mermaid
+---
+title: What soft_requires asks for
+---
+flowchart LR
+  constrain -.->|soft_requires| execute & mutate & send
+```
+
 
 ### 2. Safety Requirements
 
