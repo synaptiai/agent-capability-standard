@@ -75,7 +75,7 @@ flowchart TB
   cat{Catalog validates?} -->|yes| inp{"Inputs fit, JSON data?"}
   cat -->|no| e1["RunStartError with diagnostics"]
   inp -->|yes| run[The run starts]
-  inp -->|no| e2["RunStartError, none"]
+  inp -->|no| e2["RunStartError, no diagnostics"]
 ```
 
 ## Actions and responses
@@ -109,8 +109,8 @@ flowchart LR
   m[Host method] -->|response| sub[Submitted to the run]
   m -->|None| wait["Wait, then ask again"]
   wait --> m
-  m -->|exception| fail["Step fails, R402: retries and failure modes apply"]
-  m -->|"not implemented"| stop[The runner stops]
+  m -->|"exception from invoke_capability"| fail["Step fails, R402: retries and failure modes apply"]
+  m -->|NotImplementedError| stop[The runner stops]
 ```
 
 Values you hand the run must be I-JSON: integers within ±2^53 and at most

@@ -98,10 +98,9 @@ When a change touches critical paths (`schemas/`, `hooks/`, `skills/`, `grounded
 title: When a PVC report is needed
 ---
 flowchart TB
-  accDescr: A change that touches a critical path, schemas, hooks, skills, grounded_agency, tools or spec, includes a PVC report, which validate_pvc.py can check locally.
-  ch{"Touches schemas, hooks, skills, grounded_agency, tools or spec?"} -->|yes| pvc[Include a PVC report]
-  pvc --> v[Check it with validate_pvc.py]
-  ch -->|no| none[No report needed]
+  accDescr: A change that touches a critical path, schemas, hooks, skills, grounded_agency, tools or spec, includes a PVC report, which can be validated locally with validate_pvc.py.
+  ch["Change touches schemas, hooks, skills, grounded_agency, tools or spec"] --> pvc[Include a PVC report]
+  pvc -.->|can be validated locally| v[validate_pvc.py]
 ```
 
 - Guide: `skills/perspective-validation/CHECKLIST.md`

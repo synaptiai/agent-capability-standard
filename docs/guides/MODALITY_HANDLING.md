@@ -26,9 +26,9 @@ title: One verb, three modalities
 ---
 flowchart LR
   accDescr: Detecting a pattern in text, an object in an image and an anomaly in audio are one operation, detect, finding occurrences of a pattern in data; only the domain changes.
-  t["Text, domain: text.pattern"] --> detect
-  i["Image, domain: image.object"] --> detect
-  a["Audio, domain: audio.anomaly"] --> detect
+  t[A pattern in text] --> detect
+  i[An object in an image] --> detect
+  a[An anomaly in an audio stream] --> detect
 ```
 
 This insight drives our domain parameterization model:
@@ -151,8 +151,8 @@ The `observe` and `receive` capabilities accept any data type and do not use mod
 title: How the capabilities take a modality
 ---
 flowchart LR
-  accDescr: Six capabilities are most often parameterized by modality through domain, two take it through format or scope parameters, and the remaining 28 are modality-agnostic.
-  dom["By domain: detect, classify, measure, predict, generate, transform"]
+  accDescr: Six capabilities are most commonly parameterized by modality, two support modality through format or scope parameters, and the remaining 28 are modality-agnostic.
+  dom["Most commonly parameterized: detect, classify, measure, predict, generate, transform"]
   fs["By format or scope: retrieve, search"]
   ag["Modality-agnostic: the other 28, such as plan, checkpoint, verify, audit"]
   m[A modality] --> dom
@@ -818,9 +818,9 @@ For more information on OASF:
 title: Grounded Agency against OASF on modality
 ---
 flowchart LR
-  accDescr: OASF lists modality skills as separate entries in modality categories; Grounded Agency parameterizes the same atomic capabilities, which carry evidence anchors, confidence and checkpoint requirements.
+  accDescr: OASF lists modality skills as separate entries in modality categories; Grounded Agency parameterizes the same atomic capabilities with the same expressiveness, and every modality invocation inherits evidence anchors, confidence scores and, where applicable, checkpoint requirements.
   oasf["OASF: a skill per modality, in Computer Vision, Audio and Multi-modal categories"] -->|same expressiveness| ga["Grounded Agency: atomic capabilities with a domain parameter"]
-  ga --> safe["Inherited: evidence anchors, confidence, checkpoint requirements"]
+  ga --> safe["Inherited: evidence anchors, confidence scores, checkpoint requirements where applicable"]
 ```
 
 ---
