@@ -158,6 +158,16 @@ Our `act` capability is too vague. Skills documentation emphasizes:
 - `execute` — Run code/script and get result (deterministic)
 - `act` — Take action with side effects (non-deterministic)
 
+```mermaid
+---
+title: The split section 3.1 recommends
+---
+flowchart LR
+  accDescr: Section 3.1 recommends splitting act into execute, which runs code or a script and gets a deterministic result, and act, which takes action with side effects.
+  old[act] --> ex["execute: run code, deterministic result"]
+  old --> ac["act: action with side effects"]
+```
+
 ### 3.2 Naming Convention Mismatch
 
 **Skills best practice**: Use **gerund form** (verb + -ing) for names:
