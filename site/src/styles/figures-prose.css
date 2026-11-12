@@ -15,8 +15,10 @@
     background-size: 8px 8px;
   }
 
+  /* Lines close up so the box-drawing characters join into whole boxes. */
   .fig-ascii pre {
     margin: 0;
+    line-height: 1.2;
   }
 
   /* ---------- pattern chains (3.10.9) ---------- */
@@ -49,6 +51,7 @@
     font-size: 12px;
     color: var(--ink-2);
     background: none;
+    border: 0;
     padding: 0;
   }
 
@@ -66,8 +69,6 @@
     font-size: 12px;
     line-height: 1.2;
     color: var(--ink-2);
-    max-width: 10ch;
-    overflow-wrap: anywhere;
     text-align: center;
   }
 
@@ -77,6 +78,12 @@
   }
 
   /* ---------- table marks (3.10.8, 3.10.10, 3.10.11) ---------- */
+
+  /* Hidden words in a marked cell are positioned against the cell, so they
+     stay inside the table's scroll box instead of widening the page. */
+  table[data-enriched] :is(td, th) {
+    position: relative;
+  }
 
   .prose-cell-chain {
     display: inline-flex;
@@ -191,6 +198,7 @@
   }
 
   .oasf-map__type .pg {
+    display: inline-block;
     vertical-align: -2px;
   }
 

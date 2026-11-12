@@ -10,10 +10,12 @@ export const OVERVIEW_SOURCE = 'README.md';
 /** The overview heading whose box drawing the periodic table replaces. */
 export const PERIODIC_ANCHOR = 'The Periodic Table of Agent Capabilities';
 
-/** The periodic table's caption, from the ontology. */
+/** The periodic table's caption, from the ontology: the total, then the largest and smallest layers. */
 export function periodicCaption(o: Ontology): string {
-  const sizes = o.layers.map((l) => l.capabilities.length);
-  return `${o.capabilities.length} capabilities in ${o.layers.length} layers, one column per layer, from ${o.layers[0]!.id} with ${sizes[0]} to ${o.layers.at(-1)!.id} with ${sizes.at(-1)}.`;
+  const sized = o.layers.map((l) => ({ id: l.id, n: l.capabilities.length }));
+  const most = sized.reduce((a, b) => (b.n > a.n ? b : a));
+  const least = sized.reduce((a, b) => (b.n < a.n ? b : a));
+  return `${o.capabilities.length} capabilities in ${o.layers.length} layers; the largest layer, ${most.id}, has ${most.n} and the smallest, ${least.id}, has ${least.n}.`;
 }
 
 /**
