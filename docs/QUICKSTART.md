@@ -27,6 +27,19 @@ Fixing these statically saves hours of runtime debugging and prevents data corru
 
 ---
 
+```mermaid
+---
+title: The six steps
+---
+flowchart TB
+  accDescr: The quickstart goes from setup through validating the reference workflows and running the conformance tests to exploring a workflow, the capability ontology and a domain.
+  s1["1 Clone and set up"] --> s2["2 Validate the reference workflows"]
+  s2 --> s3["3 Run the conformance tests"]
+  s3 --> s4["4 Explore a workflow"]
+  s4 --> s5["5 Explore the capability ontology"]
+  s5 --> s6["6 Choose your domain"]
+```
+
 ## Prerequisites
 
 - Python 3.14+
