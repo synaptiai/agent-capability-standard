@@ -5,7 +5,8 @@
  * - boxes: --bg fill, --line outline (the border colour of every panel);
  * - groups: --bg-mut fill, --ink-3 outline, --ink-2 label;
  * - links and arrowheads: --ink-2, thick links --ink;
- * - labels: --ink on boxes, on a --bg patch over a link.
+ * - labels: --ink on boxes, on a --bg patch over a link;
+ * - a box that names a capability: --layer outline and a symbol chip on --tint.
  * The drawing is a fixed size in px: labels are 14px, or 12px in the phone
  * layout (the font-size attribute on the svg; the CSS sets no size). When the authored
  * layout is wider than a phone, the figure also carries a top-to-bottom
@@ -119,6 +120,16 @@
   .fig-mermaid__svg .mmd-edge--thick .mmd-stroke { fill: var(--ink); }
   .fig-mermaid__svg .mmd-label-bg { fill: var(--bg); }
   .fig-mermaid__svg .mmd-edge-label .mmd-label { fill: var(--ink-2); }
+
+  /*
+   * A box that names a capability: the outline in its layer colour and a
+   * chip with the two-letter symbol on the layer tint, as a periodic tile.
+   * The symbol and the label carry identity; the colour is never alone.
+   */
+  .fig-mermaid__svg .mmd-node--cap .mmd-line { fill: var(--layer); }
+  .fig-mermaid__svg .mmd-chip-line { fill: var(--layer); }
+  .fig-mermaid__svg .mmd-chip-fill { fill: var(--tint); }
+  .fig-mermaid__svg .mmd-chip-label { fill: var(--ink); font-weight: 700; }
 
   .fig-mermaid__caption {
     margin-top: var(--space-4);

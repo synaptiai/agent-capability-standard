@@ -58,6 +58,14 @@ export interface PlacedNode extends Box {
   id: string;
   shape: Shape;
   lines: string[];
+  /** The layer of the capability the box names, or null. */
+  layer: string | null;
+  /**
+   * The symbol chip drawn left of the label of a box that names a
+   * capability, in the page layout only: the phone layout has no room for
+   * it, and there the outline's colour comes with the capability's name.
+   */
+  chip: (Box & { symbol: string }) | null;
 }
 
 export interface PlacedGroup extends Box {
@@ -84,7 +92,11 @@ export interface Layout {
   edges: PlacedEdge[];
 }
 
-/** A word longer than a line is broken after "(", ",", "_", "/" or "-" where it can be. */
+/**
+ * A word longer than a line is broken after "(", ",", "/" or "-" where it
+ * can be. An identifier such as recovery_point or max_attempts is never
+ * split: a word with no such place gets a line of its own.
+ */
 function pieces(word: string, max: number): string[] {
   if (word.length <= max) return [word];
   const out: string[] = [];
@@ -92,7 +104,7 @@ function pieces(word: string, max: number): string[] {
   while (rest.length > max) {
     let cut = -1;
     for (let i = Math.min(max, rest.length - 1); i > 0; i--) {
-      if ('(,_/-'.includes(rest[i - 1]!)) {
+      if ('(,/-'.includes(rest[i - 1]!)) {
         cut = i;
         break;
       }
@@ -126,6 +138,11 @@ export function wrap(text: string, max: number): string[] {
 
 const even = (v: number): number => Math.round(v / 2) * 2;
 const up4 = (v: number): number => Math.ceil(v / 4) * 4;
+
+/** A capability chip: the two-letter symbol in a box one text line tall, and the gap after it. */
+export function chipSize(f: Font): { w: number; h: number; gap: number } {
+  return { w: even(2 * f.charW + 12), h: even(f.lineH + 4), gap: 8 };
+}
 
 /** Extra width each side for shapes whose ends step inward. */
 export function shapeInset(shape: Shape): number {
@@ -195,8 +212,10 @@ export async function layoutDiagram(d: Diagram, options: LayoutOptions = {}): Pr
     // A decision box's sides slant one 2px step per 2px row, so its top and
     // bottom text lines sit half the text's height in from the widest point.
     const inset = n.shape === 'decision' ? Math.max(shapeInset(n.shape), Math.ceil((lines.length * f.lineH) / 2)) : shapeInset(n.shape);
-    const w = up4(Math.max(sp.minW, textWidth(lines, f) + 2 * (sp.padX + BORDER + inset)));
-    const h = up4(lines.length * f.lineH + 2 * (sp.padY + BORDER) + (n.shape === 'cylinder' ? 6 : 0));
+    const chip = n.capability && !options.compact ? chipSize(f) : null;
+    const content = textWidth(lines, f) + (chip ? chip.w + chip.gap : 0);
+    const w = up4(Math.max(sp.minW, content + 2 * (sp.padX + BORDER + inset)));
+    const h = up4(Math.max(lines.length * f.lineH, chip ? chip.h : 0) + 2 * (sp.padY + BORDER) + (n.shape === 'cylinder' ? 6 : 0));
     elkNodes.set(n.id, { id: n.id, width: w, height: h });
   }
   for (const g of d.groups) {
@@ -276,7 +295,18 @@ export async function layoutDiagram(d: Diagram, options: LayoutOptions = {}): Pr
     font: f,
     width: even(out.width!),
     height: even(out.height!),
-    nodes: d.nodes.map((n) => ({ id: n.id, shape: n.shape, lines: nodeLines.get(n.id)!, ...placed.get(n.id)! })),
+    nodes: d.nodes.map((n) => {
+      const box = placed.get(n.id)!;
+      const lines = nodeLines.get(n.id)!;
+      let chip: PlacedNode['chip'] = null;
+      if (n.capability && !options.compact) {
+        // The chip and the text are centred together as one row.
+        const c = chipSize(f);
+        const left = even(box.x + (box.w - (c.w + c.gap + textWidth(lines, f))) / 2);
+        chip = { x: left, y: even(box.y + (box.h - c.h) / 2), w: c.w, h: c.h, symbol: n.capability.symbol };
+      }
+      return { id: n.id, shape: n.shape, lines, layer: n.capability?.layer ?? null, chip, ...box };
+    }),
     groups: d.groups.map((g) => ({ id: g.id, lines: groupLines.get(g.id)!, ...placed.get(g.id)! })),
     edges,
   };

@@ -19,6 +19,11 @@ export interface MermaidNode {
   /** The subgraph the node first appears in, or null at the top level. */
   group: string | null;
   line: number;
+  /**
+   * The capability the label names (its first word, alone or before "("),
+   * set by markCapabilities(); the box then carries its symbol on its layer.
+   */
+  capability?: { id: string; layer: string; symbol: string };
 }
 
 export interface MermaidEdge {

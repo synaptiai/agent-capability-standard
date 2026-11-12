@@ -9,7 +9,7 @@
 //   text version, which lists every group, box and link in words.
 import type { Element, ElementContent, Properties } from 'hast';
 import { toRects } from '../../pixel/grid';
-import type { Layout, PlacedEdge, PlacedNode, Point } from './layout';
+import { chipSize, type Layout, type PlacedEdge, type PlacedNode, type Point } from './layout';
 import type { Font } from './layout';
 import type { Diagram, Shape } from './parse';
 import { describeDiagram, type TextVersion } from './text';
@@ -168,10 +168,20 @@ function nodeElements(f: Font, n: PlacedNode): Element {
   const { line, fill } = shapeRects(n.shape, n.w, n.h);
   const off = (r: R): R => ({ ...r, x: r.x + n.x, y: r.y + n.y });
   const top = n.y + Math.round((n.h - n.lines.length * f.lineH) / 2) + (n.shape === 'cylinder' ? 3 : 0);
-  return h('g', { className: ['mmd-node'], dataNode: n.id }, [
-    ...fill.map((r) => rect(off(r), 'mmd-fill')),
-    ...line.map((r) => rect(off(r), 'mmd-line')),
-    ...textLines(f, n.lines, n.x + n.w / 2, top, 'mmd-label'),
+  const body = [...fill.map((r) => rect(off(r), 'mmd-fill')), ...line.map((r) => rect(off(r), 'mmd-line'))];
+  if (!n.layer) return h('g', { className: ['mmd-node'], dataNode: n.id }, [...body, ...textLines(f, n.lines, n.x + n.w / 2, top, 'mmd-label')]);
+  // A capability box: its outline in the layer colour and, in the page
+  // layout, a chip holding the two-letter symbol on the layer tint (as a
+  // periodic tile), so the colour always comes with the capability's name.
+  const cap = { className: ['mmd-node', 'mmd-node--cap', 'has-layer'], dataNode: n.id, dataLayer: n.layer, style: `--layer: var(--layer-${n.layer})` };
+  const c = n.chip;
+  if (!c) return h('g', cap, [...body, ...textLines(f, n.lines, n.x + n.w / 2, top, 'mmd-label')]);
+  return h('g', cap, [
+    ...body,
+    rect(c, 'mmd-chip-line'),
+    rect({ x: c.x + 2, y: c.y + 2, w: c.w - 4, h: c.h - 4 }, 'mmd-chip-fill'),
+    h('text', { x: c.x + c.w / 2, y: c.y + Math.round(c.h / 2 + f.size * 0.35), className: ['mmd-chip-label'], textAnchor: 'middle', ariaHidden: 'true' }, [text(c.symbol)]),
+    ...textLines(f, n.lines, c.x + c.w + chipSize(f).gap, top, 'mmd-label', 'start'),
   ]);
 }
 
@@ -240,16 +250,17 @@ export function fitStep(width: number): number {
 
 /**
  * The whole figure. `narrow` is the phone layout, drawn top to bottom, when
- * the authored layout is wider than the phone budget.
+ * the authored layout is wider than the phone budget. `n` is the figure's
+ * number on its page, shown as "Fig n" like every other figure.
  */
-export function figureElement(d: Diagram, wide: Layout, narrow: Layout | null, opts: { id: string; fallbackTitle: string }): Element {
+export function figureElement(d: Diagram, wide: Layout, narrow: Layout | null, opts: { id: string; fallbackTitle: string; n?: number }): Element {
   const ids = { title: `${opts.id}-title`, text: `${opts.id}-text` };
   const tv = describeDiagram(d, opts.fallbackTitle);
   const svgs = [drawSvg(wide, ids, 'wide')];
   if (narrow) svgs.push(drawSvg(narrow, ids, 'narrow'));
   const draw = h('div', { className: ['fig-mermaid__draw', ...(narrow ? [`fig-mermaid__draw--fit-${fitStep(wide.width)}`] : [])] }, svgs);
   return h('figure', { className: ['fig', 'fig-mermaid'], ariaLabelledBy: ids.title }, [
-    h('p', { className: ['fig-mermaid__eyebrow'], ariaHidden: 'true' }, [text('Diagram')]),
+    h('p', { className: ['fig-mermaid__eyebrow'], ariaHidden: 'true' }, [text(opts.n ? `Fig ${opts.n}` : 'Fig')]),
     h('p', { className: ['fig-mermaid__title'], id: ids.title }, [text(tv.title)]),
     draw,
     h('figcaption', { className: ['fig-mermaid__caption'] }, [text(tv.caption)]),

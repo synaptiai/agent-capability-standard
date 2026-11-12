@@ -2,7 +2,9 @@
 // src/lib/mermaid/). The fence is replaced in the page; the Markdown copy keeps
 // it and adds the text version (src/twins/md.ts). A fence the site cannot
 // draw (syntax outside the supported subset, or a drawing too wide for the
-// page or a phone) fails the build with its file and line.
+// page or a phone), or one with no accDescr: line for its caption, fails the
+// build with its file and line. Figures are numbered "Fig n" in page order,
+// and a box whose label names a capability gets its symbol on its layer.
 import type { Code, Heading, Root } from 'mdast';
 import { toString } from 'mdast-util-to-string';
 import { visit } from 'unist-util-visit';
@@ -10,6 +12,7 @@ import type { VFile } from 'vfile';
 import { FONT_NARROW, layoutDiagram, NARROW_BUDGET, WIDE_BUDGET, WRAP_NARROW, type Layout } from '../lib/mermaid/layout';
 import { MermaidError, parseMermaid, type Diagram, type Direction } from '../lib/mermaid/parse';
 import { figureElement } from '../lib/mermaid/render';
+import { markCapabilities } from '../lib/mermaid/capabilities';
 import { failWith, lineOf, sourceOf } from './source';
 
 const PLUGIN = 'remark-mermaid';
@@ -74,20 +77,26 @@ export default function remarkMermaid() {
     for (const fence of fences) {
       const at = (n: number) => lineOf(src, { position: { start: { line: bodyLine(fence.node, n) } } });
       try {
-        parsed.push({ fence, diagram: parseMermaid(fence.node.value), line: bodyLine(fence.node, 0) + src.lineOffset });
+        const diagram = markCapabilities(parseMermaid(fence.node.value));
+        // The caption is the figure's one-sentence reading; a count of its
+        // boxes says nothing, so the author writes it.
+        if (!diagram.description) problems.push(`${at(1)}: add an accDescr: line, one sentence that says what the diagram shows; it is the figure's caption`);
+        parsed.push({ fence, diagram, line: bodyLine(fence.node, 0) + src.lineOffset });
       } catch (e) {
         if (e instanceof MermaidError) problems.push(`${at(e.line)}: ${e.message}`);
         else throw e;
       }
     }
     failWith(PLUGIN, problems);
+    let n = 0;
     for (const { fence, diagram, line } of parsed) {
+      n += 1;
       const layouts = await layoutsFor(diagram);
       if (typeof layouts === 'string') {
         problems.push(`${lineOf(src, fence.node)}: ${layouts}`);
         continue;
       }
-      const figure = figureElement(diagram, layouts.wide, layouts.narrow, { id: `mermaid-l${line}`, fallbackTitle: fence.heading });
+      const figure = figureElement(diagram, layouts.wide, layouts.narrow, { id: `mermaid-l${line}`, fallbackTitle: fence.heading, n });
       // An mdast node that mdast-util-to-hast turns into exactly this element.
       const node = fence.node as unknown as { type: string; data: unknown; value?: string; lang?: string | null; meta?: string | null };
       node.type = 'paragraph';

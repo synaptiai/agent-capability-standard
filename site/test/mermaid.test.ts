@@ -5,7 +5,9 @@
 // repository's Markdown, never from the renderer's own output.
 import { toHtml } from 'hast-util-to-html';
 import { describe, expect, it } from 'vitest';
-import { layoutDiagram, NARROW_BUDGET, WIDE_BUDGET, type Layout } from '../src/lib/mermaid/layout';
+import { layoutDiagram, NARROW_BUDGET, WIDE_BUDGET, wrap, type Layout } from '../src/lib/mermaid/layout';
+import { markCapabilities } from '../src/lib/mermaid/capabilities';
+import { claudeLayerTable } from './independent';
 import { MermaidError, parseMermaid } from '../src/lib/mermaid/parse';
 import { edgeRects, figureElement, shapeRects } from '../src/lib/mermaid/render';
 import { describeDiagram } from '../src/lib/mermaid/text';
@@ -282,7 +284,33 @@ describe('drawing', async () => {
   });
 });
 
+describe('capability boxes and labels', () => {
+  it('never splits an identifier at its underscore', () => {
+    expect(wrap('rollback(recovery_point)', 22)).toEqual(['rollback(', 'recovery_point)']);
+    expect(wrap('Loop, up to max_attempts', 10)).toEqual(['Loop, up', 'to', 'max_attempts']);
+  });
+
+  it('gives a box that names a capability its symbol chip on its layer, as CLAUDE.md lists the layers', async () => {
+    // Layer of each capability from the CLAUDE.md layer table, not the ontology loader.
+    const layerOf = new Map(claudeLayerTable().flatMap((r) => r.capabilities.map((c) => [c, r.id] as const)));
+    const d = markCapabilities(parseMermaid('flowchart LR\n  a["checkpoint(state)"] --> b[verify step]\n  b --> c[mutate]'));
+    const wide = await layoutDiagram(d);
+    const html = toHtml(figureElement(d, wide, null, { id: 'm', fallbackTitle: 'T', n: 2 }));
+    const box = (id: string) => new RegExp(`<g class="([^"]+)" data-node="${id}"(?: data-layer="(\\w+)")?`).exec(html);
+    expect(box('a')?.[2]).toBe(layerOf.get('checkpoint'));
+    expect(box('c')?.[2]).toBe(layerOf.get('mutate'));
+    expect(box('b')?.[1]).toBe('mmd-node');
+    expect([...html.matchAll(/class="mmd-chip-label"[^>]*>([A-Z][a-z])</g)].length).toBe(2);
+    expect(html).toContain('<p class="fig-mermaid__eyebrow" aria-hidden="true">Fig 2</p>');
+  });
+});
+
 describe('in the build', () => {
+  it('fails on a diagram with no accDescr caption, naming the file and line', async () => {
+    const text = '# Title\n\n```mermaid\nflowchart TB\n  a --> b\n```\n';
+    await expect(renderRepoFile('docs/WORKFLOW_PATTERNS.md', text)).rejects.toThrow(/docs\/WORKFLOW_PATTERNS\.md:4: add an accDescr: line/);
+  });
+
   it('fails on syntax it cannot draw, naming the file and line', async () => {
     // Line 1 heading, 2 blank, 3 fence opens, 4 header, 5 the bad link.
     const text = '# Title\n\n```mermaid\nflowchart TB\n  a --x b\n```\n';
