@@ -80,6 +80,14 @@
     grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
   }
 
+  /* Wide: as many columns as fill every row (--cols: 5, 4 or 3, whichever
+     divides the group's card count), so no card sits alone on a row. */
+  @media (min-width: 1100px) {
+    .icon-cards.home-covers__cards {
+      grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr));
+    }
+  }
+
   .home-covers__cards .icon-card {
     grid-template-columns: 27px minmax(0, 1fr);
     column-gap: var(--space-3);
