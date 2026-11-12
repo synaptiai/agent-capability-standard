@@ -68,6 +68,8 @@ const groups = [
   { title: 'Tools', cards: cov.tools },
 ] as const;
 const wfGroups = gallery();
+/** Five, four or three columns: whichever leaves the fewest empty places in the last row, the widest on a tie. */
+const coverColumns = (n: number) => [5, 4, 3].reduce((best, c) => ((c - (n % c)) % c < (best - (n % best)) % best ? c : best));
 let fig = 0;
 const nextFig = () => ++fig;
 ---
@@ -120,7 +122,7 @@ const nextFig = () => ++fig;
       {groups.map((grp) => (
         <section class="home-covers__group">
           <h3 id={id(grp.title)}>{grp.title}</h3>
-          <ul class="icon-cards home-covers__cards" style={`--cols: ${[5, 4, 3].find((c) => grp.cards.length % c === 0) ?? 5}`}>
+          <ul class="icon-cards home-covers__cards" style={`--cols: ${coverColumns(grp.cards.length)}`}>
             {grp.cards.map((c) => (
               <IconCard
                 glyph={c.glyph!}

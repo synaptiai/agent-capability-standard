@@ -1,0 +1,66 @@
+---
+// A count matrix as a table with heat cells (visual spec 1.2 heat steps):
+// rows are pages, columns what they cite or name, each cell the count,
+// always printed. An enriched table, so it scrolls inside TableWrap when the
+// column is narrow, and it is its own text equivalent.
+//
+// Props:
+// - id: string, required. A ref- id for the figure.
+// - n: number, required. The figure number.
+// - matrix: CountMatrix, required (src/lib/index-figures.ts).
+import type { CountMatrix } from '../../lib/index-figures';
+import { HEAT_TOKENS, heatRanges, heatStep } from '../../lib/edge-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import TableWrap from '../TableWrap.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  id: string;
+  n: number;
+  matrix: CountMatrix;
+}
+
+const { id, n, matrix: m } = Astro.props;
+const max = Math.max(1, ...m.rows.flatMap((r) => r.counts));
+const ranges = heatRanges(max);
+---
+<Figure id={id} n={n} title={m.title} caption={m.caption} kind="count-matrix" class="count-matrix">
+  <TableWrap label={m.title}>
+    <table class="count-matrix__table">
+      <thead>
+        <tr>
+          <th scope="col" class="count-matrix__corner">{m.rowHead}</th>
+          {m.columns.map((c) => (
+            <th scope="col" class:list={['count-matrix__col', c.layer && 'has-layer']} style={c.layer ? `--layer: var(--layer-${c.layer})` : undefined}>
+              {c.layer && <PixelGlyph name={c.layer} layer={c.layer} scale={2} />}
+              <span>{c.label}</span>
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {m.rows.map((r) => (
+          <tr>
+            <th scope="row" class="count-matrix__row">
+              {r.glyph && <PixelGlyph name={r.glyph} />}
+              {r.url ? <a href={r.url}>{r.label}</a> : r.label}
+            </th>
+            {r.counts.map((count) => {
+              const s = heatStep(count, max);
+              return (
+                <td class="count-matrix__cell" data-heat={s} style={s === 0 ? undefined : `background: var(${HEAT_TOKENS[s - 1]!.fill}); color: var(${HEAT_TOKENS[s - 1]!.text})`}>
+                  {count}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </TableWrap>
+  <ul class="count-matrix__scale" aria-label={`Heat scale: ${m.unit} per cell`}>
+    {ranges.map((r) => (
+      <li><span class="count-matrix__swatch" style={`background: var(${HEAT_TOKENS[r.step - 1]!.fill})`}></span>{r.from === r.to ? `${r.from}` : `${r.from} to ${r.to}`}</li>
+    ))}
+  </ul>
+</Figure>

@@ -7,6 +7,11 @@ import DocLayout from '../../layouts/DocLayout.astro';
 import { pageHref, refSlugger, routeByUrl } from '../../lib/generated';
 import { allowedRfcStatuses, rfcRows } from '../../lib/rfcs';
 import TableWrap from '../../components/TableWrap.astro';
+import Figure from '../../components/fig/Figure.astro';
+import IconCard from '../../components/fig/IconCard.astro';
+import { RFC_FIG_TITLE, rfcLanes, rfcLanesCaption } from '../../lib/index-figures';
+import { PAGE_GLYPHS } from '../../pixel/glyphs-pages';
+import '../../styles/figures-indexes.css';
 
 const route = routeByUrl('/rfcs/');
 const allowed = allowedRfcStatuses();
@@ -15,6 +20,13 @@ const id = refSlugger();
 const rows = await rfcRows();
 const rfcs = rows.filter((r) => r.numbered);
 const proposals = rows.filter((r) => !r.numbered);
+const lanes = rfcLanes(rows);
+const tableId = id('rfc-table');
+const proposalGlyph = (url: string) => {
+  const g = PAGE_GLYPHS[url];
+  if (!g) throw new Error(`rfcs: the proposal ${url} has no glyph in PAGE_GLYPHS`);
+  return g;
+};
 const description = 'Requests for comments that propose changes to the Agent Capability Standard, with the status, target version and date of each.';
 ---
 <DocLayout route={route} title="RFCs" description={description}>
@@ -24,8 +36,28 @@ const description = 'Requests for comments that propose changes to the Agent Cap
       An RFC proposes a change to the standard. Its status is {allowed.slice(0, -1).join(', ')} or {allowed.at(-1)}.
       How an RFC is decided is described under <a href={pageHref('/community/governance/#decision-making')}>Decision-making</a> on the Governance page.
     </p>
+    <Figure id={id('fig-rfc-lanes')} n={1} title={RFC_FIG_TITLE} caption={rfcLanesCaption(lanes)} describedby={tableId} kind="rfc-lanes">
+      <ol class="rfc-lanes">
+        {lanes.map((lane) => (
+          <li class="rfc-lane" data-target={lane.target ?? 'none'}>
+            <p class="rfc-lane__label">
+              {lane.target === null ? 'No target' : lane.url ? <a href={lane.url}>{lane.target}</a> : lane.target}
+              {lane.target !== null && lane.version !== null && <span class="rfc-lane__note">{lane.url ? 'published' : 'not yet published'}</span>}
+            </p>
+            <ul class="rfc-lane__tiles">
+              {lane.rfcs.map((r) => (
+                <li class="rfc-tile-item">
+                  <a class:list={['rfc-tile', `rfc-tile--${r.style}`]} href={r.url} aria-label={`${r.label}: ${r.title}, ${r.status}`}>{r.tile}</a>
+                  <StatusBadge status={r.status} />
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </Figure>
     <TableWrap label="RFCs">
-      <table class="rfc-table">
+      <table class="rfc-table" id={tableId}>
         <caption>RFCs</caption>
         <thead>
           <tr><th scope="col">RFC</th><th scope="col">Title</th><th scope="col">Status</th><th scope="col">Target</th><th scope="col">Date</th></tr>
@@ -47,12 +79,11 @@ const description = 'Requests for comments that propose changes to the Agent Cap
       <section class="rfc-proposals">
         <h2 id={id('Proposals')}>Proposals</h2>
         <p>Proposals that are not numbered RFCs.</p>
-        <ul class="section-index__cards">
+        <ul class="icon-cards rfc-proposals__cards">
           {proposals.map((r) => (
-            <li class="section-index__card">
-              <a href={r.url}>{r.title}</a> <StatusBadge status={r.status} />
-              {r.date && <p>Dated {r.date}.</p>}
-            </li>
+            <IconCard glyph={proposalGlyph(r.url)} title={r.title} href={r.url}>
+              <StatusBadge status={r.status} />{r.date && <> Dated {r.date}.</>}
+            </IconCard>
           ))}
         </ul>
       </section>

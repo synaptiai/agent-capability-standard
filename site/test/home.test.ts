@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { coverage, faq, gallery, galleryCaption, getStarted, inlineText, principles, tableCaption } from '../src/lib/home';
 import { resolveGlyphKey } from '../src/pixel/keys';
-import { allCatalogSteps, claudeLayerTable, repoText, standardFileVersions } from './independent';
+import { allCatalogSteps, claudeLayerTable, repoText, skillsReadme, standardFileVersions } from './independent';
 
 const standard = () => repoText(`spec/STANDARD-v${standardFileVersions()[0]!}.md`);
 
@@ -51,6 +51,20 @@ describe('home page figures (visual spec 3.11)', () => {
     expect(data.find((c) => c.title === 'Capabilities')!.count).toBe(rows.reduce((n, r) => n + r.count, 0));
     expect(data.find((c) => c.title === 'Layers')!.count).toBe(rows.length);
     expect(data.find((c) => c.title === 'Workflows')!.count).toBe(allCatalogSteps().size);
+    // Visual spec 3.11 lists a skills card among the reference-data cards; its
+    // count is the skills README's total.
+    expect(data.find((c) => c.title === 'Skills')!.count).toBe(skillsReadme().total);
+  });
+
+  it('never draws two different home cards with the same glyph (issue #125 acceptance)', () => {
+    const cov = coverage();
+    const cards = [...cov.standard, ...cov.data, ...cov.tools, ...principles().items, ...getStarted().cards];
+    const byGrid = new Map<string, string[]>();
+    for (const c of cards) {
+      const grid = resolveGlyphKey(c.glyph!)!;
+      byGrid.set(grid, [...(byGrid.get(grid) ?? []), c.title]);
+    }
+    expect([...byGrid].filter(([, titles]) => titles.length > 1)).toEqual([]);
   });
 
   it('gives every principle of section 3 and every coverage and get-started card a drawn glyph', () => {

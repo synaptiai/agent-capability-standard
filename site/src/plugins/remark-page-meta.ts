@@ -105,7 +105,9 @@ export function shortDescription(text: string, max = MAX_DESCRIPTION): string {
   const t = text.replace(/\s+/g, ' ').trim();
   if (t.length <= max) return t;
   const window = t.slice(0, max);
-  const ends = [...window.matchAll(/[.!?](?=\s)/g)];
+  // A full stop after an abbreviation such as "Art." (EU AI Act "Art. 17")
+  // or "e.g." does not end a sentence.
+  const ends = [...window.matchAll(/(?<!\b(?:Art|Arts|No|Nos|vs|cf|e\.g|i\.e|Fig|Sec))[.!?](?=\s)/g)];
   const lastEnd = ends.at(-1);
   if (lastEnd?.index !== undefined && lastEnd.index > 40) return window.slice(0, lastEnd.index + 1);
   // Leave room for the ellipsis, so the result is never longer than max.

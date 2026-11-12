@@ -12,7 +12,8 @@ import { anchorsOf, headingText, parseMarkdown, stripFrontmatter } from './ancho
 import { currentStandard, diagnosticHref, routeByUrl, type Inline } from './generated';
 import { SITE_ORIGIN } from './links';
 import { GITHUB_BASE, readRepoFile } from './repo';
-import { chapterKey, principleKey, TOOL_GLYPHS } from '../pixel/keys';
+import { PAGE_GLYPHS } from '../pixel/glyphs-pages';
+import { chapterKey, principleKey, resolveGlyphKey, slugKey, TOOL_GLYPHS } from '../pixel/keys';
 import { kebab } from './routes';
 import { contractRows, diagramSteps, gateRows, stepRole } from './views';
 
@@ -378,10 +379,14 @@ export function coverage(): { standard: Card[]; data: Card[]; tools: Card[] } {
       if (later.length === 0) throw new Error('home: section 5 has no sections after 5.9');
       text = `What a workflow declares to use: ${later.slice(0, -1).join(', ')} and ${later.at(-1)}.`;
     }
-    // A subsection's card takes the glyph of the chapter it sits in.
+    // A chapter's card takes the chapter glyph. A subsection's card takes its
+    // own topic glyph, so it does not repeat its chapter's card beside it.
     const chapter = entries.find((x) => x.text.startsWith(`${num.split('.')[0]}. `))!;
-    const glyph = chapterKey(chapter.text);
-    if (glyph === null) throw new Error(`home: section ${num} of the Standard is in an appendix, which has no glyph`);
+    const topic = `topic:${slugKey(h.title)}`;
+    const glyph = num.includes('.') ? (resolveGlyphKey(topic) === null ? null : topic) : chapterKey(chapter.text);
+    if (glyph === null) {
+      throw new Error(`home: section ${num} of the Standard has no glyph (a subsection needs ${topic} in glyphs-pages.ts; an appendix has none)`);
+    }
     return { title: h.title, line: text, link: { text: `§${num}`, url: `${std.url}#${h.slug}` }, section: `§${num}`, glyph };
   });
   // The section of the Standard that defines the diagnostic codes, by its heading.
@@ -395,6 +400,7 @@ export function coverage(): { standard: Card[]; data: Card[]; tools: Card[] } {
     { title: 'Domain profiles', count: k.profileCount, glyph: 'count:profiles', line: 'Trust weights, risk thresholds and checkpoint rules per field.', link: { text: 'Domains', url: '/domains/' } },
     { title: 'Edge types', count: k.edgeTypeCount, glyph: 'count:edges', line: 'The kinds of relation between capabilities.', link: { text: 'Edge types', url: '/spec/edge-types/' } },
     { title: 'Diagnostic codes', count: k.diagnosticCount, glyph: 'count:diagnostics', line: 'What each code means and whether it is an error.', link: { text: 'Diagnostics', url: '/spec/diagnostics/' } },
+    { title: 'Skills', count: k.skillCount, glyph: 'count:skills', line: 'Skill files for agents: one per capability, and composed skills that combine several.', link: { text: 'Skills', url: '/guides/skills/' } },
   ];
   const tools: Card[] = [
     { title: 'Validator', line: `A Rust core with a Python command-line tool. It reports the diagnostic codes of section ${diagnosticsSection}.`, link: { text: 'Quickstart', url: '/start/quickstart/' } },
@@ -481,13 +487,15 @@ export function getStarted(): { prompt: string; cards: (Card & { extra?: HomeLin
 }
 
 /**
- * A get-started card's glyph (visual spec 2.2): the glyph of the site section
- * its first site link goes to. A card with only outside links has none.
+ * A get-started card's glyph (visual spec 2.2): the glyph of the page its
+ * first site link goes to, or of that page's section when the page has none.
+ * A card with only outside links has none.
  */
 function startGlyph(card: Card & { extra?: HomeLink }): string {
   const target = [card.link, card.extra].find((l) => l?.url.startsWith('/'));
   if (!target) throw new Error(`home: the get-started card "${card.title}" links to no site page, so it has no section glyph`);
-  return `section:${routeByUrl(target.url.split('#')[0]!).section}`;
+  const url = target.url.split('#')[0]!;
+  return PAGE_GLYPHS[url] ?? `section:${routeByUrl(url).section}`;
 }
 
 // ------------------------------------------------------------ figures

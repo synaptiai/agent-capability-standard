@@ -2,6 +2,7 @@
 // characters). Data only: its imports are more data, so the check scripts
 // can load it with plain `node`.
 import { GROUP_ALIASES, GROUP_GLYPHS } from './glyphs-groups.ts';
+import { CARD_GRIDS, PAGE_GRIDS } from './glyphs-pages.ts';
 import { PROSE_ALIASES } from './glyphs-prose.ts';
 
 /** One 9x9 glyph per cognitive layer, keyed by the layer id in the ontology. */
@@ -339,6 +340,10 @@ export const CONCEPT_GLYPHS: Readonly<Record<string, readonly string[]>> = {
 
   // ---- Listing groups (glyphs-groups.ts)
   ...GROUP_GLYPHS,
+
+  // ---- Single pages and home cards (glyphs-pages.ts)
+  ...PAGE_GRIDS,
+  ...CARD_GRIDS,
 };
 
 /**
@@ -349,7 +354,6 @@ export const CONCEPT_GLYPHS: Readonly<Record<string, readonly string[]>> = {
 export const GLYPH_ALIASES: Readonly<Record<string, string>> = {
   'chapter:capability-ontology': 'section:capabilities',
   'chapter:workflow-dsl': 'section:workflows',
-  'chapter:conformance': 'tool:conformance',
   'chapter:references': 'section:guides',
   'severity:error': 'caution',
   'severity:warning': 'warning',
@@ -370,11 +374,8 @@ export const GLYPH_ALIASES: Readonly<Record<string, string>> = {
   'role:mutating': 'pencil',
   'skill:composed': 'nested',
   'agent:explore': 'search',
-  'count:capabilities': 'section:capabilities',
   'count:edges': 'mark:enables',
-  'count:workflows': 'section:workflows',
   'count:profiles': 'section:domains',
-  'count:diagnostics': 'chapter:diagnostic-model',
   'count:skills': 'skill:composed',
   ...GROUP_ALIASES,
   ...PROSE_ALIASES,

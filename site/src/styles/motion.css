@@ -7,7 +7,7 @@
   .btn,
   .prev-next__link,
   .capability-tile,
-  .section-index__card,
+  .rfc-tile,
   .mini-tile,
   .icon-card {
     transition:
@@ -49,7 +49,8 @@
     .prev-next__link:active,
     .capability-tile:hover,
     .capability-tile:active,
-    .section-index__card:has(> a:first-child:hover),
+    .rfc-tile:hover,
+    .rfc-tile:focus-visible,
     a.mini-tile:hover,
     .icon-card:has(.icon-card__title a:hover),
     .icon-card:has(.icon-card__title a:focus-visible) {

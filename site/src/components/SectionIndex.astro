@@ -4,10 +4,17 @@
 // to (visual spec 2.2, "Listing groups"). Group headings get `ref-` ids.
 import type { ListingGroup, ListingItem } from '../lib/listing';
 import { LISTING_GROUP_GLYPHS } from '../pixel/glyphs-groups';
+import { PAGE_GLYPHS } from '../pixel/glyphs-pages';
 import { resolveGlyphKey } from '../pixel/keys';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 import IconCard from './fig/IconCard.astro';
+import CountMatrix from './fig/CountMatrix.astro';
+import SkillWorkflows from './fig/SkillWorkflows.astro';
+import { loadOntology } from '../data/ontology';
+import { listingFigures, type ListingFigure } from '../lib/index-figures';
+import { ROUTES } from '../lib/routes';
 import '../styles/figures-home.css';
+import '../styles/figures-indexes.css';
 
 interface Props {
   groups: ListingGroup[];
@@ -16,11 +23,22 @@ interface Props {
 }
 
 const { groups, id } = Astro.props;
+const section = groups[0]?.items[0]?.route.section;
+const figures = section ? listingFigures(section, ROUTES, loadOntology().layers) : [];
+for (const f of figures) {
+  if (f.at !== 'top' && !groups.some((g) => g.label === f.at)) throw new Error(`SectionIndex: a figure goes in the group "${f.at}", which ${section} does not have`);
+}
+// Figures are numbered in the order the page shows them.
+const order = [...figures.filter((f) => f.at === 'top'), ...groups.flatMap((g) => figures.filter((f) => f.at === g.label))];
+const num = (f: ListingFigure) => order.indexOf(f) + 1;
+const figId = (f: ListingFigure) => id(`fig-${f.at}`);
 
-/** Templates whose card takes the glyph of the page's site section. */
-const SECTION_GLYPH_TEMPLATES = new Set(['prose', 'raw', 'listing', 'citation']);
-
-/** A card's glyph, by the template of the page it links to. */
+/**
+ * A card's glyph, by the page it links to: a capability or layer its layer
+ * glyph, a workflow, domain or Standard version the glyph of its kind, and
+ * any other page its own glyph from PAGE_GLYPHS, so no two cards for
+ * different pages share a picture (issue #125).
+ */
 function cardGlyph(item: ListingItem): string {
   const r = item.route;
   const key =
@@ -30,17 +48,11 @@ function cardGlyph(item: ListingItem): string {
         ? 'section:workflows'
         : r.template === 'domain'
           ? `domain:${r.title}`
-          : r.template === 'skill'
-            ? 'skill:composed'
-            : r.template === 'rfc'
-              ? 'section:rfcs'
-              : r.template === 'spec'
-                ? 'section:spec'
-                : SECTION_GLYPH_TEMPLATES.has(r.template)
-                  ? `section:${r.section}`
-                  : null;
+          : r.template === 'spec'
+            ? 'section:spec'
+            : (PAGE_GLYPHS[r.url] ?? null);
   if (key === null || resolveGlyphKey(key) === null) {
-    throw new Error(`SectionIndex: no glyph for the card of ${r.url} (template ${r.template}, key ${key})`);
+    throw new Error(`SectionIndex: no glyph for the card of ${r.url} (template ${r.template}); add it to PAGE_GLYPHS in src/pixel/glyphs-pages.ts`);
   }
   return key;
 }
@@ -52,6 +64,7 @@ function groupGlyph(label: string): string {
 }
 ---
 <div class="section-index">
+  {figures.filter((f) => f.at === 'top').map((f) => f.kind === 'matrix' && <CountMatrix id={figId(f)} n={num(f)} matrix={f.matrix} />)}
   {groups.map((g) => (
     <section class="section-index__group">
       {g.label && (
@@ -59,6 +72,9 @@ function groupGlyph(label: string): string {
           <PixelGlyph name={groupGlyph(g.label)} scale={3} />
           <span>{g.label}</span>
         </h2>
+      )}
+      {figures.filter((f) => f.at === g.label).map((f) =>
+        f.kind === 'skills' ? <SkillWorkflows id={figId(f)} n={num(f)} /> : <CountMatrix id={figId(f)} n={num(f)} matrix={f.matrix} />,
       )}
       <ul class="icon-cards section-index__icon-cards">
         {g.items.map((item) => (
