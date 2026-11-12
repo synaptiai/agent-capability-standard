@@ -165,14 +165,18 @@ describe('composition text against the ontology', () => {
 });
 
 describe('compositionChain', () => {
-  /** A scan: for each "- " item under a label in Composition Patterns, its first backticked word that is a capability id. */
+  /** A scan: for each "- " item under a label in Composition Patterns, the capability ids among the backticked words before its " - " description, or the first id of an item that opens with words. */
   function scan(text: string, label: string): string[] {
     const sec = text.split(/^## Composition Patterns\s*$/m)[1]?.split(/^## /m)[0] ?? '';
     const block = sec.split(`**${label}:**`)[1]?.split(/\n\s*\n/)[0] ?? '';
     const ids = block
       .split('\n')
       .filter((l) => l.startsWith('- '))
-      .flatMap((l) => [...l.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]!).filter((x) => o.byId.has(x)).slice(0, 1));
+      .flatMap((l) => {
+        const idsIn = (t: string) => [...t.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]!).filter((x) => o.byId.has(x));
+        // An item that opens with words ("May follow `observe` ...") names one.
+        return l.startsWith('- `') ? idsIn(l.slice(2).split(' - ')[0]!) : idsIn(l).slice(0, 1);
+      });
     return [...new Set(ids)];
   }
 
@@ -186,6 +190,19 @@ describe('compositionChain', () => {
   it('skips words that are not capability ids', () => {
     const text = ['## Composition Patterns', '', '**Commonly follows:**', '- `not_a_capability` - x', '- `plan` - y', '', '**Anti-patterns:**', '- `mutate`'].join('\n');
     expect(compositionChain(text)).toEqual({ follows: ['plan'], precedes: [] });
+  });
+
+  it('takes every id an item names before its description, and none from the description', () => {
+    // Hand-written from rollback's and plan's lists: "`mutate` / `execute`" names two
+    // capabilities; "(`plan` precedes both)" is description, not a listed neighbour.
+    const text = ['## Composition Patterns', '', '**Commonly follows:**', '- `verify` - when `passed: false`', '- `mutate` / `execute` - if the side effect fails', '', '**Commonly precedes:**', '- `execute` / `mutate` - carry out the plan (`plan` precedes both)'].join('\n');
+    expect(compositionChain(text)).toEqual({ follows: ['verify', 'mutate', 'execute'], precedes: ['execute', 'mutate'] });
+  });
+
+  it('rollback lists 7 capabilities, mutate and execute among them', () => {
+    const c = compositionChain(repoText('skills/rollback/SKILL.md'));
+    expect(c.follows.length + c.precedes.length).toBe(7);
+    expect(c.follows).toEqual(expect.arrayContaining(['mutate', 'execute']));
   });
 });
 

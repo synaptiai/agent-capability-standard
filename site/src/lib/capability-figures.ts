@@ -191,9 +191,11 @@ export interface CompositionChain {
 }
 
 /**
- * The capabilities a skill names in its Composition Patterns section: the
- * first backticked word of each list item under "**Commonly follows:**" and
- * "**Commonly precedes:**" that is a capability id. Other words are skipped.
+ * The capabilities a skill names in its Composition Patterns section: every
+ * capability id among the backticked words that open each list item under
+ * "**Commonly follows:**" and "**Commonly precedes:**" (both of
+ * "`mutate` / `execute` - ..."), or the first id of an item that opens
+ * with words. Other words are skipped.
  */
 export function compositionChain(skillText: string, ontology: Ontology = loadOntology()): CompositionChain {
   const lines = skillText.split('\n');
@@ -212,8 +214,16 @@ export function compositionChain(skillText: string, ontology: Ontology = loadOnt
     if (list === null) continue;
     const item = /^[-*]\s+(.*)$/.exec(line);
     if (!item) continue;
-    const id = [...item[1]!.matchAll(/`([^`]+)`/g)].map((m) => m[1]!).find((w) => ontology.byId.has(w));
-    if (id && !out[list].includes(id)) out[list].push(id);
+    // The item's head: the backticked words before its description, joined
+    // by "/", "," "or" or "and" ("`mutate` / `execute` - ..."). Backticked
+    // words in the description (`passed: false`, "`plan` precedes both") are
+    // not the item's subject. An item in words ("May follow `observe` when
+    // ...") gives its first id.
+    const ids = (s: string) => [...s.matchAll(/`([^`]+)`/g)].map((m) => m[1]!).filter((w) => ontology.byId.has(w));
+    const head = /^(`[^`]+`(?:\s*(?:\/|,|or|and)\s*`[^`]+`)*)/.exec(item[1]!.trim())?.[1];
+    for (const id of head !== undefined ? ids(head) : ids(item[1]!).slice(0, 1)) {
+      if (!out[list].includes(id)) out[list].push(id);
+    }
   }
   return out;
 }
