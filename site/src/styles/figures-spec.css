@@ -1678,3 +1678,12 @@
     }
   }
 }
+
+@layer components {
+  /* A Standard field table shown as a figure: field names stay whole, so a
+     narrow table scrolls inside its wrapper rather than splitting a name. */
+  .fig[data-fig-kind='field-table'] td:first-child code {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+}
