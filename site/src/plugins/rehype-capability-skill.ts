@@ -5,8 +5,11 @@
 // - Procedure: the top-level ordered list gets numbered pixel tiles (CSS).
 // - Examples: each "### Example N" and the content up to the next H3 or H2
 //   becomes a <details> whose summary holds the heading with the code glyph
-//   (caution for a title that contains "Failure"). The first is open. The
+//   (caution for a title that contains "Failure"). The
 //   heading's hidden anchor link is dropped, so the summary holds no link.
+//   Every example starts closed: an open first example was the longest run
+//   without a figure on most capability pages (its fences alone are often
+//   taller than a screen), and the summaries list every example.
 // - Safety Constraints: the section's content sits in a panel with the
 //   caution glyph.
 // - Output Contract: the section's first code block folds into a
@@ -107,13 +110,13 @@ export default function rehypeCapabilitySkill() {
         else groups.at(-1)!.body.push(c);
       }
       if (groups.length > 0) {
-        const details = groups.map(({ h3, body }, i): Element => {
+        const details = groups.map(({ h3, body }): Element => {
           h3.children = h3.children.filter((c) => !(isEl(c, 'a') && ((c.properties?.className as string[]) ?? []).includes('heading-anchor')));
           const failure = /failure/i.test(text(h3));
           return {
             type: 'element',
             tagName: 'details',
-            properties: { className: ['skill-example'], open: i === 0 ? true : undefined },
+            properties: { className: ['skill-example'] },
             children: [
               {
                 type: 'element',
