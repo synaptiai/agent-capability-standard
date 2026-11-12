@@ -1,0 +1,184 @@
+/*
+ * The workflows index (visual spec 3.4): the family map (F-WI2) and the
+ * tables' column widths. Square corners, 2px lines, tokens only. The map
+ * lays itself out by the width of its own .fig container.
+ */
+/* Pages import this sheet, and it can load before the layout's tokens.css, so
+   the layer order is declared here too (the same order as tokens.css). */
+@layer reset, tokens, base, components, utilities;
+
+@layer components {
+  .fam__body {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .fam__body--domains {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @container (min-width: 640px) {
+    .fam__body--domains {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: var(--space-5);
+    }
+  }
+
+  .fam__group {
+    min-width: 0;
+  }
+
+  .fam__label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ink-2);
+  }
+
+  .fam__count {
+    font-weight: 400;
+  }
+
+  .fam__tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .fam__body--domains .fam__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fam__tiles li {
+    margin: 0;
+    min-width: 0;
+  }
+
+  /* A workflow tile: id over its step count and risk. */
+  .fam-tile {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: var(--space-1);
+    min-height: 56px;
+    height: 100%;
+    padding: var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  a.fam-tile:hover,
+  a.fam-tile:focus-visible {
+    color: var(--ink);
+    box-shadow: var(--shadow-2);
+    transform: translate(-2px, -2px);
+  }
+
+  .fam-tile__id {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 13px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  .fam-tile__facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  .fam-tile--proposed {
+    border-style: dashed;
+    background: var(--bg-sub);
+  }
+
+  /* A family: the parent tile, then its children on a 2px elbow rule. */
+  .fam-family {
+    display: grid;
+    gap: var(--space-2);
+    max-width: 30rem;
+  }
+
+  .fam-family > .fam-tile {
+    max-width: 16rem;
+  }
+
+  .fam-family__children {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0 0 0 var(--space-4);
+    padding: 0 0 0 var(--space-4);
+    list-style: none;
+    border-left: var(--px) solid var(--ink-2);
+  }
+
+  .fam-family__child {
+    position: relative;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 16rem);
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .fam-family__child::before {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--space-4));
+    top: 50%;
+    width: var(--space-3);
+    border-top: var(--px) solid var(--ink-2);
+  }
+
+  .fam-family__child:last-child::after {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--space-4) - var(--px));
+    top: calc(50% + var(--px));
+    bottom: calc(-1 * var(--space-1));
+    width: var(--px);
+    background: var(--bg-sub);
+  }
+
+  .fam-family__edge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  /* The tables below the map: the goal gets the room, the id and its strip
+     stay on their own column, risk and steps stay narrow. */
+  .workflow-table {
+    table-layout: auto;
+    width: 100%;
+  }
+
+  .workflow-table th[scope='row'] {
+    width: 34%;
+  }
+
+  .workflow-table__group th {
+    background: var(--bg-mut);
+    font-size: 14px;
+  }
+
+  .workflow-table td:not(:nth-child(2)) {
+    white-space: nowrap;
+  }
+}

@@ -6,13 +6,17 @@
 // capability each step runs, which the README's list under the card names. A
 // workflow no catalog defines has no steps to draw, so it gets a plain card,
 // not a figure: a dashed outline, the status:proposed glyph and the
-// PROPOSED_WORKFLOW_STATUS badge. The page puts each
+// PROPOSED_WORKFLOW_STATUS badge. When the README lists the proposal's
+// capabilities under "Capabilities used" and each is an ontology id
+// (`listed`), the card is a figure of those capabilities as tiles in list
+// order, still dashed and marked proposed. The page puts each
 // card under the matching H3 of the README's "Available Workflows".
 //
 // Props:
 // - id: the workflow id the profile lists, required.
 // - n: the figure number on the page.
 // - figId: the figure's ref- id.
+// - listed: the README's capability list for a proposed workflow, optional.
 import Figure from './Figure.astro';
 import MiniTile from './MiniTile.astro';
 import { loadOntology } from '../../data/ontology';
@@ -23,14 +27,16 @@ import { loadWorkflows } from '../../data/workflows';
 import { workflowHref } from '../../lib/generated';
 import { PROPOSED_WORKFLOW_STATUS } from '../../lib/status';
 import { workflowCardCaption } from '../../lib/domain-figures';
+import { proposedCaption } from '../../lib/domain-usage';
 
 interface Props {
   id: string;
   n: number;
   figId: string;
+  listed?: string[] | null;
 }
 
-const { id, n, figId } = Astro.props;
+const { id, n, figId, listed } = Astro.props;
 const wf = loadWorkflows().byId.get(id);
 const known = new Set(loadOntology().capabilities.map((c) => c.id));
 ---
@@ -43,6 +49,21 @@ const known = new Set(loadOntology().capabilities.map((c) => c.id));
         ))}
       </ol>
       <p class="wf-card__facts"><span>{wf.steps.length} {wf.steps.length === 1 ? 'step' : 'steps'}</span> <RiskBadge risk={wf.risk} /> <a class="wf-card__link" href={workflowHref(id)}>Open <code>{id}</code></a></p>
+    </div>
+  </Figure>
+) : listed && listed.length > 0 ? (
+  <Figure id={figId} n={n} title={`Capabilities the guide lists for ${id}`} caption={proposedCaption(listed)} kind="workflow-card-proposed" class="wf-card wf-card--listed">
+    <div class="wf-card__body" data-workflow={id}>
+      <p class="wf-card__facts">
+        <span class="wf-card__glyph"><PixelGlyph name="status:proposed" scale={2} /></span>
+        <code>{id}</code>
+        <StatusBadge status={PROPOSED_WORKFLOW_STATUS} />
+      </p>
+      <ol class="wf-card__steps" aria-label={`The ${listed.length} capabilities listed for ${id}, in order`}>
+        {listed.map((c, k) => (
+          <li><MiniTile id={c} size={24} link={false} relation={`item ${k + 1}`} /></li>
+        ))}
+      </ol>
     </div>
   </Figure>
 ) : (

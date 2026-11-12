@@ -23,6 +23,8 @@ import {
   trustCaption,
   workflowCardCaption,
 } from '../lib/domain-figures';
+import { capabilityUsage, listedCapabilities, proposedCaption, usageCaption, usageCheck, usageTitle } from '../lib/domain-usage';
+import { glance, glanceCaption, glanceTitle, parameterAcross } from '../lib/domain-index';
 import { sortedTrustWeights, toYaml } from '../lib/views';
 import { blocks, cell, code, fence, figure, generatedLine, markdownCopy, mdLink, table } from './md';
 import type { Twin } from './types';
@@ -33,11 +35,26 @@ export function domainTwin(key: string, description: string | null): Twin {
   const wfs = loadWorkflows();
   const readme = d.readme ? markdownCopy(d.readme, readRepoFile(d.readme), { sourceNote: true }) : `# ${d.key} domain\n`;
   const title = /^# (.+)$/m.exec(readme)?.[1] ?? `${d.key} domain`;
+  const readmeText = d.readme ? readRepoFile(d.readme) : '';
   const workflows = d.workflows.map((w) => {
     const wf = wfs.byId.get(w.id);
-    return w.defined && wf
-      ? `- ${mdLink(code(w.id), `/workflows/${wf.slug}/`)}: ${wf.goal} ${workflowCardCaption(wf)}`
-      : `- ${code(w.id)}: ${PROPOSED_WORKFLOW_STATUS}`;
+    if (w.defined && wf) return `- ${mdLink(code(w.id), `/workflows/${wf.slug}/`)}: ${wf.goal} ${workflowCardCaption(wf)}`;
+    return `- ${code(w.id)}: ${PROPOSED_WORKFLOW_STATUS}`;
+  });
+  const proposedFigures = d.workflows.flatMap((w) => {
+    const listed = !w.defined && d.readme ? listedCapabilities(readmeText, w.id) : null;
+    return listed ? [figure(`Capabilities the guide lists for ${w.id}`, proposedCaption(listed), listed.map((c, k) => `${k + 1}. ${code(c)}`).join('\n'))] : [];
+  });
+  const usage = d.readme ? capabilityUsage(readmeText, d.readme) : [];
+  const usageFigures = usage.map((u) => {
+    const c = usageCheck(u, d.profile);
+    const rows = [
+      `- Reads: ${u.inputs.map(code).join(', ') || 'nothing'}`,
+      `- Returns: ${u.outputs.map(code).join(', ') || 'nothing'}`,
+      ...c.required.map((r) => `- Required anchor ${code(r.type)}: ${r.present ? 'carried' : 'not carried'}`),
+      ...(c.other.length > 0 ? [`- Other anchors: ${c.other.map(code).join(', ')}`] : []),
+    ];
+    return figure(usageTitle(u), usageCaption(u, c, d.key), rows.join('\n'));
   });
   const markdown = blocks(
     readme,
@@ -46,8 +63,11 @@ export function domainTwin(key: string, description: string | null): Twin {
     d.description,
     fence('yaml', toYaml(d.profile)),
     ...profileFigures(d.profile),
+    usageFigures.length > 0 && '## Capability usage, against the evidence policy',
+    ...usageFigures,
     '## Workflows in this profile',
     workflows.length === 0 ? 'The profile lists no workflows.' : workflows.join('\n'),
+    ...proposedFigures,
   );
   return { title, description: description ?? d.description, markdown };
 }
@@ -94,6 +114,7 @@ function profileFigures(p: Record<string, unknown>): string[] {
 export function domainsIndexTwin(source: string, description: string | null): Twin {
   const profiles = loadProfiles();
   const readme = markdownCopy(source, readRepoFile(source), { sourceNote: true });
+  const param = parameterAcross(readRepoFile(source));
   const title = /^# (.+)$/m.exec(readme)?.[1] ?? 'Domains';
   const markdown = blocks(
     readme,
@@ -120,6 +141,26 @@ export function domainsIndexTwin(source: string, description: string | null): Tw
       ),
     ),
     thresholdsSentence(profiles),
+    '## Figures on this page',
+    ...profiles.map((p) => {
+      const g = glance(p);
+      const rows = [
+        ...(g.ladder ? g.ladder.rows.map((r) => `- At ${r.level} risk: ${OUTCOME_WORD[r.outcome]}`) : []),
+        ...(g.ladder && g.ladder.blocked.length > 0 ? [`- Never on its own: ${g.ladder.blocked.map(code).join(', ')}`] : []),
+        `- Checkpoint triggers: ${g.triggers === 0 ? 'none' : `${g.triggers} (${g.triggerLevels})`}`,
+        `- Workflows: ${g.defined} in a catalog, ${g.proposed} proposed`,
+      ];
+      return figure(glanceTitle(g), glanceCaption(g), rows.join('\n'));
+    }),
+    param &&
+      figure(
+        param.title,
+        param.caption,
+        table(
+          ['Catalog', 'Domain values (workflows)'],
+          param.rows.map((r) => [r.domain ?? 'reference', r.values.map((v) => `${code(v.value)} (${v.workflows.length})`).join(', ')]),
+        ),
+      ),
     table(
       ['Domain', 'Description', 'Workflows in a catalog'],
       profiles.map((p) => [mdLink(p.key, `/domains/${p.key}/`), cell(p.description), String(p.workflows.filter((w) => w.defined).length)]),

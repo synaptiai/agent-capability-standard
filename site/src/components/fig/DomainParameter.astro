@@ -1,0 +1,52 @@
+---
+// The domain parameter a capability takes in each catalog's workflows, under
+// the domains index's "How Domains Demonstrate Domain-Agnostic Capabilities"
+// (visual spec 3.6). The capability is the one that section names; each row
+// is a catalog (the reference catalog, then each domain catalog under its
+// glyph) and lists the `domain:` values its steps pass, each with the number
+// of workflows that use it. The section's fence stays as the author's
+// example.
+//
+// Props:
+// - data: ParameterAcross, required.
+// - n: number, required. The figure's number on the page.
+// - id: string, required. A `ref-` id.
+import '../../styles/figures-domain-usage.css';
+import { domainGlyph } from '../../lib/domain-figures';
+import type { ParameterAcross } from '../../lib/domain-index';
+import { domainHref } from '../../lib/generated';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+
+interface Props {
+  data: ParameterAcross;
+  n: number;
+  id: string;
+}
+
+const { data, n, id } = Astro.props;
+---
+<Figure id={id} n={n} title={data.title} caption={data.caption} kind="domain-parameter" class="param">
+  <p class="param__cap"><MiniTile id={data.capability} size={32} /> <code>{data.capability}</code></p>
+  <dl class="param__rows">
+    {data.rows.map((r) => (
+      <div>
+        <dt>
+          {r.domain ? <><PixelGlyph name={domainGlyph(r.domain)} scale={2} /><a href={domainHref(r.domain)}>{r.domain}</a></> : <>Reference catalog</>}
+        </dt>
+        <dd>
+          <ul class="usage__chips">
+            {r.values.map((v) => (
+              <li class="usage__chip">
+                <code>{v.value}</code>
+                <span class="param__count">{v.workflows.length}<span class="fig-sr"> {v.workflows.length === 1 ? 'workflow' : 'workflows'}: {v.workflows.join(', ')}</span></span>
+              </li>
+            ))}
+          </ul>
+        </dd>
+      </div>
+    ))}
+  </dl>
+  <p class="param__key">The number beside each value is how many of that catalog's workflows pass it.</p>
+</Figure>

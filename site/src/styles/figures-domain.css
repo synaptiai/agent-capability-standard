@@ -6,6 +6,10 @@
  * switches layout on the width of its own .fig (a container), never the
  * viewport; "narrow" is below 640px (visual spec 4.1).
  */
+/* Pages import this sheet, and it can load before the layout's tokens.css, so
+   the layer order is declared here too (the same order as tokens.css). */
+@layer reset, tokens, base, components, utilities;
+
 @layer components {
   /* Glyphs sit in the line here; .fig__drawing makes every svg a block. */
   :is(.ladder, .meter-table, .policy-list, .policy-strip, .compliance-panel, .ladder-blocked, .wf-card__body) svg.pg {
