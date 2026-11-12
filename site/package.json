@@ -11,7 +11,7 @@
     "preview": "astro preview",
     "check": "astro check && node scripts/check-contrast.mjs && node scripts/check-design-data.mjs",
     "test": "vitest run",
-    "check:axe": "node scripts/check-axe.mjs"
+    "check:axe": "node scripts/check-axe.mjs && node scripts/check-runs.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "7.3.5",

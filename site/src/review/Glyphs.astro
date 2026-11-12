@@ -11,11 +11,12 @@ import type { Route } from '../lib/routes';
 import { MIN_DISTANCE } from '../pixel/grid';
 import { ALL_GRIDS } from '../pixel/keys';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
-import { aliasRows, closestPairs, silhouetteOrder } from './sheet';
+import { aliasRows, closestPairs, familyOrder, silhouetteOrder } from './sheet';
 
 const route: Route = { source: null, url: '/_review/glyphs/', section: 'home', order: 0, template: 'not-found', title: 'Glyph sheet' };
 const id = refSlugger();
 const order = silhouetteOrder();
+const families = familyOrder();
 const pairs = closestPairs(20);
 const aliases = aliasRows();
 const sizes = { inline: order.filter((g) => g.size === 7).length, concept: order.filter((g) => g.size === 9).length };
@@ -55,21 +56,26 @@ const SCALES = [1, 2, 3];
     </ol>
 
     <h2 id={id('All glyphs')}>All glyphs</h2>
-    <p>Left of each card is the light theme, right the dark theme; each shows 1x, 2x and 3x.</p>
-    <ul class="glyph-grid">
-      {order.map((g) => (
-        <li class="glyph-card" data-glyph-key={g.key} data-size={g.size}>
-          <span class="glyph-card__themes">
-            {THEMES.map((t) => (
-              <span class="glyph-card__swatch" style={swatch(t)} data-theme-swatch={t}>
-                {SCALES.map((s) => <PixelGlyph name={g.key} scale={s} />)}
+    <p>Grouped by the outline each glyph is built on, so shapes that could be confused sit together; within a group each glyph sits beside the one most like it. Left of each card is the light theme, right the dark theme; each shows 1x, 2x and 3x.</p>
+    {families.map((f) => (
+      <section class="glyph-family" aria-labelledby={`family-${f.title.toLowerCase().replace(/[^a-z]+/g, '-')}`}>
+        <h3 id={`family-${f.title.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{f.title} <span class="glyph-family__count">({f.glyphs.length})</span></h3>
+        <ul class="glyph-grid">
+          {f.glyphs.map((g) => (
+            <li class="glyph-card" data-glyph-key={g.key} data-size={g.size}>
+              <span class="glyph-card__themes">
+                {THEMES.map((t) => (
+                  <span class="glyph-card__swatch" style={swatch(t)} data-theme-swatch={t}>
+                    {SCALES.map((s) => <PixelGlyph name={g.key} scale={s} />)}
+                  </span>
+                ))}
               </span>
-            ))}
-          </span>
-          <code class="glyph-card__key">{g.key}</code>
-        </li>
-      ))}
-    </ul>
+              <code class="glyph-card__key">{g.key}</code>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
 
     <h2 id={id('Reused glyphs')}>Reused glyphs</h2>
     <p>These concepts draw with a glyph that already has the same meaning, so no two grids are copies of each other.</p>
@@ -123,6 +129,11 @@ const SCALES = [1, 2, 3];
     gap: var(--space-2);
     padding: 0;
     list-style: none;
+  }
+
+  .glyph-family__count {
+    color: var(--ink-2);
+    font-weight: 400;
   }
 
   .glyph-card {

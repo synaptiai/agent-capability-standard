@@ -148,10 +148,12 @@ export const UI_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   // ---- Inline glyphs added for the figures (visual spec 2.3). Keys with a
   // colon belong to a group; `stop` is shared by gate:stop and fail:stop.
 
-  // Risk: one, two or three bars from the bottom; high adds an exclamation mark.
-  'risk:low': ['.......', '.......', '.......', '.......', '.......', '#####..', '#####..'],
-  'risk:medium': ['.......', '.......', '#####..', '#####..', '.......', '#####..', '#####..'],
-  'risk:high': ['#####.#', '......#', '#####.#', '#####.#', '.......', '#####..', '#####.#'],
+  // Risk: one, two or three bars from the bottom; high adds an exclamation
+  // mark. Low and medium are full width and high is a different silhouette
+  // (bars cut by the mark), so the three differ by 14 cells or more.
+  'risk:low': ['.......', '.......', '.......', '.......', '.......', '#######', '#######'],
+  'risk:medium': ['.......', '.......', '#######', '#######', '.......', '#######', '#######'],
+  'risk:high': ['#####.#', '#####.#', '......#', '#####.#', '#####..', '.......', '#####.#'],
   // Gate actions. skip: a hop over a post; end: an arrow into a bar.
   'gate:skip': ['..###..', '.#...#.', '.#...#.', '.#..###', '.....#.', '.......', '#######'],
   // A stop sign's outline (a thick octagon ring), not the solid square of
@@ -167,25 +169,60 @@ export const UI_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   'flow:store': ['...#...', '.#.#.#.', '..###..', '#..#..#', '#.....#', '#.....#', '#######'],
   'flow:read': ['.......', '####...', '#..#.#.', '#..####', '#..#.#.', '####...', '.......'],
   'flow:join': ['#.....#', '#.....#', '#.....#', '.#...#.', '..###..', '...#...', '...#...'],
-  // Field-type families.
+  // Field-type families. open: a five-armed asterisk, apart from the close X
+  // and the sun.
   'type:text': ['.......', '##..##.', '##..##.', '.#...#.', '#...#..', '.......', '.......'],
   'type:number': ['...#...', '..##...', '.#.#...', '...#...', '...#...', '...#...', '.#####.'],
   'type:boolean': ['.......', '#######', '####..#', '####..#', '####..#', '#######', '.......'],
   'type:list': ['##...##', '#.....#', '#.....#', '#.#.#.#', '#.....#', '#.....#', '##...##'],
   'type:record': ['.##.##.', '.#...#.', '.#...#.', '#..#..#', '.#...#.', '.#...#.', '.##.##.'],
-  'type:open': ['#..#..#', '.#.#.#.', '..###..', '.#####.', '..###..', '.#.#.#.', '#..#..#'],
-  // Approval and checkpoint policy. blocked: a padlock; always: two squares sharing an edge.
-  'approve:blocked': ['..###..', '.#...#.', '.#...#.', '#######', '###.###', '###.###', '#######'],
+  'type:open': ['...#...', '...#...', '##.#.##', '..###..', '.##.##.', '##...##', '.......'],
+  // Approval and checkpoint policy. blocked: a padlock with a wide shackle and
+  // a solid body (apart from the REASON tree); always: two squares sharing an edge.
+  'approve:blocked': ['.#####.', '.#...#.', '.#...#.', '#######', '#######', '###.###', '#######'],
   'policy:always': ['.......', '#######', '#..#..#', '#..#..#', '#######', '.......', '.......'],
-  // A dashed outline square.
+  // Lifecycle and document statuses (visual spec 2.3, extended to every
+  // status style the sources use; see STATUS_STYLES in src/lib/status.ts).
+  // draft: a pencil tip over a dashed line.
+  'status:draft': ['....##.', '...#=#.', '..#=#..', '.##....', '.......', '#.#.#.#', '.......'],
+  // accepted: a check over a solid bar.
+  'status:accepted': ['......#', '.....##', '#...##.', '##.##..', '.###...', '.......', '#######'],
+  // rejected: a small X over a solid bar.
+  'status:rejected': ['.#...#.', '..#.#..', '...#...', '..#.#..', '.#...#.', '.......', '#######'],
+  // superseded: an arrow passing over a bar.
+  'status:superseded': ['...#...', '....#..', '#######', '....#..', '...#...', '.......', '#######'],
+  // normative: a ruler (a bar with ticks), the rule itself.
+  'status:normative': ['.......', '.......', '#.#.#.#', '#.#.#.#', '#######', '#######', '.......'],
+  // normative reference: a push pin.
+  'status:normative-reference': ['.#####.', '..###..', '..###..', '.#####.', '#######', '...#...', '...#...'],
+  // reference: a bookmark ribbon.
+  'status:reference': ['.#####.', '.#####.', '.#####.', '.#####.', '.##.##.', '.#...#.', '.......'],
+  // analysis: plus and minus, for a weighing of pros and cons.
+  'status:analysis': ['.##....', '######.', '######.', '.##....', '.......', '..#####', '..#####'],
+  // historical: an hourglass with sand in the lower bulb.
+  'status:historical': ['#######', '.#...#.', '..#.#..', '...#...', '..#=#..', '.#===#.', '#######'],
+  // candidate: a ticket with notches and a perforation.
+  'status:candidate': ['#######', '##.####', '#######', '.#.###.', '#######', '##.####', '#######'],
+  // Skills and agents. capability: an outline tile lifted by a shadow;
+  // general-purpose: a wrench.
+  'skill:capability': ['.......', '####...', '#..##..', '#..##..', '#####..', '.####..', '.......'],
+  'agent:general-purpose': ['.#.#...', '.###...', '..#....', '..#....', '...#...', '....##.', '....##.'],
+  // A folder with a tab, for directory-tree panels.
+  folder: ['.......', '###....', '#######', '#######', '#.....#', '#######', '.......'],
+  // A group: two boxes under one bracket (a parallel group, a Mermaid subgraph).
+  group: ['#######', '#.....#', '.......', '###.###', '#=#.#=#', '###.###', '.......'],
+  // proposed: a dashed outline square.
   'status:proposed': ['#.#.#.#', '.......', '#.....#', '.......', '#.....#', '.......', '#.#.#.#'],
   // An empty tray, open at the top.
   empty: ['.......', '#.....#', '#.....#', '#.....#', '#.....#', '#######', '.......'],
   // Edge-type marks: one per ontology edge type, used at every size.
+  // precedes: two thick chevrons (>>), far from soft_requires' dotted line;
+  // enables: a chevron, a line and an open box, far from alternative_to's
+  // double arrow.
   'mark:requires': ['.......', '....#..', '####.#.', '####..#', '####.#.', '....#..', '.......'],
   'mark:soft_requires': ['...#...', '....#..', '.....#.', '#.#.#.#', '.....#.', '....#..', '...#...'],
-  'mark:enables': ['.......', '.#.....', '..#.###', '#####.#', '..#.###', '.#.....', '.......'],
-  'mark:precedes': ['#..#...', '.#..#..', '..#..#.', '...#..#', '..#..#.', '.#..#..', '#..#...'],
+  'mark:enables': ['.......', '.#..###', '..#...#', '####..#', '..#...#', '.#..###', '.......'],
+  'mark:precedes': ['##..##.', '.##..##', '..##..#', '...##..', '..##..#', '.##..##', '##..##.'],
   'mark:conflicts_with': ['...#...', '#..#..#', '##.#.##', '#######', '##.#.##', '#..#..#', '...#...'],
   'mark:alternative_to': ['.......', '.#...#.', '##...##', '#######', '##...##', '.#...#.', '.......'],
   'mark:specializes': ['...#...', '..#.#..', '.#...#.', '#######', '...#...', '...#...', '..###..'],
@@ -237,8 +274,9 @@ export const CONCEPT_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   'chapter:diagnostic-model': ['..#...#..', '...###...', '#.#####.#', '.#######.', '#.##.##.#', '.###.###.', '#.##.##.#', '..##.##..', '...###...'],
   // A tag with a hole.
   'chapter:versioning-and-compatibility': ['.........', '...######', '..#######', '.########', '###.#####', '.########', '..#######', '...######', '.........'],
-  // A signpost with two arms.
-  'chapter:decision-frameworks': ['....#....', '.######..', '.#######.', '.######..', '....#....', '..######.', '.#######.', '..######.', '....#....'],
+  // A signpost: a pole and two long arms pointing opposite ways (not a
+  // solid block, so it reads apart from the stop ring).
+  'chapter:decision-frameworks': ['....#....', '#######..', '########.', '#######..', '....#....', '..#######', '.########', '..#######', '....#....'],
 
   // ---- Domain profiles, keyed by profile file stem
   // A speaker cone and a three-bar waveform.

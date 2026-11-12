@@ -287,7 +287,9 @@
    */
   @container (min-width: 640px) {
     .cdiag {
-      grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+      /* Content-sized columns: free width goes to the side that needs it,
+         so a long output row is not wrapped beside a half-empty inputs side. */
+      grid-template-columns: auto 24px auto;
       grid-template-areas:
         'box box box'
         'in flow out';

@@ -49,6 +49,14 @@
     --layer-REMEMBER: #4d7c0f;
     --layer-COORDINATE: #1d4ed8;
     --tint-amount: 12%;
+    /* The fill of a "yes" cell in a safety panel: the layer mixed toward --bg.
+       In dark a stronger mix of the warm layers reads as brown, so the fill
+       stays faint there and the cell takes a layer-coloured border and bar. */
+    --safety-on-amount: 12%;
+    /* How much of the layer colour the "yes" cell's border and 4px top bar
+       take: none in light (a --line border, no bar, as approved), all of it
+       in dark, where the faint fill alone does not mark the cell. */
+    --safety-on-edge: 0%;
 
     /* Risk (red and gold are used for nothing else) */
     --risk-low: #3f5168;
@@ -68,6 +76,10 @@
     --on-heat-2: var(--ink);
     --on-heat-3: var(--ink);
     --on-heat-4: var(--bg);
+    /* The 2px border of a heat cell and a legend swatch. It must stand 3:1
+       against every step: --line does in light; in dark --line is as light
+       as the steps, so the border is the page colour there. */
+    --heat-line: var(--line);
 
     /* Requirement keywords share the risk colours */
     --kw-must: var(--risk-high);
@@ -163,6 +175,8 @@
       --layer-REMEMBER: #bef264;
       --layer-COORDINATE: #6f9cff;
       --tint-amount: 20%;
+      --safety-on-amount: 8%;
+      --safety-on-edge: 100%;
       --risk-low: #b4c0d0;
       --risk-medium: #facc15;
       --risk-high: #f87171;
@@ -177,6 +191,7 @@
       --on-heat-2: var(--bg);
       --on-heat-3: var(--bg);
       --on-heat-4: var(--bg);
+      --heat-line: var(--bg);
       --callout-amount: 10%;
       --code-foreground: #eef2f8;
       --code-background: #0f1726;
@@ -220,6 +235,8 @@
     --layer-REMEMBER: #bef264;
     --layer-COORDINATE: #6f9cff;
     --tint-amount: 20%;
+    --safety-on-amount: 8%;
+    --safety-on-edge: 100%;
     --risk-low: #b4c0d0;
     --risk-medium: #facc15;
     --risk-high: #f87171;
@@ -234,6 +251,7 @@
     --on-heat-2: var(--bg);
     --on-heat-3: var(--bg);
     --on-heat-4: var(--bg);
+    --heat-line: var(--bg);
     --callout-amount: 10%;
     --code-foreground: #eef2f8;
     --code-background: #0f1726;

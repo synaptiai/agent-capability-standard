@@ -53,7 +53,8 @@ export function fileFor(dist, urlPath) {
   return existsSync(file) && statSync(file).isFile() ? file : null;
 }
 
-function serve(dist) {
+/** Serve `dist` on a free local port; resolves to the http.Server. */
+export function serve(dist) {
   const server = createServer((req, res) => {
     const file = fileFor(dist, req.url ?? '/');
     if (!file) {

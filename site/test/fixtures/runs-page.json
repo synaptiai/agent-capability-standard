@@ -1,0 +1,22 @@
+{
+  "comment": "The geometry of runs-page.html, worked out by hand from its fixed heights: the body starts under the 100px header; the 50x30 drawing is too small to count; #notes runs to the next h2 (#after), past its h3; #code exempts only its first fence taller than 900px; #gone is not on the page.",
+  "entries": [
+    { "page": "template:fixture", "anchor": "notes", "category": "a", "run": "Notes" },
+    { "page": "template:fixture", "anchor": "code", "category": "b", "extent": "first-tall-fence", "run": "Code" },
+    { "page": "template:fixture", "anchor": "gone", "category": "c", "run": "Gone" }
+  ],
+  "template": "fixture",
+  "geometry": {
+    "body": { "top": 100, "bottom": 7850 },
+    "figures": [
+      { "top": 1100, "bottom": 1400 },
+      { "top": 6200, "bottom": 6300 }
+    ],
+    "exempt": [
+      { "key": "0", "label": "#notes (a)", "top": 1400, "bottom": 4050 },
+      { "key": "1", "label": "#code (b)", "top": 6450, "bottom": 7450 }
+    ]
+  },
+  "small": [{ "top": 4100, "bottom": 4300 }],
+  "missing": ["2"]
+}

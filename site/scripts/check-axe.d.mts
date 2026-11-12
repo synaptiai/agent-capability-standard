@@ -8,3 +8,4 @@ export function runAxe(
   dist: string,
   options?: { concurrency?: number; only?: string[] | null; log?: (m: string) => void },
 ): Promise<{ pages: number; runs: number; findings: string[] }>;
+export function serve(dist: string): Promise<import('node:http').Server>;
