@@ -28,7 +28,7 @@ import { CONCEPT_GLYPHS, GLYPH_ALIASES, LAYER_GLYPHS, LETTERS, MARK, UI_GLYPHS }
 import { ALL_GRIDS, chapterKey, principleKey, resolveGlyphKey } from '../src/pixel/keys.ts';
 import { parseGrid } from '../src/pixel/grid.ts';
 import { governanceStatuses } from '../src/lib/governance.ts';
-import { STATUS_STYLES } from '../src/lib/status.ts';
+import { PROPOSED_WORKFLOW_STATUS, STATUS_STYLES } from '../src/lib/status.ts';
 import { isMain } from './is-main.mjs';
 
 const SITE = fileURLToPath(new URL('..', import.meta.url));
@@ -161,6 +161,14 @@ export function sourceStatuses(files) {
   return out;
 }
 
+/**
+ * The status glyph each status value in use needs: `status:<style>` for its
+ * badge style. Values with no style are left to checkStatuses().
+ */
+export function statusGlyphKeys(values, styles) {
+  return [...values].filter(([v]) => v in styles).map(([v, where]) => ({ key: `status:${styles[v]}`, from: `status "${v}" (${where})` }));
+}
+
 export function checkStatuses(values, styles) {
   return [...values].filter(([v]) => !(v in styles)).map(([v, where]) => `status "${v}" (${where}) has no badge style in src/lib/status.ts`);
 }
@@ -248,6 +256,8 @@ function main() {
   const statuses = sourceStatuses(tracked.map((p) => ({ path: p, text: read(p) })));
   for (const s of governanceStatuses(read('spec/GOVERNANCE.md'))) if (!statuses.has(s)) statuses.set(s, 'spec/GOVERNANCE.md');
   problems.push(...checkStatuses(statuses, STATUS_STYLES));
+  statuses.set(PROPOSED_WORKFLOW_STATUS, 'src/lib/status.ts');
+  problems.push(...checkGlyphKeys(statusGlyphKeys(statuses, STATUS_STYLES), {}));
 
   const files = sourceFiles(path.join(SITE, 'src')).map((p) => ({ path: path.relative(SITE, p), text: readFileSync(p, 'utf8') }));
   problems.push(...findHandTypedCounts(files, [layers.length, capabilityCount]));

@@ -20,3 +20,4 @@ export function checkGlyphKeys(
   grids?: Readonly<Record<string, readonly string[]>>,
 ): string[];
 export function findHexColours(files: { path: string; text: string }[]): string[];
+export function statusGlyphKeys(values: Map<string, string>, styles: Record<string, string>): { key: string; from: string }[];

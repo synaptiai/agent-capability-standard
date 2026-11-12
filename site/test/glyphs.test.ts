@@ -5,11 +5,13 @@
 // catalog schema and the ontology.
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { checkGlyphKeys, findHexColours } from '../scripts/check-design-data.mjs';
+import { checkGlyphKeys, findHexColours, statusGlyphKeys } from '../scripts/check-design-data.mjs';
+import { PROPOSED_WORKFLOW_STATUS, STATUS_STYLES } from '../src/lib/status';
 import { CONCEPT_GLYPHS, GLYPH_ALIASES, LAYER_GLYPHS, UI_GLYPHS } from '../src/pixel/glyphs';
 import { gridMask, gridPairs, maskDistance } from '../src/pixel/grid';
 import { ALL_GRIDS, chapterKey, principleKey, resolveGlyphKey, TOOL_GLYPHS } from '../src/pixel/keys';
 import { coverage } from '../src/lib/home';
+import { familyOrder } from '../src/review/sheet';
 import { ontologyEdgeTriples, profileFiles, repoText, standardFileVersions } from './independent';
 
 /** A 7x7 or 9x9 grid as the set of on cells in a 9x9 frame; a 7x7 grid sits one cell in. */
@@ -45,6 +47,29 @@ describe('glyph distinctness', () => {
       }
     }
     expect(grids.length).toBeGreaterThan(Object.keys(LAYER_GLYPHS).length);
+    expect(close).toEqual([]);
+  });
+
+  it('keeps the pairs the maintainer found hard to tell apart at least 14 cells apart', () => {
+    // The exemplar review (issue #125) named these pairs as confusable at
+    // their spec limit (10 for two inline glyphs, 12 inline against concept).
+    // The spec says a pair found confusable is redrawn whatever its distance
+    // (5.2); 14, the limit for two concept glyphs, is the bar they now meet.
+    const named = [
+      ['close', 'type:open'],
+      ['mark:soft_requires', 'mark:precedes'],
+      ['risk:low', 'risk:medium'],
+      ['risk:medium', 'risk:high'],
+      ['risk:low', 'risk:high'],
+      ['sun', 'type:open'],
+      ['mark:enables', 'mark:alternative_to'],
+      ['REASON', 'approve:blocked'],
+      ['stop', 'chapter:decision-frameworks'],
+    ];
+    const close = named
+      .map(([a, b]) => ({ a, b, d: apart(cells(ALL_GRIDS[a!]!), cells(ALL_GRIDS[b!]!)) }))
+      .filter((p) => p.d < 14)
+      .map((p) => `${p.a} and ${p.b} differ in ${p.d} cells`);
     expect(close).toEqual([]);
   });
 
@@ -135,6 +160,23 @@ describe('glyph keys from the data', () => {
     expect(titles.filter((t) => !TOOL_GLYPHS[t] || resolveGlyphKey(TOOL_GLYPHS[t]!) === null)).toEqual([]);
   });
 
+  it('has a status glyph for every badge style, and reports a status whose style has none', () => {
+    const styles = [...new Set(Object.values(STATUS_STYLES))];
+    expect(styles.filter((st) => resolveGlyphKey(`status:${st}`) === null)).toEqual([]);
+    const values = new Map([
+      ['Accepted', 'spec/RFC-0001.md'],
+      [PROPOSED_WORKFLOW_STATUS, 'src/lib/status.ts'],
+      ['Withdrawn', 'spec/RFC-0009.md'],
+    ]);
+    const keys = statusGlyphKeys(values, { ...STATUS_STYLES, Withdrawn: 'withdrawn' });
+    expect(keys.map((k) => k.key)).toEqual(['status:accepted', 'status:proposed', 'status:withdrawn']);
+    expect(checkGlyphKeys(keys, {})).toEqual(['glyph status:withdrawn (status "Withdrawn" (spec/RFC-0009.md)) has no grid in src/pixel/glyphs.ts']);
+  });
+
+  it('has the glyphs the skill, agent and directory-tree figures name', () => {
+    for (const k of ['skill:capability', 'skill:composed', 'agent:explore', 'agent:general-purpose', 'folder', 'group']) expect(resolveGlyphKey(k), k).not.toBeNull();
+  });
+
   it('reports a needed key with no grid and an alias with no target', () => {
     const problems = checkGlyphKeys([{ key: 'domain:astronomy', from: 'x.yaml' }], { 'gate:nap': 'snooze' }, ALL_GRIDS);
     expect(problems).toEqual([
@@ -153,5 +195,24 @@ describe('glyph keys from the data', () => {
     const dir = 'src/components/fig';
     const files = readdirSync(dir).map((f) => ({ path: `${dir}/${f}`, text: readFileSync(`${dir}/${f}`, 'utf8') }));
     expect(findHexColours(files)).toEqual([]);
+  });
+});
+
+describe('glyph sheet families', () => {
+  it('puts every grid under exactly one family heading, and nothing under "Other shapes" today', () => {
+    const fams = familyOrder();
+    const keys = fams.flatMap((f) => f.glyphs.map((g) => g.key));
+    const want = Object.entries(ALL_GRIDS).filter(([, r]) => r.length === 7 || r.length === 9).map(([k]) => k);
+    expect([...keys].sort()).toEqual([...want].sort());
+    expect(fams.map((f) => f.title)).not.toContain('Other shapes');
+  });
+
+  it('files a grid no family names under "Other shapes", last', () => {
+    const grids = { a: ['#......', '.......', '.......', '.......', '.......', '.......', '.......'], b: ['......#', '.......', '.......', '.......', '.......', '.......', '.......'] };
+    const fams = familyOrder(grids, [{ title: 'Firsts', keys: ['a', 'missing'] }]);
+    expect(fams.map((f) => [f.title, f.glyphs.map((g) => g.key)])).toEqual([
+      ['Firsts', ['a']],
+      ['Other shapes', ['b']],
+    ]);
   });
 });
