@@ -96,7 +96,7 @@
     box-sizing: border-box;
     width: 28px;
     height: 28px;
-    border: var(--px) solid var(--line);
+    border: var(--px) solid var(--heat-line);
     background: var(--cell);
     color: var(--cell-ink);
     font-family: var(--font-mono);
@@ -131,7 +131,7 @@
     box-sizing: border-box;
     width: 16px;
     height: 16px;
-    border: var(--px) solid var(--line);
+    border: var(--px) solid var(--heat-line);
     background: var(--cell);
   }
 

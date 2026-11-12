@@ -182,10 +182,15 @@
       --risk-high: #f87171;
       --on-risk-high: #0b111e;
       --ok: #86efac;
-      /* Count text: --ink on heat step 1, --bg on steps 2 to 4. */
-      --heat-1: #44728d;
-      --heat-2: #558fae;
-      --heat-3: #66acd0;
+      /* Count text: --ink on heat step 1, --bg on steps 2 to 4. In dark the
+         steps are --indicator mixed toward --bg at 47, 64, 82 and 100%, not
+         50, 65, 80: the first three were hard to tell apart, and these
+         spread them as far as the contrast pairs allow (step 1 must keep 3:1
+         against the panel, step 2 4.5:1 for its --bg count). Adjacent
+         OKLab distance 10.5 to 10.8, was 9.0 to 11.6; --ordinal passes. */
+      --heat-1: #416c86;
+      --heat-2: #548dac;
+      --heat-3: #68b0d4;
       --heat-4: #7dd3fc;
       --on-heat-1: var(--ink);
       --on-heat-2: var(--bg);
@@ -242,10 +247,15 @@
     --risk-high: #f87171;
     --on-risk-high: #0b111e;
     --ok: #86efac;
-    /* Count text: --ink on heat step 1, --bg on steps 2 to 4. */
-    --heat-1: #44728d;
-    --heat-2: #558fae;
-    --heat-3: #66acd0;
+    /* Count text: --ink on heat step 1, --bg on steps 2 to 4. In dark the
+       steps are --indicator mixed toward --bg at 47, 64, 82 and 100%, not
+       50, 65, 80: the first three were hard to tell apart, and these
+       spread them as far as the contrast pairs allow (step 1 must keep 3:1
+       against the panel, step 2 4.5:1 for its --bg count). Adjacent
+       OKLab distance 10.5 to 10.8, was 9.0 to 11.6; --ordinal passes. */
+    --heat-1: #416c86;
+    --heat-2: #548dac;
+    --heat-3: #68b0d4;
     --heat-4: #7dd3fc;
     --on-heat-1: var(--ink);
     --on-heat-2: var(--bg);
