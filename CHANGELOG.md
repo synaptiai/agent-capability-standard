@@ -446,6 +446,17 @@ flowchart TB
   touching only `.gitignore`), but an exact pin in package metadata would
   conflict with a consumer's own ruff. The bounds describe what the package
   supports; the constraints file describes what a green check attests to
+
+```mermaid
+---
+title: Bounds and pins
+---
+flowchart TB
+  accDescr: pyproject.toml holds the bounds, what the package supports, and constraints.txt holds the exact versions, ruff among them, that a green check attests to; the install command reads both.
+  py["pyproject.toml: bounds, what the package supports"] --> pip["pip install -e .[dev] -c constraints.txt"]
+  con["constraints.txt: exact versions, ruff pinned here"] --> pip
+```
+
 - The `claude-agent-sdk` floor is `>=0.1.52`, the oldest release whose
   `ToolPermissionContext` carries the `tool_use_id` that keys the checkpoint
   reservation in `can_use_tool`, rather than the newest release available. It
