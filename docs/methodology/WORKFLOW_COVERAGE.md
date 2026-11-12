@@ -199,6 +199,16 @@ This document tracks which capabilities are exercised by reference workflows, id
 
 Implementing these 2 workflows would achieve **100% coverage** (35/35).
 
+```mermaid
+---
+title: What the two proposed workflows exercise
+---
+flowchart LR
+  accDescr: The Personal Assistant workflow exercises persist, recall and send, and the Multi-Agent Task Delegation workflow exercises delegate, synchronize and decompose.
+  pa[Personal Assistant] --> persist & recall & send
+  ma[Multi-Agent Task Delegation] --> delegate & synchronize & decompose
+```
+
 ---
 
 ## 7. Comparison: Old vs New Model

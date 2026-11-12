@@ -61,6 +61,17 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e ".[dev]" -c constraints.txt
 ```
 
+```mermaid
+---
+title: Setup
+---
+flowchart TB
+  accDescr: Clone the repository, create and activate a virtual environment, then install the package and dev tools, which builds the Rust core with maturin.
+  clone[Clone the repository] --> venv[Create and activate a virtual environment]
+  venv --> pip["pip install: package and dev tools"]
+  pip -->|maturin| core[Rust core built]
+```
+
 ## Step 2: Validate the Reference Workflows (2 min)
 
 The standard includes 12 reference workflows. Let's validate them:
@@ -102,6 +113,17 @@ Conformance PASSED
 ```
 
 The fixtures live in `tests/fixtures/` (40+ of them); `tests/fixtures/EXPECTATIONS.json` records whether each should pass and which error and warning codes it must produce. Each verifies a specific validation behavior, for example:
+
+```mermaid
+---
+title: How the conformance suite runs
+---
+flowchart TB
+  accDescr: run_conformance.py runs the valid and the intentionally invalid fixtures, and EXPECTATIONS.json records whether each should pass and which error and warning codes it must produce.
+  fx["tests/fixtures/: valid and invalid fixtures"] --> run[run_conformance.py]
+  ex["EXPECTATIONS.json: should it pass, which codes"] --> run
+  run --> out["One PASS line per fixture, then Conformance PASSED"]
+```
 
 | Test | Purpose |
 |------|---------|
@@ -214,6 +236,22 @@ Key observations:
 - **Outputs are named**: `store_as` enables later steps to reference outputs
 - **Inputs are bound**: `input_bindings` feed each step the inputs its capability requires, from the workflow's `bug` input or an earlier step's output (`${attribute_out.causes}`)
 
+```mermaid
+---
+title: The steps of debug_code_change
+---
+flowchart TB
+  accDescr: debug_code_change runs observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, audit and rollback in order; critique reads attribute_out, audit reads plan_out and verify_out, and rollback reads checkpoint_out and is skipped when verify passed.
+  observe --> search --> attribute
+  attribute -->|attribute_out.causes| constrain
+  constrain --> critique --> plan --> checkpoint
+  checkpoint -->|checkpoint first| execute
+  execute --> verify
+  verify -->|"verify_out, plan_out"| audit
+  audit --> rollback
+  rollback -.->|"gate: skip when verify_out.passed is true"| skip[Skipped]
+```
+
 ## Step 5: Explore the Capability Ontology (2 min)
 
 Open `schemas/capability_ontology.yaml` and find the `mutate` capability:
@@ -254,6 +292,18 @@ Key observations:
 - **Safety flags**: `mutation: true`, `requires_checkpoint: true`
 - **I/O schemas**: Typed contracts for inputs and outputs
 - **Evidence anchors**: Required in output for grounded agency
+
+```mermaid
+---
+title: The contract of mutate
+---
+flowchart LR
+  accDescr: mutate takes a target, an operation and an optional checkpoint_id, and returns success and evidence anchors, with the previous and new state.
+  req["Required: target, operation"] --> m[mutate]
+  opt["Optional: checkpoint_id"] --> m
+  m --> out["Required: success, evidence_anchors"]
+  m --> st["Also: previous_state, new_state"]
+```
 
 ## Step 6: Choose Your Domain (2 min)
 
@@ -331,6 +381,19 @@ cat schemas/workflows/healthcare_workflows.yaml
 | Data pipelines/ML systems | Data Analysis |
 | Clinical decision support | Healthcare |
 | Something else | Pick the closest, then customize |
+
+```mermaid
+---
+title: Which domain to start with
+---
+flowchart LR
+  accDescr: Factory automation starts with Manufacturing, personal productivity with Personal Assistant, data pipelines and ML with Data Analysis, clinical decision support with Healthcare, and anything else with the closest domain, customized.
+  f[Factory automation agents] --> mf[Manufacturing]
+  pp[Personal productivity tools] --> pa[Personal Assistant]
+  dp["Data pipelines/ML systems"] --> da[Data Analysis]
+  cd[Clinical decision support] --> hc[Healthcare]
+  se[Something else] --> cl["The closest, then customize"]
+```
 
 Each domain provides:
 - **Profile** — Pre-calibrated trust weights, risk thresholds, checkpoint policies

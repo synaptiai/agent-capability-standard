@@ -50,6 +50,16 @@ Key observations:
 - It outputs findings and metadata
 - It has no prerequisites
 
+```mermaid
+---
+title: The contract of observe
+---
+flowchart TB
+  accDescr: observe takes a target and the aspects to examine, and outputs findings and metadata; it has no prerequisites.
+  in["target, aspects"] --> observe
+  observe --> out["findings, metadata"]
+```
+
 ### 1.2 What is a Workflow?
 
 A workflow is a sequence of capability invocations. Each step:
@@ -69,6 +79,26 @@ Some capabilities depend on others running first. The ontology's edges say how s
 | `verify` | `execute`, `mutate`, `send` (when present) | `precedes` | Error V102 if they appear in the wrong order |
 
 A `precedes` edge only orders capabilities that are both in the workflow; a step in the same `parallel_group` does not count as running before another.
+
+```mermaid
+---
+title: What must come before an action
+---
+flowchart LR
+  accDescr: checkpoint is required before mutate, send and rollback (solid lines, error V102 if missing); constrain is recommended before execute, mutate and send (dotted lines, warning W601 if missing).
+  checkpoint --> mutate & send & rollback
+  constrain -.-> execute & mutate & send
+```
+
+```mermaid
+---
+title: What ground and verify need
+---
+flowchart LR
+  accDescr: One of seven sources is recommended before ground (dotted line, warning W601 if none is present), and execute, mutate and send must come before verify when they are present (solid lines, error V102 otherwise).
+  src["one of observe, detect, predict, attribute, explain, retrieve or search"] -.-> ground
+  execute & mutate & send --> verify
+```
 
 ---
 
@@ -185,6 +215,18 @@ If you get errors, check:
 - Capability names are spelled correctly
 - `store_as` is unique for each step
 - Bindings reference existing `store_as` values
+
+```mermaid
+---
+title: Validating the workflow
+---
+flowchart TB
+  accDescr: Running the validator on the file prints VALIDATION PASS; if it reports errors, check the capability names, that each store_as is unique, and that bindings reference existing store_as values.
+  run["validate_workflows.py --catalog my_first_workflow.yaml"] --> ok{Errors?}
+  ok -->|no| pass[VALIDATION PASS]
+  ok -->|yes| fix["Check names, unique store_as, binding references"]
+  fix -->|run again| run
+```
 
 ---
 
@@ -390,6 +432,17 @@ The validator ensures:
 
 Add `--strict` to make warnings fail the run too.
 
+```mermaid
+---
+title: The order the validator checks
+---
+flowchart TB
+  accDescr: The validator requires checkpoint before mutate and verify after it, each an error V102 when broken, and recommends constrain before mutate, a warning W601 when missing.
+  checkpoint -->|"before, else V102"| mutate
+  constrain -.->|"before, else W601"| mutate
+  mutate -->|"before, else V102"| verify
+```
+
 ---
 
 ## Part 4: Advanced Patterns (10 min)
@@ -472,6 +525,16 @@ Skip steps based on conditions:
       apply: "${plan_out.steps: array<object>}"
 ```
 
+```mermaid
+---
+title: A conditional step
+---
+flowchart TB
+  accDescr: The mutate step runs only when approval_out.approved is true, and is skipped otherwise.
+  c{"approval_out.approved == true"} -->|true| m[mutate]
+  c -->|"false: skip_if_false"| s[Step skipped]
+```
+
 ### 4.3 Typed Bindings
 
 When types are ambiguous, add annotations. Quote typed references: unquoted, the `: ` inside them stops the file loading when the reference is a mapping value, and makes YAML read a list item as a mapping (W612):
@@ -495,6 +558,16 @@ Reference external transform definitions:
     target_format: event
   mapping_ref: schemas/transforms/my_transform.yaml
   output_conforms_to: schemas/event_schema.yaml#/event
+```
+
+```mermaid
+---
+title: The transform step
+---
+flowchart TB
+  accDescr: transform reads retrieve_out.data as its input, applies the mapping its mapping_ref names, my_transform.yaml, and stores transform_out, which conforms to the event schema.
+  r["retrieve_out.data"] --> t["transform(mapping_ref: my_transform.yaml)"]
+  t --> e["transform_out, conforms to the event in event_schema.yaml"]
 ```
 
 ---
@@ -527,6 +600,18 @@ Reference external transform definitions:
 ```
 
 **Fix:** Check the `store_as` name. It's `observe_out`, not `insepct_out`. (If the store exists but the path after it is not in the producer's output schema, the error is B201 INVALID_BINDING_PATH.)
+
+```mermaid
+---
+title: B202 or B201
+---
+flowchart TB
+  accDescr: A reference to a store that does not exist is B202; a reference to a store that exists, with a path not in the producer's output schema, is B201.
+  ref["${store.path}"] --> s{Store exists?}
+  s -->|no| b202[B202 unknown store]
+  s -->|yes| p{"Path in the producer's output schema?"}
+  p -->|no| b201[B201 invalid binding path]
+```
 
 ### 5.4 Ambiguous Type (B204)
 
@@ -561,6 +646,18 @@ Before any mutation:
 - [ ] Add gate to verify checkpoint exists
 - [ ] Add `verify` step after mutation
 - [ ] Add `failure_modes` with recovery
+
+```mermaid
+---
+title: The safety checklist around a mutation
+---
+flowchart TB
+  accDescr: Before a mutation, add a checkpoint step and a gate that checks the checkpoint exists; after it, add a verify step; and give the steps failure modes with recovery.
+  cp[checkpoint] --> g{"gate: checkpoint exists"}
+  g --> m[Mutation]
+  m --> v[verify]
+  v -.-> fm["failure_modes with recovery"]
+```
 
 ### 6.3 Documentation
 
@@ -599,6 +696,19 @@ Build a workflow that:
 4. Applies changes
 5. Verifies the configuration still works
 6. Rolls back if verification fails
+
+```mermaid
+---
+title: Exercise 3
+---
+flowchart TB
+  accDescr: The safe update workflow inspects a configuration file, plans changes, checkpoints, applies the changes, verifies the configuration still works, and rolls back if verification fails.
+  i[Inspect the configuration file] --> p[Plan changes]
+  p --> c[Checkpoint]
+  c --> a[Apply changes]
+  a --> v[Verify it still works]
+  v -->|fails| r[Roll back]
+```
 
 ---
 

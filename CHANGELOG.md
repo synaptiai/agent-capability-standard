@@ -32,6 +32,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   with a 1.5x burst. Raise them with `GroundedAgentConfig(rate_limit=...)`
   if an agent needs more. A rate-limited call is denied before it reserves
   a checkpoint, and an error inside the rate check denies the call.
+
+```mermaid
+---
+title: The rate limit in the PreToolUse hook
+---
+flowchart TB
+  accDescr: Every tool call, including one pre-approved in allowed_tools, goes through the PreToolUse hook; a call over the rate limit, or one whose rate check errors, is denied before it reserves a checkpoint.
+  call["Tool call, pre-approved or not"] --> hook[PreToolUse hook: rate check]
+  hook -->|"over the limit, or an error"| deny[Denied]
+  hook -->|within the limit| res[Checkpoint reservation]
+```
+
 - The adapter's PreToolUse safety check no longer lets a call through
   when it hits an error. For a tool in `allowed_tools` that hook is the
   only check that runs, so an error used to skip both the rate limit and
@@ -39,6 +51,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   high-risk mutation (rate-limited, needs a checkpoint) in both modes; any
   other error denies the call in strict mode and is logged in non-strict
   mode. Deny reasons are generic; the detail and traceback go to the log.
+
+```mermaid
+---
+title: When the PreToolUse safety check hits a problem
+---
+flowchart TB
+  accDescr: A tool the mapper cannot classify is treated as a high-risk mutation, rate-limited and needing a checkpoint; any other error denies the call in strict mode and is logged in non-strict mode.
+  p{Problem in the check} -->|tool cannot be classified| hr["High-risk mutation: rate-limited, needs a checkpoint"]
+  p -->|"other error, strict mode"| deny[Call denied]
+  p -->|"other error, non-strict mode"| log[Logged]
+```
+
 - `wrap_options()` adds Stop and SubagentStop hooks that release a
   checkpoint reservation left behind by a call another PreToolUse hook
   denied. Such a call never runs, so its reservation used to block every
@@ -82,6 +106,20 @@ from this plugin release.
   tag or, run by hand on `main`, for a tag it creates there;
   `scripts/release_notes.py` refuses a tag that does not match `plugin.json`
   or has no section
+
+```mermaid
+---
+title: The release workflow
+---
+flowchart TB
+  accDescr: A pushed v* tag, or a manual run on main that creates the tag, starts release.yml; release_notes.py refuses a tag that does not match plugin.json or has no CHANGELOG section, and otherwise the GitHub Release is published with that section as its notes.
+  tag[Pushed v* tag] --> wf[release.yml]
+  man["Manual run on main: creates the tag"] --> wf
+  wf --> rn{"release_notes.py: matches plugin.json, has a section?"}
+  rn -->|no| refuse[Refused]
+  rn -->|yes| pub["GitHub Release, the section as notes"]
+```
+
 - **Delegate identity (#114, RFC-0004 amendment).** With `identity@1` a
   host may attest who took a delegation (`effective.identity`); a waiting
   delegate keeps only results from that principal (others dropped as
@@ -155,6 +193,17 @@ from this plugin release.
   Python `WorkflowEngine` both call it, so they can no longer disagree. CI
   gains a `rust-core` job (fmt, clippy, tests, MSRV) and a `cel-differential`
   job that checks the expression fixtures against cel-go
+
+```mermaid
+---
+title: One core for both tools
+---
+flowchart LR
+  accDescr: The validator CLI, tools/validate_workflows.py, and the Python WorkflowEngine both call the Rust core compiled into grounded_agency._core, so they can no longer disagree.
+  cli[Validator CLI] --> core["Rust core in grounded_agency._core"]
+  eng[Python WorkflowEngine] --> core
+```
+
 - **Orchestration extensions, first part (#114):** `workflow_extensions.requires`
   is validated (unknown extensions and undeclared extension fields are V106),
   `triggers` (schedule with 5-field cron or interval and IANA time zone,
@@ -190,6 +239,20 @@ from this plugin release.
   `grounded_agency.workflows.WorkflowRunner` and a `Host`
   ([guide](docs/guides/RUNNING_WORKFLOWS.md)); runtime conformance fixtures
   in `tests/conformance/runtime/`
+
+```mermaid
+---
+title: Running a workflow on the reference executor
+---
+flowchart TB
+  accDescr: Python drives the sans-IO executor in the Rust core through WorkflowRunner and a Host; a run snapshots to canonical JSON with a SHA-256 and an optional HMAC, and can resume from any snapshot.
+  runner[WorkflowRunner] -->|drives| ex[Executor in the Rust core]
+  ex -->|actions| host[Host]
+  host -->|responses| ex
+  ex --> snap["Snapshot: canonical JSON, SHA-256, optional HMAC"]
+  snap -->|resume| ex
+```
+
 - `docs/research/analysis/validator-engine-disagreements-1.0.md`: minimal
   reproductions of the 22 cases where the 1.0 validator and engine judged
   the same workflow differently, and how each behaves now (#114, question 3)
@@ -208,6 +271,18 @@ from this plugin release.
   separately and passes unless `--strict` is given;
   `tools/validator_suggestions.json` gains `warnings` and
   `structured_warnings`, and hints such as "did you mean" are printed
+
+```mermaid
+---
+title: Warnings and the validator's verdict
+---
+flowchart TB
+  accDescr: The validator reports W6xx warnings separately and passes, unless --strict is given, in which case warnings fail the run.
+  w[W6xx warnings only] --> s{"--strict?"}
+  s -->|no| pass[Passes, warnings reported]
+  s -->|yes| fail[Fails]
+```
+
 - `WorkflowEngine.validate_report()`, `add_workflow()` and `effective_flags()`;
   `ErrorCode` gains the v1.1 codes and `Severity` is exported
 - `python tools/sync_skill_schemas.py --check`, run in CI, fails when a
@@ -273,6 +348,18 @@ from this plugin release.
   conflicts) and the audit still run; before, a `stop` gate ended the run
   R403 with neither. A runtime fixture (`domain_schedule_no_slot`) runs
   this path.
+
+```mermaid
+---
+title: schedule_management with no free slot
+---
+flowchart TB
+  accDescr: With no free slot, ranking, planning and drafting are skipped, and the explanation, now given the slots and conflicts, and the audit still run.
+  none[No free slot] --> skip["Ranking, planning, drafting: skipped"]
+  none --> ex["Explanation, given the slots and conflicts"]
+  ex --> au[Audit]
+```
+
 - **Unattended runs ask standing mandates, and deferral continues (#114).**
   A `standing_mandate` approver is asked even when nobody is present; the
   host answers `approved`, or `unavailable` when no mandate covers the
@@ -282,6 +369,18 @@ from this plugin release.
   steps that only read, reason or record, and ends the run `deferred`, so a scheduled sweep
   finishes its other work. `RunResult.deferred` lists the deferrals, and the
   default `Host` answers `unavailable` for a standing mandate
+
+```mermaid
+---
+title: A standing mandate in an unattended run
+---
+flowchart TB
+  accDescr: A standing_mandate approver is asked even when nobody is present; the host answers approved, or unavailable when no mandate covers the action, and only then does when_unattended apply.
+  ask[Standing mandate asked] -->|covered| ok[approved]
+  ask -->|no mandate covers it| un[unavailable]
+  un --> wu[when_unattended applies]
+```
+
 - **Quorum independence per reviewer (#114).** `forbidden_inputs`
   takes a per-reviewer mapping, verdicts carry `scope: full | delta`,
   and `quorum.min_full` requires passing full sweeps
@@ -291,6 +390,19 @@ from this plugin release.
   and `retry` take it, so a workflow can re-check a quiet worker and
   escalate only when the wait expires. A failure mode that handled lost
   liveness through `on_error: R401` must add R406
+
+```mermaid
+---
+title: Lost liveness and an expired wait
+---
+flowchart TB
+  accDescr: Lost liveness is R406, which failure modes and retry take, so a workflow can re-check a quiet worker; only an expired wait, R401, is escalated.
+  w[Wait on a worker] -->|liveness lost| r406[R406 LIVENESS_LOST]
+  r406 -->|"on_error or retry: re-check"| w
+  w -->|wait expires| r401[R401 timeout]
+  r401 --> esc[Escalate]
+```
+
 - **Migration:** binding `fresh_context`, `model_family` or `role` on
   `delegate`, or `accept_from` on `receive`/`synchronize`, now needs
   `delegation@1` in `workflow_extensions.requires` (V106). These inputs were
@@ -334,6 +446,17 @@ from this plugin release.
   touching only `.gitignore`), but an exact pin in package metadata would
   conflict with a consumer's own ruff. The bounds describe what the package
   supports; the constraints file describes what a green check attests to
+
+```mermaid
+---
+title: Bounds and pins
+---
+flowchart TB
+  accDescr: pyproject.toml holds the bounds, what the package supports, and constraints.txt holds the exact versions, ruff among them, that a green check attests to; the install command reads both.
+  py["pyproject.toml: bounds, what the package supports"] --> pip["pip install -e .[dev] -c constraints.txt"]
+  con["constraints.txt: exact versions, ruff pinned here"] --> pip
+```
+
 - The `claude-agent-sdk` floor is `>=0.1.52`, the oldest release whose
   `ToolPermissionContext` carries the `tool_use_id` that keys the checkpoint
   reservation in `can_use_tool`, rather than the newest release available. It
@@ -368,6 +491,19 @@ from this plugin release.
   invokes) counts as a wait, so a checkpoint taken before it no longer silently covers a later
   `mutate` or `send`. The #114 port's checkin_recovery mutate was the first
   case found; revision 1.1e checkpoints again after the escalation.
+
+```mermaid
+---
+title: An invoke that can wait counts as a wait
+---
+flowchart TB
+  accDescr: An invoke of a catalog workflow that can wait counts as a wait, so a checkpoint taken before it no longer covers a later mutate or send; a new checkpoint is needed after it.
+  cp1[checkpoint] --> inv["invoke of a workflow that can wait"]
+  inv --> cp2[New checkpoint]
+  cp2 --> act["mutate or send"]
+  cp1 -.->|"no longer covers"| act
+```
+
 - **A recovery loop replaces every waiting delegate it runs again.** A loop
   from a later step (a blocked quorum, say) back to before the reviewers
   delegated them again without `replaces`, so the host could not cancel
@@ -376,6 +512,18 @@ from this plugin release.
   also across a pass that skips it. Runtime fixtures
   `delegate_wait_replaced_by_later_loop` and
   `delegate_wait_replacement_survives_skip`.
+
+```mermaid
+---
+title: A loop that runs the reviewers again
+---
+flowchart TB
+  accDescr: A recovery loop from a later step, such as a blocked quorum, back to before the reviewers now names every waiting delegate it runs again in replaces, so the host can cancel the earlier delegations.
+  q[Blocked quorum] -->|recovery loop| back[Back to before the reviewers]
+  back --> del["Each waiting delegate delegates again, naming replaces"]
+  del --> cancel[Host can cancel the earlier delegation]
+```
+
 - **Whole-branch review (#114): executor.** Forged snapshots that passed the
   state check and then panicked are refused at restore; resolved inputs
   deeper than I-JSON allows fail the step (R402) instead of breaking
@@ -420,6 +568,18 @@ from this plugin release.
   nothing is rolled back when nothing was mutated, and audits run after
   the rollback so they record it. `data_quality_pipeline` writes nothing,
   so it no longer checkpoints or rolls back and its risk is low
+
+```mermaid
+---
+title: Rollback in the reference catalogs
+---
+flowchart TB
+  accDescr: A verify or verification step that errors rolls the mutation back, without a new checkpoint of its own, and the audits run after the rollback so they record it; nothing is rolled back when nothing was mutated.
+  m[Mutation] --> v[Verification step]
+  v -->|errors| rb["Rollback, with no checkpoint of its own"]
+  rb --> au[Audits record the rollback]
+```
+
 - **Whole-branch review (#114): skills.** Every capability skill's output
   contract, field table and examples use the ontology's field names and
   types (`verify` returns `passed`, `checkpoint` `checkpoint_id`, `detect`
@@ -485,6 +645,18 @@ from this plugin release.
   PreToolUse (so pre-approved tools are covered too), is consumed on success
   and released by a new PostToolUseFailure hook on failure or interrupt, and
   lapses after `GroundedAgentConfig.checkpoint_reservation_seconds` (#114)
+
+```mermaid
+---
+title: A checkpoint reservation's life
+---
+flowchart LR
+  accDescr: A reservation belongs to one tool call, is taken in PreToolUse, is consumed when the call succeeds, is released by the PostToolUseFailure hook on failure or interrupt, and lapses after checkpoint_reservation_seconds.
+  take["Taken in PreToolUse, for one tool call"] --> used["On success: consumed"]
+  take --> rel["On failure or interrupt: released by PostToolUseFailure"]
+  take --> lapse["Lapses after the configured time"]
+```
+
 - `templates/SKILL_TEMPLATE_ENHANCED.md` nested a ```` ```markdown ```` block
   containing ```` ```yaml ```` blocks of the same fence length. Per CommonMark
   the outer block closes at the first bare fence, so the document's structure
@@ -497,6 +669,19 @@ from this plugin release.
   deferred the SDK's `finally: await query.close()` — the call that terminates
   the CLI subprocess — to garbage collection, leaving the process alive past
   its consumer
+
+```mermaid
+---
+title: Closing the SDK's generator
+---
+flowchart TB
+  accDescr: When a caller breaks out of iteration, grounded_query now closes the SDK's generator, so the SDK's finally block runs query.close() and terminates the CLI subprocess; before, that was left to garbage collection and the process outlived its consumer.
+  brk[Caller breaks out of iteration] --> ac["grounded_query: aclose()"]
+  ac --> fin["SDK finally: query.close()"]
+  fin --> term[CLI subprocess terminates]
+  brk -.->|"before: no aclose"| gc["Left to garbage collection; the process stays alive"]
+```
+
 - `test_grounded_query_callable` no longer drives an unbounded billable API
   call. It still exercises the real SDK with no mock and no skip, but stops
   after the first message and runs under a timeout. The timeout bounds the
@@ -533,6 +718,18 @@ from this plugin release.
   those files. The rewrite now strips every existing prefix before re-applying
   exactly one, so a tree a previous run had already doubled is repaired rather
   than left stable-but-corrupt (#107)
+
+```mermaid
+---
+title: The comment rewrite in sync_skill_schemas.py
+---
+flowchart TB
+  accDescr: Before, each run reapplied the rewrite to already-rewritten text and stacked another prefix; now the rewrite strips every existing prefix and then applies exactly one, which also repairs a doubled tree.
+  run[Each run of sync_skill_schemas.py] --> strip["Strip every existing (repo-level) prefix"]
+  strip --> one[Apply exactly one prefix]
+  run -.->|before| stack[Another prefix stacked on each run]
+```
+
 - `skills/receive/reference/event_schema.yaml` was an orphan copy that
   `sync_skill_schemas.py` could not reach, because the sync only bundles into
   skills that carry a `reference/workflow_catalog.yaml`. It is now resynced and
@@ -597,6 +794,16 @@ The full list is in the
 
 ### Changed
 - Migrated from 99 to 36 atomic capabilities with domain parameterization
+
+```mermaid
+---
+title: From 99 capabilities to 36
+---
+flowchart TB
+  accDescr: The 99 capabilities of v1.0.0 became 36 atomic capabilities, with domain parameters in place of domain-specific variants.
+  v99[99 capabilities] -->|domain parameterization| v36[36 atomic capabilities]
+```
+
 - Grounded Agency evaluation section reports the 51 steps in the reference
   workflows
 
@@ -605,6 +812,15 @@ The full list is in the
 ### Changed
 - Flattened skills directory structure for Claude Code compatibility: skills
   moved from `skills/<category>/<skill>/` to `skills/<skill>/`
+
+```mermaid
+---
+title: The flattened skills directory
+---
+flowchart TB
+  accDescr: Skills moved from skills/category/skill/ to skills/skill/, one level shallower.
+  old["skills/category/skill/"] -->|flattened to| new["skills/skill/"]
+```
 
 ### Fixed
 - The PostToolUse hook reads its JSON from stdin instead of command-line

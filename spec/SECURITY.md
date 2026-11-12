@@ -23,6 +23,26 @@ The action capabilities (`execute`, `mutate`, `send`) are constrained by ontolog
 - `plan` (ordering, `precedes`): When a workflow has a plan, it must come before `execute` and `mutate`
 - `verify` (ordering, `precedes`): A verification must come after the action it checks
 
+```mermaid
+---
+title: What must come before an action
+---
+flowchart LR
+  accDescr: checkpoint is required before mutate, send and rollback (solid lines, requires), and constrain should run before execute, mutate and send (dotted lines, soft_requires).
+  checkpoint --> mutate & send & rollback
+  constrain -.-> execute & mutate & send
+```
+
+```mermaid
+---
+title: The ordering edges around an action
+---
+flowchart LR
+  accDescr: A plan, when present, comes before execute and mutate, and verify comes after the action it checks; both are precedes edges.
+  plan -->|precedes| execute & mutate
+  execute & mutate & send -->|precedes| verify
+```
+
 ### 1.3 Claims Must Be Grounded
 
 All outputs SHOULD include:
@@ -38,6 +58,20 @@ Hard constraints prevent catastrophic entity conflation:
 - Never merge entities with conflicting unique identifiers
 - Never merge across incompatible entity types
 - Always record merge/split operations in lineage
+
+```mermaid
+---
+title: The hard constraints on a merge
+---
+flowchart TB
+  accDescr: Two entities are never merged when their unique identifiers conflict or their entity types are incompatible, and every merge or split is recorded in lineage.
+  c[Candidate merge] --> id{Conflicting unique identifiers?}
+  id -->|yes| no1[Never merged]
+  id -->|no| ty{Incompatible entity types?}
+  ty -->|yes| no2[Never merged]
+  ty -->|no| m[Merge]
+  m --> lin[Recorded in lineage]
+```
 
 ---
 
@@ -98,6 +132,18 @@ Hard constraints prevent catastrophic entity conflation:
 - Retention policies bound state growth
 - Anomaly detection capabilities
 
+```mermaid
+---
+title: World state versions against silent drift
+---
+flowchart LR
+  accDescr: Each world state version links to its parent, and compare detects the changes between two versions.
+  v1[World state version] -->|parent link| v0[Parent version]
+  v1 --> cmp[compare]
+  v0 --> cmp
+  cmp --> ch[Changes between versions]
+```
+
 #### 2.2.5 Schema Spoofing
 
 **Scenario**: Attacker provides data that passes schema validation but has malicious semantics.
@@ -127,6 +173,17 @@ Hard constraints prevent catastrophic entity conflation:
 - Gate can block if `${checkpoint_out.checkpoint_id} == null`
 - Hook (pretooluse_require_checkpoint) enforces at runtime
 
+```mermaid
+---
+title: Three guards against checkpoint bypass
+---
+flowchart LR
+  accDescr: A mutate, send or rollback step without an earlier checkpoint is rejected statically by the validator with V102, can be blocked by a gate when checkpoint_id is null, and is blocked at runtime by the pretooluse_require_checkpoint hook.
+  step["mutate, send or rollback with no checkpoint"] --> val["Validator: V102"]
+  step --> gate["Gate: no checkpoint_id"]
+  step --> hook["Runtime hook: require checkpoint"]
+```
+
 #### 2.2.8 Recovery Loop Exhaustion
 
 **Scenario**: Workflow enters infinite recovery loop.
@@ -135,6 +192,16 @@ Hard constraints prevent catastrophic entity conflation:
 - max_loops limit on recovery
 - Timeout on steps
 - R404 error when recovery exhausted
+
+```mermaid
+---
+title: When recovery runs out
+---
+flowchart TB
+  accDescr: A recovery loop repeats up to its max_loops limit, with a timeout on each step, and R404 is raised when recovery is exhausted.
+  rec[Recovery loop] -->|"up to max_loops"| rec
+  rec -->|exhausted| r404[R404 error]
+```
 
 ---
 
@@ -195,6 +262,18 @@ Deployments SHOULD:
 
 ## 5. Security Hooks
 
+```mermaid
+---
+title: Where the hooks run
+---
+flowchart TB
+  accDescr: Before a tool runs, pretooluse_require_checkpoint blocks a mutation without a checkpoint; after it runs, posttooluse_log_tool adds to the audit trail.
+  call[Tool call] --> pre{"pretooluse_require_checkpoint: checkpoint present?"}
+  pre -->|no| block[Mutation blocked]
+  pre -->|yes| run[Tool runs]
+  run --> post["posttooluse_log_tool: audit trail"]
+```
+
 ### 5.1 Pre-Tool Use Hooks
 
 | Hook | Security Function |
@@ -240,6 +319,18 @@ Signs of security issues:
 4. **Investigate**: Trace provenance to identify root cause
 5. **Remediate**: Update policies, trust weights, or constraints
 
+```mermaid
+---
+title: Incident response
+---
+flowchart TB
+  accDescr: Contain by stopping the affected workflows, assess the audit logs and world state history, roll back to the last known-good checkpoint, investigate the root cause through provenance, and remediate policies, trust weights or constraints.
+  c[Contain: stop affected workflows] --> a[Assess: audit logs, world state history]
+  a --> r[Rollback: last known-good checkpoint]
+  r --> i[Investigate: trace provenance]
+  i --> m[Remediate: policies, trust weights, constraints]
+```
+
 ### 6.3 Recovery
 
 - Use `rollback` capability to restore checkpointed state
@@ -274,6 +365,18 @@ Please report security vulnerabilities privately:
 | Remediation plan | 14 days |
 | Fix release | 30 days (90 days for complex issues) |
 | Public disclosure | After fix release |
+
+```mermaid
+---
+title: The disclosure timeline
+---
+flowchart TB
+  accDescr: A report is acknowledged within 48 hours, assessed within 7 days, given a remediation plan within 14 days and fixed within 30 days, or 90 for complex issues; public disclosure follows the fix release.
+  ack[Acknowledgment: 48 hours] --> as[Initial assessment: 7 days]
+  as --> pl[Remediation plan: 14 days]
+  pl --> fx["Fix release: 30 days, 90 if complex"]
+  fx --> pub[Public disclosure]
+```
 
 ### 7.4 Credit
 

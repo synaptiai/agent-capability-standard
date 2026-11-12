@@ -36,6 +36,17 @@ A self-contained unit that implements a capability. Each skill has a `SKILL.md` 
 
 Skills are organized by layer in the `skills/` directory.
 
+```mermaid
+---
+title: Workflow, step, capability and skill
+---
+flowchart LR
+  accDescr: A workflow is a sequence of steps, each step invokes a capability, and a skill implements a capability.
+  wf[Workflow] -->|steps| step[Step]
+  step -->|invokes| cap[Capability]
+  skill[Skill] -->|implements| cap
+```
+
 ---
 
 ## Capability Theory
@@ -61,6 +72,15 @@ observe → search → plan → checkpoint → execute → verify → rollback
 
 **Why it matters:** Value comes from compositions, not from primitive count. The goal is better workflows, not more capabilities.
 
+```mermaid
+---
+title: What debug_code_change composes
+---
+flowchart TB
+  accDescr: debug_code_change composes observe, search, plan, checkpoint, execute, verify and rollback, in that order.
+  observe --> search --> plan --> checkpoint --> execute --> verify --> rollback
+```
+
 ### Layer
 A functional category grouping capabilities by their primary purpose. The 9 cognitive layers are:
 - **PERCEIVE**: Acquire information from external sources (retrieve, search, observe, receive)
@@ -83,6 +103,17 @@ The systematic process by which capabilities are identified and justified. Groun
 2. Domain specialization (verb + domain → specific capability)
 3. Operational requirements for production agents
 4. Atomicity validation (ensure each is truly irreducible)
+
+```mermaid
+---
+title: How capabilities are derived
+---
+flowchart TB
+  accDescr: The derivation starts from the eight foundational verbs of the DIS '23 framework, specialises each verb with a domain, adds operational requirements for production agents, and validates that each capability is irreducible.
+  dis["DIS '23 AI Capabilities framework: 8 foundational verbs"] --> dom["Domain specialization: verb + domain"]
+  dom --> ops[Operational requirements for production agents]
+  ops --> atom["Atomicity validation: each is irreducible"]
+```
 
 See [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
 
@@ -123,6 +154,17 @@ A derived snapshot from observations and transition rules. World state includes:
 - Lineage (how this state was derived)
 - `version_id` and `parent_version_id` for versioning
 
+```mermaid
+---
+title: Observations and world state
+---
+flowchart TB
+  accDescr: Append-only observations and transition rules derive a world state snapshot, and each world state version names its parent version.
+  obs[Observations, append-only] --> ws[World state snapshot]
+  rules[Transition rules] --> ws
+  ws -->|parent_version_id| prev[Parent world state version]
+```
+
 ### Provenance
 Traceability record for claims and transformations. Provenance answers:
 - Where did this data come from?
@@ -151,6 +193,18 @@ A reference to the original source of information. Evidence anchors enable verif
 
 **What it prevents:** Unverifiable claims that erode trust over time, and audit failures when you can't prove where data came from
 
+```mermaid
+---
+title: A grounded claim and its evidence anchors
+---
+flowchart LR
+  accDescr: A grounded claim carries evidence anchors, and each anchor points to an original source such as a source document, an API response, a log entry or a sensor reading.
+  claim[Grounded claim] -->|evidence anchor| doc[Source document]
+  claim -->|evidence anchor| api[API response]
+  claim -->|evidence anchor| logs[Log entry]
+  claim -->|evidence anchor| sensor[Sensor reading]
+```
+
 ---
 
 ## Trust and Identity
@@ -164,6 +218,18 @@ Authority-weighted, confidence-weighted, recency-decayed score for a source or c
 **Why it matters:** When sources conflict, you need a principled way to decide which to believe. Trust scores make conflict resolution transparent and consistent instead of arbitrary.
 
 **What it prevents:** Arbitrary "last source wins" resolution, inconsistent decisions about which data to trust, and unexplainable conflicts that require human intervention every time
+
+```mermaid
+---
+title: What a trust score combines
+---
+flowchart TB
+  accDescr: Source ranking weights, time decay and field-specific authority preferences combine into a trust score, which decides which source to believe when sources conflict.
+  w[Source ranking weights] --> t[Trust score]
+  d[Time decay] --> t
+  f[Field-specific authority preferences] --> t
+  t -->|sources conflict| r[Which source to believe]
+```
 
 ### Identity Resolution
 Defining entities and resolving aliases across sources. Identity resolution:
@@ -212,15 +278,52 @@ A documented way a step can fail, with recovery instructions:
 - `when` (optional): Expression that fires the failure mode; evaluated after the step, so it can read the step's own output
 - `recovery` (optional): How to recover — prose, or a recovery loop
 
+```mermaid
+---
+title: Gates, failure modes and recovery loops
+---
+flowchart TB
+  accDescr: A gate checks its when condition before the step, or after it with phase after, and takes its action when the condition matches; a failure mode's when is evaluated after the step and fires its action and recovery, and a recovery loop resumes at goto_step with inject_context, up to max_loops times.
+  gate{"gate when, phase before"} -->|matches| gact["action: stop, rollback, skip, warn or end"]
+  gate -->|no match| step[Step runs]
+  step --> after{"gate when, phase after; failure mode when"}
+  after -->|matches| fact[action]
+  fact --> rec["recovery: prose or a recovery loop"]
+  rec -->|"condition: goto_step, inject_context, up to max_loops"| goto[Resume at goto_step]
+```
+
 ### Store As
 The identifier used to store a step's output for later reference. Other steps can use this identifier in their bindings.
 
 Example: `store_as: observe_out` allows later steps to use `${observe_out.observation}`
 
+```mermaid
+---
+title: store_as and a binding
+---
+flowchart TB
+  accDescr: A step stores its output under its store_as name, observe_out, and a later step reads a field of it through the binding observe_out.observation.
+  s1["Step with store_as: observe_out"] -->|"${observe_out.observation}"| s2[Later step]
+```
+
 ### Parallel Group
 Steps that can execute concurrently. Parallel groups define:
 - `parallel_group`: Group identifier
 - `join`: How to wait for completion (all_complete, any_complete)
+
+```mermaid
+---
+title: A parallel group
+---
+flowchart TB
+  accDescr: Steps in one parallel_group run concurrently, and the join, all_complete or any_complete, says when the group is complete.
+  subgraph pg [parallel_group]
+    a[Step A]
+    b[Step B]
+  end
+  a --> j{"join: all_complete or any_complete"}
+  b --> j
+```
 
 ---
 
@@ -233,6 +336,21 @@ A saved state that enables rollback. A checkpoint step is required before any ca
 
 **What it prevents:** Corrupted state from partial execution, inconsistent data visible to users, and the nightmare of manually reversing changes across multiple systems
 
+```mermaid
+---
+title: The capabilities a checkpoint must come before
+---
+flowchart LR
+  accDescr: A checkpoint step must come before mutate, send and rollback; audit and persist, like checkpoint itself, are mutations that need no checkpoint.
+  cp[checkpoint] --> m[mutate]
+  cp --> s[send]
+  cp --> r[rollback]
+  subgraph none [mutation, no checkpoint needed]
+    au[audit]
+    pe[persist]
+  end
+```
+
 ### Rollback
 Reverting to a previous checkpoint. Rollback is triggered when:
 - Verification fails
@@ -242,6 +360,18 @@ Reverting to a previous checkpoint. Rollback is triggered when:
 **Why it matters:** Rollback makes failures recoverable. Instead of "the workflow failed, now what?", you get "the workflow failed, reverting to checkpoint, state is now consistent."
 
 **What it prevents:** Permanent damage from failed mutations, manual recovery procedures that introduce new errors, and downtime while you figure out what state things are in
+
+```mermaid
+---
+title: What triggers a rollback
+---
+flowchart LR
+  accDescr: A failed verification, an unexpected side effect or a gate that blocks execution triggers a rollback, which reverts to the previous checkpoint.
+  v[Verification fails] --> rb[Rollback]
+  se[Unexpected side effects] --> rb
+  g[A gate blocks] --> rb
+  rb -->|reverts to| cp[Previous checkpoint]
+```
 
 ### Mutation
 A change to external state (files, databases, APIs). Steps inherit `mutation`, `requires_checkpoint`, `requires_approval` and `risk` from the ontology; a step that declares a weaker value is ignored with warning W602 (`audit` alone is `mutation_overridable` and may declare `mutation: false`). Mutating steps:
@@ -265,6 +395,18 @@ Checking that outcomes match expectations. Verification:
 - Returns PASS or FAIL with evidence
 - May trigger rollback on failure
 - Uses `constrain` to define expectations and policies
+
+```mermaid
+---
+title: Verify and constrain
+---
+flowchart TB
+  accDescr: constrain defines the expectations and policies, verify checks the outcome against them and returns PASS or FAIL with evidence, and a FAIL may trigger a rollback.
+  c[constrain] -->|expectations and policies| v[verify]
+  v --> pass[PASS, with evidence]
+  v --> fail[FAIL, with evidence]
+  fail -.->|may trigger| rb[Rollback]
+```
 
 ### Constrain
 Enforcing policy and least privilege. Constraints check:
@@ -299,6 +441,17 @@ A declarative specification for converting between schemas. Transform mappings:
 - Define field-by-field conversions
 - Specify coercion functions
 - Document any loss of information
+
+```mermaid
+---
+title: A transform mapping
+---
+flowchart TB
+  accDescr: A transform mapping converts data from a source schema to a target schema with field-by-field conversions and coercion functions, and documents any loss of information.
+  src[Source schema] --> tm["Transform mapping: field-by-field conversions, coercion functions"]
+  tm --> tgt[Target schema]
+  tm -.-> loss[Documented loss of information]
+```
 
 ---
 
@@ -355,6 +508,17 @@ The degree to which an implementation satisfies the standard:
 
 **What it prevents:** All-or-nothing adoption that blocks progress, and uncertainty about what guarantees your implementation actually provides
 
+```mermaid
+---
+title: Adopting the conformance levels
+---
+flowchart TB
+  accDescr: Adoption starts at L1, basic validation, and progresses through L2 and L3 to L4, full type safety with patch suggestions.
+  l1["L1: capability existence and prerequisites"] --> l2["L2: schema resolution and type inference"]
+  l2 --> l3["L3: binding types against consumer contracts"]
+  l3 --> l4["L4: patch suggestions and coercion registry"]
+```
+
 ### Prerequisite
 A capability that must be executed before another. Prerequisites are defined in the capability ontology:
 - `requires`: Hard prerequisite — a source step must run before the target (error V102)
@@ -386,6 +550,17 @@ Request clarification when input is ambiguous. The `inquire` capability generate
 - Clarifying questions targeting specific ambiguities
 - Ambiguity analysis (missing parameters, conflicting interpretations)
 - Confidence score indicating how certain the agent is that clarification is needed
+
+```mermaid
+---
+title: Inquire before proceeding
+---
+flowchart TB
+  accDescr: A request with missing parameters, conflicting interpretations or too few constraints goes to inquire, which asks clarifying questions that resolve the uncertainty before the agent proceeds.
+  req["Request: missing parameters, conflicting interpretations or too few constraints"] --> inq[inquire]
+  inq --> q[Clarifying questions]
+  q -->|uncertainty resolved| go[Proceed]
+```
 
 ---
 

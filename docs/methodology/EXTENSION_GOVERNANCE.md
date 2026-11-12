@@ -34,6 +34,20 @@ New capabilities may be added when:
 
 A proposed capability MUST satisfy ALL of the following:
 
+```mermaid
+---
+title: The six criteria, all required
+---
+flowchart LR
+  accDescr: A proposed capability must meet all six criteria: non-composability, atomicity, a distinct contract, layer fit, workflow usage and domain generality.
+  p["Proposed capability, must meet all six"] --> c1[2.1 Non-composability]
+  p --> c2[2.2 Atomicity]
+  p --> c3[2.3 Distinct contract]
+  p --> c4[2.4 Layer fit]
+  p --> c5[2.5 Workflow usage]
+  p --> c6[2.6 Domain generality]
+```
+
 ### 2.1 Non-Composability
 
 **The capability cannot be expressed as a composition of existing capabilities.**
@@ -166,6 +180,19 @@ To manage ontology evolution, we use tiers:
 - Must graduate to Extended or be removed
 - Currently: 0 capabilities
 
+```mermaid
+---
+title: The three tiers today
+---
+flowchart TB
+  accDescr: Core holds 36 capabilities, validated with a stable API; Extended holds none, all having moved to Core in v1.0.0; Experimental holds none, and its proposals must graduate to Extended or be removed.
+  core["Core: 36 capabilities. Validated, stable API, full documentation"]
+  ext["Extended: 0 capabilities. All migrated to Core in v1.0.0"]
+  exp["Experimental: 0 capabilities. No stability guarantees"]
+  exp -.->|graduates| ext
+  ext -.->|graduates| core
+```
+
 ### Graduation Criteria
 
 **Experimental → Extended**:
@@ -254,6 +281,17 @@ flowchart LR
 
 **Decision**: Rejected (implement as `retrieve` with GraphQL adapter)
 
+```mermaid
+---
+title: The three example proposals
+---
+flowchart LR
+  accDescr: cluster meets every criterion and is accepted; search-and-replace is a composition of search and transform and is rejected in favour of that composition; query-graphql is retrieve with GraphQL parameters and is rejected in favour of retrieve with a GraphQL adapter.
+  cl["cluster: all six criteria met"] --> acc[Accepted]
+  sr["search-and-replace: composable, not atomic"] --> rej1["Rejected: search + transform"]
+  qg["query-graphql: composable, not domain general"] --> rej2["Rejected: retrieve + GraphQL adapter"]
+```
+
 ---
 
 ## 7. Counter-Proposal: Workflow Pattern
@@ -280,6 +318,16 @@ search_and_replace:
 ```
 
 If it works as a pattern, don't propose it as a capability.
+
+```mermaid
+---
+title: search_and_replace as a pattern
+---
+flowchart TB
+  accDescr: The pattern searches for old_function_name and stores matches, which transform reads to produce the replaced text.
+  search -->|matches| transform
+  transform --> out[replaced_text]
+```
 
 ---
 

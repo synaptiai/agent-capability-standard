@@ -59,6 +59,15 @@ LangChain Approach:
 
 **Key Insight**: AutoGPT's "you build your agent by connecting blocks, where each block performs a single action" aligns with explicit capabilities, not parameterized verbs.
 
+```mermaid
+---
+title: AutoGPT blocks
+---
+flowchart TB
+  accDescr: In AutoGPT each block performs one action, and connected blocks form a workflow.
+  b1[Block: one action] --> b2[Block: one action] --> b3[Block: one action]
+```
+
 **Source**: [AutoGPT Architecture](https://agpt.co/blog/introducing-the-autogpt-platform)
 
 ### 1.3 CrewAI
@@ -88,6 +97,18 @@ LangChain Approach:
 - Tools (explicit, typed)
 - State/Memory
 - Orchestration
+
+```mermaid
+---
+title: Tools in the OpenAI Agents SDK
+---
+flowchart TB
+  accDescr: An agent calls three kinds of tool: function tools, made from any Python function; hosted tools, provided by OpenAI; and other agents used as tools, which compose agents hierarchically.
+  agent[Agent loop] --> ft["Function tools: any Python function"]
+  agent --> ht["Hosted tools: provided by OpenAI"]
+  agent --> at["Agents as tools"]
+  at -->|hierarchical| sub[Another agent]
+```
 
 **Source**: [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/)
 
@@ -136,6 +157,17 @@ LangChain Approach:
 - Filter desires → intentions
 - Execute plans
 
+```mermaid
+---
+title: BDI operations
+---
+flowchart TB
+  accDescr: A BDI agent updates its beliefs, generates desires, filters desires into intentions, and executes the plans it has committed to.
+  b[Update beliefs] --> d[Generate desires]
+  d -->|filter| i[Intentions]
+  i --> p[Execute plans]
+```
+
 **Mapping to Grounded Agency**:
 
 | BDI Concept | Grounded Agency Equivalent |
@@ -174,6 +206,18 @@ LangChain Approach:
 | Operator application | `act`, `transform` |
 | Impasse handling | `decompose` |
 
+```mermaid
+---
+title: SOAR problem solving
+---
+flowchart TB
+  accDescr: SOAR elaborates the state, proposes candidate operators, compares them, and applies the selected operator; when knowledge is insufficient it reaches an impasse and creates a subgoal to resolve it.
+  e[Elaborate state] --> pr[Propose candidate operators]
+  pr --> c[Compare candidates]
+  c --> a[Apply selected operator]
+  imp[Impasse: knowledge insufficient] -->|creates| sg[Subgoal]
+```
+
 **Assessment**: SOAR provides a useful framing but is too abstract. The "operator" concept is closer to our "capability" but SOAR doesn't enumerate what operators exist—they're problem-specific.
 
 **Source**: [SOAR Architecture](https://soar.eecs.umich.edu/soar_manual/02_TheSoarArchitecture/)
@@ -188,6 +232,16 @@ LangChain Approach:
 **The Loop**:
 ```
 Thought → Action → Observation → Thought → ...
+```
+
+```mermaid
+---
+title: The ReAct loop
+---
+flowchart LR
+  accDescr: ReAct alternates a thought, an action and an observation, and the observation feeds the next thought.
+  t[Thought] --> a[Action] --> o[Observation]
+  o --> t
 ```
 
 **Assessment**: ReAct is the dominant practical pattern. It's simpler than BDI/SOAR and directly maps to how LLM agents work. However, it doesn't specify *what* actions are available—that's left to the tool inventory.
@@ -460,6 +514,25 @@ TOTAL: 35 capabilities
 | `estimate-risk` | Keep (specialization) | Remove (use measure + context) |
 | `act-plan` | Keep (specialization) | Remove (use act with plan input) |
 
+```mermaid
+---
+title: What the recommendation renames and removes
+---
+flowchart LR
+  accDescr: identify becomes classify, estimate becomes measure, forecast becomes predict, grounding becomes ground and identity-resolution becomes resolve-identity; model-schema, detect-anomaly, estimate-risk and act-plan are removed.
+  id_o[identify] --> classify
+  es_o[estimate] --> measure
+  fo_o[forecast] --> predict
+  gr_o[grounding] --> ground
+  ir_o[identity-resolution] --> ri[resolve-identity]
+  subgraph removed [Removed]
+    ms[model-schema]
+    da[detect-anomaly]
+    er[estimate-risk]
+    ap[act-plan]
+  end
+```
+
 ### 5.4 Why This Works Better
 
 1. **Simpler names**: `classify` > `identify`, `measure` > `estimate`
@@ -499,6 +572,17 @@ TOTAL: 35 capabilities
 | Thought | compare, plan, critique, explain |
 | Action | retrieve, search, generate, act, send |
 | Observation | inspect, detect, verify, compare |
+
+```mermaid
+---
+title: ReAct phases and the capabilities in each
+---
+flowchart LR
+  accDescr: Thought maps to compare, plan, critique and explain; Action to retrieve, search, generate, act and send; Observation to inspect, detect, verify and compare.
+  th[Thought] --> compare_t[compare] & plan & critique & explain
+  ac[Action] --> retrieve & search & generate & act & send
+  ob[Observation] --> inspect & detect & verify & compare_o[compare]
+```
 
 ---
 

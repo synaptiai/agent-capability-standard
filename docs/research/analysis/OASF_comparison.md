@@ -43,6 +43,16 @@ OASF provides a structured taxonomy of AI agent skills organized into **15 prima
 
 Each category contains 2-11 subcategories with hierarchical numerical coding (e.g., 10101 for a specific skill under category 101).
 
+```mermaid
+---
+title: How OASF codes its skills
+---
+flowchart TB
+  accDescr: OASF has 15 primary categories, each category has 2 to 11 subcategories, and a skill's numerical code sits under its subcategory, as 10101 sits under 101.
+  cat["Primary category: 15 of them"] -->|2 to 11 each| sub["Subcategory, for example 101"]
+  sub --> skill["Skill, for example 10101"]
+```
+
 ### 1.2 Grounded Agency Capability Ontology
 
 Our ontology defines **36 atomic capabilities** across **9 cognitive layers**, derived from first principles analysis of BDI cognitive architecture, ReAct agent patterns, Claude Skills, and MCP tool patterns:
@@ -66,6 +76,19 @@ Our ontology defines **36 atomic capabilities** across **9 cognitive layers**, d
 ### 2.1 OASF Skills That Map to Our Atomic Capabilities
 
 The following OASF skills align with our atomic capabilities and could be represented using domain parameters:
+
+```mermaid
+---
+title: The skills in the table that map to a composition
+---
+flowchart LR
+  accDescr: In the table below, Multi-agent Planning maps to plan and delegate, Audit Summarization to audit and explain, Performance Monitoring to observe and measure, Benchmark Execution to execute and verify, and Feature Engineering to transform and generate.
+  map[Multi-agent Planning] --> plan & delegate
+  aus[Audit Summarization] --> audit & explain
+  pm[Performance Monitoring] --> observe & measure
+  be[Benchmark Execution] --> execute & verify
+  fe[Feature Engineering] --> transform & generate
+```
 
 | OASF Skill | OASF Category | Grounded Agency Equivalent | Notes |
 |------------|---------------|---------------------------|-------|
@@ -127,6 +150,18 @@ These OASF categories represent **modality-specific capabilities** that our onto
 | **Multi-modal [7]** | Cross-modality transformations | `transform` with source/target modality parameters |
 | **DevOps/MLOps [12]** | Infrastructure-specific operations | Workflow patterns using `execute`, `verify`, `checkpoint` |
 
+```mermaid
+---
+title: How the modality categories are handled
+---
+flowchart LR
+  accDescr: Computer Vision and Audio become domain parameters on detect, classify, generate and transform; Multi-modal becomes transform with modality parameters; DevOps/MLOps becomes workflow patterns using execute, verify and checkpoint.
+  cv["Computer Vision [2]"] --> dp["Domain parameter on detect, classify, generate, transform"]
+  au["Audio [3]"] --> dp
+  mm["Multi-modal [7]"] --> tr["transform with source and target modality"]
+  ops["DevOps/MLOps [12]"] --> wp["Workflow patterns using execute, verify, checkpoint"]
+```
+
 **Key Insight:** Our ontology treats modality (text, image, audio, code) as a **domain parameter**, not a separate capability. This reduces the ontology size while maintaining expressiveness.
 
 ---
@@ -156,6 +191,17 @@ These OASF categories represent **modality-specific capabilities** that our onto
 - `constrain` capability enforces policies pre-execution
 - `verify` capability validates post-execution
 - Safety is **not optional**—it's built into the capability contracts
+
+```mermaid
+---
+title: Safety built into the capabilities
+---
+flowchart TB
+  accDescr: In Grounded Agency, constrain enforces policies before execution, mutate and send structurally require a checkpoint, and verify validates after execution.
+  con[constrain] -->|policies, before execution| hi["mutate, send"]
+  cp[checkpoint] -->|required before| hi
+  hi -->|after execution| ver[verify]
+```
 
 ### 3.3 Composability Comparison
 
@@ -207,6 +253,23 @@ These OASF categories represent **modality-specific capabilities** that our onto
 | **Bias Mitigation** | Ethical constraint | Use `constrain` with bias detection rules |
 | **Content Moderation** | Safety filtering | Use `classify` + `constrain` |
 
+```mermaid
+---
+title: How the missing OASF skills are expressed
+---
+flowchart LR
+  accDescr: Each OASF skill without a direct equivalent is expressed with an existing capability and a domain, a composition, or a workflow, as the table above lists.
+  ig[Image Generation] --> gen1["generate, domain: image"]
+  vg[Video Generation] --> gen2["generate, domain: video"]
+  ss[Speech Synthesis] --> gen3["generate, domain: audio"]
+  sr[Speech Recognition] --> sr2["detect + transform, audio domain"]
+  de[Depth Estimation] --> me["measure, domain: depth"]
+  i3[Image-to-3D] --> wf["detect → transform → generate"]
+  pe[Personalization] --> st["state + transform"]
+  bm[Bias Mitigation] --> co1["constrain with bias rules"]
+  cm[Content Moderation] --> co2["classify + constrain"]
+```
+
 **Conclusion:** No new atomic capabilities needed. All OASF skills can be expressed through domain parameterization or workflow composition.
 
 ### 4.2 Grounded Agency Capabilities Missing from OASF
@@ -250,6 +313,15 @@ rag_pipeline:
     purpose: Cite sources
 ```
 
+```mermaid
+---
+title: The RAG pipeline
+---
+flowchart TB
+  accDescr: The RAG pipeline searches, retrieves, detects the relevant passages, grounds the response in the evidence, generates it, and explains its sources.
+  search --> retrieve --> detect --> ground --> generate --> explain
+```
+
 ### 5.2 Security Assessment (OASF Category 8)
 
 ```yaml
@@ -275,6 +347,15 @@ security_assessment:
     purpose: Record assessment findings
 ```
 
+```mermaid
+---
+title: The security assessment
+---
+flowchart TB
+  accDescr: The security assessment searches for vulnerability patterns, detects issues, measures severity, attributes root causes, critiques mitigation options, generates a report and audits the findings.
+  search --> detect --> measure --> attribute --> critique --> generate --> audit
+```
+
 ### 5.3 Multi-Agent Orchestration (OASF Category 10)
 
 ```yaml
@@ -295,6 +376,15 @@ multi_agent_orchestration:
     purpose: Merge results from multiple agents
   - capability: audit
     purpose: Record orchestration decisions
+```
+
+```mermaid
+---
+title: The multi-agent orchestration
+---
+flowchart TB
+  accDescr: The orchestration decomposes the task, plans with dependencies, delegates subtasks, synchronizes shared state, verifies the results, integrates them and audits the decisions.
+  decompose --> plan --> delegate --> synchronize --> verify --> integrate --> audit
 ```
 
 ### 5.4 Data Quality Pipeline (OASF Category 9)
@@ -321,6 +411,15 @@ data_quality_pipeline:
     purpose: Record transformations applied
 ```
 
+```mermaid
+---
+title: The data quality pipeline
+---
+flowchart TB
+  accDescr: The pipeline observes the raw data, detects quality problems, classifies them, measures quality, transforms the data, verifies it and audits the transformations.
+  observe --> detect --> classify --> measure --> transform --> verify --> audit
+```
+
 ### 5.5 MLOps Model Deployment (OASF Category 12)
 
 ```yaml
@@ -345,6 +444,18 @@ model_deployment:
     purpose: Record deployment event
   - capability: rollback
     purpose: Revert to the checkpoint if deployment verification failed
+```
+
+```mermaid
+---
+title: The MLOps model deployment
+---
+flowchart TB
+  accDescr: The deployment checks the model artifacts and the deployment policies with constrain, checkpoints, executes, verifies, measures performance, audits, and rolls back to the checkpoint if verification failed.
+  c1[constrain] -->|artifacts| c2[constrain]
+  c2 -->|policies| checkpoint
+  checkpoint --> execute --> verify --> measure --> audit
+  audit -->|if verification failed| rollback
 ```
 
 ---
@@ -389,6 +500,17 @@ OASF and Grounded Agency represent complementary approaches to agent capability 
 The frameworks are not mutually exclusive. OASF skills can be implemented using Grounded Agency capabilities, benefiting from our safety guarantees and composability model. Conversely, OASF's extensive skill taxonomy identifies specific domain applications that could inform new workflow patterns.
 
 **Bottom Line:** Every OASF skill can be expressed through our 36 atomic capabilities via domain parameterization or workflow composition, while gaining safety properties (evidence anchors, checkpoints, verification) that OASF lacks.
+
+```mermaid
+---
+title: How the two frameworks complement each other
+---
+flowchart TB
+  accDescr: OASF skills can be implemented with Grounded Agency capabilities, which add evidence anchors, checkpoints and verification, and OASF's taxonomy can inform new workflow patterns.
+  oasf[OASF skill taxonomy] -->|implemented with| ga[Grounded Agency capabilities]
+  ga -->|adds| safe["Evidence anchors, checkpoints, verification"]
+  oasf -.->|informs| wp[New workflow patterns]
+```
 
 ---
 
