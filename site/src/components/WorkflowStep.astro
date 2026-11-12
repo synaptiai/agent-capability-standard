@@ -1,7 +1,8 @@
 ---
 // One step of the workflow diagram (design notes, design-system section 12;
-// visual spec 3.3): its number on the rail, then a card that is a closed
-// <details>. The summary shows the capability, its layer and its purpose;
+// visual spec 3.3): its number on the rail, then a card that is a
+// <details>, closed except for the workflow's first step (as the first
+// capability example is open, visual spec 3.1). The summary shows the capability, its layer and its purpose;
 // each step's risk is the risk column of the step map above it, so the card
 // gives it only when opened (the visual review found it drawn three times). Opening the card shows everything else the catalog says about
 // the step: its flags, the checkpoint it relies on, its condition or gates
@@ -22,9 +23,11 @@ import YamlBlock from './YamlBlock.astro';
 interface Props {
   workflow: Workflow;
   d: DiagramStep;
+  /** Whether the card starts open: true for the workflow's first step. */
+  open?: boolean;
 }
 
-const { workflow, d } = Astro.props;
+const { workflow, d, open = false } = Astro.props;
 const { step, role, branch, checkpointStep, missingCheckpoint } = d;
 const e = step.effective;
 const gates = gateRows(step);
@@ -49,7 +52,7 @@ const has = (v: unknown) => v !== undefined && v !== null;
 >
   <span class="wf-step__node" aria-hidden="true">{nodeGlyph && <PixelGlyph name={nodeGlyph} />}</span>
   <span class="wf-step__number">{step.index}</span>
-  <details class="wf-step__card">
+  <details class="wf-step__card" open={open}>
     <summary class="wf-step__summary">
       <span class="wf-step__head">
         <code>{step.capability}</code>

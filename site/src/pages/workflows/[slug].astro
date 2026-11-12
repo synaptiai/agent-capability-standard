@@ -64,7 +64,11 @@ const inputRows = schemaRows(wf.inputs);
 // Figures are numbered in page order: the step map, the inputs (when there
 // are any), the risk, then the data flow.
 const riskAgrees = riskSummary(wf).agree;
-const figN = { spine: 1, inputs: 2, risk: inputRows.length > 0 ? 3 : 2, flow: (inputRows.length > 0 ? 4 : 3) - (riskAgrees ? 1 : 0) };
+// Page order: step map, inputs, steps, data flow, then risk (the order of
+// visual spec 3.3: F-W2 before F-W3). The risk figure is numbered only when
+// the risks differ; otherwise the section is one sentence.
+const flowN = inputRows.length > 0 ? 3 : 2;
+const figN = { spine: 1, inputs: 2, flow: flowN, risk: flowN + 1 };
 const topInputs = inputRows.filter((r) => r.depth === 0).length;
 ---
 <DocLayout route={route} title={wf.id} description={wf.goal}>
@@ -126,17 +130,6 @@ const topInputs = inputRows.filter((r) => r.depth === 0).length;
       <WorkflowDiagram workflow={wf} />
     </section>
 
-    <section class="workflow-risk">
-      <h2 id={id('Risk')}>Risk</h2>
-      {riskAgrees ? <p class="workflow-risk__sentence">{riskSummary(wf).sentence}</p> : <RiskStrip wf={wf} n={figN.risk} id="ref-fig-risk" />}
-      {wf.risk_propagation !== undefined && (
-        <details class="workflow-details">
-          <summary>Risk propagation as written in the catalog</summary>
-          <YamlBlock value={wf.risk_propagation} />
-        </details>
-      )}
-    </section>
-
     <section class="workflow-data-flow">
       <h2 id={id('Data flow')}>Data flow</h2>
       <DataFlowGrid wf={wf} n={figN.flow} id="ref-fig-data-flow" />
@@ -144,6 +137,17 @@ const topInputs = inputRows.filter((r) => r.depth === 0).length;
         <details class="workflow-details">
           <summary>Data flow as written in the catalog</summary>
           <YamlBlock value={wf.data_flow} />
+        </details>
+      )}
+    </section>
+
+    <section class="workflow-risk">
+      <h2 id={id('Risk')}>Risk</h2>
+      {riskAgrees ? <p class="workflow-risk__sentence">{riskSummary(wf).sentence}</p> : <RiskStrip wf={wf} n={figN.risk} id="ref-fig-risk" />}
+      {wf.risk_propagation !== undefined && (
+        <details class="workflow-details">
+          <summary>Risk propagation as written in the catalog</summary>
+          <YamlBlock value={wf.risk_propagation} />
         </details>
       )}
     </section>
