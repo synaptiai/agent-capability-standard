@@ -1,0 +1,36 @@
+---
+// F-C9, the skill's worked examples against its output (the figure under
+// the Examples heading): one row per example, with the skill's output fields
+// its code fences write out as chips, and the fields it leaves out as
+// outlined, struck chips. A field counts when a fence uses its name as a key,
+// which the caption says. The examples stay below, each in its <details>.
+//
+// Props:
+// - cap: Capability, required.
+// - fields: ExampleFields, required. From exampleFields().
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { exampleFieldsCaption, exampleFieldsTitle, type ExampleFields } from '../../lib/capability-figures';
+import Figure from './Figure.astro';
+
+interface Props {
+  cap: Capability;
+  fields: ExampleFields;
+  n: number;
+}
+
+const { cap, fields, n } = Astro.props;
+---
+<Figure id="ref-fig-examples" n={n} title={exampleFieldsTitle(cap)} caption={exampleFieldsCaption(cap, fields)} kind="example-fields">
+  <ol class="xfields has-layer" style={`--layer: var(--layer-${cap.layer})`} aria-label={`The ${fields.examples.length} examples, with the output fields each writes out`}>
+    {fields.examples.map((e, i) => (
+      <li class="xfields__row">
+        <span class="xfields__title"><span class="pmap__n" aria-hidden="true">{i + 1}</span><span>{e.title.replace(/^Example \d+:\s*/, '')}</span></span>
+        <span class="fig-sr">; writes out: {e.shows.length === 0 ? 'no output field' : e.shows.join(', ')}; leaves out: {fields.outputs.filter((o) => !e.shows.includes(o)).join(', ') || 'nothing'}</span>
+        <span class="xfields__chips" aria-hidden="true">
+          {fields.outputs.map((o) => <code class:list={['pmap__chip', e.shows.includes(o) ? 'pmap__chip--out' : 'xfields__chip--off']}>{o}</code>)}
+        </span>
+      </li>
+    ))}
+  </ol>
+</Figure>

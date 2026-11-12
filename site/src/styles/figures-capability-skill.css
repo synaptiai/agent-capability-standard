@@ -321,20 +321,6 @@
     color: var(--ink-3);
   }
 
-  /* The Field Definitions table's "In the contract" column. */
-  .skill-fd__glyph {
-    vertical-align: middle;
-    color: var(--ink-2);
-  }
-
-  .skill-fd__contract {
-    white-space: nowrap;
-  }
-
-  .skill-fd__contract[data-in-contract='yes'] .skill-fd__glyph {
-    color: var(--ink);
-  }
-
   .skill-fence {
     margin: var(--space-3) 0;
   }

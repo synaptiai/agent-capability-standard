@@ -6,7 +6,10 @@
 import { describe, expect, it } from 'vitest';
 import { loadOntology } from '../src/data/ontology';
 import {
+  chainChecks,
   compositionChain,
+  exampleFields,
+  exampleFieldsIsFigure,
   contractRowId,
   contractSummary,
   edgeRules,
@@ -106,6 +109,57 @@ describe('neighbours (F-C1)', () => {
     })[0];
     expect(only).toBeDefined();
     expect(neighbours(cap(only![0])).find((x) => x.id === only![1])!.group).toBe('either');
+  });
+});
+
+describe('exampleFields (F-C9)', () => {
+  it('marks the output fields each example fence uses as a key, read by hand', () => {
+    const text = [
+      '## Output Contract', '', '```yaml', 'result: object', 'confidence: number', 'notes: string', '```', '',
+      '## Examples', '', '### Example 1: Small', '', '```yaml', 'result:', '  x: 1', 'confidence: 0.9', '```', '',
+      '### Example 2: JSON', '', '```json', '{ "result": {}, "notes": "n" }', '```', '', 'The confidence is low.', '',
+      '## Verification', '',
+    ].join('\n');
+    const f = exampleFields(text, 'fixture');
+    expect(f.examples).toEqual([
+      { title: 'Example 1: Small', shows: ['result', 'confidence'] },
+      // "confidence" outside a fence does not count.
+      { title: 'Example 2: JSON', shows: ['result', 'notes'] },
+    ]);
+    expect(exampleFieldsIsFigure(f)).toBe(true);
+  });
+});
+
+describe('chainChecks', () => {
+  it('reads the edges between the pair in either direction and counts neighbouring steps in order', () => {
+    // Hand-made: two workflows; a runs right before b twice and right after b once.
+    const o = loadOntology();
+    const cap = o.byId.get('mutate')!;
+    const wfs = [{ steps: [{ capability: 'checkpoint' }, { capability: 'mutate' }, { capability: 'verify' }] }, { steps: [{ capability: 'checkpoint' }, { capability: 'mutate' }, { capability: 'checkpoint' }] }];
+    const checks = chainChecks(cap, { follows: ['checkpoint'], precedes: ['verify'] }, o, wfs);
+    // Expected from the independent YAML scan: the edges between checkpoint and mutate, and between mutate and verify.
+    const triples = ontologyEdgeTriples();
+    const want = (a: string, b: string) => triples.filter((e) => (e.from === a && e.to === b) || (e.from === b && e.to === a)).map((e) => e.type).sort();
+    expect(checks[0]!.edges.map((e) => e.type).sort()).toEqual(want('checkpoint', 'mutate'));
+    expect(checks[0]!.adjacent).toBe(2);
+    expect(checks[1]!.edges.map((e) => e.type).sort()).toEqual(want('mutate', 'verify'));
+    expect(checks[1]!.adjacent).toBe(1);
+  });
+});
+
+describe('composition text against the ontology', () => {
+  it("never says a skill commonly follows a capability the ontology orders after it, or precedes one ordered before it", () => {
+    // Issue #125 review: mutate's skill said it "commonly follows verify"
+    // while the ontology's precedes edge puts verify after mutate. Expected:
+    // no such pair, with edges read by the independent YAML scan.
+    const before = new Set(ontologyEdgeTriples().filter((e) => e.type === 'precedes' || e.type === 'requires').map((e) => `${e.from}>${e.to}`));
+    const bad: string[] = [];
+    for (const c of loadOntology().capabilities) {
+      const chain = compositionChain(repoText(`skills/${c.id}/SKILL.md`));
+      for (const x of chain.follows) if (before.has(`${c.id}>${x}`)) bad.push(`${c.id} follows ${x}`);
+      for (const x of chain.precedes) if (before.has(`${x}>${c.id}`)) bad.push(`${c.id} precedes ${x}`);
+    }
+    expect(bad).toEqual([]);
   });
 });
 

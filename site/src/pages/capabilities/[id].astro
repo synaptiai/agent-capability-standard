@@ -8,16 +8,29 @@
 // the ontology. Headings the page adds have `ref-` ids; the skill's own
 // headings keep the ids GitHub gives them.
 import { getEntry, render } from 'astro:content';
-import CompositionChain from '../../components/fig/CompositionChain.astro';
 import ContractDiagram from '../../components/fig/ContractDiagram.astro';
 import Neighbourhood from '../../components/fig/Neighbourhood.astro';
 import WhereItRuns from '../../components/fig/WhereItRuns.astro';
 import SafetyPanel from '../../components/fig/SafetyPanel.astro';
 import OutputFields from '../../components/fig/OutputFields.astro';
+import CompositionChain from '../../components/fig/CompositionChain.astro';
+import ExampleFields from '../../components/fig/ExampleFields.astro';
+import VerificationMap from '../../components/fig/VerificationMap.astro';
+import InputGroupsFig from '../../components/fig/InputGroups.astro';
+import ExampleWorkflowsFig from '../../components/fig/ExampleWorkflows.astro';
+import SkillToolsFig from '../../components/fig/SkillTools.astro';
 import ProcedureMap from '../../components/fig/ProcedureMap.astro';
 import SafetySequence from '../../components/fig/SafetySequence.astro';
 import {
   compositionChain,
+  exampleFields,
+  exampleFieldsIsFigure,
+  skillTools,
+  verificationMap,
+  verificationMapIsFigure,
+  inputGroups,
+  inputGroupsIsFigure,
+  exampleWorkflows,
   edgeRules,
   neighbours,
   outputFields,
@@ -77,6 +90,11 @@ const skillText = readRepoFile(route.source!);
 const chain = compositionChain(skillText);
 const chainLength = chain.follows.length + chain.precedes.length + 1;
 const fields = outputFields(cap, skillText, route.source!);
+const examples = exampleFields(skillText, route.source!);
+const checks = verificationMap(skillText, route.source!);
+const igroups = inputGroups(skillText, route.source!);
+const xworkflows = exampleWorkflows(skillText);
+const tools = typeof fm['allowed-tools'] === 'string' ? skillTools(cap, fm['allowed-tools'], route.source!) : null;
 const sequence = safetySequence(cap, ontology);
 const procedure = procedureMap(skillText, route.source!);
 const std = currentStandardText();
@@ -87,22 +105,40 @@ const next = () => ++figN;
 const nRelations = groups.length > 0 && neighbours(cap, ontology).length > 0 ? next() : 0;
 const nContract = next();
 const nUsage = usage.length > 0 ? next() : 0;
+const nTools = typeof fm['allowed-tools'] === 'string' ? next() : 0;
 // The skill's Inputs section gets no port figure: the contract figure above
 // already draws the same ports, and the skill's own table follows the
-// heading (the review counted each input four times). Under Output Contract
+// heading (the review counted each input four times); it gets F-C12 when its
+// inputs need different Standard extensions. Under Output Contract
 // the page draws what the contract figure does not: which of the skill's
 // output fields the contract declares (F-C6). Under Safety Constraints it
 // draws where the capability may run in a step list (F-C5). Under Procedure
-// it draws which inputs and output fields each step names (F-C7).
-type After = { kind: 'chain' | 'output' | 'sequence' | 'procedure'; n: number } | { kind: 'sentence'; text: string };
+// it draws which inputs and output fields each step names (F-C7), under
+// Verification the same for each check (F-C11), under Examples which output
+// fields each example writes out (F-C9) and under Composition Patterns the
+// listed neighbours against the ontology and the catalogs. Under the skill's
+// heading it draws what the skill's tools can do (F-C10).
+type After = { kind: 'chain' | 'examples' | 'xworkflows' | 'verification' | 'inputs' | 'output' | 'sequence' | 'procedure'; n: number; lead?: string } | { kind: 'sentence'; text: string };
 const after: Record<string, After> = {};
 for (const part of skill.parts) {
+  if (part.id === 'inputs' && inputGroupsIsFigure(igroups)) after[part.id] = { kind: 'inputs', n: next() };
   // F-C7 only where two or more steps use a field's name; elsewhere nothing, since a count of one word match says little.
   if (part.id === 'procedure' && procedureMapIsFigure(procedure)) after[part.id] = { kind: 'procedure', n: next() };
-  if (part.id === 'output-contract') after[part.id] = outputFieldsIsFigure(fields) ? { kind: 'output', n: next() } : { kind: 'sentence', text: outputFieldsCaption(cap, fields) };
+  // F-C9 (the examples against the output) sits under Output Contract when
+  // F-C6 there is only a sentence, and under Examples otherwise.
+  const examplesUnderOutput = !outputFieldsIsFigure(fields) && exampleFieldsIsFigure(examples);
+  if (part.id === 'output-contract')
+    after[part.id] = outputFieldsIsFigure(fields)
+      ? { kind: 'output', n: next() }
+      : examplesUnderOutput
+        ? { kind: 'examples', n: next(), lead: outputFieldsCaption(cap, fields) }
+        : { kind: 'sentence', text: outputFieldsCaption(cap, fields) };
+  if (part.id === 'examples' && exampleFieldsIsFigure(examples) && !examplesUnderOutput) after[part.id] = { kind: 'examples', n: next() };
+  else if (part.id === 'examples' && xworkflows.length > 0) after[part.id] = { kind: 'xworkflows', n: next() };
+  if (part.id === 'verification' && verificationMapIsFigure(checks)) after[part.id] = { kind: 'verification', n: next() };
+  if (part.id === 'composition-patterns' && chainLength >= 2) after[part.id] = { kind: 'chain', n: next() };
   if (part.id === 'safety-constraints')
     after[part.id] = sequenceIsFigure(sequence) ? { kind: 'sequence', n: next() } : { kind: 'sentence', text: sequenceCaption(cap, sequence, edgeRules(std.text, std.source)) };
-  if (part.id === 'composition-patterns' && chainLength >= 2) after[part.id] = { kind: 'chain', n: next() };
 }
 const skillFacts = (
   [
@@ -227,6 +263,7 @@ const skillFacts = (
           ))}
         </dl>
       )}
+      {tools && <SkillToolsFig cap={cap} tools={tools} n={nTools} />}
       <div class="doc__body">
         {skill.lead && <Fragment set:html={skill.lead} />}
         {skill.parts.map((part) => {
@@ -234,6 +271,11 @@ const skillFacts = (
           return (
             <>
               <Fragment set:html={part.head} />
+              {fig?.kind === 'examples' && fig.lead && <p>{fig.lead}</p>}
+              {fig?.kind === 'examples' && <ExampleFields cap={cap} fields={examples} n={fig.n} />}
+              {fig?.kind === 'xworkflows' && <ExampleWorkflowsFig cap={cap} rows={xworkflows} n={fig.n} />}
+              {fig?.kind === 'inputs' && <InputGroupsFig cap={cap} groups={igroups} n={fig.n} />}
+              {fig?.kind === 'verification' && <VerificationMap cap={cap} map={checks} n={fig.n} />}
               {fig?.kind === 'chain' && <CompositionChain cap={cap} chain={chain} n={fig.n} />}
               {fig?.kind === 'procedure' && <ProcedureMap cap={cap} map={procedure} n={fig.n} />}
               {fig?.kind === 'output' && <OutputFields cap={cap} fields={fields} n={fig.n} />}

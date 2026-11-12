@@ -4,7 +4,7 @@
 // agree. Kept apart from views.ts so the figure work of each page type stays
 // in its own file.
 import { EDGE_TYPES, loadOntology, type Capability, type EdgeType, type Ontology } from '../data/ontology';
-import { capabilityUsage, type CapabilityUse } from '../data/workflows';
+import { capabilityUsage, loadWorkflows, type CapabilityUse } from '../data/workflows';
 import { sectionFence, sectionOrderedItems, sectionTableByHeader, tableRows } from './md-sections';
 import { contractRows, tableOrder, type SchemaRow } from './views';
 
@@ -76,6 +76,7 @@ export function relationWords(n: Neighbour): string {
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const wordList = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
 /** Counts behind F-C1's name and caption: relations by direction. */
 export function neighbourCounts(list: Neighbour[]): { relations: number; capabilities: number; into: number; out: number; bothWays: number } {
@@ -217,14 +218,46 @@ export function compositionChain(skillText: string, ontology: Ontology = loadOnt
   return out;
 }
 
-/** The chain figure's caption. */
-export function chainCaption(cap: Capability, chain: CompositionChain): string {
-  const names = (ids: string[]) => (ids.length === 1 ? ids[0]! : `${ids.slice(0, -1).join(', ')} and ${ids.at(-1)}`);
-  const parts = [
-    ...(chain.follows.length > 0 ? [`commonly follows ${names(chain.follows)}`] : []),
-    ...(chain.precedes.length > 0 ? [`commonly precedes ${names(chain.precedes)}`] : []),
+/** A capability the skill lists, checked against the ontology and the catalogs. */
+export interface ChainCheck {
+  id: string;
+  side: 'follows' | 'precedes';
+  /** The ontology edges between the two, in either direction, as "type" with its direction from the listed capability's side. */
+  edges: { type: EdgeType; dir: 'into' | 'out' }[];
+  /** Catalog steps where the listed capability runs directly before (follows) or after (precedes) this one. */
+  adjacent: number;
+}
+
+/**
+ * The skill's "commonly follows / precedes" lists checked against two other
+ * sources: the ontology's edges between the pair, and how often the pair
+ * runs as neighbouring steps, in that order, in the reference and domain
+ * workflows. The list itself stays as text under the figure; the figure
+ * adds what the list does not say (issue #125 review: the chain alone
+ * restated the list).
+ */
+export function chainChecks(cap: Capability, chain: CompositionChain, ontology: Ontology = loadOntology(), workflows: { steps: { capability: string }[] }[] = loadWorkflows().all): ChainCheck[] {
+  const pairs = (a: string, b: string) => workflows.reduce((k, w) => k + w.steps.slice(1).filter((s, i) => w.steps[i]!.capability === a && s.capability === b).length, 0);
+  const edgesWith = (id: string) =>
+    ontology.edges
+      .filter((e) => (e.from === id && e.to === cap.id) || (e.to === id && e.from === cap.id))
+      .map((e) => ({ type: e.type, dir: (e.from === id ? 'out' : 'into') as 'into' | 'out' }));
+  return [
+    ...chain.follows.map((id) => ({ id, side: 'follows' as const, edges: edgesWith(id), adjacent: pairs(id, cap.id) })),
+    ...chain.precedes.map((id) => ({ id, side: 'precedes' as const, edges: edgesWith(id), adjacent: pairs(cap.id, id) })),
   ];
-  return `As this section says, ${cap.id} ${parts.join(', and ')}.`;
+}
+
+/** The chain figure's caption: how many listed neighbours the ontology and the catalogs back. */
+export function chainCaption(cap: Capability, chain: CompositionChain, checks: ChainCheck[] = chainChecks(cap, chain)): string {
+  const n = checks.length;
+  const edged = checks.filter((c) => c.edges.length > 0).length;
+  const seen = checks.filter((c) => c.adjacent > 0);
+  const top = [...seen].sort((a, b) => b.adjacent - a.adjacent)[0];
+  return (
+    `The skill lists ${plural(n, 'capability', 'capabilities')} as common neighbours of ${cap.id}; ${edged} of them ${edged === 1 ? 'has' : 'have'} an edge with it in the ontology, and ${seen.length} ${seen.length === 1 ? 'runs' : 'run'} next to it, in that order, in a catalog workflow` +
+    (top ? ` (${top.id} most often, ${plural(top.adjacent, 'time', 'times')}).` : '.')
+  );
 }
 
 // ------------------------------------------------------------ rendered skill
@@ -496,4 +529,252 @@ export function procedureMapCaption(cap: Capability, m: ProcedureMap): string {
         ? '; no step uses an output field.'
         : `; ${plural(silent.length, 'output field', 'output fields')} of ${m.outputs.length} ${silent.length === 1 ? 'is' : 'are'} used by no step (${silent.join(', ')}).`;
   return lead + tail;
+}
+
+// ------------------------------------------------------------ F-C9 examples against the output
+
+export interface ExampleFields {
+  /** The skill's output fields, in the Output Contract fence's order. */
+  outputs: string[];
+  /** Per "### Example" of the Examples section: its title and the output fields its fences name. */
+  examples: { title: string; shows: string[] }[];
+}
+
+/**
+ * Which of the skill's output fields each worked example writes out: a
+ * field counts when the example's code fences use its name as a key
+ * (`name:`) or a JSON key (`"name"`). Read from the skill's own Examples and
+ * Output Contract sections.
+ */
+export function exampleFields(skillText: string, where: string): ExampleFields {
+  const outputs = skillOutputKeys(skillText, where);
+  const lines = skillText.split('\n');
+  const start = lines.findIndex((l) => /^## Examples\s*$/.test(l));
+  if (start === -1) return { outputs, examples: [] };
+  const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
+  const body = lines.slice(start + 1, end === -1 ? undefined : end);
+  const examples: { title: string; lines: string[] }[] = [];
+  for (const l of body) {
+    const h = /^### (.+)$/.exec(l);
+    if (h) examples.push({ title: h[1]!.trim(), lines: [] });
+    else examples.at(-1)?.lines.push(l);
+  }
+  const fences = (ls: string[]) => {
+    const out: string[] = [];
+    let open = false;
+    for (const l of ls) {
+      if (/^\s*```/.test(l)) open = !open;
+      else if (open) out.push(l);
+    }
+    return out.join('\n');
+  };
+  return {
+    outputs,
+    examples: examples.map((e) => {
+      const code = fences(e.lines);
+      return { title: e.title, shows: outputs.filter((f) => new RegExp(`(?:^|[\\s{,])"?${f}"?\\s*:`, 'm').test(code)) };
+    }),
+  };
+}
+
+/** A figure when the skill has two or more examples and at least one names an output field. */
+export function exampleFieldsIsFigure(f: ExampleFields): boolean {
+  return f.examples.length >= 2 && f.examples.some((e) => e.shows.length > 0);
+}
+
+export function exampleFieldsTitle(cap: Capability): string {
+  return `The output fields each example of the ${cap.id} skill writes out`;
+}
+
+export function exampleFieldsCaption(_cap: Capability, f: ExampleFields): string {
+  const all = f.outputs.filter((o) => f.examples.every((e) => e.shows.includes(o)));
+  const none = f.outputs.filter((o) => f.examples.every((e) => !e.shows.includes(o)));
+  const lead = `${plural(f.examples.length, 'example', 'examples')} against the skill's ${plural(f.outputs.length, 'output field', 'output fields')}`;
+  if (!exampleFieldsIsFigure(f)) return `${lead}: no example writes out an output field by name.`;
+  return `${lead}: ${all.length === 0 ? 'no field is in every example' : `${wordList(all)} ${all.length === 1 ? 'is' : 'are'} in every example`}${none.length === 0 ? '' : `, and ${wordList(none)} ${none.length === 1 ? 'is' : 'are'} in none`}.`;
+}
+
+// ------------------------------------------------------------ F-C10 the skill's tools against the ontology
+
+export type ToolPower = 'read' | 'run' | 'write';
+
+/** What each tool name in a skill's allowed-tools can do. A name not listed here fails the build. */
+export const TOOL_POWER: Readonly<Record<string, ToolPower>> = {
+  Read: 'read',
+  Grep: 'read',
+  Glob: 'read',
+  Web: 'read',
+  WebFetch: 'read',
+  WebSearch: 'read',
+  Bash: 'run',
+  Git: 'run',
+  Edit: 'write',
+  Write: 'write',
+  MultiEdit: 'write',
+};
+
+export const TOOL_POWER_WORDS: Readonly<Record<ToolPower, string>> = {
+  read: 'Only read',
+  run: 'Run commands, which can change state',
+  write: 'Change files',
+};
+
+export interface SkillTools {
+  groups: { power: ToolPower; tools: string[] }[];
+  /** The ontology's mutation flag for the capability. */
+  mutation: boolean;
+}
+
+/** The skill's allowed-tools (frontmatter), grouped by what they can do. */
+export function skillTools(cap: Capability, allowed: string, where: string): SkillTools {
+  const tools = allowed.split(',').map((t) => t.trim()).filter(Boolean);
+  const unknown = tools.filter((t) => !(t in TOOL_POWER));
+  if (unknown.length > 0) throw new Error(`${where}: allowed-tools names ${unknown.join(', ')}; add ${unknown.length === 1 ? 'it' : 'them'} to TOOL_POWER`);
+  const groups = (['read', 'run', 'write'] as const).map((power) => ({ power, tools: tools.filter((t) => TOOL_POWER[t] === power) }));
+  return { groups, mutation: cap.mutation };
+}
+
+export function skillToolsTitle(cap: Capability): string {
+  return `What the ${cap.id} skill's tools can do, against the ontology`;
+}
+
+export function skillToolsCaption(cap: Capability, t: SkillTools): string {
+  const n = t.groups.reduce((a, g) => a + g.tools.length, 0);
+  const can = t.groups.filter((g) => g.power !== 'read').flatMap((g) => g.tools);
+  const parts = t.groups.filter((g) => g.tools.length > 0).map((g) => `${g.tools.length} ${g.power === 'read' ? 'only read' : g.power === 'run' ? 'run commands' : 'change files'}`);
+  const flag = t.mutation ? `the ontology marks ${cap.id} as changing state` : `the ontology marks ${cap.id} as read-only`;
+  const verdict =
+    can.length === 0
+      ? t.mutation
+        ? `, so the skill has no tool that can make the change itself`
+        : ', and every tool only reads'
+      : t.mutation
+        ? `, and ${wordList(can)} can make the change`
+        : `, so ${wordList(can)} ${can.length === 1 ? 'is' : 'are'} more than the capability needs`;
+  return `The skill may use ${plural(n, 'tool', 'tools')}: ${wordList(parts)}; ${flag}${verdict}.`;
+}
+
+// ------------------------------------------------------------ F-C11 verification checks against the fields
+
+export interface CheckMap {
+  checks: { n: number; text: string; reads: string[]; writes: string[] }[];
+  inputs: string[];
+  outputs: string[];
+}
+
+/**
+ * F-C11: each checkbox item of the skill's Verification section, with the
+ * skill's inputs and output fields it names as whole words (the matcher of
+ * F-C7), so a reader sees which fields the checks cover and which none does.
+ */
+export function verificationMap(skillText: string, where: string): CheckMap {
+  const inputs = skillInputNames(skillText, where);
+  const outputs = skillOutputKeys(skillText, where);
+  const lines = skillText.split('\n');
+  const start = lines.findIndex((l) => /^## Verification\s*$/.test(l));
+  if (start === -1) return { checks: [], inputs, outputs };
+  const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
+  const items = lines
+    .slice(start + 1, end === -1 ? undefined : end)
+    .flatMap((l) => /^\s*[-*] \[[ xX]\]\s+(.*)$/.exec(l)?.[1] ?? [])
+    .map((t) => t.replace(/\*\*/g, '').replace(/`/g, '').trim());
+  return {
+    checks: items.map((text, i) => ({ n: i + 1, text, reads: inputs.filter((f) => names(text, f)), writes: outputs.filter((f) => names(text, f)) })),
+    inputs,
+    outputs,
+  };
+}
+
+/** A figure when two or more checks name a field. */
+export function verificationMapIsFigure(m: CheckMap): boolean {
+  return m.checks.filter((c) => c.reads.length + c.writes.length > 0).length >= 2;
+}
+
+export function verificationMapTitle(cap: Capability): string {
+  return `The field names each verification check of the ${cap.id} skill uses`;
+}
+
+export function verificationMapCaption(_cap: Capability, m: CheckMap): string {
+  const k = m.checks.filter((c) => c.reads.length + c.writes.length > 0).length;
+  const named = new Set(m.checks.flatMap((c) => c.writes));
+  const silent = m.outputs.filter((f) => !named.has(f));
+  return (
+    `${k} of the ${plural(m.checks.length, 'check', 'checks')} ${k === 1 ? 'uses' : 'use'} the name of an input or output field as a word` +
+    (silent.length === 0 ? '; every output field is named by a check.' : `; ${plural(silent.length, 'output field', 'output fields')} of ${m.outputs.length} ${silent.length === 1 ? 'is' : 'are'} named by no check (${wordList(silent)}).`)
+  );
+}
+
+// ------------------------------------------------------------ F-C12 inputs by the extension they need
+
+export interface InputGroups {
+  groups: { extension: string | null; inputs: { name: string; required: boolean }[] }[];
+}
+
+/**
+ * The skill's inputs grouped by the Standard extension their description
+ * names (`delegation@1`, `identity@1`), or none. Read from the Inputs table.
+ */
+export function inputGroups(skillText: string, where: string): InputGroups {
+  const rows = tableRows(sectionTableByHeader(skillText, 'Inputs', 'Parameter', where)).slice(1);
+  const out = new Map<string | null, { name: string; required: boolean }[]>();
+  for (const r of rows) {
+    const name = r[0]!.replace(/`/g, '').trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+    const ext = /\b([a-z_]+@\d+)\b/.exec(r.slice(1).join(' '))?.[1] ?? null;
+    if (!out.has(ext)) out.set(ext, []);
+    out.get(ext)!.push({ name, required: /^yes$/i.test(r[1]!.trim()) });
+  }
+  return { groups: [...out.entries()].sort((a, b) => (a[0] === null ? -1 : b[0] === null ? 1 : a[0].localeCompare(b[0]))).map(([extension, inputs]) => ({ extension, inputs })) };
+}
+
+/** A figure when the inputs fall into two or more groups. */
+export function inputGroupsIsFigure(g: InputGroups): boolean {
+  return g.groups.length >= 2;
+}
+
+export function inputGroupsTitle(cap: Capability): string {
+  return `The inputs of the ${cap.id} skill, by the Standard extension each needs`;
+}
+
+export function inputGroupsCaption(_cap: Capability, g: InputGroups): string {
+  const core = g.groups.find((x) => x.extension === null)?.inputs.length ?? 0;
+  const ext = g.groups.filter((x) => x.extension !== null);
+  return `${plural(core, 'input works', 'inputs work')} without an extension; ${wordList(ext.map((x) => `${plural(x.inputs.length, 'input needs', 'inputs need')} ${x.extension}`))}. A workflow that binds an extension's input must declare that extension.`;
+}
+
+// ------------------------------------------------------------ F-C13 the workflows the examples run
+
+/**
+ * The catalog workflows the skill's examples name in their code fences (as a
+ * `workflow:` value or a quoted id), in first-mention order, each with the
+ * examples that name it.
+ */
+export function exampleWorkflows(skillText: string, ids: ReadonlySet<string> = new Set(loadWorkflows().all.map((w) => w.id))): { id: string; examples: number[] }[] {
+  const lines = skillText.split('\n');
+  const start = lines.findIndex((l) => /^## Examples\s*$/.test(l));
+  if (start === -1) return [];
+  const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
+  const out = new Map<string, number[]>();
+  let ex = 0;
+  let open = false;
+  for (const l of lines.slice(start + 1, end === -1 ? undefined : end)) {
+    if (/^### /.test(l)) ex += 1;
+    if (/^\s*```/.test(l)) {
+      open = !open;
+      continue;
+    }
+    if (!open) continue;
+    const m = /^\s*(?:workflow|workflow_id):\s*"?([a-z_]+)"?\s*$/.exec(l);
+    if (m && ids.has(m[1]!)) {
+      const list = out.get(m[1]!) ?? [];
+      if (!list.includes(ex)) list.push(ex);
+      out.set(m[1]!, list);
+    }
+  }
+  return [...out.entries()].map(([id, examples]) => ({ id, examples }));
+}
+
+export function exampleWorkflowsCaption(cap: Capability, rows: { id: string; examples: number[] }[]): string {
+  const steps = rows.map((r) => loadWorkflows().byId.get(r.id)!.steps.length);
+  return `The examples run ${plural(rows.length, 'catalog workflow', 'catalog workflows')} through ${cap.id}, from ${Math.min(...steps)} to ${Math.max(...steps)} steps; each strip is a workflow, with a square per step.`;
 }

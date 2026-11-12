@@ -228,6 +228,24 @@
     padding-left: var(--space-1);
   }
 
+  /* The checkbox is a checklist mark, not a control: a square pixel box in
+     --ink-2, so it does not read as a greyed-out, disabled input. */
+  .task-list-item > input[type='checkbox'] {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin: 0 var(--space-2) 0 0;
+    vertical-align: -2px;
+    border: var(--px) solid var(--ink-2);
+    border-radius: 0;
+    background: var(--bg);
+    opacity: 1;
+  }
+
+  .task-list-item > input[type='checkbox']:checked {
+    background: var(--ink);
+  }
+
   /* BreakCode: break at its <wbr>s first, inside a part only when it must. */
   :not(pre) > code.break-code {
     overflow-wrap: break-word;

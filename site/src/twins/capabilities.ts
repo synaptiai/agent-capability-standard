@@ -28,10 +28,32 @@ import {
   neighbours,
   stepWords,
   usageCaption,
+  chainCaption,
+  chainChecks,
+  compositionChain,
+  exampleFields,
+  exampleFieldsCaption,
+  exampleFieldsIsFigure,
+  exampleFieldsTitle,
+  skillTools,
+  exampleWorkflows,
+  exampleWorkflowsCaption,
+  inputGroups,
+  inputGroupsCaption,
+  inputGroupsIsFigure,
+  inputGroupsTitle,
+  verificationMap,
+  verificationMapCaption,
+  verificationMapIsFigure,
+  verificationMapTitle,
+  skillToolsCaption,
+  skillToolsTitle,
+  TOOL_POWER_WORDS,
 } from '../lib/capability-figures';
 import { currentStandardText } from '../lib/spec-figures';
 import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle, riskByLayer, riskByLayerCaption, usageMatrix, usageMatrixCaption } from '../lib/layer-figures';
 import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, safetyRows, type SchemaRow } from '../lib/views';
+import { loadWorkflows } from '../data/workflows';
 import { blocks, cell, code, figure, generatedLine, markdownCopy, mdLink, table } from './md';
 import type { Twin } from './types';
 
@@ -112,6 +134,46 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
         ),
       )
     : null;
+  const chain = compositionChain(skillText);
+  const checks = chainChecks(cap, chain);
+  const chainBlock =
+    checks.length === 0
+      ? null
+      : figure(
+          `The neighbours the skill lists for ${cap.id}, checked against the ontology and the catalogs`,
+          chainCaption(cap, chain, checks),
+          table(
+            ['Listed as', 'Capability', 'Ontology edge', 'Next to it in a workflow'],
+            checks.map((c) => [
+              c.side === 'follows' ? 'commonly follows' : 'commonly precedes',
+              capLink(c.id),
+              c.edges.length === 0 ? 'none' : c.edges.map((e) => `${code(e.type)}${e.dir === 'into' ? ' (into it)' : ''}`).join(', '),
+              c.adjacent === 0 ? 'never' : `${c.adjacent} times`,
+            ]),
+          ),
+        );
+  const allowed = /^allowed-tools:\s*(.+)$/m.exec(skillText)?.[1]?.trim();
+  const tools = allowed ? skillTools(cap, allowed, skillSource) : null;
+  const toolsBlock = tools
+    ? figure(skillToolsTitle(cap), skillToolsCaption(cap, tools), table(['What they can do', 'Tools'], tools.groups.map((g) => [TOOL_POWER_WORDS[g.power], g.tools.map(code).join(', ') || 'none'])))
+    : null;
+  const ig = inputGroups(skillText, skillSource);
+  const inputsBlock = inputGroupsIsFigure(ig)
+    ? figure(inputGroupsTitle(cap), inputGroupsCaption(cap, ig), table(['Extension', 'Inputs'], ig.groups.map((g) => [g.extension ? code(g.extension) : 'none', g.inputs.map((x) => `${code(x.name)}${x.required ? ' (required)' : ''}`).join(', ')])))
+    : null;
+  const xw = exampleWorkflows(skillText);
+  const xwBlock =
+    xw.length === 0 || exampleFieldsIsFigure(exampleFields(skillText, skillSource)) && outputFieldsIsFigure(fields)
+      ? null
+      : figure(`The catalog workflows the examples of the ${cap.id} skill run`, exampleWorkflowsCaption(cap, xw), table(['Workflow', 'Steps', 'Examples'], xw.map((r) => [mdLink(code(r.id), `/workflows/${loadWorkflows().byId.get(r.id)!.slug}/`), String(loadWorkflows().byId.get(r.id)!.steps.length), r.examples.join(', ')])));
+  const vm = verificationMap(skillText, skillSource);
+  const verificationBlock = verificationMapIsFigure(vm)
+    ? figure(verificationMapTitle(cap), verificationMapCaption(cap, vm), table(['Check', 'Inputs it uses by name', 'Output fields it uses by name'], vm.checks.map((c) => [`${c.n}. ${cell(c.text)}`, c.reads.map(code).join(', '), c.writes.map(code).join(', ')])))
+    : null;
+  const ex = exampleFields(skillText, skillSource);
+  const examplesBlock = exampleFieldsIsFigure(ex)
+    ? figure(exampleFieldsTitle(cap), exampleFieldsCaption(cap, ex), table(['Example', 'Output fields it writes out'], ex.examples.map((e) => [cell(e.title), e.shows.map(code).join(', ') || 'none'])))
+    : null;
   const std = currentStandardText();
   const rules = edgeRules(std.text, std.source);
   const seq = safetySequence(cap, ontology);
@@ -147,7 +209,13 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
     '## Used in workflows',
     used,
     '## Claude Code skill',
+    toolsBlock,
+    inputsBlock,
     procedureBlock,
+    examplesBlock,
+    xwBlock,
+    verificationBlock,
+    chainBlock,
     markdownCopy(skillSource, skillText, { shiftHeadings: 1 }),
   );
   return { title: cap.id, description: cap.description, markdown };

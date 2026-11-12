@@ -5,8 +5,8 @@
 // - Procedure: the top-level ordered list gets numbered pixel tiles (CSS).
 // - Inputs: the parameter table's "Required" column gets a check glyph on
 //   "Yes" and a cross on "No", as yes/no columns do on prose pages (visual
-//   spec 3.10.10); with three or more rows the table is an enriched table
-//   and counts as an information figure (visual spec 4.2).
+//   spec 3.10.10). The glyphs repeat the column's words, so the table is a
+//   glyph aid and not an information figure.
 // - Examples: each "### Example N" and the content up to the next H3 or H2
 //   becomes a <details> whose summary holds the heading with the code glyph
 //   (caution for a title that contains "Failure"). The
@@ -17,17 +17,13 @@
 // - Safety Constraints: the section's content sits in a panel with the
 //   caution glyph.
 // - Output Contract: the section's first code block folds into a
-//   <details>, under the page's figure of the same fields. The "Field
-//   Definitions" table gets a column that says, per field, whether the
-//   ontology's output contract declares it, with the contract's type and
-//   whether it is required (a check glyph), or that it is the skill's own (the
-//   open-type glyph). Every row carries a glyph, so the table is an enriched
-//   table and counts as an information figure (visual spec 4.2).
+//   <details>, under the page's figure of the same fields (F-C6, which says
+//   which of the skill's fields the contract declares, so the Field
+//   Definitions table is left as written).
 // The port columns and the composition chain are Astro figures, which the
 // page puts under their headings.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
-import { loadOntology, type Capability } from '../data/ontology';
-import { contractRows } from '../lib/views';
+import { loadOntology } from '../data/ontology';
 import { glyphElement } from '../pixel/hast';
 import { sourceOf } from './source';
 
@@ -125,19 +121,6 @@ export default function rehypeCapabilitySkill() {
       if (table) markRequired(table);
     }
 
-    // Output Contract: the Field Definitions table against the contract.
-    const out2 = sections(kids).get('output-contract');
-    const cap = loadOntology().byId.get(SKILL.exec(sourceOf(file, 'rehype-capability-skill').repoPath)![1]!)!;
-    if (out2) {
-      const [s, e] = out2;
-      const h3 = kids.slice(s + 1, e).findIndex((c) => isEl(c, 'h3') && c.properties?.id === 'field-definitions');
-      if (h3 !== -1) {
-        const block = kids.slice(s + 1 + h3 + 1, e).find((c) => isEl(c) && (c.tagName === 'table' || c.tagName === 'div'));
-        const table = block ? tableOf(block) : undefined;
-        if (table) markFieldDefinitions(table, cap);
-      }
-    }
-
     // Examples: one <details> per H3.
     const ex = sections(kids).get('examples');
     if (ex) {
@@ -175,42 +158,7 @@ export default function rehypeCapabilitySkill() {
   };
 }
 
-const el = (tagName: string, properties: Element['properties'], children: ElementContent[]): Element => ({ type: 'element', tagName, properties, children });
 const txt = (value: string): ElementContent => ({ type: 'text', value });
-
-/** Adds the "In the contract" column to a skill's Field Definitions table. */
-export function markFieldDefinitions(table: Element, cap: Capability): number {
-  const contract = new Map(contractRows(cap.output_schema).map((r) => [r.path, r]));
-  const part = (tag: string) => table.children.find((c): c is Element => isEl(c, tag));
-  const rows = (sec: Element | undefined) => (sec ? sec.children.filter((c): c is Element => isEl(c, 'tr')) : []);
-  const head = rows(part('thead'))[0];
-  if (!head) return 0;
-  head.children.push(el('th', {}, [txt('In the contract')]));
-  let marked = 0;
-  for (const tr of rows(part('tbody'))) {
-    const first = tr.children.find((c): c is Element => isEl(c, 'td'));
-    const name = first ? text(first).replace(/`/g, '').trim() : '';
-    const row = contract.get(name);
-    // A nested name (`audit_record.actor`) whose head the contract declares
-    // is inside a contract field, not the skill's own.
-    const head = /^([A-Za-z_][A-Za-z0-9_]*)[.[]/.exec(name)?.[1];
-    const parent = !row && head ? contract.get(head) : undefined;
-    const cell = parent
-      ? [glyphElement('nested', { className: 'skill-fd__glyph' }), txt(' Inside '), el('code', {}, [txt(head!)]), txt(', which the contract declares')]
-      : row
-      ? [
-          glyphElement('check', { className: 'skill-fd__glyph' }),
-          txt(' Yes: '),
-          el('code', {}, [txt(row.type)]),
-          txt(row.required ? ', required' : ', optional'),
-        ]
-      : [glyphElement('type:open', { className: 'skill-fd__glyph' }), txt(' '), txt("No, the skill's own")];
-    tr.children.push(el('td', { className: ['skill-fd__contract'], dataInContract: row ? 'yes' : parent ? 'inside' : 'no' }, cell));
-    marked += 1;
-  }
-  table.properties = { ...table.properties, dataEnriched: String(marked), ...(marked >= 3 ? { dataInfoFigure: 'enriched-table' } : {}) };
-  return marked;
-}
 
 /** Marks the "Required" column of a skill's Inputs table with check (Yes) and cross (No) glyphs. */
 export function markRequired(table: Element): number {
@@ -228,6 +176,8 @@ export function markRequired(table: Element): number {
     c.children.unshift(glyphElement(v === 'yes' ? 'check' : 'close', { className: `skill-req skill-req--${v}` }), txt(' '));
     marked += 1;
   }
-  if (marked > 0) table.properties = { ...table.properties, dataEnriched: String(marked), ...(marked >= 3 ? { dataInfoFigure: 'enriched-table' } : {}) };
+  // The glyphs repeat the column's Yes and No, so the table is a glyph aid,
+  // not an information figure (issue #125 review).
+  if (marked > 0) table.properties = { ...table.properties, dataEnriched: String(marked) };
   return marked;
 }

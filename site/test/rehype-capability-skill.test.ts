@@ -85,29 +85,16 @@ describe('rehype-capability-skill', () => {
     const section = html.slice(html.indexOf('id="inputs"'), html.indexOf('id="procedure"'));
     const marks = [...section.matchAll(/class="pg skill-req skill-req--(yes|no)"/g)].map((m) => m[1]);
     expect(marks).toEqual(['yes', 'yes', 'no']);
-    expect(section).toMatch(/<table[^>]*data-enriched="3"[^>]*data-info-figure="enriched-table"/);
+    // The glyphs repeat the Yes and No, so the table is not an information figure (issue #125 review).
+    expect(section).toMatch(/<table[^>]*data-enriched="3"/);
+    expect(section).not.toContain('data-info-figure');
   });
 
-  it('adds an "In the contract" column to Field Definitions from the ontology', async () => {
+  it('leaves the Field Definitions table as written; the output-fields figure says which fields the contract declares', async () => {
     const html = await render('skills/mutate/SKILL.md');
     const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
-    expect(section).toContain('<th>In the contract</th>');
-    // Expected from mutate's output_schema in schemas/capability_ontology.yaml:
-    // success is a required boolean, new_state an optional any,
-    // rollback_command is not in the contract, and previous_state is.
-    const cells = [...section.matchAll(/<td class="skill-fd__contract" data-in-contract="(yes|no|inside)">([^]*?)<\/td>/g)].map((m) => [
-      m[1],
-      m[2]!.replace(/<svg[^]*?<\/svg>/g, '').trim(),
-    ]);
-    expect(cells).toEqual([
-      ['yes', 'Yes: <code>boolean</code>, required'],
-      ['yes', 'Yes: <code>any</code>, optional'],
-      ['no', "No, the skill's own"],
-      // previous_state is an optional contract field of mutate, so a field under it is inside the contract.
-      ['inside', 'Inside <code>previous_state</code>, which the contract declares'],
-    ]);
-    // Every row carries a glyph, so it counts as an information figure (visual spec 4.2).
-    expect(section).toMatch(/<table[^>]*data-enriched="4"[^>]*data-info-figure="enriched-table"/);
+    expect(section).not.toContain('In the contract');
+    expect(section).not.toContain('data-info-figure');
   });
 
   it('makes each example a closed details whose summary keeps the H3 and its id, with no anchor link', async () => {

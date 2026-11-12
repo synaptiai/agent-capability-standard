@@ -242,7 +242,7 @@ error:
 **Commonly follows:**
 - `checkpoint` - REQUIRED before any mutation
 - `plan` - Mutations execute planned changes
-- `verify` - Verify preconditions before mutating
+- `constrain` - Check policy constraints before mutating
 
 **Commonly precedes:**
 - `verify` - Verify mutation results
