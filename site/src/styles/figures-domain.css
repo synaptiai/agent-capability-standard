@@ -581,9 +581,26 @@
     list-style: none;
   }
 
+  /* A step: its tile over its number. */
   .wf-card__steps li {
-    display: flex;
+    display: grid;
+    justify-items: center;
+    align-content: start;
+    gap: 2px;
     margin: 0;
+    min-width: 24px;
+  }
+
+  .wf-card__n {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1;
+    color: var(--ink-2);
+  }
+
+  /* The facts sit on their own line under the steps. */
+  .wf-card__steps + .wf-card__facts {
+    flex-basis: 100%;
   }
 
   .wf-card__link {

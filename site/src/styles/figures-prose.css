@@ -55,6 +55,16 @@
     padding: 0;
   }
 
+  /* The inputs a step takes from outside the chain, under its id. */
+  .prose-chain__in {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.2;
+    color: var(--ink-2);
+    text-align: center;
+    white-space: nowrap;
+  }
+
   .prose-chain__arrow {
     display: flex;
     flex-direction: column;

@@ -59,6 +59,9 @@ describe('pattern chains', () => {
       name: 'analyze',
       ids: ['retrieve', 'detect', 'explain'],
       outputs: ['data', 'occurrences', 'report'],
+      // From the fixture's flow lines: target and patterns come from outside;
+      // data and occurrences are outputs of earlier lines.
+      inputs: [['target'], ['patterns'], []],
       fromFlow: true,
     });
   });
@@ -68,6 +71,7 @@ describe('pattern chains', () => {
       name: 'p',
       ids: ['plan', 'execute', 'verify'],
       outputs: [null, null, null],
+      inputs: [[], [], []],
       fromFlow: false,
     });
     expect(patternChain('p:\n  composes: [a, b]\n')).toBeNull();
@@ -83,6 +87,8 @@ describe('pattern chains', () => {
     expect(code).toMatch(/data-fig-kind="pattern-chain"[\s\S]*?<\/figure><pre[^>]*data-language="yaml"/);
     const chain = /<figure[^>]*data-fig-kind="pattern-chain"[\s\S]*?<\/figure>/.exec(code)![0];
     expect([...chain.matchAll(/class="mini-tile mini-tile--32/g)]).toHaveLength(3);
+    // The inputs from outside the chain, under their steps, in flow order.
+    expect([...chain.matchAll(/<span class="prose-chain__in">.*?in: <\/span>([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(['target', 'patterns']);
     expect([...code.matchAll(/>Fig (\d+)</g)].map((m) => m[1])).toEqual(['1', '2']);
   });
 });
@@ -131,6 +137,15 @@ describe('table marks', () => {
     expect(code).toContain('</span> high</td>');
     // Three rows carry marks; the Total row carries none.
     expect(code).toContain('data-enriched="3"');
+    // Three marked rows make it an information figure (visual spec 4.2).
+    expect(code).toContain('data-info-figure="enriched-table"');
+  });
+
+  it('leaves a table with fewer than three marked rows out of the figure count', async () => {
+    const text = ['# T', '', '| Capability | Count |', '|---|---|', '| `plan` | 1 |', '| `verify` | 2 |', ''].join('\n');
+    const { code } = await renderRepoFile('docs/FAQ.md', text);
+    expect(code).toContain('data-enriched="2"');
+    expect(code).not.toContain('data-info-figure');
   });
 });
 

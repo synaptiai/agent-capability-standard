@@ -108,6 +108,11 @@ export interface PatternChain {
   ids: string[];
   /** Output name after each id (from the flow lines), or null. */
   outputs: (string | null)[];
+  /**
+   * The arguments of each flow line that no earlier line outputs: what the
+   * step takes from outside the chain. Empty lists when not from flow lines.
+   */
+  inputs: string[][];
   fromFlow: boolean;
 }
 
@@ -133,14 +138,32 @@ export function patternChain(code: string): PatternChain | null {
   }
   if (ids.length < 2) return null;
   const flow = lines
-    .map((l) => /^\s*\d+\.\s+([A-Za-z_][\w-]*)\(.*\)\s*→\s*(\S+)\s*$/.exec(l))
+    .map((l) => /^\s*\d+\.\s+([A-Za-z_][\w-]*)\((.*)\)\s*→\s*(\S+)\s*$/.exec(l))
     .filter((m): m is RegExpExecArray => m !== null)
-    .map((m) => ({ id: m[1]!, out: m[2]!.replace(/\[\]$/, '') }));
+    .map((m) => ({ id: m[1]!, args: argNames(m[2]!), out: m[3]!.replace(/\[\]$/, '') }));
   const listed = new Set(ids);
   if (flow.length > 0 && flow.every((f) => listed.has(f.id))) {
-    return { name, ids: flow.map((f) => f.id), outputs: flow.map((f) => f.out), fromFlow: true };
+    const seen = new Set<string>();
+    const inputs = flow.map((f) => {
+      const outside = f.args.filter((a) => !seen.has(a));
+      seen.add(f.out);
+      return outside;
+    });
+    return { name, ids: flow.map((f) => f.id), outputs: flow.map((f) => f.out), inputs, fromFlow: true };
   }
-  return { name, ids, outputs: ids.map(() => null), fromFlow: false };
+  return { name, ids, outputs: ids.map(() => null), inputs: ids.map(() => []), fromFlow: false };
+}
+
+/**
+ * The plain names among a flow line's arguments (`detect(current_state,
+ * anomaly_patterns)`), with a trailing `[]` dropped; quoted or nested
+ * arguments are left out.
+ */
+function argNames(args: string): string[] {
+  return args
+    .split(',')
+    .map((a) => a.trim().replace(/\[\]$/, ''))
+    .filter((a) => /^[A-Za-z_][\w.]*$/.test(a));
 }
 
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
@@ -150,7 +173,9 @@ const cap1 = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 export function chainCaption(c: PatternChain): string {
   const ends = `from ${c.ids[0]} to ${c.ids.at(-1)}`;
   return c.fromFlow
-    ? `${cap1(count(c.ids.length))} steps in flow order, ${ends}; each arrow names the output passed on.`
+    ? `${cap1(count(c.ids.length))} steps in flow order, ${ends}; each arrow names the output passed on${
+        c.inputs.some((i) => i.length > 0) ? ', and "in:" under a step names the inputs it takes from outside the chain' : ''
+      }.`
     : `${cap1(count(c.ids.length))} capabilities in the order the pattern lists them, ${ends}.`;
 }
 
@@ -170,6 +195,9 @@ function chainFigure(c: PatternChain, id: string): Element {
       el('span', { className: ['prose-chain__node'] }, [
         miniTileElement(cap, { size: 32 }),
         el('code', { className: ['prose-chain__id'], ariaHidden: 'true' }, [text(cap)]),
+        ...(c.inputs[i]!.length > 0
+          ? [el('span', { className: ['prose-chain__in'] }, [el('span', { className: ['visually-hidden'] }, [text(`${cap} also takes `)]), el('span', { ariaHidden: 'true' }, [text('in: ')]), text(c.inputs[i]!.join(', '))])]
+          : []),
       ]),
     );
     return el('li', { className: ['prose-chain__item'] }, kids);
@@ -362,7 +390,7 @@ function enrichTable(table: Element): number {
         marked.add(r);
       });
     });
-    table.properties = { ...table.properties, dataEnriched: 'coverage' };
+    table.properties = { ...table.properties, dataEnriched: 'coverage', ...infoFigure(marked.size) };
     return marked.size;
   }
 
@@ -459,8 +487,18 @@ function enrichTable(table: Element): number {
       });
     }
   });
-  if (marked.size > 0) table.properties = { ...table.properties, dataEnriched: String(marked.size) };
+  if (marked.size > 0) table.properties = { ...table.properties, dataEnriched: String(marked.size), ...infoFigure(marked.size) };
   return marked.size;
+}
+
+/**
+ * Visual spec 4.2: an enriched table is an information figure when at least
+ * three of its rows carry bars, pips, check glyphs, tiles or heat badges. The
+ * figure-gap check (src/lib/runs.ts) counts elements with data-info-figure.
+ */
+export const ENRICHED_TABLE_MIN_ROWS = 3;
+function infoFigure(rows: number): { dataInfoFigure?: string } {
+  return rows >= ENRICHED_TABLE_MIN_ROWS ? { dataInfoFigure: 'enriched-table' } : {};
 }
 
 // ---------- F-O1 ----------

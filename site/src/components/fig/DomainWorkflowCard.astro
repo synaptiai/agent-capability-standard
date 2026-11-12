@@ -9,7 +9,7 @@
 // PROPOSED_WORKFLOW_STATUS badge. When the README lists the proposal's
 // capabilities under "Capabilities used" and each is an ontology id
 // (`listed`), the card is a figure of those capabilities as tiles in list
-// order, still dashed and marked proposed. The page puts each
+// order, each numbered, still dashed and marked proposed. The page puts each
 // card under the matching H3 of the README's "Available Workflows".
 //
 // Props:
@@ -45,7 +45,10 @@ const known = new Set(loadOntology().capabilities.map((c) => c.id));
     <div class="wf-card__body" data-workflow={id}>
       <ol class="wf-card__steps" aria-label={`The ${wf.steps.length} steps of ${id}, in order`}>
         {wf.steps.map((s) => (
-          <li data-step={s.index}>{known.has(s.capability) ? <MiniTile id={s.capability} size={24} link={false} relation={`step ${s.index}`} /> : <code>{s.capability}</code>}</li>
+          <li data-step={s.index}>
+            {known.has(s.capability) ? <MiniTile id={s.capability} size={24} link={false} relation={`step ${s.index}`} /> : <code>{s.capability}</code>}
+            <span class="wf-card__n" aria-hidden="true">{s.index}</span>
+          </li>
         ))}
       </ol>
       <p class="wf-card__facts"><span>{wf.steps.length} {wf.steps.length === 1 ? 'step' : 'steps'}</span> <RiskBadge risk={wf.risk} /> <a class="wf-card__link" href={workflowHref(id)}>Open <code>{id}</code></a></p>
@@ -61,7 +64,10 @@ const known = new Set(loadOntology().capabilities.map((c) => c.id));
       </p>
       <ol class="wf-card__steps" aria-label={`The ${listed.length} capabilities listed for ${id}, in order`}>
         {listed.map((c, k) => (
-          <li><MiniTile id={c} size={24} link={false} relation={`item ${k + 1}`} /></li>
+          <li>
+            <MiniTile id={c} size={24} link={false} relation={`item ${k + 1}`} />
+            <span class="wf-card__n" aria-hidden="true">{k + 1}</span>
+          </li>
         ))}
       </ol>
     </div>
