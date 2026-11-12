@@ -3,7 +3,9 @@
 // Patterns" heading (visual spec 3.1): one row of small periodic tiles in the
 // order the section names them, the capabilities it commonly follows, then
 // this capability (the 4px-bordered tile), then the ones it commonly
-// precedes, with a chevron between each pair. The ids come from the
+// precedes. Chevrons sit only on each side of this capability: the
+// section lists the tiles before and after it as alternatives, not as an
+// order among themselves. The ids come from the
 // section's own lists; words that are not capability ids are skipped. Drawn
 // only when it has two or more tiles.
 //
@@ -34,7 +36,7 @@ const items = [
   <ol class="chain" aria-label={`Capabilities in the order this section names them, with ${cap.id} in place`}>
     {items.map((x, i) => (
       <li class:list={['chain__item', x.self && 'chain__item--self']}>
-        {i > 0 && <PixelGlyph name="chevron-right" class="chain__arrow" />}
+        {(x.self ? i > 0 : i > 0 && items[i - 1]!.self) && <PixelGlyph name="chevron-right" class="chain__arrow" />}
         <MiniTile id={x.id} size={32} relation={x.relation} current={x.self} link={!x.self} />
       </li>
     ))}
