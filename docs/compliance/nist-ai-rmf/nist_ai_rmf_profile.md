@@ -164,6 +164,15 @@ flowchart TB
 | **GV-2.2** — Training and awareness programs | Training tracks defined per role; awareness, intermediate, advanced, expert proficiency levels | `docs/compliance/iso42001/competency_framework.md` (§4–5) | Full |
 | **GV-2.3** — Senior leadership oversight | Management review process with quarterly cadence; top management participation required | `docs/compliance/iso42001/management_review.md` | Full |
 
+```mermaid
+---
+title: The proficiency levels GV-2.2 cites
+---
+flowchart TB
+  accDescr: The training tracks in GV-2.2 run through four proficiency levels, from awareness to intermediate, advanced and expert.
+  aw[Awareness] --> in[Intermediate] --> ad[Advanced] --> ex[Expert]
+```
+
 ### 4.3 GV-3: Workforce Diversity, Equity, Inclusion, and Accessibility
 
 **NIST Description:** Workforce diversity, equity, inclusion, and accessibility processes are prioritized in the mapping, measuring, and managing of AI risks.
@@ -222,6 +231,18 @@ flowchart TB
 | **MP-1.3** — Deployment context characterized | 7 domain profiles define operational context: trust weights, risk thresholds, compliance requirements, evidence policies | `schemas/profiles/healthcare.yaml`, `schemas/profiles/manufacturing.yaml`, `schemas/profiles/data_analysis.yaml`, `schemas/profiles/personal_assistant.yaml`, `schemas/profiles/vision.yaml`, `schemas/profiles/audio.yaml`, `schemas/profiles/multimodal.yaml` | Full |
 | **MP-1.4** — Assumptions documented | First-principles derivation methodology documents design assumptions; whitepaper states core principles | `docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md`, `spec/WHITEPAPER.md` | Full |
 | **MP-1.5** — User interactions characterized | `inquire` capability for human escalation; `require_human` flag in profiles; `block_autonomous` lists | `schemas/profiles/profile_schema.yaml`, `skills/inquire/SKILL.md` | Full |
+
+```mermaid
+---
+title: What a domain profile sets for MP-1.3
+---
+flowchart LR
+  accDescr: Each of the seven domain profiles defines its deployment context through trust weights, risk thresholds, compliance requirements and evidence policies.
+  dp[A domain profile] --> tw[Trust weights]
+  dp --> rt[Risk thresholds]
+  dp --> cr[Compliance requirements]
+  dp --> ep[Evidence policies]
+```
 
 ### 5.2 MP-2: AI System Categorization
 
@@ -292,6 +313,17 @@ flowchart TB
 | **ME-2.2** — Evaluation results documented | EvidenceStore captures tool executions as evidence anchors; checkpoint tracker records state transitions; audit log records all skill invocations | `grounded_agency/state/evidence_store.py`, `grounded_agency/state/checkpoint_tracker.py`, `.claude/audit.log` | Partial — Evidence is captured structurally but aggregated reporting/dashboards are a gap |
 | **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P10D`); audit hooks capture all skill invocations in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are gaps |
 
+```mermaid
+---
+title: Where ME-2.2 evaluation evidence is captured
+---
+flowchart LR
+  accDescr: The EvidenceStore captures tool executions as evidence anchors, the checkpoint tracker records state transitions, and the audit log records every skill invocation; aggregated reporting over them is a gap.
+  es[EvidenceStore] --> a1[Evidence anchors]
+  ct[Checkpoint tracker] --> a2[State transitions]
+  al[Audit log] --> a3[Skill invocations]
+```
+
 ### 6.3 ME-3: Trustworthy AI Actor Competency
 
 **NIST Description:** Mechanisms for tracking identified AI risks over time are in place.
@@ -334,6 +366,17 @@ flowchart TB
 | **MG-1.3** — Risk response prioritized | Three-tier risk model assigns priority structurally — high-risk capabilities (mutate, send) get mandatory checkpoints and approval; medium-risk get approval; low-risk are unrestricted | `schemas/capability_ontology.yaml` (risk, requires_checkpoint, requires_approval fields) | Full |
 | **MG-1.4** — Risk response monitored | Audit hooks log all skill invocations; EvidenceStore tracks execution state; management review evaluates nonconformities quarterly. No automated incident detection. | `hooks/hooks.json`, `grounded_agency/state/evidence_store.py`, `docs/compliance/iso42001/management_review.md` | Partial — Automated incident detection is a gap |
 
+```mermaid
+---
+title: How MG-1.3 assigns response priority
+---
+flowchart LR
+  accDescr: The three-tier risk model sets priority structurally: high-risk mutate and send need a checkpoint and approval, medium-risk capabilities need approval, and low-risk ones are unrestricted.
+  hi["High: mutate, send"] --> h2[Checkpoint and approval]
+  me[Medium] --> m2[Approval]
+  lo[Low] --> l2[Unrestricted]
+```
+
 ### 7.2 MG-2: Strategies for Minimizing Negative Impacts
 
 **NIST Description:** Strategies to maximize AI benefits and minimize negative impacts are planned, prepared, implemented, documented, and informed by input from relevant AI actors.
@@ -343,6 +386,15 @@ flowchart TB
 | **MG-2.1** — Response plans documented | Post-market monitoring plan defines escalation procedures and incident response; nonconformity procedure defines detection → containment → correction → verification workflow | `docs/compliance/eu-ai-act/post_market_monitoring.md`, `docs/compliance/iso42001/nonconformity_procedure.md` | Full |
 | **MG-2.2** — Response plans tested | Recovery loop limits (`max_loops`) prevent infinite retry; rollback restores prior checkpoints; `constrain` capability enforces operational bounds. Conformance test suite validates structural properties. | `schemas/capability_ontology.yaml` (max_loops), `skills/rollback/SKILL.md`, `skills/constrain/SKILL.md`, `scripts/run_conformance.py` | Partial — Tabletop exercises and scenario testing are not documented |
 | **MG-2.3** — Incident documentation maintained | Audit log records all skill invocations with timestamps; ProvenanceRecord chains track claim lineage; world state versioning preserves history with parent links | `.claude/audit.log`, `schemas/world_state_schema.yaml` (provenance), `grounded_agency/state/evidence_store.py` | Full |
+
+```mermaid
+---
+title: The nonconformity workflow MG-2.1 cites
+---
+flowchart TB
+  accDescr: The nonconformity procedure runs from detection through containment and correction to verification.
+  d[Detection] --> c[Containment] --> co[Correction] --> v[Verification]
+```
 
 ### 7.3 MG-3: Third-Party Risk Management
 

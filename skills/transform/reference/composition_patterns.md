@@ -261,26 +261,6 @@ Catalog id: `digital_twin_sync_loop`
 receive → search → transform → integrate → detect(entity) → classify → state → compare(state_diff) → transition → detect(anomaly) → measure(risk) → predict(risk) → plan → constrain → checkpoint → mutate (skipped when not compliant) → execute (skipped when nothing was mutated) → verify (skipped when nothing was mutated) → rollback (skipped when nothing was mutated or verify passed) → audit → explain
 ```
 
-```mermaid
----
-title: Digital Twin Sync Loop, gates and recovery
----
-flowchart TB
-  accDescr: After constrain and checkpoint, mutate runs only when the plan is compliant and stops if no checkpoint was created; when mutate is skipped, execute, verify and rollback are skipped too; otherwise a FAIL verdict sends the run through rollback, and both paths go on to audit and explain.
-  constrain[constrain] --> checkpoint[checkpoint] --> g1{Compliant?}
-  g1 -->|"no: skip to audit"| audit[audit]
-  g1 -->|yes| g0{Checkpoint created?}
-  g0 -->|no| halt[stop]
-  g0 -->|yes| mutate[mutate]
-  mutate --> execute[execute]
-  execute --> verify[verify]
-  verify --> g2{Passed?}
-  g2 -->|yes| audit
-  g2 -->|FAIL| rollback[rollback]
-  rollback --> audit
-  audit --> explain[explain]
-```
-
 ### Detailed Steps
 
 | Step | Capability | Purpose | Stores As | Risk |
@@ -391,6 +371,26 @@ rollback:
   - when: ${mutate_out} == null || ${verify_out.passed} == true
     action: skip
     message: No mutation was applied, or the twin passed verification. No rollback needed.
+```
+
+```mermaid
+---
+title: Digital Twin Sync Loop, gates and recovery
+---
+flowchart TB
+  accDescr: After constrain and checkpoint, mutate runs only when the plan is compliant and stops if no checkpoint was created; when mutate is skipped, execute, verify and rollback are skipped too; otherwise a FAIL verdict sends the run through rollback, and both paths go on to audit and explain.
+  constrain[constrain] --> checkpoint[checkpoint] --> g1{Compliant?}
+  g1 -->|"no: skip to audit"| audit[audit]
+  g1 -->|yes| g0{Checkpoint created?}
+  g0 -->|no| halt[stop]
+  g0 -->|yes| mutate[mutate]
+  mutate --> execute[execute]
+  execute --> verify[verify]
+  verify --> g2{Passed?}
+  g2 -->|yes| audit
+  g2 -->|FAIL| rollback[rollback]
+  rollback --> audit
+  audit --> explain[explain]
 ```
 
 Timeouts: `mutate`, `execute` and `verify` 5m. `receive` and `verify` retry up to 3 times with exponential backoff. The workflow declares `workflow_extensions` for input bindings, conditions, parallel groups and gates (`supports_recovery_loops: false`).
