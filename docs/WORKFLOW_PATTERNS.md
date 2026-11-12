@@ -316,7 +316,7 @@ title: Execute-verify-retry loop
 ---
 flowchart TB
   accDescr: Each attempt saves a checkpoint, executes and verifies; a failed check rolls back and plans the next attempt, and explain reports the outcome on success or once the attempts run out.
-  subgraph attempt [Loop, up to max_attempts]
+  subgraph attempt [Up to max_attempts tries]
     checkpoint["checkpoint(state)"] -->|recovery| execute["execute(operation)"]
     execute -->|result| verify{"verify(result, criteria)"}
     verify -->|not valid| rollback["rollback(recovery)"]
