@@ -200,7 +200,7 @@
   }
 
   .dot-scale__label--end {
-    transform: translateX(calc(-100% + 5px));
+    transform: translateX(calc(-100% - 6px));
   }
 
   .dot-scale__label {
