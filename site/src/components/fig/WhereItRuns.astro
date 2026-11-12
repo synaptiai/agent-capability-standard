@@ -37,7 +37,7 @@ const rest = rows.slice(CAP);
       {shown.map(({ u, wf }) => (
         <li class="runs__row" data-workflow={u.workflowId} data-catalog={u.catalog}>
           <a class="runs__name" href={workflowHref(u.workflowId)}><code>{u.workflowId}</code></a>
-          <StepStrip wf={wf} size={16} highlight={cap.id} />
+          <StepStrip wf={wf} size={20} highlight={cap.id} />
           <span class="runs__steps">{stepWords(u.steps)}</span>
         </li>
       ))}
@@ -49,7 +49,7 @@ const rest = rows.slice(CAP);
           {rest.map(({ u, wf }) => (
             <li class="runs__row" data-workflow={u.workflowId} data-catalog={u.catalog}>
               <a class="runs__name" href={workflowHref(u.workflowId)}><code>{u.workflowId}</code></a>
-              <StepStrip wf={wf} size={16} highlight={cap.id} />
+              <StepStrip wf={wf} size={20} highlight={cap.id} />
               <span class="runs__steps">{stepWords(u.steps)}</span>
             </li>
           ))}

@@ -187,7 +187,7 @@ const nextFig = () => ++fig;
                         <span class="wf-gallery__steps">{it.steps} steps</span>
                         <RiskBadge risk={it.workflow.risk} />
                       </p>
-                      <StepStrip wf={it.workflow} />
+                      <StepStrip wf={it.workflow} size={20} />
                     </li>
                   ))}
                 </ul>
@@ -196,14 +196,14 @@ const nextFig = () => ++fig;
           })}
         </div>
         <ul class="wf-gallery__legend" aria-label="Key">
-          <li><span class="step-strip step-strip--10" aria-hidden="true"><span class="step-strip__step step-strip__step--plain"></span></span>A step</li>
+          <li><span class="step-strip step-strip--20" aria-hidden="true"><span class="step-strip__step step-strip__step--plain"></span></span>A step</li>
           {(['checkpoint', 'mutating', 'verify', 'rollback'] as const).map((role) => (
             <li>
-              <span class="step-strip step-strip--10" aria-hidden="true"><span class="step-strip__step step-strip__step--role"><PixelGlyph name={`role:${role}`} scale={1} /></span></span>
-              {{ checkpoint: 'Checkpoint', mutating: 'Changes state', verify: 'Verifies', rollback: 'Rollback' }[role]}
+              <span class="step-strip step-strip--20" aria-hidden="true"><span class="step-strip__step step-strip__step--role"><PixelGlyph name={`role:${role}`} scale={2} /></span></span>
+              {{ checkpoint: 'Checkpoint', mutating: 'Makes the change', verify: 'Verifies', rollback: 'Rollback' }[role]}
             </li>
           ))}
-          <li><span class="step-strip step-strip--10" aria-hidden="true"><span class="step-strip__step step-strip__step--plain step-strip__step--gate"></span></span>Has a gate</li>
+          <li><span class="step-strip step-strip--20" aria-hidden="true"><span class="step-strip__step step-strip__step--plain step-strip__step--gate"></span></span>Has a gate</li>
         </ul>
       </Figure>
     </section>

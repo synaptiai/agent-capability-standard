@@ -582,7 +582,7 @@ describe('agent files', () => {
       expect(md).toContain(`**Figure: ${title.replace(/&amp;/g, '&')}.** ${caption!.replace(/&amp;/g, '&')}`);
     }
     // One gallery strip per catalog workflow, as many squares as steps.
-    const strips = [...html.matchAll(/<span role="img" aria-label="[^"]*" data-workflow="([^"]+)" data-steps="(\d+)" class="step-strip step-strip--10">/g)];
+    const strips = [...html.matchAll(/<span role="img" aria-label="[^"]*" data-workflow="([^"]+)" data-steps="(\d+)" class="step-strip step-strip--20">/g)];
     expect(strips.map((m) => [m[1], Number(m[2])])).toEqual([...allCatalogSteps()].map(([id, c]) => [id, c.length]));
     // The story renders its final frame: no beat is hidden in the HTML.
     expect(html).not.toMatch(/data-beat="\d"[^>]*class="[^"]*is-off/);
