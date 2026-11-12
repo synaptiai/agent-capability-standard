@@ -1,0 +1,41 @@
+---
+// An edge drawn between two 32px tiles (visual spec 2.4): a horizontal
+// connector 64x32 or a vertical one 40x64 (centred under the tile, its mark
+// to the right of the line), in the type's line style, with
+// the type's mark beside the line (conflicts_with carries it in the gap at
+// its midpoint instead). Decorative: the tiles and the figure's text carry
+// the relation.
+//
+// Props:
+// - type: EdgeType, required.
+// - dir: 'right' | 'up' | 'down', default 'right'. Where the `to` end points.
+import type { EdgeType } from '../../data/ontology';
+import { edgeRects, edgeStyle, glyphRects } from '../../pixel/lines';
+import Rects from './Rects.astro';
+
+interface Props {
+  type: EdgeType;
+  dir?: 'right' | 'up' | 'down';
+}
+
+const { type, dir = 'right' } = Astro.props;
+const style = edgeStyle(type);
+const horizontal = dir === 'right';
+const W = horizontal ? 64 : 40;
+const H = horizontal ? 32 : 64;
+// The line runs through the tiles' centre line, 6px clear of each tile.
+const line = horizontal
+  ? edgeRects(type, 6, 16, W - 6, 16)
+  : dir === 'down'
+    ? edgeRects(type, W / 2, 6, W / 2, H - 6)
+    : edgeRects(type, W / 2, H - 6, W / 2, 6);
+const markAt: [number, number] = style.midMark
+  ? [line.mid[0] - 7, line.mid[1] - 7]
+  : horizontal
+    ? [W / 2 - 8, 18]
+    : [W / 2 + 4, H / 2 - 8];
+const mark = glyphRects(`mark:${type}`, markAt[0], markAt[1], 2);
+---
+<svg class:list={['edge-connector', `edge-connector--${horizontal ? 'h' : 'v'}`]} viewBox={`0 0 ${W} ${H}`} width={W} height={H} shape-rendering="crispEdges" aria-hidden="true" focusable="false" data-edge-type={type}>
+  <Rects rects={[...line.rects, ...mark]} />
+</svg>

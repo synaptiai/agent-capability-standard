@@ -1,0 +1,172 @@
+---
+// F-E2, every edge of the ontology as a from x to matrix (visual spec 3.7).
+// Rows are `from`, columns `to`, both in periodic-table order, with layer
+// blocks shaded in a checkerboard and each layer's glyph and the capability
+// symbols as heads. A cell holds its type's mark at 1x; a cell with two types
+// is split in two 8px halves, one mark each, in the order of spec 2.4. Marks
+// are in ink, never a layer colour (the identity rule).
+// When the figure is narrower than 640px, a 9x9 grid of edges between layer
+// pairs replaces the matrix: counts printed in cells filled with the four
+// heat steps, with a scale legend.
+// A toolbar of type toggles (one tab stop, arrow keys between buttons) dims
+// the cells none of whose types is selected; it needs JavaScript, so without
+// it a plain legend shows instead. Cells are not focusable; the per-type
+// lists after the figure hold the same edges.
+//
+// Props:
+// - id: string, required. A ref- id.
+// - n: number, required. The figure number.
+// - listsId: string, required. Id of the edge lists, for the skip link.
+import { loadOntology } from '../../data/ontology';
+import { cellReading, edgeMatrixCaption, HEAT_TOKENS, heatRanges, heatStep, layerPairCaption, layerPairCounts, matrixCaption, matrixCells } from '../../lib/edge-figures';
+import { capabilitySymbol, tableOrder } from '../../lib/views';
+import { glyphRects } from '../../pixel/lines';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import Rects from './Rects.astro';
+
+interface Props {
+  id: string;
+  n: number;
+  listsId: string;
+}
+
+const { id, n, listsId } = Astro.props;
+const o = loadOntology();
+const order = tableOrder(o);
+const at = new Map(order.map((c, i) => [c, i]));
+const cells = matrixCells(o);
+
+// ---- the wide matrix
+// Heads: the layer glyph, then the symbols; column symbols are staggered on two
+// lines so neighbours do not run together.
+const HEAD = 48;
+const C = 16;
+const W = HEAD + order.length * C;
+let start = 0;
+const bands = o.layers.map((l) => {
+  const b = { id: l.id, start, size: l.capabilities.length };
+  start += b.size;
+  return b;
+});
+const blocks = bands.flatMap((r, i) =>
+  bands.map((c, j) => ({ x: HEAD + c.start * C, y: HEAD + r.start * C, w: c.size * C, h: r.size * C, shade: (i + j) % 2 === 1 })),
+);
+const heads = bands.flatMap((b) => [
+  ...glyphRects(b.id, 0, HEAD + b.start * C + b.size * 8 - 10, 2),
+  ...glyphRects(b.id, HEAD + b.start * C + b.size * 8 - 10, 0, 2),
+]);
+const drawn = cells.map((c) => {
+  const x = HEAD + at.get(c.to)! * C;
+  const y = HEAD + at.get(c.from)! * C;
+  const marks = c.types.length === 1 ? [glyphRects(`mark:${c.types[0]}`, x + 4, y + 4, 1)] : c.types.map((t, k) => glyphRects(`mark:${t}`, x + (k === 0 ? 0 : 9), y + 4, 1));
+  return { c, x, y, rects: marks.flat() };
+});
+const types = o.edgeTypes.map((t) => t.id);
+
+// ---- the narrow layer-pair grid
+const pairs = layerPairCounts(o);
+const max = Math.max(...pairs.counts.flat());
+const LH = 24;
+const LC = 28;
+const LG = 2;
+const LW = LH + pairs.layers.length * (LC + LG);
+const pos = (k: number) => LH + LG + k * (LC + LG);
+const ranges = heatRanges(max);
+const matrixName = 'Every edge in the ontology, as a matrix';
+---
+<Figure id={id} n={n} title={matrixName} caption={edgeMatrixCaption(o)} kind="edge-matrix" class="edge-matrix">
+  <div class="edge-matrix__wide" data-edge-matrix>
+    <a class="edge-matrix__skip" href={`#${listsId}`}>Skip to the edge lists</a>
+    <div class="edge-matrix__toolbar" role="toolbar" aria-label="Edge types shown in the matrix">
+      {types.map((t, i) => (
+        <button type="button" class="edge-matrix__toggle" aria-pressed="true" tabindex={i === 0 ? 0 : -1} data-type={t}>
+          <PixelGlyph name={`mark:${t}`} /><code>{t}</code>
+        </button>
+      ))}
+    </div>
+    <ul class="edge-matrix__legend" aria-label="Edge type marks">
+      {types.map((t) => <li><PixelGlyph name={`mark:${t}`} /><code>{t}</code></li>)}
+    </ul>
+    <div class="edge-matrix__plot">
+      <svg viewBox={`0 0 ${W} ${W}`} width={W} height={W} shape-rendering="crispEdges" role="img" aria-label={matrixName}>
+        {blocks.map((b) => <rect x={b.x} y={b.y} width={b.w} height={b.h} style={`fill: var(${b.shade ? '--bg-sub' : '--bg'})`} />)}
+        <g class="edge-matrix__heads"><Rects rects={heads} /></g>
+        <g class="edge-matrix__symbols">
+          {order.map((c, k) => (
+            <>
+              <text x={HEAD - 4} y={HEAD + k * C + 12} text-anchor="end">{capabilitySymbol(c)}</text>
+              <text x={HEAD + k * C + 8} y={k % 2 === 0 ? HEAD - 17 : HEAD - 3} text-anchor="middle">{capabilitySymbol(c)}</text>
+            </>
+          ))}
+        </g>
+        {drawn.map((d) => (
+          <g class="edge-matrix__cell" data-types={d.c.types.join(' ')} data-from={d.c.from} data-to={d.c.to}>
+            <title>{cellReading(d.c)}</title>
+            <rect x={d.x + 1} y={d.y + 1} width={C - 2} height={C - 2} style="fill: var(--bg-mut)" />
+            <Rects rects={d.rects} />
+          </g>
+        ))}
+      </svg>
+    </div>
+    <p class="edge-matrix__key">{matrixCaption(o)} Rows are the edge's <code>from</code> capability and columns its <code>to</code>, labelled with periodic-table symbols and grouped by layer.</p>
+  </div>
+  <div class="edge-matrix__narrow">
+    <svg viewBox={`0 0 ${LW} ${LW}`} width={LW} height={LW} shape-rendering="crispEdges" role="img" aria-label="Edges between layers">
+      <g class="edge-matrix__heads">
+        <Rects rects={pairs.layers.flatMap((l, k) => [...glyphRects(l, 2, pos(k) + 4, 2), ...glyphRects(l, pos(k) + 4, 2, 2)])} />
+      </g>
+      {pairs.counts.map((row, i) =>
+        row.map((count, j) => {
+          const s = heatStep(count, max);
+          return (
+            <g data-heat={s} data-from-layer={pairs.layers[i]} data-to-layer={pairs.layers[j]}>
+              <rect x={pos(j)} y={pos(i)} width={LC} height={LC} style={`fill: var(${s === 0 ? '--rule' : '--line'})`} />
+              <rect x={pos(j) + 2} y={pos(i) + 2} width={LC - 4} height={LC - 4} style={`fill: var(${s === 0 ? '--bg-sub' : HEAT_TOKENS[s - 1]!.fill})`} />
+              {s > 0 && <text x={pos(j) + LC / 2} y={pos(i) + 19} text-anchor="middle" style={`fill: var(${HEAT_TOKENS[s - 1]!.text})`}>{count}</text>}
+            </g>
+          );
+        }),
+      )}
+    </svg>
+    <p class="edge-matrix__key">{layerPairCaption(o)} Rows are the <code>from</code> layer, columns the <code>to</code> layer.</p>
+    <ul class="edge-matrix__scale" aria-label="Heat scale: edges per layer pair">
+      {ranges.map((r) => (
+        <li><span class="edge-matrix__swatch" style={`background: var(${HEAT_TOKENS[r.step - 1]!.fill})`}></span>{r.from === r.to ? `${r.from}` : `${r.from} to ${r.to}`}</li>
+      ))}
+    </ul>
+    <ul class="edge-matrix__layers" aria-label="Layer glyphs">
+      {pairs.layers.map((l) => <li><PixelGlyph name={l} />{l}</li>)}
+    </ul>
+  </div>
+</Figure>
+
+<script>
+  // Type toggles: aria-pressed buttons in a toolbar with a roving tabindex.
+  // A cell dims (a token colour swap, in CSS) when none of its types is pressed.
+  for (const root of document.querySelectorAll<HTMLElement>('[data-edge-matrix]')) {
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>('.edge-matrix__toggle')];
+    const cells = [...root.querySelectorAll<SVGGElement>('.edge-matrix__cell')];
+    const update = () => {
+      const on = new Set(buttons.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.type));
+      for (const c of cells) c.classList.toggle('is-dim', !(c.dataset.types ?? '').split(' ').some((t) => on.has(t)));
+    };
+    const focus = (i: number) => {
+      buttons.forEach((b, k) => (b.tabIndex = k === i ? 0 : -1));
+      buttons[i]?.focus();
+    };
+    buttons.forEach((b, i) => {
+      b.addEventListener('click', () => {
+        b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+        update();
+      });
+      b.addEventListener('keydown', (e) => {
+        const last = buttons.length - 1;
+        const next = { ArrowRight: i === last ? 0 : i + 1, ArrowDown: i === last ? 0 : i + 1, ArrowLeft: i === 0 ? last : i - 1, ArrowUp: i === 0 ? last : i - 1, Home: 0, End: last }[e.key];
+        if (next === undefined) return;
+        e.preventDefault();
+        focus(next);
+      });
+    });
+  }
+</script>

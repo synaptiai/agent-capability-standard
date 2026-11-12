@@ -9,6 +9,7 @@ import { allowedRfcStatuses, rfcRows } from '../lib/rfcs';
 import { kebab } from '../lib/routes';
 import { schemaGroups, schemaListing } from '../lib/views';
 import { blocks, cell, code, fence, generatedLine, markdownCopy, mdLink, mdUrl, table } from './md';
+import { edgeTypesFigureBlocks } from './edges-spec';
 import type { Twin } from './types';
 
 export function edgeTypesTwin(source: string, title: string, description: string | null): Twin {
@@ -29,6 +30,7 @@ export function edgeTypesTwin(source: string, title: string, description: string
         t.edges.length === 0 ? 'The ontology has no edges of this type.' : t.edges.map((e) => `- ${capLink(e.from)} to ${capLink(e.to)}`).join('\n'),
       ),
     ),
+    ...edgeTypesFigureBlocks(),
   );
   return { title, description, markdown };
 }

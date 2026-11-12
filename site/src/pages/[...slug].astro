@@ -34,7 +34,7 @@ const { title, headTitle, description } = pageHead(route, page);
 ---
 <DocLayout route={route} title={title} headTitle={headTitle} description={description}>
   {route.template === 'spec' && (
-    <SpecPage route={route} page={page}><Content /></SpecPage>
+    <SpecPage route={route} page={page} html={entry.rendered?.html}><Content /></SpecPage>
   )}
   {route.template === 'rfc' && (
     <RfcPage route={route} page={page}><Content /></RfcPage>

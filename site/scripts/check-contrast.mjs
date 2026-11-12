@@ -179,6 +179,22 @@ export function pairs(tokens) {
   for (const e of ['--line', '--control', '--indicator', '--ink']) {
     for (const s of ['--bg', '--bg-sub', '--bg-mut']) add('edge', `${e} on ${s}`, `var(${e})`, `var(${s})`);
   }
+  // Heat cells (visual spec 1.2, 6.2): the printed count on each step, and the
+  // cell's edge against the figure panel. A light step can be fainter than 3:1
+  // against the panel, so, as with the accent fill, the edge passes when the
+  // fill or its 2px --line border reaches 3:1 against --bg-sub. (--line
+  // against each fill is not the edge a reader sees, so it is not checked.)
+  for (const h of Object.keys(tokens).filter((k) => /^--heat-\d$/.test(k))) {
+    add('text', `--on-${h.slice(2)} count on ${h}`, `var(--on-${h.slice(2)})`, `var(${h})`);
+    out.push({
+      kind: 'edge',
+      label: `${h} cell edge on --bg-sub (the fill itself or its --line border)`,
+      anyOf: [
+        { fg: `var(${h})`, bg: 'var(--bg-sub)' },
+        { fg: 'var(--line)', bg: 'var(--bg-sub)' },
+      ],
+    });
+  }
   out.push({
     kind: 'edge',
     label: 'accent fill edge on --bg (the fill itself or its --line border)',

@@ -1,0 +1,67 @@
+---
+// F-S8, annotation types (visual spec 3.9): every type name of §5.3's
+// "Annotation grammar" sentence as a chip, grouped by its typeGlyphs()
+// family; containers (array<T>, map<K,V>, nullable<T>, union<T,…>) show
+// their slot as a dashed box; the subtype the section states (integer in
+// number) is drawn as one chip inside the other.
+//
+// Props:
+// - id: string, required. A ref- id.
+// - n: number, required.
+// - title: string, required.
+// - names: string[], required. From annotationGrammar().
+// - subtype: { sub, of } | null, required.
+import { annotationCaption, annotationGroups, containerParts } from '../../lib/spec-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  id: string;
+  n: number;
+  title: string;
+  names: string[];
+  subtype: { sub: string; of: string } | null;
+}
+
+const { id, n, title, names, subtype } = Astro.props;
+const groups = annotationGroups(names);
+const FAMILY_NAMES: Record<string, string> = {
+  'type:open': 'Any value',
+  'type:text': 'Text',
+  'type:number': 'Numbers',
+  'type:boolean': 'True or false',
+  'type:record': 'Objects and maps',
+  'type:list': 'Lists',
+};
+const nested = subtype && names.includes(subtype.sub) && names.includes(subtype.of) ? subtype : null;
+---
+<Figure id={id} n={n} title={title} caption={annotationCaption(names, groups)} kind="annotation-types">
+  <ul class="type-groups">
+    {groups.map((g) => (
+      <li class="type-group" data-family={g.family ?? 'none'}>
+        <p class="type-group__head">
+          {g.family ? <PixelGlyph name={g.family} /> : <PixelGlyph name="empty" />}
+          <span>{g.family ? (FAMILY_NAMES[g.family] ?? g.family) : 'Null and wrappers'}</span>
+        </p>
+        <ul class="type-group__chips">
+          {g.names
+            .filter((name) => !(nested && name === nested.sub))
+            .map((name) => {
+              const c = containerParts(name);
+              return (
+                <li class="chip chip--type">
+                  {c ? (
+                    <code>{c.open}<span class="chip__slot">{c.slot}</span>{c.close}</code>
+                  ) : nested && name === nested.of ? (
+                    <><code>{name}</code><span class="chip chip--inner"><code>{nested.sub}</code><span class="chip__label">subtype</span></span></>
+                  ) : (
+                    <code>{name}</code>
+                  )}
+                </li>
+              );
+            })}
+        </ul>
+      </li>
+    ))}
+  </ul>
+</Figure>

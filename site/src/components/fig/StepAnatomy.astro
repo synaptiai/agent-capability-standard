@@ -1,0 +1,51 @@
+---
+// F-S5, step anatomy (visual spec 3.9): one exploded step card, its fields
+// (the properties of `$defs/step` in the catalog schema) in five labelled
+// groups. Each field is a port: a filled pin when required, the type glyph
+// and the schema type, and a link to its row of the §5.2 field tables where
+// it has one. A schema property missing from the groups, or a group name the
+// schema lacks, fails the build (stepAnatomy()).
+//
+// Props:
+// - id: string, required. A ref- id.
+// - n: number, required.
+// - title: string, required.
+// - rows: Map<string, string>, required. Field -> first field of its §5.2 table row.
+import { stepFieldId } from '../../plugins/rehype-figure-marks';
+import { stepAnatomy, stepAnatomyCaption } from '../../lib/spec-figures';
+import Figure from './Figure.astro';
+import Port from './Port.astro';
+
+interface Props {
+  id: string;
+  n: number;
+  title: string;
+  rows: Map<string, string>;
+}
+
+const { id, n, title, rows } = Astro.props;
+const groups = stepAnatomy();
+---
+<Figure id={id} n={n} title={title} caption={stepAnatomyCaption()} kind="step-anatomy">
+  <div class="step-anatomy">
+    <p class="step-anatomy__head" aria-hidden="true"><code>- capability: …</code></p>
+    <div class="step-anatomy__groups">
+      {groups.map((g) => (
+        <section class="step-anatomy__group" aria-labelledby={`${id}-${g.id}`} data-group={g.id}>
+          <p class="step-anatomy__title" id={`${id}-${g.id}`}>{g.title} <span class="step-anatomy__count">{g.slots.length}</span></p>
+          <ul class="ports ports--out">
+            {g.slots.map((s) => (
+              <Port
+                name={s.name}
+                type={s.type}
+                required={s.required}
+                description={s.description || undefined}
+                href={rows.has(s.name) ? `#${stepFieldId(rows.get(s.name)!)}` : undefined}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  </div>
+</Figure>

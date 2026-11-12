@@ -1,0 +1,51 @@
+---
+// F-S7, the anatomy of a reference (visual spec 3.9): each line of §5.3's
+// "Examples" fence split into chips: the root (with the store glyph), its
+// path segments (field, index, slice) and its type annotation (with the
+// type-family glyphs). The legend is §5.3's own bullet on what a root can be.
+//
+// Props:
+// - id: string, required. A ref- id.
+// - n: number, required.
+// - title: string, required.
+// - examples: { line, parts }[], required. From bindingExamples().
+// - rule: string, required. From rootRule().
+import type { ReferenceParts } from '../../lib/spec-figures';
+import { referenceCaption } from '../../lib/spec-figures';
+import { typeGlyphs } from '../../lib/views';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  id: string;
+  n: number;
+  title: string;
+  examples: { line: string; parts: ReferenceParts }[];
+  rule: string;
+}
+
+const { id, n, title, examples, rule } = Astro.props;
+---
+<Figure id={id} n={n} title={title} caption={referenceCaption(examples)} kind="reference-anatomy">
+  <ul class="ref-anatomy">
+    {examples.map(({ line, parts }) => (
+      <li class="ref-anatomy__row">
+        <code class="ref-anatomy__line">{line}</code>
+        <ol class="ref-anatomy__chips">
+          <li class="chip chip--root">
+            <PixelGlyph name="flow:store" /><code>{parts.root}</code><span class="chip__label">root</span>
+          </li>
+          {parts.segments.map((s) => (
+            <li class="chip"><code>{s.text}</code><span class="chip__label">{s.kind}</span></li>
+          ))}
+          {parts.annotation && (
+            <li class="chip chip--type">
+              {typeGlyphs(parts.annotation).map((g) => <PixelGlyph name={g} />)}<code>{parts.annotation}</code><span class="chip__label">type</span>
+            </li>
+          )}
+        </ol>
+      </li>
+    ))}
+  </ul>
+  <p class="ref-anatomy__legend"><PixelGlyph name="flow:store" /> <span>{rule}</span></p>
+</Figure>
