@@ -1,0 +1,57 @@
+---
+// The frame of every information figure (visual spec 3.0 and 6.1): a panel
+// with a "FIG n" eyebrow, a title that names the figure, the drawing, and a
+// one-sentence reading of the data as its caption.
+//
+// Props:
+// - id: string, required. The figure's element id; the title gets
+//   `{id}-title` and the figure is labelled by it. On a generated page use a
+//   `ref-` id from refSlugger(), so it never collides with source heading ids.
+// - n: number, required. The figure's number on its page (1, 2, ...). Pages
+//   count their own figures; the frame does not.
+// - title: string, required. The figure's name. Spec pages append ", from §n".
+// - caption: string, required. One plain sentence computed from the data
+//   (write it with a helper in src/lib/views.ts so the Markdown copy uses the
+//   same words). Never typed by hand.
+// - heading: 'p' | 'h3', default 'p'. Use 'h3' only where the page wants the
+//   figure in its table of contents; the id must then start with `ref-`.
+// - describedby: string, optional. Id of the element that holds the figure's
+//   text equivalent (a table or list on the page), for aria-describedby.
+// - wide: boolean, default false. Lets the figure break out to 60rem on pages
+//   without a table of contents (home and index pages only, decision D4).
+// - kind: string, optional. Set as data-fig-kind for tests and sweeps.
+// Slot: the drawing. Put a legend inside the slot, under the drawing.
+interface Props {
+  id: string;
+  n: number;
+  title: string;
+  caption: string;
+  heading?: 'p' | 'h3';
+  describedby?: string;
+  wide?: boolean;
+  kind?: string;
+  class?: string;
+}
+
+const { id, n, title, caption, heading = 'p', describedby, wide = false, kind, class: className } = Astro.props;
+if (!id) throw new Error('Figure: id is required');
+if (!Number.isInteger(n) || n < 1) throw new Error(`Figure ${id}: n must be a whole number from 1, got ${n}`);
+if (!title.trim()) throw new Error(`Figure ${id}: empty title`);
+if (!caption.trim()) throw new Error(`Figure ${id}: empty caption`);
+if (heading === 'h3' && !id.startsWith('ref-')) throw new Error(`Figure ${id}: a figure with an h3 title needs a ref- id`);
+const Title = heading;
+const titleId = `${id}-title`;
+---
+<figure
+  class:list={['fig', wide && 'fig--wide', className]}
+  id={id}
+  aria-labelledby={titleId}
+  aria-describedby={describedby}
+  data-fig={n}
+  data-fig-kind={kind}
+>
+  <p class="fig__eyebrow" aria-hidden="true">Fig {n}</p>
+  <Title class="fig__title" id={titleId}>{title}</Title>
+  <div class="fig__drawing"><slot /></div>
+  <figcaption class="fig__caption">{caption}</figcaption>
+</figure>

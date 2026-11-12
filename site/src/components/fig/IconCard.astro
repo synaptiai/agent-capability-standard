@@ -1,0 +1,43 @@
+---
+// A card with a 3x concept glyph at the top left, a title, a one-line
+// description and an optional hero number (visual spec 3.0). A glyph aid,
+// not an information figure. Only the title link is focusable, so a card can
+// hold other links. Put cards in <ul class="icon-cards"> as <li> children.
+//
+// Props:
+// - glyph: string, required. A glyph key (concept or alias), e.g. 'tool:validator'.
+// - title: string, required.
+// - href: string, optional. Makes the title a link.
+// - number: number | string, optional. The hero number, from a loader.
+// - numberLabel: string, optional. Words read after the number by screen
+//   readers when the title does not already say what is counted.
+// - eyebrow: string, optional. A short label over the title.
+// - heading: 'p' | 'h3', default 'p'. With 'h3', `id` is required and must start with `ref-`.
+// - id: string, optional.
+// Slot: the description (inline content).
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+
+interface Props {
+  glyph: string;
+  title: string;
+  href?: string;
+  number?: number | string;
+  numberLabel?: string;
+  eyebrow?: string;
+  heading?: 'p' | 'h3';
+  id?: string;
+}
+
+const { glyph, title, href, number, numberLabel, eyebrow, heading = 'p', id } = Astro.props;
+if (heading === 'h3' && !id?.startsWith('ref-')) throw new Error(`IconCard ${title}: an h3 title needs a ref- id`);
+const Title = heading;
+---
+<li class="icon-card">
+  <span class="icon-card__glyph" aria-hidden="true"><PixelGlyph name={glyph} scale={3} /></span>
+  {eyebrow && <p class="icon-card__eyebrow">{eyebrow}</p>}
+  <Title class="icon-card__title" id={id}>{href ? <a href={href}>{title}</a> : title}</Title>
+  {number !== undefined && (
+    <p class="icon-card__number">{number}{numberLabel && <span class="fig-sr"> {numberLabel}</span>}</p>
+  )}
+  {Astro.slots.has('default') && <p class="icon-card__text"><slot /></p>}
+</li>

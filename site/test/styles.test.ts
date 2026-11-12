@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const STYLES = ['tokens.css', 'base.css', 'components.css', 'motion.css'].map((f) => ({
+const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'motion.css'].map((f) => ({
   file: f,
   css: readFileSync(`src/styles/${f}`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }));
@@ -35,6 +35,14 @@ describe('typography', () => {
       '.prev-next__title',
       '.capability-tile__symbol',
       '.wf-step__number',
+      // Visual spec 3.0 and 1.2 (issue #125): the small periodic tile and the
+      // highlighted step of a step strip show the same two-letter tile symbol
+      // as the periodic table, and hero numbers on icon and edge-type cards
+      // are in the display font.
+      '.mini-tile__symbol',
+      '.step-strip__step--hit',
+      '.icon-card__number',
+      '.edge-card__number',
     ]);
     const display = rules()
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))
@@ -140,11 +148,11 @@ describe('definitions', () => {
     expect(unused).toEqual([]);
   });
 
-  it('uses every class components.css defines on a single class selector', () => {
-    const css = STYLES.find((s) => s.file === 'components.css')!.css;
+  it.each(['components.css', 'figures.css'])('uses every class %s defines on a single class selector', (file) => {
+    const css = STYLES.find((s) => s.file === file)!.css;
     const markup = listFiles('src').filter((f) => /\.(astro|ts)$/.test(f)).map((f) => readFileSync(f, 'utf8')).join('\n');
     const lone = rules()
-      .filter((r) => r.file === 'components.css')
+      .filter((r) => r.file === file)
       .flatMap((r) => r.selectors)
       .filter((s) => /^\.[a-z][\w-]*$/.test(s))
       .map((s) => s.slice(1));

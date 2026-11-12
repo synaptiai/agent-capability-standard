@@ -1,0 +1,45 @@
+---
+// One I/O row (visual spec 3.0): a 10x10 pin on the box edge (filled when
+// the field is required, outlined when optional), the type-family glyphs
+// from typeGlyphs(), the field name, the exact type string, and a short
+// description shown on hover or focus when the figure is wide and always
+// when it is narrow. Render inside <ul class="ports"> (add `ports--out` for
+// an output column, which puts the pin on the left).
+//
+// Props:
+// - name: string, required. The field name or path.
+// - type: string, required. The exact type string, printed as given.
+// - required: boolean, default false.
+// - description: string, optional. Plain text.
+// - href: string, optional. Link for the name (e.g. the contract table row).
+// - depth: 0 | 1, default 0. 1 indents the row 16px under its parent.
+// - mark: string, optional. An extra glyph key drawn after the name, with
+//   `markLabel` as its accessible text (e.g. 'principle:grounded-claims').
+// - markLabel: string, required with mark.
+import { typeGlyphs } from '../../lib/views';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+
+interface Props {
+  name: string;
+  type: string;
+  required?: boolean;
+  description?: string;
+  href?: string;
+  depth?: 0 | 1;
+  mark?: string;
+  markLabel?: string;
+}
+
+const { name, type, required = false, description, href, depth = 0, mark, markLabel } = Astro.props;
+if (mark && !markLabel) throw new Error(`Port ${name}: mark ${mark} needs a markLabel`);
+const glyphs = typeGlyphs(type);
+---
+<li class:list={['port', required ? 'port--required' : 'port--optional']} data-depth={depth} data-type={type}>
+  <span class="port__pin" aria-hidden="true"></span>
+  <span class="port__glyphs" aria-hidden="true">{glyphs.map((g) => <PixelGlyph name={g} />)}</span>
+  <code class="port__name">{href ? <a href={href}>{name}</a> : name}</code>
+  {mark && <PixelGlyph name={mark} label={markLabel} class="port__mark" />}
+  <code class="port__type">{type}</code>
+  <span class="fig-sr">{required ? ', required' : ', optional'}</span>
+  {description && <span class="port__desc">{description}</span>}
+</li>

@@ -1,7 +1,7 @@
 // Pure functions that turn the loaded data into what the generated pages show.
 // The templates stay thin and the tests check these functions directly.
 import { parse, stringify } from 'yaml';
-import { loadOntology, EDGE_TYPES, type Capability, type EdgeType, type Ontology } from '../data/ontology';
+import { loadOntology, EDGE_TYPES, type Capability, type EdgeType, type EdgeTypeInfo, type Ontology } from '../data/ontology';
 import { loadProfiles, type DomainProfile } from '../data/profiles';
 import { COMPOSED_SKILLS } from '../data/skills';
 import { loadWorkflows, type Step, type Workflow } from '../data/workflows';
@@ -132,6 +132,16 @@ export function capabilitySymbols(ids: string[]): Map<string, string> {
 /** Capability ids in layer order, as the periodic table numbers them from 1. */
 export function tableOrder(ontology: Ontology = loadOntology()): string[] {
   return ontology.layers.flatMap((l) => l.capabilities);
+}
+
+let symbols: Map<string, string> | null = null;
+
+/** The periodic-table symbol of a capability, as the table computes it. */
+export function capabilitySymbol(id: string): string {
+  symbols ??= capabilitySymbols(tableOrder());
+  const s = symbols.get(id);
+  if (!s) throw new Error(`views: ${id} is not a capability`);
+  return s;
 }
 
 // -------------------------------------------------------------------- edges
@@ -515,4 +525,130 @@ export function schemaGroups(standardVersion: string): { key: SchemaEntry['group
   { key: 'other', label: 'Other schemas', intro: 'Schema files the Standard does not name.' },
   { key: 'transforms', label: 'Transforms', intro: 'The coercion registry and the mappings the transform capability uses.' },
   ];
+}
+
+// -------------------------------------------------------------- type glyphs
+
+/** Type strings that name one field-type family glyph (visual spec 2.3). */
+const TYPE_FAMILIES: Readonly<Record<string, string>> = {
+  string: 'type:text',
+  number: 'type:number',
+  integer: 'type:number',
+  boolean: 'type:boolean',
+  array: 'type:list',
+  object: 'type:record',
+  any: 'type:open',
+  unknown: 'type:open',
+};
+
+/** Split on commas or pipes that are not inside angle brackets. */
+function splitTopLevel(s: string, sep: ',' | '|'): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = '';
+  for (const ch of s) {
+    if (ch === '<') depth++;
+    if (ch === '>') depth--;
+    if (ch === sep && depth === 0) {
+      parts.push(cur.trim());
+      cur = '';
+    } else cur += ch;
+  }
+  parts.push(cur.trim());
+  return parts.filter((p) => p !== '');
+}
+
+/**
+ * The family glyph keys of a field type string (visual spec 2.3, the
+ * normalising rule). The exact string is always printed beside the glyphs,
+ * so the glyphs only give the family:
+ * 1. a union (`a|b` or `union<a, b>`) gives each part's glyphs in order;
+ * 2. `nullable<T>` gives T's glyphs;
+ * 3. `array of T` and `array<T>` give `type:list`;
+ * 4. other strings are looked up by family (`map<K,V>` is a record);
+ * 5. `null` and anything else give no glyph.
+ */
+export function typeGlyphs(type: string): string[] {
+  const t = type.trim();
+  const top = splitTopLevel(t, '|');
+  if (top.length > 1) return top.flatMap(typeGlyphs);
+  const generic = /^([a-z_]+)\s*<([\s\S]*)>$/i.exec(t);
+  if (generic) {
+    const [, name, inner] = generic;
+    switch (name!.toLowerCase()) {
+      case 'union':
+        return splitTopLevel(inner!, ',').flatMap(typeGlyphs);
+      case 'nullable':
+        return typeGlyphs(inner!);
+      case 'array':
+        return ['type:list'];
+      case 'map':
+        return ['type:record'];
+      default:
+        return [];
+    }
+  }
+  if (/^array\s+of\s+/i.test(t)) return ['type:list'];
+  const family = TYPE_FAMILIES[t.toLowerCase()];
+  return family ? [family] : [];
+}
+
+// ------------------------------------------------------------- safety panel
+
+/** The domain profiles that never let a capability run autonomously (`risk_thresholds.block_autonomous`). */
+export function autonomyBlocks(capId: string, profiles: DomainProfile[] = loadProfiles()): { blocked: string[]; total: number } {
+  const blocked = profiles
+    .filter((p) => {
+      const t = p.profile.risk_thresholds;
+      return isObj(t) && Array.isArray(t.block_autonomous) && t.block_autonomous.map(String).includes(capId);
+    })
+    .map((p) => p.key);
+  return { blocked, total: profiles.length };
+}
+
+export interface SafetyRow {
+  /** Stable key: risk, mutation, checkpoint, approval, overridable, autonomy. */
+  key: 'risk' | 'mutation' | 'checkpoint' | 'approval' | 'overridable' | 'autonomy';
+  term: string;
+  /** Whether the cell is drawn as on. Risk is always on. */
+  on: boolean;
+  value: string;
+  glyph: string;
+}
+
+/**
+ * The six cells of a capability's safety panel (visual spec F-C3), shared by
+ * the page and its Markdown copy. A checkpoint that comes only from a
+ * `requires` edge (rollback) says so.
+ */
+export function safetyRows(cap: Capability, profiles: DomainProfile[] = loadProfiles()): SafetyRow[] {
+  const viaEdge = !cap.requires_checkpoint && cap.edgesIn.requires.includes('checkpoint');
+  const needsCheckpoint = cap.requires_checkpoint || viaEdge;
+  const { blocked, total } = autonomyBlocks(cap.id, profiles);
+  const yes = (b: boolean) => (b ? 'Yes' : 'No');
+  return [
+    { key: 'risk', term: 'Risk', on: true, value: cap.risk[0]!.toUpperCase() + cap.risk.slice(1), glyph: `risk:${cap.risk}` },
+    { key: 'mutation', term: 'Changes state', on: cap.mutation, value: yes(cap.mutation), glyph: cap.mutation ? 'pencil' : 'eye' },
+    { key: 'checkpoint', term: 'Needs checkpoint', on: needsCheckpoint, value: viaEdge ? 'Yes, via requires edge' : yes(needsCheckpoint), glyph: 'flag' },
+    { key: 'approval', term: 'Needs approval', on: cap.requires_approval, value: yes(cap.requires_approval), glyph: 'stamp' },
+    { key: 'overridable', term: 'Overridable', on: cap.mutation_overridable, value: yes(cap.mutation_overridable), glyph: 'undo' },
+    {
+      key: 'autonomy',
+      term: 'Blocked from autonomy',
+      on: blocked.length > 0,
+      value: blocked.length > 0 ? `In ${blocked.length} of ${total} profiles` : 'No',
+      glyph: 'approve:blocked',
+    },
+  ];
+}
+
+// -------------------------------------------------------------- edge types
+
+/**
+ * How many edges of a type the ontology has, counting a symmetric type once
+ * per pair of capabilities (conflicts_with lists each pair in both directions).
+ */
+export function edgeTypeCount(info: EdgeTypeInfo): number {
+  if (!info.symmetric) return info.edges.length;
+  return new Set(info.edges.map((e) => [e.from, e.to].sort().join('\u0000'))).size;
 }

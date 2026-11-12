@@ -40,6 +40,15 @@ export function code(text: string): string {
   return `${ticks}${pad}${text}${pad}${ticks}`;
 }
 
+/**
+ * A figure's text equivalent in a Markdown copy (visual spec 6.1): the
+ * figure's title and its caption sentence, then the table or list that holds
+ * the same data. Pass the same caption the page's <figcaption> shows.
+ */
+export function figure(title: string, caption: string, body: string): string {
+  return `**Figure: ${title.replace(/\.$/, '')}.** ${caption}\n\n${body.replace(/\n+$/, '')}`;
+}
+
 export function table(headers: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.join(' | ')} |`;
   return [line(headers), line(headers.map(() => '---')), ...rows.map(line)].join('\n');

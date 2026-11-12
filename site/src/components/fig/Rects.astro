@@ -1,0 +1,17 @@
+---
+// Draws FigRects (src/pixel/lines.ts) inside an <svg>. Every fill is a token
+// or currentColor, never a hex value.
+//
+// Props:
+// - rects: (FigRect & { opacity?: number })[], required.
+// - class: string, optional. Set on the wrapping <g>.
+import { inkAttrs, type FigRect } from '../../pixel/lines';
+
+interface Props {
+  rects: readonly (FigRect & { opacity?: number })[];
+  class?: string;
+}
+
+const { rects, class: className } = Astro.props;
+---
+<g class={className}>{rects.map((r) => <rect x={r.x} y={r.y} width={r.w} height={r.h} fill-opacity={r.opacity} {...inkAttrs(r.ink)} />)}</g>

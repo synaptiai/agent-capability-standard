@@ -7,7 +7,9 @@
   .btn,
   .prev-next__link,
   .capability-tile,
-  .section-index__card {
+  .section-index__card,
+  .mini-tile,
+  .icon-card {
     transition:
       transform var(--step-hover),
       box-shadow var(--step-hover);
@@ -47,7 +49,10 @@
     .prev-next__link:active,
     .capability-tile:hover,
     .capability-tile:active,
-    .section-index__card:has(> a:first-child:hover) {
+    .section-index__card:has(> a:first-child:hover),
+    a.mini-tile:hover,
+    .icon-card:has(.icon-card__title a:hover),
+    .icon-card:has(.icon-card__title a:focus-visible) {
       transform: none;
     }
   }

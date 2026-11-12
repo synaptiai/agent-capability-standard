@@ -1,0 +1,47 @@
+---
+// A small periodic tile (visual spec 3.0): the capability's two-letter
+// symbol on its layer tint inside a 2px layer-coloured border, plus the
+// layer glyph at 32px and up. The symbol and glyph carry identity, so the
+// layer colour is never the only cue. A link to the capability's page unless
+// `link` is false (inside another link or a card that is one).
+//
+// Props:
+// - id: string, required. A capability id from the ontology; throws otherwise.
+// - size: 24 | 32 | 48, default 32.
+// - relation: string, optional. Words added to the accessible name after a
+//   colon, e.g. "requires, precedes" -> "checkpoint, VERIFY layer: requires, precedes".
+// - link: boolean, default true. False renders a <span> with role="img".
+// - current: boolean, default false. The selected or centre tile: a 4px
+//   border instead of 2px.
+// - class: string, optional.
+import { loadOntology } from '../../data/ontology';
+import { capabilityHref } from '../../lib/generated';
+import { capabilitySymbol } from '../../lib/views';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+
+interface Props {
+  id: string;
+  size?: 24 | 32 | 48;
+  relation?: string;
+  link?: boolean;
+  current?: boolean;
+  class?: string;
+}
+
+const { id, size = 32, relation, link = true, current = false, class: className } = Astro.props;
+if (![24, 32, 48].includes(size)) throw new Error(`MiniTile ${id}: size must be 24, 32 or 48, got ${size}`);
+const cap = loadOntology().capabilities.find((c) => c.id === id);
+if (!cap) throw new Error(`MiniTile: ${id} is not a capability in the ontology`);
+const symbol = capabilitySymbol(id);
+const name = `${id}, ${cap.layer} layer${relation ? `: ${relation}` : ''}`;
+const Tag = link ? 'a' : 'span';
+---
+<Tag
+  class:list={['mini-tile', `mini-tile--${size}`, current && 'mini-tile--current', 'has-layer', className]}
+  href={link ? capabilityHref(id) : undefined}
+  role={link ? undefined : 'img'}
+  aria-label={name}
+  style={`--layer: var(--layer-${cap.layer})`}
+  data-capability={id}
+  data-layer={cap.layer}
+><span class="mini-tile__symbol" aria-hidden="true" data-pagefind-ignore>{symbol}</span>{size >= 32 && <PixelGlyph name={cap.layer} scale={size === 48 ? 2 : 1} class="mini-tile__glyph" />}</Tag>
