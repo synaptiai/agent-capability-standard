@@ -4,7 +4,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'motion.css'].map((f) => ({
+// Every stylesheet in src/styles, so a figure sheet added by a page branch
+// (figures-*.css, kept apart from figures.css so branches merge cleanly) is
+// held to the same rules as the rest.
+const STYLES = readdirSync('src/styles')
+  .filter((f) => f.endsWith('.css'))
+  .sort()
+  .map((f) => ({
   file: f,
   css: readFileSync(`src/styles/${f}`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }));
@@ -148,7 +154,7 @@ describe('definitions', () => {
     expect(unused).toEqual([]);
   });
 
-  it.each(['components.css', 'figures.css'])('uses every class %s defines on a single class selector', (file) => {
+  it.each(STYLES.map((s) => s.file).filter((f) => f === 'components.css' || f.startsWith('figures')))('uses every class %s defines on a single class selector', (file) => {
     const css = STYLES.find((s) => s.file === file)!.css;
     const markup = listFiles('src').filter((f) => /\.(astro|ts)$/.test(f)).map((f) => readFileSync(f, 'utf8')).join('\n');
     const lone = rules()

@@ -9,6 +9,7 @@ import { capabilityHref, refSlugger, routeByUrl } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
 import type { PageMeta } from '../../plugins/remark-page-meta';
 import TableWrap from '../../components/TableWrap.astro';
+import '../../styles/figures-edges-spec.css';
 
 const route = routeByUrl('/spec/edge-types/');
 const entry = await getEntry('docs', route.source!);

@@ -1,0 +1,31 @@
+/*
+ * Figures of the edge types page (visual spec 3.7) and of the Standard
+ * (3.9: chapter glyphs and the figures of chapters 4 and 5). Kept apart from
+ * figures.css so the page branches merge cleanly. Tokens only, square
+ * corners, 2px lines. Each figure lays itself out by the width of its own
+ * .fig (a container), never the viewport.
+ */
+@layer components {
+  /* ---------- chapter glyphs on Standard H2s ---------- */
+
+  .chapter-glyph {
+    display: inline-block;
+    margin-right: var(--space-3);
+    vertical-align: -2px;
+    color: var(--ink);
+  }
+
+  /* ---------- edge type summary table (F-E4) ---------- */
+
+  .edge-summary__mark,
+  .edge-summary__flag {
+    display: inline-block;
+    margin-right: var(--space-2);
+    vertical-align: -2px;
+    color: var(--ink);
+  }
+
+  .edge-summary__count {
+    min-width: 10rem;
+  }
+}
