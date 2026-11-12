@@ -59,6 +59,12 @@ describe('typography', () => {
       // sources, workflows and so on) are hero numbers, like the domains
       // index card number above.
       '.domain-hero__facts dd',
+      // Visual spec 2.2 and 3.8 (issue #125 rollout): a diagnostic family is
+      // drawn as its code letter typeset on a square tile, not as a 5x7
+      // grid, because six 5x7 capitals cannot keep the 14-cell mask distance
+      // from the 9x9 concept glyphs. The letter is a hero character of its
+      // tile, like a tile symbol.
+      '.diag-family',
     ]);
     const display = rules()
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))

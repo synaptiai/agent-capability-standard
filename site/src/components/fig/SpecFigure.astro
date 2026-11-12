@@ -39,6 +39,12 @@ import FlowArrow from './FlowArrow.astro';
 import RunReplay from './RunReplay.astro';
 import SafetyDefaults from './SafetyDefaults.astro';
 import TableWrap from '../TableWrap.astro';
+import * as T from '../../lib/spec-tail-figures';
+import { heatRanges, heatStep } from '../../lib/edge-figures';
+import { loadIdentityPolicy } from '../../data/spec-sources';
+import { githubBlobUrl, githubTreeUrl } from '../../lib/repo';
+import { run, type FigRect } from '../../pixel/lines';
+import StepStrip from './StepStrip.astro';
 import { loadCatalogSchema } from '../../data/catalog-schema';
 import { loadOntology } from '../../data/ontology';
 import { readRepoFile } from '../../lib/repo';
@@ -71,7 +77,8 @@ const idOf = (name: string) => refSlugger()(`Figure: ${name}`);
 const o = loadOntology();
 const schema = loadCatalogSchema();
 const KNOWN = ['fields', 'layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
-const NEW = ['quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
+const TAIL = ['codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'world-state-fields', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
+const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
   'recovery-replay': 'A recovery that runs out',
@@ -100,6 +107,45 @@ const deleg = slot === 'delegate' ? D.delegateGroups(text, where) : null;
 const quorum = slot === 'quorum' ? D.quorumExample(text, where) : null;
 const trust = slot === 'trust-classes' ? D.trustClassBars(text, where) : [];
 const sender = slot === 'sender-filter' ? D.senderFilter(text, where) : [];
+const shelf = slot === 'schema-shelf' ? T.schemaShelf(text, where) : [];
+const wsRows = slot === 'world-state-fields' ? T.fieldRows(text, '6.3 ', where) : [];
+const policy = slot === 'merge-thresholds' ? loadIdentityPolicy() : null;
+const decay = slot === 'decay' ? T.decayColumns(text, where) : null;
+const families = slot === 'families' ? T.diagnosticFamilies(text, where) : [];
+const heat = slot === 'code-heat' ? T.codeHeat(text, where) : null;
+const levels = slot === 'levels' ? T.conformanceLevels(text, where) : [];
+const suite = slot === 'suite' ? T.conformanceSuite(text, where) : [];
+const bumps = slot === 'bumps' ? T.versionBumps(text, where) : [];
+const tree = slot === 'checkpoint-tree' ? T.decisionTree(text, where) : null;
+const pattern = slot.startsWith('pattern-') ? T.patternStrips(text, where)[Number(slot.slice(8))] : null;
+if (slot.startsWith('pattern-') && !pattern) throw new Error(`SpecFigure: §12.5 has no pattern fence for ${slot}`);
+// F-S25: 9 columns of 20px with 8px gaps after a 36px axis; 100px is a decay factor of 1.
+const DECAY_H = 100;
+const even = (v: number) => 2 * Math.round(v / 2);
+const W_DECAY = 36 + 9 * 28 - 8;
+const floorY = decay ? DECAY_H - even(decay.minTrust * DECAY_H) : 0;
+const decayRects: FigRect[] = decay
+  ? [
+      { x: 32, y: 0, w: 2, h: DECAY_H + 2, ink: 'ink-3' },
+      { x: 32, y: DECAY_H, w: W_DECAY - 32, h: 2, ink: 'ink-3' },
+      ...decay.columns.flatMap((c, i): FigRect[] => {
+        const h = even(c.value * DECAY_H);
+        const x = 36 + i * 28;
+        const top = DECAY_H - h;
+        if (!c.floored) return [{ x, y: top, w: 20, h, ink: 'ink' }];
+        // Held up by the floor: an outline with 2px stripes every 4px (the = shade).
+        return [
+          { x, y: top, w: 20, h: 2, ink: 'ink' },
+          { x, y: top, w: 2, h, ink: 'ink' },
+          { x: x + 18, y: top, w: 2, h, ink: 'ink' },
+          ...Array.from({ length: Math.floor((h - 2) / 4) }, (_, k): FigRect => ({ x: x + 2, y: top + 4 + k * 4, w: 16, h: 2, ink: 'ink-3' })),
+        ];
+      }),
+      ...run(36, floorY - 4, W_DECAY, floorY - 4, 'ink-2', 2, 'dashed').map((r) => ({ ...r, y: floorY - 4 })),
+    ]
+  : [];
+const codesSec = slot.startsWith('codes-') ? T.sectionCodes(text, slot.slice(6), where) : null;
+const isOutcome = (n: T.TreeNode) => n.branches.length === 0;
 const pct = (v: number, max: number) => `${((v / max) * 100).toFixed(3)}%`;
 const line = (type: string) => edgeRects(type, 2, 8, 46, 8).rects;
 const fields = slot === 'fields' ? fieldTable(text, '4.1 ', where) : [];
@@ -433,5 +479,185 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
   <Figure id={idOf('quorum fields and their codes')} n={n} title={titled('Quorum fields and the codes they raise')} caption={D.quorumFieldsCaption(D.quorumFieldCodes(text, where))} kind="quorum-fields">
     <Fragment set:html={inner} />
     <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
+  </Figure>
+)}
+
+{slot === 'schema-shelf' && (
+  <Figure id={idOf('schema shelf')} n={n} title={titled('Schema shelf')} caption={T.shelfCaption(shelf)} kind="schema-shelf">
+    <ul class="shelf">
+      {shelf.map((f) => (
+        <li class="shelf__file"><PixelGlyph name="chapter:canonical-schemas" scale={3} /><a href={githubBlobUrl(f.source)}><code>{f.name}</code></a><span class="shelf__purpose">{f.purpose}</span></li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'world-state-fields' && (
+  <Figure id={idOf('world-state fields')} n={n} title={titled('World-state fields')} caption={T.fieldGroupsCaption(wsRows, 'A world state snapshot')} kind="world-state-fields">
+    {T.fieldGroups(wsRows).map((g) => (
+      <div class="ws-group">
+        <p class="deleg__ext">{g.prefix ? <>under <code>{g.prefix}</code></> : 'top level'}</p>
+        <ul class="ports ports--out spec-ports">{g.rows.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} />)}</ul>
+      </div>
+    ))}
+  </Figure>
+)}
+{slot === 'merge-thresholds' && policy && (
+  <Figure id={idOf('merge thresholds')} n={n} title={titled('Merge thresholds')} caption={T.thresholdsCaption()} kind="merge-thresholds">
+    <div class="scale">
+      <div class="scale__track" aria-hidden="true">
+        {policy.thresholds.map((t, i) => <span class:list={['scale__tick', i % 2 === 1 && 'scale__tick--low']} style={`left: ${pct(t.value - policy.range[0], policy.range[1] - policy.range[0])}`}><span class="scale__label"><code>{t.name}</code> {t.value}</span></span>)}
+      </div>
+      <p class="scale__ends" aria-hidden="true"><span>{policy.range[0]}</span><span>{policy.range[1]}</span></p>
+      <ul class="scale__list">{policy.thresholds.map((t) => <li><code>{t.name}</code> {t.value}</li>)}</ul>
+    </div>
+  </Figure>
+)}
+{slot === 'decay' && decay && (
+  <Figure id={idOf('decay with a floor')} n={n} title={titled('Decay with a floor: reference configuration')} caption={T.decayCaption(decay)} kind="decay">
+    <div class="decay">
+      <svg class="decay__plot" viewBox={`-8 0 ${W_DECAY + 8} ${DECAY_H + 34}`} width={W_DECAY + 8} height={DECAY_H + 34} shape-rendering="crispEdges" role="img" aria-labelledby={`${idOf('decay with a floor')}-title`}>
+        <Rects rects={decayRects} />
+        <text x="28" y="10" text-anchor="end" font-size="12" fill="currentColor">1</text>
+        <text x="28" y={floorY - 1} text-anchor="end" font-size="12" fill="currentColor">{decay.minTrust}</text>
+        {decay.columns.filter((c) => Number.isInteger(c.halfLives)).map((c) => (
+          <>
+            <text x={36 + c.halfLives * 2 * 28 + 10} y={DECAY_H + 15} text-anchor="middle" font-size="12" fill="currentColor">{c.halfLives}</text>
+            <text x={36 + c.halfLives * 2 * 28 + 10} y={DECAY_H + 30} text-anchor="middle" font-size="12" fill="currentColor">{c.days}d</text>
+          </>
+        ))}
+      </svg>
+      <ul class="decay__key">
+        <li><span class="decay__swatch" aria-hidden="true"></span>0.5 ** (age / half_life)</li>
+        <li><span class="decay__swatch decay__swatch--floor" aria-hidden="true"></span>held at the min_trust floor ({decay.minTrust})</li>
+        <li>x axis: age in half-lives (top) and days (bottom)</li>
+      </ul>
+    </div>
+  </Figure>
+)}
+{slot === 'families' && (
+  <Figure id={idOf('diagnostic families')} n={n} title={titled('Diagnostic families')} caption={T.familiesCaption(families)} kind="diagnostic-families">
+    <ul class="families">
+      {families.map((f) => (
+        <li class:list={['family', `family--${f.severity}`]} data-family={f.prefix}>
+          <span class="diag-family" aria-hidden="true">{f.prefix}</span>
+          <span class="family__name">{f.name}</span>
+          <span class="family__range"><code>{f.range}</code>, {f.severity}</span>
+          <span class="family__count">{f.codes.length} codes</span>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'code-heat' && heat && (
+  <Figure id={idOf('where codes are raised')} n={n} title={titled('Where codes are raised')} caption={T.heatCaption(heat)} kind="code-heat">
+    <TableWrap label="Diagnostic codes each section of chapter 5 names, by family">
+      <table class="heat">
+        <thead><tr><th scope="col">Family</th>{heat.sections.map((s) => <th scope="col"><a href={sectionLink(s.n)} title={s.title}>{s.n}</a></th>)}</tr></thead>
+        <tbody>
+          {heat.families.map((f, i) => (
+            <tr data-family={f.prefix}>
+              <th scope="row"><span class="diag-family diag-family--small" aria-hidden="true">{f.prefix}</span>{f.name}</th>
+              {heat.counts[i]!.map((c) => <td class:list={['heat__cell', c > 0 && `heat__cell--${heatStep(c, heat.max)}`]} data-count={c}>{c > 0 ? c : ''}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableWrap>
+    <p class="heat__legend">Codes named:{heatRanges(heat.max).map((r) => <span class="heat__key"><span class:list={['heat__cell', `heat__cell--${r.step}`]} aria-hidden="true"></span>{r.from === r.to ? r.from : `${r.from} to ${r.to}`}</span>)}<span class="heat__key"><span class="heat__cell" aria-hidden="true"></span>none</span></p>
+  </Figure>
+)}
+{slot === 'levels' && (
+  <Figure id={idOf('what each level checks')} n={n} title={titled('What each conformance level checks')} caption={T.levelsCaption(levels)} kind="conformance-levels">
+    <ul class="levels">
+      {levels.map((c) => (
+        <li class="levels__col" data-level={c.level}>
+          <p class="levels__head"><span class="levels__id">{c.level}</span>{c.name}<span class="levels__count">{c.items.length}</span></p>
+          <ul class="levels__items">
+            {c.items.map((it) => (
+              <li>{it.text}{(it.sections.length > 0 || it.codes.length > 0) && (
+                <span class="levels__chips">{it.sections.map((sec) => <a class="chip chip--inner" href={sectionLink(sec)}>§{sec}</a>)}{it.codes.map((cd) => <DiagnosticTile code={cd} />)}</span>
+              )}</li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'suite' && (
+  <Figure id={idOf('the conformance suite')} n={n} title={titled('The conformance suite')} caption={T.suiteCaption(suite)} kind="conformance-suite">
+    <ul class="trust-bars suite">
+      {suite.map((p) => (
+        <li class="trust-bars__row"><a class="suite__label" href={githubTreeUrl(p.dir)}>{p.label}</a><PixelBar value={p.count} max={Math.max(...suite.map((x) => x.count))} /></li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'bumps' && (
+  <Figure id={idOf('which change bumps which number')} n={n} title={titled('Which change bumps which number')} caption={T.bumpsCaption(bumps)} kind="version-bumps">
+    <ul class="bumps">
+      {bumps.map((b) => (
+        <li class="bumps__tile" data-bump={b.bump}>
+          <p class="bumps__head"><span class="bumps__id">{b.bump}</span>{b.change}</p>
+          <p class="bumps__example">{b.example}</p>
+          {b.changes.length > 0 ? (
+            <ul class="bumps__changes">{b.changes.map((c) => <li>{c}</li>)}</ul>
+          ) : (
+            <p class="bumps__none">No schema change in §11.4</p>
+          )}
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'checkpoint-tree' && tree && (
+  <Figure id={idOf('checkpoint decision tree')} n={n} title={titled('Checkpoint decision tree')} caption={T.treeCaption(tree)} kind="checkpoint-tree">
+    <div class="tree">
+      <p class="tree__q">{tree.text}</p>
+      <ul class="tree__branches">
+        {tree.branches.map((b) => (
+          <li>
+            <span class="chip chip--inner tree__a">{b.answer}</span>
+            {isOutcome(b.node) ? (
+              <span class:list={['tree__out', /REQUIRED/.test(b.node.text) && 'tree__out--required']}>{/REQUIRED/.test(b.node.text) && <PixelGlyph name="role:checkpoint" />}{b.node.text}</span>
+            ) : (
+              <>
+                <p class="tree__q">{b.node.text}</p>
+                <ul class="tree__branches">
+                  {b.node.branches.map((c) => (
+                    <li>
+                      <span class="chip chip--inner tree__a">{c.answer}</span>
+                      <span class:list={['tree__out', /REQUIRED/.test(c.node.text) && 'tree__out--required']}>{/REQUIRED/.test(c.node.text) && <PixelGlyph name="role:checkpoint" />}{c.node.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+    {inner && <details class="fig-details"><summary>Text version</summary><Fragment set:html={inner} /></details>}
+  </Figure>
+)}
+{pattern && (
+  <Figure id={idOf(`pattern ${pattern.name}`)} n={n} title={titled(`Pattern: ${pattern.name}`)} caption={T.patternCaption(pattern)} kind="pattern-strip">
+    <StepStrip wf={pattern.wf} size={20} symbols label={`${pattern.name}: ${pattern.wf.steps.map((s) => s.capability).join(', ')}`} />
+    <ol class="pattern">
+      {pattern.wf.steps.map((s) => (
+        <li class="pattern__step">
+          <span class="replay__n" aria-hidden="true">{s.index}</span>
+          <MiniTile id={s.capability} size={24} />
+          <code>{s.capability}</code>
+          {s.store_as && <span class="pattern__store">as <code>{s.store_as}</code></span>}
+          {s.consumes.length > 0 && <span class="pattern__reads">reads {s.consumes.map((c) => <code>{c}</code>)}</span>}
+        </li>
+      ))}
+    </ol>
+  </Figure>
+)}
+{codesSec && inner && (
+  <Figure id={idOf(`${codesSec.heading} codes`)} n={n} title={titled(`${codesSec.heading} by code`)} caption={T.sectionCodesCaption(codesSec)} kind="code-table">
+    <Fragment set:html={inner} />
   </Figure>
 )}

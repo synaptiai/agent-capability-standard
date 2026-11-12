@@ -926,3 +926,482 @@
     color: var(--ink-2);
   }
 }
+
+@layer components {
+  /* ---------- diagnostic family tiles (F-S26, F-X1 headers) ---------- */
+
+  /* The family's code letter typeset in the display font on a square tile:
+     a different size class from the 9x9 grids, so it never has to keep a
+     mask distance from them, and the letter is the one every code starts with. */
+  .diag-family {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border: 2px solid var(--ink);
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 32px;
+    line-height: 1;
+  }
+
+  .diag-family--small {
+    width: 24px;
+    height: 24px;
+    margin-right: var(--space-2);
+    font-size: 20px;
+    vertical-align: middle;
+  }
+
+  .families {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @container (min-width: 480px) {
+    .families {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .family {
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 0 var(--space-2);
+    align-items: center;
+    padding: var(--space-2);
+    border: 2px solid var(--ink-2);
+    background: var(--bg);
+  }
+
+  .family--warning {
+    border-style: dashed;
+  }
+
+  .family .diag-family {
+    grid-row: span 3;
+  }
+
+  .family__name {
+    font-weight: 700;
+  }
+
+  .family__range,
+  .family__count {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-S23 schema shelf ---------- */
+
+  .shelf {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @container (min-width: 480px) {
+    .shelf {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .shelf__file {
+    display: grid;
+    grid-template-columns: 27px 1fr;
+    gap: 2px var(--space-2);
+    align-items: center;
+    padding: var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .shelf__file .pg {
+    grid-row: span 2;
+  }
+
+  .shelf__purpose {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .ws-group + .ws-group {
+    margin-top: var(--space-3);
+  }
+
+  /* ---------- F-S24b merge thresholds ---------- */
+
+  .scale {
+    padding: 0 var(--space-2);
+  }
+
+  .scale__track {
+    position: relative;
+    height: 4px;
+    margin: 40px 0;
+    background: var(--ink-2);
+  }
+
+  .scale__tick {
+    position: absolute;
+    bottom: 0;
+    width: 4px;
+    height: 24px;
+    margin-left: -2px;
+    background: var(--ink);
+  }
+
+  /* Every other threshold hangs below the line, so neighbouring labels never meet. */
+  .scale__tick--low {
+    top: 0;
+    bottom: auto;
+  }
+
+  .scale__label {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .scale__tick--low .scale__label {
+    top: 100%;
+    bottom: auto;
+  }
+
+  .scale__label code,
+  .scale__list code {
+    font-size: 13px;
+  }
+
+  /* Read by screen readers at every width (the line is aria-hidden); shown when the line has no labels. */
+  .scale__list {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  /* Too narrow for labels on the line: number the ticks and list them below. */
+  @container (max-width: 479px) {
+    .scale__label {
+      display: none;
+    }
+
+    .scale__list {
+      position: static;
+      display: grid;
+      gap: var(--space-1);
+      width: auto;
+      height: auto;
+      overflow: visible;
+      clip-path: none;
+      white-space: normal;
+    }
+  }
+
+  .scale__ends {
+    display: flex;
+    justify-content: space-between;
+    margin: var(--space-1) 0 0;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-S25 decay ---------- */
+
+  .decay {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-4);
+    color: var(--ink);
+  }
+
+  .decay__plot text {
+    font-family: var(--font-mono);
+  }
+
+  .decay__key {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .decay__key li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .decay__swatch {
+    width: 16px;
+    height: 16px;
+    background: var(--ink);
+  }
+
+  .decay__swatch--floor {
+    border: 2px solid var(--ink);
+    background: repeating-linear-gradient(to bottom, var(--ink-3) 0 2px, transparent 2px 4px);
+  }
+
+  /* ---------- F-S27 heat grid ---------- */
+
+  .heat th,
+  .heat td {
+    padding: 4px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .heat tbody th {
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .heat__cell {
+    min-width: 28px;
+    height: 28px;
+    border: 2px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 14px;
+  }
+
+  span.heat__cell {
+    display: inline-block;
+    width: 20px;
+    min-width: 0;
+    height: 16px;
+    vertical-align: middle;
+  }
+
+  .heat__cell--1 {
+    background: var(--heat-1);
+    color: var(--on-heat-1);
+  }
+
+  .heat__cell--2 {
+    background: var(--heat-2);
+    color: var(--on-heat-2);
+  }
+
+  .heat__cell--3 {
+    background: var(--heat-3);
+    color: var(--on-heat-3);
+  }
+
+  .heat__cell--4 {
+    background: var(--heat-4);
+    color: var(--on-heat-4);
+  }
+
+  .heat__legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .heat__key {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* ---------- F-S28 levels, F-S30 bumps ---------- */
+
+  .levels,
+  .bumps {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @container (min-width: 640px) {
+    .levels {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .bumps {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .levels__col,
+  .bumps__tile {
+    padding: var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .levels__head,
+  .bumps__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-weight: 700;
+  }
+
+  .levels__id,
+  .bumps__id {
+    padding: 0 var(--space-1);
+    border: 2px solid var(--ink);
+    background: var(--ink);
+    color: var(--bg);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  .levels__count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  .levels__items,
+  .bumps__changes {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0 0 0 var(--space-3);
+    font-size: 14px;
+  }
+
+  .levels__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+  }
+
+  .bumps__example,
+  .bumps__none {
+    margin: 0 0 var(--space-2);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-S29 suite ---------- */
+
+  .suite__label {
+    font-size: 14px;
+  }
+
+  @container (min-width: 560px) {
+    .suite .trust-bars__row {
+      grid-template-columns: 220px 1fr;
+    }
+  }
+
+  /* ---------- F-S31 decision tree ---------- */
+
+  .tree__q {
+    display: inline-block;
+    margin: 0;
+    padding: var(--space-1) var(--space-3);
+    border: var(--border);
+    background: var(--bg);
+    font-weight: 700;
+  }
+
+  .tree__branches {
+    display: grid;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0 var(--space-3);
+    padding: 0 0 0 var(--space-3);
+    border-left: 2px solid var(--ink-3);
+    list-style: none;
+  }
+
+  .tree__branches > li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .tree__out {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: 2px dashed var(--ink-2);
+  }
+
+  .tree__out--required {
+    border: 4px solid var(--ink);
+    font-weight: 700;
+  }
+
+  /* ---------- F-S32 pattern strips ---------- */
+
+  .pattern {
+    display: grid;
+    gap: 4px;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .pattern__step {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 14px;
+  }
+
+  .pattern__reads {
+    color: var(--ink-2);
+  }
+
+  .pattern__reads code + code {
+    margin-left: var(--space-1);
+  }
+}
+
+@layer components {
+  /* A source table a figure wraps keeps its own wrapping and scrolls in its
+     region; the drawing's overflow-wrap: anywhere would break every word. */
+  .fig__drawing .table-wrap {
+    overflow-wrap: normal;
+  }
+
+  .approval-flow > *,
+  .deleg > *,
+  .quorum > * {
+    min-width: 0;
+  }
+}
