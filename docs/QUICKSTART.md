@@ -31,11 +31,11 @@ title: The six steps
 ---
 flowchart TB
   accDescr: The quickstart goes from setup through validating the reference workflows and running the conformance tests to exploring a workflow, the capability ontology and a domain.
-  s1["1 Clone and set up"] --> s2["2 Validate the reference workflows"]
-  s2 --> s3["3 Run the conformance tests"]
-  s3 --> s4["4 Explore a workflow"]
-  s4 --> s5["5 Explore the capability ontology"]
-  s5 --> s6["6 Choose your domain"]
+  s1["Step 1: Clone and Setup"] --> s2["Step 2: Validate the Reference Workflows"]
+  s2 --> s3["Step 3: Run Conformance Tests"]
+  s3 --> s4["Step 4: Explore a Workflow"]
+  s4 --> s5["Step 5: Explore the Capability Ontology"]
+  s5 --> s6["Step 6: Choose Your Domain"]
 ```
 
 ---
@@ -112,8 +112,6 @@ PASS: pass_all_36_capabilities
 Conformance PASSED
 ```
 
-The fixtures live in `tests/fixtures/` (40+ of them); `tests/fixtures/EXPECTATIONS.json` records whether each should pass and which error and warning codes it must produce. Each verifies a specific validation behavior, for example:
-
 ```mermaid
 ---
 title: How the conformance suite runs
@@ -124,6 +122,8 @@ flowchart TB
   ex["EXPECTATIONS.json: should it pass, which codes"] --> run
   run --> out["One PASS line per fixture, then Conformance PASSED"]
 ```
+
+The fixtures live in `tests/fixtures/` (40+ of them); `tests/fixtures/EXPECTATIONS.json` records whether each should pass and which error and warning codes it must produce. Each verifies a specific validation behavior, for example:
 
 | Test | Purpose |
 |------|---------|
@@ -241,14 +241,14 @@ Key observations:
 title: The steps of debug_code_change
 ---
 flowchart TB
-  accDescr: debug_code_change runs observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, audit and rollback in order; critique reads attribute_out, audit reads plan_out and verify_out, and rollback reads checkpoint_out and is skipped when verify passed.
-  observe --> search --> attribute
-  attribute -->|attribute_out.causes| constrain
-  constrain --> critique --> plan --> checkpoint
+  accDescr: debug_code_change runs observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, audit and rollback in order; critique reads attribute_out.causes, audit reads plan_out and verify_out, and rollback reads checkpoint_out and is skipped when verify passed.
+  observe --> search --> attribute --> constrain
+  constrain --> critique["critique, reads attribute_out.causes"]
+  critique --> plan --> checkpoint
   checkpoint -->|checkpoint first| execute
   execute --> verify
-  verify -->|"verify_out, plan_out"| audit
-  audit --> rollback
+  verify --> audit["audit, reads plan_out and verify_out"]
+  audit --> rollback["rollback, reads checkpoint_out"]
   rollback -.->|"gate: skip when verify_out.passed is true"| skip[Skipped]
 ```
 
