@@ -1,0 +1,69 @@
+---
+// F-CI1, risk by layer (visual spec 3.11): a real table with a row per risk
+// level (its glyph, pips and word) and a column per layer (its glyph and
+// name, linking to the layer page). A cell is the number of that layer's
+// capabilities at that risk, printed on one of the four heat steps with a
+// 2px border; an empty cell is blank. It shows where the medium- and
+// high-risk capabilities sit, which the periodic table does not. A scale
+// legend follows. The table scrolls inside its wrapper when narrow.
+//
+// Props:
+// - n: number, required. The figure number on the page.
+import { HEAT_TOKENS, heatRanges, heatStep } from '../../lib/edge-figures';
+import { layerHref } from '../../lib/generated';
+import { riskByLayer, riskByLayerCaption } from '../../lib/layer-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import TableWrap from '../TableWrap.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  n: number;
+}
+
+const { n } = Astro.props;
+const m = riskByLayer();
+const title = 'Capabilities by risk level and layer';
+const ranges = heatRanges(m.max);
+const pips = { low: 1, medium: 2, high: 3 } as const;
+---
+<Figure id="ref-fig-risk-by-layer" n={n} title={title} caption={riskByLayerCaption(m)} kind="risk-by-layer">
+  <TableWrap label={title}>
+    <table class="umatrix riskmap">
+      <caption class="fig-sr">{title}</caption>
+      <thead>
+        <tr>
+          <th scope="col" class="umatrix__corner">Risk</th>
+          {m.layers.map((l) => (
+            <th scope="col" class="riskmap__layer has-layer" style={`--layer: var(--layer-${l})`}>
+              <a href={layerHref(l)}><PixelGlyph name={l} scale={2} /><span class="riskmap__layer-name">{l}</span></a>
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {m.rows.map((r) => (
+          <tr data-risk={r.risk}>
+            <th scope="row" class="umatrix__name riskmap__risk">
+              <PixelGlyph name={`risk:${r.risk}`} />
+              <span class="risk-pips" data-level={pips[r.risk]} aria-hidden="true">{Array.from({ length: pips[r.risk] }, () => <span class="risk-pips__pip"></span>)}</span>
+              {r.risk}
+            </th>
+            {r.counts.map((count) => {
+              const s = heatStep(count, m.max);
+              return s === 0 ? (
+                <td class="umatrix__cell umatrix__cell--empty riskmap__cell"><span class="fig-sr">0</span></td>
+              ) : (
+                <td class="umatrix__cell riskmap__cell" data-heat={s} style={`--cell: var(${HEAT_TOKENS[s - 1]!.fill}); --cell-ink: var(${HEAT_TOKENS[s - 1]!.text})`}>{count}</td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </TableWrap>
+  <ul class="umatrix__scale" aria-label="Heat scale: capabilities per cell">
+    {ranges.map((r) => (
+      <li><span class="umatrix__swatch" style={`--cell: var(${HEAT_TOKENS[r.step - 1]!.fill})`}></span>{r.from === r.to ? `${r.from}` : `${r.from} to ${r.to}`}</li>
+    ))}
+  </ul>
+</Figure>

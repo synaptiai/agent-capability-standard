@@ -1,10 +1,14 @@
 ---
 // The capabilities overview: the periodic table generated from the ontology,
-// then counts by risk level and by edge type.
+// risk by layer as a heat table (F-CI1) with the counts by risk level and by
+// edge type folded under it, then one card per layer (visual spec 3.11).
 import CapabilityTable from '../../components/CapabilityTable.astro';
+import IconCard from '../../components/fig/IconCard.astro';
+import RiskByLayer from '../../components/fig/RiskByLayer.astro';
+import '../../styles/figures-layer.css';
 import { loadOntology, RISKS } from '../../data/ontology';
 import DocLayout from '../../layouts/DocLayout.astro';
-import { pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
+import { layerHref, pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
 import TableWrap from '../../components/TableWrap.astro';
 
 const route = routeByUrl('/capabilities/');
@@ -28,7 +32,10 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
       <CapabilityTable />
     </section>
     <section class="capabilities-counts">
-      <h2 id={id('Counts')}>Counts</h2>
+      <h2 id={id('Risk by layer')}>Risk by layer</h2>
+      <RiskByLayer n={1} />
+      <details class="fig-details">
+      <summary>Counts by risk level and by edge type</summary>
       <TableWrap label="Capabilities by risk level">
         <table class="count-table">
           <caption>Capabilities by risk level</caption>
@@ -48,6 +55,17 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
           </tbody>
         </table>
       </TableWrap>
+      </details>
+    </section>
+    <section class="capabilities-layers">
+      <h2 id={id('The layers')}>The layers</h2>
+      <ul class="icon-cards">
+        {ontology.layers.map((l) => (
+          <IconCard glyph={l.id} title={l.id} href={layerHref(l.id)} number={l.capabilities.length} numberLabel="capabilities" eyebrow={`Layer ${l.order + 1}`}>
+            {l.description.replace(/\.$/, '')}. {l.cognitive_mapping}.
+          </IconCard>
+        ))}
+      </ul>
     </section>
   </article>
 </DocLayout>

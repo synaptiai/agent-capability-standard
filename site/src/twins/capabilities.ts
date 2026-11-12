@@ -26,8 +26,8 @@ import {
   usageCaption,
 } from '../lib/capability-figures';
 import { currentStandardText } from '../lib/spec-figures';
-import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle } from '../lib/layer-figures';
-import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, layerUsage, safetyRows, type SchemaRow } from '../lib/views';
+import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle, riskByLayer, riskByLayerCaption, usageMatrix, usageMatrixCaption } from '../lib/layer-figures';
+import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, safetyRows, type SchemaRow } from '../lib/views';
 import { blocks, cell, code, figure, generatedLine, markdownCopy, mdLink, table } from './md';
 import type { Twin } from './types';
 
@@ -144,7 +144,6 @@ export function layerTwin(layerId: string): Twin {
   const caps = capabilitiesOfLayer(ontology, layer.id);
   const sentence = `${layer.description.replace(/\.$/, '')}.`;
   const crossing = crossLayerEdges(layer.id, ontology);
-  const usage = layerUsage(layer.id);
   const markdown = blocks(
     `# ${layer.id}`,
     sentence,
@@ -175,11 +174,15 @@ export function layerTwin(layerId: string): Twin {
           .join('\n\n'),
     '## Workflows that use this layer',
     figure(stepsTitle(layer.id, stepsPerLayer()), stepsCaption(layer.id, stepsPerLayer()), table(['Layer', 'Steps'], stepsPerLayer().map((r) => [r.layer, String(r.steps)]))),
-    usage.length === 0
-      ? 'No workflow uses a capability of this layer.'
-      : usage
-          .map((u) => `- ${mdLink(code(u.workflow.id), `/workflows/${u.workflow.slug}/`)}: ${u.capabilities.map(code).join(', ')}`)
-          .join('\n'),
+    (() => {
+      const m = usageMatrix(layer.id);
+      if (m.rows.length === 0) return usageMatrixCaption(layer.id, m);
+      return figure(
+        `Workflows that use ${layer.id} capabilities`,
+        usageMatrixCaption(layer.id, m),
+        table(['Workflow', ...m.capabilities.map(code)], m.rows.map((r) => [mdLink(code(r.workflow.id), `/workflows/${r.workflow.slug}/`), ...r.counts.map((c) => (c === 0 ? '' : String(c)))])),
+      );
+    })(),
   );
   return { title: layer.id, description: `${sentence} ${layer.capabilities.length} capabilities.`, markdown };
 }
@@ -201,7 +204,11 @@ export function capabilitiesIndexTwin(): Twin {
         ),
       ),
     ),
-    '## Counts',
+    '## Risk by layer',
+    (() => {
+      const m = riskByLayer(ontology);
+      return figure('Capabilities by risk level and layer', riskByLayerCaption(m), table(['Risk', ...m.layers], m.rows.map((r) => [r.risk, ...r.counts.map((c) => (c === 0 ? '' : String(c)))])));
+    })(),
     table(['Risk', 'Capabilities'], RISKS.map((r) => [r, String(ontology.capabilities.filter((c) => c.risk === r).length)])),
     `${ontology.capabilities.filter((c) => c.mutation).length} of the ${n} capabilities change state.`,
     table(['Edge type', 'Edges'], ontology.edgeTypes.map((t) => [code(t.id), String(t.edges.length)])),
