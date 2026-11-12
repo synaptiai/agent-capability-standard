@@ -140,6 +140,29 @@ describe('built site', () => {
     }
   });
 
+  it('gives each generated capability and layer figure a matching figure block in the Markdown copy', () => {
+    // Visual spec 6.1 and 6.3: the copy holds "**Figure: {title}.** {caption}" with the same words as the
+    // page's figure title and figcaption, so the two outputs of one build are compared.
+    const decode = (t: string) => t.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const ids = ['ref-fig-relationships', 'ref-fig-contract', 'ref-fig-usage', 'ref-fig-layer-edges', 'ref-fig-layer-steps'];
+    let seen = 0;
+    for (const dir of ['capabilities', 'layers']) {
+      for (const d of pageDirs(dir)) {
+        const html = readFileSync(path.join(dist, dir, d, 'index.html'), 'utf8');
+        const md = readFileSync(path.join(dist, dir, d, 'index.md'), 'utf8');
+        for (const id of ids) {
+          const fig = new RegExp(`<figure[^>]*id="${id}"[\\s\\S]*?</figure>`).exec(html)?.[0];
+          if (!fig) continue;
+          const title = decode(new RegExp(`id="${id}-title"[^>]*>([^<]*)<`).exec(fig)![1]!);
+          const caption = decode(/<figcaption[^>]*>([^<]*)<\/figcaption>/.exec(fig)![1]!);
+          expect(md, `${dir}/${d} ${id}`).toContain(`**Figure: ${title}.** ${caption}`);
+          seen++;
+        }
+      }
+    }
+    expect(seen).toBeGreaterThan(pageDirs('capabilities').length);
+  });
+
   it('draws one F-C1 tile per neighbour and one edge mark per relationship on every capability page', () => {
     // Expected: the line-scanned edge triples; a symmetric type counts once per pair (visual spec 6.3).
     const sym = new Set(symmetricEdgeTypes());

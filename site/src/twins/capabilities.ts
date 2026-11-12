@@ -1,6 +1,6 @@
 // Markdown copies of the capability pages, the layer pages and the
 // capabilities overview, from the same data the HTML pages use.
-import { capabilitiesOfLayer, loadOntology, ONTOLOGY_SOURCE, RISKS, type Capability } from '../data/ontology';
+import { capabilitiesOfLayer, loadOntology, ONTOLOGY_SOURCE, RISKS } from '../data/ontology';
 import { loadVersions } from '../data/versions';
 import { capabilityUsage } from '../data/workflows';
 import { readRepoFile } from '../lib/repo';
@@ -34,17 +34,6 @@ function contractTable(rows: SchemaRow[]): string {
       cell([r.description, ...r.constraints].filter(Boolean).join(' ')),
     ]),
   );
-}
-
-export function flagLines(cap: Capability): string[] {
-  return [
-    `- Layer: ${mdLink(cap.layer, `/layers/${loadOntology().layers.find((l) => l.id === cap.layer)!.slug}/`)}`,
-    `- Risk: ${cap.risk}`,
-    `- Mutates state: ${cap.mutation ? 'yes' : 'no'}`,
-    `- Checkpoint required: ${cap.requires_checkpoint ? 'yes' : 'no'}`,
-    `- Approval required: ${cap.requires_approval ? 'yes' : 'no'}`,
-    ...(cap.mutation_overridable ? ['- A step may declare `mutation: false`'] : []),
-  ];
 }
 
 export function capabilityTwin(capId: string, skillSource: string): Twin {
@@ -89,7 +78,7 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
     `# ${cap.id}`,
     cap.description,
     generatedLine([ONTOLOGY_SOURCE, skillSource]) + ` Ontology version ${loadVersions().ontology}.`,
-    flagLines(cap).join('\n'),
+    `Layer: ${mdLink(cap.layer, `/layers/${ontology.layers.find((l) => l.id === cap.layer)!.slug}/`)}`,
     '## Safety',
     table(['Property', 'Value'], safetyRows(cap).map((r) => [r.term, r.value])),
     '## Relationships',

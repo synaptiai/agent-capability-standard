@@ -15,7 +15,7 @@ import Neighbourhood from '../../components/fig/Neighbourhood.astro';
 import PortColumn from '../../components/fig/PortColumn.astro';
 import WhereItRuns from '../../components/fig/WhereItRuns.astro';
 import SafetyPanel from '../../components/fig/SafetyPanel.astro';
-import { compositionChain, neighbours, splitAtH2s } from '../../lib/capability-figures';
+import { compositionChain, contractSummary, neighbours, splitAtH2s } from '../../lib/capability-figures';
 import { readRepoFile } from '../../lib/repo';
 import '../../styles/figures-capability.css';
 import ContractTable from '../../components/ContractTable.astro';
@@ -67,10 +67,12 @@ const next = () => ++figN;
 const nRelations = groups.length > 0 && neighbours(cap, ontology).length > 0 ? next() : 0;
 const nContract = next();
 const nUsage = usage.length > 0 ? next() : 0;
+const contract = contractSummary(cap);
+// A port column with no ports would be an empty figure (visual spec 1.1.5); none is drawn then.
 const after: Record<string, { kind: 'in' | 'out' | 'chain'; n: number }> = {};
 for (const part of skill.parts) {
-  if (part.id === 'inputs') after[part.id] = { kind: 'in', n: next() };
-  if (part.id === 'output-contract') after[part.id] = { kind: 'out', n: next() };
+  if (part.id === 'inputs' && contract.inputs.length > 0) after[part.id] = { kind: 'in', n: next() };
+  if (part.id === 'output-contract' && contract.outputs.length > 0) after[part.id] = { kind: 'out', n: next() };
   if (part.id === 'composition-patterns' && chainLength >= 2) after[part.id] = { kind: 'chain', n: next() };
 }
 const skillFacts = (
