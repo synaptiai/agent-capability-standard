@@ -501,6 +501,19 @@ Permission callback checks → Checkpoint valid → ALLOWED
 Evidence collector captures output
 ```
 
+```mermaid
+---
+title: The skill to checkpoint flow
+---
+flowchart TB
+  accDescr: When Claude invokes the checkpoint skill, the skill_tracker hook records a checkpoint in the CheckpointTracker; a later Write passes the PreToolUse hook and the permission callback because the checkpoint is valid, and the evidence collector captures the output.
+  skill["Claude invokes Skill(skill=checkpoint): git stash, file backup"] --> hook["skill_tracker hook: CheckpointTracker.create_checkpoint()"]
+  hook --> write[Claude invokes the Write tool]
+  write --> pre["PreToolUse hook: checkpoint exists, pass"]
+  pre --> perm["Permission callback: checkpoint valid, allowed"]
+  perm --> ev[Evidence collector captures the output]
+```
+
 ## Running Workflows
 
 The adapter guards tool calls an agent makes freely. To run a catalog
