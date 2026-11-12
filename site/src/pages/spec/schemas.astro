@@ -10,7 +10,7 @@ import { schemaGroups, schemaListing } from '../../lib/views';
 import TableWrap from '../../components/TableWrap.astro';
 import Figure from '../../components/fig/Figure.astro';
 import PixelBar from '../../components/fig/PixelBar.astro';
-import { SHELF_MIN_ROWS, schemaShelves, shelfCaption, shelfTitle } from '../../lib/index-figures';
+import { SHELF_MIN_ROWS, schemaShelves, shelfCaption, shelfMax, shelfTitle } from '../../lib/index-figures';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import '../../styles/figures-indexes.css';
 
@@ -20,7 +20,6 @@ const entries = schemaListing(readRepoFile(std.source));
 const id = refSlugger();
 const GROUPS = schemaGroups(std.version);
 const shelves = schemaShelves(entries, GROUPS);
-const maxLines = Math.max(...shelves.flatMap((sh) => sh.tiles.map((t) => t.lines)));
 let fig = 0;
 const description = `The schema files of the Agent Capability Standard, grouped by what the Standard requires of them, with a link to each file.`;
 ---
@@ -57,7 +56,7 @@ const description = `The schema files of the Agent Capability Standard, grouped 
                     {t.entry.purpose && <p class="schema-table__purpose">{t.entry.purpose}.</p>}
                     {t.entry.description && <p>{t.entry.description}</p>}
                   </td>
-                  <td><PixelBar value={t.lines} max={maxLines} label={`${t.lines} lines`} /></td>
+                  <td><PixelBar value={t.lines} max={shelfMax(sh)} label={`${t.lines} lines`} /></td>
                 </tr>
               ))}
             </tbody>
@@ -69,7 +68,7 @@ const description = `The schema files of the Agent Capability Standard, grouped 
           <h2 id={id(g.label)}>{g.label}</h2>
           <p>{g.intro}{sh.tiles[0]!.entry.source.includes('/', 'schemas/'.length) && <> In <code>{sh.tiles[0]!.entry.source.split('/').slice(0, -1).join('/')}/</code>.</>}</p>
           {sh.tiles.length >= SHELF_MIN_ROWS ? (
-            <Figure id={id(`fig-${g.label}`)} n={++fig} title={shelfTitle(sh)} caption={shelfCaption(sh, maxLines)} kind="schema-shelf">{table}</Figure>
+            <Figure id={id(`fig-${g.label}`)} n={++fig} title={shelfTitle(sh)} caption={shelfCaption(sh)} kind="schema-shelf">{table}</Figure>
           ) : table}
         </section>
       );

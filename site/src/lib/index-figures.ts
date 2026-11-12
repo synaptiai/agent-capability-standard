@@ -114,12 +114,17 @@ export function shelfTitle(sh: Shelf): string {
   return `${sh.label}: the files and their length`;
 }
 
-/** "5 files, all YAML; the longest is x at n lines. Bars share one scale across the page, up to m lines." */
-export function shelfCaption(sh: Shelf, maxLines: number): string {
+/** The top of a group's bar scale: its longest file. */
+export function shelfMax(sh: Shelf): number {
+  return Math.max(...sh.tiles.map((t) => t.lines));
+}
+
+/** "5 files, all YAML; the longest is x at n lines and the shortest y at m. Each bar is on this group's scale, up to n lines." */
+export function shelfCaption(sh: Shelf): string {
   const formats = [...new Set(sh.tiles.map((t) => t.format))];
   const longest = [...sh.tiles].sort((a, b) => b.lines - a.lines)[0]!;
   const shortest = [...sh.tiles].sort((a, b) => a.lines - b.lines)[0]!;
-  return `${sh.tiles.length} files, ${formats.length === 1 ? `all ${formats[0]}` : formats.map((f) => `${sh.tiles.filter((t) => t.format === f).length} ${f}`).join(' and ')}; the longest is ${longest.file} at ${longest.lines} lines and the shortest ${shortest.file} at ${shortest.lines}. Every bar on this page is on one scale, up to ${maxLines} lines.`;
+  return `${sh.tiles.length} files, ${formats.length === 1 ? `all ${formats[0]}` : formats.map((f) => `${sh.tiles.filter((t) => t.format === f).length} ${f}`).join(' and ')}; the longest is ${longest.file} at ${longest.lines} lines and the shortest ${shortest.file} at ${shortest.lines}. The bars are on this group's scale, up to ${shelfMax(sh)} lines.`;
 }
 
 // ------------------------------------------------------------ listing figures
@@ -140,10 +145,17 @@ export interface CountMatrix {
   rows: { label: string; url?: string; glyph?: string; counts: number[] }[];
 }
 
-/** Times `re` matches in a page's source, grouped by the key `key` makes of each match. */
-function countIn(source: string, re: RegExp, key: (m: RegExpMatchArray) => string | null): Map<string, number> {
+/** A page as the matrices read it: its card title, its URL and its Markdown source text. */
+export interface Doc {
+  label: string;
+  url: string;
+  text: string;
+}
+
+/** Times `re` matches in a text, grouped by the key `key` makes of each match. */
+function countIn(text: string, re: RegExp, key: (m: RegExpMatchArray) => string | null): Map<string, number> {
   const out = new Map<string, number>();
-  for (const m of readRepoFile(source).matchAll(re)) {
+  for (const m of text.matchAll(re)) {
     const k = key(m);
     if (k !== null) out.set(k, (out.get(k) ?? 0) + 1);
   }
@@ -152,25 +164,27 @@ function countIn(source: string, re: RegExp, key: (m: RegExpMatchArray) => strin
 
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
 
-/** Pages of a listing group, with their source files. */
-function groupPages(routes: readonly Route[], section: string, group: string | undefined): (Route & { source: string })[] {
-  return routes.filter((r): r is Route & { source: string } => r.section === section && r.group === group && r.source !== null);
+/** The pages of a section (of one group of it, when `group` is given), in route order, with their source text. */
+export function sectionDocs(routes: readonly Route[], section: string, group?: string): Doc[] {
+  return routes
+    .filter((r): r is Route & { source: string } => r.section === section && r.source !== null && (group === undefined || r.group === group))
+    .sort((a, b) => a.order - b.order)
+    .map((r) => ({ label: r.title, url: r.url, text: readRepoFile(r.source) }));
 }
 
 /**
  * The ISO/IEC 42001 documents against the clauses they cite ("Clause 6.1"
  * counts for clause 6). Columns are every clause any of them cites.
  */
-export function isoClauseMatrix(routes: readonly Route[]): CountMatrix {
-  const pages = groupPages(routes, 'compliance', 'ISO/IEC 42001');
-  const per = pages.map((p) => countIn(p.source, /\bClause (\d+)(?:\.\d+)*/g, (m) => m[1]!));
+export function isoClauseMatrix(pages: readonly Doc[]): CountMatrix {
+  const per = pages.map((p) => countIn(p.text, /\bClause (\d+)(?:\.\d+)*/g, (m) => m[1]!));
   const clauses = [...new Set(per.flatMap((m) => [...m.keys()]))].sort((a, b) => Number(a) - Number(b));
-  const rows = pages.map((p, i) => ({ label: p.title, url: p.url, counts: clauses.map((c) => per[i]!.get(c) ?? 0) }));
+  const rows = pages.map((p, i) => ({ label: p.label, url: p.url, counts: clauses.map((c) => per[i]!.get(c) ?? 0) }));
   const most = clauses.map((c, j) => ({ c, docs: rows.filter((r) => r.counts[j]! > 0).length })).sort((a, b) => b.docs - a.docs)[0]!;
   const widest = [...rows].sort((a, b) => b.counts.filter(Boolean).length - a.counts.filter(Boolean).length)[0]!;
   return {
     title: 'Which ISO/IEC 42001 clauses each document cites',
-    caption: `${rows.length} documents cite clauses ${clauses[0]} to ${clauses.at(-1)}. Clause ${most.c} is cited by the most documents (${most.docs}); the ${widest.label.toLowerCase()} cites the most clauses (${widest.counts.filter(Boolean).length}).`,
+    caption: `The ${rows.length} documents cite ${clauses.length} clauses: ${joinAnd(clauses)}. Clause ${most.c} is cited by the most documents (${most.docs}); the ${widest.label.toLowerCase()} cites the most clauses (${widest.counts.filter(Boolean).length}).`,
     rowHead: 'Document',
     unit: 'citations',
     columns: clauses.map((c) => ({ key: c, label: `Clause ${c}` })),
@@ -187,15 +201,14 @@ export const EU_MAX_COLUMNS = 10;
  * cite, with `k` the smallest number from two up that leaves no more than
  * EU_MAX_COLUMNS columns, so the matrix shows what the documents share.
  */
-export function euArticleMatrix(routes: readonly Route[]): CountMatrix {
-  const pages = groupPages(routes, 'compliance', 'EU AI Act');
-  const per = pages.map((p) => countIn(p.source, /\bArt(?:icle|\.)\s?(\d+)/g, (m) => m[1]!));
+export function euArticleMatrix(pages: readonly Doc[]): CountMatrix {
+  const per = pages.map((p) => countIn(p.text, /\bArt(?:icle|\.)\s?(\d+)/g, (m) => m[1]!));
   const all = [...new Set(per.flatMap((m) => [...m.keys()]))];
   const docsCiting = (a: string) => per.filter((m) => m.has(a)).length;
   let k = 2;
   while (all.filter((a) => docsCiting(a) >= k).length > EU_MAX_COLUMNS) k++;
   const shared = all.filter((a) => docsCiting(a) >= k).sort((a, b) => Number(a) - Number(b));
-  const rows = pages.map((p, i) => ({ label: p.title, url: p.url, counts: shared.map((a) => per[i]!.get(a) ?? 0) }));
+  const rows = pages.map((p, i) => ({ label: p.label, url: p.url, counts: shared.map((a) => per[i]!.get(a) ?? 0) }));
   const totals = shared.map((a, j) => ({ a, n: sum(rows.map((r) => r.counts[j]!)) })).sort((x, y) => y.n - x.n);
   return {
     title: `EU AI Act articles cited by ${k} or more documents`,
@@ -212,13 +225,12 @@ export function euArticleMatrix(routes: readonly Route[]): CountMatrix {
  * code spans (`mutate`). A plain word such as "plan" is not counted, since it
  * may not mean the capability.
  */
-export function backgroundLayerMatrix(routes: readonly Route[], layers: readonly { id: string; capabilities: string[] }[]): CountMatrix {
-  const pages = routes.filter((r): r is Route & { source: string } => r.section === 'background' && r.source !== null);
+export function backgroundLayerMatrix(pages: readonly Doc[], layers: readonly { id: string; capabilities: string[] }[]): CountMatrix {
   const layerOf = new Map(layers.flatMap((l) => l.capabilities.map((c) => [c, l.id] as const)));
   const ids = [...layerOf.keys()].sort((a, b) => b.length - a.length);
   const re = new RegExp('`(' + ids.join('|') + ')`', 'g');
-  const per = pages.map((p) => countIn(p.source, re, (m) => layerOf.get(m[1]!) ?? null));
-  const rows = pages.map((p, i) => ({ label: p.title, url: p.url, counts: layers.map((l) => per[i]!.get(l.id) ?? 0) }));
+  const per = pages.map((p) => countIn(p.text, re, (m) => layerOf.get(m[1]!) ?? null));
+  const rows = pages.map((p, i) => ({ label: p.label, url: p.url, counts: layers.map((l) => per[i]!.get(l.id) ?? 0) }));
   const totals = layers.map((l, j) => ({ id: l.id, n: sum(rows.map((r) => r.counts[j]!)) })).sort((a, b) => b.n - a.n);
   const top = [...rows].sort((a, b) => sum(b.counts) - sum(a.counts))[0]!;
   const none = rows.filter((r) => sum(r.counts) === 0).map((r) => r.label);
@@ -243,11 +255,11 @@ export function listingFigures(section: string, routes: readonly Route[], layers
       return [{ at: 'Skills', kind: 'skills' }];
     case 'compliance':
       return [
-        { at: 'EU AI Act', kind: 'matrix', matrix: euArticleMatrix(routes) },
-        { at: 'ISO/IEC 42001', kind: 'matrix', matrix: isoClauseMatrix(routes) },
+        { at: 'EU AI Act', kind: 'matrix', matrix: euArticleMatrix(sectionDocs(routes, 'compliance', 'EU AI Act')) },
+        { at: 'ISO/IEC 42001', kind: 'matrix', matrix: isoClauseMatrix(sectionDocs(routes, 'compliance', 'ISO/IEC 42001')) },
       ];
     case 'background':
-      return [{ at: 'Methodology', kind: 'matrix', matrix: backgroundLayerMatrix(routes, layers) }];
+      return [{ at: 'Methodology', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'background'), layers) }];
     default:
       return [];
   }
@@ -260,34 +272,4 @@ export function skillsCaption(rows: readonly { steps: number | null }[]): string
   const runs = rows.filter((r) => r.steps !== null).map((r) => r.steps!);
   const none = rows.length - runs.length;
   return `${runs.length} of the ${rows.length} composed skills run a catalog workflow, of ${Math.min(...runs)} to ${Math.max(...runs)} steps${none ? `; ${none} run${none === 1 ? 's' : ''} none` : ''}.`;
-}
-
-// ------------------------------------------------------------ F-CI1
-
-/**
- * F-CI1 Risk by layer: how many of each layer's capabilities sit at each risk
- * level, from the ontology. Rows are the risk levels from low to high.
- */
-export function riskByLayerMatrix(
-  layers: readonly { id: string; capabilities: string[] }[],
-  riskOf: (id: string) => string,
-  risks: readonly string[],
-): CountMatrix {
-  const rows = risks.map((risk) => ({
-    label: risk,
-    glyph: `risk:${risk}`,
-    counts: layers.map((l) => l.capabilities.filter((c) => riskOf(c) === risk).length),
-  }));
-  const top = risks.at(-1)!;
-  const topRow = rows.at(-1)!;
-  const where = layers.filter((_, j) => topRow.counts[j]! > 0).map((l) => `${l.id} (${topRow.counts[layers.indexOf(l)]})`);
-  const total = sum(topRow.counts);
-  return {
-    title: 'Risk by layer',
-    caption: `${total} capabilities are ${top} risk, all in ${joinAnd(where)}; ${layers.filter((_, j) => rows.every((r, i) => i === 0 || r.counts[j] === 0)).length} of the ${layers.length} layers hold only ${risks[0]}-risk capabilities.`,
-    rowHead: 'Risk',
-    unit: 'capabilities',
-    columns: layers.map((l) => ({ key: l.id, label: l.id, layer: l.id })),
-    rows,
-  };
 }

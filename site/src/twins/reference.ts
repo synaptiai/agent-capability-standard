@@ -71,7 +71,6 @@ export function schemasTwin(): Twin {
     ...(() => {
       const groups = schemaGroups(std.version);
       const shelves = schemaShelves(entries, groups);
-      const maxLines = Math.max(...shelves.flatMap((sh) => sh.tiles.map((t) => t.lines)));
       return shelves.map((sh) => {
         const g = groups.find((x) => x.key === sh.key)!;
         const rows = table(
@@ -82,7 +81,7 @@ export function schemasTwin(): Twin {
             String(t.lines),
           ]),
         );
-        return blocks(`## ${g.label}`, g.intro, sh.tiles.length >= SHELF_MIN_ROWS ? figure(shelfTitle(sh), shelfCaption(sh, maxLines), rows) : rows);
+        return blocks(`## ${g.label}`, g.intro, sh.tiles.length >= SHELF_MIN_ROWS ? figure(shelfTitle(sh), shelfCaption(sh), rows) : rows);
       });
     })(),
   );
