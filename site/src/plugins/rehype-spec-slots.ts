@@ -20,8 +20,10 @@ import { hastText } from './rehype-figure-marks';
 import { failWith, sourceOf } from './source';
 
 export interface RehypeSpecSlotsOptions {
-  /** Repo path of the current Standard. */
+  /** Repo path of the current Standard (diagnostic tiles). */
   current: string;
+  /** The slot map of each Standard file that has figures, by repo path. */
+  slots: ReadonlyMap<string, readonly SpecSlot[]>;
 }
 
 const PLUGIN = 'rehype-spec-slots';
@@ -180,8 +182,13 @@ const TILE_SECTIONS: readonly { level: number; section: string; column?: string 
 export default function rehypeSpecSlots(options: RehypeSpecSlotsOptions) {
   return (tree: Root, file: VFile): void => {
     const { repoPath } = sourceOf(file, PLUGIN);
-    if (repoPath !== options.current) return;
+    const slots = options.slots.get(repoPath);
+    if (!slots) return;
     const problems: string[] = [];
+    if (repoPath !== options.current) {
+      failWith(PLUGIN, placeSlots(tree, slots).map((p) => `${repoPath}: ${p}`));
+      return;
+    }
     const byCode = new Map(loadDiagnostics().map((d) => [d.code, d]));
     for (const s of TILE_SECTIONS) {
       const sec = section(tree.children, { key: '', level: s.level, section: s.section, at: 'heading' });
@@ -192,7 +199,7 @@ export default function rehypeSpecSlots(options: RehypeSpecSlotsOptions) {
       }
       if (diagnosticTiles(table.el, byCode, problems, `§${s.section.trim()}`, s.column) === 0) problems.push(`§${s.section.trim()}: no diagnostic code to draw as a tile`);
     }
-    problems.push(...placeSlots(tree));
+    problems.push(...placeSlots(tree, slots));
     failWith(PLUGIN, problems.map((p) => `${repoPath}: ${p}`));
   };
 }

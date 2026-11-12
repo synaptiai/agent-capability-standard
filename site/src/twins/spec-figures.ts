@@ -9,6 +9,7 @@ import * as D from '../lib/spec-dsl-figures';
 import { REPLAY_FIXTURES, replay, replayCaption, replayRows } from '../lib/run-replay';
 import { loadWorldStateSchema } from '../data/spec-sources';
 import { cell, code, figure, table } from './md';
+import { readRepoFile } from '../lib/repo';
 import * as T from '../lib/spec-tail-figures';
 import { loadIdentityPolicy } from '../data/spec-sources';
 
@@ -120,5 +121,18 @@ export function specTailBlocks(): string[] {
       table(['Family', ...heat.sections.map((x) => `§${x.n}`)], heat.families.map((f, i) => [f.name, ...heat.counts[i]!.map(String)])),
     ),
     figure('The conformance suite, from §10.3', T.suiteCaption(suite), table(['Part', 'Count', 'Folder'], suite.map((p) => [p.label, String(p.count), code(p.dir)]))),
+  ];
+}
+
+/** An older Standard's figure blocks: the keyword counts, the one figure there that adds to its own text. */
+export function specOlderBlocks(source: string): string[] {
+  const chapters = D.chapterKeywords(readRepoFile(source));
+  return [
+    '## Figures on this page',
+    figure(
+      'Where the requirements are, from §1.2',
+      D.keywordsCaption(chapters),
+      table(['Chapter', ...D.KEYWORD_GROUPS.map((g) => g.label)], chapters.map((c) => [`${c.n}. ${c.title}`, ...D.KEYWORD_GROUPS.map((g) => String(c.counts[g.id]))])),
+    ),
   ];
 }

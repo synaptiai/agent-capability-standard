@@ -174,6 +174,29 @@ export function familyTableCaption(f: Family): string {
   return `${plural(f.codes.length, 'code', 'codes')} in ${f.range}, every one ${f.severity === 'error' ? 'an error' : 'a warning'}; the Section column names where the Standard defines it.`;
 }
 
+/**
+ * A Standard's own error categories (its §9.1 table) with the number of codes
+ * its §9.x tables list for each, read from the text alone (for 1.0.0, whose
+ * codes the diagnostics loader does not hold).
+ */
+export function categoryCounts(text: string, where: string): { name: string; range: string; prefix: string; count: number }[] {
+  const rows = tableRows(sectionTable(text, '9.1 ', 0, where)).slice(1);
+  const codes = [...text.matchAll(/^\| ([A-Z]\d{3}) \|/gm)].map((m) => m[1]!);
+  return rows.map((r) => {
+    const m = /^([A-Z]\d)xx$/.exec(r[1]!);
+    if (!m) throw new Error(`${where}: §9.1 range "${r[1]}" is not a letter, a digit and xx`);
+    const count = new Set(codes.filter((c) => c.startsWith(m[1]!))).size;
+    if (count === 0) throw new Error(`${where}: §9.1 category ${r[0]} has no code in a §9 table`);
+    return { name: r[0]!, range: r[1]!, prefix: m[1]![0]!, count };
+  });
+}
+
+export function categoryCaption(c: { name: string; count: number }[]): string {
+  const max = Math.max(...c.map((x) => x.count));
+  const top = c.filter((x) => x.count === max).map((x) => x.name);
+  return `${plural(c.reduce((a, x) => a + x.count, 0), 'code', 'codes')} in ${plural(c.length, 'category', 'categories')}; ${list(top)} ${top.length === 1 ? 'has' : 'have'} the most, ${max}${top.length === 1 ? '' : ' each'}.`;
+}
+
 // ---------------------------------------------- F-S27 where codes are raised
 
 /** The §5.1 to §5.17 sections: number and the text up to the next §5.x heading (subsections included). */
@@ -358,6 +381,24 @@ export interface PatternStrip {
   wf: Workflow;
 }
 
+/** A fence's steps read line by line: each `- capability:` starts a step; its store_as and its references are kept. */
+export function stepsByLine(fence: string): { capability: string; store_as?: string; input_bindings: Record<string, string> }[] {
+  const out: { capability: string; store_as?: string; input_bindings: Record<string, string> }[] = [];
+  for (const line of fence.split('\n')) {
+    const cap = /^- capability:\s*(\S+)/.exec(line);
+    if (cap) {
+      out.push({ capability: cap[1]!, input_bindings: {} });
+      continue;
+    }
+    const cur = out.at(-1);
+    if (!cur) continue;
+    const store = /^\s+store_as:\s*(\S+)/.exec(line);
+    if (store) cur.store_as = store[1]!;
+    for (const m of line.matchAll(/\$\{[^}]+\}/g)) cur.input_bindings[`ref${Object.keys(cur.input_bindings).length}`] = m[0];
+  }
+  return out;
+}
+
 /** Each §12.5 fence with `capability:` steps, as a workflow, named by the bold "Pattern: …" before it. */
 export function patternStrips(text: string, where: string): PatternStrip[] {
   const blocks = sectionBlocks(text, '12.5 ', where);
@@ -371,7 +412,14 @@ export function patternStrips(text: string, where: string): PatternStrip[] {
     }
     if (b.type !== 'code') continue;
     if (!name) throw new Error(`${where}: a §12.5 fence has no "Pattern:" name before it`);
-    const steps: unknown = parse(b.value);
+    let steps: unknown;
+    try {
+      steps = parse(b.value);
+    } catch {
+      // A fence that is not valid YAML (1.0.0 writes an unquoted [${a}, ${b}]):
+      // read its steps line by line, keeping what the strip draws.
+      steps = stepsByLine(b.value);
+    }
     if (!Array.isArray(steps)) throw new Error(`${where}: §12.5's ${name} fence is not a list of steps`);
     const wf = parseCatalog(where, JSON.stringify({ [name]: { goal: name, risk: 'low', steps } }), 'core', loadOntology())[0]!;
     out.push({ name, wf });

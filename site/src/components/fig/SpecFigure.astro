@@ -11,6 +11,7 @@
 // - n: number, required. The figure's number on the page.
 // - inner: string | null, required. The wrapped block's HTML, or null.
 // - source: string, required. The Standard's repo path.
+// - slots: SpecSlot[], optional. The page's slot map (SPEC_SLOTS_100 on 1.0.0).
 import { fieldTable, fieldsCaption } from '../../lib/edge-figures';
 import {
   annotationGrammar,
@@ -25,7 +26,7 @@ import {
   safetyCriticalCaption,
   stepFieldRows,
 } from '../../lib/spec-figures';
-import { SPEC_SLOTS } from '../../lib/spec-slots';
+import { SPEC_SLOTS, type SpecSlot } from '../../lib/spec-slots';
 import * as D from '../../lib/spec-dsl-figures';
 import { REPLAY_FIXTURES } from '../../lib/run-replay';
 import { loadCatalogEnums, loadWorldStateSchema } from '../../data/spec-sources';
@@ -64,10 +65,12 @@ interface Props {
   n: number;
   inner: string | null;
   source: string;
+  /** The page's slot map; the current Standard's by default. */
+  slots?: readonly SpecSlot[];
 }
 
-const { slot, n, inner, source } = Astro.props;
-const def = SPEC_SLOTS.find((s) => s.key === slot);
+const { slot, n, inner, source, slots = SPEC_SLOTS } = Astro.props;
+const def = slots.find((s) => s.key === slot);
 if (!def) throw new Error(`SpecFigure: no slot ${slot}`);
 const text = readRepoFile(source);
 const where = source;
@@ -77,7 +80,8 @@ const idOf = (name: string) => refSlugger()(`Figure: ${name}`);
 const o = loadOntology();
 const schema = loadCatalogSchema();
 const KNOWN = ['fields', 'layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
-const TAIL = ['codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'world-state-fields', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
+const OLDER = ['ports-5.1', 'ports-5.2', 'ports-6.2', 'categories'];
+const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'world-state-fields', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
 const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
@@ -145,6 +149,9 @@ const decayRects: FigRect[] = decay
     ]
   : [];
 const codesSec = slot.startsWith('codes-') ? T.sectionCodes(text, slot.slice(6), where) : null;
+const PORT_TITLES: Record<string, [string, string]> = { 'ports-5.1': ['Workflow fields', 'A workflow'], 'ports-5.2': ['Step fields', 'A step'], 'ports-6.2': ['Event fields', 'A canonical event'] };
+const portRows = slot in PORT_TITLES ? T.fieldRows(text, `${slot.slice(6)} `, where) : [];
+const categories = slot === 'categories' ? T.categoryCounts(text, where) : [];
 const isOutcome = (n: T.TreeNode) => n.branches.length === 0;
 const pct = (v: number, max: number) => `${((v / max) * 100).toFixed(3)}%`;
 const line = (type: string) => edgeRects(type, 2, 8, 46, 8).rects;
@@ -659,5 +666,19 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
 {codesSec && inner && (
   <Figure id={idOf(`${codesSec.heading} codes`)} n={n} title={titled(`${codesSec.heading} by code`)} caption={T.sectionCodesCaption(codesSec)} kind="code-table">
     <Fragment set:html={inner} />
+  </Figure>
+)}
+{slot in PORT_TITLES && (
+  <Figure id={idOf(PORT_TITLES[slot]![0])} n={n} title={titled(PORT_TITLES[slot]![0])} caption={T.fieldGroupsCaption(portRows, PORT_TITLES[slot]![1])} kind="field-ports">
+    <ul class="ports ports--out spec-ports">{portRows.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} />)}</ul>
+  </Figure>
+)}
+{slot === 'categories' && (
+  <Figure id={idOf('error categories')} n={n} title={titled('Error categories')} caption={T.categoryCaption(categories)} kind="error-categories">
+    <ul class="trust-bars">
+      {categories.map((c) => (
+        <li class="trust-bars__row" data-family={c.prefix}><span class="trust-bars__name"><span class="diag-family diag-family--small" aria-hidden="true">{c.prefix}</span>{c.name} <code>{c.range}</code></span><PixelBar value={c.count} max={Math.max(...categories.map((x) => x.count))} /></li>
+      ))}
+    </ul>
   </Figure>
 )}

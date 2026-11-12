@@ -77,6 +77,34 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'pattern-2', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 2, startsWith: '- capability: plan' } },
 ];
 
+/**
+ * Standard 1.0.0: only figures drawn from its own text (visual spec 3.9 gives
+ * the older version chapter icons; these add what its tables, lists and
+ * fences support). The ontology, schemas and fixtures are 1.1 data and are
+ * not drawn here.
+ */
+export const SPEC_SLOTS_100: readonly SpecSlot[] = [
+  { key: 'requirements', level: 3, section: '1.2 ', at: after('list', 0, 'MUST, MUST NOT, SHALL, SHALL NOT: Absolu') },
+  { key: 'fields', level: 3, section: '4.1 ', at: 'heading' },
+  { key: 'ports-5.1', level: 3, section: '5.1 ', at: 'heading' },
+  { key: 'ports-5.2', level: 3, section: '5.2 ', at: 'heading' },
+  { key: 'ports-6.2', level: 3, section: '6.2 ', at: 'heading' },
+  { key: 'world-state-fields', level: 3, section: '6.3 ', at: 'heading' },
+  { key: 'categories', level: 3, section: '9.1 ', at: 'heading' },
+  { key: 'levels', level: 3, section: '10.1 ', at: 'heading' },
+  { key: 'bumps', level: 3, section: '11.4 ', at: 'heading' },
+  { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' } },
+  { key: 'pattern-0', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 0, startsWith: '- capability: plan' } },
+  { key: 'pattern-1', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 1, startsWith: '- capability: retrieve' } },
+  { key: 'pattern-2', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 2, startsWith: '- capability: verify' } },
+];
+
+/** The slot map of each Standard version that has one, by version. */
+export const SLOTS_BY_VERSION: Readonly<Record<string, readonly SpecSlot[]>> = {
+  '1.1.0': SPEC_SLOTS,
+  '1.0.0': SPEC_SLOTS_100,
+};
+
 /** The marker element a slot leaves in the rendered HTML (rehype-spec-slots), and its pattern. */
 export const SLOT_MARKER = /<div data-fig-slot="([^"]+)" data-fig-at="(here|start|end)"><\/div>/g;
 

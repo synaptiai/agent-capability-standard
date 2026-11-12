@@ -19,6 +19,7 @@ import rehypeCapabilitySkill from '../plugins/rehype-capability-skill';
 import rehypeFigureMarks from '../plugins/rehype-figure-marks';
 import rehypeKeywords from '../plugins/rehype-keywords';
 import rehypeSpecSlots from '../plugins/rehype-spec-slots';
+import { SLOTS_BY_VERSION } from './spec-slots';
 import rehypeTables from '../plugins/rehype-tables';
 import rehypeTaskLists from '../plugins/rehype-task-lists';
 import remarkHtmlAllowlist from '../plugins/remark-html-allowlist';
@@ -83,7 +84,17 @@ export const PROCESSOR_OPTIONS: UnifiedProcessorOptions = {
         edgeTypes: 'spec/EDGE_TYPES.md',
       },
     ],
-    [rehypeSpecSlots, { current: loadVersions().standard.current.source }],
+    [
+      rehypeSpecSlots,
+      {
+        current: loadVersions().standard.current.source,
+        slots: new Map(
+          [loadVersions().standard.current, ...loadVersions().standard.previous]
+            .filter((v) => SLOTS_BY_VERSION[v.version])
+            .map((v) => [v.source, SLOTS_BY_VERSION[v.version]!]),
+        ),
+      },
+    ],
     rehypeTables,
     rehypeTaskLists,
     rehypeCapabilitySkill,
