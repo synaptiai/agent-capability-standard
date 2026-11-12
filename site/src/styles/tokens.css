@@ -131,6 +131,7 @@
     /* Motion */
     --step-hover: 120ms steps(2, end);
     --step-marker: 80ms steps(2, end);
+    --step-replay: 280ms steps(1, end);
 
     /* Shiki's css-variables theme reads these names */
     --astro-code-foreground: var(--code-foreground);

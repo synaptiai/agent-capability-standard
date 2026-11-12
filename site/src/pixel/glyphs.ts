@@ -185,8 +185,9 @@ export const UI_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   'policy:always': ['.......', '#######', '#..#..#', '#..#..#', '#######', '.......', '.......'],
   // Lifecycle and document statuses (visual spec 2.3, extended to every
   // status style the sources use; see STATUS_STYLES in src/lib/status.ts).
-  // draft: a pencil tip over a dashed line.
-  'status:draft': ['....##.', '...#=#.', '..#=#..', '.##....', '.......', '#.#.#.#', '.......'],
+  // draft: an upright pencil, its point on a dashed line still being drawn
+  // (upright, so it stays apart from the slanted `pencil` of a mutating step).
+  'status:draft': ['..###..', '..#=#..', '..#=#..', '..###..', '...#...', '.......', '#.#.#.#'],
   // accepted: a check over a solid bar.
   'status:accepted': ['......#', '.....##', '#...##.', '##.##..', '.###...', '.......', '#######'],
   // rejected: a small X over a solid bar.
@@ -199,16 +200,19 @@ export const UI_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   'status:normative-reference': ['.#####.', '..###..', '..###..', '.#####.', '#######', '...#...', '...#...'],
   // reference: a bookmark ribbon.
   'status:reference': ['.#####.', '.#####.', '.#####.', '.#####.', '.##.##.', '.#...#.', '.......'],
-  // analysis: plus and minus, for a weighing of pros and cons.
-  'status:analysis': ['.##....', '######.', '######.', '.##....', '.......', '..#####', '..#####'],
+  // analysis: a balance (beam, hanging pans, post and base), for a weighing
+  // of pros and cons.
+  'status:analysis': ['...#...', '#######', '#..#..#', '##.#.##', '...#...', '...#...', '.#####.'],
   // historical: an hourglass with sand in the lower bulb.
   'status:historical': ['#######', '.#...#.', '..#.#..', '...#...', '..#=#..', '.#===#.', '#######'],
-  // candidate: a ticket with notches and a perforation.
-  'status:candidate': ['#######', '##.####', '#######', '.#.###.', '#######', '##.####', '#######'],
+  // candidate: a ballot box with a slip going into its slot, a text put to
+  // a vote (apart from the two joined squares of policy:always).
+  'status:candidate': ['..###..', '..#.#..', '##...##', '#.....#', '#.....#', '#.....#', '#######'],
   // Skills and agents. capability: an outline tile lifted by a shadow;
-  // general-purpose: a wrench.
+  // general-purpose: a wrench, its open jaw at the top left and a handle
+  // three cells wide running down to the right.
   'skill:capability': ['.......', '####...', '#..##..', '#..##..', '#####..', '.####..', '.......'],
-  'agent:general-purpose': ['.#.#...', '.###...', '..#....', '..#....', '...#...', '....##.', '....##.'],
+  'agent:general-purpose': ['#.#....', '#.#....', '###....', '.###...', '..###..', '...###.', '....##.'],
   // A folder with a tab, for directory-tree panels.
   folder: ['.......', '###....', '#######', '#######', '#.....#', '#######', '.......'],
   // A group: two boxes under one bracket (a parallel group, a Mermaid subgraph).

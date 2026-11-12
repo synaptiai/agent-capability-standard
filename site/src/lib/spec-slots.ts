@@ -70,7 +70,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'code-heat', level: 3, section: '9.6 ', at: 'heading' },
   { key: 'codes-9.6', level: 3, section: '9.6 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },
   { key: 'codes-9.7', level: 3, section: '9.7 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },
-  { key: 'levels', level: 3, section: '10.2 ', at: 'heading' },
+  { key: 'levels', level: 3, section: '10.1 ', at: 'heading' },
   { key: 'suite', level: 3, section: '10.3 ', at: 'heading' },
   { key: 'bumps', level: 3, section: '11.4 ', at: 'heading' },
   { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' } },

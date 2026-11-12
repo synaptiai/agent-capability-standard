@@ -141,56 +141,99 @@
 
   /* ---------- F-S1 safety ordering ---------- */
 
-  .order-groups {
-    display: grid;
-    gap: var(--space-4);
+  /* Sources on top, targets below, a lane per source and edge type between
+     them; in a narrower frame, two wrapped rows of 48px cells, each target listing
+     its incoming edges as mark and source symbol. */
+  .order-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
     margin: 0;
     padding: 0;
     list-style: none;
+    font-size: 14px;
   }
 
-  .order-group__src {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin: 0 0 var(--space-2);
-    font-weight: 700;
-  }
-
-  .order-edges {
-    display: grid;
-    gap: var(--space-2);
-    margin: 0 0 0 14px;
-    padding: 0 0 0 var(--space-3);
-    border-left: 2px solid var(--ink-3);
-    list-style: none;
-  }
-
-  .order-edge {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .order-edge__type {
+  .order-key li {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    min-width: 150px;
   }
 
-  .order-edge__line {
+  .order-key__line {
     color: var(--ink-2);
   }
 
-  .order-edge__targets {
+  .order-draw {
+    position: relative;
+    display: none;
+    color: var(--ink);
+  }
+
+  .order-draw > svg {
+    position: absolute;
+    inset: 0;
+  }
+
+  .order-draw__node {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 96px;
+  }
+
+  .order-draw__node code {
+    height: 18px;
+    font-size: 13px;
+    line-height: 18px;
+    background: none;
+    padding: 0;
+  }
+
+  .order-cells__head {
+    margin: 0 0 var(--space-1);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .order-cells__row {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-1);
-    margin: 0;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-3);
     padding: 0;
     list-style: none;
+  }
+
+  .order-cell {
+    display: grid;
+    justify-items: center;
+    align-content: start;
+    gap: 2px;
+    width: 48px;
+    margin: 0;
+  }
+
+  .order-cell__mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 14px;
+  }
+
+  /* The drawing is 608px wide (ORDER_GEOM); the frame adds no scroll. */
+  @container (min-width: 620px) {
+    .order-draw {
+      display: block;
+    }
+
+    .order-cells {
+      display: none;
+    }
   }
 
   /* ---------- F-S6 safety defaults ---------- */
@@ -232,58 +275,137 @@
     border-color: var(--ink-2);
   }
 
-  .flag-key__pips,
-  .flag-col__pips {
+  .flag-key__pips {
     display: inline-flex;
-    justify-content: center;
-    gap: 2px;
-    width: 24px;
-  }
-
-  .flag-key__pips span,
-  .flag-col__pips span {
-    width: 6px;
-    height: 6px;
-    border: 2px solid var(--ink-3);
-  }
-
-  .flag-key__pips span,
-  .flag-col__pips .is-on {
-    border-color: var(--ink);
-    background: var(--ink);
-  }
-
-  .flag-groups {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-3) var(--space-4);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .flag-group__head {
-    display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: var(--space-1);
-    margin: 0 0 var(--space-1);
-    font-family: var(--font-eyebrow);
-    font-size: 12px;
+  }
+
+  /* Risk pips in the risk's own colour (visual spec 1.2), always with the word. */
+  .flag-pips {
+    --pip: 6px;
+  }
+
+  .flag-pips[data-risk='low'] {
+    color: var(--risk-low);
+  }
+
+  .flag-pips[data-risk='medium'] {
+    color: var(--risk-medium);
+  }
+
+  .flag-pips[data-risk='high'] {
+    color: var(--risk-high);
+  }
+
+  /* Wide: 36 rows in table order, a column per flag. */
+  .flag-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1.4fr) 104px repeat(3, minmax(64px, 1fr));
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 1px 0;
+  }
+
+  .flag-row > .flag-cell {
+    justify-self: center;
+  }
+
+  .flag-row--head {
+    padding-bottom: var(--space-1);
+    border-bottom: 2px solid var(--ink-3);
+    font-size: 13px;
     color: var(--ink-2);
   }
 
-  .flag-group__caps {
-    display: flex;
-    gap: 4px;
+  .flag-row--head > :nth-child(n + 3) {
+    text-align: center;
+  }
+
+  .flag-rows {
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
-  .flag-col {
-    display: grid;
-    justify-items: center;
-    gap: 4px;
+  .flag-row--layer:not(:first-child) {
+    margin-top: 4px;
+    padding-top: 5px;
+    border-top: 2px solid var(--rule);
+  }
+
+  .flag-row__cap,
+  .flag-row__risk {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .flag-row__id {
+    font-size: 14px;
+  }
+
+  .flag-row__word {
+    font-size: 13px;
+  }
+
+  /* Narrow: the rows as 4 columns, each a tile with its four marks under it. */
+  @container (max-width: 519px) {
+    .flag-row--head {
+      display: none;
+    }
+
+    .flag-rows {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-rows: repeat(var(--rows), auto);
+      grid-auto-flow: column;
+      gap: var(--space-2) var(--space-1);
+    }
+
+    .flag-row {
+      grid-template-columns: repeat(3, 16px);
+      grid-template-areas:
+        'cap cap cap'
+        'risk risk risk';
+      justify-content: center;
+      gap: 3px 2px;
+      padding: 0;
+    }
+
+    .flag-row--layer:not(:first-child) {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .flag-row__cap {
+      grid-area: cap;
+      justify-self: center;
+    }
+
+    .flag-row__id {
+      display: none;
+    }
+
+    .flag-row__risk {
+      grid-area: risk;
+      gap: var(--space-1);
+      justify-self: center;
+      width: max-content;
+      white-space: nowrap;
+    }
+
+    .flag-row__word {
+      font-size: 12px;
+    }
+
+    .flag-row > .flag-cell {
+      width: 16px;
+      height: 14px;
+    }
   }
 
   /* ---------- F-S11 operator precedence ---------- */
@@ -416,27 +538,146 @@
 
   /* ---------- F-S14 recovery loop, F-S16 silent source ---------- */
 
-  .rloop__step {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
+  /* F-S14: the goto_step loop as a return bracket in a lane on the left,
+     from the step back up to its target, with the max_loops counter on the
+     loop; the ways out drop below the step. */
+  .rloop__rows {
     margin: 0;
-    padding: var(--space-2) var(--space-3);
-    border: var(--border);
-    background: var(--bg);
-    font-weight: 700;
-  }
-
-  .rloop__branches {
-    display: grid;
-    gap: var(--space-2);
-    margin: 0 0 0 var(--space-4);
-    padding: var(--space-2) 0 0 var(--space-3);
-    border-left: 2px solid var(--ink-2);
+    padding: 0;
     list-style: none;
   }
 
-  .rloop__branch,
+  .rloop__row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    margin: 0;
+  }
+
+  .rloop__lane {
+    position: relative;
+  }
+
+  /* The bracket: 4px rects, square ends, as F-W1's rollback lane. */
+  .rloop__row--target .rloop__lane::before,
+  .rloop__row--step .rloop__lane::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    right: 4px;
+    border-left: 4px solid var(--ink);
+  }
+
+  .rloop__row--target .rloop__lane::before {
+    top: calc(50% - 2px);
+    bottom: 0;
+    border-top: 4px solid var(--ink);
+  }
+
+  .rloop__row--step .rloop__lane::before {
+    top: 0;
+    height: calc(50% + 2px);
+    border-bottom: 4px solid var(--ink);
+  }
+
+  .rloop__row--loop .rloop__lane {
+    border-left: 4px solid var(--ink);
+    margin-left: 6px;
+  }
+
+  .rloop__tip {
+    position: absolute;
+    top: calc(50% - 6px);
+    right: -2px;
+  }
+
+  .rloop__box {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    margin: var(--space-1) 0;
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid var(--ink-2);
+    background: var(--bg);
+  }
+
+  .rloop__box--step {
+    border: var(--border);
+    font-weight: 700;
+  }
+
+  .rloop__loop {
+    display: grid;
+    gap: var(--space-1);
+    margin: var(--space-1) 0;
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid var(--ink);
+    border-left-width: 0;
+    background: var(--bg);
+  }
+
+  .rloop__when,
+  .rloop__then,
+  .rloop__counter {
+    margin: 0;
+  }
+
+  .rloop__when {
+    font-weight: 700;
+  }
+
+  .rloop__then {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+  }
+
+  .rloop__counter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .rloop__cells {
+    display: inline-flex;
+    gap: 2px;
+  }
+
+  .rloop__cell {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--ink);
+  }
+
+  .rloop__cell--more {
+    border-style: dashed;
+    border-color: var(--ink-3);
+  }
+
+  .rloop__exits {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0 0 0 28px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .rloop__exit {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-1);
+    margin: 0;
+  }
+
+  .rloop__exit .flow-arrow {
+    margin-left: var(--space-3);
+  }
+
   .silent__mode {
     display: flex;
     flex-wrap: wrap;
@@ -447,26 +688,14 @@
     background: var(--bg);
   }
 
-  .rloop__branch--loop {
-    border: 2px solid var(--ink);
-    border-left-width: 4px;
-  }
-
-  .rloop__then {
-    flex: 1 1 240px;
-  }
-
-  .rloop__when {
-    flex: 1 1 100%;
-    font-weight: 700;
-  }
-
-  .rloop__counter {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-size: 14px;
-    color: var(--ink-2);
+  .rloop__exit-body {
+    display: grid;
+    gap: var(--space-1);
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid var(--line);
+    background: var(--bg);
   }
 
   .silent {
@@ -812,7 +1041,63 @@
     list-style: none;
   }
 
+  /* Loops: a lane per loop on the left of the rows, 12px apart, and in it a
+     return bracket from the step that looped (bottom tick) up to the step it
+     went back to (top tick), as the rollback lane of F-W1. The rows are 4px
+     apart and have a 2px border, so an upright reaches 6px past its row. */
+  .replay--lanes {
+    padding-left: calc(var(--lanes, 1) * 12px + 8px);
+  }
+
+  .replay__lanes {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    left: calc(-2px - var(--lanes) * 12px - 8px);
+    width: calc(var(--lanes) * 12px + 8px);
+  }
+
+  .replay__lane {
+    position: absolute;
+    right: 0;
+    border-color: var(--ink);
+    border-style: solid;
+    border-width: 0;
+  }
+
+  .replay__lane:nth-child(1) { left: 2px; }
+  .replay__lane:nth-child(2) { left: 14px; }
+  .replay__lane:nth-child(3) { left: 26px; }
+
+  .replay__lane--top {
+    top: calc(50% - 2px);
+    bottom: -6px;
+    border-top-width: 4px;
+    border-left-width: 4px;
+  }
+
+  .replay__lane--bottom {
+    top: -6px;
+    height: calc(50% + 8px);
+    border-bottom-width: 4px;
+    border-left-width: 4px;
+  }
+
+  .replay__lane--mid {
+    top: -6px;
+    bottom: -6px;
+    right: auto;
+    border-left-width: 4px;
+  }
+
+  .replay__lane--self {
+    top: 25%;
+    bottom: 25%;
+    border-width: 4px 0 4px 4px;
+  }
+
   .replay__row {
+    position: relative;
     display: grid;
     grid-template-columns: 24px 24px 1fr;
     gap: 2px var(--space-2);
@@ -889,19 +1174,35 @@
   }
 
   .replay__loop {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-left: 12px;
+    position: relative;
     padding: 2px var(--space-2);
-    border-left: 4px solid var(--ink);
     font-size: 14px;
   }
 
-  .replay__loop-line {
-    width: 12px;
-    height: 2px;
-    background: var(--ink);
+  .replay__loop-text {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .replay__why {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .replay__why svg {
+    flex: none;
+    margin-top: 4px;
+  }
+
+  .replay__exit {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0;
+    font-size: 14px;
   }
 
   .replay__end {
@@ -1038,6 +1339,9 @@
 
   /* ---------- F-S24b merge thresholds ---------- */
 
+  /* F-S24b: the thresholds as ticks on one line, labels alternating above
+     and below, and under it the bands between them, each named by the
+     action it leads to. */
   .scale {
     padding: 0 var(--space-2);
   }
@@ -1045,7 +1349,7 @@
   .scale__track {
     position: relative;
     height: 4px;
-    margin: 40px 0;
+    margin: 44px 0 56px;
     background: var(--ink-2);
   }
 
@@ -1067,9 +1371,24 @@
   .scale__label {
     position: absolute;
     bottom: 100%;
-    right: 0;
+    display: flex;
+    gap: var(--space-1);
+    align-items: baseline;
     font-size: 13px;
     white-space: nowrap;
+  }
+
+  .scale__label--mid {
+    left: 2px;
+    transform: translateX(-50%);
+  }
+
+  .scale__label--end {
+    right: 0;
+  }
+
+  .scale__label--start {
+    left: 0;
   }
 
   .scale__tick--low .scale__label {
@@ -1082,7 +1401,43 @@
     font-size: 13px;
   }
 
-  /* Read by screen readers at every width (the line is aria-hidden); shown when the line has no labels. */
+  .scale__label {
+    width: max-content;
+  }
+
+  .scale__bands {
+    position: relative;
+    height: 28px;
+  }
+
+  .scale__band {
+    position: absolute;
+    top: 0;
+    display: grid;
+    place-items: center;
+    height: 28px;
+    border: 2px solid var(--ink-3);
+    background: var(--bg-mut);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    overflow: hidden;
+  }
+
+  .scale__band + .scale__band {
+    border-left-width: 0;
+  }
+
+  .scale__band--open {
+    border-style: dashed;
+    background: transparent;
+    color: var(--ink-2);
+  }
+
+  .scale__band-name {
+    white-space: nowrap;
+  }
+
+  /* Read by screen readers at every width (the plot is aria-hidden); shown when the bands are too narrow for their names. */
   .scale__list {
     position: absolute;
     width: 1px;
@@ -1096,10 +1451,78 @@
     font-size: 14px;
   }
 
-  /* Too narrow for labels on the line: number the ticks and list them below. */
+  .scale__list li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .scale__band-n {
+    display: none;
+  }
+
+  .scale__swatch {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    border: 2px solid var(--ink-3);
+    background: var(--bg-mut);
+  }
+
+  .scale__swatch--open {
+    border-style: dashed;
+    background: transparent;
+  }
+
+  /* At 308px the band names do not fit their bands: the list names them, and
+     each label wraps its name at the underscores, value first. */
   @container (max-width: 479px) {
+    .scale__track {
+      margin: 72px 0 84px;
+    }
+
+    /* One word per line: the names break at their underscores. */
     .scale__label {
+      flex-direction: column;
+      gap: 0;
+      align-items: center;
+      line-height: 1.2;
+    }
+
+    .scale__label code {
+      display: flex;
+      flex-direction: column;
+      align-items: inherit;
+    }
+
+    .scale__label--end {
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .scale__label--start {
+      align-items: flex-start;
+    }
+
+    .scale__label code {
+      font-size: 12px;
+    }
+
+    .scale__tick--low .scale__label {
+      flex-direction: column-reverse;
+    }
+
+    .scale__band-name {
       display: none;
+    }
+
+    .scale__band-n {
+      display: inline;
+      font-size: 12px;
     }
 
     .scale__list {
@@ -1108,6 +1531,7 @@
       gap: var(--space-1);
       width: auto;
       height: auto;
+      margin-top: var(--space-3);
       overflow: visible;
       clip-path: none;
       white-space: normal;
@@ -1216,6 +1640,59 @@
     }
   }
 
+  /* F-S27 at full width: families as rows and the 17 sections as columns,
+     the grid visual spec 3.9 gives; a narrower frame shows it transposed,
+     sections as rows. */
+  .heat-grid--wide {
+    display: none;
+  }
+
+  @container (min-width: 640px) {
+    .heat-grid--wide {
+      display: block;
+    }
+
+    .heat-grid--narrow {
+      display: none;
+    }
+  }
+
+  .heat--wide {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .heat--wide .heat__head-col {
+    width: 124px;
+  }
+
+  .heat--wide tbody th {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .heat--wide thead th {
+    padding: 2px 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 400;
+  }
+
+  .heat--wide thead .heat__span {
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink-2);
+    text-align: left;
+  }
+
+  .heat--wide td.heat__cell {
+    width: auto;
+    min-width: 0;
+    padding: 2px 0;
+  }
+
   .heat__cell {
     min-width: 28px;
     height: 28px;
@@ -1280,11 +1757,14 @@
     list-style: none;
   }
 
-  @container (min-width: 640px) {
+  /* F-S28: the four levels side by side, equal, none drawn on top of another. */
+  @container (min-width: 600px) {
     .levels {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
     }
+  }
 
+  @container (min-width: 640px) {
     .bumps {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
@@ -1336,11 +1816,16 @@
     font-size: 14px;
   }
 
-  .levels__chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1);
-    margin-top: var(--space-1);
+  .levels__name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* A § reference or code in a bullet, drawn in its place as a chip. */
+  .levels__items .levels__chip {
+    display: inline-block;
+    margin: 2px 0 2px var(--space-1);
+    vertical-align: middle;
   }
 
   .bumps__example,
