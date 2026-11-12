@@ -18,7 +18,7 @@
 // - id: string, required. A `ref-` id for the figure.
 import '../../styles/figures-workflow.css';
 import type { Workflow } from '../../data/workflows';
-import { spineStepWords, workflowSpine, ROLE_GLYPH, type SpineStep } from '../../lib/workflow-figures';
+import { FAILURE_MARK, spineStepWords, workflowSpine, ROLE_GLYPH, type SpineStep } from '../../lib/workflow-figures';
 import { bracket, chevron, glyphRects, laneOffsets, type FigRect } from '../../pixel/lines';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import Figure from './Figure.astro';
@@ -89,6 +89,9 @@ const lane = (parts: number[]) => (parts.length === 0 ? 0 : parts.reduce((a, b) 
 const gateWide = Math.max(0, ...spine.steps.map((s) => lane([...(s.condition !== null ? [GLYPH] : []), ...(s.gates.length > 0 ? [GLYPH, ...s.gates.map(() => GLYPH)] : [])])));
 const gateNarrow = Math.max(0, ...spine.steps.map((s) => lane([...(s.condition !== null ? [GLYPH] : []), ...(s.gates.length > 0 ? [GLYPH] : []), ...(s.gates.length > 1 ? [COUNT] : [])])));
 const gateCols = spine.lanes.gate ? 1 : 0;
+// The failure lane: the failure cross, then one glyph per failure mode. The
+// cross stays when narrow: it is what tells a failure's undo or stop from
+// the step's own role glyph and from a gate's.
 const failCols = spine.maxFailures;
 const columns = (narrow: boolean) =>
   [
@@ -97,7 +100,7 @@ const columns = (narrow: boolean) =>
     '14px',
     'minmax(0, 1fr)',
     ...(gateCols > 0 ? [`${narrow ? gateNarrow : gateWide}px`] : []),
-    ...(failCols > 0 ? [`${failCols * 16 - 2}px`] : []),
+    ...(failCols > 0 ? [`${(failCols + 1) * 16 - 2}px`] : []),
     '22px',
     ...(spine.lanes.reads ? [`${READ_W}px`] : []),
   ].join(' ');
@@ -176,7 +179,10 @@ const stepId = (k: number) => `ref-step-${k}`;
                   </span>
                 )}
                 {failCols > 0 && (
-                  <span class="spine__fail" aria-hidden="true">{s.failures.map((f) => <PixelGlyph name={`fail:${f}`} />)}</span>
+                  <span class="spine__fail" aria-hidden="true">
+                    {s.failures.length > 0 && <PixelGlyph name={FAILURE_MARK} class="spine__failmark" />}
+                    {s.failures.map((f) => <PixelGlyph name={`fail:${f}`} />)}
+                  </span>
                 )}
                 <span class="spine__risk" aria-hidden="true" data-risk={s.risk}>
                   <span class="risk-pips" data-level={pips[s.risk]}>{Array.from({ length: pips[s.risk] }, () => <span class="risk-pips__pip"></span>)}</span>
@@ -211,7 +217,7 @@ const stepId = (k: number) => `ref-step-${k}`;
         {l.glyph === 'pips' ? (
           <span class="risk-pips" aria-hidden="true">{[1, 2, 3].map(() => <span class="risk-pips__pip"></span>)}</span>
         ) : (
-          <PixelGlyph name={l.glyph} />
+          <span class="spine-legend__glyphs">{l.marker && <PixelGlyph name={l.marker} />}<PixelGlyph name={l.glyph} /></span>
         )}
         <span>{l.label}</span>
       </li>

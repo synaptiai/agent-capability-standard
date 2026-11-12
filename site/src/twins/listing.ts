@@ -16,7 +16,7 @@ function figureText(f: ListingFigure): string {
     return figure(m.title, m.caption, table([m.rowHead, ...m.columns.map((c) => c.label)], m.rows.map((r) => [r.url ? mdLink(r.label, r.url) : r.label, ...r.counts.map(String)])));
   }
   if (f.kind === 'bars') {
-    return figure(f.bars.title, f.bars.caption, table(['Release', 'Changes'], f.bars.rows.map((r) => [r.url ? mdLink(r.label, r.url) : r.label, r.words])));
+    return figure(f.bars.title, f.bars.caption, table([...f.bars.head], f.bars.rows.map((r) => [r.url ? mdLink(r.label, r.url) : r.label, r.words])));
   }
   const wfs = loadWorkflows();
   const rows = Object.keys(COMPOSED_SKILLS)

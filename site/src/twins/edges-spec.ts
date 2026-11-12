@@ -3,9 +3,24 @@
 // list or fence they sit beside. Each block uses the same caption function as
 // the page's <figcaption>.
 import { loadCatalogSchema } from '../data/catalog-schema';
-import { loadOntology } from '../data/ontology';
+import { loadOntology, type EdgeTypeInfo } from '../data/ontology';
 import { edgeTypesCaption, gateBranches, gateCaption, layerModelCaption, safetyCritical, safetyCriticalCaption, stepAnatomy, stepAnatomyCaption } from '../lib/spec-figures';
-import { edgeExample, edgeMatrixCaption, layerPairCounts } from '../lib/edge-figures';
+import {
+  CHAIN_SECTIONS,
+  chainCaption,
+  changesCaption,
+  EDGE_TYPES_SOURCE,
+  edgeCardCaption,
+  edgeChanges,
+  edgeExample,
+  edgeMatrixCaption,
+  exampleChains,
+  fieldsCaption,
+  fieldTable,
+  layerPairCounts,
+  summaryCaption,
+} from '../lib/edge-figures';
+import { readRepoFile } from '../lib/repo';
 import { edgeTypeCount, safetyRows } from '../lib/views';
 import { cell, code, figure, table } from './md';
 import { specEarlyBlocks, specLateBlocks, specTailBlocks } from './spec-figures';
@@ -13,33 +28,66 @@ import { slotBlocks } from './spec-slot-blocks';
 import { SPEC_SLOTS } from '../lib/spec-slots';
 import { loadVersions } from '../data/versions';
 
-/** The edge types page: each type card's example sentence, and the matrix as layer-pair counts. */
+/**
+ * The edge types page's figures, one block each in page order, under the
+ * source text (visual spec 6.1): the seven type cards, the summary table with
+ * its counts, the edge properties, the three example chains and the 1.1.0
+ * changes. The two generated figures that follow ("Edges of each type, as
+ * declared" and the matrix) are written by edgeTypesTwin where the page draws
+ * them.
+ */
 export function edgeTypesFigureBlocks(): string[] {
   const o = loadOntology();
-  const { layers, counts } = layerPairCounts(o);
+  const yes = (b: boolean) => (b ? 'Yes' : 'No');
+  const unit = (t: EdgeTypeInfo, n: number) => (t.symmetric ? (n === 1 ? 'pair' : 'pairs') : n === 1 ? 'edge' : 'edges');
+  const cards = o.edgeTypes.map((t) => {
+    const ex = edgeExample(t);
+    const n = edgeTypeCount(t);
+    return figure(
+      `${t.id}: ${ex.sentence}`,
+      edgeCardCaption(t),
+      table(['Example', 'From', 'To', 'Transitive', 'Symmetric', 'Count'], [[cell(ex.sentence), code(ex.from), code(ex.to), yes(t.transitive), yes(t.symmetric), `${n} ${unit(t, n)}`]]),
+    );
+  });
+  const properties = fieldTable(readRepoFile(EDGE_TYPES_SOURCE), 'Edge Properties', EDGE_TYPES_SOURCE);
+  const chains = CHAIN_SECTIONS.map((h) => {
+    const cs = exampleChains(h);
+    return figure(h, chainCaption(cs), cs.flatMap((c) => c.edges.map((e) => `- ${code(e.from)} ${code(e.type)} ${code(e.to)}`)).join('\n'));
+  });
+  const changes = edgeChanges();
   return [
     '## Figures on this page',
+    ...cards,
     figure(
-      'Edge type cards',
-      `Each edge type's card draws the first edge of that type in the ontology.`,
+      'Edge type summary, with counts',
+      summaryCaption(o),
       table(
-        ['Type', 'Example', 'Transitive', 'Symmetric', 'Count'],
-        o.edgeTypes.map((t) => {
-          const n = edgeTypeCount(t);
-          const unit = t.symmetric ? (n === 1 ? 'pair' : 'pairs') : n === 1 ? 'edge' : 'edges';
-          return [code(t.id), cell(edgeExample(t).sentence), t.transitive ? 'Yes' : 'No', t.symmetric ? 'Yes' : 'No', `${n} ${unit}`];
-        }),
+        ['Type', 'Edges, a symmetric pair once', 'Transitive', 'Symmetric'],
+        o.edgeTypes.map((t) => [code(t.id), String(edgeTypeCount(t)), yes(t.transitive), yes(t.symmetric)]),
       ),
     ),
+    figure('Edge properties', fieldsCaption(properties, 'An edge has'), table(['Field', 'Type', 'Required', 'Description'], properties.map((p) => [code(p.name), cell(p.type), yes(p.required), cell(p.description)]))),
+    ...chains,
     figure(
-      'Every edge in the ontology, as a matrix',
-      edgeMatrixCaption(o),
-      `Edges between layers, rows by the \`from\` layer and columns by the \`to\` layer, a symmetric pair counted once. The per-type lists under "All edges" give every edge.\n\n${table(
-        ['From \\ to', ...layers],
-        layers.map((l, i) => [l, ...counts[i]!.map(String)]),
-      )}`,
+      'What changed in 1.1.0',
+      changesCaption(changes),
+      table(['Edge', '1.0.0', '1.1.0', 'Why'], changes.map((c) => [`${code(c.from)} → ${code(c.to)}`, c.before ? code(c.before) : 'new', c.after ? code(c.after) : 'removed', cell(c.why)])),
     ),
   ];
+}
+
+/** The all-edges matrix of the edge types page as layer-pair counts. */
+export function edgeMatrixBlock(): string {
+  const o = loadOntology();
+  const { layers, counts } = layerPairCounts(o);
+  return figure(
+    'Every edge in the ontology, as a matrix',
+    edgeMatrixCaption(o),
+    `Edges between layers, rows by the \`from\` layer and columns by the \`to\` layer, a symmetric pair counted once. The per-type lists below give every edge.\n\n${table(
+      ['From \\ to', ...layers],
+      layers.map((l, i) => [l, ...counts[i]!.map(String)]),
+    )}`,
+  );
 }
 
 /**

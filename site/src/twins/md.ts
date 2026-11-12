@@ -79,7 +79,7 @@ export function blocks(...parts: (string | null | undefined | false)[]): string 
   return `${parts.filter((p): p is string => typeof p === 'string' && p.trim() !== '').map((p) => p.trim()).join('\n\n')}\n`;
 }
 
-interface Edit {
+export interface Edit {
   start: number;
   end: number;
   text: string;
@@ -92,6 +92,8 @@ export interface CopyOptions {
   sourceNote?: boolean;
   /** Title for an H1 to add when the source has none. */
   title?: string;
+  /** More insertions into the source, from its parse (the prose pages' figure blocks). */
+  extraEdits?: (tree: Root) => Edit[];
 }
 
 /**
@@ -137,6 +139,7 @@ export function markdownCopy(repoPath: string, text: string, options: CopyOption
 
   // Each mermaid fence stays, followed by its text version.
   edits.push(...mermaidTwinEdits(tree, body));
+  if (options.extraEdits) edits.push(...options.extraEdits(tree));
 
   if (problems.length > 0) throw new Error(`twins: links in ${repoPath} did not resolve:\n  ${problems.join('\n  ')}`);
 

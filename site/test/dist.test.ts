@@ -300,8 +300,9 @@ describe('built site', () => {
     for (const d of pageDirs('domains')) {
       const html = readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8');
       const md = readFileSync(path.join(dist, 'domains', d, 'index.md'), 'utf8');
+      // Every figure counts, the workflow cards included: each card's steps are a "Steps of" block in the
+      // copy (visual spec 6.1), not only a line in the workflow list.
       const figs = [...html.matchAll(/<figure [^>]*data-fig-kind="(\w[\w-]*)"[\s\S]*?<figcaption class="fig__caption">([\s\S]*?)<\/figcaption>/g)]
-        .filter((m) => m[1] !== 'workflow-card')
         .map((m) => m[2]!.replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
       expect(figs.length, d).toBeGreaterThan(3);
       expect((md.match(/^\*\*Figure: /gm) ?? []).length, d).toBe(figs.length);
@@ -793,7 +794,7 @@ describe('check-dist.mjs on the built site', () => {
   it('finds no problem once Pagefind has run, and counts one page per route', () => {
     execFileSync('npx', ['pagefind', '--site', dist], { cwd: process.cwd(), stdio: 'pipe' });
     const { problems, stats } = checkDistDir(dist);
-    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [] });
+    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [], figures: [], legends: [], review: [] });
     expect(stats.pages).toBe(ROUTES.length);
     expect(stats.copies).toBe(ROUTES.length);
   }, 120_000);

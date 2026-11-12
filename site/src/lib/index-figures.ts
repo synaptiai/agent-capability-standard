@@ -1,11 +1,13 @@
 // Data and captions for the figures of the section index pages, the RFC
 // index and the schemas page (visual spec 3.11). The pages and their Markdown
 // copies both read these, so the words agree.
-import { readRepoFile } from './repo';
+import { readRepoFile, trackedUnder } from './repo';
 import type { Route } from './routes';
 import type { RfcRow } from './rfcs';
 import { statusStyle } from './status';
 import type { SchemaEntry } from './views';
+import { currentStandardText } from './spec-figures';
+import { diagnosticFamilies } from './spec-tail-figures';
 
 // ------------------------------------------------------------ F-R1
 
@@ -254,11 +256,17 @@ export function backgroundLayerMatrix(pages: readonly Doc[], layers: readonly { 
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** Bars on one scale: a label (linked when it has a page), a value and its printed words. */
+/**
+ * Bars: a label (linked when it has a page), a value and its printed words.
+ * The bars share one scale, the largest value, unless a row gives its own
+ * `max` (a share of a whole, such as 6 of 8 codes).
+ */
 export interface BarList {
   title: string;
   caption: string;
-  rows: { label: string; url?: string; value: number; words: string }[];
+  /** Column headings for the table in the Markdown copy: the label, then the words. */
+  head: [string, string];
+  rows: { label: string; url?: string; value: number; max?: number; words: string }[];
 }
 
 /**
@@ -289,8 +297,157 @@ export function releaseBars(changelog: string): BarList {
   const top = [...rows].sort((a, b) => b.value - a.value)[0]!;
   return {
     title: 'Changes in each release, newest first',
+    head: ['Release', 'Changes'],
     caption: `${plural(rows.length, 'release', 'releases')} from ${rows.at(-1)!.label} to ${rows[0]!.label}; ${top.label} has the most changes (${top.value}), counted as list items in the release notes.`,
     rows,
+  };
+}
+
+// ------------------------------------------------------------ /start/
+
+/** The reading speed the start pages' reading times assume. */
+export const WORDS_PER_MINUTE = 200;
+
+/**
+ * A page's words outside fenced blocks, and its fenced blocks other than
+ * diagrams (mermaid, or two or more lines of box-drawing characters): the
+ * commands and code to read or run.
+ */
+export function pageSize(text: string): { words: number; codeBlocks: number } {
+  let codeBlocks = 0;
+  const prose = text
+    .replace(/^---\n[\s\S]*?\n---\n/, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/^( {0,3})(`{3,}|~{3,})([^\n]*)\n[\s\S]*?^\1\2[ \t]*$/gm, (f: string, _i, _t, info: string) => {
+      const drawing = f.split('\n').filter((l) => /[\u2500-\u257f]/.test(l)).length >= 2;
+      if (!/^\s*mermaid\b/.test(info) && !drawing) codeBlocks += 1;
+      return '';
+    })
+    // A link counts as its text; a destination, an image and an HTML tag are not words.
+    .replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ');
+  return { words: (prose.match(/[A-Za-z0-9][\w'’.-]*/g) ?? []).length, codeBlocks };
+}
+
+/** The start pages' reading times, at WORDS_PER_MINUTE, with their code blocks. */
+export function readingBars(pages: readonly Doc[]): BarList {
+  const rows = pages.map((p) => {
+    const { words, codeBlocks } = pageSize(p.text);
+    const minutes = Math.max(1, Math.round(words / WORDS_PER_MINUTE));
+    return { label: p.label, url: p.url, value: minutes, words: `${minutes} min, ${plural(codeBlocks, 'code block', 'code blocks')}`, codeBlocks };
+  });
+  const total = sum(rows.map((r) => r.value));
+  const short = [...rows].sort((a, b) => a.value - b.value)[0]!;
+  const long = [...rows].sort((a, b) => b.value - a.value)[0]!;
+  const code = [...rows].sort((a, b) => b.codeBlocks - a.codeBlocks)[0]!;
+  return {
+    title: 'How long each page takes to read',
+    caption: `At ${WORDS_PER_MINUTE} words a minute, not counting code, the ${rows.length} pages take about ${total} minutes in all; the ${short.label} is the shortest (${short.value} min) and the ${long.label} the longest (${long.value} min). The ${code.label} has the most code blocks to read or run (${code.codeBlocks}).`,
+    head: ['Page', 'Reading time and code blocks'],
+    rows: rows.map(({ codeBlocks: _c, ...r }) => r),
+  };
+}
+
+// ------------------------------------------------------------ /spec/
+
+const CODE = /^[A-Z]\d{3}$/;
+const codesIn = (xs: unknown[]): string[] => xs.filter((x): x is string => typeof x === 'string' && CODE.test(x));
+
+/** One part of the conformance suite: how many fixtures or cases it has, and the diagnostic codes they expect. */
+export interface SuitePart {
+  label: string;
+  count: number;
+  unit: string;
+  codes: Set<string>;
+}
+
+export const EXPECTATIONS_SOURCE = 'tests/fixtures/EXPECTATIONS.json';
+export const EVAL_SOURCE = 'tests/conformance/expressions/eval.json';
+export const CHECK_SOURCE = 'tests/conformance/expressions/check.json';
+export const RUNTIME_DIR = 'tests/conformance/runtime';
+export const CONTRIB_DIR = 'tests/conformance/contrib';
+
+/**
+ * The parts of the conformance suite that spec/CONFORMANCE.md names, and the
+ * codes each expects: a validator fixture's expected error and warning
+ * codes, an evaluation case's error, a check case's diagnostics, and the code
+ * and cause a runtime or contributed fixture's run ends with.
+ */
+export function conformanceSuite(): SuitePart[] {
+  type Exp = { should_pass?: boolean; expected_error_codes?: unknown[]; expected_warning_codes?: unknown[] };
+  const exp = Object.values(JSON.parse(readRepoFile(EXPECTATIONS_SOURCE)) as Record<string, Exp>);
+  const validator = (pass: boolean): SuitePart => {
+    const set = exp.filter((v) => (v.should_pass === true) === pass);
+    return {
+      label: `Validator fixtures that must ${pass ? 'pass' : 'fail'}`,
+      count: set.length,
+      unit: 'fixtures',
+      codes: new Set(set.flatMap((v) => codesIn([...(v.expected_error_codes ?? []), ...(v.expected_warning_codes ?? [])]))),
+    };
+  };
+  const cases = (source: string) => (JSON.parse(readRepoFile(source)) as { cases: { expect: unknown }[] }).cases;
+  const evalCases = cases(EVAL_SOURCE);
+  const checkCases = cases(CHECK_SOURCE);
+  const runs = (dir: string, label: string): SuitePart => {
+    const files = trackedUnder(dir, '.json');
+    const codes = files.flatMap((f) => {
+      const end = (JSON.parse(readRepoFile(f)) as { end?: { code?: unknown; cause?: unknown } }).end ?? {};
+      return codesIn([end.code, end.cause]);
+    });
+    return { label, count: files.length, unit: 'fixtures', codes: new Set(codes) };
+  };
+  return [
+    validator(true),
+    validator(false),
+    {
+      label: 'Expression evaluation cases',
+      count: evalCases.length,
+      unit: 'cases',
+      codes: new Set(evalCases.flatMap((c) => codesIn([(c.expect as { error?: unknown } | null)?.error]))),
+    },
+    { label: 'Expression check cases', count: checkCases.length, unit: 'cases', codes: new Set(checkCases.flatMap((c) => (Array.isArray(c.expect) ? codesIn(c.expect) : []))) },
+    runs(RUNTIME_DIR, 'Runtime fixtures'),
+    runs(CONTRIB_DIR, 'Contributed fixtures'),
+  ];
+}
+
+/** A diagnostic family as the coverage figure reads it: its name, range and codes. */
+export interface FamilyCodes {
+  name: string;
+  range: string;
+  codes: string[];
+}
+
+/** The diagnostic families of the current Standard's §9.1, with their codes. */
+export function specFamilies(): FamilyCodes[] {
+  const { source, text } = currentStandardText();
+  return diagnosticFamilies(text, source).map((f) => ({ name: f.name, range: f.range, codes: f.codes.map((d) => d.code) }));
+}
+
+export const COVERAGE_FIG_TITLE = 'Diagnostic codes the conformance suite expects, by family';
+
+/** Each family's share of codes that at least one fixture or case of the suite expects. */
+export function suiteCoverage(parts: readonly SuitePart[], families: readonly FamilyCodes[]): BarList {
+  const expected = new Set(parts.flatMap((p) => [...p.codes]));
+  const rows = families.map((f) => {
+    const hit = f.codes.filter((c) => expected.has(c));
+    return { label: `${f.range} ${f.name}`, value: hit.length, max: f.codes.length, words: `${hit.length} of ${f.codes.length} codes`, f };
+  });
+  const all = sum(families.map((f) => f.codes.length));
+  const hit = sum(rows.map((r) => r.value));
+  const share = (r: (typeof rows)[number]) => r.value / r.max;
+  const full = rows.filter((r) => r.value === r.max).map((r) => r.f.name);
+  const low = [...rows].sort((a, b) => share(a) - share(b))[0]!;
+  const fixtures = sum(parts.map((p) => p.count));
+  return {
+    title: COVERAGE_FIG_TITLE,
+    caption: `The suite's ${fixtures} fixtures and cases (${joinAnd(parts.map((p) => `${p.count} ${p.label.charAt(0).toLowerCase()}${p.label.slice(1)}`))}) expect ${hit} of the ${all} diagnostic codes. ${
+      full.length > 0 ? `Every ${joinAnd(full)} code is expected; ` : ''
+    }${low.f.name} has the smallest share, ${low.value} of ${low.max}.`,
+    head: ['Family', 'Codes the suite expects'],
+    rows: rows.map(({ f: _f, ...r }) => r),
   };
 }
 
@@ -311,10 +468,13 @@ export function listingFigures(section: string, routes: readonly Route[], layers
       ];
     case 'background':
       return [{ at: 'Methodology', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'background'), layers) }];
+    // The start pages are read in order by a newcomer, so the figure is how long each takes; counting
+    // capability names in code spans scored the overview, which shows all 36 in a drawing, as 0.
     case 'start':
-      return [{ at: 'top', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'start'), layers) }];
+      return [{ at: 'top', kind: 'bars', bars: readingBars(sectionDocs(routes, 'start')) }];
+    // The specification pages name few capabilities as code; what they share is the conformance suite.
     case 'spec':
-      return [{ at: 'top', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'spec'), layers) }];
+      return [{ at: 'top', kind: 'bars', bars: suiteCoverage(conformanceSuite(), specFamilies()) }];
     case 'community':
       return [{ at: 'top', kind: 'bars', bars: releaseBars(readRepoFile('CHANGELOG.md')) }];
     default:

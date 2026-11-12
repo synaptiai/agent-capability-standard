@@ -5,6 +5,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   backgroundLayerMatrix,
+  conformanceSuite,
+  pageSize,
+  readingBars,
+  suiteCoverage,
   euArticleMatrix,
   EU_MAX_COLUMNS,
   isoClauseMatrix,
@@ -12,6 +16,8 @@ import {
   type Doc,
 } from '../src/lib/index-figures';
 import type { RfcRow } from '../src/lib/rfcs';
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
 import { repoText } from './independent';
 
 const rfc = (label: string, status: string, target: string | null, numbered = true): RfcRow => ({
@@ -123,5 +129,105 @@ describe('background layer matrix', () => {
     ];
     const m = backgroundLayerMatrix([{ label: 'P', url: '/p/', text: 'We `plan`, then plan again, then `mutate` and `mutate`.' }], layers);
     expect(m.rows[0]!.counts).toEqual([1, 2]);
+  });
+});
+
+describe('/start/ reading times', () => {
+  it('counts words outside fences, and code blocks that are not diagrams', () => {
+    // Hand count: "One two three.", "Four five" and the link text "six" are 6 words (the link's
+    // destination, the badge image and the HTML tag are not words); the bash and the json fences are code
+    // blocks; the mermaid fence and the box drawing are diagrams, not code; frontmatter is not text.
+    const text = [
+      '---',
+      'title: x',
+      '---',
+      'One two three.',
+      '```bash',
+      'npm ci',
+      '```',
+      '```mermaid',
+      'flowchart LR',
+      '  a --> b',
+      '```',
+      '```',
+      '┌─┐',
+      '└─┘',
+      '```',
+      'Four five [six](https://x.y/z) ![badge](https://img.shields.io/b.svg) <br/>',
+      '',
+      '[ref]: https://x.y/ref',
+      '```json',
+      '{}',
+      '```',
+    ].join('\n');
+    expect(pageSize(text)).toEqual({ words: 6, codeBlocks: 2 });
+  });
+
+  it('rounds to whole minutes at 200 words a minute, with at least one', () => {
+    const words = (n: number) => Array.from({ length: n }, () => 'word').join(' ');
+    const b = readingBars([
+      { label: 'Short', url: '/a/', text: words(20) },
+      { label: 'Long', url: '/b/', text: `${words(700)}\n\n\`\`\`sh\nx\n\`\`\`` },
+    ]);
+    expect(b.rows.map((r) => [r.value, r.words])).toEqual([
+      [1, '1 min, 0 code blocks'],
+      [4, '4 min, 1 code block'],
+    ]);
+    expect(b.caption).toContain('take about 5 minutes in all');
+  });
+});
+
+describe('/spec/ conformance coverage', () => {
+  it('shares each family by its own size, and names the full and the smallest families', () => {
+    const parts = [
+      { label: 'A fixtures', count: 3, unit: 'fixtures', codes: new Set(['V101', 'B201']) },
+      { label: 'B cases', count: 2, unit: 'cases', codes: new Set(['B202', 'V101']) },
+    ];
+    const fams = [
+      { name: 'Validation', range: 'V1xx', codes: ['V101', 'V102', 'V103', 'V104'] },
+      { name: 'Binding', range: 'B2xx', codes: ['B201', 'B202'] },
+    ];
+    const b = suiteCoverage(parts, fams);
+    expect(b.rows).toEqual([
+      { label: 'V1xx Validation', value: 1, max: 4, words: '1 of 4 codes' },
+      { label: 'B2xx Binding', value: 2, max: 2, words: '2 of 2 codes' },
+    ]);
+    expect(b.caption).toBe(
+      "The suite's 5 fixtures and cases (3 a fixtures and 2 b cases) expect 3 of the 6 diagnostic codes. Every Binding code is expected; Validation has the smallest share, 1 of 4.",
+    );
+  });
+
+  it('reads the suite as spec/CONFORMANCE.md names it, by text scans of the fixture files', () => {
+    const exp = repoText('tests/fixtures/EXPECTATIONS.json');
+    const pass = (exp.match(/"should_pass":\s*true/g) ?? []).length;
+    const fail = (exp.match(/"should_pass":\s*false/g) ?? []).length;
+    const listed = (re: RegExp, text: string) => new Set([...text.matchAll(re)].flatMap((m) => m[1]!.match(/[A-Z]\d{3}/g) ?? []));
+    const evalText = repoText('tests/conformance/expressions/eval.json');
+    const checkText = repoText('tests/conformance/expressions/check.json');
+    const dir = (d: string) => readdirSync(path.join('..', d)).filter((f) => f.endsWith('.json'));
+    const ends = (d: string) =>
+      new Set(
+        dir(d).flatMap((f) => {
+          const t = repoText(`${d}/${f}`);
+          const end = t.slice(t.indexOf('"end":'), t.includes('"trace_kinds"') && t.indexOf('"trace_kinds"') > t.indexOf('"end":') ? t.indexOf('"trace_kinds"') : undefined);
+          return [...end.matchAll(/"(?:code|cause)":\s*"([A-Z]\d{3})"/g)].map((m) => m[1]!);
+        }),
+      );
+    const got = conformanceSuite();
+    expect(got.map((p) => p.count)).toEqual([
+      pass,
+      fail,
+      (evalText.match(/"id":/g) ?? []).length,
+      (checkText.match(/"id":/g) ?? []).length,
+      dir('tests/conformance/runtime').length,
+      dir('tests/conformance/contrib').length,
+    ]);
+    expect(pass + fail).toBeGreaterThan(80);
+    // All validator codes together (pass and fail fixtures), and each other part's codes.
+    expect(new Set([...got[0]!.codes, ...got[1]!.codes])).toEqual(listed(/"expected_(?:error|warning)_codes":\s*\[([^\]]*)\]/g, exp));
+    expect(got[2]!.codes).toEqual(listed(/"error":\s*"([A-Z]\d{3})"/g, evalText));
+    expect(got[3]!.codes).toEqual(listed(/"expect":\s*\[([^\]]*)\]/g, checkText));
+    expect(got[4]!.codes).toEqual(ends('tests/conformance/runtime'));
+    expect(got[5]!.codes).toEqual(ends('tests/conformance/contrib'));
   });
 });

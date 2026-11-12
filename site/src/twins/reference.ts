@@ -12,7 +12,8 @@ import { kebab } from '../lib/routes';
 import { schemaGroups, schemaListing } from '../lib/views';
 import { blocks, cell, code, fence, figure, generatedLine, markdownCopy, mdLink, mdUrl, table } from './md';
 import { RFC_FIG_TITLE, rfcLanes, rfcLanesCaption, SHELF_MIN_ROWS, schemaShelves, shelfCaption, shelfTitle } from '../lib/index-figures';
-import { edgeTypesFigureBlocks } from './edges-spec';
+import { edgeMatrixBlock, edgeTypesFigureBlocks } from './edges-spec';
+import { declaredCaption } from '../lib/edge-figures';
 import type { Twin } from './types';
 
 export function edgeTypesTwin(source: string, title: string, description: string | null): Twin {
@@ -20,20 +21,25 @@ export function edgeTypesTwin(source: string, title: string, description: string
   const capLink = (id: string) => mdLink(code(id), `/capabilities/${kebab(id)}/`);
   const markdown = blocks(
     markdownCopy(source, readRepoFile(source), { sourceNote: true }),
+    ...edgeTypesFigureBlocks(),
     '## Edge types in the ontology',
     `${generatedLine([ONTOLOGY_SOURCE])} Ontology version ${o.version}. It has ${o.edgeTypes.length} edge types and ${o.edges.length} edges, counted as the ontology declares them, so a symmetric pair declared in both directions appears twice.`,
-    table(
-      ['Type', 'Description', 'Semantics', 'Transitive', 'Symmetric', 'Edges'],
-      o.edgeTypes.map((t) => [code(t.id), cell(t.description), cell(t.semantics), t.transitive ? 'Yes' : 'No', t.symmetric ? 'Yes' : 'No', String(t.edges.length)]),
+    figure(
+      'Edges of each type, as declared',
+      declaredCaption(o),
+      table(
+        ['Type', 'Description', 'Semantics', 'Transitive', 'Symmetric', 'Edges'],
+        o.edgeTypes.map((t) => [code(t.id), cell(t.description), cell(t.semantics), t.transitive ? 'Yes' : 'No', t.symmetric ? 'Yes' : 'No', String(t.edges.length)]),
+      ),
     ),
     '## All edges',
+    edgeMatrixBlock(),
     ...o.edgeTypes.map((t) =>
       blocks(
         `### ${code(t.id)} (${t.edges.length})`,
         t.edges.length === 0 ? 'The ontology has no edges of this type.' : t.edges.map((e) => `- ${capLink(e.from)} to ${capLink(e.to)}`).join('\n'),
       ),
     ),
-    ...edgeTypesFigureBlocks(),
   );
   return { title, description, markdown };
 }

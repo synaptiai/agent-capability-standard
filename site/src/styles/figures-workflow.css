@@ -243,6 +243,11 @@
     color: var(--ink);
   }
 
+  .spine-legend__glyphs {
+    display: inline-flex;
+    gap: 2px;
+  }
+
   @container (max-width: 639px) {
     .spine {
       --spine-n: 20px;
