@@ -7,6 +7,7 @@ import type { Workflow } from '../data/workflows';
 import { capabilityHref, diagnosticHref, workflowHref } from '../lib/generated';
 import { failureRows, gateRows, type DiagramStep } from '../lib/views';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
+import BreakCode from './BreakCode.astro';
 import Callout from './Callout.astro';
 import FlagBadge from './FlagBadge.astro';
 import LayerBadge from './LayerBadge.astro';
@@ -69,14 +70,14 @@ const nodeGlyph = NODE_GLYPH[role];
     )}
     {step.condition !== undefined && step.condition !== null && (
       <p class="wf-step__branch">
-        <PixelGlyph name="diamond" /><span class="wf-step__only-if">Only if</span> <code>{String(step.condition)}</code>
+        <PixelGlyph name="diamond" /><span class="wf-step__only-if">Only if</span> <BreakCode text={String(step.condition)} />
       </p>
     )}
     {gates.length > 0 && (
       <ul class="wf-step__gates">
         {gates.map((g) => (
           <li>
-            <PixelGlyph name="diamond" /> <span class="wf-step__gate-label">Gate</span>{g.phase && <> ({g.phase} the step)</>}: when <code>{g.when}</code>,{' '}
+            <PixelGlyph name="diamond" /> <span class="wf-step__gate-label">Gate</span>{g.phase && <> ({g.phase} the step)</>}: when <BreakCode text={g.when} />,{' '}
             <code>{g.action}</code>.{g.message && <> {g.message}</>}
           </li>
         ))}
@@ -85,7 +86,7 @@ const nodeGlyph = NODE_GLYPH[role];
     {step.workflow_id && (
       <p class="wf-step__subflow"><PixelGlyph name="nested" /> Runs workflow <a href={workflowHref(step.workflow_id)}><code>{step.workflow_id}</code></a></p>
     )}
-    {step.store_as && <p class="wf-step__store">Stores <code>{step.store_as}</code></p>}
+    {step.store_as && <p class="wf-step__store">Stores <BreakCode text={step.store_as} /></p>}
     {failures.length > 0 && (
       <details class="wf-step__failures">
         <summary>Failure handling ({failures.length})</summary>

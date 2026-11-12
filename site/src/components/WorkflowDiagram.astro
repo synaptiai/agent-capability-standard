@@ -3,7 +3,8 @@
 // design-system section 12): an <ol class="wf"> of step cards, each with a
 // role (checkpoint, mutating, verify, rollback or plain) taken from its
 // capability and effective safety flags. Consecutive steps in one parallel
-// group sit in one box.
+// group sit in one box. A key above the rail says what a dashed, indented
+// card (a step with gates or a condition) means, and lists those steps.
 import type { Workflow } from '../data/workflows';
 import { diagramRuns, diagramSteps } from '../lib/views';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
@@ -14,8 +15,16 @@ interface Props {
 }
 
 const { workflow } = Astro.props;
-const runs = diagramRuns(diagramSteps(workflow));
+const steps = diagramSteps(workflow);
+const runs = diagramRuns(steps);
+const branches = steps.filter((d) => d.branch).map((d) => d.step.index);
 ---
+{branches.length > 0 && (
+  <p class="wf-key">
+    <span class="wf-key__swatch" aria-hidden="true"></span>
+    {`A dashed card set in from the rail is a step with gates or a condition, so it may be skipped or end the run: ${branches.length === 1 ? 'step' : 'steps'} ${branches.length === 1 ? branches[0] : `${branches.slice(0, -1).join(', ')} and ${branches.at(-1)}`}.`}
+  </p>
+)}
 <ol class="wf" aria-label={`Steps of ${workflow.id}`} data-workflow={workflow.id}>
   {runs.map((run) =>
     run.group === null ? (

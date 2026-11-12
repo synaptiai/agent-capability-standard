@@ -1,9 +1,10 @@
 ---
 // F-W2, which step reads which stored output (visual spec 3.3). A real
 // table: one row per step, one column per stored output (named by the step
-// that stores it). The step's own output is a filled cell with the
-// `flow:store` glyph; an output it reads is an outlined cell with the
-// `flow:read` glyph. The table scrolls sideways in a TableWrap when narrow,
+// that stores it). The step's own output is a cell with a 2px ink border and
+// the `flow:store` glyph; an output it reads is a cell with a thin border and
+// the `flow:read` glyph. Glyphs are drawn at 2x, so they can be told apart;
+// no cell is a filled square, which on the same page means a required input. The table scrolls sideways in a TableWrap when narrow,
 // with the step column kept in view. Every cell also carries its meaning as
 // text, so the glyphs are never the only signal.
 //
@@ -52,7 +53,7 @@ const stepId = (k: number) => `ref-step-${k}`;
                   <span class="flow-grid__cell flow-grid__cell--empty" aria-hidden="true"></span>
                 ) : (
                   <span class:list={['flow-grid__cell', `flow-grid__cell--${c}`]}>
-                    <PixelGlyph name={c === 'store' ? 'flow:store' : 'flow:read'} scale={1} />
+                    <PixelGlyph name={c === 'store' ? 'flow:store' : 'flow:read'} scale={2} />
                     <span class="fig-sr">{c === 'store' ? 'stores' : 'reads'}</span>
                   </span>
                 )}
@@ -64,7 +65,7 @@ const stepId = (k: number) => `ref-step-${k}`;
     </table>
   </TableWrap>
   <ul class="spine-legend" aria-label="Key">
-    <li><span class="flow-grid__cell flow-grid__cell--store" aria-hidden="true"><PixelGlyph name="flow:store" scale={1} /></span><span>the step stores this output</span></li>
-    <li><span class="flow-grid__cell flow-grid__cell--read" aria-hidden="true"><PixelGlyph name="flow:read" scale={1} /></span><span>the step reads it</span></li>
+    <li><span class="flow-grid__cell flow-grid__cell--store" aria-hidden="true"><PixelGlyph name="flow:store" scale={2} /></span><span>the step stores this output</span></li>
+    <li><span class="flow-grid__cell flow-grid__cell--read" aria-hidden="true"><PixelGlyph name="flow:read" scale={2} /></span><span>the step reads it</span></li>
   </ul>
 </Figure>

@@ -1354,6 +1354,23 @@
     margin-bottom: var(--space-2);
   }
 
+  /* The key above the rail: a small dashed card, then what it means. */
+  .wf-key {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+    color: var(--ink-2);
+  }
+
+  .wf-key__swatch {
+    flex: none;
+    width: 24px;
+    height: 16px;
+    border: var(--px) dashed var(--ink-3);
+    background: var(--bg-sub);
+  }
+
   /* A step with gates or a condition is a side branch: one lane in, a dashed elbow. */
   .wf-step[data-branch='true'] {
     margin-left: 2rem !important;

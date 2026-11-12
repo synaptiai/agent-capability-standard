@@ -2,9 +2,10 @@
 // F-W3, declared and step risk (visual spec 3.3): one 16px cell per step
 // with its risk drawn as 1 to 3 bars in the risk colour, the step numbers
 // under them (the highest in bold), then the risk badges. When the
-// declared, computed and highest step risk agree they collapse into one
-// badge; otherwise each is shown, and the caption states the values without
-// judging which is right.
+// declared, computed and highest step risk agree, the caption's sentence
+// says so and no badge is drawn (visual spec 1.1 rule 5: no figure that one
+// sentence can replace); otherwise each is shown, and the caption states the
+// values without judging which is right.
 //
 // Props:
 // - wf: Workflow, required.
@@ -39,16 +40,12 @@ const bars = { low: 1, medium: 2, high: 3 } as const;
         </li>
       ))}
     </ol>
-    <ul class="risk-strip__badges">
-      {r.agree ? (
-        <li><RiskBadge risk={r.highest} label={r.computed !== null ? 'Declared, computed and step risk' : 'Declared and step risk'} /></li>
-      ) : (
-        <>
-          <li><RiskBadge risk={r.highest} label="Highest step risk" /></li>
-          <li><RiskBadge risk={r.declared} label="Declared workflow risk" /></li>
-          {r.computed !== null && <li><RiskBadge risk={r.computed} label="Computed risk" /></li>}
-        </>
-      )}
-    </ul>
+    {!r.agree && (
+      <ul class="risk-strip__badges">
+        <li><RiskBadge risk={r.highest} label="Highest step risk" /></li>
+        <li><RiskBadge risk={r.declared} label="Declared workflow risk" /></li>
+        {r.computed !== null && <li><RiskBadge risk={r.computed} label="Computed risk" /></li>}
+      </ul>
+    )}
   </div>
 </Figure>

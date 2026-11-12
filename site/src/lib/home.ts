@@ -507,7 +507,7 @@ function words(xs: string[]): string {
 /** Fig: the story. Its caption names the steps the four marks sit on. */
 export function storyCaption(): string {
   const s = story();
-  return `The ${s.workflow.id} workflow has ${s.workflow.steps.length} steps: it saves a checkpoint at step ${s.checkpointStep.index}, changes state at step ${s.changeStep.index}, verifies at step ${s.verifyStep.index} and can roll back at step ${s.rollbackStep.index}.`;
+  return `The ${s.workflow.id} workflow has ${s.workflow.steps.length} steps: it saves a checkpoint at step ${s.checkpointStep.index}, makes its change at step ${s.changeStep.index}, verifies at step ${s.verifyStep.index} and can roll back at step ${s.rollbackStep.index}.`;
 }
 
 /** Fig: the periodic table. The smallest and largest layers, from the ontology. */

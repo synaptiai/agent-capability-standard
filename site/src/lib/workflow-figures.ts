@@ -51,11 +51,14 @@ export const ROLE_GLYPH: Readonly<Record<StepRole, string | null>> = {
   plain: null,
 };
 
+// Checkpoint and rollback steps change state too (their mutation flag is
+// true, and the page header counts them), so the mutating role is worded as
+// the step that makes the workflow's change, not as the only one that writes.
 const ROLE_WORDS: Readonly<Record<Exclude<StepRole, 'plain'>, string>> = {
   checkpoint: 'saves a checkpoint',
   verify: 'checks a result',
   rollback: 'rolls back',
-  mutating: 'changes state',
+  mutating: 'makes the change',
 };
 
 export interface SpineStep {
@@ -195,7 +198,7 @@ export function workflowSpine(wf: Workflow): Spine {
   const has = (role: StepRole) => steps.some((s) => s.role === role);
   const legend: LegendItem[] = [];
   for (const role of ['checkpoint', 'mutating', 'verify', 'rollback'] as const) {
-    if (has(role)) legend.push({ glyph: ROLE_GLYPH[role]!, label: `step ${ROLE_WORDS[role]}` });
+    if (has(role)) legend.push({ glyph: ROLE_GLYPH[role]!, label: role === 'mutating' ? 'step makes the change (checkpoint and rollback steps also change state)' : `step ${ROLE_WORDS[role]}` });
   }
   if (steps.some((s) => s.condition !== null)) legend.push({ glyph: 'flow:condition', label: 'runs only when its condition holds (dashed tile)' });
   if (steps.some((s) => s.gates.length > 0)) legend.push({ glyph: 'diamond', label: 'step has gates' });
@@ -225,9 +228,9 @@ export function workflowSpine(wf: Workflow): Spine {
   const topSteps = steps.filter((s) => RISK_LEVEL[s.risk] === top).map((s) => s.index);
   const clauses = [
     changing.length > 0
-      ? `${stepList(changing)} ${changing.length === 1 ? 'changes' : 'change'} state` +
+      ? `${stepList(changing)} ${changing.length === 1 ? 'makes the change' : 'make the changes'}` +
         (checkpointSpans.length > 0 ? ` after the checkpoint at ${stepList(checkpointSpans.map((c) => c.fromStep))}` : '')
-      : 'no step changes state',
+      : 'no step makes a change beyond a checkpoint or rollback',
     ...(gated.length > 0 ? [`${stepList(gated)} ${gated.length === 1 ? 'has' : 'have'} gates`] : []),
     ...(failing.length > 0 ? [`${stepList(failing)} ${failing.length === 1 ? 'says' : 'say'} what to do on failure`] : []),
     `the highest step risk is ${steps.find((s) => RISK_LEVEL[s.risk] === top)!.risk}, at ${stepList(topSteps)}`,

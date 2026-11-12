@@ -28,18 +28,16 @@ import type { Route } from '../../lib/routes';
 import {
   capabilitiesUsed,
   composedSkillsFor,
-  gateRows,
   producerSteps,
   profilesListing,
   schemaRows,
 } from '../../lib/views';
-import TableWrap from '../../components/TableWrap.astro';
 import DataFlowGrid from '../../components/fig/DataFlowGrid.astro';
 import Figure from '../../components/fig/Figure.astro';
 import Port from '../../components/fig/Port.astro';
 import RiskStrip from '../../components/fig/RiskStrip.astro';
 import WorkflowSpine from '../../components/fig/WorkflowSpine.astro';
-import { inputsCaption } from '../../lib/workflow-figures';
+import { inputsCaption, stepList } from '../../lib/workflow-figures';
 
 export function getStaticPaths() {
   const { all } = loadWorkflows();
@@ -64,9 +62,8 @@ const detailsId = (n: number) => `ref-step-${n}-details`;
 const profiles = profilesListing(wf.id);
 const skills = composedSkillsFor(wf.id);
 const flagsHref = specSectionHref('5.2.1');
-const gatesHref = specSectionHref('5.6');
 const checkpoints = wf.steps.filter((s) => s.capability === 'checkpoint').length;
-const changing = wf.steps.filter((s) => s.effective.mutation).length;
+const changing = wf.steps.filter((s) => s.effective.mutation).map((s) => s.index);
 const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
 const inputRows = schemaRows(wf.inputs);
 // Figures are numbered in page order: the step map, the inputs (when there
@@ -95,7 +92,7 @@ const topInputs = inputRows.filter((r) => r.depth === 0).length;
         )}
         <div><dt>Steps</dt><dd>{wf.steps.length}</dd></div>
         <div><dt>Checkpoint steps</dt><dd>{checkpoints}</dd></div>
-        <div><dt>Steps that change state</dt><dd>{changing}</dd></div>
+        <div><dt>Steps that change state</dt><dd>{changing.length}{changing.length > 0 && ` (${stepList(changing)})`}</dd></div>
         <div><dt>Source</dt><dd><a href={githubBlobUrl(wf.source)}><code>{wf.source}</code></a></dd></div>
         {wf.profile && (
           <div><dt>Profile</dt><dd><a href={repoPathHref(wf.profile, wf.source)}><code>{wf.profile}</code></a></dd></div>
@@ -148,7 +145,6 @@ const topInputs = inputRows.filter((r) => r.depth === 0).length;
       <h2 id={id('Bindings and details')}>Bindings and details</h2>
       <DataFlowGrid wf={wf} n={figN.flow} id="ref-fig-data-flow" />
       {wf.steps.map((step) => {
-        const gates = gateRows(step);
         const reads = producerSteps(wf, step);
         const e = step.effective;
         return (
@@ -193,23 +189,6 @@ const topInputs = inputRows.filter((r) => r.depth === 0).length;
                 <summary>Input bindings</summary>
                 <YamlBlock value={step.input_bindings} />
               </details>
-            )}
-            {gates.length > 0 && (
-              <TableWrap label={`Gates of step ${step.index}`}>
-                <table class="gate-table">
-                  <caption><a href={gatesHref}>Gates</a> of step {step.index}</caption>
-                  <thead><tr><th scope="col">When</th><th scope="col">Action</th><th scope="col">Message</th></tr></thead>
-                  <tbody>
-                    {gates.map((g) => (
-                      <tr>
-                        <td><code>{g.when}</code>{g.phase && <> ({g.phase} the step)</>}</td>
-                        <td><code>{g.action}</code></td>
-                        <td>{g.message}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </TableWrap>
             )}
             {Object.keys(step.extra).length > 0 && (
               <>

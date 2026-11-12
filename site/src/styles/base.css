@@ -211,6 +211,11 @@
     color: inherit;
   }
 
+  /* BreakCode: break at its <wbr>s first, inside a part only when it must. */
+  :not(pre) > code.break-code {
+    overflow-wrap: break-word;
+  }
+
   /* Code in a table cell stays on one line; the table scrolls instead. */
   :is(td, th) > code,
   :is(td, th) > a > code {

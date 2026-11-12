@@ -287,7 +287,7 @@ describe('drawing', async () => {
 describe('capability boxes and labels', () => {
   it('never splits an identifier at its underscore', () => {
     expect(wrap('rollback(recovery_point)', 22)).toEqual(['rollback(', 'recovery_point)']);
-    expect(wrap('Loop, up to max_attempts', 10)).toEqual(['Loop, up', 'to', 'max_attempts']);
+    expect(wrap('Up to max_attempts tries', 10)).toEqual(['Up to', 'max_attempts', 'tries']);
   });
 
   it('gives a box that names a capability its symbol chip on its layer, as CLAUDE.md lists the layers', async () => {

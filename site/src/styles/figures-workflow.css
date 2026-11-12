@@ -271,7 +271,7 @@
     width: auto;
     border-collapse: collapse;
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .flow-grid caption {
@@ -291,8 +291,8 @@
   }
 
   .flow-grid thead th {
-    width: 18px;
-    min-width: 18px;
+    width: 26px;
+    min-width: 26px;
     height: 22px;
     vertical-align: bottom;
     font-family: var(--font-mono);
@@ -314,6 +314,17 @@
     white-space: nowrap;
   }
 
+  /* Step names at 13px (the 12px floor for figure text), and each row link 24px tall (WCAG 2.5.8). */
+  .flow-grid tbody th a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+  }
+
+  .flow-grid tbody th code {
+    font-size: 13px;
+  }
+
   .flow-grid__n {
     display: inline-block;
     min-width: 2.5ch;
@@ -323,8 +334,8 @@
   }
 
   .flow-grid td {
-    width: 18px;
-    height: 18px;
+    width: 26px;
+    height: 26px;
     text-align: center;
     vertical-align: middle;
   }
@@ -333,11 +344,11 @@
     display: inline-grid;
     place-items: center;
     box-sizing: border-box;
-    width: 16px;
-    height: 16px;
+    width: 24px;
+    height: 24px;
     border: var(--px) solid var(--line);
     background: var(--bg);
-    color: var(--ink);
+    color: var(--ink-2);
     vertical-align: middle;
   }
 
@@ -347,9 +358,8 @@
   }
 
   .flow-grid__cell--store {
-    background: var(--ink);
     border-color: var(--ink);
-    color: var(--bg);
+    color: var(--ink);
   }
 
   .flow-grid tbody tr:hover th,
