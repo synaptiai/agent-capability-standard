@@ -1,7 +1,8 @@
 // Every glyph of the site as a character grid (see grid.ts for the
-// characters). Data only: its one import is more data, so the check scripts
+// characters). Data only: its imports are more data, so the check scripts
 // can load it with plain `node`.
 import { GROUP_ALIASES, GROUP_GLYPHS } from './glyphs-groups.ts';
+import { PROSE_ALIASES } from './glyphs-prose.ts';
 
 /** One 9x9 glyph per cognitive layer, keyed by the layer id in the ontology. */
 export const LAYER_GLYPHS: Readonly<Record<string, readonly string[]>> = {
@@ -338,6 +339,7 @@ export const GLYPH_ALIASES: Readonly<Record<string, string>> = {
   'count:diagnostics': 'chapter:diagnostic-model',
   'count:skills': 'skill:composed',
   ...GROUP_ALIASES,
+  ...PROSE_ALIASES,
 };
 
 /** Older chapter titles that name the same chapter (1.0.0 "Error Model" is 1.1.0 "Diagnostic Model"). */

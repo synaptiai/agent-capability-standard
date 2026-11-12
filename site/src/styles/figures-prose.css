@@ -1,0 +1,383 @@
+/*
+ * Prose, RFC and skill page figures (visual spec 3.10), drawn into rendered
+ * Markdown by rehype-prose-figures and placed by the prose templates: box
+ * diagram panels, pattern chains, table marks, F-O1, the page hero band and
+ * the RFC lifecycle track. Kept apart from figures.css so branches merge
+ * cleanly. Square corners, 2px lines, tokens only.
+ */
+@layer components {
+  /* ---------- box diagram panels (3.10.4) ---------- */
+
+  .fig-ascii {
+    /* --rule dots on an 8px pitch: grid paper behind the author's own drawing. */
+    background-color: var(--bg-sub);
+    background-image: radial-gradient(var(--rule) 1px, transparent 1.5px);
+    background-size: 8px 8px;
+  }
+
+  .fig-ascii pre {
+    margin: 0;
+  }
+
+  /* ---------- pattern chains (3.10.9) ---------- */
+
+  .prose-chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-3) var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .prose-chain__item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+    margin: 0;
+  }
+
+  .prose-chain__node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .prose-chain__id {
+    font-size: 12px;
+    color: var(--ink-2);
+    background: none;
+    padding: 0;
+  }
+
+  .prose-chain__arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding-top: 8px;
+    color: var(--ink-3);
+  }
+
+  .prose-chain__out {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.2;
+    color: var(--ink-2);
+    max-width: 10ch;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+
+  .prose-chain__chevron {
+    flex: none;
+    vertical-align: middle;
+  }
+
+  /* ---------- table marks (3.10.8, 3.10.10, 3.10.11) ---------- */
+
+  .prose-cell-chain {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    color: var(--ink-3);
+  }
+
+  .prose-cap-cell .mini-tile {
+    margin-right: var(--space-2);
+    vertical-align: middle;
+  }
+
+  .prose-bar-cell {
+    min-width: 9rem;
+  }
+
+  .prose-yn {
+    vertical-align: -2px;
+  }
+
+  .prose-yn--yes {
+    color: var(--ok);
+  }
+
+  .prose-yn--no {
+    color: var(--ink-3);
+  }
+
+  .prose-risk {
+    vertical-align: middle;
+    margin-right: 2px;
+  }
+
+  .prose-risk[data-risk='low'] {
+    color: var(--risk-low);
+  }
+
+  .prose-risk[data-risk='medium'] {
+    color: var(--risk-medium);
+  }
+
+  .prose-risk[data-risk='high'] {
+    color: var(--risk-high);
+  }
+
+  .prose-strip {
+    margin-left: var(--space-1);
+    vertical-align: middle;
+  }
+
+  .prose-wf-cell {
+    white-space: nowrap;
+  }
+
+  /* A coverage-grid count (visual spec 1.2 heat steps): the count is always printed. */
+  .heat-badge {
+    display: inline-block;
+    min-width: 24px;
+    margin: 0 var(--space-1) var(--space-1) 0;
+    padding: 0 4px;
+    border: 2px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 20px;
+    text-align: center;
+  }
+
+  .heat-badge--1 {
+    background: var(--heat-1);
+    color: var(--on-heat-1);
+  }
+
+  .heat-badge--2 {
+    background: var(--heat-2);
+    color: var(--on-heat-2);
+  }
+
+  .heat-badge--3 {
+    background: var(--heat-3);
+    color: var(--on-heat-3);
+  }
+
+  .heat-badge--4 {
+    background: var(--heat-4);
+    color: var(--on-heat-4);
+  }
+
+  /* ---------- F-O1, OASF categories mapped to capabilities (3.10.14) ---------- */
+
+  .oasf-map {
+    margin: 0;
+  }
+
+  .oasf-map th[scope='row'] {
+    font-weight: 400;
+    text-align: left;
+  }
+
+  .oasf-map__code {
+    display: inline-block;
+    min-width: 4ch;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  .oasf-map__type {
+    white-space: nowrap;
+  }
+
+  .oasf-map__type .pg {
+    vertical-align: -2px;
+  }
+
+  .oasf-map__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+
+  /* ---------- page hero band (3.10.1, 3.10.12, 3.10.13) ---------- */
+
+  .page-hero {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-4) var(--space-3);
+    margin: var(--space-6) 0 var(--space-5);
+    padding: var(--space-4);
+    border: var(--border);
+    background: var(--bg-sub);
+    box-shadow: var(--shadow-1);
+  }
+
+  .page-hero__tile {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 48px;
+    height: 48px;
+    border: var(--border);
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  .page-hero__tile .pg {
+    width: 36px;
+    height: 36px;
+  }
+
+  @media (min-width: 600px) {
+    .page-hero {
+      gap: var(--space-5);
+      padding: var(--space-5);
+    }
+
+    .page-hero__tile {
+      width: 72px;
+      height: 72px;
+    }
+  }
+
+  .page-hero__text {
+    min-width: 0;
+  }
+
+  /* The title is the band's own: smaller than a bare page title, so a long
+     one stays within the band's height (multiples of 5px, as base.css). */
+  .page-hero__text h1 {
+    margin: var(--space-2) 0 0;
+    font-size: 35px;
+  }
+
+  @media (min-width: 960px) {
+    .page-hero__text h1 {
+      font-size: 45px;
+    }
+  }
+
+  .page-hero__eyebrow {
+    margin: 0;
+  }
+
+  .page-hero__status {
+    margin: var(--space-3) 0 0;
+  }
+
+  .page-hero .lead {
+    margin: var(--space-3) 0 0;
+  }
+
+  .page-hero .skill-meta {
+    margin: var(--space-4) 0 0;
+  }
+
+  .skill-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .skill-tools > li {
+    margin: 0;
+  }
+
+  .skill-tools code {
+    display: inline-block;
+    padding: 0 6px;
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .skill-runs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    margin: var(--space-4) 0 0;
+  }
+
+  /* F-R2: the RFC lifecycle track, the current state filled in --accent. */
+  .rfc-track {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .rfc-track__or {
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  .rfc-track__label {
+    margin: 0 0 var(--space-2);
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  .rfc-track__states {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .rfc-track__state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+  }
+
+  .rfc-track__box {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 2px 8px;
+    border: var(--border);
+    background: var(--bg);
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .rfc-track__state--current .rfc-track__box {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 700;
+  }
+
+  .rfc-track__then {
+    color: var(--ink-3);
+  }
+
+  .rfc-track__date {
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- H2 dividers (3.10.2) ---------- */
+
+  /* A 2px rule of 8px dashes with 4px gaps above every H2, drawn in CSS so it
+     adds no DOM; a Markdown rule right before an H2 would draw a second line. */
+  :is(.doc--prose, .doc--rfc, .doc--skill) h2::before {
+    content: '';
+    display: block;
+    height: 2px;
+    margin-bottom: var(--space-4);
+    background: repeating-linear-gradient(90deg, var(--rule) 0 8px, transparent 8px 12px);
+  }
+
+  :is(.doc--prose, .doc--rfc, .doc--skill) hr:has(+ h2) {
+    display: none;
+  }
+}
