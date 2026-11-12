@@ -27,6 +27,25 @@
   .site-header__home:is(:hover, :focus-visible) .mark__loose {
     transform: translate(-1px, -1px);
   }
+
+  /* A run replay (RunReplay) plays once, row by row, when its script finds
+     motion allowed and the figure in view; each row waits for its turn
+     (--i) and then appears in one step. Without the class it is the final
+     state. */
+  .replay-run.is-replaying :is(.replay__row, .replay__loop, .replay__exit, .replay__end) {
+    animation: replay-in var(--step-replay) backwards;
+    animation-delay: calc(var(--i, 0) * 280ms);
+  }
+
+  @keyframes replay-in {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
 }
 
 @layer utilities {
