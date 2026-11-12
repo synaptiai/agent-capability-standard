@@ -273,6 +273,18 @@
 
   /* ---------- step strip ---------- */
 
+  /* A table or list under a figure that holds the same data: it starts
+     closed (a capability's edges and contract, the edge changes table). */
+  .fig-details {
+    margin: var(--space-4) 0 var(--space-5);
+  }
+
+  .fig-details > summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
   .step-strip {
     display: inline-flex;
     flex-wrap: wrap;
@@ -289,6 +301,10 @@
 
   .step-strip--16 {
     --cell: 16px;
+  }
+
+  .step-strip--20 {
+    --cell: 20px;
   }
 
   .step-strip__step {

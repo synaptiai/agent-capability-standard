@@ -210,18 +210,7 @@
     color: var(--ink-2);
   }
 
-  /* The table under F-C1 holds the same edges; it starts closed. */
-  .fig-details {
-    margin: var(--space-4) 0 var(--space-5);
-  }
-
-  .fig-details > summary {
-    cursor: pointer;
-    font-weight: 700;
-    color: var(--ink);
-  }
-
-  /* ---------- F-C2 contract: inputs | box | outputs, stacked when narrow ---------- */
+  /* ---------- F-C2 contract: the capability as a band, then inputs -> outputs ---------- */
 
   .cdiag {
     display: grid;
@@ -281,7 +270,7 @@
     color: var(--ink-2);
   }
 
-  /* Narrow: both port lists read left to right, pin first. */
+  /* Both port lists read left to right, pin first. */
   .cdiag .ports:not(.ports--out) .port {
     justify-content: flex-start;
   }
@@ -290,69 +279,49 @@
     order: 0;
   }
 
+  /*
+   * Wide: the capability is a band across the top (glyph, id, layer in one
+   * line), and under it the inputs and the outputs side by side with a right
+   * chevron between them, read like a signature: these go in, these come
+   * out. No box sits between wired ports.
+   */
   @container (min-width: 640px) {
     .cdiag {
-      grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1fr);
-      gap: 0;
-      align-items: stretch;
-    }
-
-    .cdiag .cdiag__flow {
-      display: none;
-    }
-
-    .cdiag__side--in {
-      text-align: right;
-    }
-
-    .cdiag__side--in .cdiag__label {
-      padding-right: 22px;
-    }
-
-    .cdiag__side--out .cdiag__label {
-      padding-left: 22px;
-    }
-
-    /* Inputs sit against the box with the pin on the right; a 2px stub joins each pin to the box. */
-    .cdiag .ports:not(.ports--out) .port {
-      justify-content: flex-end;
-    }
-
-    .cdiag .ports:not(.ports--out) .port__pin {
-      order: 9;
-    }
-
-    .cdiag__ports .port__pin {
-      position: relative;
-    }
-
-    .cdiag__side--in .port__pin {
-      margin-right: 12px;
-    }
-
-    .cdiag__side--out .port__pin {
-      margin-left: 12px;
-    }
-
-    .cdiag__ports .port[data-depth='0'] .port__pin::after {
-      content: '';
-      position: absolute;
-      top: 2px;
-      width: 12px;
-      height: 2px;
-      background: var(--ink-2);
-    }
-
-    .cdiag__side--in .port[data-depth='0'] .port__pin::after {
-      left: calc(100% + 2px);
-    }
-
-    .cdiag__side--out .port[data-depth='0'] .port__pin::after {
-      right: calc(100% + 2px);
+      grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+      grid-template-areas:
+        'box box box'
+        'in flow out';
+      column-gap: var(--space-4);
+      row-gap: var(--space-4);
+      align-items: start;
     }
 
     .cdiag__box {
-      min-height: 120px;
+      grid-area: box;
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      gap: var(--space-3);
+      min-height: 0;
+      padding: var(--space-2) var(--space-3);
+    }
+
+    .cdiag__side--in {
+      grid-area: in;
+    }
+
+    .cdiag__side--out {
+      grid-area: out;
+    }
+
+    .cdiag .cdiag__flow--in {
+      grid-area: flow;
+      align-self: center;
+      transform: rotate(-90deg);
+    }
+
+    .cdiag .cdiag__flow--out {
+      display: none;
     }
   }
 

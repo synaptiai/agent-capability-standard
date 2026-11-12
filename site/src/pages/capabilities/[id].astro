@@ -1,21 +1,19 @@
 ---
 // One page per capability, from its ontology node: the safety panel (F-C3),
 // its relationships drawn one tile per neighbour (F-C1) over the edge table,
-// the contract as a block diagram (F-C2) over the contract tables, the
+// the contract figure (F-C2) with the contract tables folded under it, the
 // workflows that run it as step strips (F-C4), and the skill that implements
-// it (skills/<id>/SKILL.md, rendered through the Markdown pipeline), with port
-// columns under its Inputs and Output Contract headings and a tile chain
-// under Composition Patterns (visual spec 3.1). The layer always comes from
+// it (skills/<id>/SKILL.md, rendered through the Markdown pipeline), with a
+// tile chain under Composition Patterns (visual spec 3.1). The layer always comes from
 // the ontology. Headings the page adds have `ref-` ids; the skill's own
 // headings keep the ids GitHub gives them.
 import { getEntry, render } from 'astro:content';
 import CompositionChain from '../../components/fig/CompositionChain.astro';
 import ContractDiagram from '../../components/fig/ContractDiagram.astro';
 import Neighbourhood from '../../components/fig/Neighbourhood.astro';
-import PortColumn from '../../components/fig/PortColumn.astro';
 import WhereItRuns from '../../components/fig/WhereItRuns.astro';
 import SafetyPanel from '../../components/fig/SafetyPanel.astro';
-import { compositionChain, contractSummary, neighbours, splitAtH2s } from '../../lib/capability-figures';
+import { compositionChain, neighbours, splitAtH2s } from '../../lib/capability-figures';
 import { readRepoFile } from '../../lib/repo';
 import '../../styles/figures-capability.css';
 import ContractTable from '../../components/ContractTable.astro';
@@ -67,12 +65,11 @@ const next = () => ++figN;
 const nRelations = groups.length > 0 && neighbours(cap, ontology).length > 0 ? next() : 0;
 const nContract = next();
 const nUsage = usage.length > 0 ? next() : 0;
-const contract = contractSummary(cap);
-// A port column with no ports would be an empty figure (visual spec 1.1.5); none is drawn then.
-const after: Record<string, { kind: 'in' | 'out' | 'chain'; n: number }> = {};
+// The skill's Inputs and Output Contract sections get no port figure: the
+// contract figure above already draws the same ports, and the skill's own
+// table follows each heading (the review counted each input four times).
+const after: Record<string, { kind: 'chain'; n: number }> = {};
 for (const part of skill.parts) {
-  if (part.id === 'inputs' && contract.inputs.length > 0) after[part.id] = { kind: 'in', n: next() };
-  if (part.id === 'output-contract' && contract.outputs.length > 0) after[part.id] = { kind: 'out', n: next() };
   if (part.id === 'composition-patterns' && chainLength >= 2) after[part.id] = { kind: 'chain', n: next() };
 }
 const skillFacts = (
@@ -170,12 +167,11 @@ const skillFacts = (
     <section class="capability-contract">
       <h2 id={id('Contract')}>Contract</h2>
       <ContractDiagram cap={cap} n={nContract} describedby="ref-contract-tables" />
-      <div id="ref-contract-tables">
-        <h3 id={id('Inputs')}>Inputs</h3>
+      <details class="fig-details" id="ref-contract-tables">
+        <summary>The same contract as tables, with descriptions</summary>
         <ContractTable rows={contractRows(cap.input_schema)} caption={`Inputs of ${cap.id}`} from={ONTOLOGY_SOURCE} side="in" />
-        <h3 id={id('Outputs')}>Outputs</h3>
         <ContractTable rows={contractRows(cap.output_schema)} caption={`Outputs of ${cap.id}`} from={ONTOLOGY_SOURCE} side="out" />
-      </div>
+      </details>
     </section>
 
     <section class="capability-usage">
@@ -206,8 +202,6 @@ const skillFacts = (
           return (
             <>
               <Fragment set:html={part.head} />
-              {fig?.kind === 'in' && <PortColumn cap={cap} side="in" n={fig.n} />}
-              {fig?.kind === 'out' && <PortColumn cap={cap} side="out" n={fig.n} />}
               {fig?.kind === 'chain' && <CompositionChain cap={cap} chain={chain} n={fig.n} />}
               <Fragment set:html={part.body} />
             </>
