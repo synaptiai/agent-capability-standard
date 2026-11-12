@@ -1,7 +1,6 @@
 // Markdown copies of the capability pages, the layer pages and the
 // capabilities overview, from the same data the HTML pages use.
 import { capabilitiesOfLayer, loadOntology, ONTOLOGY_SOURCE, RISKS } from '../data/ontology';
-import { riskByLayerMatrix } from '../lib/index-figures';
 import { loadVersions } from '../data/versions';
 import { capabilityUsage } from '../data/workflows';
 import { readRepoFile } from '../lib/repo';
@@ -164,10 +163,6 @@ export function capabilitiesIndexTwin(): Twin {
       ),
     ),
     '## Counts',
-    (() => {
-      const m = riskByLayerMatrix(ontology.layers, (id) => ontology.byId.get(id)!.risk, RISKS);
-      return figure(m.title, m.caption, table([m.rowHead, ...m.columns.map((c) => c.label)], m.rows.map((r) => [r.label, ...r.counts.map(String)])));
-    })(),
     table(['Risk', 'Capabilities'], RISKS.map((r) => [r, String(ontology.capabilities.filter((c) => c.risk === r).length)])),
     `${ontology.capabilities.filter((c) => c.mutation).length} of the ${n} capabilities change state.`,
     table(['Edge type', 'Edges'], ontology.edgeTypes.map((t) => [code(t.id), String(t.edges.length)])),

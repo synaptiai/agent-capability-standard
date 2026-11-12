@@ -6,9 +6,6 @@ import { loadOntology, RISKS } from '../../data/ontology';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
 import TableWrap from '../../components/TableWrap.astro';
-import CountMatrix from '../../components/fig/CountMatrix.astro';
-import { riskByLayerMatrix } from '../../lib/index-figures';
-import '../../styles/figures-indexes.css';
 
 const route = routeByUrl('/capabilities/');
 const ontology = loadOntology();
@@ -16,7 +13,6 @@ const id = refSlugger();
 const n = ontology.capabilities.length;
 const byRisk = RISKS.map((risk) => ({ risk, count: ontology.capabilities.filter((c) => c.risk === risk).length }));
 const mutating = ontology.capabilities.filter((c) => c.mutation).length;
-const riskMatrix = riskByLayerMatrix(ontology.layers, (cid) => ontology.byId.get(cid)!.risk, RISKS);
 const description = `The ${n} capabilities of the ontology in ${ontology.layers.length} layers, with their risk levels and safety flags.`;
 ---
 <DocLayout route={route} title="Capabilities" description={description}>
@@ -33,9 +29,6 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
     </section>
     <section class="capabilities-counts">
       <h2 id={id('Counts')}>Counts</h2>
-      <CountMatrix id={id('fig-risk-by-layer')} n={1} matrix={riskMatrix} />
-      <details class="capabilities-counts__tables">
-        <summary>The counts as tables</summary>
       <TableWrap label="Capabilities by risk level">
         <table class="count-table">
           <caption>Capabilities by risk level</caption>
@@ -55,7 +48,6 @@ const description = `The ${n} capabilities of the ontology in ${ontology.layers.
           </tbody>
         </table>
       </TableWrap>
-      </details>
     </section>
   </article>
 </DocLayout>
