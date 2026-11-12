@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Run fixture</title>
+<!-- A page for scripts/check-runs.mjs to measure before it measures the
+     site: every block has a fixed height, so the geometry in
+     runs-page.json can be worked out by hand. -->
+<style>
+  html, body, main, div, p, h2, h3, figure, pre { margin: 0; padding: 0; border: 0; display: block; }
+  body { width: 1440px; }
+</style>
+</head>
+<body class="page page--fixture page--with-sidebar">
+<header style="height:100px">header, not part of the body</header>
+<main><div class="doc-main__body">
+  <p style="height:1000px">prose</p>
+  <figure class="fig" style="height:300px"><div class="fig__drawing" style="width:200px;height:100px"></div></figure>
+  <h2 id="notes" style="height:50px">Notes</h2>
+  <div style="height:2000px">narrative</div>
+  <h3 id="sub" style="height:50px">Sub</h3>
+  <div style="height:550px">more narrative</div>
+  <h2 id="after" style="height:50px">After</h2>
+  <figure class="fig" style="height:200px"><div class="fig__drawing" style="width:50px;height:30px"></div></figure>
+  <p style="height:1900px">prose</p>
+  <div data-info-figure style="width:300px;height:100px">enriched table</div>
+  <p style="height:100px">prose</p>
+  <h2 id="code" style="height:50px">Code</h2>
+  <pre style="height:1000px">tall fence</pre>
+  <pre style="height:400px">short fence</pre>
+</div></main>
+<footer style="height:100px">footer</footer>
+</body>
+</html>

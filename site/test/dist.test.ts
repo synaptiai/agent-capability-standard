@@ -13,6 +13,7 @@ import { RESERVED_WORKFLOW_SLUGS } from '../src/data/workflows';
 import { checkDistDir } from '../scripts/check-dist.mjs';
 import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
 import { ROUTES, type Route } from '../src/lib/routes';
+import { EXEMPT_RUNS, pageMatches } from '../src/lib/runs';
 import {
   allCatalogSteps,
   claudeLayerTable,
@@ -730,5 +731,26 @@ describe('review pages', () => {
     const deploy = yml.slice(yml.indexOf('\n  deploy:'));
     expect(deploy.indexOf('dist/_review')).toBeGreaterThan(-1);
     expect(deploy.indexOf('dist/_review')).toBeLessThan(deploy.indexOf('pages deploy dist'));
+  });
+});
+
+// Visual spec 3.12: every exempt run names a heading that exists. A page
+// entry needs its heading on that page; a template entry on at least one
+// page of the template. (scripts/check-runs.mjs fails on the same thing in
+// the browser; this catches it without one.)
+describe('exempt runs', () => {
+  it('name headings that exist on their pages', () => {
+    const problems: string[] = [];
+    for (const e of EXEMPT_RUNS) {
+      const pages = ROUTES.filter((r) => pageMatches(e.page, r.url, r.template));
+      if (pages.length === 0) {
+        problems.push(`${e.page}: no page`);
+        continue;
+      }
+      if (e.anchor === '*') continue;
+      const has = pages.filter((r) => readFileSync(path.join(dist, pageFile(r.url)), 'utf8').includes(`id="${e.anchor}"`));
+      if (e.page.startsWith('template:') ? has.length === 0 : has.length < pages.length) problems.push(`${e.page}#${e.anchor}`);
+    }
+    expect(problems).toEqual([]);
   });
 });
