@@ -1,0 +1,83 @@
+---
+// F-L2, the edges between a layer and the other layers (visual spec 3.2):
+// the same rail stack as F-C1, with the layers whose edges point into this
+// one above it and the layers it points to below. Each row is the other
+// layer's glyph tile and name, a bar of its edge count (one scale for the
+// whole figure, every track the same length) and an edge mark for each
+// type present. The edges
+// themselves are listed in the table under the figure.
+//
+// Props:
+// - layerId: string, required.
+// - n: number, required. The figure number on the page.
+// - describedby: string, optional. Id of the element that lists the edges.
+import { loadOntology } from '../../data/ontology';
+import { layerHref } from '../../lib/generated';
+import { layerLinks, layerLinksCaption, type LayerLink } from '../../lib/layer-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import { railStub, STUB_H, STUB_W } from '../../pixel/rail';
+import Figure from './Figure.astro';
+import PixelBar from './PixelBar.astro';
+import Rects from './Rects.astro';
+
+interface Props {
+  layerId: string;
+  n: number;
+  describedby?: string;
+}
+
+const { layerId, n, describedby } = Astro.props;
+const ontology = loadOntology();
+const links = layerLinks(layerId, ontology);
+const max = Math.max(1, ...[...links.into, ...links.out].map((l) => l.edges.length));
+type Row = { kind: 'centre' } | { kind: 'into' | 'out'; items: LayerLink[] };
+const rows: Row[] = [
+  ...(links.into.length > 0 ? [{ kind: 'into' as const, items: links.into }] : []),
+  { kind: 'centre' as const },
+  ...(links.out.length > 0 ? [{ kind: 'out' as const, items: links.out }] : []),
+];
+const label = { into: `Into ${layerId}`, out: `Out of ${layerId}` };
+---
+<Figure id="ref-fig-layer-edges" n={n} title={`Edges between ${layerId} and other layers`} caption={layerLinksCaption(layerId, links)} describedby={describedby} kind="layer-edges">
+  <div class="nbhd llinks">
+    {rows.map((row, i) => {
+      const edge = i === 0 ? 'first' : i === rows.length - 1 ? 'last' : 'mid';
+      if (row.kind === 'centre') {
+        return (
+          <div class="nbhd__row nbhd__row--centre" data-rail={edge}>
+            <span class="nbhd__rail" aria-hidden="true">
+              <svg class="nbhd__stub" viewBox={`0 0 ${STUB_W} ${STUB_H}`} width={STUB_W} height={STUB_H} shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={railStub('centre')} /></svg>
+            </span>
+            <div class="nbhd__centre has-layer" style={`--layer: var(--layer-${layerId})`}>
+              <span class="llinks__tile llinks__tile--centre" aria-hidden="true"><PixelGlyph name={layerId} scale={4} /></span>
+              <span class="nbhd__centre-text"><code>{layerId}</code><span class="nbhd__centre-layer">this layer</span></span>
+            </div>
+          </div>
+        );
+      }
+      return (
+        <div class:list={['nbhd__row', `nbhd__row--${row.kind}`]} data-rail={edge} data-group={row.kind}>
+          <span class="nbhd__rail" aria-hidden="true">
+            <svg class="nbhd__stub" viewBox={`0 0 ${STUB_W} ${STUB_H}`} width={STUB_W} height={STUB_H} shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={railStub(row.kind)} /></svg>
+          </span>
+          <div class="nbhd__body">
+            <p class="nbhd__head" id={`ref-llinks-${row.kind}`}>{label[row.kind]} <span class="nbhd__count">({row.items.length})</span></p>
+            <ul class="llinks__list" aria-labelledby={`ref-llinks-${row.kind}`}>
+              {row.items.map((l) => (
+                <li class="llinks__row has-layer" style={`--layer: var(--layer-${l.layer})`} data-layer={l.layer} data-edges={l.edges.length}>
+                  <span class="llinks__tile" aria-hidden="true"><PixelGlyph name={l.layer} scale={2} /></span>
+                  <a class="llinks__name" href={layerHref(l.layer)}>{l.layer}</a>
+                  <PixelBar value={l.edges.length} max={max} />
+                  <span class="fig-sr">{l.edges.length === 1 ? 'edge' : 'edges'}</span>
+                  <span class="llinks__marks">
+                    {l.types.map((t) => <PixelGlyph name={`mark:${t}`} label={t} />)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      );
+    })}
+  </div>
+</Figure>

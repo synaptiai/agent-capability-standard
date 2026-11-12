@@ -1,18 +1,30 @@
 ---
-// One page per capability, from its ontology node: the contract, safety flags,
-// edges by type, the workflows that use it, and the skill that implements it
-// (skills/<id>/SKILL.md, rendered through the Markdown pipeline). The layer
-// always comes from the ontology. Headings the page adds have `ref-` ids; the
-// skill's own headings keep the ids GitHub gives them.
+// One page per capability, from its ontology node: the safety panel (F-C3),
+// its relationships drawn one tile per neighbour (F-C1) over the edge table,
+// the contract as a block diagram (F-C2) over the contract tables, the
+// workflows that run it as step strips (F-C4), and the skill that implements
+// it (skills/<id>/SKILL.md, rendered through the Markdown pipeline), with port
+// columns under its Inputs and Output Contract headings and a tile chain
+// under Composition Patterns (visual spec 3.1). The layer always comes from
+// the ontology. Headings the page adds have `ref-` ids; the skill's own
+// headings keep the ids GitHub gives them.
 import { getEntry, render } from 'astro:content';
-import CapabilityFlags from '../../components/CapabilityFlags.astro';
+import CompositionChain from '../../components/fig/CompositionChain.astro';
+import ContractDiagram from '../../components/fig/ContractDiagram.astro';
+import Neighbourhood from '../../components/fig/Neighbourhood.astro';
+import PortColumn from '../../components/fig/PortColumn.astro';
+import WhereItRuns from '../../components/fig/WhereItRuns.astro';
+import SafetyPanel from '../../components/fig/SafetyPanel.astro';
+import { compositionChain, contractSummary, neighbours, splitAtH2s } from '../../lib/capability-figures';
+import { readRepoFile } from '../../lib/repo';
+import '../../styles/figures-capability.css';
 import ContractTable from '../../components/ContractTable.astro';
 import LayerBadge from '../../components/LayerBadge.astro';
 import { loadOntology, ONTOLOGY_SOURCE } from '../../data/ontology';
 import { loadVersions } from '../../data/versions';
 import { capabilityUsage } from '../../data/workflows';
 import DocLayout from '../../layouts/DocLayout.astro';
-import { capabilityHref, refSlugger, routesByTemplate, workflowHref } from '../../lib/generated';
+import { capabilityHref, refSlugger, routesByTemplate, specSectionHref } from '../../lib/generated';
 import { COMMIT_SHA, githubBlobUrl } from '../../lib/repo';
 import type { Route } from '../../lib/routes';
 import { contractRows, EDGE_LABELS, edgeGroups } from '../../lib/views';
@@ -42,8 +54,27 @@ const id = refSlugger();
 
 const entry = await getEntry('docs', route.source!);
 if (!entry) throw new Error(`capabilities: no docs entry for ${route.source}`);
-const { Content } = await render(entry);
+await render(entry);
+if (typeof entry.rendered?.html !== 'string') throw new Error(`capabilities: ${route.source} has no rendered HTML`);
+const skill = splitAtH2s(entry.rendered.html);
 const fm = entry.data;
+const chain = compositionChain(readRepoFile(route.source!));
+const chainLength = chain.follows.length + chain.precedes.length + 1;
+
+// Figures are numbered in page order; a figure that falls back to a sentence takes no number.
+let figN = 0;
+const next = () => ++figN;
+const nRelations = groups.length > 0 && neighbours(cap, ontology).length > 0 ? next() : 0;
+const nContract = next();
+const nUsage = usage.length > 0 ? next() : 0;
+const contract = contractSummary(cap);
+// A port column with no ports would be an empty figure (visual spec 1.1.5); none is drawn then.
+const after: Record<string, { kind: 'in' | 'out' | 'chain'; n: number }> = {};
+for (const part of skill.parts) {
+  if (part.id === 'inputs' && contract.inputs.length > 0) after[part.id] = { kind: 'in', n: next() };
+  if (part.id === 'output-contract' && contract.outputs.length > 0) after[part.id] = { kind: 'out', n: next() };
+  if (part.id === 'composition-patterns' && chainLength >= 2) after[part.id] = { kind: 'chain', n: next() };
+}
 const skillFacts = (
   [
     ['argument-hint', 'Arguments'],
@@ -58,26 +89,29 @@ const skillFacts = (
 ---
 <DocLayout route={route} title={cap.id} description={cap.description}>
   <article class="doc doc--capability" data-capability={cap.id} data-layer={cap.layer.toLowerCase()} data-pagefind-body>
-    <header class="capability-header">
-      <LayerBadge layer={cap.layer} />
-      <h1 id={id(cap.id)}><code>{cap.id}</code></h1>
-      <p class="lead">{cap.description}</p>
-      <CapabilityFlags cap={cap} />
+    <header class="capability-header capability-header--panel">
+      <div class="capability-header__text">
+        <LayerBadge layer={cap.layer} />
+        <h1 id={id(cap.id)}><code>{cap.id}</code></h1>
+        <p class="lead">{cap.description}</p>
+      </div>
+      <div class="capability-header__safety">
+        <SafetyPanel cap={cap} id="ref-safety" />
+        <p class="capability-header__defs">
+          Defined in the Standard: <a href={specSectionHref('4.1')}>risk and state</a>, <a href={specSectionHref('4.4')}>checkpoints</a>, <a href={specSectionHref('5.2.1')}>approval</a>.
+        </p>
+      </div>
     </header>
-
-    <section class="capability-contract">
-      <h2 id={id('Contract')}>Contract</h2>
-      <h3 id={id('Inputs')}>Inputs</h3>
-      <ContractTable rows={contractRows(cap.input_schema)} caption={`Inputs of ${cap.id}`} from={ONTOLOGY_SOURCE} />
-      <h3 id={id('Outputs')}>Outputs</h3>
-      <ContractTable rows={contractRows(cap.output_schema)} caption={`Outputs of ${cap.id}`} from={ONTOLOGY_SOURCE} />
-    </section>
 
     <section class="capability-relationships">
       <h2 id={id('Relationships')}>Relationships</h2>
       {groups.length === 0 ? (
         <p>No edge in the ontology starts or ends at this capability.</p>
       ) : (
+        <>
+        <Neighbourhood cap={cap} n={nRelations} describedby="ref-relationships-table" />
+        <details class="fig-details" id="ref-relationships-table">
+        <summary>The same edges as a table, by type</summary>
         <TableWrap label={`Edges of ${cap.id} in the ontology, by type`}>
           <table class="edge-table">
             <caption>Edges of {cap.id} in the ontology, by type</caption>
@@ -128,24 +162,25 @@ const skillFacts = (
             </tbody>
           </table>
         </TableWrap>
+        </details>
+        </>
       )}
+    </section>
+
+    <section class="capability-contract">
+      <h2 id={id('Contract')}>Contract</h2>
+      <ContractDiagram cap={cap} n={nContract} describedby="ref-contract-tables" />
+      <div id="ref-contract-tables">
+        <h3 id={id('Inputs')}>Inputs</h3>
+        <ContractTable rows={contractRows(cap.input_schema)} caption={`Inputs of ${cap.id}`} from={ONTOLOGY_SOURCE} side="in" />
+        <h3 id={id('Outputs')}>Outputs</h3>
+        <ContractTable rows={contractRows(cap.output_schema)} caption={`Outputs of ${cap.id}`} from={ONTOLOGY_SOURCE} side="out" />
+      </div>
     </section>
 
     <section class="capability-usage">
       <h2 id={id('Used in workflows')}>Used in workflows</h2>
-      {usage.length === 0 ? (
-        <p>No reference or domain workflow uses this capability.</p>
-      ) : (
-        <ul class="usage-list">
-          {usage.map((u) => (
-            <li data-workflow={u.workflowId} data-catalog={u.catalog}>
-              <a href={workflowHref(u.workflowId)}><code>{u.workflowId}</code></a>
-              {' '}
-              <span class="usage-list__steps">{u.steps.length === 1 ? 'step' : 'steps'} {u.steps.join(', ')}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <WhereItRuns cap={cap} n={nUsage} />
     </section>
 
     <section class="capability-skill" data-skill={cap.id}>
@@ -165,7 +200,19 @@ const skillFacts = (
         </dl>
       )}
       <div class="doc__body">
-        <Content />
+        {skill.lead && <Fragment set:html={skill.lead} />}
+        {skill.parts.map((part) => {
+          const fig = after[part.id];
+          return (
+            <>
+              <Fragment set:html={part.head} />
+              {fig?.kind === 'in' && <PortColumn cap={cap} side="in" n={fig.n} />}
+              {fig?.kind === 'out' && <PortColumn cap={cap} side="out" n={fig.n} />}
+              {fig?.kind === 'chain' && <CompositionChain cap={cap} chain={chain} n={fig.n} />}
+              <Fragment set:html={part.body} />
+            </>
+          );
+        })}
       </div>
     </section>
 

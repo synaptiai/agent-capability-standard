@@ -1,0 +1,692 @@
+/*
+ * The capability page's figures (visual spec 3.1): the header with the
+ * safety panel, the relationships stack (F-C1), the contract block diagram
+ * (F-C2), the workflow strips (F-C4), and the aids in the skill's prose
+ * (port columns, composition chain, numbered procedure, collapsed examples,
+ * the safety panel), and the layer page's hero, edge map (F-L2) and
+ * steps-per-layer bars (F-L4), which reuse the same rail and tiles (visual
+ * spec 3.2). Shared parts are styled in figures.css. Each figure lays
+ * itself out by the width of its own .fig container, never the viewport.
+ *
+ * Pages import this file, and a page's styles can load before the layout's
+ * tokens.css, so the layer order is declared here too (the same order);
+ * without it this file would make `components` the first layer.
+ */
+@layer reset, tokens, base, components, utilities;
+
+@layer components {
+  /* ---------- header: title on the left, safety panel (F-C3) on the right when wide ---------- */
+
+  .capability-header--panel {
+    display: grid;
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  @media (min-width: 1100px) {
+    .capability-header--panel {
+      grid-template-columns: minmax(0, 1fr) 22rem;
+    }
+  }
+
+  /* Header-sized safety cells: one word per line fits a third of 22rem. */
+  .capability-header__safety .safety-panel__grid dt {
+    font-size: 12px;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .capability-header__text {
+    min-width: 0;
+  }
+
+  .capability-header__defs {
+    margin: var(--space-2) 0 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-C1 relationships: one rail, one row per direction ---------- */
+
+  .nbhd {
+    display: grid;
+  }
+
+  .nbhd__row {
+    --stub-y: 12px;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    padding-bottom: var(--space-4);
+  }
+
+  .nbhd__row[data-rail='last'] {
+    padding-bottom: 0;
+  }
+
+  .nbhd__row--centre {
+    --stub-y: 32px;
+  }
+
+  .nbhd__rail {
+    position: relative;
+  }
+
+  /* The rail runs from the first row's stub to the last row's stub, unbroken between rows. */
+  .nbhd__rail::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--ink-2);
+  }
+
+  .nbhd__row[data-rail='first'] > .nbhd__rail::before {
+    top: calc(var(--stub-y) - 1px);
+  }
+
+  .nbhd__row[data-rail='last'] > .nbhd__rail::before {
+    bottom: auto;
+    height: calc(var(--stub-y) + 1px);
+  }
+
+  .nbhd__stub {
+    position: absolute;
+    left: 0;
+    top: calc(var(--stub-y) - 7px);
+    color: var(--ink-2);
+  }
+
+  .nbhd__body {
+    min-width: 0;
+    padding-left: var(--space-1);
+  }
+
+  .nbhd__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: 24px;
+    margin: 0;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .nbhd__head .pg {
+    color: var(--ink-2);
+  }
+
+  .nbhd__count {
+    font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  .nbhd__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) 4px;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .nbhd__cell {
+    display: grid;
+    justify-items: start;
+    gap: 4px;
+    width: 48px;
+    margin: 0;
+  }
+
+  .nbhd__marks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    color: var(--ink);
+  }
+
+  .nbhd__centre {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    box-sizing: border-box;
+    min-height: 64px;
+    padding: 6px var(--space-4) 6px 6px;
+    border: var(--px) solid var(--layer);
+    background: var(--bg);
+  }
+
+  .nbhd__centre-text {
+    display: grid;
+    gap: 2px;
+  }
+
+  .nbhd__centre-text code {
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--ink);
+  }
+
+  .nbhd__centre-layer {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .nbhd-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin: var(--space-4) 0 0;
+    padding: var(--space-3) 0 0;
+    border-top: var(--px) solid var(--rule);
+    list-style: none;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .nbhd-legend > li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+  }
+
+  .nbhd-legend .pg {
+    flex: none;
+    color: var(--ink);
+  }
+
+  .nbhd-legend code {
+    overflow-wrap: normal;
+  }
+
+  .nbhd-empty,
+  .runs-empty {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--ink-2);
+  }
+
+  /* The table under F-C1 holds the same edges; it starts closed. */
+  .fig-details {
+    margin: var(--space-4) 0 var(--space-5);
+  }
+
+  .fig-details > summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  /* ---------- F-C2 contract: inputs | box | outputs, stacked when narrow ---------- */
+
+  .cdiag {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .cdiag__side {
+    min-width: 0;
+  }
+
+  .cdiag__label {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  .cdiag__none {
+    margin: 0;
+    color: var(--ink-2);
+  }
+
+  .cdiag .cdiag__flow {
+    justify-self: center;
+    color: var(--ink-2);
+  }
+
+  .cdiag__box {
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: var(--space-1);
+    min-height: 88px;
+    padding: var(--space-3);
+    border: var(--px) solid var(--layer);
+    background: var(--tint);
+    color: var(--ink);
+    text-align: center;
+  }
+
+  .cdiag__glyph {
+    color: var(--layer);
+  }
+
+  .cdiag__id {
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  .cdiag__layer {
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  /* Narrow: both port lists read left to right, pin first. */
+  .cdiag .ports:not(.ports--out) .port {
+    justify-content: flex-start;
+  }
+
+  .cdiag .ports:not(.ports--out) .port__pin {
+    order: 0;
+  }
+
+  @container (min-width: 640px) {
+    .cdiag {
+      grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1fr);
+      gap: 0;
+      align-items: stretch;
+    }
+
+    .cdiag .cdiag__flow {
+      display: none;
+    }
+
+    .cdiag__side--in {
+      text-align: right;
+    }
+
+    .cdiag__side--in .cdiag__label {
+      padding-right: 22px;
+    }
+
+    .cdiag__side--out .cdiag__label {
+      padding-left: 22px;
+    }
+
+    /* Inputs sit against the box with the pin on the right; a 2px stub joins each pin to the box. */
+    .cdiag .ports:not(.ports--out) .port {
+      justify-content: flex-end;
+    }
+
+    .cdiag .ports:not(.ports--out) .port__pin {
+      order: 9;
+    }
+
+    .cdiag__ports .port__pin {
+      position: relative;
+    }
+
+    .cdiag__side--in .port__pin {
+      margin-right: 12px;
+    }
+
+    .cdiag__side--out .port__pin {
+      margin-left: 12px;
+    }
+
+    .cdiag__ports .port[data-depth='0'] .port__pin::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      width: 12px;
+      height: 2px;
+      background: var(--ink-2);
+    }
+
+    .cdiag__side--in .port[data-depth='0'] .port__pin::after {
+      left: calc(100% + 2px);
+    }
+
+    .cdiag__side--out .port[data-depth='0'] .port__pin::after {
+      right: calc(100% + 2px);
+    }
+
+    .cdiag__box {
+      min-height: 120px;
+    }
+  }
+
+  /* ---------- F-C4 where it runs ---------- */
+
+  .runs {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .runs__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+    margin: 0;
+  }
+
+  .runs__name code {
+    overflow-wrap: normal;
+  }
+
+  .runs__steps {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  @container (min-width: 640px) {
+    .runs__row {
+      grid-template-columns: max-content minmax(0, 1fr) max-content;
+      align-items: center;
+      gap: var(--space-3);
+    }
+  }
+
+  .runs__more {
+    margin-top: var(--space-3);
+  }
+
+  .runs__more > summary {
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  .runs__more > .runs {
+    margin-top: var(--space-3);
+  }
+
+  /* ---------- skill prose: port columns and the composition chain ---------- */
+
+  /* Figures inside the skill's rendered Markdown keep the figure spacing (visual spec 4.1). */
+  .capability-skill .doc__body > .fig {
+    margin-block: var(--space-5);
+  }
+
+  .fig--compact .ports {
+    gap: 2px;
+  }
+
+  /* The port columns in the prose read left to right, pin first, like a list. */
+  .fig--compact .ports--compact:not(.ports--out) .port {
+    justify-content: flex-start;
+  }
+
+  .fig--compact .ports--compact:not(.ports--out) .port__pin {
+    order: 0;
+  }
+
+  .chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .chain__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+  }
+
+  .chain__arrow {
+    color: var(--ink-2);
+  }
+
+  /* ---------- skill prose: numbered procedure ---------- */
+
+  .skill-steps {
+    counter-reset: skill-step;
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .skill-steps > li {
+    position: relative;
+    counter-increment: skill-step;
+    padding-left: 36px;
+  }
+
+  .skill-steps > li + li {
+    margin-top: var(--space-3);
+  }
+
+  .skill-steps > li::before {
+    content: counter(skill-step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    background: var(--ink);
+    color: var(--bg);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  /* ---------- skill prose: collapsed examples ---------- */
+
+  .skill-example {
+    margin: var(--space-3) 0;
+    border: var(--border);
+    background: var(--bg-sub);
+  }
+
+  .skill-example__summary {
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+  }
+
+  .skill-example__summary > h3 {
+    display: inline;
+    margin: 0;
+    font-size: 18px;
+    vertical-align: middle;
+  }
+
+  .skill-example__glyph {
+    display: inline-block;
+    margin: 0 var(--space-2) 0 var(--space-1);
+    vertical-align: middle;
+    color: var(--ink);
+  }
+
+  .skill-example__body {
+    padding: 0 var(--space-3) var(--space-3);
+    min-width: 0;
+  }
+
+  /* ---------- skill prose: the safety constraints panel ---------- */
+
+  .skill-safety {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border: var(--border);
+    background: var(--bg-sub);
+    box-shadow: var(--shadow-1);
+  }
+
+  .skill-safety__glyph {
+    color: var(--ink);
+  }
+
+  .skill-safety__body > :first-child {
+    margin-top: 0;
+  }
+
+  .skill-safety__body > :last-child {
+    margin-bottom: 0;
+  }
+
+  /* ---------- layer page: hero (F-L1) ---------- */
+
+  .layer-hero {
+    display: grid;
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  @media (min-width: 1100px) {
+    .layer-hero {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+  }
+
+  .layer-hero__text {
+    min-width: 0;
+  }
+
+  .layer-hero__title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .layer-hero__title h1 {
+    margin: 0;
+  }
+
+  .layer-hero__glyph {
+    display: inline-grid;
+    flex: none;
+    color: var(--layer);
+  }
+
+  /* Six 48px tiles a row at most: 6 x 48 + 5 x 4 = 308px, the narrow budget. */
+  .layer-hero__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 308px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .layer-hero__tiles > li {
+    margin: 0;
+  }
+
+  /* ---------- layer page: edges to other layers (F-L2) ---------- */
+
+  .llinks__list {
+    display: grid;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .llinks__row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 7rem) minmax(80px, 1fr) 64px;
+    align-items: center;
+    gap: 4px var(--space-2);
+    margin: 0;
+  }
+
+  .llinks__tile {
+    display: inline-grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: 32px;
+    height: 32px;
+    border: var(--px) solid var(--layer);
+    background: var(--tint);
+    color: var(--layer);
+  }
+
+  .llinks__tile--centre {
+    width: 48px;
+    height: 48px;
+  }
+
+  .llinks__name {
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  .llinks__marks {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    color: var(--ink);
+  }
+
+  /* Narrow: the marks go under the bar when there is no room beside it. */
+  @container (max-width: 420px) {
+    .llinks__row {
+      grid-template-columns: 32px minmax(0, 1fr);
+    }
+
+    .llinks__row > .pixel-bar,
+    .llinks__marks {
+      grid-column: 2;
+    }
+  }
+
+  /* ---------- layer page: steps per layer (F-L4) ---------- */
+
+  .lbars {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .lbars__row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 7.5rem) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .lbars__glyph {
+    color: var(--ink-2);
+  }
+
+  .lbars__name {
+    font-size: 14px;
+    font-family: var(--font-mono);
+  }
+
+  /* The other layers recede; this page's layer keeps its colour, glyph and name. */
+  .lbars .pixel-bar__fill {
+    background: var(--ink-3);
+  }
+
+  .lbars__row--current .pixel-bar__fill {
+    background: var(--layer);
+  }
+
+  .lbars__row--current .lbars__glyph {
+    color: var(--layer);
+  }
+
+  .lbars__row--current .lbars__name {
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .lbars__table {
+    margin-bottom: 0;
+  }
+}

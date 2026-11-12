@@ -1,0 +1,95 @@
+---
+// F-C1, a capability's relationships with one tile per neighbour (visual
+// spec 3.1). A vertical stack: the "into" row, the capability itself, then
+// the "out of", "both directions" and "either way" rows, each joined to one
+// rail on the left by a stub whose chevrons give the direction (the stub is
+// the row header's direction glyph). Each tile is
+// a 32px MiniTile with an edge mark for each relationship under it; the marks,
+// not colour, carry the edge types, and a legend names the types present.
+//
+// Props:
+// - cap: Capability, required.
+// - n: number, required. The figure number on the page.
+// - describedby: string, optional. Id of the relationships table.
+import type { Capability } from '../../data/ontology';
+import { neighbourGroupLabel, neighbourhoodCaption, neighbourhoodTitle, neighbours, NEIGHBOUR_GROUPS, relationWords, type NeighbourGroup } from '../../lib/capability-figures';
+import { EDGE_LABELS } from '../../lib/views';
+import { railStub as stub, STUB_H, STUB_W } from '../../pixel/rail';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+import Rects from './Rects.astro';
+
+interface Props {
+  cap: Capability;
+  n: number;
+  describedby?: string;
+}
+
+const { cap, n, describedby } = Astro.props;
+const list = neighbours(cap);
+const groups = NEIGHBOUR_GROUPS.map((g) => ({ group: g, items: list.filter((x) => x.group === g) })).filter((g) => g.items.length > 0);
+// Rows top to bottom: "into" above the capability, everything else below it.
+type Row = { kind: 'centre' } | { kind: 'group'; group: NeighbourGroup; items: typeof list };
+const rows: Row[] = [
+  ...groups.filter((g) => g.group === 'into').map((g) => ({ kind: 'group' as const, ...g })),
+  { kind: 'centre' as const },
+  ...groups.filter((g) => g.group !== 'into').map((g) => ({ kind: 'group' as const, ...g })),
+];
+const types = [...new Set(list.flatMap((x) => x.relations.map((r) => r.type)))];
+const legendOrder = Object.keys(EDGE_LABELS).filter((t) => types.includes(t as never)) as (keyof typeof EDGE_LABELS)[];
+
+const head = (g: NeighbourGroup) => `ref-nbhd-${g}`;
+---
+{list.length === 0 ? (
+  <p class="nbhd-empty"><PixelGlyph name="empty" /> No edge in the ontology starts or ends at {cap.id}.</p>
+) : (
+  <Figure id="ref-fig-relationships" n={n} title={neighbourhoodTitle(cap, list)} caption={neighbourhoodCaption(cap, list)} describedby={describedby} kind="neighbourhood">
+    <div class="nbhd" data-neighbours={list.length} data-relations={list.reduce((k, x) => k + x.relations.length, 0)}>
+      {rows.map((row, i) => {
+        const edge = i === 0 ? 'first' : i === rows.length - 1 ? 'last' : 'mid';
+        if (row.kind === 'centre') {
+          return (
+            <div class="nbhd__row nbhd__row--centre" data-rail={edge}>
+              <span class="nbhd__rail" aria-hidden="true">
+                <svg class="nbhd__stub" viewBox={`0 0 ${STUB_W} ${STUB_H}`} width={STUB_W} height={STUB_H} shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={stub('centre')} /></svg>
+              </span>
+              <div class="nbhd__centre has-layer" style={`--layer: var(--layer-${cap.layer})`}>
+                <MiniTile id={cap.id} size={48} current link={false} />
+                <span class="nbhd__centre-text"><code>{cap.id}</code><span class="nbhd__centre-layer">{cap.layer} layer</span></span>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div class:list={['nbhd__row', `nbhd__row--${row.group}`]} data-rail={edge} data-group={row.group}>
+            <span class="nbhd__rail" aria-hidden="true">
+              <svg class="nbhd__stub" viewBox={`0 0 ${STUB_W} ${STUB_H}`} width={STUB_W} height={STUB_H} shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={stub(row.group)} /></svg>
+            </span>
+            <div class="nbhd__body">
+              <p class="nbhd__head" id={head(row.group)}>
+                {neighbourGroupLabel(row.group, cap.id)}
+                <span class="nbhd__count">({row.items.length})</span>
+              </p>
+              <ul class="nbhd__tiles" aria-labelledby={head(row.group)}>
+                {row.items.map((x) => (
+                  <li class="nbhd__cell" data-capability={x.id} data-relations={x.relations.length}>
+                    <MiniTile id={x.id} size={32} relation={relationWords(x)} />
+                    <span class="nbhd__marks" aria-hidden="true">
+                      {x.relations.map((r) => <PixelGlyph name={`mark:${r.type}`} class="nbhd__mark" />)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+    <ul class="nbhd-legend" aria-label="Edge types in this figure">
+      {legendOrder.map((t) => (
+        <li><PixelGlyph name={`mark:${t}`} /><code>{t}</code> <span>{EDGE_LABELS[t].out.toLowerCase()}</span></li>
+      ))}
+    </ul>
+  </Figure>
+)}

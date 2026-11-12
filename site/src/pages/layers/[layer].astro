@@ -1,8 +1,15 @@
 ---
-// One page per layer of the ontology: its description and cognitive mapping,
-// its capabilities, the edges that cross into other layers, and the workflows
-// that use its capabilities.
+// One page per layer of the ontology: a hero with the layer glyph and its
+// capabilities as periodic tiles (F-L1), its capability cards, the edges that
+// cross into other layers drawn as a rail stack (F-L2) over the edge tables,
+// and the workflows that use its capabilities, after the steps-per-layer
+// bars (F-L4) (visual spec 3.2).
 import CapabilityCard from '../../components/CapabilityCard.astro';
+import LayerLinks from '../../components/fig/LayerLinks.astro';
+import LayerSteps from '../../components/fig/LayerSteps.astro';
+import MiniTile from '../../components/fig/MiniTile.astro';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import '../../styles/figures-capability.css';
 import LayerBadge from '../../components/LayerBadge.astro';
 import { capabilitiesOfLayer, loadOntology } from '../../data/ontology';
 import DocLayout from '../../layouts/DocLayout.astro';
@@ -33,18 +40,28 @@ const crossing = crossLayerEdges(layer.id, ontology);
 const usage = layerUsage(layer.id);
 const id = refSlugger();
 const sentence = `${layer.description.replace(/\.$/, '')}.`;
+const nLinks = crossing.length > 0 ? 1 : 0;
+const nSteps = nLinks + 1;
 ---
 <DocLayout route={route} title={layer.id} description={`${sentence} ${layer.capabilities.length} capabilities.`}>
   <article class="doc doc--layer" data-layer={layer.slug} data-pagefind-body>
-    <header class="layer-header">
-      <p class="layer-header__position">Layer {layer.order + 1} of {ontology.layers.length}</p>
-      <h1 id={id(layer.id)}>{layer.id}</h1>
-      <p class="lead">{sentence}</p>
-      <dl class="layer-meta">
-        <div><dt>Cognitive mapping</dt><dd>{layer.cognitive_mapping}</dd></div>
-        <div><dt>Capabilities</dt><dd>{layer.capabilities.length}</dd></div>
-      </dl>
-      <p>Layers are defined in <a href={specSectionHref('4.2')}>section 4.2 of the Standard</a>.</p>
+    <header class="layer-header layer-hero has-layer" style={`--layer: var(--layer-${layer.id})`}>
+      <div class="layer-hero__text">
+        <p class="layer-header__position">Layer {layer.order + 1} of {ontology.layers.length}</p>
+        <div class="layer-hero__title">
+          <span class="layer-hero__glyph" aria-hidden="true"><PixelGlyph name={layer.id} scale={4} /></span>
+          <h1 id={id(layer.id)}>{layer.id}</h1>
+        </div>
+        <p class="lead">{sentence}</p>
+        <dl class="layer-meta">
+          <div><dt>Cognitive mapping</dt><dd>{layer.cognitive_mapping}</dd></div>
+          <div><dt>Capabilities</dt><dd>{layer.capabilities.length}</dd></div>
+        </dl>
+        <p>Layers are defined in <a href={specSectionHref('4.2')}>section 4.2 of the Standard</a>.</p>
+      </div>
+      <ul class="layer-hero__tiles" aria-label={`Capabilities of ${layer.id}`}>
+        {caps.map((c) => <li><MiniTile id={c.id} size={48} /></li>)}
+      </ul>
     </header>
 
     <section class="layer-capabilities">
@@ -59,7 +76,11 @@ const sentence = `${layer.description.replace(/\.$/, '')}.`;
       {crossing.length === 0 ? (
         <p>No edge connects this layer's capabilities to another layer.</p>
       ) : (
-        crossing.map((g) => (
+        <>
+        <LayerLinks layerId={layer.id} n={nLinks} describedby="ref-layer-edge-tables" />
+        <details class="fig-details" id="ref-layer-edge-tables">
+        <summary>Every edge, by type</summary>
+        {crossing.map((g) => (
           <TableWrap label={`${g.type} edges (${g.edges.length})`} data-edge-type={g.type}>
             <table class="edge-table">
               <caption><code>{g.type}</code> edges ({g.edges.length})</caption>
@@ -95,15 +116,20 @@ const sentence = `${layer.description.replace(/\.$/, '')}.`;
               )}
             </table>
           </TableWrap>
-        ))
+        ))}
+        </details>
+        </>
       )}
     </section>
 
     <section class="layer-workflows">
       <h2 id={id('Workflows that use this layer')}>Workflows that use this layer</h2>
+      <LayerSteps layerId={layer.id} n={nSteps} />
       {usage.length === 0 ? (
         <p>No reference or domain workflow uses a capability of this layer.</p>
       ) : (
+        <details class="fig-details">
+        <summary>{usage.length === 1 ? 'The workflow' : `All ${usage.length} workflows`} and the {layer.id} capabilities each uses</summary>
         <ul class="usage-list">
           {usage.map((u) => (
             <li data-workflow={u.workflow.id}>
@@ -112,6 +138,7 @@ const sentence = `${layer.description.replace(/\.$/, '')}.`;
             </li>
           ))}
         </ul>
+        </details>
       )}
     </section>
   </article>

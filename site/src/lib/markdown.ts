@@ -12,6 +12,7 @@
 import { rehypeHeadingIds, type ShikiConfig, type UnifiedProcessorOptions } from '@astrojs/markdown-remark';
 import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypeCallouts from '../plugins/rehype-callouts';
+import rehypeCapabilitySkill from '../plugins/rehype-capability-skill';
 import rehypeKeywords from '../plugins/rehype-keywords';
 import rehypeTables from '../plugins/rehype-tables';
 import rehypeTaskLists from '../plugins/rehype-task-lists';
@@ -70,5 +71,6 @@ export const PROCESSOR_OPTIONS: UnifiedProcessorOptions = {
     rehypeCallouts,
     rehypeTables,
     rehypeTaskLists,
+    rehypeCapabilitySkill,
   ],
 };

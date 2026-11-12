@@ -1,12 +1,24 @@
 // Markdown copies of the capability pages, the layer pages and the
 // capabilities overview, from the same data the HTML pages use.
-import { capabilitiesOfLayer, loadOntology, ONTOLOGY_SOURCE, RISKS, type Capability } from '../data/ontology';
+import { capabilitiesOfLayer, loadOntology, ONTOLOGY_SOURCE, RISKS } from '../data/ontology';
 import { loadVersions } from '../data/versions';
 import { capabilityUsage } from '../data/workflows';
 import { readRepoFile } from '../lib/repo';
 import { kebab } from '../lib/routes';
-import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, layerUsage, type SchemaRow } from '../lib/views';
-import { blocks, cell, code, generatedLine, markdownCopy, mdLink, table } from './md';
+import {
+  contractCaption,
+  contractSummary,
+  contractTitle,
+  neighbourGroupLabel,
+  neighbourhoodCaption,
+  neighbourhoodTitle,
+  neighbours,
+  stepWords,
+  usageCaption,
+} from '../lib/capability-figures';
+import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle } from '../lib/layer-figures';
+import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, layerUsage, safetyRows, type SchemaRow } from '../lib/views';
+import { blocks, cell, code, figure, generatedLine, markdownCopy, mdLink, table } from './md';
 import type { Twin } from './types';
 
 const capLink = (id: string) => mdLink(code(id), `/capabilities/${kebab(id)}/`);
@@ -22,17 +34,6 @@ function contractTable(rows: SchemaRow[]): string {
       cell([r.description, ...r.constraints].filter(Boolean).join(' ')),
     ]),
   );
-}
-
-export function flagLines(cap: Capability): string[] {
-  return [
-    `- Layer: ${mdLink(cap.layer, `/layers/${loadOntology().layers.find((l) => l.id === cap.layer)!.slug}/`)}`,
-    `- Risk: ${cap.risk}`,
-    `- Mutates state: ${cap.mutation ? 'yes' : 'no'}`,
-    `- Checkpoint required: ${cap.requires_checkpoint ? 'yes' : 'no'}`,
-    `- Approval required: ${cap.requires_approval ? 'yes' : 'no'}`,
-    ...(cap.mutation_overridable ? ['- A step may declare `mutation: false`'] : []),
-  ];
 }
 
 export function capabilityTwin(capId: string, skillSource: string): Twin {
@@ -54,22 +55,41 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
                 ],
           )
           .join('\n');
-  const used =
-    usage.length === 0
-      ? 'No reference or domain workflow uses this capability.'
-      : usage.map((u) => `- ${mdLink(code(u.workflowId), `/workflows/${u.slug}/`)}: ${u.steps.length === 1 ? 'step' : 'steps'} ${u.steps.join(', ')}`).join('\n');
+  const near = neighbours(cap, ontology);
+  const neighbourhood =
+    near.length === 0
+      ? null
+      : figure(
+          neighbourhoodTitle(cap, near),
+          neighbourhoodCaption(cap, near),
+          table(
+            ['Capability', 'Row', 'Relationships'],
+            near.map((x) => [
+              capLink(x.id),
+              neighbourGroupLabel(x.group, cap.id),
+              x.relations.map((r) => `${code(r.type)} (${{ in: 'into', out: 'out of', 'both-ways': 'both ways' }[r.direction]})`).join(', '),
+            ]),
+          ),
+        );
+  const summary = contractSummary(cap);
+  const usedList = usage.map((u) => `- ${mdLink(code(u.workflowId), `/workflows/${u.slug}/`)}: ${stepWords(u.steps)}`).join('\n');
+  const used = usage.length === 0 ? usageCaption(cap, usage) : figure(`${cap.id} in workflows`, usageCaption(cap, usage), usedList);
   const markdown = blocks(
     `# ${cap.id}`,
     cap.description,
     generatedLine([ONTOLOGY_SOURCE, skillSource]) + ` Ontology version ${loadVersions().ontology}.`,
-    flagLines(cap).join('\n'),
+    `Layer: ${mdLink(cap.layer, `/layers/${ontology.layers.find((l) => l.id === cap.layer)!.slug}/`)}`,
+    '## Safety',
+    table(['Property', 'Value'], safetyRows(cap).map((r) => [r.term, r.value])),
+    '## Relationships',
+    neighbourhood,
+    relationships,
     '## Contract',
+    `**Figure: ${contractTitle(cap, summary)}.** ${contractCaption(cap, summary)} The tables below list every field.`,
     '### Inputs',
     contractTable(contractRows(cap.input_schema)),
     '### Outputs',
     contractTable(contractRows(cap.output_schema)),
-    '## Relationships',
-    relationships,
     '## Used in workflows',
     used,
     '## Claude Code skill',
@@ -99,10 +119,23 @@ export function layerTwin(layerId: string): Twin {
     '## Edges to other layers',
     crossing.length === 0
       ? 'No edge connects this layer to another layer.'
+      : figure(
+          `Edges between ${layer.id} and other layers`,
+          layerLinksCaption(layer.id, layerLinks(layer.id, ontology)),
+          table(
+            ['Direction', 'Other layer', 'Edges', 'Types'],
+            (['into', 'out'] as const).flatMap((d) =>
+              layerLinks(layer.id, ontology)[d].map((l) => [d === 'into' ? `Into ${layer.id}` : `Out of ${layer.id}`, l.layer, String(l.edges.length), l.types.map(code).join(', ')]),
+            ),
+          ),
+        ),
+    crossing.length === 0
+      ? null
       : crossing
           .map((g) => [`### ${g.type}`, ...g.edges.map((e) => `- ${capLink(e.from)} to ${capLink(e.to)} (${e.otherLayer})`)].join('\n\n'))
           .join('\n\n'),
     '## Workflows that use this layer',
+    figure(stepsTitle(layer.id, stepsPerLayer()), stepsCaption(layer.id, stepsPerLayer()), table(['Layer', 'Steps'], stepsPerLayer().map((r) => [r.layer, String(r.steps)]))),
     usage.length === 0
       ? 'No workflow uses a capability of this layer.'
       : usage

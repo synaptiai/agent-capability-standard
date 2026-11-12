@@ -4,9 +4,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-// figures-mermaid.css holds the Mermaid figure styles in a file of their own;
-// it is listed so every rule here (display font, opacity, tokens) covers it too.
-const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'motion.css', 'figures-mermaid.css'].map((f) => ({
+// Every stylesheet in src/styles, so a figure sheet added by a page branch
+// (figures-*.css, kept apart from figures.css so branches merge cleanly) is
+// held to the same rules as the rest.
+const STYLES = readdirSync('src/styles')
+  .filter((f) => f.endsWith('.css'))
+  .sort()
+  .map((f) => ({
   file: f,
   css: readFileSync(`src/styles/${f}`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }));

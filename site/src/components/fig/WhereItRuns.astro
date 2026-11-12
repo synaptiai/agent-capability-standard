@@ -1,0 +1,60 @@
+---
+// F-C4, where a capability runs (visual spec 3.1): one row per workflow that
+// uses it, with the workflow's steps as a 16px StepStrip in which this
+// capability's steps carry its layer tint and two-letter symbol, then the
+// step numbers. Up to 8 rows show; the rest are in a "Show all" disclosure.
+// With no workflow, a sentence and the empty glyph instead of a figure.
+//
+// Props:
+// - cap: Capability, required.
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { capabilityUsage, loadWorkflows } from '../../data/workflows';
+import { stepWords, usageCaption } from '../../lib/capability-figures';
+import { workflowHref } from '../../lib/generated';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import StepStrip from './StepStrip.astro';
+
+interface Props {
+  cap: Capability;
+  n: number;
+}
+
+const { cap, n } = Astro.props;
+const usage = capabilityUsage(cap.id);
+const all = loadWorkflows().all;
+const rows = usage.map((u) => ({ u, wf: all.find((w) => w.id === u.workflowId)! }));
+const CAP = 8;
+const shown = rows.slice(0, CAP);
+const rest = rows.slice(CAP);
+---
+{usage.length === 0 ? (
+  <p class="runs-empty"><PixelGlyph name="empty" scale={3} /> <span>{usageCaption(cap, usage)}</span></p>
+) : (
+  <Figure id="ref-fig-usage" n={n} title={`${cap.id} in workflows`} caption={usageCaption(cap, usage)} kind="usage">
+    <ul class="runs" aria-label={`${cap.id} in workflows`}>
+      {shown.map(({ u, wf }) => (
+        <li class="runs__row" data-workflow={u.workflowId} data-catalog={u.catalog}>
+          <a class="runs__name" href={workflowHref(u.workflowId)}><code>{u.workflowId}</code></a>
+          <StepStrip wf={wf} size={16} highlight={cap.id} />
+          <span class="runs__steps">{stepWords(u.steps)}</span>
+        </li>
+      ))}
+    </ul>
+    {rest.length > 0 && (
+      <details class="runs__more">
+        <summary>Show all {rows.length}</summary>
+        <ul class="runs" aria-label={`More workflows that use ${cap.id}`}>
+          {rest.map(({ u, wf }) => (
+            <li class="runs__row" data-workflow={u.workflowId} data-catalog={u.catalog}>
+              <a class="runs__name" href={workflowHref(u.workflowId)}><code>{u.workflowId}</code></a>
+              <StepStrip wf={wf} size={16} highlight={cap.id} />
+              <span class="runs__steps">{stepWords(u.steps)}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    )}
+  </Figure>
+)}
