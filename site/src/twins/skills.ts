@@ -30,8 +30,8 @@ export function skillFigureBlock(dir: string, f: SkillFigure): string {
       const map = spineTable(spine);
       return figure(
         spine.title,
-        `${spine.caption} Each step's card is on the ${mdLink(code(f.wf.id), `/workflows/${f.wf.slug}/`)} page.`,
-        table(map.headers, map.rows.map((r) => r.map((c, i) => (i === 1 && c ? code(c) : cell(c))))),
+        spine.caption,
+        `${table(map.headers, map.rows.map((r) => r.map((c, i) => (i === 1 && c ? code(c) : cell(c)))))}\n\nEach step's card is on the ${mdLink(code(f.wf.id), `/workflows/${f.wf.slug}/`)} page.`,
       );
     }
     case 'flow': {

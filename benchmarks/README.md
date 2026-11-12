@@ -54,10 +54,10 @@ This prevents drift — ontology changes automatically propagate to benchmarks.
 
 ```mermaid
 ---
-title: How source changes reach two scenarios
+title: Where two scenarios load their data
 ---
 flowchart TB
-  accDescr: The ontology's requires edges reach the Capability Gap scenario through CapabilityRegistry, and the canonical coercion registry reaches the Workflow Type Error scenario through safe_yaml_load, so a change to either source reaches the benchmarks.
+  accDescr: The Capability Gap scenario loads the ontology's requires edges through CapabilityRegistry, so ontology changes reach the benchmarks, and the Workflow Type Error scenario loads its coercions from the canonical registry through safe_yaml_load.
   onto["Ontology: requires edges"] --> reg[CapabilityRegistry] --> gap[Capability Gap]
   coerce[Coercion registry] --> sy[safe_yaml_load] --> wte[Workflow Type Error]
 ```
@@ -159,12 +159,11 @@ python benchmarks/runner.py --report --format json --output results/metrics.json
 title: Adding a scenario
 ---
 flowchart TB
-  accDescr: A new scenario module in scenarios/ subclasses BenchmarkScenario; setup prepares the fixtures, run_baseline and run_ga each execute one approach and return metrics, and compare takes both results and returns the improvement. The scenario is then registered in scenarios/__init__.py and documented in this README.
+  accDescr: A new scenario module in scenarios/ subclasses BenchmarkScenario and defines setup, which prepares the fixtures, run_baseline and run_ga, which execute each approach and return metrics, and compare, which takes both results and returns the improvement. The scenario is then registered in scenarios/__init__.py and documented in this README.
   subgraph mod["1. scenarios/new_scenario.py"]
-    setup["setup: prepare fixtures"] --> rb["run_baseline: baseline metrics"]
-    setup --> rg["run_ga: GA metrics"]
-    rb --> cmp["compare: improvement"]
-    rg --> cmp
+    setup["setup: prepare fixtures"]
+    rb["run_baseline: baseline metrics"] --> cmp["compare: improvement"]
+    rg["run_ga: GA metrics"] --> cmp
   end
   cmp --> reg["2. Register in scenarios/__init__.py"] --> doc[3. Document in this README]
 ```

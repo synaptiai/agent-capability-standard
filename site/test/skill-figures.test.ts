@@ -116,3 +116,19 @@ describe('the example matches figure', () => {
     expect(m.examples.flatMap((e) => e.matches).filter((x) => x.auto).length).toBe(auto);
   });
 });
+
+describe('the Markdown copy of a composed skill page', () => {
+  it('has one figure block for each figure the page draws', async () => {
+    const { ROUTES } = await import('../src/lib/routes');
+    const { skillFigureEdits } = await import('../src/twins/skills');
+    const { parseMarkdown, stripFrontmatter } = await import('../src/lib/anchors');
+    for (const dir of Object.keys(COMPOSED_SKILLS)) {
+      expect(ROUTES.some((r) => r.source === SOURCE(dir)), dir).toBe(true);
+      const figs = Object.values(composedSkillFigures(dir, text(dir), SOURCE(dir))).flat();
+      const drawn = figs.filter((f) => f.kind !== 'sentence').length;
+      const body = stripFrontmatter(text(dir)).replace(/^\s+/, '');
+      const inserted = skillFigureEdits(dir, SOURCE(dir))(parseMarkdown(body)).map((e) => e.text).join('');
+      expect((inserted.match(/\*\*Figure: /g) ?? []).length, dir).toBe(drawn);
+    }
+  });
+});
