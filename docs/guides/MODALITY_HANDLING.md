@@ -152,7 +152,7 @@ title: How the capabilities take a modality
 ---
 flowchart LR
   accDescr: Six capabilities are most commonly parameterized by modality, two support modality through format or scope parameters, and the remaining 28 are modality-agnostic.
-  dom["Most commonly parameterized: detect, classify, measure, predict, generate, transform"]
+  dom["Most commonly: detect, classify, measure, predict, generate, transform"]
   fs["By format or scope: retrieve, search"]
   ag["Modality-agnostic: the other 28, such as plan, checkpoint, verify, audit"]
   m[A modality] --> dom

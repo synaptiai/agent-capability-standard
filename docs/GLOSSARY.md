@@ -287,10 +287,10 @@ flowchart TB
   accDescr: A gate checks its when condition before the step, or after it with phase after, and takes its action when the condition matches; an after-gate cannot skip. A failure mode's when is evaluated after the step; when it fires, its action runs and then its recovery, which may be a recovery loop that resumes at goto_step with inject_context, up to max_loops times.
   gate{"Gate, phase before: when matches?"} -->|yes| gact["action: stop, rollback, skip, warn or end"]
   gate -->|no| step[Step runs]
-  step --> ag{"Gate, phase after: when matches?"}
-  ag -->|yes| aact["action; an after-gate cannot skip"]
+  step --> ag{"After-gate: when matches?"}
+  ag -->|yes| aact["action, not skip"]
   step --> fm{"Failure mode: when matches?"}
-  fm -->|yes| fact["action: stop, rollback, request_more_context, ..."]
+  fm -->|yes| fact[action]
   fact --> rec["recovery: prose, or a recovery loop"]
   rec -->|recovery loop| goto["Resume at goto_step with inject_context, up to max_loops"]
 ```
