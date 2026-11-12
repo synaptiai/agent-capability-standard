@@ -22,16 +22,21 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
+import { REVIEW_DIR } from '../src/lib/review.ts';
 import { isMain } from './is-main.mjs';
 
 export const NOT_FOUND_PAGE = '404.html';
 const COPY = 'index.md';
 
-/** Every file under `dir`, relative, with forward slashes, sorted. */
+/**
+ * Every file under `dir`, relative, with forward slashes, sorted. The review
+ * pages (dist/_review/) are left out: they are not routes and are never deployed.
+ */
 export function walk(dir, base = dir) {
   const out = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
+    if (e.isDirectory() && dir === base && e.name === REVIEW_DIR) continue;
     if (e.isDirectory()) out.push(...walk(p, base));
     else out.push(path.relative(base, p).split(path.sep).join('/'));
   }

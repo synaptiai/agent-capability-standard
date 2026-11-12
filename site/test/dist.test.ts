@@ -358,9 +358,15 @@ describe('dist checks on a fixture', () => {
 describe('agent files', () => {
   const ORIGIN = 'https://acs.synapti.ai';
 
-  /** Directories (as URL paths like /a/b/) that hold a file with this name, by a walk of dist. */
+  /**
+   * Directories (as URL paths like /a/b/) that hold a file with this name, by
+   * a walk of dist. The review pages under dist/_review/ (the glyph sheet and
+   * the figure parts) are not published pages, so the walk leaves them out;
+   * the last test of this block checks they are built and kept out.
+   */
   function dirsWith(file: string, dir = '', out: string[] = []): string[] {
     for (const e of readdirSync(path.join(dist, dir), { withFileTypes: true })) {
+      if (e.isDirectory() && dir === '' && e.name === '_review') continue;
       if (e.isDirectory()) dirsWith(file, path.posix.join(dir, e.name), out);
       else if (e.name === file) out.push(dir === '' ? '/' : `/${dir}/`);
     }
@@ -584,4 +590,20 @@ describe('check-dist.mjs on the built site', () => {
     expect(stats.pages).toBe(ROUTES.length);
     expect(stats.copies).toBe(ROUTES.length);
   }, 120_000);
+});
+
+describe('review pages', () => {
+  it('builds the glyph sheet and the figure parts, and keeps them out of the sitemap and llms.txt', () => {
+    expect(existsSync(path.join(dist, '_review/glyphs/index.html'))).toBe(true);
+    expect(existsSync(path.join(dist, '_review/parts/index.html'))).toBe(true);
+    expect(readFileSync(path.join(dist, 'sitemap.xml'), 'utf8')).not.toContain('/_review/');
+    expect(readFileSync(path.join(dist, 'llms.txt'), 'utf8')).not.toContain('/_review/');
+  });
+
+  it('removes the review pages in the deploy job before publishing', () => {
+    const yml = readFileSync('../.github/workflows/site.yml', 'utf8');
+    const deploy = yml.slice(yml.indexOf('\n  deploy:'));
+    expect(deploy.indexOf('dist/_review')).toBeGreaterThan(-1);
+    expect(deploy.indexOf('dist/_review')).toBeLessThan(deploy.indexOf('pages deploy dist'));
+  });
 });

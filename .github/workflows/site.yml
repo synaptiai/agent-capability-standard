@@ -90,6 +90,11 @@ jobs:
           name: site-dist
           path: dist
 
+      # The review pages (the glyph sheet and the figure parts) are built for
+      # review only and never published (site/src/lib/review.ts).
+      - name: Remove the review pages
+        run: if [ -d dist/_review ]; then rm -r -- dist/_review; fi
+
       # Pinned to a commit, not a tag: this step holds the Cloudflare token,
       # and a tag can be moved to other code. Update the SHA and the comment
       # together, after reading the release.

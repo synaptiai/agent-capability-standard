@@ -8,6 +8,7 @@ import { checkBuiltSlugs } from './src/lib/check-slugs';
 import { formatLinkStats, linkStats } from './src/lib/links';
 import { spaceBuiltPages } from './src/lib/search-text';
 import { REDIRECTS_FILE, redirectsFile } from './src/lib/redirects';
+import { REVIEW_DIR } from './src/lib/review';
 import { markdownSources } from './src/lib/routes';
 import { PROCESSOR_OPTIONS, SHIKI_CONFIG } from './src/lib/markdown';
 
@@ -40,6 +41,18 @@ export default defineConfig({
     shikiConfig: SHIKI_CONFIG,
   },
   integrations: [
+    {
+      // Review pages (visual spec 5.2): the glyph sheet and the figure parts.
+      // Built under dist/_review/, left out of every dist check, the sitemap,
+      // llms.txt and search, and removed by the deploy job before publishing.
+      name: 'acs-review-pages',
+      hooks: {
+        'astro:config:setup': ({ injectRoute }) => {
+          injectRoute({ pattern: `/${REVIEW_DIR}/glyphs`, entrypoint: new URL('./src/review/Glyphs.astro', import.meta.url) });
+          injectRoute({ pattern: `/${REVIEW_DIR}/parts`, entrypoint: new URL('./src/review/Parts.astro', import.meta.url) });
+        },
+      },
+    },
     {
       // The design preview page, only while running `astro dev`; it is never built.
       name: 'acs-design-preview',
