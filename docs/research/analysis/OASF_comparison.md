@@ -198,8 +198,8 @@ title: Safety built into the capabilities
 ---
 flowchart TB
   accDescr: In Grounded Agency, constrain enforces policies before execution and verify validates after it, and the high-risk capabilities mutate and send structurally require a checkpoint.
-  con["constrain: enforces policies"] -->|before| ex[Execution]
-  ex -->|after| ver["verify: validates"]
+  con["constrain(policies)"] -->|before| ex[Execution]
+  ex -->|after| ver[verify]
   cp[checkpoint] -->|structurally required before| hi["High risk: mutate, send"]
 ```
 
@@ -452,7 +452,7 @@ title: The MLOps model deployment
 ---
 flowchart TB
   accDescr: The deployment checks the model artifacts and the deployment policies with constrain, checkpoints, executes, verifies, measures performance, audits, and rolls back to the checkpoint if verification failed.
-  c1["constrain: model artifacts"] --> c2["constrain: deployment policies"]
+  c1["constrain(model artifacts)"] --> c2["constrain(deployment policies)"]
   c2 --> checkpoint
   checkpoint --> execute --> verify --> measure --> audit
   audit -->|if verification failed| rollback

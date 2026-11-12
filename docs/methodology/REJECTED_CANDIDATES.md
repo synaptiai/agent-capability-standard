@@ -120,7 +120,7 @@ title: optimize as a composition
 ---
 flowchart LR
   accDescr: optimize runs discover and then compare, and the compare step loops until the result is optimal or max_iterations is reached.
-  discover --> compare["compare, loop: until optimal or max_iterations"]
+  discover --> compare["compare(loop until optimal or max_iterations)"]
 ```
 
 ```yaml

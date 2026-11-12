@@ -243,12 +243,12 @@ title: The steps of debug_code_change
 flowchart TB
   accDescr: debug_code_change runs observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, audit and rollback in order; critique reads attribute_out.causes, audit reads plan_out and verify_out, and rollback reads checkpoint_out and is skipped when verify passed.
   observe --> search --> attribute --> constrain
-  constrain --> critique["critique, reads attribute_out.causes"]
+  constrain --> critique["critique(attribute_out.causes)"]
   critique --> plan --> checkpoint
   checkpoint -->|checkpoint first| execute
   execute --> verify
-  verify --> audit["audit, reads plan_out and verify_out"]
-  audit --> rollback["rollback, reads checkpoint_out"]
+  verify --> audit["audit(plan_out, verify_out)"]
+  audit --> rollback["rollback(checkpoint_out)"]
   rollback -.->|"gate: skip when verify_out.passed is true"| skip[Skipped]
 ```
 
