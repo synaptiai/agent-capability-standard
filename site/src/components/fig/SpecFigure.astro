@@ -267,7 +267,7 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
       ))}
     </ul>
     <div class="order-draw" aria-hidden="true" style={`width: ${orderLayout.width}px; height: ${orderLayout.height}px`}>
-      <svg viewBox={`0 0 ${orderLayout.width} ${orderLayout.height}`} width={orderLayout.width} height={orderLayout.height} shape-rendering="crispEdges" focusable="false"><Rects rects={orderRects} /></svg>
+      <svg viewBox={`0 0 ${orderLayout.width} ${orderLayout.height}`} width={orderLayout.width} height={orderLayout.height} shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={orderRects} /></svg>
       {orderLayout.sources.map((x) => (
         <span class="order-draw__node" style={`left: ${x.x - 48}px; top: 0`} data-source={x.id}><code>{x.id}</code><MiniTile id={x.id} size={32} link={false} /></span>
       ))}
