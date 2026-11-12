@@ -574,7 +574,13 @@ describe('agent files', () => {
         .trim();
     for (const [source, page] of pairs) {
       const src = repoText(source);
-      const copy = readFileSync(path.join(dist, page, 'index.md'), 'utf8');
+      // The current Standard's copy ends with the text equivalents of its
+      // site-drawn figures (visual spec 3.9 and 6.1, "Figures on this page"),
+      // which are not in the source; the rest must match it.
+      const full = readFileSync(path.join(dist, page, 'index.md'), 'utf8');
+      const appended = full.indexOf('\n## Figures on this page\n');
+      if (source.startsWith('spec/STANDARD-')) expect(appended, source).toBeGreaterThan(-1);
+      const copy = appended === -1 ? full : full.slice(0, appended + 1);
       expect(copy, source).toContain(`Source: [${source}](`);
       expect(headingLines(copy), source).toEqual(headingLines(src));
       expect(strip(copy), source).toBe(strip(src));

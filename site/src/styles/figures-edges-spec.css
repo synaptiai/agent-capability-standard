@@ -362,5 +362,352 @@
     cursor: pointer;
     color: var(--ink-2);
   }
+
+  /* ---------- Standard: capability fields (F-S2) ---------- */
+
+  .spec-ports {
+    max-width: 40rem;
+  }
+
+  /* ---------- Standard: layer model (F-S3) ---------- */
+
+  .layer-model {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .layer-model__col {
+    display: grid;
+    grid-template-columns: 9rem minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+    padding: var(--space-2);
+    border: var(--border);
+    border-left: 6px solid var(--layer);
+    background: var(--bg);
+  }
+
+  .layer-model__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .layer-model__head:hover .layer-model__name {
+    text-decoration: underline;
+  }
+
+  .layer-model__name {
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    overflow-wrap: anywhere;
+  }
+
+  .layer-model__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .layer-model__tiles > li {
+    margin: 0;
+  }
+
+  .layer-model__mapping {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.3;
+    color: var(--ink-2);
+  }
+
+  /* Wide: head, tiles and mapping on one line per layer. */
+  @container (min-width: 640px) {
+    .layer-model__col {
+      grid-template-columns: 11rem minmax(0, 1fr) 13rem;
+      border-top: var(--border);
+      border-left: 6px solid var(--layer);
+    }
+
+    .layer-model__mapping {
+      grid-column: auto;
+    }
+  }
+
+  /* ---------- Standard: edge types (F-S4) and safety panels (§4.4) ---------- */
+
+  .edge-card-grid,
+  .safety-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(13rem, 100%), 1fr));
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .edge-card-grid > li,
+  .safety-grid > li {
+    display: grid;
+    margin: 0;
+    min-width: 0;
+  }
+
+  /* One panel per row, so each panel's cells are wide enough for their terms. */
+  .safety-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .safety-grid__item {
+    gap: var(--space-2);
+    align-content: start;
+  }
+
+  .safety-grid__name {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    font-weight: 700;
+  }
+
+  /* ---------- Standard: step anatomy (F-S5) ---------- */
+
+  .step-anatomy {
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .step-anatomy__head {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: var(--border);
+    background: var(--bg-mut);
+  }
+
+  .step-anatomy__groups {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr));
+    gap: var(--space-4);
+    padding: var(--space-3);
+  }
+
+  .step-anatomy__group {
+    display: grid;
+    align-content: start;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .step-anatomy__title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0;
+    padding-bottom: var(--space-1);
+    border-bottom: var(--px) solid var(--ink);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+
+  .step-anatomy__count {
+    font-family: var(--font-mono);
+    color: var(--ink-2);
+  }
+
+  /* ---------- Standard: chips (F-S7, F-S8) ---------- */
+
+  .ref-anatomy,
+  .type-groups {
+    display: grid;
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ref-anatomy__row,
+  .type-group {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .ref-anatomy__line {
+    justify-self: start;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .ref-anatomy__chips,
+  .type-group__chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .chip {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  .chip--root {
+    background: var(--bg-mut);
+    border-width: 4px;
+  }
+
+  .chip--inner {
+    padding: 2px var(--space-1);
+    background: var(--bg-sub);
+  }
+
+  .chip__label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-2);
+  }
+
+  .chip__slot {
+    display: inline-block;
+    margin: 0 2px;
+    padding: 0 4px;
+    border: var(--px) dashed var(--ink-2);
+    color: var(--ink-2);
+  }
+
+  .ref-anatomy__legend {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin: 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .type-groups {
+    grid-template-columns: repeat(auto-fill, minmax(min(13rem, 100%), 1fr));
+    gap: var(--space-3);
+  }
+
+  .type-group {
+    align-content: start;
+    padding: var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .type-group__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  /* ---------- Standard: gate and failure branches (F-S9, F-S10) ---------- */
+
+  .branches {
+    display: grid;
+    gap: 0;
+  }
+
+  .branches__step,
+  .branches__decision {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    color: var(--ink);
+  }
+
+  .branches__step {
+    justify-self: start;
+    padding: var(--space-2) var(--space-3);
+    border: 4px solid var(--ink);
+    background: var(--bg);
+    font-weight: 700;
+  }
+
+  .branches__point {
+    display: grid;
+    gap: var(--space-2);
+    margin-left: 14px;
+    padding: var(--space-3) 0 var(--space-3) var(--space-4);
+    border-left: var(--px) solid var(--ink);
+  }
+
+  .branches__decision span {
+    font-style: italic;
+  }
+
+  .branches__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(9rem, 100%), 1fr));
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .branches[data-kind='fail'] .branches__list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .branches__branch {
+    position: relative;
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .branches__action {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .branches__effect {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  @container (min-width: 560px) {
+    .branches[data-kind='fail'] .branches__branch {
+      grid-template-columns: 15rem minmax(0, 1fr);
+      align-items: center;
+    }
+  }
 }
 

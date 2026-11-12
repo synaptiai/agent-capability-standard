@@ -4,6 +4,7 @@
 // is handled here, so a new template fails the build until it has a copy.
 import { loadOntology } from '../data/ontology';
 import { loadProfiles } from '../data/profiles';
+import { loadVersions } from '../data/versions';
 import { loadWorkflows } from '../data/workflows';
 import { sourceMeta } from '../lib/listing';
 import { readRepoFile } from '../lib/repo';
@@ -12,7 +13,8 @@ import { capabilitiesIndexTwin, capabilityTwin, layerTwin } from './capabilities
 import { domainsIndexTwin, domainTwin } from './domains';
 import { homeTwin } from './home';
 import { listingTwin } from './listing';
-import { markdownCopy } from './md';
+import { blocks, markdownCopy } from './md';
+import { specFigureBlocks } from './edges-spec';
 import { citationTwin, diagnosticsTwin, edgeTypesTwin, rfcsIndexTwin, schemasTwin } from './reference';
 import type { Twin } from './types';
 import { workflowsIndexTwin, workflowTwin } from './workflows';
@@ -41,7 +43,10 @@ async function buildTwin(route: Route): Promise<Twin> {
       const source = route.source!;
       const meta = await sourceMeta(route);
       const title = route.template === 'spec' ? route.title : meta.title;
-      return { title, description: meta.description, markdown: markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title }) };
+      const copy = markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title });
+      // The current Standard's site-drawn figures add their text equivalents (visual spec 3.9).
+      const figures = route.template === 'spec' && source === loadVersions().standard.current.source ? specFigureBlocks() : [];
+      return { title, description: meta.description, markdown: figures.length > 0 ? blocks(copy, ...figures) : copy };
     }
     case 'home':
       return homeTwin();

@@ -5,20 +5,55 @@
 // headings.) Whether the older version is still supported, and which
 // appendix lists the changes, come from the current Standard's text; a fact
 // it does not state is left out.
+// On the current version, the site-drawn figures of chapters 4 and 5
+// (visual spec 3.9) are placed under their section headings: the rendered
+// HTML is cut after each anchored heading and the figure rendered there. Each
+// anchor must match one heading, or the build fails. Older versions show the
+// source as rendered (with the chapter glyphs of rehype-figure-marks).
 import StatusBadge from '../components/StatusBadge.astro';
 import '../styles/figures-edges-spec.css';
 import { loadVersions, olderVersionNote } from '../data/versions';
 import { readRepoFile } from '../lib/repo';
 import type { Route } from '../lib/routes';
 import { routeForSource } from '../lib/routes';
+import { cutAfterHeadings, type Anchor } from '../lib/inject';
+import { fieldTable, fieldsCaption } from '../lib/edge-figures';
+import {
+  annotationGrammar,
+  bindingExamples,
+  edgeTypesCaption,
+  failureBranches,
+  failureCaption,
+  gateBranches,
+  gateCaption,
+  rootRule,
+  safetyCritical,
+  safetyCriticalCaption,
+  stepFieldRows,
+} from '../lib/spec-figures';
+import { loadCatalogSchema } from '../data/catalog-schema';
+import { loadOntology } from '../data/ontology';
+import { refSlugger } from '../lib/generated';
+import ActionBranches from '../components/fig/ActionBranches.astro';
+import AnnotationTypes from '../components/fig/AnnotationTypes.astro';
+import EdgeTypeCard from '../components/fig/EdgeTypeCard.astro';
+import Figure from '../components/fig/Figure.astro';
+import LayerModel from '../components/fig/LayerModel.astro';
+import MiniTile from '../components/fig/MiniTile.astro';
+import Port from '../components/fig/Port.astro';
+import ReferenceAnatomy from '../components/fig/ReferenceAnatomy.astro';
+import SafetyPanel from '../components/fig/SafetyPanel.astro';
+import StepAnatomy from '../components/fig/StepAnatomy.astro';
 import type { PageMeta } from '../plugins/remark-page-meta';
 
 interface Props {
   route: Route;
   page: PageMeta;
+  /** The source's rendered HTML; the figures are placed in it on the current version. */
+  html?: string;
 }
 
-const { route, page } = Astro.props;
+const { route, page, html } = Astro.props;
 const { current, previous } = loadVersions().standard;
 const isCurrent = route.source === current.source;
 const currentUrl = routeForSource(current.source)?.url;
@@ -26,6 +61,35 @@ const self = previous.find((v) => v.source === route.source);
 if (!isCurrent && !self) throw new Error(`SpecPage: ${route.source} is not a tracked Standard version`);
 const note = self ? olderVersionNote(self.version, readRepoFile(current.source)) : null;
 const status = (self ?? current).status;
+
+// The figures, in page order, each under the heading its section starts with.
+type Key = 'fields' | 'layers' | 'edges' | 'safety' | 'step' | 'reference' | 'annotations' | 'gates' | 'failures';
+const ANCHORS: Anchor<Key>[] = [
+  { key: 'fields', level: 3, startsWith: '4.1 ' },
+  { key: 'layers', level: 3, startsWith: '4.2 ' },
+  { key: 'edges', level: 3, startsWith: '4.3 ' },
+  { key: 'safety', level: 3, startsWith: '4.4 ' },
+  { key: 'step', level: 3, startsWith: '5.2 ' },
+  { key: 'reference', level: 3, startsWith: '5.3 ' },
+  { key: 'annotations', level: 3, startsWith: '5.4 ' },
+  { key: 'gates', level: 3, startsWith: '5.6 ' },
+  { key: 'failures', level: 3, startsWith: '5.7 ' },
+];
+if (isCurrent && typeof html !== 'string') throw new Error(`SpecPage: ${route.source} has no rendered HTML for its figures`);
+const segments = isCurrent ? cutAfterHeadings(html!, ANCHORS, route.source!) : [];
+const text = isCurrent ? readRepoFile(route.source!) : '';
+const where = route.source!;
+const id = refSlugger();
+const section = (k: Key) => ANCHORS.find((a) => a.key === k)!.startsWith.trim();
+// "{figure title}, from §{n}" (visual spec 3.9).
+const titled = (name: string, k: Key) => `${name}, from §${section(k)}`;
+let fig = 0;
+const figNo = () => ++fig;
+const o = loadOntology();
+const schema = loadCatalogSchema();
+const fields = isCurrent ? fieldTable(text, '4.1 ', where) : [];
+const grammar = isCurrent ? annotationGrammar(text, where) : null;
+const failures = isCurrent ? failureBranches(text, where, schema) : [];
 ---
 <article
   class="doc doc--spec"
@@ -43,6 +107,72 @@ const status = (self ?? current).status;
     </p>
   )}
   <div class="doc__body">
-    <slot />
+    {isCurrent ? (
+      segments.map((sg) => (
+        <>
+          <Fragment set:html={sg.html} />
+          {sg.key === 'fields' && (
+            <Figure id={id('Figure: capability fields')} n={figNo()} title={titled('Capability fields', 'fields')} caption={fieldsCaption(fields, 'A capability has')} kind="capability-fields">
+              <ul class="ports ports--out spec-ports">
+                {fields.map((f) => <Port name={f.name} type={f.type} required={f.required} description={f.description} />)}
+              </ul>
+            </Figure>
+          )}
+          {sg.key === 'layers' && <LayerModel id={id('Figure: layer model')} n={figNo()} title={titled('Layer model', 'layers')} />}
+          {sg.key === 'edges' && (
+            <Figure id={id('Figure: edge types')} n={figNo()} title={titled('Edge types', 'edges')} caption={edgeTypesCaption(o)} kind="edge-types">
+              <ul class="edge-card-grid">
+                {o.edgeTypes.map((t) => <li><EdgeTypeCard info={t} /></li>)}
+              </ul>
+            </Figure>
+          )}
+          {sg.key === 'safety' && (
+            <Figure id={id('Figure: safety-critical capabilities')} n={figNo()} title={titled('Safety-critical capabilities', 'safety')} caption={safetyCriticalCaption(o)} kind="safety-critical">
+              <ul class="safety-grid">
+                {safetyCritical(o).map((c) => (
+                  <li class="safety-grid__item">
+                    <p class="safety-grid__name"><MiniTile id={c.id} size={32} /><code>{c.id}</code></p>
+                    <SafetyPanel cap={c} compact />
+                  </li>
+                ))}
+              </ul>
+            </Figure>
+          )}
+          {sg.key === 'step' && <StepAnatomy id={id('Figure: step anatomy')} n={figNo()} title={titled('Step anatomy', 'step')} rows={stepFieldRows(text, where)} />}
+          {sg.key === 'reference' && (
+            <ReferenceAnatomy id={id('Figure: anatomy of a reference')} n={figNo()} title={titled('Anatomy of a reference', 'reference')} examples={bindingExamples(text, where)} rule={rootRule(text, where)} />
+          )}
+          {sg.key === 'annotations' && grammar && (
+            <AnnotationTypes id={id('Figure: annotation types')} n={figNo()} title={titled('Annotation types', 'annotations')} names={grammar.names} subtype={grammar.subtype} />
+          )}
+          {sg.key === 'gates' && (
+            <ActionBranches
+              id={id('Figure: gate outcomes')}
+              n={figNo()}
+              title={titled('Gate outcomes', 'gates')}
+              caption={gateCaption(schema)}
+              kind="gate"
+              points={gateBranches(schema).map((b) => ({
+                label: `when holds, ${b.phase} the step`,
+                at: b.phase === 'after' ? 'after' : 'before',
+                branches: b.actions.map((a) => ({ action: a })),
+              }))}
+            />
+          )}
+          {sg.key === 'failures' && (
+            <ActionBranches
+              id={id('Figure: failure actions')}
+              n={figNo()}
+              title={titled('Failure actions', 'failures')}
+              caption={failureCaption(failures)}
+              kind="fail"
+              points={[{ label: 'the step failed, or a failure mode\'s when holds', at: 'after', branches: failures }]}
+            />
+          )}
+        </>
+      ))
+    ) : (
+      <slot />
+    )}
   </div>
 </article>

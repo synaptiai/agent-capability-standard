@@ -9,6 +9,8 @@ import { claudeLayerTable, ontologyEdgeTriples, repoText, symmetricEdgeTypes } f
 import { parseTokens, pairRatio } from '../scripts/check-contrast.mjs';
 import { edgeChanges, exampleChains, heatRanges, heatStep, layerPairCounts, matrixCells, parseChains } from '../src/lib/edge-figures';
 import { cutAfterHeadings } from '../src/lib/inject';
+import { loadCatalogSchema } from '../src/data/catalog-schema';
+import { annotationGrammar, bindingExamples, failureBranches, gateBranches, referenceParts, stepAnatomy, stepFieldRows } from '../src/lib/spec-figures';
 
 const STANDARDS = ['spec/STANDARD-v1.1.0.md', 'spec/STANDARD-v1.0.0.md'];
 
@@ -131,5 +133,89 @@ describe('figure anchors', () => {
   });
   it('fails when an anchor matches no heading', () => {
     expect(() => cutAfterHeadings(html, [{ key: 'k', level: 2, startsWith: 'Nope' }], 'fixture')).toThrow(/matches 0 headings/);
+  });
+});
+
+describe('Standard figures from the catalog schema (F-S5, F-S9, F-S10)', () => {
+  const schema = JSON.parse(repoText('schemas/workflow_catalog.schema.json'));
+  const std = 'spec/STANDARD-v1.1.0.md';
+  const text = repoText(std);
+
+  it('groups every step property of the schema exactly once, required ones as the schema lists them', () => {
+    const props = Object.keys(schema.$defs.step.properties);
+    const groups = stepAnatomy();
+    const names = groups.flatMap((g) => g.slots.map((s) => s.name));
+    expect([...names].sort()).toEqual([...props].sort());
+    expect(groups.flatMap((g) => g.slots).filter((s) => s.required).map((s) => s.name).sort()).toEqual([...schema.$defs.step.required].sort());
+  });
+
+  it('links a field to the §5.2 table row that names it', () => {
+    // The row "| `risk`, `mutation`, `requires_checkpoint`, `requires_approval` | ..." of §5.2.
+    const rows = stepFieldRows(text, std);
+    expect(rows.get('requires_approval')).toBe('risk');
+    expect(rows.get('capability')).toBe('capability');
+    expect(rows.has('delay')).toBe(false);
+  });
+
+  it('branches on every gate action before the step, and after it on all but what the schema forbids', () => {
+    const actions = schema.$defs.gate.properties.action.enum as string[];
+    const forbidden = schema.$defs.gate.then.properties.action.not.const as string;
+    expect(gateBranches()).toEqual([
+      { phase: 'before', actions },
+      { phase: 'after', actions: actions.filter((a) => a !== forbidden) },
+    ]);
+    expect(loadCatalogSchema().failureActions).toEqual(schema.$defs.failure_mode.properties.action.enum);
+  });
+
+  it('gives each failure action the effect of its §5.12 table row, by a line scan', () => {
+    const lines = text.split('\n');
+    const start = lines.findIndex((l) => /^\| `action` \| Effect before recovery \|$/.test(l));
+    const effect = new Map<string, string>();
+    for (const l of lines.slice(start + 2)) {
+      if (!l.startsWith('|')) break;
+      const [, names, eff] = l.split('|').map((c) => c.trim());
+      for (const m of names!.matchAll(/`([a-z_]+)`/g)) effect.set(m[1]!, eff!.replace(/`/g, ''));
+    }
+    expect(effect.size).toBeGreaterThan(0);
+    for (const b of failureBranches(text, std)) expect(b.effect).toBe(effect.get(b.action));
+  });
+});
+
+describe('Standard figures from §5.3 (F-S7, F-S8)', () => {
+  const std = 'spec/STANDARD-v1.1.0.md';
+  const text = repoText(std);
+
+  it('splits references into root, segments and annotation (fixtures)', () => {
+    expect(referenceParts('${search_out.results[0:5]}')).toEqual({
+      root: 'search_out',
+      segments: [
+        { kind: 'field', text: '.results' },
+        { kind: 'slice', text: '[0:5]' },
+      ],
+      annotation: null,
+    });
+    expect(referenceParts('${a.b[2].c : map<string, number>}')).toEqual({
+      root: 'a',
+      segments: [
+        { kind: 'field', text: '.b' },
+        { kind: 'index', text: '[2]' },
+        { kind: 'field', text: '.c' },
+      ],
+      annotation: 'map<string, number>',
+    });
+    expect(() => referenceParts('${a[01]}')).toThrow();
+  });
+
+  it('reads every line of the Examples fence', () => {
+    const fence = /Examples:\n```yaml\n([\s\S]*?)```/.exec(text)![1]!.trim().split('\n');
+    expect(bindingExamples(text, std).map((e) => e.line)).toEqual(fence.map((l) => l.trim()));
+  });
+
+  it('reads the annotation grammar names as the sentence lists them', () => {
+    const sentence = /\*\*Annotation grammar:\*\*([\s\S]*?)\. `integer` is a subtype/.exec(text)![1]!;
+    const want = [...sentence.matchAll(/`([^`]+)`/g)].map((m) => m[1]!);
+    const g = annotationGrammar(text, std);
+    expect(g.names).toEqual(want);
+    expect(g.subtype).toEqual({ sub: 'integer', of: 'number' });
   });
 });
