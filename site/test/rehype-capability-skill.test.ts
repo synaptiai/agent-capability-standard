@@ -39,6 +39,7 @@ const FIXTURE = [
   '| `success` | boolean |',
   '| `new_state` | object |',
   '| `rollback_command` | string |',
+  '| `previous_state.hash` | string |',
   '',
   '## Examples',
   '',
@@ -92,9 +93,9 @@ describe('rehype-capability-skill', () => {
     const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
     expect(section).toContain('<th>In the contract</th>');
     // Expected from mutate's output_schema in schemas/capability_ontology.yaml:
-    // success is a required boolean, new_state an optional any, and
-    // rollback_command is not in the contract.
-    const cells = [...section.matchAll(/<td class="skill-fd__contract" data-in-contract="(yes|no)">([^]*?)<\/td>/g)].map((m) => [
+    // success is a required boolean, new_state an optional any,
+    // rollback_command is not in the contract, and previous_state is.
+    const cells = [...section.matchAll(/<td class="skill-fd__contract" data-in-contract="(yes|no|inside)">([^]*?)<\/td>/g)].map((m) => [
       m[1],
       m[2]!.replace(/<svg[^]*?<\/svg>/g, '').trim(),
     ]);
@@ -102,9 +103,11 @@ describe('rehype-capability-skill', () => {
       ['yes', 'Yes: <code>boolean</code>, required'],
       ['yes', 'Yes: <code>any</code>, optional'],
       ['no', "No, the skill's own"],
+      // previous_state is an optional contract field of mutate, so a field under it is inside the contract.
+      ['inside', 'Inside <code>previous_state</code>, which the contract declares'],
     ]);
-    // Three rows carry a glyph, so it counts as an information figure (visual spec 4.2).
-    expect(section).toMatch(/<table[^>]*data-enriched="3"[^>]*data-info-figure="enriched-table"/);
+    // Every row carries a glyph, so it counts as an information figure (visual spec 4.2).
+    expect(section).toMatch(/<table[^>]*data-enriched="4"[^>]*data-info-figure="enriched-table"/);
   });
 
   it('makes each example a closed details whose summary keeps the H3 and its id, with no anchor link', async () => {

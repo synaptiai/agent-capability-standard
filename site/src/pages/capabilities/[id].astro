@@ -24,7 +24,6 @@ import {
   outputFieldsCaption,
   outputFieldsIsFigure,
   procedureMap,
-  procedureMapCaption,
   procedureMapIsFigure,
   safetySequence,
   sequenceCaption,
@@ -98,7 +97,8 @@ const nUsage = usage.length > 0 ? next() : 0;
 type After = { kind: 'chain' | 'output' | 'sequence' | 'procedure'; n: number } | { kind: 'sentence'; text: string };
 const after: Record<string, After> = {};
 for (const part of skill.parts) {
-  if (part.id === 'procedure') after[part.id] = procedureMapIsFigure(procedure) ? { kind: 'procedure', n: next() } : { kind: 'sentence', text: procedureMapCaption(cap, procedure) };
+  // F-C7 only where two or more steps use a field's name; elsewhere nothing, since a count of one word match says little.
+  if (part.id === 'procedure' && procedureMapIsFigure(procedure)) after[part.id] = { kind: 'procedure', n: next() };
   if (part.id === 'output-contract') after[part.id] = outputFieldsIsFigure(fields) ? { kind: 'output', n: next() } : { kind: 'sentence', text: outputFieldsCaption(cap, fields) };
   if (part.id === 'safety-constraints')
     after[part.id] = sequenceIsFigure(sequence) ? { kind: 'sequence', n: next() } : { kind: 'sentence', text: sequenceCaption(cap, sequence, edgeRules(std.text, std.source)) };

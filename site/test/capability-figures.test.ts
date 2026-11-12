@@ -284,7 +284,7 @@ describe('procedureMap (F-C7)', () => {
     const m = procedureMap(SKILL, 'fixture');
     expect(procedureMapIsFigure(m)).toBe(true);
     expect(procedureMapCaption(cap('retrieve'), m)).toBe(
-      "2 of the procedure's 3 steps name an input or output field of the retrieve skill; 1 output field of 3 is named by no step (confidence).",
+      "2 of the procedure's 3 steps use the name of an input or output field of the retrieve skill as a word; 1 output field of 3 is used by no step (confidence).",
     );
   });
 
@@ -292,6 +292,6 @@ describe('procedureMap (F-C7)', () => {
     const one = SKILL.replace('fill `result` and evidence_anchors', 'finish');
     const m = procedureMap(one, 'fixture');
     expect(procedureMapIsFigure(m)).toBe(false);
-    expect(procedureMapCaption(cap('retrieve'), m)).toBe("1 of the procedure's 3 steps names an input or output field of the retrieve skill.");
+    expect(procedureMapCaption(cap('retrieve'), m)).toBe("1 of the procedure's 3 steps uses the name of an input or output field of the retrieve skill as a word.");
   });
 });

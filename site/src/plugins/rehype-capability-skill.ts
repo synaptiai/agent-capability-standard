@@ -191,7 +191,13 @@ export function markFieldDefinitions(table: Element, cap: Capability): number {
     const first = tr.children.find((c): c is Element => isEl(c, 'td'));
     const name = first ? text(first).replace(/`/g, '').trim() : '';
     const row = contract.get(name);
-    const cell = row
+    // A nested name (`audit_record.actor`) whose head the contract declares
+    // is inside a contract field, not the skill's own.
+    const head = /^([A-Za-z_][A-Za-z0-9_]*)[.[]/.exec(name)?.[1];
+    const parent = !row && head ? contract.get(head) : undefined;
+    const cell = parent
+      ? [glyphElement('nested', { className: 'skill-fd__glyph' }), txt(' Inside '), el('code', {}, [txt(head!)]), txt(', which the contract declares')]
+      : row
       ? [
           glyphElement('check', { className: 'skill-fd__glyph' }),
           txt(' Yes: '),
@@ -199,7 +205,7 @@ export function markFieldDefinitions(table: Element, cap: Capability): number {
           txt(row.required ? ', required' : ', optional'),
         ]
       : [glyphElement('type:open', { className: 'skill-fd__glyph' }), txt(' '), txt("No, the skill's own")];
-    tr.children.push(el('td', { className: ['skill-fd__contract'], dataInContract: row ? 'yes' : 'no' }, cell));
+    tr.children.push(el('td', { className: ['skill-fd__contract'], dataInContract: row ? 'yes' : parent ? 'inside' : 'no' }, cell));
     marked += 1;
   }
   table.properties = { ...table.properties, dataEnriched: String(marked), ...(marked >= 3 ? { dataInfoFigure: 'enriched-table' } : {}) };

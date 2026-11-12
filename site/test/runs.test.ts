@@ -118,8 +118,8 @@ describe('exempt runs and scope', () => {
       'troubleshooting:b',
       'api-reference:b',
     ]);
-    // Added at integration: the Live Context command lists, and rollback's Intent.
-    expect(rows('template:capability')).toEqual(['examples:b', 'live-context:b']);
+    // Added at integration: rollback's Intent.
+    expect(rows('template:capability')).toEqual(['examples:b']);
     expect(rows('/capabilities/rollback/')).toEqual(['intent:a']);
     expect(rows('template:domain')).toEqual(['customization-guide:b', 'integration-examples:b']);
     expect(EXEMPT_RUNS.find((e) => e.page === 'template:capability')?.extent).toBe('first-tall-fence');

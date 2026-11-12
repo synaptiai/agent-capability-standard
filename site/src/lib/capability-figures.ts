@@ -443,7 +443,12 @@ export function skillInputNames(skillText: string, where: string): string[] {
   return rows.map((r) => r[0]!.replace(/`/g, '').trim()).filter((x) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(x));
 }
 
-/** True when `text` names `field` as a whole word (not part of a longer name). */
+/**
+ * True when `text` uses `field` as a whole word (not part of a longer name).
+ * This is a word match, not a reading of what the step does: a field named
+ * with an English word ("data", "options") is marked wherever the step uses
+ * that word, and the caption says so.
+ */
 function names(text: string, field: string): boolean {
   return new RegExp(`(?<![A-Za-z0-9_])${field}(?![A-Za-z0-9_])`).test(text);
 }
@@ -474,7 +479,7 @@ export function procedureMapIsFigure(m: ProcedureMap): boolean {
 
 /** F-C7's title. */
 export function procedureMapTitle(cap: Capability): string {
-  return `The fields each step of the ${cap.id} procedure names`;
+  return `The field names each step of the ${cap.id} procedure uses`;
 }
 
 /** F-C7's caption, or the sentence printed in its place. */
@@ -482,13 +487,13 @@ export function procedureMapCaption(cap: Capability, m: ProcedureMap): string {
   const k = naming(m).length;
   const named = new Set(m.steps.flatMap((s) => s.writes));
   const silent = m.outputs.filter((f) => !named.has(f));
-  const lead = `${k} of the procedure's ${plural(m.steps.length, 'step', 'steps')} ${k === 1 ? 'names' : 'name'} an input or output field of the ${cap.id} skill`;
+  const lead = `${k} of the procedure's ${plural(m.steps.length, 'step', 'steps')} ${k === 1 ? 'uses' : 'use'} the name of an input or output field of the ${cap.id} skill as a word`;
   if (!procedureMapIsFigure(m)) return `${lead}.`;
   const tail =
     silent.length === 0
-      ? '; every output field is named by at least one step.'
+      ? '; every output field is used by at least one step.'
       : silent.length === m.outputs.length
-        ? '; no step names an output field.'
-        : `; ${plural(silent.length, 'output field', 'output fields')} of ${m.outputs.length} ${silent.length === 1 ? 'is' : 'are'} named by no step (${silent.join(', ')}).`;
+        ? '; no step uses an output field.'
+        : `; ${plural(silent.length, 'output field', 'output fields')} of ${m.outputs.length} ${silent.length === 1 ? 'is' : 'are'} used by no step (${silent.join(', ')}).`;
   return lead + tail;
 }

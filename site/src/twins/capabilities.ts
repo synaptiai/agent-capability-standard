@@ -107,11 +107,11 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
         procedureMapTitle(cap),
         procedureMapCaption(cap, proc),
         table(
-          ['Step', 'Inputs it names', 'Output fields it names'],
+          ['Step', 'Inputs it uses by name', 'Output fields it uses by name'],
           proc.steps.map((s) => [`${s.n}. ${s.title}`, s.reads.map(code).join(', '), s.writes.map(code).join(', ')]),
         ),
       )
-    : procedureMapCaption(cap, proc);
+    : null;
   const std = currentStandardText();
   const rules = edgeRules(std.text, std.source);
   const seq = safetySequence(cap, ontology);

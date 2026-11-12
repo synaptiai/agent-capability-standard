@@ -97,10 +97,6 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
     extent: 'first-tall-fence',
     run: 'the open first example, when its fence alone is taller than one viewport',
   },
-  // Added at integration: the "Live Context" section of the audit, search and
-  // verify skills is a list of shell commands the skill runs at load time
-  // (category b); it has nothing else to draw.
-  { page: 'template:capability', anchor: 'live-context', category: 'b', run: 'Live Context (shell commands the skill runs)' },
   { page: 'template:domain', anchor: 'customization-guide', category: 'b', run: 'Customization Guide' },
   { page: 'template:domain', anchor: 'integration-examples', category: 'b', run: 'Integration Examples' },
   // The numbered RFCs only: the OASF proposal under /rfcs/proposals/ is a
