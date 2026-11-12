@@ -1,7 +1,7 @@
 // The capability skill step (rehype-capability-skill), run through the build
 // pipeline on a hand-written SKILL.md. The fixture is rendered at the path of
 // a capability skill (mutate) and at the path of a composed skill
-// (debug-workflow), which the step must leave alone. Expected values are
+// (debug-workflow), which gets only the folds. Expected values are
 // read off the fixture below.
 import { describe, expect, it } from 'vitest';
 import { loadOntology } from '../src/data/ontology';
@@ -145,9 +145,11 @@ describe('rehype-capability-skill', () => {
     expect(html).toMatch(/<h2 id="composition-patterns">[^]*<p>after<\/p>/);
   });
 
-  it('leaves a composed skill untouched', async () => {
+  it('folds a composed skill\'s output fence and examples, and leaves the rest as written', async () => {
     const html = await render('skills/debug-workflow/SKILL.md');
-    expect(html).not.toMatch(/skill-steps|skill-fence|skill-example|skill-safety/);
+    expect(html).toMatch(/<details class="fig-details skill-fence"><summary>The output as the skill writes it, in YAML<\/summary>/);
+    expect([...html.matchAll(/<details class="skill-example">/g)]).toHaveLength(2);
     expect(html).toMatch(/<h3 id="example-1-happy-path">/);
+    expect(html).not.toMatch(/skill-steps|skill-safety|skill-req|skill-contract/);
   });
 });

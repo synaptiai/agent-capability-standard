@@ -1,5 +1,6 @@
 // Visual aids in the SKILL.md of an atomic capability (skills/<id>/SKILL.md
-// for an ontology capability; composed skills are left alone), keyed by the
+// for an ontology capability; a composed skill gets only the two folds, as
+// below), keyed by the
 // fixed H2s every such skill has (visual spec 3.1). The prose and the heading
 // ids are not changed:
 // - Procedure: the top-level ordered list gets numbered pixel tiles (CSS).
@@ -26,8 +27,15 @@
 //   the skill leaves out.
 // The port columns and the composition chain are Astro figures, which the
 // page puts under their headings.
+//
+// A composed skill (skills/<dir>/SKILL.md in COMPOSED_SKILLS) gets only the
+// two folds: its Output Contract fence and each example closed under a
+// summary, since its contract and example output are long YAML (the longest
+// run on the site was one composed skill's open example). Its other sections
+// are left as written.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
 import { loadOntology, type Capability } from '../data/ontology';
+import { COMPOSED_SKILLS } from '../data/skills';
 import { contractRows } from '../lib/views';
 import { glyphElement } from '../pixel/hast';
 import { sourceOf } from './source';
@@ -66,11 +74,23 @@ export function isCapabilitySkill(repoPath: string): boolean {
   return m !== null && loadOntology().byId.has(m[1]!);
 }
 
+/** True when the hast file is the SKILL.md of a composed skill. */
+export function isComposedSkill(repoPath: string): boolean {
+  const m = /^skills\/([a-z0-9_-]+)\/SKILL\.md$/.exec(repoPath);
+  return m !== null && m[1]! in COMPOSED_SKILLS;
+}
+
 export default function rehypeCapabilitySkill() {
   return (tree: Root, file: Parameters<typeof sourceOf>[0]): void => {
-    if (!file.path || !/[\\/]skills[\\/][a-z_]+[\\/]SKILL\.md$/.test(file.path)) return;
-    if (!isCapabilitySkill(sourceOf(file, 'rehype-capability-skill').repoPath)) return;
+    if (!file.path || !/[\\/]skills[\\/][a-z0-9_-]+[\\/]SKILL\.md$/.test(file.path)) return;
+    const repoPath = sourceOf(file, 'rehype-capability-skill').repoPath;
     const kids = tree.children;
+    if (isComposedSkill(repoPath)) {
+      foldOutputFence(kids);
+      foldExamples(kids);
+      return;
+    }
+    if (!isCapabilitySkill(repoPath)) return;
 
     // Procedure: number tiles on the first top-level ordered list.
     const proc = sections(kids).get('procedure');
@@ -95,26 +115,11 @@ export default function rehypeCapabilitySkill() {
     }
 
     // Output Contract: the section's first code block folds under a summary,
-    // because the page draws its fields as a figure (F-C6) or marks them in
-    // the Field Definitions table.
+    // because the page marks its fields in the Field Definitions table and
+    // counts them in the sentence above it.
     const output = sections(kids).get('output-contract');
     if (output) {
-      const [s, e] = output;
-      const at = kids.slice(s + 1, e).findIndex((c) => isEl(c, 'pre'));
-      if (at !== -1) {
-        const i = s + 1 + at;
-        const fold: Element = {
-          type: 'element',
-          tagName: 'details',
-          properties: { className: ['fig-details', 'skill-fence'] },
-          children: [
-            { type: 'element', tagName: 'summary', properties: {}, children: [{ type: 'text', value: 'The output as the skill writes it, in YAML' }] },
-            kids[i] as ElementContent,
-          ],
-        };
-        kids.splice(i, 1, fold);
-      }
-      const repoPath = sourceOf(file, 'rehype-capability-skill').repoPath;
+      foldOutputFence(kids);
       const cap = loadOntology().byId.get(SKILL.exec(repoPath)![1]!)!;
       const [s2, e2] = sections(kids).get('output-contract')!;
       const table = kids
@@ -136,39 +141,7 @@ export default function rehypeCapabilitySkill() {
     }
 
     // Examples: one <details> per H3.
-    const ex = sections(kids).get('examples');
-    if (ex) {
-      const [s, e] = ex;
-      const part = kids.slice(s + 1, e);
-      const before: RootContent[] = [];
-      const groups: { h3: Element; body: RootContent[] }[] = [];
-      for (const c of part) {
-        if (isEl(c, 'h3')) groups.push({ h3: c, body: [] });
-        else if (groups.length === 0) before.push(c);
-        else groups.at(-1)!.body.push(c);
-      }
-      if (groups.length > 0) {
-        const details = groups.map(({ h3, body }): Element => {
-          h3.children = h3.children.filter((c) => !(isEl(c, 'a') && ((c.properties?.className as string[]) ?? []).includes('heading-anchor')));
-          const failure = /failure/i.test(text(h3));
-          return {
-            type: 'element',
-            tagName: 'details',
-            properties: { className: ['skill-example'] },
-            children: [
-              {
-                type: 'element',
-                tagName: 'summary',
-                properties: { className: ['skill-example__summary'] },
-                children: [glyphElement(failure ? 'caution' : 'code', { className: 'skill-example__glyph' }), h3],
-              },
-              { type: 'element', tagName: 'div', properties: { className: ['skill-example__body'] }, children: body as ElementContent[] },
-            ],
-          };
-        });
-        kids.splice(s + 1, e - s - 1, ...before, ...details);
-      }
-    }
+    foldExamples(kids);
   };
 }
 
@@ -241,4 +214,59 @@ export function markContract(table: Element, cap: Capability): number {
   const marked = marks.filter((m) => m !== null).length;
   table.properties = { ...table.properties, dataEnriched: String(marked), dataInfoFigure: 'enriched-table' };
   return marked;
+}
+
+/** Folds the first code block of the Output Contract section under a summary. */
+function foldOutputFence(kids: RootContent[]): void {
+  const output = sections(kids).get('output-contract');
+  if (!output) return;
+  const [s, e] = output;
+  const at = kids.slice(s + 1, e).findIndex((c) => isEl(c, 'pre'));
+  if (at === -1) return;
+  const i = s + 1 + at;
+  const fold: Element = {
+    type: 'element',
+    tagName: 'details',
+    properties: { className: ['fig-details', 'skill-fence'] },
+    children: [
+      { type: 'element', tagName: 'summary', properties: {}, children: [{ type: 'text', value: 'The output as the skill writes it, in YAML' }] },
+      kids[i] as ElementContent,
+    ],
+  };
+  kids.splice(i, 1, fold);
+}
+
+/** Each "### Example" of the Examples section and its content up to the next H3 or H2 becomes a closed <details>. */
+function foldExamples(kids: RootContent[]): void {
+  const ex = sections(kids).get('examples');
+  if (!ex) return;
+  const [s, e] = ex;
+  const part = kids.slice(s + 1, e);
+  const before: RootContent[] = [];
+  const groups: { h3: Element; body: RootContent[] }[] = [];
+  for (const c of part) {
+    if (isEl(c, 'h3')) groups.push({ h3: c, body: [] });
+    else if (groups.length === 0) before.push(c);
+    else groups.at(-1)!.body.push(c);
+  }
+  if (groups.length === 0) return;
+  const details = groups.map(({ h3, body }): Element => {
+    h3.children = h3.children.filter((c) => !(isEl(c, 'a') && ((c.properties?.className as string[]) ?? []).includes('heading-anchor')));
+    const failure = /failure/i.test(text(h3));
+    return {
+      type: 'element',
+      tagName: 'details',
+      properties: { className: ['skill-example'] },
+      children: [
+        {
+          type: 'element',
+          tagName: 'summary',
+          properties: { className: ['skill-example__summary'] },
+          children: [glyphElement(failure ? 'caution' : 'code', { className: 'skill-example__glyph' }), h3],
+        },
+        { type: 'element', tagName: 'div', properties: { className: ['skill-example__body'] }, children: body as ElementContent[] },
+      ],
+    };
+  });
+  kids.splice(s + 1, e - s - 1, ...before, ...details);
 }
