@@ -1847,13 +1847,12 @@
     font-family: var(--font-mono);
   }
 
-  /* Narrow, with the story script (data-live): the script shows one part of
-     the diagram at a time in a box of the rail's shape, the same box before,
-     during and after the story. Labels and tile symbols are set at 14 viewBox
-     units, so the diagram drawn at about 0.87x on a 360px screen still shows
-     them at 12px or more. */
+  /* Narrow: while the reader scrolls inside the story, the script shows one
+     part of the diagram at a time in a box of the rail's shape. Labels and
+     tile symbols are set at 14 viewBox units, so the diagram drawn at about
+     0.87x on a 360px screen still shows them at 12px or more. */
   @media (max-width: 959px) {
-    .story[data-live] .story__svg {
+    .story[data-playing] .story__svg {
       aspect-ratio: var(--rail-aspect);
       max-height: 45vh;
     }
