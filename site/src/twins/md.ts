@@ -4,6 +4,7 @@
 import type { Definition, Heading, Image, Link, Root } from 'mdast';
 import { visit } from 'unist-util-visit';
 import { parseMarkdown, stripFrontmatter } from '../lib/anchors';
+import { mermaidTwinEdits } from '../lib/mermaid/twin';
 import { SITE_ORIGIN, repoResolver } from '../lib/links';
 import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
 import { ROUTES } from '../lib/routes';
@@ -124,6 +125,9 @@ export function markdownCopy(repoPath: string, text: string, options: CopyOption
     }
     edits.push({ start: from + at, end: from + at + n.url.length, text: r.url });
   });
+
+  // Each mermaid fence stays, followed by its text version.
+  edits.push(...mermaidTwinEdits(tree, body));
 
   if (problems.length > 0) throw new Error(`twins: links in ${repoPath} did not resolve:\n  ${problems.join('\n  ')}`);
 

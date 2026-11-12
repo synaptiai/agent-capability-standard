@@ -1,0 +1,280 @@
+// Lays out a parsed flowchart with ELK's layered algorithm (elkjs, which runs
+// in Node; no browser is needed at build time) and snaps the result to the
+// pixel grid: every coordinate and size is an even number of pixels, and every
+// edge is a chain of horizontal and vertical segments.
+//
+// Labels are set in the site's mono font, so their width is known without a
+// browser: Atkinson Hyperlegible Mono advances 0.632em per character
+// (8.848px at 14px, measured in Chromium with canvas measureText on
+// 2026-11-12). The fallback mono fonts are narrower, so a label never
+// outgrows its box.
+import ELK from 'elkjs/lib/elk.bundled.js';
+import type { Diagram, Direction, LinkStyle, Shape } from './parse';
+
+/** Characters advance this many ems in the mono font. */
+export const CHAR_EM = 0.632;
+/** Label sizes: 14px on the page, 12px (the floor for figure text) in the phone layout. */
+export const FONT_WIDE = 14;
+export const FONT_NARROW = 12;
+
+export interface Font {
+  size: number;
+  lineH: number;
+  charW: number;
+}
+
+export function font(size: number): Font {
+  return { size, lineH: size + 4, charW: CHAR_EM * size };
+}
+/** Widest drawing on a desktop page: the 46rem column less the figure's padding and border. */
+export const WIDE_BUDGET = 684;
+/** Widest drawing at a 360px viewport: 328px of content less 8px padding and 2px border each side. */
+export const NARROW_BUDGET = 308;
+
+/** Characters per label line, for the authored layout and the phone layout. */
+export const WRAP_WIDE = 22;
+export const WRAP_NARROW = 10;
+
+/** Space inside boxes and between them: the page layout, and the tighter phone layout. */
+const SPACING = {
+  roomy: { padX: 12, padY: 8, nodeNode: 24, layers: 36, edgeNode: 16, edgeEdge: 12, edgeLayers: 16, minW: 48, groupPad: 16 },
+  compact: { padX: 6, padY: 6, nodeNode: 12, layers: 24, edgeNode: 8, edgeEdge: 8, edgeLayers: 8, minW: 40, groupPad: 8 },
+} as const;
+const BORDER = 2;
+
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface PlacedNode extends Box {
+  id: string;
+  shape: Shape;
+  lines: string[];
+}
+
+export interface PlacedGroup extends Box {
+  id: string;
+  lines: string[];
+}
+
+export interface PlacedEdge {
+  from: string;
+  to: string;
+  style: LinkStyle;
+  arrow: boolean;
+  points: Point[];
+  label: (Box & { lines: string[] }) | null;
+}
+
+export interface Layout {
+  direction: Direction;
+  font: Font;
+  width: number;
+  height: number;
+  nodes: PlacedNode[];
+  groups: PlacedGroup[];
+  edges: PlacedEdge[];
+}
+
+/** A word longer than a line is broken after "(", ",", "_", "/" or "-" where it can be. */
+function pieces(word: string, max: number): string[] {
+  if (word.length <= max) return [word];
+  const out: string[] = [];
+  let rest = word;
+  while (rest.length > max) {
+    let cut = -1;
+    for (let i = Math.min(max, rest.length - 1); i > 0; i--) {
+      if ('(,_/-'.includes(rest[i - 1]!)) {
+        cut = i;
+        break;
+      }
+    }
+    if (cut === -1) break;
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  out.push(rest);
+  return out;
+}
+
+/**
+ * Greedy word wrap. A long word is broken after punctuation (see pieces);
+ * a word with no such place gets a line of its own.
+ */
+export function wrap(text: string, max: number): string[] {
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of text.split(' ').flatMap((w) => pieces(w, max))) {
+    if (cur === '') cur = word;
+    else if (cur.length + 1 + word.length <= max) cur += ` ${word}`;
+    else {
+      lines.push(cur);
+      cur = word;
+    }
+  }
+  if (cur !== '') lines.push(cur);
+  return lines;
+}
+
+const even = (v: number): number => Math.round(v / 2) * 2;
+const up4 = (v: number): number => Math.ceil(v / 4) * 4;
+
+/** Extra width each side for shapes whose ends step inward. */
+export function shapeInset(shape: Shape): number {
+  return { rect: 0, round: 2, stadium: 4, subroutine: 6, cylinder: 0, circle: 6, decision: 8, hexagon: 8 }[shape];
+}
+
+function textWidth(lines: string[], f: Font): number {
+  return Math.max(...lines.map((l) => l.length)) * f.charW;
+}
+
+export interface LayoutOptions {
+  direction?: Direction;
+  wrapAt?: number;
+  fontSize?: number;
+  /** Tighter padding and spacing, for the phone layout. */
+  compact?: boolean;
+}
+
+interface ElkNode {
+  id: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  children?: ElkNode[];
+  layoutOptions?: Record<string, string>;
+  edges?: ElkEdge[];
+}
+
+interface ElkEdge {
+  id: string;
+  sources: string[];
+  targets: string[];
+  labels?: { text: string; width: number; height: number; x?: number; y?: number; layoutOptions?: Record<string, string> }[];
+  sections?: { startPoint: Point; endPoint: Point; bendPoints?: Point[] }[];
+}
+
+const elk = new ELK();
+
+/** Remove repeated and collinear points, and split any diagonal step into two straight ones. */
+export function orthogonal(points: Point[]): Point[] {
+  const out: Point[] = [];
+  for (const p of points) {
+    const last = out.at(-1);
+    if (last && last.x === p.x && last.y === p.y) continue;
+    if (last && last.x !== p.x && last.y !== p.y) out.push({ x: p.x, y: last.y });
+    out.push(p);
+  }
+  return out.filter((p, i) => {
+    const a = out[i - 1];
+    const b = out[i + 1];
+    return !(a && b && ((a.x === p.x && p.x === b.x) || (a.y === p.y && p.y === b.y)));
+  });
+}
+
+export async function layoutDiagram(d: Diagram, options: LayoutOptions = {}): Promise<Layout> {
+  const direction = options.direction ?? d.direction;
+  const wrapAt = options.wrapAt ?? WRAP_WIDE;
+  const f = font(options.fontSize ?? FONT_WIDE);
+  const sp = SPACING[options.compact ? 'compact' : 'roomy'];
+  const nodeLines = new Map(d.nodes.map((n) => [n.id, wrap(n.label, wrapAt)]));
+  const groupLines = new Map(d.groups.map((g) => [g.id, wrap(g.label, wrapAt)]));
+
+  const elkNodes = new Map<string, ElkNode>();
+  for (const n of d.nodes) {
+    const lines = nodeLines.get(n.id)!;
+    const w = up4(Math.max(sp.minW, textWidth(lines, f) + 2 * (sp.padX + BORDER + shapeInset(n.shape))));
+    const h = up4(lines.length * f.lineH + 2 * (sp.padY + BORDER) + (n.shape === 'cylinder' ? 6 : 0));
+    elkNodes.set(n.id, { id: n.id, width: w, height: h });
+  }
+  for (const g of d.groups) {
+    const head = groupLines.get(g.id)!.length * f.lineH + 8;
+    elkNodes.set(g.id, {
+      id: g.id,
+      children: [],
+      layoutOptions: { 'elk.padding': `[top=${up4(head + sp.groupPad)},left=${sp.groupPad},bottom=${sp.groupPad},right=${sp.groupPad}]` },
+    });
+  }
+  const root: ElkNode = {
+    id: '__root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': direction === 'LR' ? 'RIGHT' : 'DOWN',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+      'elk.json.shapeCoords': 'ROOT',
+      'elk.json.edgeCoords': 'ROOT',
+      'elk.padding': '[top=4,left=4,bottom=4,right=4]',
+      'elk.spacing.nodeNode': String(sp.nodeNode),
+      'elk.layered.spacing.nodeNodeBetweenLayers': String(sp.layers),
+      'elk.spacing.edgeNode': String(sp.edgeNode),
+      'elk.spacing.edgeEdge': String(sp.edgeEdge),
+      'elk.spacing.edgeLabel': '4',
+      'elk.layered.spacing.edgeNodeBetweenLayers': String(sp.edgeLayers),
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+    },
+    children: [],
+    edges: [],
+  };
+  const parentOf = (group: string | null) => (group === null ? root : elkNodes.get(group)!);
+  for (const g of d.groups) parentOf(g.parent).children!.push(elkNodes.get(g.id)!);
+  for (const n of d.nodes) parentOf(n.group).children!.push(elkNodes.get(n.id)!);
+  d.edges.forEach((e, i) => {
+    const edge: ElkEdge = { id: `e${i}`, sources: [e.from], targets: [e.to] };
+    if (e.label) {
+      const lines = wrap(e.label, wrapAt);
+      edge.labels = [{ layoutOptions: { 'elk.edgeLabels.inline': 'true' }, text: e.label, width: up4(textWidth(lines, f) + 8), height: lines.length * f.lineH + 4 }];
+    }
+    root.edges!.push(edge);
+  });
+
+  const out = (await elk.layout(root as never)) as unknown as ElkNode;
+
+  const placed = new Map<string, Box>();
+  const walk = (n: ElkNode) => {
+    for (const c of n.children ?? []) {
+      placed.set(c.id, { x: even(c.x!), y: even(c.y!), w: even(c.width!), h: even(c.height!) });
+      walk(c);
+    }
+  };
+  walk(out);
+
+  const edges: PlacedEdge[] = (out.edges ?? []).map((e, i) => {
+    const src = d.edges[i]!;
+    const s = e.sections?.[0];
+    if (!s || (e.sections?.length ?? 0) > 1) throw new Error(`mermaid: ELK gave edge ${src.from} -> ${src.to} ${e.sections?.length ?? 0} sections`);
+    const raw = [s.startPoint, ...(s.bendPoints ?? []), s.endPoint].map((p) => ({ x: even(p.x), y: even(p.y) }));
+    const l = e.labels?.[0];
+    return {
+      from: src.from,
+      to: src.to,
+      style: src.style,
+      arrow: src.arrow,
+      points: orthogonal(raw),
+      label:
+        l && src.label
+          ? { x: even(l.x!), y: even(l.y!), w: even(l.width), h: even(l.height), lines: wrap(src.label, wrapAt) }
+          : null,
+    };
+  });
+
+  return {
+    direction,
+    font: f,
+    width: even(out.width!),
+    height: even(out.height!),
+    nodes: d.nodes.map((n) => ({ id: n.id, shape: n.shape, lines: nodeLines.get(n.id)!, ...placed.get(n.id)! })),
+    groups: d.groups.map((g) => ({ id: g.id, lines: groupLines.get(g.id)!, ...placed.get(g.id)! })),
+    edges,
+  };
+}

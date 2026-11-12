@@ -1,7 +1,8 @@
 // The Markdown pipeline, in one place so astro.config.mjs and the tests run the
 // same chain. Order matters:
 // - remark: links are rewritten first, so the page-meta block keeps rewritten
-//   links; the HTML allowlist sees the raw HTML nodes.
+//   links; the HTML allowlist sees the raw HTML nodes; mermaid fences become
+//   figures last, before Shiki would highlight them as code.
 // - Astro runs Shiki after remark and before the rehype plugins listed here.
 // - rehype: rehypeHeadingIds runs first so the autolink plugin and everything
 //   after it see the ids (Astro's own later pass keeps ids already set).
@@ -15,6 +16,7 @@ import rehypeKeywords from '../plugins/rehype-keywords';
 import rehypeTables from '../plugins/rehype-tables';
 import rehypeTaskLists from '../plugins/rehype-task-lists';
 import remarkHtmlAllowlist from '../plugins/remark-html-allowlist';
+import remarkMermaid from '../plugins/remark-mermaid';
 import remarkPageMeta from '../plugins/remark-page-meta';
 import remarkRepoLinks from '../plugins/remark-repo-links';
 import { ROUTES, routeForSource } from './routes';
@@ -57,7 +59,7 @@ export const SHIKI_CONFIG: ShikiConfig = {
 
 export const PROCESSOR_OPTIONS: UnifiedProcessorOptions = {
   smartypants: false,
-  remarkPlugins: [remarkRepoLinks, remarkPageMeta, remarkHtmlAllowlist],
+  remarkPlugins: [remarkRepoLinks, remarkPageMeta, remarkHtmlAllowlist, remarkMermaid],
   rehypePlugins: [
     rehypeHeadingIds,
     [
