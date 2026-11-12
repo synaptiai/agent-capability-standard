@@ -4,7 +4,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'motion.css'].map((f) => ({
+// figures-mermaid.css holds the Mermaid figure styles in a file of their own;
+// it is listed so every rule here (display font, opacity, tokens) covers it too.
+const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'motion.css', 'figures-mermaid.css'].map((f) => ({
   file: f,
   css: readFileSync(`src/styles/${f}`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }));

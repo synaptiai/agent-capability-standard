@@ -390,6 +390,19 @@ score(claim) = trust(source) × confidence × recency(t)
 
 Tie-breakers apply in order: (1) prefer authoritative source for the specific field, (2) prefer higher confidence, (3) escalate to human.
 
+```mermaid
+---
+title: Choosing between conflicting claims
+---
+flowchart TB
+  claims[Conflicting claims] --> score["score(claim) = trust(source) × confidence × recency(t)"]
+  score -->|highest score| win[Winning claim]
+  score -->|tie| t1["1. Prefer the authoritative source for the field"]
+  t1 -->|still tied| t2[2. Prefer higher confidence]
+  t2 -->|still tied| t3[3. Escalate to a human]
+```
+
+
 ### 5.4 Field-Specific Authority
 
 Some fields have designated authoritative sources:
@@ -450,6 +463,18 @@ Based on confidence score:
 - **0.75–0.90**: Suggest merge (human review)
 - **0.60–0.75**: No action
 - **< 0.40**: Force split review
+
+```mermaid
+---
+title: What the alias confidence score decides
+---
+flowchart LR
+  score[Score] -->|"> 0.90"| auto[Auto-merge]
+  score -->|"0.75–0.90"| suggest["Suggest merge (human review)"]
+  score -->|"0.60–0.75"| none[No action]
+  score -->|"< 0.40"| split[Force split review]
+```
+
 
 **Hard constraints** prevent catastrophic merges:
 
@@ -533,6 +558,17 @@ failure_modes:
         failure_evidence: ${verify_out.violations}
       max_loops: 3
 ```
+
+```mermaid
+---
+title: The recovery loop in the example above
+---
+flowchart TB
+  plan["Step that stores plan_out"] --> verify[verify step]
+  verify -->|"passed == false"| rollback[Action: rollback]
+  rollback -->|"goto_step: plan_out, with failure_evidence, at most 3 loops"| plan
+```
+
 
 ### 7.4 Design-Time Type Validator
 
@@ -933,6 +969,17 @@ This appendix bridges academic concepts to practical application. If you're eval
 - Low-stakes decisions with easy manual override
 
 ### D.3 Adoption Path
+
+```mermaid
+---
+title: Adoption path
+---
+flowchart TB
+  p1["Phase 1: Validation only (Week 1)"] --> p2["Phase 2: Safety layer (Weeks 2–4)"]
+  p2 --> p3["Phase 3: Grounding (Month 2)"]
+  p3 --> p4["Phase 4: Full conformance (Quarter 2)"]
+```
+
 
 **Phase 1: Validation only (Week 1)**
 - Add validator to CI/CD pipeline
