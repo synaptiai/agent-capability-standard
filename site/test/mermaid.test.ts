@@ -13,7 +13,8 @@ import { edgeRects, figureElement, shapeRects } from '../src/lib/mermaid/render'
 import { describeDiagram } from '../src/lib/mermaid/text';
 import { layoutsFor } from '../src/plugins/remark-mermaid';
 import { markdownCopy } from '../src/twins/md';
-import { readRepoFile } from '../src/lib/repo';
+import { readRepoFile, TRACKED_FILES } from '../src/lib/repo';
+import { ROUTES } from '../src/lib/routes';
 import { renderRepoFile } from './pipeline';
 
 // 6 nodes (a..f), 8 links (the last line is two), 1 subgraph holding c and d.
@@ -317,14 +318,27 @@ describe('in the build', () => {
     await expect(renderRepoFile('docs/WORKFLOW_PATTERNS.md', text)).rejects.toThrow(/docs\/WORKFLOW_PATTERNS\.md:5: circle and cross link ends/);
   });
 
-  it('draws each mermaid fence of the two guides as a figure', async () => {
-    for (const file of ['docs/GROUNDED_AGENCY.md', 'docs/WORKFLOW_PATTERNS.md']) {
-      const fences = readRepoFile(file).split('\n').filter((l) => /^```mermaid\s*$/.test(l)).length;
-      expect(fences, file).toBeGreaterThanOrEqual(3);
-      const { code } = await renderRepoFile(file);
-      expect([...code.matchAll(/<figure class="fig fig-mermaid"/g)].length, file).toBe(fences);
-      expect(code, file).not.toMatch(/language-mermaid|data-language="mermaid"/);
-    }
+  // Every routed Markdown source with a mermaid fence, found by a line scan
+  // of the source (not by the renderer), so a new diagram anywhere is drawn
+  // here before the build meets it.
+  const withFences = ROUTES.flatMap((r) => (r.source !== null && /^```mermaid\s*$/m.test(readRepoFile(r.source)) ? [r.source] : []));
+
+  it('finds the diagrams of the two exemplar guides', () => {
+    expect(withFences).toEqual(expect.arrayContaining(['docs/GROUNDED_AGENCY.md', 'docs/WORKFLOW_PATTERNS.md']));
+  });
+
+  it('keeps mermaid out of every version of the Standard', () => {
+    // The Standard's versions are release texts; their figures are drawn by the site from data.
+    const standards = [...TRACKED_FILES].filter((p) => /^spec\/STANDARD-v[^/]*\.md$/.test(p));
+    expect(standards.length).toBeGreaterThan(0);
+    for (const s of standards) expect(readRepoFile(s), s).not.toMatch(/^```mermaid/m);
+  });
+
+  it.each(withFences)('draws each mermaid fence of %s as a figure', async (file) => {
+    const fences = readRepoFile(file).split('\n').filter((l) => /^```mermaid\s*$/.test(l)).length;
+    const { code } = await renderRepoFile(file);
+    expect([...code.matchAll(/<figure class="fig fig-mermaid"/g)].length, file).toBe(fences);
+    expect(code, file).not.toMatch(/language-mermaid|data-language="mermaid"/);
   });
 
   it('keeps each fence in the Markdown copy and adds its text version', () => {
