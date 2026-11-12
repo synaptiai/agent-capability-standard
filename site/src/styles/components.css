@@ -1028,6 +1028,13 @@
     min-width: 0;
   }
 
+  /* A status badge in a fact list may wrap inside itself, so a long status
+     ("Reference implementation") fits the value column at 360px. */
+  .page-meta .status-badge {
+    max-width: 100%;
+    white-space: normal;
+  }
+
   .value-list .value-list {
     margin: 0;
   }
