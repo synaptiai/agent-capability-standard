@@ -20,6 +20,15 @@ This QMS applies to:
 - The full AI lifecycle: design, development, testing, deployment, post-market monitoring
 - All 36 capabilities in the ontology, all 7 domain profiles, and all 12 workflow patterns
 
+```mermaid
+---
+title: The lifecycle this QMS covers
+---
+flowchart TB
+  accDescr: The QMS covers the full AI lifecycle, from design through development, testing and deployment to post-market monitoring.
+  d[Design] --> dev[Development] --> t[Testing] --> dep[Deployment] --> pmm[Post-market monitoring]
+```
+
 ## 3. Art. 17 Compliance Matrix
 
 ### 3.1 Requirement (a) — Strategy for Regulatory Compliance
@@ -94,6 +103,17 @@ This QMS applies to:
 | Risk treatment | Structural controls (hooks, conflicts_with edges), operational controls (approvals, blocking), detective controls (audit, evidence) | AIMS-RSK-001 Sections 3.1-3.3 |
 | Residual risk acceptance | Formal acceptance per risk tier with monitoring | AIMS-RSK-001 Section 7 |
 | Risk monitoring | Post-market monitoring KPIs | EUAIA-PMM-001 Section 5 |
+
+```mermaid
+---
+title: The three kinds of risk treatment control
+---
+flowchart LR
+  accDescr: Risk treatment combines structural controls (hooks and conflicts_with edges), operational controls (approvals and blocking) and detective controls (audit and evidence).
+  rt[Risk treatment] --> sc["Structural controls: hooks, conflicts_with edges"]
+  rt --> oc["Operational controls: approvals, blocking"]
+  rt --> dc["Detective controls: audit, evidence"]
+```
 
 **ISO 42001 Cross-Reference:** Clause 6.1 (Actions to address risks), Annex A.2 (Policies related to AI), Annex A.7 (AI system risk management)
 
@@ -182,6 +202,15 @@ This QMS applies to:
 | Escalation responsibility | Escalation matrix with responsible roles per level | EUAIA-PMM-001 Section 6.1 |
 | Incident reporting responsibility | Art. 62 reporting chain: Operator → Safety Officer → Owner → Legal | EUAIA-PMM-001 Section 7.2 |
 | Audit responsibility | Internal audit programme and auditor competency | AIMS-AUD-001 (internal audit checklist) |
+
+```mermaid
+---
+title: The Art. 62 reporting chain
+---
+flowchart LR
+  accDescr: A serious incident is reported up a chain of roles, from the AI System Operator to the AI Safety Officer, the AI System Owner and Legal.
+  op[AI System Operator] --> so[AI Safety Officer] --> ow[AI System Owner] --> lg[Legal]
+```
 
 **ISO 42001 Cross-Reference:** Clause 5.1 (Leadership and commitment), Clause 5.3 (Roles, responsibilities and authorities)
 

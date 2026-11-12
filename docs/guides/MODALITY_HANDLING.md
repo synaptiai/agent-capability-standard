@@ -146,11 +146,37 @@ The `observe` and `receive` capabilities accept any data type and do not use mod
 - **2 additional capabilities** support modality through format/scope parameters: `retrieve`, `search`
 - **28 remaining capabilities** are modality-agnostic (e.g., `plan`, `checkpoint`, `verify`, `audit` operate on any data type)
 
+```mermaid
+---
+title: How the capabilities take a modality
+---
+flowchart LR
+  accDescr: Six capabilities are most often parameterized by modality through domain, two take it through format or scope parameters, and the remaining 28 are modality-agnostic.
+  dom["By domain: detect, classify, measure, predict, generate, transform"]
+  fs["By format or scope: retrieve, search"]
+  ag["Modality-agnostic: the other 28, such as plan, checkpoint, verify, audit"]
+  m[A modality] --> dom
+  m --> fs
+  m -.->|not used by| ag
+```
+
 ---
 
 ## 3. Examples
 
 ### 3.1 Text Modality Examples
+
+```mermaid
+---
+title: The text examples at a glance
+---
+flowchart LR
+  accDescr: The three text examples use detect with domain text.entity, classify with domain text.sentiment, and transform from text.en to text.pt-BR.
+  m[Text input]
+  m --> c0["detect(text.entity)"]
+  m --> c1["classify(text.sentiment)"]
+  m --> c2["transform(text.en to text.pt-BR)"]
+```
 
 **Example 1: Named Entity Recognition**
 
@@ -227,6 +253,18 @@ confidence: 0.88
 ```
 
 ### 3.2 Image Modality Examples
+
+```mermaid
+---
+title: The image examples at a glance
+---
+flowchart LR
+  accDescr: The three image examples use detect with domain image.object, measure with domain image.quality, and generate with domain image in svg format.
+  m[Image input]
+  m --> c0["detect(image.object)"]
+  m --> c1["measure(image.quality)"]
+  m --> c2["generate(image, svg)"]
+```
 
 **Example 1: Object Detection in Images**
 
@@ -408,6 +446,18 @@ confidence: 0.84
 
 ### 3.4 Video Modality Examples
 
+```mermaid
+---
+title: The video examples at a glance
+---
+flowchart LR
+  accDescr: The three video examples use detect with domain video.action, measure with domain video.stability, and classify with domain video.activity.
+  m[Video input]
+  m --> c0["detect(video.action)"]
+  m --> c1["measure(video.stability)"]
+  m --> c2["classify(video.activity)"]
+```
+
 **Example 1: Action Detection in Video**
 
 ```yaml
@@ -585,6 +635,24 @@ Every capability invocation in the Grounded Agency framework must produce `evide
 | **Video** | `temporal_segment` | `video:<path>:time:<start>-<end>` | Time range within a video file |
 | **Multi-Modal** | `composite` | Contains nested anchors from multiple modalities | Combines anchors from different modalities |
 
+```mermaid
+---
+title: Evidence anchor kinds by modality
+---
+flowchart LR
+  accDescr: Text uses text_span anchors; images use bounding_box, image_reference or pixel_mask; audio uses time_segment or frequency_band; video uses video_region, frame_reference or temporal_segment; and a multi-modal composite anchor nests anchors from the other modalities.
+  tx[Text] --> a1[text_span]
+  im[Image] --> a2[bounding_box]
+  im --> a3[image_reference]
+  im --> a4[pixel_mask]
+  au[Audio] --> a5[time_segment]
+  au --> a6[frequency_band]
+  vi[Video] --> a7[video_region]
+  vi --> a8[frame_reference]
+  vi --> a9[temporal_segment]
+  mm[Multi-modal] --> a10["composite: nests anchors from several modalities"]
+```
+
 ### 4.2 Anchor Schema
 
 All evidence anchors follow a common schema, regardless of modality:
@@ -716,6 +784,20 @@ Selected OASF skills and their Grounded Agency equivalents:
 | Image-to-3D | Multi-modal [7] | Workflow: `detect(domain: image.*) -> transform -> generate(domain: 3d)` |
 
 These workflow patterns will be formally defined in the workflow catalog. See the catalog for currently available patterns.
+
+```mermaid
+---
+title: The two multi-modal workflows in the equivalences
+---
+flowchart LR
+  accDescr: Visual QA chains detect on an image, ground and generate text; Image-to-3D chains detect on an image, transform and generate in the 3d domain.
+  subgraph vqa [Visual QA]
+    q1["detect(image.*)"] --> q2[ground] --> q3["generate(text)"]
+  end
+  subgraph i3d [Image-to-3D]
+    d1["detect(image.*)"] --> d2[transform] --> d3["generate(3d)"]
+  end
+```
 
 ### 5.3 Key Differences
 

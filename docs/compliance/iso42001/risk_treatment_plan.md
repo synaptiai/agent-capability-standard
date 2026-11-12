@@ -128,6 +128,18 @@ Per ISO 31000 risk treatment framework:
 | **Transfer** | Share risk with another party | `delegate` to human operator; `inquire` for escalation |
 | **Accept** | Acknowledge with monitoring | Low-risk capabilities with evidence grounding and audit |
 
+```mermaid
+---
+title: The four treatment options in the framework
+---
+flowchart LR
+  accDescr: The framework avoids a risk with block_autonomous, mitigates it with checkpoints, approvals, evidence grounding and confidence thresholds, transfers it by delegating to a human or escalating with inquire, and accepts the low risks with evidence grounding and audit.
+  av[Avoid] --> av2["block_autonomous removes the capability from autonomous runs"]
+  mi[Mitigate] --> mi2["Checkpoints, approvals, evidence grounding, confidence thresholds"]
+  tr[Transfer] --> tr2["delegate to a human operator, inquire to escalate"]
+  ac[Accept] --> ac2["Low-risk capabilities, with evidence grounding and audit"]
+```
+
 ## 5. Cross-Domain Risk Treatment Matrix
 
 | Domain Profile | Low-Risk Treatment | Medium-Risk Treatment | High-Risk Treatment |
@@ -169,6 +181,17 @@ After applying all treatments:
 | Low | Low | High (structural evidence grounding) | Very Low | Yes |
 | Medium | Medium | High (approval gates + audit) | Low | Yes |
 | High | High | Very High (structural checkpoint + approval + domain blocking) | Low | Yes, with monitoring |
+
+```mermaid
+---
+title: Inherent and residual risk by tier
+---
+flowchart LR
+  accDescr: After treatment, low inherent risk falls to very low, medium to low, and high to low, which is accepted with monitoring.
+  il[Inherent: low] -->|structural evidence grounding| rl[Residual: very low]
+  im[Inherent: medium] -->|approval gates and audit| rm[Residual: low]
+  ih[Inherent: high] -->|checkpoint, approval, domain blocking| rh["Residual: low, accepted with monitoring"]
+```
 
 **Residual Risk Acceptance:** The AI System Owner shall formally accept residual risks by signing this risk treatment plan. Residual risks shall be reviewed at each management review cycle (see Clause 9 document).
 

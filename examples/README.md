@@ -30,6 +30,16 @@ workflows of the reference catalog (`world_model_build`,
 `digital_twin_sync_loop`, `digital_twin_bootstrap`), copied verbatim; a test
 keeps them identical. CI validates it in strict mode:
 
+```mermaid
+---
+title: Where the example workflows come from
+---
+flowchart TB
+  accDescr: The example catalog holds the three digital twin workflows copied verbatim from the reference catalog, a test keeps the copies identical, and CI validates the example catalog in strict mode.
+  ref[Reference catalog] -->|copied verbatim, a test keeps them identical| ex["Example catalog: world_model_build, digital_twin_sync_loop, digital_twin_bootstrap"]
+  ex -->|validated in strict mode| ci[CI]
+```
+
 ```bash
 python tools/validate_workflows.py --catalog examples/digital_twin_sync_loop.workflow_catalog.yaml --strict
 ```
@@ -39,6 +49,7 @@ The workflow skills run the reference catalog's workflows step by step:
 - `skills/capability-gap-analysis/` - Identify missing capabilities (`capability_gap_analysis`)
 - `skills/digital-twin-bootstrap/` - Build a world model and run a first sync (`digital_twin_bootstrap`)
 - `skills/digital-twin-sync-loop/` - Keep a digital twin in sync (`digital_twin_sync_loop`)
+
 
 To run a workflow on the reference executor from Python, see
 [Running workflows](../docs/guides/RUNNING_WORKFLOWS.md).

@@ -26,6 +26,21 @@
 | **Major NC** | Systematic failure or deviation that undermines AIMS effectiveness |
 | **N/A** | Not applicable (with documented justification) |
 
+```mermaid
+---
+title: Where a finding goes
+---
+flowchart LR
+  accDescr: Each check is classified as conforming, an opportunity for improvement, a minor or major nonconformity, or not applicable with a justification; nonconformities are documented as NCRs under the nonconformity procedure.
+  chk[Check] --> c["C: conforming"]
+  chk --> ofi["OFI: could be enhanced"]
+  chk --> mi[Minor NC]
+  chk --> ma[Major NC]
+  chk --> na["N/A: justified"]
+  mi --> ncr[An NCR]
+  ma --> ncr
+```
+
 ---
 
 ## Clause 1–3: Scope, Normative References, Terms and Definitions
@@ -68,6 +83,17 @@ These clauses are informational and do not contain auditable requirements. Howev
 | 4.3.2 | Does the scope consider external/internal issues? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | | |
 | 4.3.3 | Does the scope consider stakeholder requirements? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | | |
 | 4.3.4 | Are scope boundaries clearly defined (technology, data, organizational)? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | | |
+
+```mermaid
+---
+title: What the AIMS scope must consider
+---
+flowchart LR
+  accDescr: The AIMS scope must consider the internal and external issues of Clause 4.1 and the stakeholder requirements of Clause 4.2, and define its technology, data and organizational boundaries.
+  iss["Internal and external issues (4.1)"] --> scope["AIMS scope (4.3)"]
+  req["Stakeholder requirements (4.2)"] --> scope
+  scope --> bnd["Technology, data and organizational boundaries"]
+```
 
 ### 4.4 AI Management System
 
@@ -127,6 +153,18 @@ These clauses are informational and do not contain auditable requirements. Howev
 | 6.1.5 | Are structural controls implemented for high-risk capabilities? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | PreToolUse hook, `requires_checkpoint`, `requires_approval` | Verify hook is active |
 | 6.1.6 | Are domain-specific risk treatments documented? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Risk treatment plan Section 5, domain profiles | |
 | 6.1.7 | Is residual risk assessed and accepted? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Risk treatment plan Section 7 | |
+
+```mermaid
+---
+title: The risk steps that Clause 6.1 checks
+---
+flowchart TB
+  accDescr: The Clause 6.1 checks follow AI risk from identification, through classification on the three-tier model and treatments for every tier with structural controls for the high-risk capabilities, to residual risk that is assessed and accepted.
+  id[Risks and opportunities identified] --> cl[Classified on the three-tier model]
+  cl --> tr[Treatments defined for low, medium and high]
+  tr --> sc[Structural controls for high-risk capabilities]
+  sc --> rr[Residual risk assessed and accepted]
+```
 
 ### 6.2 AI Objectives and Planning to Achieve Them
 
@@ -212,6 +250,17 @@ These clauses are informational and do not contain auditable requirements. Howev
 | 8.3.2 | Are structural controls functioning? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Test: attempt Write without checkpoint (must be blocked) | Critical test |
 | 8.3.3 | Are domain profile controls applied correctly? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | `block_autonomous` enforcement, confidence thresholds | |
 
+```mermaid
+---
+title: From risk assessment to working controls
+---
+flowchart TB
+  accDescr: Risk assessment at defined intervals feeds treatment planning, the risk treatment plan is implemented, and the structural controls are tested by attempting a Write without a checkpoint, which must be blocked.
+  ra["Risk assessment, at defined intervals"] -->|results used for| tp[Treatment planning]
+  tp --> impl["Risk treatment plan implemented: hooks, profiles, approvals"]
+  impl --> test["Test: a Write without a checkpoint must be blocked"]
+```
+
 ### 8.4 AI System Lifecycle
 
 | # | Check | Finding | Evidence | Notes |
@@ -244,6 +293,17 @@ These clauses are informational and do not contain auditable requirements. Howev
 | 9.2.4 | Are auditors objective and impartial? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Auditor independence declaration | |
 | 9.2.5 | Are audit results reported to relevant management? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Management review input #3c | |
 | 9.2.6 | Are corrective actions taken for audit findings? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | NCR records per nonconformity procedure | |
+
+```mermaid
+---
+title: The internal audit cycle that Clause 9.2 checks
+---
+flowchart TB
+  accDescr: Internal audits run at planned intervals by objective auditors, their results are reported to management as management review input 3c, and corrective actions for findings are recorded as NCRs.
+  plan["Audits at planned intervals, objective auditors"] --> rep["Results reported to management (review input 3c)"]
+  plan --> ca[Corrective actions for findings]
+  ca --> ncr[NCR records]
+```
 
 ### 9.3 Management Review
 
@@ -280,6 +340,15 @@ These clauses are informational and do not contain auditable requirements. Howev
 | 10.1.7 | Are corrective actions effective (recurrence check)? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Verification records, recurrence analysis | |
 | 10.1.8 | Is root cause analysis performed for major/critical NCRs? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | RCA records in NCRs | |
 
+```mermaid
+---
+title: What the nonconformity procedure must cover
+---
+flowchart LR
+  accDescr: The nonconformity procedure must cover identification, evaluation by severity, corrective action with root cause and prevention, and follow-up that verifies effectiveness.
+  id[Identification] --> ev[Severity evaluation] --> ca["Corrective action: root cause, prevention"] --> fu["Follow-up: effectiveness"]
+```
+
 ### 10.2 Continual Improvement
 
 | # | Check | Finding | Evidence | Notes |
@@ -309,6 +378,16 @@ These are Grounded Agency-specific checks beyond standard ISO 42001 requirements
 | F.10 | Run `python tools/validate_workflows.py` | All workflows valid | | |
 | F.11 | Verify `execute` capability has `requires_approval: true` | Flag present in ontology | | |
 | F.12 | Verify medium-risk capabilities are controlled by domain profiles | `block_autonomous` lists include relevant capabilities per domain | | |
+
+```mermaid
+---
+title: The conflicts_with edges test F.7 checks
+---
+flowchart LR
+  accDescr: Test F.7 checks that mutate and persist each conflict with rollback.
+  mutate[mutate] ---|conflicts_with| rollback[rollback]
+  persist[persist] ---|conflicts_with| rollback
+```
 
 ---
 

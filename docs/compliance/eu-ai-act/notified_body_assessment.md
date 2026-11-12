@@ -32,6 +32,16 @@ Under the internal control procedure, the provider:
 
 **No external involvement required.** The provider self-certifies.
 
+```mermaid
+---
+title: The Annex VI procedure
+---
+flowchart TB
+  accDescr: Under internal control the provider verifies its quality management system against Art. 17, examines the technical documentation against Art. 8-15, verifies design, development and post-market monitoring, issues the EU declaration of conformity and affixes the CE marking.
+  v1["Verify the QMS against Art. 17"] --> v2["Examine the technical documentation against Art. 8-15"] --> v3["Verify design, development and post-market monitoring"]
+  v3 --> decl["Issue the EU declaration of conformity (Art. 47)"] --> ce["Affix the CE marking (Art. 48)"]
+```
+
 ### 2.2 Annex VII — Conformity Assessment with Notified Body
 
 Under the notified body procedure:
@@ -44,6 +54,16 @@ Under the notified body procedure:
 6. The provider affixes the CE marking
 
 **External involvement required.** A designated third party verifies compliance.
+
+```mermaid
+---
+title: The Annex VII procedure
+---
+flowchart TB
+  accDescr: The provider selects a notified body designated under Art. 39, which assesses the quality management system and the technical documentation and issues a certificate; the provider then issues the EU declaration of conformity referencing it and affixes the CE marking.
+  n1["Provider selects a notified body (Art. 39)"] --> n2["Notified body assesses the QMS"] --> n3["Notified body assesses the technical documentation"] --> n4["Notified body issues a certificate"]
+  n4 -->|referenced by| decl["Provider issues the EU declaration of conformity"] --> ce["Provider affixes the CE marking"]
+```
 
 ## 3. Decision Tree
 
@@ -177,6 +197,19 @@ When notified body engagement is required or recommended, the provider should se
 | Declaration of conformity (Art. 47) | Provider issues EU declaration of conformity | Upon completion |
 | CE marking (Art. 48) | Provider affixes CE marking | Upon declaration |
 | Post-market monitoring (EUAIA-PMM-001) | Ongoing monitoring commences | Continuous |
+
+```mermaid
+---
+title: The conformity assessment milestones in order
+---
+flowchart TB
+  accDescr: The milestones run from risk classification and route determination through documentation and the two assessments to the declaration of conformity, the CE marking and continuous monitoring; a certificate is issued only on the notified body route.
+  cls[Risk classification] --> route[Route determination] --> docs[Technical documentation preparation] --> qms[QMS assessment] --> rev[Technical documentation review]
+  rev -->|notified body route| cert[Certificate issuance]
+  cert --> decl["Declaration of conformity (Art. 47)"]
+  rev -->|internal control route| decl
+  decl --> ce["CE marking (Art. 48)"] --> pmm["Post-market monitoring, continuous"]
+```
 
 ---
 

@@ -13,6 +13,20 @@ These hooks directly implement capabilities defined in the standard's VERIFY lay
 
 ## How Hooks Work
 
+```mermaid
+---
+title: One tool call through the two hooks
+---
+flowchart TB
+  accDescr: Claude Code passes each tool call as JSON on stdin to the pre-tool-use hook; exit 0 lets the tool run, exit 2 blocks it with the reason shown to Claude, and any other non-zero exit is a non-blocking error after which the tool still runs; after the tool runs, the post-tool-use hook logs it.
+  call[Tool call from Claude Code] -->|JSON on stdin| pre[Pre-tool-use hook]
+  pre -->|exit 0| run[The tool runs]
+  pre -->|other non-zero exit: non-blocking error| run
+  pre -->|exit 2| block["Blocked: the reason on stderr is shown to Claude"]
+  run -->|JSON on stdin| post["Post-tool-use hook: logging and audit"]
+```
+
+
 ### Pre-Tool-Use Hooks
 
 Run **before** a tool executes and can block operations. Claude Code passes
@@ -86,6 +100,21 @@ The `pretooluse_require_checkpoint.sh` hook enforces the `checkpoint` capability
 - Uses `CLAUDE_PROJECT_DIR` for absolute path resolution (SEC-006)
 - Maps to the spec's `requires_checkpoint: true` field on capabilities
 
+
+```mermaid
+---
+title: How the checkpoint hook decides
+---
+flowchart TB
+  accDescr: CheckpointTracker or a person writes the marker file outside the gated tools; on every Write, Edit, MultiEdit, NotebookEdit or Bash call the hook allows the call only when the marker is present, is not a symlink, holds valid JSON with an id, creation time and expiry, and has not expired, and otherwise blocks with exit code 2.
+  w[CheckpointTracker or a person] -->|writes| m[".claude/checkpoint.ok"]
+  call["Write, Edit, MultiEdit, NotebookEdit or Bash call"] --> h[pretooluse_require_checkpoint.sh]
+  m -.->|read by| h
+  h --> q{"Marker present, not a symlink, valid JSON, not expired?"}
+  q -->|yes| ok[Call allowed]
+  q -->|no| no[Blocked with exit code 2]
+```
+
 The marker file must contain valid JSON:
 ```json
 {"checkpoint_id": "chk_...", "created_at": 1706000000, "expires_at": 1706001800}
@@ -102,6 +131,17 @@ The `posttooluse_log_tool.sh` hook implements the `audit` capability:
 - Each entry includes the HMAC of the previous entry, creating a hash chain
 - Records what was executed for provenance tracking
 - Enables post-hoc analysis of agent behavior
+
+
+```mermaid
+---
+title: The audit log's hash chain
+---
+flowchart TB
+  accDescr: Each audit log entry includes the HMAC of the entry before it, so the entries form a hash chain that tools/verify_audit_log.py can check for tampering.
+  e1[Entry 1] -->|HMAC included in| e2[Entry 2] -->|HMAC included in| e3[Entry 3]
+  e3 -.-> v[verify_audit_log.py checks the chain]
+```
 
 Verify audit log integrity:
 ```bash

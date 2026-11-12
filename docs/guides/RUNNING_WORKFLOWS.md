@@ -66,6 +66,18 @@ raised, with the error diagnostics in `.diagnostics`. Warnings do not block
 a run. Inputs or an `actor_identity` that do not fit the workflow, or are not
 JSON data, also raise `RunStartError` (with no diagnostics).
 
+```mermaid
+---
+title: When a run starts
+---
+flowchart TB
+  accDescr: A run starts only when the catalog validates, warnings aside, and the inputs and actor_identity fit the workflow and are JSON data; a catalog with errors raises RunStartError with its diagnostics, and unfit inputs raise RunStartError with none.
+  cat{Catalog validates?} -->|yes| inp{"Inputs fit, JSON data?"}
+  cat -->|no| e1["RunStartError with diagnostics"]
+  inp -->|yes| run[The run starts]
+  inp -->|no| e2["RunStartError, none"]
+```
+
 ## Actions and responses
 
 | Action | Your host | Respond with |
@@ -87,6 +99,19 @@ fails that step (R402); the step's retries and failure modes then apply.
 `NotImplementedError` instead stops the runner, since the host cannot run
 that capability at all. Give `Host` a `CheckpointTracker` and checkpoints
 are recorded in it.
+
+```mermaid
+---
+title: What the runner does with a host method's result
+---
+flowchart LR
+  accDescr: A response is submitted to the run; None means nothing yet, so the runner waits poll_interval_ms or until the deadline and asks again; an exception from invoke_capability fails the step with R402 and its retries and failure modes apply; NotImplementedError stops the runner.
+  m[Host method] -->|response| sub[Submitted to the run]
+  m -->|None| wait["Wait, then ask again"]
+  wait --> m
+  m -->|exception| fail["Step fails, R402: retries and failure modes apply"]
+  m -->|"not implemented"| stop[The runner stops]
+```
 
 Values you hand the run must be I-JSON: integers within ±2^53 and at most
 100 levels deep. Anything else is refused, so that snapshots and approval
@@ -264,6 +289,19 @@ times (default 100,000, about 28 hours at the default 1 s
 `RunIncomplete` is raised with the live run in `.run`, so you can snapshot
 it or drive it on. `HostResponseError` is a `RunIncomplete`.
 
+```mermaid
+---
+title: Driving a run by hand
+---
+flowchart TB
+  accDescr: start returns the run without driving it; next returns the pending action until it is answered, your code acts and submit answers it; to carry a run across processes or days it is saved as a signed snapshot and restored with the same key, and restore refuses a tampered one.
+  st["runner.start()"] --> nx["run.next(): the pending action"]
+  nx --> act[Your code acts]
+  act --> sb["run.submit(): the response"]
+  sb --> nx
+  sb -.->|across processes or days| snap["run.snapshot(key), then runner.restore(): refuses a tampered one"]
+```
+
 ## Conformance
 
 `tests/conformance/runtime/*.json` are scripted runs. Each one has a
@@ -281,3 +319,16 @@ that loops, an escalation and unattended deferral, end to end. Fixtures
 an adopter wrote themselves (`gap*`) are the exception: edit them in
 `tests/conformance/contrib/`, where they are kept as sent; the generator
 checks their keys and copies them in.
+
+
+```mermaid
+---
+title: Where the runtime fixtures come from and what runs them
+---
+flowchart TB
+  accDescr: scripts/gen_runtime_fixtures.py generates the runtime fixtures and copies in the contributed gap fixtures after checking their keys; cargo test replays each fixture with a snapshot and restore before every step, and tests/test_runner.py runs them through Python.
+  contrib["tests/conformance/contrib/ (gap fixtures, kept as sent)"] -->|keys checked, copied in| gen
+  gen["scripts/gen_runtime_fixtures.py"] --> fx["tests/conformance/runtime/*.json"]
+  fx --> cargo["cargo test --test runtime: snapshot and restore before every step"]
+  fx --> py["tests/test_runner.py: through Python"]
+```

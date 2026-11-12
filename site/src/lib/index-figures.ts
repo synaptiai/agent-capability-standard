@@ -163,6 +163,15 @@ function countIn(text: string, re: RegExp, key: (m: RegExpMatchArray) => string 
 
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
 
+/**
+ * The text with its ```mermaid fences removed. A diagram restates what the
+ * prose around it says, so a citation in its labels or caption is the same
+ * citation again and is not counted twice.
+ */
+export function withoutDiagrams(text: string): string {
+  return text.replace(/^([ \t]*)```mermaid[^\n]*\n[\s\S]*?^\1```[ \t]*$/gm, '');
+}
+
 /** The pages of a section (of one group of it, when `group` is given), in route order, with their source text. */
 export function sectionDocs(routes: readonly Route[], section: string, group?: string): Doc[] {
   return routes
@@ -176,7 +185,7 @@ export function sectionDocs(routes: readonly Route[], section: string, group?: s
  * counts for clause 6). Columns are every clause any of them cites.
  */
 export function isoClauseMatrix(pages: readonly Doc[]): CountMatrix {
-  const per = pages.map((p) => countIn(p.text, /\bClause (\d+)(?:\.\d+)*/g, (m) => m[1]!));
+  const per = pages.map((p) => countIn(withoutDiagrams(p.text), /\bClause (\d+)(?:\.\d+)*/g, (m) => m[1]!));
   const clauses = [...new Set(per.flatMap((m) => [...m.keys()]))].sort((a, b) => Number(a) - Number(b));
   const rows = pages.map((p, i) => ({ label: p.label, url: p.url, counts: clauses.map((c) => per[i]!.get(c) ?? 0) }));
   const most = clauses.map((c, j) => ({ c, docs: rows.filter((r) => r.counts[j]! > 0).length })).sort((a, b) => b.docs - a.docs)[0]!;
@@ -201,7 +210,7 @@ export const EU_MAX_COLUMNS = 10;
  * EU_MAX_COLUMNS columns, so the matrix shows what the documents share.
  */
 export function euArticleMatrix(pages: readonly Doc[]): CountMatrix {
-  const per = pages.map((p) => countIn(p.text, /\bArt(?:icle|\.)\s?(\d+)/g, (m) => m[1]!));
+  const per = pages.map((p) => countIn(withoutDiagrams(p.text), /\bArt(?:icle|\.)\s?(\d+)/g, (m) => m[1]!));
   const all = [...new Set(per.flatMap((m) => [...m.keys()]))];
   const docsCiting = (a: string) => per.filter((m) => m.has(a)).length;
   let k = 2;
