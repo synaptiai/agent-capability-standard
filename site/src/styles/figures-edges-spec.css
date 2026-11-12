@@ -396,7 +396,7 @@
     box-sizing: border-box;
     width: 16px;
     height: 16px;
-    border: var(--border);
+    border: var(--px) solid var(--heat-line);
   }
 
   /* ---------- all edges lists ---------- */

@@ -121,7 +121,7 @@ const matrixName = 'Every edge in the ontology, as a matrix';
           const s = heatStep(count, max);
           return (
             <g data-heat={s} data-from-layer={pairs.layers[i]} data-to-layer={pairs.layers[j]}>
-              <rect x={pos(j)} y={pos(i)} width={LC} height={LC} style={`fill: var(${s === 0 ? '--rule' : '--line'})`} />
+              <rect x={pos(j)} y={pos(i)} width={LC} height={LC} style={`fill: var(${s === 0 ? '--rule' : '--heat-line'})`} />
               <rect x={pos(j) + 2} y={pos(i) + 2} width={LC - 4} height={LC - 4} style={`fill: var(${s === 0 ? '--bg-sub' : HEAT_TOKENS[s - 1]!.fill})`} />
               {s > 0 && <text x={pos(j) + LC / 2} y={pos(i) + 19} text-anchor="middle" style={`fill: var(${HEAT_TOKENS[s - 1]!.text})`}>{count}</text>}
             </g>

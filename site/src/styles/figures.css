@@ -506,8 +506,12 @@
     background: var(--bg);
   }
 
+  /* On: a faint layer fill under a layer-coloured border and a 4px top bar
+     (shape, not only colour, marks the cell), and the word says the state. */
   .safety-cell--on {
-    background: var(--tint);
+    border-color: var(--layer);
+    background: color-mix(in srgb, var(--layer) var(--safety-on-amount), var(--bg));
+    box-shadow: inset 0 4px 0 var(--layer);
   }
 
   .safety-panel--compact .safety-cell {

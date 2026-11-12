@@ -49,6 +49,10 @@
     --layer-REMEMBER: #4d7c0f;
     --layer-COORDINATE: #1d4ed8;
     --tint-amount: 12%;
+    /* The fill of a "yes" cell in a safety panel: the layer mixed toward --bg.
+       The cell also takes a layer-coloured border and top bar, so the fill
+       stays faint; in dark a stronger mix of the warm layers reads as brown. */
+    --safety-on-amount: 12%;
 
     /* Risk (red and gold are used for nothing else) */
     --risk-low: #3f5168;
@@ -68,6 +72,10 @@
     --on-heat-2: var(--ink);
     --on-heat-3: var(--ink);
     --on-heat-4: var(--bg);
+    /* The 2px border of a heat cell and a legend swatch. It must stand 3:1
+       against every step: --line does in light; in dark --line is as light
+       as the steps, so the border is the page colour there. */
+    --heat-line: var(--line);
 
     /* Requirement keywords share the risk colours */
     --kw-must: var(--risk-high);
@@ -163,6 +171,7 @@
       --layer-REMEMBER: #bef264;
       --layer-COORDINATE: #6f9cff;
       --tint-amount: 20%;
+      --safety-on-amount: 8%;
       --risk-low: #b4c0d0;
       --risk-medium: #facc15;
       --risk-high: #f87171;
@@ -177,6 +186,7 @@
       --on-heat-2: var(--bg);
       --on-heat-3: var(--bg);
       --on-heat-4: var(--bg);
+      --heat-line: var(--bg);
       --callout-amount: 10%;
       --code-foreground: #eef2f8;
       --code-background: #0f1726;
@@ -220,6 +230,7 @@
     --layer-REMEMBER: #bef264;
     --layer-COORDINATE: #6f9cff;
     --tint-amount: 20%;
+    --safety-on-amount: 8%;
     --risk-low: #b4c0d0;
     --risk-medium: #facc15;
     --risk-high: #f87171;
@@ -234,6 +245,7 @@
     --on-heat-2: var(--bg);
     --on-heat-3: var(--bg);
     --on-heat-4: var(--bg);
+    --heat-line: var(--bg);
     --callout-amount: 10%;
     --code-foreground: #eef2f8;
     --code-background: #0f1726;
