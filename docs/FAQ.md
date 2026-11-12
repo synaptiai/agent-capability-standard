@@ -115,7 +115,7 @@ flowchart LR
 title: Proposals covered by existing capabilities
 ---
 flowchart LR
-  accDescr: negotiate is covered by synchronize, handoff by delegate with context, forget by persist with ttl 0 or mutate with delete, and index and associate by the MODEL layer capabilities; observe already exists.
+  accDescr: negotiate is covered by synchronize, handoff by delegate with context, forget by persist with ttl 0 or mutate with delete, and index and associate by the MODEL layer capabilities.
   negotiate["negotiate"] --> synchronize["synchronize"]
   handoff["handoff"] --> delegate["delegate(with context)"]
   forget["forget"] --> persist["persist(ttl: 0)"]
