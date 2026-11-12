@@ -485,11 +485,10 @@ If a rollback operation fails:
 title: When a rollback fails
 ---
 flowchart TB
-  accDescr: A failed rollback is logged with the checkpoint ID and partial restoration status, retried at most twice with exponential backoff, and when every retry fails a human operator is alerted; it never triggers another checkpoint.
+  accDescr: A failed rollback is logged with the checkpoint ID and partial restoration status and retried at most twice with exponential backoff, and when every retry fails a human operator is alerted with the checkpoint ID and the failure details.
   fail[Rollback fails] --> log["Log the failure: checkpoint ID, partial restoration status"]
   log --> retry["Retry, at most 2 attempts, exponential backoff"]
-  retry -->|succeeds| done[Restored]
-  retry -->|all retries fail| human["Alert a human operator with the checkpoint ID and details"]
+  retry -->|all retries fail| human["Alert a human operator with the checkpoint ID and failure details"]
 ```
 
 ---

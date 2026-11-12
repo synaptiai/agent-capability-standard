@@ -652,11 +652,10 @@ Before any mutation:
 title: The safety checklist around a mutation
 ---
 flowchart TB
-  accDescr: Before a mutation, add a checkpoint step and a gate that checks the checkpoint exists; after it, add a verify step; and give the steps failure modes with recovery.
+  accDescr: Before a mutation, add a checkpoint step and a gate that checks the checkpoint exists, and add a verify step after the mutation.
   cp[checkpoint] --> g{"gate: checkpoint exists"}
   g --> m[Mutation]
   m --> v[verify]
-  v -.-> fm["failure_modes with recovery"]
 ```
 
 ### 6.3 Documentation
