@@ -182,16 +182,6 @@ output:
 - **Phase 2 (target):** Make `evidence_anchors` required for skills in Categories 5 (Analytical), 6 (RAG), 8 (Security & Privacy), 13 (Governance & Compliance), and 15 (Advanced Reasoning & Planning).
 - **Phase 3 (aspirational):** Make `evidence_anchors` required for all skill categories.
 
-```mermaid
----
-title: Adopting evidence anchors in three phases
----
-flowchart TB
-  accDescr: evidence_anchors starts as an optional field on every output, becomes required in five categories, and finally becomes required in all of them.
-  p1["Phase 1, recommended: optional on all skill outputs; an empty array and confidence 0.0 when there is no evidence"] --> p2["Phase 2, target: required in Categories 5, 6, 8, 13 and 15"]
-  p2 --> p3["Phase 3, aspirational: required in all categories"]
-```
-
 ---
 
 ### 3.2 Checkpoint Primitive
@@ -303,16 +293,6 @@ skill:
 The checkpoint skill should be invoked before any skill classified as high-risk. OASF does not currently assign risk levels to skills, so this proposal also recommends adding a `risk` attribute (see Section 4). Example integration:
 
 > **Note:** OASF skill IDs used in examples (e.g., `120301`, `110201`) are illustrative and should be verified against the OASF skill catalog for the target version.
-
-```mermaid
----
-title: The checkpoint goes before the high-risk skill
----
-flowchart LR
-  accDescr: In the example a checkpoint of the production namespace runs before the infrastructure deployment, and performance monitoring follows it.
-  cp["160101 checkpoint: production namespace"] --> dep["120301 infrastructure deployment"]
-  dep --> mon["110201 performance monitoring"]
-```
 
 ```yaml
 # Workflow: Safe Infrastructure Deployment
@@ -458,18 +438,6 @@ steps:
         skill: 130401    # audit
         input:
           event: "Schema migration completed successfully"
-```
-
-```mermaid
----
-title: The atomic data pipeline update
----
-flowchart TB
-  accDescr: The pipeline is checkpointed, the schema migration runs and data quality is assessed; a score under 0.95 rolls back to the checkpoint, and otherwise the success is audited.
-  cp["160101 checkpoint: pipeline/etl-main"] --> mig["090201 schema migration"]
-  mig --> q["090301 data quality assessment"]
-  q -->|"score < 0.95"| rb["160102 rollback to the checkpoint"]
-  q -->|"score ≥ 0.95"| audit["130401 audit: migration completed"]
 ```
 
 #### Error Handling
@@ -720,17 +688,6 @@ risk:
             verification after execution
 ```
 
-```mermaid
----
-title: What each risk level requires
----
-flowchart LR
-  accDescr: A low-risk skill has no additional requirements, a medium-risk skill needs approval before it runs, and a high-risk skill needs a checkpoint before it runs and verification after.
-  low[risk: low] --> r0[No additional requirements]
-  med[risk: medium] --> r1[Approval before execution]
-  high[risk: high] --> r2["Checkpoint before, verification after"]
-```
-
 For context, the Grounded Agency ontology classifies only 2 of its 36 capabilities (`mutate` and `send`) as high-risk. The following category-level defaults are intentionally conservative starting points.
 
 **Suggested risk classifications for existing OASF categories:**
@@ -803,19 +760,6 @@ category:
 ```
 
 Evidence anchoring is not a separate skill but a schema extension that applies to all existing skills.
-
-```mermaid
----
-title: Category 16, Safety and Recovery
----
-flowchart LR
-  accDescr: Category 16 has a State Management subcategory, 1601, with checkpoint and rollback, and a Policy Enforcement subcategory, 1602, with constrain.
-  c16[Category 16] --> s1601[1601 State Management]
-  c16 --> s1602[1602 Policy Enforcement]
-  s1601 --> cp[160101 checkpoint]
-  s1601 --> rb[160102 rollback]
-  s1602 --> con[160103 constrain]
-```
 
 **Versioning:** Category 16 skills follow OASF's existing semantic versioning scheme. The category should be stabilized and reviewed before OASF reaches 1.0. Breaking changes to safety primitives require a major version increment at the category level.
 
@@ -988,18 +932,6 @@ steps:
         input:
           checkpoint_id: "${cp.output.checkpoint_id}"
           reason: "Post-deployment health check failed"
-```
-
-```mermaid
----
-title: The safe model deployment
----
-flowchart TB
-  accDescr: The deployment policies are checked first; only when they pass is a checkpoint taken, then the model is deployed and its health checked, and a failed health check rolls back to the checkpoint.
-  con["1 constrain: maintenance window, SRE approval"] -->|compliant| cp["2 checkpoint the production namespace"]
-  cp --> dep["3 deploy model-serving-v2.3.1"]
-  dep --> health["4 performance monitoring: error rate, latency"]
-  health -->|"passed == false"| rb["5 rollback to the checkpoint"]
 ```
 
 ### 5.3 Category 16 Skills Summary

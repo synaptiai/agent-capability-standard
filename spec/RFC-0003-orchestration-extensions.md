@@ -29,17 +29,6 @@ This RFC answers all three and specifies Standard v1.1.0
    (fresh context, model family, role, sender filtering) ship now; naming a
    specific agent waits for RFC-0002's identity object.
 
-```mermaid
----
-title: The three questions and their answers
----
-flowchart LR
-  accDescr: Q1, how to add fields, is answered by named, versioned extensions that a workflow must declare; Q2, how E2 relates to identity, by shipping the identity-free parts of E2 now and naming an agent later; Q3, why the validator and engine disagree, by specifying the rules and keeping one reference implementation.
-  q1["Q1: how to add fields"] --> a1["Named, versioned extensions that a workflow declares"]
-  q2["Q2: E2 and identity"] --> a2["E2 split: the parts that need no identity now, a named agent later"]
-  q3["Q3: validator and engine disagree"] --> a3["Rules specified, one reference implementation"]
-```
-
 ## Motivation
 
 Orchestrators built on the standard need to pause for external events,

@@ -50,16 +50,6 @@ Key observations:
 - It outputs findings and metadata
 - It has no prerequisites
 
-```mermaid
----
-title: The contract of observe
----
-flowchart TB
-  accDescr: observe takes a target and the aspects to examine, and outputs findings and metadata; it has no prerequisites.
-  in["target, aspects"] --> observe
-  observe --> out["findings, metadata"]
-```
-
 ### 1.2 What is a Workflow?
 
 A workflow is a sequence of capability invocations. Each step:
@@ -494,20 +484,6 @@ steps:
         - ${code_search}
 ```
 
-```mermaid
----
-title: The parallel group in the example
----
-flowchart LR
-  accDescr: The log search and the code search run together in the gather_context group, which joins when both are complete, and integrate combines the two results.
-  subgraph gather_context [parallel_group gather_context]
-    logs["search: logs"]
-    code["search: src"]
-  end
-  logs -->|log_search| integrate
-  code -->|"code_search, join: all_complete"| integrate
-```
-
 ### 4.2 Conditional Execution
 
 Skip steps based on conditions:
@@ -557,16 +533,6 @@ Reference external transform definitions:
     target_format: event
   mapping_ref: schemas/transforms/my_transform.yaml
   output_conforms_to: schemas/event_schema.yaml#/event
-```
-
-```mermaid
----
-title: The transform step
----
-flowchart TB
-  accDescr: transform reads retrieve_out.data as its input, applies the mapping its mapping_ref names, my_transform.yaml, and stores transform_out, which conforms to the event schema.
-  r["retrieve_out.data"] --> t["transform(mapping_ref: my_transform.yaml)"]
-  t --> e["transform_out, conforms to the event in event_schema.yaml"]
 ```
 
 ---

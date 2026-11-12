@@ -43,15 +43,6 @@ The Agent Capability Standard provides structural reliability:
 - **Add safety**: Implement checkpoints for high-risk mutations (1 week)
 - **Expand**: Progress to full conformance as value is demonstrated (1 quarter)
 
-```mermaid
----
-title: The recommended adoption path
----
-flowchart LR
-  accDescr: Start by running the validator on existing workflows in about a day, add checkpoints for high-risk mutations in about a week, and progress to full conformance over a quarter as the value shows.
-  s1["Start small: validate existing workflows, 1 day"] --> s2["Add safety: checkpoints for high-risk mutations, 1 week"] --> s3["Expand: full conformance, 1 quarter"]
-```
-
 The standard is framework-agnostic and modular. Adopt what you need; expand as complexity grows.
 
 ---
@@ -199,20 +190,6 @@ This organization provides several benefits:
 - **Risk assessment**: the EXECUTE layer holds the only high-risk capabilities, `mutate` and `send`
 - **Dependency ordering**: PERCEIVE typically precedes UNDERSTAND and MODEL, which precede REASON, which precedes EXECUTE
 - **Safety integration**: VERIFY capabilities such as `checkpoint` can be required before EXECUTE capabilities
-
-```mermaid
----
-title: The usual order of the layers
----
-flowchart TB
-  accDescr: PERCEIVE typically comes before UNDERSTAND and MODEL, which come before REASON, which comes before EXECUTE; a VERIFY capability such as checkpoint can be required before EXECUTE.
-  p[PERCEIVE] --> u[UNDERSTAND]
-  p --> m[MODEL]
-  u --> r[REASON]
-  m --> r
-  r --> e[EXECUTE]
-  v["VERIFY, such as checkpoint"] ==>|can be required before| e
-```
 
 ### 3.3 Key Capability Families
 

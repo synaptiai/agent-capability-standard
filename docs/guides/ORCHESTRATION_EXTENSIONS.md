@@ -68,18 +68,6 @@ flowchart TB
 `attendance: attended | unattended` overrides the default. It matters for
 approval steps: an unattended run cannot wait for a person in the session.
 
-```mermaid
----
-title: Each trigger kind's default attendance
----
-flowchart LR
-  accDescr: By default, schedule and event triggers start unattended runs, a manual trigger starts an attended run, and an invoked run takes the invoker's attendance.
-  sch[schedule] --> un[unattended]
-  ev[event] --> un
-  man[manual] --> at[attended]
-  inv[invoke] --> inh["the invoker's attendance"]
-```
-
 ### Schedules
 
 ```yaml

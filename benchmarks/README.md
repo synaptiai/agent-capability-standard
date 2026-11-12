@@ -52,16 +52,6 @@ The GA paths use real SDK components instead of inline simulation:
 
 This prevents drift — ontology changes automatically propagate to benchmarks.
 
-```mermaid
----
-title: Where two scenarios load their data
----
-flowchart TB
-  accDescr: The Capability Gap scenario loads the ontology's requires edges through CapabilityRegistry, so ontology changes reach the benchmarks, and the Workflow Type Error scenario loads its coercions from the canonical registry through safe_yaml_load.
-  onto["Ontology: requires edges"] --> reg[CapabilityRegistry] --> gap[Capability Gap]
-  coerce[Coercion registry] --> sy[safe_yaml_load] --> wte[Workflow Type Error]
-```
-
 ## Scenarios
 
 | # | Scenario | Tests | Baseline Approach | GA Approach |

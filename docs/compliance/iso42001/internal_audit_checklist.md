@@ -267,17 +267,6 @@ flowchart TB
 | 9.2.5 | Are audit results reported to relevant management? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Management review input #3c | |
 | 9.2.6 | Are corrective actions taken for audit findings? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | NCR records per nonconformity procedure | |
 
-```mermaid
----
-title: The internal audit cycle that Clause 9.2 checks
----
-flowchart TB
-  accDescr: Internal audits run at planned intervals by objective auditors, their results are reported to management as management review input 3c, and corrective actions for findings are recorded as NCRs.
-  plan["Audits at planned intervals, objective auditors"] --> rep["Results reported to management (review input 3c)"]
-  plan --> ca[Corrective actions for findings]
-  ca --> ncr[NCR records]
-```
-
 ### 9.3 Management Review
 
 | # | Check | Finding | Evidence | Notes |
@@ -342,16 +331,6 @@ These are Grounded Agency-specific checks beyond standard ISO 42001 requirements
 | F.10 | Run `python tools/validate_workflows.py` | All workflows valid | | |
 | F.11 | Verify `execute` capability has `requires_approval: true` | Flag present in ontology | | |
 | F.12 | Verify medium-risk capabilities are controlled by domain profiles | `block_autonomous` lists include relevant capabilities per domain | | |
-
-```mermaid
----
-title: The conflicts_with edges test F.7 checks
----
-flowchart LR
-  accDescr: Test F.7 checks that mutate and persist each conflict with rollback.
-  mutate[mutate] ---|conflicts_with| rollback[rollback]
-  persist[persist] ---|conflicts_with| rollback
-```
 
 ---
 

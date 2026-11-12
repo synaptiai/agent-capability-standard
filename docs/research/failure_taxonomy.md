@@ -369,16 +369,6 @@ observe(world) → compare(current_state, expected_state) →
   if diverged: plan(replan)
 ```
 
-```mermaid
----
-title: Gap 1 workaround, world change detection
----
-flowchart TB
-  accDescr: observe the world, compare the current state with the expected state, and plan a replan if they have diverged.
-  observe["observe(world)"] --> compare["compare(current_state, expected_state)"]
-  compare -->|diverged| plan["plan(replan)"]
-```
-
 **Recommendation for Issue #9**: Consider a `monitor` meta-capability that composes this pattern.
 
 ### Gap 2: Goal Uncertainty Handling
@@ -392,16 +382,6 @@ critique(user_request, criteria=[clarity, completeness]) →
   if issues: explain(what_is_unclear) → receive(clarification)
 ```
 
-```mermaid
----
-title: Gap 2 workaround, goal uncertainty
----
-flowchart TB
-  accDescr: critique the user request for clarity and completeness; if it finds issues, explain what is unclear and receive the clarification.
-  critique["critique(user_request, criteria: clarity, completeness)"] -->|issues| explain["explain(what_is_unclear)"]
-  explain --> receive["receive(clarification)"]
-```
-
 **Recommendation for Issue #9**: Consider an `inquire` capability or make `critique` domain-aware for intent analysis.
 
 ### Gap 3: Rate Limiting/Resource Management
@@ -413,16 +393,6 @@ flowchart TB
 ```
 constrain(operation, limits=[tokens, calls, memory]) →
   measure(current_usage) → if exceeded: rollback or queue
-```
-
-```mermaid
----
-title: Gap 3 workaround, resource limits
----
-flowchart TB
-  accDescr: constrain the operation with limits on tokens, calls and memory, measure the current usage, and roll back or queue if a limit is exceeded.
-  constrain["constrain(operation, limits: tokens, calls, memory)"] --> measure["measure(current_usage)"]
-  measure -->|exceeded| out["rollback or queue"]
 ```
 
 **Recommendation for Issue #9**: Extend `constrain` schema to include resource budgets explicitly.

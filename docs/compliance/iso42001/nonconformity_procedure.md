@@ -197,18 +197,6 @@ Corrective actions shall:
 | 4 | **Training/awareness** | Lower | Training module, awareness communication |
 | 5 | **Documentation update** | Lowest | Update documentation, add warning |
 
-```mermaid
----
-title: The corrective action hierarchy
----
-flowchart TB
-  accDescr: Corrective actions prefer the higher tiers, from structural elimination, the most effective, through automated detection, process change and training to documentation updates, the least effective.
-  t1["Tier 1, structural elimination: highest"] -->|preferred over| t2["Tier 2, automated detection: high"]
-  t2 -->|preferred over| t3["Tier 3, process change: medium"]
-  t3 -->|preferred over| t4["Tier 4, training and awareness: lower"]
-  t4 -->|preferred over| t5["Tier 5, documentation update: lowest"]
-```
-
 ### 5.5 Effectiveness Verification
 
 | Verification Method | When to Use | Evidence |

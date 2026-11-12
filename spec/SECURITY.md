@@ -318,18 +318,6 @@ Signs of security issues:
 4. **Investigate**: Trace provenance to identify root cause
 5. **Remediate**: Update policies, trust weights, or constraints
 
-```mermaid
----
-title: Incident response
----
-flowchart TB
-  accDescr: Contain by stopping the affected workflows, assess the audit logs and world state history, roll back to the last known-good checkpoint, investigate the root cause through provenance, and remediate policies, trust weights or constraints.
-  c[Contain: stop affected workflows] --> a[Assess: audit logs, world state history]
-  a --> r[Rollback: last known-good checkpoint]
-  r --> i[Investigate: trace provenance]
-  i --> m[Remediate: policies, trust weights, constraints]
-```
-
 ### 6.3 Recovery
 
 - Use `rollback` capability to restore checkpointed state
@@ -364,18 +352,6 @@ Please report security vulnerabilities privately:
 | Remediation plan | 14 days |
 | Fix release | 30 days (90 days for complex issues) |
 | Public disclosure | After fix release |
-
-```mermaid
----
-title: The disclosure timeline
----
-flowchart TB
-  accDescr: A report is acknowledged within 48 hours, assessed within 7 days, given a remediation plan within 14 days and fixed within 30 days, or 90 for complex issues; public disclosure follows the fix release.
-  ack[Acknowledgment: 48 hours] --> as[Initial assessment: 7 days]
-  as --> pl[Remediation plan: 14 days]
-  pl --> fx["Fix release: 30 days, 90 if complex"]
-  fx --> pub[Public disclosure]
-```
 
 ### 7.4 Credit
 

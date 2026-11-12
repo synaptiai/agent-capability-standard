@@ -189,16 +189,6 @@ edges:
 ```
 
 
-```mermaid
----
-title: The three example edges
----
-flowchart TB
-  accDescr: In the example, mutate precedes verify, verify precedes audit, and verify is an alternative to constrain.
-  mutate[mutate] -->|precedes| verify[verify] -->|precedes| audit[audit]
-  verify ---|alternative_to| constrain[constrain]
-```
-
 Key design decisions:
 
 1. **100% Schema Coverage**: All 36 capabilities have both `input_schema` and `output_schema`, enabling static type checking.
@@ -425,16 +415,6 @@ transition_rules:
         - "restore prior status"
 ```
 
-```mermaid
----
-title: The example transition rule
----
-flowchart LR
-  accDescr: An anomaly_detected event whose message contains 500, with an error rate over 0.01, sets the payments API to degraded and raises the alert level; the rollback restores the prior status.
-  prior[Prior status] -->|"anomaly_detected and error_rate_5m > 0.01"| degraded["degraded, alert_level high"]
-  degraded -.->|rollback| prior
-```
-
 ---
 
 ## 5. Trust-Aware Conflict Resolution
@@ -548,18 +528,6 @@ Based on confidence score:
 - **0.75–0.90**: Suggest merge (human review)
 - **0.60–0.75**: No action
 - **< 0.40**: Force split review
-
-```mermaid
----
-title: What the alias confidence score decides
----
-flowchart LR
-  accDescr: Above 0.90 two entities merge automatically, from 0.75 to 0.90 a merge is suggested for human review, from 0.60 to 0.75 nothing happens, and below 0.40 a split is reviewed.
-  score[Alias confidence score] --> auto["Above 0.90: auto-merge"]
-  score --> suggest["0.75–0.90: suggest merge (human review)"]
-  score --> none["0.60–0.75: no action"]
-  score --> split["Below 0.40: force split review"]
-```
 
 
 **Hard constraints** prevent catastrophic merges:

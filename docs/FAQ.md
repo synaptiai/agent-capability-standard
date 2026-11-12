@@ -175,17 +175,6 @@ The number 36 emerges from first-principles derivation:
 3. **Domain parameterization**: Instead of 99 domain-specific skills (detect-anomaly, detect-entity), we use 36 atomic verbs with domain parameters (detect with domain: anomaly)
 4. **Atomicity**: Each capability is truly irreducible and serves a single purpose
 
-```mermaid
----
-title: Where the 36 comes from
----
-flowchart TB
-  accDescr: Cognitive architectures give the foundation, which yields nine cognitive layers; domain parameters replace 99 domain-specific skills with atomic verbs; and each of the 36 is checked to be irreducible.
-  f["Foundation: BDI, ReAct, SOAR"] --> l[9 cognitive layers]
-  l --> d["Domain parameterization: 36 verbs instead of 99 skills"]
-  d --> a["Atomicity: each irreducible, single purpose"]
-```
-
 For the full derivation, see [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
 
 ### What happened to the 99 capabilities?
@@ -199,21 +188,6 @@ The original 99-capability model included many domain-specific variants. Through
 | forecast-risk, forecast-time | predict (horizon: risk/time) | Horizon parameterization |
 
 The archived 99-capability model is in `_archive/skills/` for reference.
-
-```mermaid
----
-title: How the 99 variants became parameters
----
-flowchart LR
-  accDescr: The detect variants became detect with a domain, the estimate variants became measure with a metric, and the forecast variants became predict with a horizon.
-  da[detect-anomaly] -->|domain| detect
-  de[detect-entity] -->|domain| detect
-  dp[detect-person] -->|domain| detect
-  er[estimate-risk] -->|metric| measure
-  ei[estimate-impact] -->|metric| measure
-  fr[forecast-risk] -->|horizon| predict
-  ft[forecast-time] -->|horizon| predict
-```
 
 ### Is 36 the final number?
 
@@ -235,18 +209,6 @@ Yes, through the governance process:
 4. After review, capability may be accepted
 
 For most use cases, **composing existing capabilities** or **parameterizing with domains** is preferred.
-
-```mermaid
----
-title: Proposing a capability
----
-flowchart TB
-  accDescr: A proposal starts as a GitHub issue, becomes an RFC if it gains support, shows that it meets every criterion, and after review may be accepted.
-  issue[GitHub issue] -->|gains support| rfc[RFC]
-  rfc --> crit["Show it meets the criteria: non-composable, atomic, useful"]
-  crit --> review[Review]
-  review -->|may be| accepted[Accepted]
-```
 
 ### How do domain parameters work?
 
@@ -575,16 +537,6 @@ Modality profiles add source-type-specific trust weights and grounding requireme
 1. Follow the [Quickstart Guide](QUICKSTART.md) (10 min)
 2. Complete the [Tutorial](TUTORIAL.md) (30 min)
 3. Read the [Specification](../spec/STANDARD-v1.1.0.md)
-
-```mermaid
----
-title: Getting started
----
-flowchart TB
-  accDescr: Start with the Quickstart Guide, about 10 minutes, then the Tutorial, about 30 minutes, then read the Specification.
-  q["Quickstart Guide, 10 min"] --> t["Tutorial, 30 min"]
-  t --> s[Specification]
-```
 
 ### Can I use this commercially?
 

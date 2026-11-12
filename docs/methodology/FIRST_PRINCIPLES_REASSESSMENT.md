@@ -26,16 +26,6 @@ Plus cross-cutting concerns:
 - **COORDINATE** — Work with other agents
 - **MODEL** — Maintain world representation
 
-```mermaid
----
-title: The agent loop
----
-flowchart TB
-  accDescr: An agent loops through perceive, understand, reason, act and verify, then repeats.
-  p[PERCEIVE] --> u[UNDERSTAND] --> r[REASON] --> a[ACT] --> v[VERIFY]
-  v -->|repeat| p
-```
-
 ### 1.2 Irreducible Operations per Phase
 
 **PERCEIVE** — How agents acquire information:
@@ -275,19 +265,6 @@ Keep 3.
 
 **Net change**: 36 → 35 (removed `resolve-identity`)
 
-```mermaid
----
-title: Changes from the previous set
----
-flowchart LR
-  accDescr: inspect is renamed observe, world-state becomes state, state-transition becomes transition, causal-model becomes attribute, and resolve-identity is removed as a workflow of detect, classify and integrate.
-  inspect_o[inspect] --> observe
-  ws[world-state] --> state
-  st[state-transition] --> transition
-  cm[causal-model] --> attribute
-  ri[resolve-identity] --> wf["Removed: a workflow of detect + classify + integrate"]
-```
-
 ---
 
 ## 3. Gap Analysis: What's Missing?
@@ -307,25 +284,6 @@ flowchart LR
 | `monitor` | Continuous observation | Workflow pattern of repeated `observe` |
 | `alert` | Notify on condition | Composition: `detect` + `send` |
 | `validate` | Check preconditions | Merged into `verify` |
-
-```mermaid
----
-title: Where the other candidates went
----
-flowchart LR
-  accDescr: reflect is covered by observe, infer by detect and classify, abstract by discover, instantiate by generate and transform, negotiate by synchronize, prioritize by compare, schedule by plan; monitor is a pattern of repeated observe, alert is a composition of detect and send, and validate is merged into verify.
-  reflect_c[reflect] --> observe
-  monitor_c["monitor, repeated"] --> observe
-  infer_c[infer] --> detect & classify
-  alert_c[alert] --> detect
-  alert_c --> send
-  abstract_c[abstract] --> discover
-  inst[instantiate] --> generate & transform
-  negotiate_c[negotiate] --> synchronize
-  prioritize_c[prioritize] --> compare
-  schedule_c[schedule] --> plan
-  validate_c[validate] --> verify
-```
 
 ### 3.2 The "Learn" Question
 

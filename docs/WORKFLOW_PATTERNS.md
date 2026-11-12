@@ -64,19 +64,6 @@ analyze:
     6. explain(assessment) → report
 ```
 
-```mermaid
----
-title: Analyze pattern flow
----
-flowchart TB
-  accDescr: The retrieved data goes two ways, to detect and classify for patterns and to measure and compare against a baseline, and explain reports the assessment.
-  retrieve["retrieve(target)"] -->|data| detect["detect(data, patterns)"]
-  detect -->|occurrences| classify["classify(occurrences)"]
-  retrieve -->|data| measure["measure(data, metrics)"]
-  measure -->|values| compare["compare(values, baseline)"]
-  compare -->|assessment| explain["explain(assessment)"]
-```
-
 **Example uses**:
 - Code analysis
 - Data profiling
@@ -828,11 +815,15 @@ Pattern outputs should aggregate:
 
 ```mermaid
 ---
-title: How a pattern carries evidence
+title: A pattern's evidence chain
 ---
 flowchart LR
-  accDescr: Each capability output carries evidence anchors and a confidence from 0 to 1; the pattern output gathers all the evidence and takes the lowest confidence in the chain.
-  caps["Each capability output: evidence_anchors, confidence (0-1)"] -->|aggregated| out["Pattern output: all the evidence, the lowest confidence in the chain"]
+  accDescr: Every capability output in the chain carries its evidence anchors and a confidence; the pattern output takes all of the anchors and the lowest of the confidences.
+  c1["Capability 1: anchors, confidence"] --> out["Pattern output"]
+  c2["Capability 2: anchors, confidence"] --> out
+  cn["Capability N: anchors, confidence"] --> out
+  out --> ev["All the evidence anchors"]
+  out --> lo["The lowest confidence"]
 ```
 
 ---

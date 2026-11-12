@@ -213,17 +213,6 @@ python scripts/fill_form.py input.pdf fields.json output.pdf
 
 Or keep `act` but document that it's parameterized by action type.
 
-```mermaid
----
-title: Splitting act
----
-flowchart LR
-  accDescr: The single act capability could split into execute, which runs code and returns output, mutate, which changes state, and send, which is already separate.
-  act[act] --> ex["execute: run code, return output"]
-  act --> mu["mutate: change state"]
-  act -.->|already separate| se["send: transmit externally"]
-```
-
 ### 3.4 Progressive Disclosure Pattern
 
 **Skills insight**: Content loads in stages:
@@ -305,18 +294,6 @@ Skills documentation shows common workflow patterns. Let's validate:
 
 **Our capabilities cover this**: ✅
 
-```mermaid
----
-title: Pattern 1, plan then validate then execute
----
-flowchart TB
-  accDescr: Analyze the form with detect, create the field mapping with plan, validate the mapping with verify, fill the form with execute or mutate, and verify the output.
-  a["Analyze form: detect"] --> m["Create field mapping: plan"]
-  m --> v["Validate mapping: verify"]
-  v --> f["Fill form: execute or mutate"]
-  f --> o["Verify output: verify"]
-```
-
 **Pattern 2: Feedback Loop**
 ```
 1. Make edits (mutate)
@@ -326,18 +303,6 @@ flowchart TB
 ```
 
 **Our capabilities cover this**: ✅ (verify + conditional logic in workflow)
-
-```mermaid
----
-title: Pattern 2, the feedback loop
----
-flowchart TB
-  accDescr: Make edits with mutate, validate with verify, fix and validate again while validation fails, and proceed when it passes.
-  e["Make edits: mutate"] --> v{"Validate: verify"}
-  v -->|fails| fix[Fix]
-  fix --> v
-  v -->|passes| go[Proceed]
-```
 
 **Pattern 3: Progressive Disclosure**
 ```
@@ -468,27 +433,6 @@ TOTAL: 36 capabilities
 ## 7. Skills-Capability Mapping Table
 
 For reference, here's how common Skills operations map to capabilities:
-
-```mermaid
----
-title: Skills operations and their capabilities
----
-flowchart LR
-  accDescr: Each common skills operation maps to the capability or capabilities in the table below.
-  o1[Read file] --> retrieve
-  o4[Extract data] --> retrieve & transform
-  o2[Search files] --> search
-  o3[Analyze content] --> detect & classify
-  o5[Run script] --> execute
-  o6[Modify file] --> mutate
-  o7[Validate output] --> verify
-  o8[Generate document] --> generate
-  o9[Save results] --> persist
-  o10[Send to API] --> send
-  o11[Create plan] --> plan
-  o12[Compare options] --> compare
-  o13[Explain reasoning] --> explain
-```
 
 | Skills Operation | Capability | Notes |
 |-----------------|------------|-------|

@@ -465,16 +465,6 @@ These were considered but should be parameters of base capabilities.
 
 **Analysis**: Temporal and spatial are not distinct cognitive operations—they're domains to which reasoning is applied.
 
-```mermaid
----
-title: Reasoning specializations as a domain
----
-flowchart LR
-  accDescr: temporal-reasoning and spatial-reasoning are reasoning with domain temporal and domain spatial.
-  tr[temporal-reasoning] -->|"domain: temporal"| r[Reasoning]
-  sr[spatial-reasoning] -->|"domain: spatial"| r
-```
-
 ---
 
 ## 4. Rejected: Too Vague

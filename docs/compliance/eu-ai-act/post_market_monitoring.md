@@ -68,22 +68,6 @@ Beyond existing telemetry, the following data points should be collected at the 
 | **Quarterly** | Comprehensive performance review, risk model reassessment, regulatory compliance check | AI Safety Officer + AI System Owner | Quarterly review report (input to AIMS-MGR-001 management review) |
 | **Annual** | Full system audit, risk classification review (EUAIA-CLS-001 reassessment), regulatory update incorporation | AI System Owner + external audit (if applicable) | Annual conformity assessment update |
 
-```mermaid
----
-title: Who monitors at each cadence
----
-flowchart LR
-  accDescr: Continuous checks are automated by hooks and the SDK, daily and weekly monitoring falls to the AI System Operator, monthly and quarterly reviews to the AI Safety Officer, with the AI System Owner joining quarterly, and the annual audit to the AI System Owner, with an external audit if applicable; the quarterly review report goes to the AIMS-MGR-001 management review.
-  auto["Automated: hooks and SDK"] --> c[Continuous]
-  op[AI System Operator] --> d[Daily]
-  op --> w[Weekly]
-  so[AI Safety Officer] --> m[Monthly]
-  so --> q["Quarterly: report to AIMS-MGR-001"]
-  ow[AI System Owner] --> q
-  ow --> a[Annual]
-  ext["External audit, if applicable"] -.-> a
-```
-
 ### 4.2 Event-Triggered Monitoring
 
 In addition to scheduled monitoring, the following events trigger immediate monitoring activities:
@@ -168,19 +152,6 @@ Per Art. 3(49), a serious incident is an incident or malfunctioning that directl
 | 4 | Notification to market surveillance authority | Within 15 days of awareness | AI System Owner + Legal | Art. 62(1) notification via EU database (Art. 71) |
 | 5 | Detailed investigation report | Within 30 days | AI Safety Officer | Full root cause analysis, corrective actions, preventive measures |
 | 6 | Follow-up notifications (if causal link unclear) | As determined | AI System Owner | Updated findings, revised timeline |
-
-```mermaid
----
-title: Reporting a serious incident
----
-flowchart TB
-  accDescr: A serious incident is detected and assessed at once, escalated to L4 and contained within an hour, reported in preliminary form within 24 hours, notified to the market surveillance authority within 15 days and investigated in full within 30 days, with follow-up notifications when the causal link is unclear.
-  s1["Detect and assess the incident: immediately"] --> s2["Escalate to L4 and contain the system: within 1 hour"]
-  s2 --> s3["Preliminary incident report: within 24 hours"]
-  s3 --> s4["Notify the market surveillance authority: within 15 days of awareness"]
-  s4 --> s5["Detailed investigation report: within 30 days"]
-  s5 -.->|if the causal link is unclear| s6[Follow-up notifications]
-```
 
 ### 7.3 Notification Content (Art. 62(1))
 

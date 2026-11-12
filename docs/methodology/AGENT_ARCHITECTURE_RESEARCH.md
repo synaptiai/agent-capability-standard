@@ -234,16 +234,6 @@ flowchart TB
 Thought → Action → Observation → Thought → ...
 ```
 
-```mermaid
----
-title: The ReAct loop
----
-flowchart LR
-  accDescr: ReAct alternates a thought, an action and an observation, and the observation feeds the next thought.
-  t[Thought] --> a[Action] --> o[Observation]
-  o --> t
-```
-
 **Assessment**: ReAct is the dominant practical pattern. It's simpler than BDI/SOAR and directly maps to how LLM agents work. However, it doesn't specify *what* actions are available—that's left to the tool inventory.
 
 **Source**: [ReAct Paper](https://arxiv.org/abs/2210.03629), [IBM ReAct Guide](https://www.ibm.com/think/topics/react-agent)
@@ -514,25 +504,6 @@ TOTAL: 35 capabilities
 | `estimate-risk` | Keep (specialization) | Remove (use measure + context) |
 | `act-plan` | Keep (specialization) | Remove (use act with plan input) |
 
-```mermaid
----
-title: What the recommendation renames and removes
----
-flowchart LR
-  accDescr: identify becomes classify, estimate becomes measure, forecast becomes predict, grounding becomes ground and identity-resolution becomes resolve-identity; model-schema, detect-anomaly, estimate-risk and act-plan are removed.
-  id_o[identify] --> classify
-  es_o[estimate] --> measure
-  fo_o[forecast] --> predict
-  gr_o[grounding] --> ground
-  ir_o[identity-resolution] --> ri[resolve-identity]
-  subgraph removed [Removed]
-    ms[model-schema]
-    da[detect-anomaly]
-    er[estimate-risk]
-    ap[act-plan]
-  end
-```
-
 ### 5.4 Why This Works Better
 
 1. **Simpler names**: `classify` > `identify`, `measure` > `estimate`
@@ -572,17 +543,6 @@ flowchart LR
 | Thought | compare, plan, critique, explain |
 | Action | retrieve, search, generate, act, send |
 | Observation | inspect, detect, verify, compare |
-
-```mermaid
----
-title: ReAct phases and the capabilities in each
----
-flowchart LR
-  accDescr: Thought maps to compare, plan, critique and explain; Action to retrieve, search, generate, act and send; Observation to inspect, detect, verify and compare.
-  th[Thought] --> compare_t[compare] & plan & critique & explain
-  ac[Action] --> retrieve & search & generate & act & send
-  ob[Observation] --> inspect & detect & verify & compare_o[compare]
-```
 
 ---
 

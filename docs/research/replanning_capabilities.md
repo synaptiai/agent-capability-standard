@@ -201,16 +201,6 @@ monitor = observe → state → compare(current_state, expected_state) → detec
 
 **Verdict**: `monitor` is a **workflow pattern**, not an atomic capability. The existing `observe`, `state`, `compare`, and `detect` capabilities can be composed to achieve this.
 
-```mermaid
----
-title: monitor as a composition
----
-flowchart TB
-  accDescr: monitor decomposes into observe, state, compare of the current with the expected state, and detect of the divergence.
-  observe --> state --> compare["compare(current_state, expected_state)"]
-  compare --> detect["detect(divergence)"]
-```
-
 However, we should extend `detect` to recognize "plan-invalidation" as a valid domain:
 
 ```yaml
@@ -243,15 +233,6 @@ replan = critique(current_plan, violations) → plan(revised_goal, new_constrain
 
 **Verdict**: `replan` is **not atomic**. It's a composition of `critique` (identify what's wrong) and `plan` (create new approach).
 
-```mermaid
----
-title: replan as a composition
----
-flowchart TB
-  accDescr: replan is critique of the current plan against the violations, followed by plan with the revised goal and new constraints.
-  critique["critique(current_plan, violations)"] --> plan["plan(revised_goal, new_constraints)"]
-```
-
 ### 3.4 Candidate: `inquire` (Goal Clarification)
 
 **Proposed operation**: Generate clarifying questions when goal is ambiguous.
@@ -259,16 +240,6 @@ flowchart TB
 **Decomposition analysis**:
 ```
 inquire = measure(ambiguity) → generate(clarifying_questions) → receive(clarification)
-```
-
-```mermaid
----
-title: The decomposition first considered for inquire
----
-flowchart TB
-  accDescr: The first decomposition considered for inquire is measure the ambiguity, generate clarifying questions, and receive the clarification; the analysis below finds it debatable.
-  measure["measure(ambiguity)"] --> generate["generate(clarifying_questions)"]
-  generate --> receive["receive(clarification)"]
 ```
 
 Wait — let's reconsider. The generation of clarifying questions is specialized:
@@ -322,17 +293,6 @@ infer-goal = observe(context) → classify(likely_intents) → compare(intents) 
 | Domain-general? | ✓ YES — Applies to any goal inference |
 
 **Verdict**: `infer-goal` is a **workflow pattern** using `observe`, `classify`, `compare`, and `ground`.
-
-```mermaid
----
-title: infer-goal as a composition
----
-flowchart TB
-  accDescr: infer-goal observes the context, classifies the likely intents, compares them, and grounds the selected intent.
-  observe["observe(context)"] --> classify["classify(likely_intents)"]
-  classify --> compare["compare(intents)"]
-  compare --> ground["ground(selected_intent)"]
-```
 
 ---
 
@@ -652,21 +612,6 @@ audit:
 | `infer-goal` | **Workflow** | `observe` + `classify` + `compare` + `ground` |
 | `negotiate-goal` | **Workflow** | Multiple rounds of `inquire` + `receive` |
 | **`inquire`** | **Atomic** | Unique operation for requesting clarification |
-
-```mermaid
----
-title: The verdict on each proposal
----
-flowchart LR
-  accDescr: detect-plan-invalidation becomes a domain of detect; trigger-replan is a composition; monitor-assumptions, clarify-intent, infer-goal and negotiate-goal are workflows; and inquire is atomic.
-  dpi[detect-plan-invalidation] --> dom[Domain of detect]
-  tr[trigger-replan] --> comp["Composition: critique + plan"]
-  ma[monitor-assumptions] --> wf[Workflow]
-  ci[clarify-intent] --> wf
-  ig[infer-goal] --> wf
-  ng[negotiate-goal] --> wf
-  inq[inquire] --> atomic[Atomic]
-```
 
 ### Q2: What evidence anchors support goal clarification?
 

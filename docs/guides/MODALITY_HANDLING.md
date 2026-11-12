@@ -94,16 +94,6 @@ Domain parameters do not erase modality -- they parameterize it. The modality af
 - **Tool selection.** The runtime maps `detect` with `domain: image.object` to a vision model or API, while `detect` with `domain: text.entity` maps to an NER model. This mapping is an implementation concern, not an ontology concern.
 - **Confidence calibration.** Different modalities have different uncertainty profiles. Image classification confidence may be calibrated differently from text classification confidence.
 
-```mermaid
----
-title: Tool selection is the runtime's mapping
----
-flowchart LR
-  accDescr: The runtime maps detect with domain image.object to a vision model or API, and detect with domain text.entity to an NER model; the mapping is an implementation concern, not an ontology concern.
-  d1["detect, domain: image.object"] -->|runtime maps to| v[Vision model or API]
-  d2["detect, domain: text.entity"] -->|runtime maps to| n[NER model]
-```
-
 ---
 
 ## 2. Capability-Modality Matrix
@@ -144,20 +134,6 @@ The `observe` and `receive` capabilities accept any data type and do not use mod
 - **6 capabilities** are most commonly parameterized by modality: `detect`, `classify`, `measure`, `predict`, `generate`, `transform`
 - **2 additional capabilities** support modality through format/scope parameters: `retrieve`, `search`
 - **28 remaining capabilities** are modality-agnostic (e.g., `plan`, `checkpoint`, `verify`, `audit` operate on any data type)
-
-```mermaid
----
-title: How the capabilities take a modality
----
-flowchart LR
-  accDescr: Six capabilities are most commonly parameterized by modality, two support modality through format or scope parameters, and the remaining 28 are modality-agnostic.
-  dom["Most commonly: detect, classify, measure, predict, generate, transform"]
-  fs["By format or scope: retrieve, search"]
-  ag["Modality-agnostic: the other 28, such as plan, checkpoint, verify, audit"]
-  m[A modality] --> dom
-  m --> fs
-  m -.->|not used by| ag
-```
 
 ---
 
@@ -369,17 +345,6 @@ confidence: 0.95
     options:
       language: "en"
       speaker_diarization: true
-```
-
-```mermaid
----
-title: Speech detection, then transcription
----
-flowchart TB
-  accDescr: detect with domain audio.speech finds speech segments in the retrieved audio, and transform turns those segments from audio.speech into text.transcript.
-  r["retrieve_out.data"] --> d["detect, domain: audio.speech"]
-  d -->|speech_segments_out.matches| t["transform: audio.speech to text.transcript"]
-  t --> o[transcript_out]
 ```
 
 Output for detect step:
@@ -634,24 +599,6 @@ Every capability invocation in the Grounded Agency framework must produce `evide
 | **Video** | `temporal_segment` | `video:<path>:time:<start>-<end>` | Time range within a video file |
 | **Multi-Modal** | `composite` | Contains nested anchors from multiple modalities | Combines anchors from different modalities |
 
-```mermaid
----
-title: Evidence anchor kinds by modality
----
-flowchart LR
-  accDescr: Text uses text_span anchors; images use bounding_box, image_reference or pixel_mask; audio uses time_segment or frequency_band; video uses video_region, frame_reference or temporal_segment; and a multi-modal composite anchor nests anchors from the other modalities.
-  tx[Text] --> a1[text_span]
-  im[Image] --> a2[bounding_box]
-  im --> a3[image_reference]
-  im --> a4[pixel_mask]
-  au[Audio] --> a5[time_segment]
-  au --> a6[frequency_band]
-  vi[Video] --> a7[video_region]
-  vi --> a8[frame_reference]
-  vi --> a9[temporal_segment]
-  mm[Multi-modal] --> a10["composite: nests anchors from several modalities"]
-```
-
 ### 4.2 Anchor Schema
 
 All evidence anchors follow a common schema, regardless of modality:
@@ -784,20 +731,6 @@ Selected OASF skills and their Grounded Agency equivalents:
 
 These workflow patterns will be formally defined in the workflow catalog. See the catalog for currently available patterns.
 
-```mermaid
----
-title: The two multi-modal workflows in the equivalences
----
-flowchart LR
-  accDescr: Visual QA chains detect on an image, ground and generate text; Image-to-3D chains detect on an image, transform and generate in the 3d domain.
-  subgraph vqa [Visual QA]
-    q1["detect(image.*)"] --> q2[ground] --> q3["generate(text)"]
-  end
-  subgraph i3d [Image-to-3D]
-    d1["detect(image.*)"] --> d2[transform] --> d3["generate(3d)"]
-  end
-```
-
 ### 5.3 Key Differences
 
 1. **Taxonomy vs. parameterization.** OASF lists modality skills as separate entries in a flat catalog. Grounded Agency parameterizes the same atomic capabilities, reducing the number of concepts to learn while maintaining the same expressiveness.
@@ -856,28 +789,6 @@ When no specialization is needed, the modality alone suffices:
 ## Appendix B: Complete Workflow -- Multi-Modal Content Moderation
 
 This appendix demonstrates a full workflow that uses domain parameters across multiple modalities.
-
-```mermaid
----
-title: The content moderation workflow
----
-flowchart TB
-  accDescr: The workflow retrieves the submission, detects speech in the audio, classifies text and images in one parallel group, transcribes the speech, looks for cross-modal evasion, integrates the signals, decides, explains and audits.
-  retrieve["1 retrieve the submission"] --> det["2 detect speech in the audio"]
-  subgraph modality_analysis [parallel_group modality_analysis]
-    ct["3 classify the text"]
-    ci["4 classify the images"]
-  end
-  det --> ct
-  det --> ci
-  ct --> tr["5 transform speech to text"]
-  ci --> tr
-  tr --> ev["6 detect cross-modal evasion"]
-  ev --> integ["7 integrate all signals"]
-  integ --> verdict["8 classify, domain: moderation.decision"]
-  verdict --> explain["9 explain the decision"]
-  explain --> audit["10 audit the decision"]
-```
 
 ```yaml
 # Standard version: 1.1.0

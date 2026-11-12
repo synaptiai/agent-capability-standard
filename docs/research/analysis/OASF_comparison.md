@@ -77,19 +77,6 @@ Our ontology defines **36 atomic capabilities** across **9 cognitive layers**, d
 
 The following OASF skills align with our atomic capabilities and could be represented using domain parameters:
 
-```mermaid
----
-title: The skills in the table that map to a composition
----
-flowchart LR
-  accDescr: In the table below, Multi-agent Planning maps to plan and delegate, Audit Summarization to audit and explain, Performance Monitoring to observe and measure, Benchmark Execution to execute and verify, and Feature Engineering to transform and generate.
-  map[Multi-agent Planning] --> plan & delegate
-  aus[Audit Summarization] --> audit & explain
-  pm[Performance Monitoring] --> observe & measure
-  be[Benchmark Execution] --> execute & verify
-  fe[Feature Engineering] --> transform & generate
-```
-
 | OASF Skill | OASF Category | Grounded Agency Equivalent | Notes |
 |------------|---------------|---------------------------|-------|
 | Information Retrieval | RAG [6] | `retrieve` | Direct mapping |
@@ -149,18 +136,6 @@ These OASF categories represent **modality-specific capabilities** that our onto
 | **Audio [3]** | Modality-specific (audio classification, speech synthesis) | Domain parameter on `detect`, `classify`, `generate`, `transform` |
 | **Multi-modal [7]** | Cross-modality transformations | `transform` with source/target modality parameters |
 | **DevOps/MLOps [12]** | Infrastructure-specific operations | Workflow patterns using `execute`, `verify`, `checkpoint` |
-
-```mermaid
----
-title: How the modality categories are handled
----
-flowchart LR
-  accDescr: Computer Vision and Audio become domain parameters on detect, classify, generate and transform; Multi-modal becomes transform with modality parameters; DevOps/MLOps becomes workflow patterns using execute, verify and checkpoint.
-  cv["Computer Vision [2]"] --> dp["Domain parameter on detect, classify, generate, transform"]
-  au["Audio [3]"] --> dp
-  mm["Multi-modal [7]"] --> tr["transform with source and target modality"]
-  ops["DevOps/MLOps [12]"] --> wp["Workflow patterns using execute, verify, checkpoint"]
-```
 
 **Key Insight:** Our ontology treats modality (text, image, audio, code) as a **domain parameter**, not a separate capability. This reduces the ontology size while maintaining expressiveness.
 
@@ -252,23 +227,6 @@ flowchart TB
 | **Personalization** | User adaptation | Use `state` (user model) + `transform` |
 | **Bias Mitigation** | Ethical constraint | Use `constrain` with bias detection rules |
 | **Content Moderation** | Safety filtering | Use `classify` + `constrain` |
-
-```mermaid
----
-title: How the missing OASF skills are expressed
----
-flowchart LR
-  accDescr: Each OASF skill without a direct equivalent is expressed with an existing capability and a domain, a composition, or a workflow, as the table above lists.
-  ig[Image Generation] --> gen1["generate, domain: image"]
-  vg[Video Generation] --> gen2["generate, domain: video"]
-  ss[Speech Synthesis] --> gen3["generate, domain: audio"]
-  sr[Speech Recognition] --> sr2["detect + transform, audio domain"]
-  de[Depth Estimation] --> me["measure, domain: depth"]
-  i3[Image-to-3D] --> wf["detect → transform → generate"]
-  pe[Personalization] --> st["state + transform"]
-  bm[Bias Mitigation] --> co1["constrain with bias rules"]
-  cm[Content Moderation] --> co2["classify + constrain"]
-```
 
 **Conclusion:** No new atomic capabilities needed. All OASF skills can be expressed through domain parameterization or workflow composition.
 
@@ -444,18 +402,6 @@ model_deployment:
     purpose: Record deployment event
   - capability: rollback
     purpose: Revert to the checkpoint if deployment verification failed
-```
-
-```mermaid
----
-title: The MLOps model deployment
----
-flowchart TB
-  accDescr: The deployment checks the model artifacts and the deployment policies with constrain, checkpoints, executes, verifies, measures performance, audits, and rolls back to the checkpoint if verification failed.
-  c1["constrain(model artifacts)"] --> c2["constrain(deployment policies)"]
-  c2 --> checkpoint
-  checkpoint --> execute --> verify --> measure --> audit
-  audit -->|if verification failed| rollback
 ```
 
 ---

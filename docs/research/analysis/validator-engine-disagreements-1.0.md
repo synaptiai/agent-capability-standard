@@ -1531,17 +1531,6 @@ inside `load_catalog`, so no validation runs.
 
 **Which is right (v1.0.0):** the validator (§5.2; §9.2 V103).
 
-```mermaid
----
-title: D17 catalog and verdicts
----
-flowchart TB
-  accDescr: One step has no capability key; at 9e2f65b the validator reports V103 and the engine crashes with a KeyError, and after the fix it is V103.
-  x["Step with no capability key, store_as x"]
-  x -.->|verdicts| res
-  res["Validator: V103. Engine: crash, KeyError. After the fix: V103"]
-```
-
 Catalog `r21_missing_capability_key.yaml`:
 
 ```yaml

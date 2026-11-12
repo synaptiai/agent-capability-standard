@@ -103,21 +103,6 @@ Influence               │                    Influence
 | Data Subjects | Privacy notices | At data collection | Data Protection Officer | Processing purposes, rights, contact information |
 | Open Source Community | Release notes, documentation | Per release | Project maintainers | Changes, migration guides, contribution guidelines |
 
-```mermaid
----
-title: Who communicates with each stakeholder group
----
-flowchart LR
-  accDescr: The AI Safety Officer communicates with top management, regulators and certification bodies; the AI System Owner with operators and end users; the Data Protection Officer with data subjects; and the project maintainers with the open source community.
-  so[AI Safety Officer] --> tm[Top Management]
-  so --> rg[Regulators]
-  so --> cb[Certification Bodies]
-  ow[AI System Owner] --> op[AI System Operators]
-  ow --> eu[End Users]
-  dpo[Data Protection Officer] --> ds[Data Subjects]
-  pm[Project maintainers] --> oss[Open Source Community]
-```
-
 ## 6. Determining AIMS Scope (Clause 4.3)
 
 The scope of the AI Management System shall consider:

@@ -213,18 +213,6 @@ New capabilities must follow the 6-step process defined in `CLAUDE.md`:
 5. **Update workflow catalog** — If adding workflow patterns
 6. **Generate local schema** — `tools/sync_skill_schemas.py`
 
-```mermaid
----
-title: Adding a capability
----
-flowchart TB
-  accDescr: A new capability goes through six steps in order: update the ontology, create the skill, update every capability count reference, validate, update the workflow catalog when workflow patterns are added, and generate the local schema.
-  s1[Update the ontology] --> s2[Create the skill] --> s3[Update all capability count references] --> s4[Validate]
-  s4 -.->|if adding workflow patterns| s5[Update the workflow catalog]
-  s4 --> s6[Generate the local schema]
-  s5 --> s6
-```
-
 **Reference:** `CLAUDE.md` Section "Creating New Capabilities", `docs/methodology/EXTENSION_GOVERNANCE.md`
 
 ### 4.4 Training, Fine-tuning, and Testing (Annex IV, 3(c))
@@ -279,18 +267,6 @@ Training-related responsibilities:
 | **Conflict edges** | `conflicts_with` relationships prevent mutually exclusive capabilities from co-executing | Validated at design time by workflow validator |
 | **Domain blocking** | `block_autonomous` capability lists prevent autonomous execution regardless of approval status | Enforced at profile evaluation level |
 | **Trust decay** | Source trust halves every 10 days (τ₁/₂ = 10d, floor = 0.25) | Mathematical model; no override mechanism |
-
-```mermaid
----
-title: The PreToolUse checkpoint gate
----
-flowchart TB
-  accDescr: Before a Write, Edit, MultiEdit, NotebookEdit or Bash tool call runs, the shell hook checks for a valid checkpoint marker; with one the tool runs, without one the hook blocks the call with exit code 2.
-  call["Write, Edit, MultiEdit, NotebookEdit or Bash tool call"] --> hook[PreToolUse shell hook]
-  hook --> q{Valid checkpoint marker?}
-  q -->|yes| run[The tool runs]
-  q -->|no| block[Blocked with exit code 2]
-```
 
 **Reference:** `hooks/hooks.json`, `schemas/capability_ontology.yaml` — edges
 
@@ -364,18 +340,6 @@ A comprehensive post-market monitoring plan is defined in **EUAIA-PMM-001**, cov
 | Management review (AIMS-MGR-001) | Quarterly monitoring reports as standing agenda |
 | Internal audit (AIMS-AUD-001) | Monitoring effectiveness as audit objective |
 | Risk treatment (AIMS-RSK-001) | KPI trends inform risk reassessment |
-
-```mermaid
----
-title: Where post-market monitoring feeds the AIMS
----
-flowchart LR
-  accDescr: Post-market monitoring feeds four AIMS processes: L2 and higher escalations trigger corrective action, quarterly reports go to management review, monitoring effectiveness is an internal audit objective, and KPI trends inform risk reassessment.
-  pmm[Post-market monitoring] --> ncr["Corrective action, triggered by L2+ escalations"]
-  pmm --> mgr["Management review, of the quarterly reports"]
-  pmm --> aud["Internal audit, of monitoring effectiveness"]
-  pmm --> rsk["Risk reassessment, informed by KPI trends"]
-```
 
 ## 8. Annex IV Element 7 — Testing and Validation
 
@@ -470,18 +434,6 @@ Before placing a high-risk AI system on the market, the provider shall register 
 | Conformity assessment route | EUAIA-NTB-001 |
 | QMS documentation | EUAIA-QMS-001 |
 | Intended purpose and intended deployment | EUAIA-CLS-001 Section 4 |
-
-```mermaid
----
-title: What the EU database registration draws on, before market placement
----
-flowchart LR
-  accDescr: Before a high-risk AI system is placed on the market, the provider registers it in the EU database, drawing on the risk classification, the conformity assessment route, the QMS documentation and the AI system description.
-  cls[Risk classification] --> reg["EU database registration (Art. 49)"]
-  ntb[Conformity assessment route] --> reg
-  qms[QMS documentation] --> reg
-  tec[AI system description] --> reg
-```
 
 ---
 

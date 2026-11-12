@@ -381,19 +381,6 @@ cat schemas/workflows/healthcare_workflows.yaml
 | Clinical decision support | Healthcare |
 | Something else | Pick the closest, then customize |
 
-```mermaid
----
-title: Which domain to start with
----
-flowchart LR
-  accDescr: Factory automation starts with Manufacturing, personal productivity with Personal Assistant, data pipelines and ML with Data Analysis, clinical decision support with Healthcare, and anything else with the closest domain, customized.
-  f[Factory automation agents] --> mf[Manufacturing]
-  pp[Personal productivity tools] --> pa[Personal Assistant]
-  dp["Data pipelines/ML systems"] --> da[Data Analysis]
-  cd[Clinical decision support] --> hc[Healthcare]
-  se[Something else] --> cl["The closest, then customize"]
-```
-
 Each domain provides:
 - **Profile** — Pre-calibrated trust weights, risk thresholds, checkpoint policies
 - **Workflows** — Ready-to-use workflow patterns
