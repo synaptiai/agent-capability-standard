@@ -176,8 +176,12 @@
     padding-left: var(--space-4);
   }
 
+  /* The pin sits on the first line of its label, centred on the name,
+     even when the label wraps to a second line. */
   .port__pin {
     flex: none;
+    align-self: flex-start;
+    margin-top: 9px;
     box-sizing: border-box;
     width: 10px;
     height: 10px;
@@ -197,6 +201,19 @@
     order: 9;
   }
 
+  /* Everything but the pin and the description. It takes the rest of the
+     row (a zero basis, so it never drops under the pin as a whole) and wraps
+     inside itself; it aligns its items the way its row does. */
+  .port__label {
+    display: flex;
+    flex: 1 1 0;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: inherit;
+    gap: 2px var(--space-2);
+    min-width: 0;
+  }
+
   .port__glyphs {
     display: inline-flex;
     gap: 2px;
@@ -204,6 +221,8 @@
   }
 
   .port__name {
+    min-width: 0;
+    overflow-wrap: anywhere;
     font-weight: 700;
     color: var(--ink);
   }

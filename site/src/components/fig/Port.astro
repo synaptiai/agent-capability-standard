@@ -4,7 +4,9 @@
 // from typeGlyphs(), the field name, the exact type string, and a short
 // description shown on hover or focus when the figure is wide and always
 // when it is narrow. Render inside <ul class="ports"> (add `ports--out` for
-// an output column, which puts the pin on the left).
+// an output column, which puts the pin on the left). The glyphs, name, mark
+// and type sit in one label box beside the pin, so when the column is too
+// narrow the type wraps under the name, never under the pin.
 //
 // Props:
 // - name: string, required. The field name or path.
@@ -36,10 +38,12 @@ const glyphs = typeGlyphs(type);
 ---
 <li class:list={['port', required ? 'port--required' : 'port--optional']} data-depth={depth} data-type={type}>
   <span class="port__pin" aria-hidden="true"></span>
-  <span class="port__glyphs" aria-hidden="true">{glyphs.map((g) => <PixelGlyph name={g} />)}</span>
-  <code class="port__name">{href ? <a href={href}>{name}</a> : name}</code>
-  {mark && <PixelGlyph name={mark} label={markLabel} class="port__mark" />}
-  <code class="port__type">{type}</code>
+  <span class="port__label">
+    <span class="port__glyphs" aria-hidden="true">{glyphs.map((g) => <PixelGlyph name={g} />)}</span>
+    <code class="port__name">{href ? <a href={href}>{name}</a> : name}</code>
+    {mark && <PixelGlyph name={mark} label={markLabel} class="port__mark" />}
+    <code class="port__type">{type}</code>
+  </span>
   <span class="fig-sr">{required ? ', required' : ', optional'}</span>
   {description && <span class="port__desc">{description}</span>}
 </li>
