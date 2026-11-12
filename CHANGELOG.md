@@ -794,16 +794,6 @@ The full list is in the
 
 ### Changed
 - Migrated from 99 to 36 atomic capabilities with domain parameterization
-
-```mermaid
----
-title: From 99 capabilities to 36
----
-flowchart TB
-  accDescr: The 99 capabilities of v1.0.0 became 36 atomic capabilities, with domain parameters in place of domain-specific variants.
-  v99[99 capabilities] -->|domain parameterization| v36[36 atomic capabilities]
-```
-
 - Grounded Agency evaluation section reports the 51 steps in the reference
   workflows
 
@@ -812,15 +802,6 @@ flowchart TB
 ### Changed
 - Flattened skills directory structure for Claude Code compatibility: skills
   moved from `skills/<category>/<skill>/` to `skills/<skill>/`
-
-```mermaid
----
-title: The flattened skills directory
----
-flowchart TB
-  accDescr: Skills moved from skills/category/skill/ to skills/skill/, one level shallower.
-  old["skills/category/skill/"] -->|flattened to| new["skills/skill/"]
-```
 
 ### Fixed
 - The PostToolUse hook reads its JSON from stdin instead of command-line
