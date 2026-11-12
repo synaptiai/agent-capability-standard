@@ -809,7 +809,7 @@ describe('check-dist.mjs on the built site', () => {
   it('finds no problem once Pagefind has run, and counts one page per route', () => {
     execFileSync('npx', ['pagefind', '--site', dist], { cwd: process.cwd(), stdio: 'pipe' });
     const { problems, stats } = checkDistDir(dist);
-    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [], figures: [], legends: [], review: [] });
+    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [], figures: [], drawn: [], legends: [], review: [] });
     expect(stats.pages).toBe(ROUTES.length);
     expect(stats.copies).toBe(ROUTES.length);
   }, 120_000);
