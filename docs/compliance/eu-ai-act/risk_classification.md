@@ -153,6 +153,19 @@ flowchart LR
 | Scientific research analysis | Minimal Risk | N/A | No direct decision impact |
 | Regulatory reporting | Limited Risk | N/A | Transparency obligations |
 
+```mermaid
+---
+title: Data analysis deployments by risk tier
+---
+flowchart LR
+  accDescr: A data analysis deployment takes its tier from the decisions it informs: credit scoring and employment analytics are high risk, regulatory reporting is limited risk, and business intelligence dashboards and scientific research analysis are minimal risk.
+  cr[Credit scoring] --> high["High Risk"]
+  em[Employment analytics] --> high
+  rr[Regulatory reporting] --> lim["Limited Risk"]
+  bi[Business intelligence dashboards] --> min["Minimal Risk"]
+  sc[Scientific research analysis] --> min
+```
+
 **Framework Readiness:** The data analysis profile includes `data_lineage` as a required evidence anchor type, supporting Art. 10 (data governance) traceability requirements.
 
 #### Vision (Context-Dependent — Potentially High Risk)
@@ -214,6 +227,17 @@ The framework's internal risk model maps to EU AI Act requirements:
 
 **Note:** This mapping shows structural alignment, not equivalence. A low-risk *capability* in a high-risk *deployment* still carries the deployment's regulatory obligations.
 
+```mermaid
+---
+title: Framework risk tiers against EU AI Act tiers
+---
+flowchart LR
+  accDescr: The 29 low-risk capabilities align with a minimal or limited risk baseline, the 5 medium-risk capabilities with limited to high risk, and the 2 high-risk capabilities with high risk in an Annex III context.
+  low["Low: 29 capabilities"] --> ml["Minimal or Limited Risk baseline"]
+  med["Medium: 5 capabilities"] --> lh["Limited to High Risk"]
+  hi["High: mutate, send"] --> hr["High Risk, in an Annex III context"]
+```
+
 ## 6. Annex III Area Analysis
 
 ### 6.1 Areas Directly Relevant to Framework Profiles
@@ -225,6 +249,21 @@ The framework's internal risk model maps to EU AI Act requirements:
 | **Area 4** — Employment | Recruitment, HR analytics, task allocation | data_analysis (context) | Evidence anchors with `data_lineage`, human review gates |
 | **Area 5(a)** — Healthcare | Medical devices, clinical decision support | healthcare | `block_autonomous: [mutate, send, execute, delegate]`, `clinician_verification` |
 | **Area 5(b)** — Financial | Credit scoring, risk assessment | data_analysis (context) | `data_lineage` evidence, `require_review: medium` |
+
+```mermaid
+---
+title: Annex III areas and the profiles they reach
+---
+flowchart LR
+  accDescr: Area 1 biometrics reaches the vision, audio and multimodal profiles, Area 2(b) machinery safety reaches manufacturing, Areas 4 employment and 5(b) financial reach data analysis depending on context (dotted), and Area 5(a) reaches healthcare.
+  a1["Area 1: biometrics"] --> vi[vision]
+  a1 --> au[audio]
+  a1 --> mm[multimodal]
+  a2["Area 2(b): machinery safety"] --> mf[manufacturing]
+  a4["Area 4: employment"] -.-> da["data_analysis, by context"]
+  a5b["Area 5(b): financial"] -.-> da
+  a5a["Area 5(a): healthcare"] --> hc[healthcare]
+```
 
 ### 6.2 Areas Not Currently Addressed
 

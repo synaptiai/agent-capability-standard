@@ -122,6 +122,17 @@ In addition to scheduled monitoring, the following events trigger immediate moni
 | **L3** | Critical | Safety KPI failure (checkpoint, evidence coverage); multiple concurrent warnings | Within 2 hours | AI Safety Officer + AI System Owner | Affected capability suspended or restricted; immediate corrective action; deployer notification; preliminary incident assessment |
 | **L4** | Incident | Serious incident per Art. 62 definition; system poses risk to health/safety/rights | Immediate | AI System Owner + Legal/Regulatory | System withdrawal or recall initiated; Art. 62 notification within 15 days; market surveillance authority engagement |
 
+```mermaid
+---
+title: The four escalation levels
+---
+flowchart TB
+  accDescr: An isolated anomaly is logged at L1, a breached alert threshold raises L2, a safety KPI failure or several concurrent warnings raise L3, and a serious incident under Art. 62 raises L4, with the response time shrinking from the next business day to immediate.
+  l1["L1 Info: respond next business day"] -->|a KPI breaches its alert threshold| l2["L2 Warning: respond within 8 hours"]
+  l2 -->|a safety KPI fails, or several warnings at once| l3["L3 Critical: respond within 2 hours"]
+  l3 -->|a serious incident under Art. 62| l4["L4 Incident: respond immediately"]
+```
+
 ### 6.2 Escalation Matrix by Profile
 
 | Profile | L1 → L2 Threshold | L2 → L3 Threshold | L3 → L4 Threshold |
@@ -152,6 +163,19 @@ Per Art. 3(49), a serious incident is an incident or malfunctioning that directl
 | 4 | Notification to market surveillance authority | Within 15 days of awareness | AI System Owner + Legal | Art. 62(1) notification via EU database (Art. 71) |
 | 5 | Detailed investigation report | Within 30 days | AI Safety Officer | Full root cause analysis, corrective actions, preventive measures |
 | 6 | Follow-up notifications (if causal link unclear) | As determined | AI System Owner | Updated findings, revised timeline |
+
+```mermaid
+---
+title: Reporting a serious incident
+---
+flowchart TB
+  accDescr: A serious incident is detected and assessed at once, escalated to L4 and contained within an hour, reported in preliminary form within 24 hours, notified to the market surveillance authority within 15 days and investigated in full within 30 days, with follow-up notifications when the causal link is unclear.
+  s1[Detect and assess the incident at once] -->|within 1 hour| s2[Escalate to L4 and contain the system]
+  s2 -->|within 24 hours| s3[Prepare the preliminary incident report]
+  s3 -->|within 15 days of awareness| s4[Notify the market surveillance authority]
+  s4 -->|within 30 days| s5[Write the detailed investigation report]
+  s5 -.->|if the causal link is unclear| s6[Send follow-up notifications]
+```
 
 ### 7.3 Notification Content (Art. 62(1))
 
