@@ -40,6 +40,17 @@ State management is the largest failure category (~35%), reflecting the fundamen
   checkpoint(state) → state(immutable_copy) → iterate → mutate(from_checkpoint)
   ```
 
+```mermaid
+---
+title: Mitigation for LangChain #34887
+---
+flowchart TB
+  accDescr: Checkpoint the state, make an immutable copy, iterate over it, and mutate from the checkpoint.
+  a["checkpoint(state)"] --> b["state(immutable_copy)"]
+  b --> c[iterate]
+  c --> d["mutate(from_checkpoint)"]
+```
+
 #### Clawdbot #2397: Memory flush fires after compaction
 - **Symptoms**: Data loss from event ordering violation
 - **Root Cause**: Async events not properly sequenced
@@ -51,6 +62,18 @@ State management is the largest failure category (~35%), reflecting the fundamen
   ```
   synchronize([flush, compaction]) → checkpoint → compaction → verify → flush
   ```
+
+```mermaid
+---
+title: Mitigation for Clawdbot #2397
+---
+flowchart TB
+  accDescr: Synchronize the flush and the compaction, checkpoint, compact, verify, and only then flush.
+  a["synchronize([flush, compaction])"] --> b[checkpoint]
+  b --> c[compaction]
+  c --> d[verify]
+  d --> e[flush]
+```
 
 #### Clawdbot #2384: Unbounded memory growth in groupHistories
 - **Symptoms**: OOM errors over time
@@ -76,6 +99,18 @@ State management is the largest failure category (~35%), reflecting the fundamen
   checkpoint(shared_state) → delegate(agents, isolated_state_copy) →
     synchronize(results) → integrate → verify
   ```
+
+```mermaid
+---
+title: Mitigation for AutoGen #2659
+---
+flowchart TB
+  accDescr: Checkpoint the shared state, delegate to agents with isolated copies of the state, synchronize their results, integrate, and verify.
+  a["checkpoint(shared_state)"] --> b["delegate(agents, isolated_state_copy)"]
+  b --> c["synchronize(results)"]
+  c --> d[integrate]
+  d --> e[verify]
+```
 
 ---
 
@@ -105,6 +140,16 @@ Workflow failures (~25%) occur at component boundaries where data contracts are 
   astream() → verify(output, expected_type) → if mismatch: transform(to_expected)
   ```
 
+```mermaid
+---
+title: Mitigation for LangChain #34874
+---
+flowchart TB
+  accDescr: Check the output of astream against the expected type, and transform it to the expected type on a mismatch.
+  a["astream()"] --> b["verify(output, expected_type)"]
+  b -->|mismatch| c["transform(to_expected)"]
+```
+
 #### LangChain #34876: Crash on empty messages
 - **Symptoms**: NoneType error, uncaught exception
 - **Root Cause**: No null/empty validation
@@ -127,6 +172,17 @@ Workflow failures (~25%) occur at component boundaries where data contracts are 
   ```
   agent_output → verify(schema) → if invalid: transform(to_schema) or rollback
   ```
+
+```mermaid
+---
+title: Mitigation for CrewAI #1823
+---
+flowchart TB
+  accDescr: Verify the agent output against the schema; if it is invalid, transform it to the schema or roll back.
+  a[agent_output] --> b["verify(schema)"]
+  b -->|invalid| c["transform(to_schema)"]
+  b -->|invalid| d[rollback]
+```
 
 ---
 
@@ -158,6 +214,17 @@ Coordination failures (~20%) involve multiple agents or async operations not pro
     verify(response.approved) → if timeout: rollback
   ```
 
+```mermaid
+---
+title: Mitigation for Clawdbot #2402
+---
+flowchart TB
+  accDescr: Send the approval request, receive the response with a timeout, verify that it approves, and roll back on a timeout.
+  a["send(approval_request)"] --> b["receive(response, timeout)"]
+  b --> c["verify(response.approved)"]
+  b -->|timeout| d[rollback]
+```
+
 #### LangChain #34357: Graph cycles cause infinite recursion
 - **Symptoms**: Stack overflow, infinite loop
 - **Root Cause**: No cycle detection
@@ -170,6 +237,18 @@ Coordination failures (~20%) involve multiple agents or async operations not pro
   graph → detect(cycles) → if cycles: reject →
     execute(with constrain(max_depth)) → verify(terminated)
   ```
+
+```mermaid
+---
+title: Mitigation for LangChain #34357
+---
+flowchart TB
+  accDescr: Detect cycles in the graph and reject it if there are any; otherwise execute with a maximum depth and verify that it terminated.
+  a[graph] --> b["detect(cycles)"]
+  b -->|cycles| r[reject]
+  b -->|none| c["execute, with constrain(max_depth)"]
+  c --> d["verify(terminated)"]
+```
 
 #### AutoGen #2724: Nested agent calls exceed recursion limit
 - **Symptoms**: RecursionError
@@ -213,6 +292,17 @@ Grounding failures (~10%) occur when agents make claims without evidence.
     if not grounded: remove citation or flag uncertainty
   ```
 
+```mermaid
+---
+title: Mitigation for AutoGen #2945
+---
+flowchart TB
+  accDescr: Ground each citation in its source and verify that the source exists; if it is not grounded, remove the citation or flag the uncertainty.
+  a[citation] --> b["ground(source)"]
+  b --> c["verify(source_exists)"]
+  c -->|not grounded| d[Remove the citation or flag uncertainty]
+```
+
 #### LangChain #34604: Agent claims tool succeeded when it failed
 - **Symptoms**: Proceeds as if successful despite failure
 - **Root Cause**: Error not checked after tool call
@@ -225,6 +315,18 @@ Grounding failures (~10%) occur when agents make claims without evidence.
   tool_call → execute → verify(result.success) →
     ground(success_claim, result) → if failed: handle_error
   ```
+
+```mermaid
+---
+title: Mitigation for LangChain #34604
+---
+flowchart TB
+  accDescr: After the tool call executes, verify the result's success, ground the success claim in the result, and handle the error if it failed.
+  a[tool_call] --> b[execute]
+  b --> c["verify(result.success)"]
+  c --> d["ground(success_claim, result)"]
+  c -->|failed| e[handle_error]
+```
 
 ---
 
@@ -255,6 +357,18 @@ Explainability failures (~5%) prevent understanding of agent decisions.
   error → audit(full_details) → explain(user_friendly) →
     constrain(no_internal_details) → send(sanitized_error)
   ```
+
+```mermaid
+---
+title: Mitigation for Clawdbot #2415
+---
+flowchart TB
+  accDescr: Audit the full error details, explain the error in user-friendly terms, constrain it to no internal details, and send the sanitized error.
+  a[error] --> b["audit(full_details)"]
+  b --> c["explain(user_friendly)"]
+  c --> d["constrain(no_internal_details)"]
+  d --> e["send(sanitized_error)"]
+```
 
 #### AutoGen #2867: Cannot trace multi-agent decision
 - **Symptoms**: No way to understand how decision was made
@@ -299,6 +413,18 @@ Trust failures (~5%) involve contradictory information without resolution.
     ground(target, permission_evidence) → send
   ```
 
+```mermaid
+---
+title: Mitigation for Clawdbot #2412
+---
+flowchart TB
+  accDescr: Verify that the target is authorized, constrain it to valid channels, ground the target in permission evidence, and then send.
+  a[response] --> b["verify(target_authorized)"]
+  b --> c["constrain(valid_channels)"]
+  c --> d["ground(target, permission_evidence)"]
+  d --> e[send]
+```
+
 #### AutoGen #2934: Conflicting agent opinions not resolved
 - **Symptoms**: Deadlock, no consensus
 - **Root Cause**: No conflict resolution strategy
@@ -311,6 +437,17 @@ Trust failures (~5%) involve contradictory information without resolution.
   opinions → compare(against_criteria) →
     integrate(strategy=weighted_voting) → synchronize(final_decision)
   ```
+
+```mermaid
+---
+title: Mitigation for AutoGen #2934
+---
+flowchart TB
+  accDescr: Compare the opinions against the criteria, integrate them by weighted voting, and synchronize the final decision.
+  a[opinions] --> b["compare(against_criteria)"]
+  b --> c["integrate(strategy=weighted_voting)"]
+  c --> d["synchronize(final_decision)"]
+```
 
 ---
 
