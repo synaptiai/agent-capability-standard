@@ -34,6 +34,15 @@ Standard 1.2.0 has one proposal so far:
 [RFC-0002](RFC-0002-agent-reliability-profile.md) (Draft), which adds
 cross-session behavioural reliability for agents.
 
+```mermaid
+---
+title: The Standard's versions
+---
+flowchart LR
+  accDescr: Standard 1.0.0 is supported; 1.1.0, accepted through RFC-0003 and RFC-0004, is the current candidate; 1.2.0 is planned, with RFC-0002 as its one draft proposal so far.
+  v10["1.0.0: supported"] --> v11["1.1.0: current, via RFC-0003 and RFC-0004"] --> v12["1.2.0: planned, RFC-0002 in draft"]
+```
+
 ## Plugin and tools
 
 | Version | Date | Main changes |
@@ -41,6 +50,17 @@ cross-session behavioural reliability for agents.
 | 2.0.0 | 2026-10-29 | Implements Standard 1.1.0. The validator and the executor are one Rust core, used by `tools/validate_workflows.py` and by the Python package. |
 | 1.2.0 | 2026-02-04 | Workflow execution engine; multi-agent coordination runtime (delegate, synchronize, invoke); OASF mapping and extension mechanism; vision, audio and multimodal profiles; EU AI Act, NIST AI RMF and ISO 42001 documents. |
 | 1.0.0 to 1.1.1 | 2026-01-24 to 2026-01-27 | Early releases, listed in the [project changelog](../CHANGELOG.md). |
+
+
+```mermaid
+---
+title: The plugin's versions and the Standard they implement
+---
+flowchart LR
+  accDescr: The plugin went from the early 1.0.0 to 1.1.1 releases to 1.2.0 and then 2.0.0, which implements Standard 1.1.0 with one Rust core for the validator and the executor.
+  p1["Plugin 1.0.0 to 1.1.1"] --> p12["Plugin 1.2.0"] --> p20["Plugin 2.0.0: one Rust core"]
+  p20 -->|implements| s11[Standard 1.1.0]
+```
 
 ## Next
 
