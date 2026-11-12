@@ -59,6 +59,20 @@ Hard constraints prevent catastrophic entity conflation:
 - Never merge across incompatible entity types
 - Always record merge/split operations in lineage
 
+```mermaid
+---
+title: The hard constraints on a merge
+---
+flowchart TB
+  accDescr: Two entities are never merged when their unique identifiers conflict or their entity types are incompatible, and every merge or split is recorded in lineage.
+  c[Candidate merge] --> id{Conflicting unique identifiers?}
+  id -->|yes| no1[Never merged]
+  id -->|no| ty{Incompatible entity types?}
+  ty -->|yes| no2[Never merged]
+  ty -->|no| m[Merge]
+  m --> lin[Recorded in lineage]
+```
+
 ---
 
 ## 2. Threat Model
@@ -248,18 +262,6 @@ Deployments SHOULD:
 
 ## 5. Security Hooks
 
-### 5.1 Pre-Tool Use Hooks
-
-| Hook | Security Function |
-|------|-------------------|
-| `pretooluse_require_checkpoint.sh` | Blocks mutation without checkpoint |
-
-### 5.2 Post-Tool Use Hooks
-
-| Hook | Security Function |
-|------|-------------------|
-| `posttooluse_log_tool.sh` | Creates audit trail |
-
 ```mermaid
 ---
 title: Where the hooks run
@@ -271,6 +273,18 @@ flowchart TB
   pre -->|yes| run[Tool runs]
   run --> post["posttooluse_log_tool: audit trail"]
 ```
+
+### 5.1 Pre-Tool Use Hooks
+
+| Hook | Security Function |
+|------|-------------------|
+| `pretooluse_require_checkpoint.sh` | Blocks mutation without checkpoint |
+
+### 5.2 Post-Tool Use Hooks
+
+| Hook | Security Function |
+|------|-------------------|
+| `posttooluse_log_tool.sh` | Creates audit trail |
 
 ### 5.3 Adding Security Hooks
 
