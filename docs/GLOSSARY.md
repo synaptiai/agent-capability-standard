@@ -283,11 +283,13 @@ A documented way a step can fail, with recovery instructions:
 title: Gates, failure modes and recovery loops
 ---
 flowchart TB
-  accDescr: A gate checks its when condition before the step, or after it with phase after, and takes its action when the condition matches; a failure mode's when is evaluated after the step and fires its action and recovery, and a recovery loop resumes at goto_step with inject_context, up to max_loops times.
+  accDescr: A gate checks its when condition before the step by default and takes its action when the condition matches; a gate with phase after checks it after the step and cannot skip; a failure mode's when is evaluated after the step and fires its action and its recovery, and a recovery loop resumes at goto_step with inject_context, up to max_loops times.
   gate{"gate when, phase before"} -->|matches| gact["action: stop, rollback, skip, warn or end"]
   gate -->|no match| step[Step runs]
-  step --> after{"gate when, phase after; failure mode when"}
-  after -->|matches| fact[action]
+  step --> ag{"gate when, phase after"}
+  ag -->|matches| aact["action, not skip"]
+  step --> fm{"failure mode when"}
+  fm -->|fires| fact[action]
   fact --> rec["recovery: prose or a recovery loop"]
   rec -->|"condition: goto_step, inject_context, up to max_loops"| goto[Resume at goto_step]
 ```
