@@ -2,8 +2,10 @@
 // The home page's scroll story: text steps beside a sticky pixel diagram.
 // Everything is drawn here from the ontology and the model_deployment
 // workflow as rects on a 2px grid; nothing is copied or typed in.
-// - Beat 1: every capability as a square, in a column per layer under that
-//   layer's glyph; the ones the workflow uses carry an ink frame.
+// - Beat 1: every capability as a small periodic tile (its two-letter symbol
+//   on its layer tint, in a layer-coloured border), in a column per layer
+//   under that layer's glyph; the ones the workflow uses carry an ink frame.
+//   The symbol and the glyph come with every colour (visual spec 1.2).
 // - Beat 2: the workflow's steps as a rail, with the first step's contract
 //   shown as input and output ports.
 // - Beats 3 to 6: the checkpoint, the step that changes state (with a line
@@ -16,6 +18,7 @@
 // shows the final frame again when the story leaves the screen.
 import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
 import { story } from '../lib/home';
+import { capabilitySymbol } from '../lib/views';
 import { chevron, glyphRects, type FigRect } from '../pixel/lines';
 import InlineText from './InlineText.astro';
 import Rects from './fig/Rects.astro';
@@ -34,14 +37,14 @@ const used = new Set(s.workflow.steps.map((x) => x.capability));
 const W = 320;
 const X0 = 8;
 const PITCH = 34;
-const SQ = 18;
-const ROW_GAP = 2;
+const SQ = 22; // a tile: 2px border and an 18px face, room for a 12px two-letter symbol
+const ROW_GAP = 6; // a used tile's 2px ink frame still leaves 2px to the next tile
 const HEAD = 8;
-const GLYPH = 2; // the layer glyphs at 2x: 18px, as wide as a square
-const gridTop = HEAD + 9 * GLYPH + 6;
+const GLYPH = 2; // the layer glyphs at 2x: 18px, centred over the tile
+const gridTop = HEAD + 9 * GLYPH + 8;
 const maxRows = Math.max(...ontology.layers.map((l) => l.capabilities.length));
 const colX = (i: number) => X0 + i * PITCH + (PITCH - SQ) / 2;
-const heads = ontology.layers.map((layer, i) => ({ layer: layer.id, x: colX(i) }));
+const heads = ontology.layers.map((layer, i) => ({ layer: layer.id, x: colX(i) + (SQ - 9 * GLYPH) / 2 }));
 const squares = ontology.layers.flatMap((layer, i) =>
   capabilitiesOfLayer(ontology, layer.id).map((cap, j) => ({
     id: cap.id,
@@ -49,6 +52,7 @@ const squares = ontology.layers.flatMap((layer, i) =>
     x: colX(i),
     y: gridTop + j * (SQ + ROW_GAP),
     used: used.has(cap.id),
+    symbol: capabilitySymbol(cap.id),
   })),
 );
 const gridBottom = gridTop + maxRows * (SQ + ROW_GAP);
@@ -73,18 +77,10 @@ const rb = s.rollbackStep.index;
 const vf = s.verifyStep.index;
 if (!(cp < ch && ch < rb)) throw new Error('HomeStory: expected checkpoint, then the change, then rollback');
 
-// Text sizes in viewBox units: 12 for labels, 11 for stored names. Where
-// the stored names show (960px and up) the diagram is drawn at about 1.16x
-// or more, so they render at 12.7px or more; below 960px they are left out.
+// Text size in viewBox units: 12 for the step labels and the tile symbols.
+// The rail shows no stored names: they did not fit at a readable size, and
+// the steps' text and the workflow page name them.
 const LABEL = 12;
-const STORE = 11;
-// A store_as name is cut to the room left beside the step's label. The mono
-// font's advance is a little over 0.6em, so 0.66em leaves a visible gap.
-const ADVANCE = 0.66;
-const storeText = (index: number, cap: string, name: string): string => {
-  const room = Math.floor((RW - 10 - `${index} ${cap}`.length * LABEL * ADVANCE - 16) / (STORE * ADVANCE));
-  return name.length <= room ? name : `${name.slice(0, Math.max(0, room - 1))}…`;
-};
 
 // The role marks: the shared 7x7 role glyphs at 2x, right of the rail.
 const MARK_X = RX + RW + 10;
@@ -141,7 +137,7 @@ const portY = (n: number, k: number) => rowY(first) + 2 * Math.round(((k + 1) * 
     >
       <title id={svgTitle}>
         Diagram: the capabilities in a grid by layer, then the steps of the {s.workflow.id} workflow as a rail, with its
-        checkpoint, the step that changes state, verify and rollback marked.
+        checkpoint, the step that makes the change, verify and rollback marked.
       </title>
       <g data-beat="1">
         {heads.map((h) => (
@@ -149,16 +145,14 @@ const portY = (n: number, k: number) => rowY(first) + 2 * Math.round(((k + 1) * 
             <Rects rects={glyphRects(h.layer, h.x, HEAD, GLYPH)} />
           </g>
         ))}
-        {squares.map((q) =>
-          q.used ? (
-            <>
-              <rect class="story__frame" x={q.x} y={q.y} width={SQ} height={SQ} />
-              <rect class="story__cap" x={q.x + 4} y={q.y + 4} width={SQ - 8} height={SQ - 8} style={`--layer: var(--layer-${q.layer})`} />
-            </>
-          ) : (
-            <rect class="story__cap" x={q.x} y={q.y} width={SQ} height={SQ} style={`--layer: var(--layer-${q.layer})`} />
-          ),
-        )}
+        {squares.map((q) => (
+          <g class:list={['story__tile', 'has-layer', q.used && 'story__tile--used']} style={`--layer: var(--layer-${q.layer})`} data-capability={q.id}>
+            {q.used && <rect class="story__used" x={q.x - 2} y={q.y - 2} width={SQ + 4} height={SQ + 4} />}
+            <rect class="story__cap" x={q.x} y={q.y} width={SQ} height={SQ} />
+            <rect class="story__face" x={q.x + 2} y={q.y + 2} width={SQ - 4} height={SQ - 4} />
+            <text class="story__symbol" x={q.x + SQ / 2} y={q.y + 15} font-size={LABEL}>{q.symbol}</text>
+          </g>
+        ))}
       </g>
 
       <g data-beat="2">
@@ -188,7 +182,6 @@ const portY = (n: number, k: number) => rowY(first) + 2 * Math.round(((k + 1) * 
           <>
             <rect class="story__stripe" x={RX + 2} y={rowY(st.index) + 2} width={4} height={BH - 4} style={`--layer: var(--layer-${st.layer})`} />
             <text class="story__label" x={RX + 10} y={mid(st.index) + 4} font-size={LABEL}>{st.index} {st.capability}</text>
-            {st.store_as && <text class="story__store" x={RX + RW - 6} y={mid(st.index) + 4} font-size={STORE}>{storeText(st.index, st.capability, st.store_as)}</text>}
           </>
         ))}
         {Array.from({ length: portsIn }, (_, k) => <rect class="story__port" x={RX - 6} y={portY(portsIn, k)} width={6} height={4} />)}

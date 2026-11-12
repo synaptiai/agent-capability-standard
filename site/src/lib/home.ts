@@ -281,7 +281,7 @@ export function story(): StoryData {
       beat: 1,
       title: 'An agent does a few kinds of thing.',
       text: t(
-        `It perceives, reasons, changes things and checks its work. The standard names ${counts.capabilityCount} of these operations and sorts them into ${counts.layerCount} layers. In the diagram each square stands for a capability, in the column of its layer. The ${used.size} that the model deployment workflow uses are outlined.`,
+        `It perceives, reasons, changes things and checks its work. The standard names ${counts.capabilityCount} of these operations and sorts them into ${counts.layerCount} layers. In the diagram each tile is a capability, with its two-letter symbol, in the column under its layer's glyph. The ${used.size} that the model deployment workflow uses have a dark frame.`,
       ),
     },
     {
