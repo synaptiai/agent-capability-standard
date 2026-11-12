@@ -46,14 +46,14 @@ const mono = route.section === 'capabilities';
         <div class="sidebar__group">
           {run.group && (
             <p class="sidebar__group-title">
-              {layers.has(run.group) ? <PixelGlyph name={run.group} layer={run.group} /> : <span class="pip" aria-hidden="true"></span>}
+              {layers.has(run.group) ? <PixelGlyph name={run.group} layer={run.group} /> : <span class="sidebar__dash" aria-hidden="true"></span>}
               <span>{run.group}</span>
             </p>
           )}
           <ul>
             {run.rows.map((r) => (
               <li>
-                <a href={r.url} aria-current={r.url === route.url ? 'page' : undefined} class:list={[mono && r.template === 'capability' && 'sidebar__mono']}>{r.title}</a>
+                <a href={r.url} aria-current={r.url === route.url ? 'page' : undefined} class:list={[mono && r.template === 'capability' && 'sidebar__mono']}>{run.group && r.title === run.group ? 'Layer overview' : r.title}</a>
               </li>
             ))}
           </ul>

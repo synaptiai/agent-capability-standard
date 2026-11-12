@@ -20,6 +20,15 @@
     background: currentColor;
   }
 
+  /* A sidebar group with no layer glyph leads with the eyebrow's dash. */
+  .sidebar__dash {
+    display: inline-block;
+    flex: none;
+    width: 12px;
+    height: var(--px);
+    background: var(--indicator);
+  }
+
   .eyebrow {
     display: inline-flex;
     align-items: center;
@@ -32,10 +41,13 @@
     color: var(--ink-3);
   }
 
+  /* The eyebrow leads with a short 2px dash, not a filled square: a square
+     before a capitalised label is another site's eyebrow (visual spec 1.3,
+     originality; issue #125 review). */
   .eyebrow::before {
     content: '';
-    width: var(--pip);
-    height: var(--pip);
+    width: 12px;
+    height: var(--px);
     background: var(--indicator);
     flex: none;
   }
@@ -774,11 +786,11 @@
     text-transform: uppercase;
   }
 
-  /* Markdown callouts have no glyph in their label; they get a pip. */
+  /* Markdown callouts have no glyph in their label; they get the eyebrow's dash. */
   .callout__label:not(:has(svg))::before {
     content: '';
-    width: var(--pip);
-    height: var(--pip);
+    width: 12px;
+    height: var(--px);
     background: currentColor;
     flex: none;
   }
