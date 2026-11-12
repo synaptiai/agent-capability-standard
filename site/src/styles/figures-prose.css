@@ -379,6 +379,12 @@
     color: var(--ink-2);
   }
 
+  /* The check before "Goals" and the cross before "Non-goals" (3.10.12). */
+  .rfc-heading-glyph {
+    margin-right: var(--space-3);
+    vertical-align: -2px;
+  }
+
   /* ---------- H2 dividers (3.10.2) ---------- */
 
   /* A 2px rule of 8px dashes with 4px gaps above every H2, drawn in CSS so it
