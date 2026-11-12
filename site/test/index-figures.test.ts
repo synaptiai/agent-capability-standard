@@ -53,6 +53,36 @@ describe('compliance citation matrices', () => {
     ]);
   });
 
+  it('does not count a citation again inside a Mermaid diagram', () => {
+    const text = [
+      'Corrective actions follow Clause 10.',
+      '',
+      '```mermaid',
+      'flowchart TB',
+      '  accDescr: Actions are tracked per Clause 10.',
+      '  a["Clause 10 procedure"] --> b[Art. 62]',
+      '```',
+      '',
+      '- A list item:',
+      '',
+      '  ```mermaid',
+      '  flowchart LR',
+      '    x["Clause 9"] --> y["Art. 17"]',
+      '  ```',
+      '',
+      'Art. 17 applies.',
+    ].join('\n');
+    const iso = isoClauseMatrix([{ label: 'A', url: '/a/', text }]);
+    expect(iso.columns.map((c) => c.key)).toEqual(['10']);
+    expect(iso.rows[0]!.counts).toEqual([1]);
+    const eu = euArticleMatrix([
+      { label: 'A', url: '/a/', text },
+      { label: 'B', url: '/b/', text: 'Art. 17' },
+    ]);
+    expect(eu.columns.map((c) => c.key)).toEqual(['17']);
+    expect(eu.rows.map((r) => r.counts)).toEqual([[1], [1]]);
+  });
+
   it('agrees with a hand count of the management review', () => {
     const doc: Doc = { label: 'Management review', url: '/x/', text: repoText('docs/compliance/iso42001/management_review.md') };
     const m = isoClauseMatrix([doc]);
