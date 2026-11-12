@@ -73,6 +73,33 @@ Run the composed workflow **debug_code_change** (`reference/workflow_catalog.yam
 11) **Invoke `/audit`** and store output as `audit_out`
     - Record what changed and why: the component, the causes, the plan, the exit code, the verdict, and whether it was rolled back (`rollback_out.restored`; null when the rollback was skipped)
 
+```mermaid
+---
+title: The diagnosis, steps 1 to 6
+---
+flowchart TB
+  accDescr: The workflow observes the failing component, searches for related code, attributes causes, sets the invariants with constrain, critiques the causes and plans a minimal fix.
+  observe[observe] --> search[search] --> attribute[attribute] --> constrain[constrain] --> critique[critique] --> plan[plan]
+```
+
+```mermaid
+---
+title: The fix, steps 7 to 11
+---
+flowchart TB
+  accDescr: After the checkpoint, execute is skipped when the plan has no steps; otherwise verify checks the fix, a failed verdict sends the run through rollback, and every path ends with audit; a fix or verification that fails with R401 or R402 rolls back to the checkpoint and ends the run with that error.
+  checkpoint[checkpoint] --> g1{Plan has steps?}
+  g1 -->|"no: skip to audit"| audit[audit]
+  g1 -->|yes| execute[execute]
+  execute --> verify[verify]
+  verify --> g2{Passed?}
+  g2 -->|yes| audit
+  g2 -->|no| rollback[rollback]
+  rollback --> audit
+  execute -.->|"R401, R402"| stop["Roll back, end with the error"]
+  verify -.->|"R401, R402"| stop
+```
+
 ## Output Contract
 
 Return a structured object:
@@ -288,6 +315,19 @@ assumptions:
 **Commonly precedes:**
 - `explain` - To create debug report for stakeholders
 - `send` - To notify team of resolution
+
+
+```mermaid
+---
+title: Where the workflow usually sits
+---
+flowchart LR
+  accDescr: The debug workflow commonly follows receive or retrieve and commonly precedes explain or send.
+  receive[receive] --> dw[debug-workflow]
+  retrieve[retrieve] --> dw
+  dw --> explain[explain]
+  dw --> send[send]
+```
 
 **Anti-patterns:**
 - Never skip `/observe` to jump directly to `/plan`

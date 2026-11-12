@@ -56,6 +56,21 @@ Run the composed workflow **capability_gap_analysis** (`reference/workflow_catal
 7) **Invoke `/audit`** and store output as `audit_out`
    - Record rationale + decision lineage: the ranking and the plan
 
+```mermaid
+---
+title: How the analysis outputs feed each other
+---
+flowchart TB
+  accDescr: observe feeds its observation to attribute, whose causes feed discover; both compare steps read the discovered patterns, generate builds the plan from the priority ranking and the architecture recommendation, and audit records the ranking and the plan.
+  observe["observe(user_input.domain)"] -->|observation| attribute["attribute(dependencies)"]
+  attribute -->|causes| discover["discover(gap_analysis)"]
+  discover -->|patterns| ca["compare(architecture)"]
+  discover -->|patterns| cp["compare(priority)"]
+  ca -->|recommendation| generate["generate(plan)"]
+  cp -->|ranking| generate
+  generate --> audit[audit]
+```
+
 ## Output Contract
 
 Return a structured object:
@@ -279,6 +294,20 @@ assumptions:
 - `generate` (domain: plan) - To create detailed skill specifications
 - `compare` (domain: priority) - To refine gap prioritization
 - `explain` - To create executive summary
+
+
+```mermaid
+---
+title: Where the workflow usually sits
+---
+flowchart LR
+  accDescr: The gap analysis commonly follows observe or retrieve and commonly precedes generate with domain plan, compare with domain priority, or explain.
+  observe[observe] --> ga[gap analysis]
+  retrieve[retrieve] --> ga
+  ga --> generate["generate(plan)"]
+  ga --> compare["compare(priority)"]
+  ga --> explain[explain]
+```
 
 **Anti-patterns:**
 - Never skip relationship mapping before prioritization

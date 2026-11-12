@@ -56,6 +56,17 @@ A world model captures:
 
 Every step has `skip_if_false: true`, so exactly one branch runs: steps 1-2, or step 3.
 
+```mermaid
+---
+title: The two branches of the bootstrap
+---
+flowchart TB
+  accDescr: With no world state passed in, step 1 invokes world_model_build and step 2 invokes digital_twin_sync_loop on the new baseline; with a world state passed in, step 3 invokes digital_twin_sync_loop from it; exactly one branch runs.
+  q{World state passed in?} -->|no| b1["Step 1: build the world model"]
+  b1 -->|the baseline| b2["Step 2: first sync loop"]
+  q -->|yes| b3["Step 3: first sync loop from the given state"]
+```
+
 ## Output Contract
 
 Return a structured object:
@@ -292,6 +303,7 @@ assumptions:
 - `simulate` - To run what-if scenarios
 - `predict` (domain: risk) - To predict future states
 - `explain` - To generate executive reports
+
 
 **Anti-patterns:**
 - Never skip identity resolution (`detect` → `classify` → `integrate`) before state construction

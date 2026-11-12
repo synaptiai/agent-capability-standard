@@ -41,6 +41,18 @@ This workflow is designed to **model both real and digital systems** using the c
 2. **Checkpoint before mutation** (`/checkpoint`): `mutate` stops if `${checkpoint_out.checkpoint_id} == null`
 3. Any external side effects require explicit approval (do not `send` without approval); `mutate` and `execute` require approval
 
+```mermaid
+---
+title: The hard gates before mutate
+---
+flowchart TB
+  accDescr: mutate runs only when constrain finds the plan compliant and a checkpoint was created, and it needs approval; otherwise it is skipped or stopped.
+  c{"constrain: compliant?"} -->|no| skip[mutate is skipped]
+  c -->|yes| k{"checkpoint created?"}
+  k -->|no| stop[mutate stops]
+  k -->|yes| a[Approval] --> mutate[mutate]
+```
+
 ## Procedure
 
 0) **Ensure baseline exists**: If no twin snapshot exists, run `/digital-twin-bootstrap` instead: it builds the world model and then runs this loop
@@ -74,6 +86,22 @@ Then execute the sync loop:
 9) **Invoke `/transition`** from `state_out.state` and store output as `transition_out`
    - Apply transition rules triggered by new observations; compute next states
 
+
+```mermaid
+---
+title: Steps 1 to 9, the updated snapshot
+---
+flowchart TB
+  accDescr: Signals are received, searched for context in parallel, normalized into canonical events and merged with the previous snapshot; entities are detected and classified, the state step produces the new snapshot, compare diffs it against the previous one, and transition computes next states.
+  receive[receive] --> search["search, in parallel"]
+  receive --> transform["transform(canonical_event)"]
+  transform --> integrate[integrate]
+  integrate --> detect["detect(entity)"] --> classify[classify]
+  integrate --> state[state]
+  state --> compare["compare(state_diff)"]
+  state --> transition[transition]
+```
+
 10) **Invoke `/detect`** (domain: anomaly) for `drift` on the observed state (`state_out.state`), the expected effects (`transition_out.effects`) and the diff (`compare_state_out`), and store output as `detect_anomaly_out`
     - Detect drift/anomalies between expected and observed state
 
@@ -88,6 +116,16 @@ Then execute the sync loop:
 
 14) **Invoke `/constrain`** on `plan_out.steps` (`least_privilege`, `change_policy`) and store output as `constrain_out`
     - Enforce policy and least privilege for planned actions
+
+
+```mermaid
+---
+title: Steps 10 to 14, from drift to a checked plan
+---
+flowchart TB
+  accDescr: detect finds drift from the snapshot, the expected effects and the diff; measure scores the risk, predict forecasts it, plan proposes safe actions and constrain checks them against least privilege and change policy.
+  drift["detect(anomaly): drift"] --> measure["measure(risk)"] --> predict["predict(risk)"] --> plan[plan] --> constrain[constrain]
+```
 
 15) **Invoke `/checkpoint`** on `twin_state` and store output as `checkpoint_out`
     - Create the checkpoint marker before any mutation/side-effect step
@@ -113,6 +151,25 @@ Then execute the sync loop:
 
 21) **Invoke `/explain`** and store output as `explain_out`
     - Produce a decision-ready sync report: drift, actions, verification, next steps
+
+
+```mermaid
+---
+title: Steps 15 to 21, act, verify and record
+---
+flowchart TB
+  accDescr: After the checkpoint, mutate runs only when the plan is compliant; when nothing was mutated, execute, verify and rollback are skipped; a failed verdict sends the run through rollback; every path ends with audit and explain.
+  checkpoint[checkpoint] --> g1{Compliant?}
+  g1 -->|"no: skip to audit"| audit[audit]
+  g1 -->|yes| mutate[mutate]
+  mutate --> execute[execute]
+  execute --> verify[verify]
+  verify --> g2{Passed?}
+  g2 -->|yes| audit
+  g2 -->|no| rollback[rollback]
+  rollback --> audit
+  audit --> explain[explain]
+```
 
 ## Output Contract
 
