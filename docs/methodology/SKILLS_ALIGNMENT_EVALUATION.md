@@ -124,6 +124,17 @@ From the documentation:
 
 **Assessment**: ✅ Our capabilities cover this skill's operations.
 
+```mermaid
+---
+title: The capabilities each analysed skill uses
+---
+flowchart LR
+  accDescr: PDF Processing uses retrieve, transform, detect, verify and act; Excel Analysis uses retrieve, detect, measure, compare, generate and persist; Git Commit Helper uses retrieve, detect, classify and generate.
+  pdf[PDF Processing] --> p1[retrieve] & p2[transform] & p3[detect] & p4[verify] & p5[act]
+  xls[Excel Analysis] --> x1[retrieve] & x2[detect] & x3[measure] & x4[compare] & x5[generate] & x6[persist]
+  git[Git Commit Helper] --> g1[retrieve] & g2[detect] & g3[classify] & g4[generate]
+```
+
 ---
 
 ## 3. Gap Analysis
@@ -192,12 +203,33 @@ python scripts/fill_form.py input.pdf fields.json output.pdf
 
 Or keep `act` but document that it's parameterized by action type.
 
+```mermaid
+---
+title: Splitting act
+---
+flowchart LR
+  accDescr: The single act capability could split into execute, which runs code and returns output, mutate, which changes state, and send, which is already separate.
+  act[act] --> ex["execute: run code, return output"]
+  act --> mu["mutate: change state"]
+  act -.->|already separate| se["send: transmit externally"]
+```
+
 ### 3.4 Progressive Disclosure Pattern
 
 **Skills insight**: Content loads in stages:
 1. Metadata (always) — ~100 tokens
 2. Instructions (when triggered) — ~5k tokens
 3. Resources (as needed) — unlimited
+
+```mermaid
+---
+title: Progressive disclosure in skills
+---
+flowchart TB
+  accDescr: A skill's metadata always loads, about 100 tokens; its instructions load when the skill is triggered, about 5k tokens; and its resources load as needed.
+  m["1 Metadata: always, ~100 tokens"] -->|triggered| i["2 Instructions: ~5k tokens"]
+  i -->|as needed| r["3 Resources: unlimited"]
+```
 
 **Implication for capabilities**: Our capability definitions should also support progressive disclosure:
 - **Level 1**: Capability name + brief description (in workflow metadata)
@@ -263,6 +295,18 @@ Skills documentation shows common workflow patterns. Let's validate:
 
 **Our capabilities cover this**: ✅
 
+```mermaid
+---
+title: Pattern 1, plan then validate then execute
+---
+flowchart TB
+  accDescr: Analyze the form with detect, create the field mapping with plan, validate the mapping with verify, fill the form with execute or mutate, and verify the output.
+  a["Analyze form: detect"] --> m["Create field mapping: plan"]
+  m --> v["Validate mapping: verify"]
+  v --> f["Fill form: execute or mutate"]
+  f --> o["Verify output: verify"]
+```
+
 **Pattern 2: Feedback Loop**
 ```
 1. Make edits (mutate)
@@ -272,6 +316,18 @@ Skills documentation shows common workflow patterns. Let's validate:
 ```
 
 **Our capabilities cover this**: ✅ (verify + conditional logic in workflow)
+
+```mermaid
+---
+title: Pattern 2, the feedback loop
+---
+flowchart TB
+  accDescr: Make edits with mutate, validate with verify, fix and validate again while validation fails, and proceed when it passes.
+  e["Make edits: mutate"] --> v{"Validate: verify"}
+  v -->|fails| fix[Fix]
+  fix --> v
+  v -->|passes| go[Proceed]
+```
 
 **Pattern 3: Progressive Disclosure**
 ```
@@ -317,6 +373,19 @@ Skills documentation shows common workflow patterns. Let's validate:
 - Split `act` → `execute` + `mutate`
 - Add `wait` for async operations
 - Keep `send` for external transmission
+
+```mermaid
+---
+title: The three options
+---
+flowchart TB
+  accDescr: Option A keeps 35 capabilities and documents act's modes; option B splits act into execute and mutate for 36; option C also adds wait for 37; send is kept in B and C.
+  a["A: keep 35, act with implicit modes"]
+  b["B: 36, act becomes execute + mutate"]
+  c["C: 37, execute + mutate, plus wait"]
+  a -->|split act| b
+  b -->|add wait| c
+```
 
 ### Verdict
 
@@ -391,6 +460,27 @@ TOTAL: 36 capabilities
 ## 7. Skills-Capability Mapping Table
 
 For reference, here's how common Skills operations map to capabilities:
+
+```mermaid
+---
+title: Skills operations and their capabilities
+---
+flowchart LR
+  accDescr: Each common skills operation maps to the capability or capabilities in the table below.
+  o1[Read file] --> retrieve
+  o4[Extract data] --> retrieve & transform
+  o2[Search files] --> search
+  o3[Analyze content] --> detect & classify
+  o5[Run script] --> execute
+  o6[Modify file] --> mutate
+  o7[Validate output] --> verify
+  o8[Generate document] --> generate
+  o9[Save results] --> persist
+  o10[Send to API] --> send
+  o11[Create plan] --> plan
+  o12[Compare options] --> compare
+  o13[Explain reasoning] --> explain
+```
 
 | Skills Operation | Capability | Notes |
 |-----------------|------------|-------|
