@@ -243,6 +243,11 @@
     color: var(--ink);
   }
 
+  .spine-legend__glyphs {
+    display: inline-flex;
+    gap: 2px;
+  }
+
   @container (max-width: 639px) {
     .spine {
       --spine-n: 20px;
@@ -275,7 +280,8 @@
 
     .spine .spine__purpose,
     .spine .spine__gates .spine__more,
-    .spine .spine__gates .spine__diamond {
+    .spine .spine__gates .spine__diamond,
+    .spine .spine__fail .spine__failmark {
       display: none;
     }
 

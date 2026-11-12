@@ -201,6 +201,29 @@ describe('check-dist.mjs', () => {
     expect(problems(s)).toEqual([]);
   });
 
+  // A legend entry is keyed by the marks it draws, so two glyph names for one grid are one glyph.
+  const glyph = (rects: string, key: string) => `<svg class="pg" viewBox="0 0 7 7" data-glyph="${key}" aria-hidden="true">${rects}</svg>`;
+  const UNDO = '<rect x="0" y="2" width="7" height="1"></rect>';
+  const MARK = '<rect x="3" y="3" width="1" height="1"></rect>';
+
+  it('fails a legend that draws one glyph for two different entries', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace(
+      '</h1>',
+      `</h1><ul class="spine-legend" aria-label="Key"><li>${glyph(UNDO, 'role:rollback')}<span>step rolls back</span></li><li>${glyph(UNDO, 'fail:rollback')}<span>on failure, roll back</span></li></ul>`,
+    );
+    expect(problems(s)).toEqual(['[legends] /guide/: the legend "Key" draws the same glyph for "step rolls back" and "on failure, roll back"']);
+  });
+
+  it('passes a legend whose entries differ by a lane mark before the same glyph', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace(
+      '</h1>',
+      `</h1><ul class="spine-legend" aria-label="Key"><li>${glyph(UNDO, 'role:rollback')}<span>step rolls back</span></li><li>${glyph(MARK, 'close')}${glyph(UNDO, 'fail:rollback')}<span>on failure, roll back</span></li></ul>`,
+    );
+    expect(problems(s)).toEqual([]);
+  });
+
   it('fails a built file that links to the review pages, which the deploy removes', () => {
     const s = cleanSite();
     s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', '</h1><a href="/_review/glyphs/">Glyphs</a>');

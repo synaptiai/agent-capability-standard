@@ -38,6 +38,7 @@ export function checkSitemap(fileList: string[], xml: string): string[];
 export function pageFigures(html: string): { n: number; title: string | null }[];
 export function copyFigureTitles(md: string): string[];
 export function checkFigureCopies(fileList: string[], read: (file: string) => string): string[];
+export function checkLegends(fileList: string[], read: (file: string) => string): string[];
 export function checkReviewLinks(fileList: string[], read: (file: string) => string): string[];
 export function checkDistDir(distDir: string): { problems: Record<string, string[]>; stats: DistStats };
 export function formatStats(stats: DistStats): string[];

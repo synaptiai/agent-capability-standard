@@ -15,6 +15,8 @@
 // - figures: every numbered figure on a page ("Fig n") has a
 //   "**Figure: {title}.**" block in the page's Markdown copy, and the copy has
 //   no block for a figure the page does not draw (visual spec 6.1);
+// - legends: no legend on a page draws the same glyph (or glyph pair) for two
+//   different entries;
 // - review: no built file outside the review pages (dist/_review/) points at
 //   them, so removing that folder before deploying leaves nothing dangling.
 // Paths are compared with the case they have in dist/, as the host compares
@@ -410,6 +412,34 @@ export function checkFigureCopies(fileList, read) {
   return problems;
 }
 
+/**
+ * No legend draws one glyph for two entries with different words. A legend
+ * is an element with a class ending in "legend"; an entry is a child element
+ * with at least one SVG, keyed by the marks of all its SVGs, so two glyph keys
+ * that draw the same grid count as one glyph.
+ */
+export function checkLegends(fileList, read) {
+  const problems = [];
+  for (const f of fileList.filter((x) => x.endsWith('.html'))) {
+    const html = read(f);
+    for (const m of html.matchAll(/<([a-zA-Z][\w-]*)\b[^>]*\sclass="(?:[^"]*\s)?[\w-]*legend(?:\s[^"]*)?"[^>]*>/g)) {
+      const name = /\saria-label="([^"]*)"/.exec(m[0])?.[1] ?? /class="([^"]*)"/.exec(m[0])[1];
+      const words = new Map();
+      for (const [a, b] of childElements(html, m.index)) {
+        const item = html.slice(a, b);
+        const svgs = item.match(/<svg\b[\s\S]*?<\/svg>/g);
+        if (!svgs) continue;
+        const key = svgs.map((s) => s.replace(/^<svg\b[^>]*>/, '').replace(/\s+/g, ' ')).join('|');
+        const label = plainText(item.replace(/<svg\b[\s\S]*?<\/svg>/g, ''));
+        const seen = words.get(key);
+        if (seen === undefined) words.set(key, label);
+        else if (seen !== label) problems.push(`${pageUrl(f)}: the legend "${decodeEntities(name)}" draws the same glyph for "${seen}" and "${label}"`);
+      }
+    }
+  }
+  return problems;
+}
+
 /** Built files outside the review pages that point at them. */
 export function checkReviewLinks(fileList, read) {
   const re = new RegExp(`(^|["'(/=\\s])/?${REVIEW_DIR}/`);
@@ -439,6 +469,7 @@ export function checkDistDir(distDir) {
     copies: has.has('llms.txt') ? checkCopies(fileList, read('llms.txt')) : [],
     sitemap: has.has('sitemap.xml') ? checkSitemap(fileList, read('sitemap.xml')) : [],
     figures: checkFigureCopies(fileList, read),
+    legends: checkLegends(fileList, read),
     review: checkReviewLinks(fileList, read),
   };
   const sum = (list) => list.reduce((n, f) => n + size(f), 0);

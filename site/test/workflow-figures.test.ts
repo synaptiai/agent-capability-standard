@@ -8,6 +8,7 @@ import { loadWorkflows, parseCatalog } from '../src/data/workflows';
 import { dataFlowGrid, indexStripLabel, readsList, riskSummary, workflowSpine } from '../src/lib/workflow-figures';
 import { workflowsIndexTwin, workflowTwin } from '../src/twins/workflows';
 import { allCatalogSteps, catalogFiles, repoText } from './independent';
+import { ALL_GRIDS, resolveGlyphKey } from '../src/pixel/keys';
 
 // A 5-step workflow with a 2-step parallel group, a sub-workflow step, every
 // gate action and every failure action (spec 6.3: the corpus cannot exercise these).
@@ -33,6 +34,35 @@ const FIXTURE = JSON.stringify({
 const fixture = () => parseCatalog('fixture.json', FIXTURE, 'core', loadOntology())[0]!;
 
 describe('step spine on the fixture (F-W1)', () => {
+  it('never lists one drawing twice with different words in its key', () => {
+    // The issue #125 audit: "step rolls back" and "on failure, roll back" were the same undo glyph, and so
+    // were "gate stops the run" and "on failure, stop". The fixture has every gate and failure action; a
+    // rollback step is added so the role, gate and failure rollbacks all appear in one key.
+    const wf = fixture();
+    const rb = parseCatalog(
+      'fixture.json',
+      FIXTURE.replace('"steps":[', '"steps":[{"capability":"checkpoint","purpose":"Save first","store_as":"cp0"},').replace(
+        /\]\}\}$/,
+        ',{"capability":"rollback","purpose":"Undo","store_as":"rb","input_bindings":{"checkpoint":"${cp0}"}}]}}',
+      ),
+      'core',
+      loadOntology(),
+    )[0]!;
+    expect(rb.steps.length).toBe(wf.steps.length + 2);
+    const s = workflowSpine(rb);
+    expect(s.legend.map((l) => l.glyph)).toEqual(expect.arrayContaining(['role:rollback', 'gate:rollback', 'fail:rollback', 'gate:stop', 'fail:stop']));
+    const drawn = (k: string) => (k === 'pips' ? 'pips' : ALL_GRIDS[resolveGlyphKey(k)!]!.join('/'));
+    const byDrawing = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const l of s.legend) {
+      const key = [l.marker, l.glyph].filter((x): x is string => !!x).map(drawn).join(' + ');
+      const seen = byDrawing.get(key);
+      if (seen !== undefined && seen !== l.label) clashes.push(`"${seen}" and "${l.label}"`);
+      byDrawing.set(key, l.label);
+    }
+    expect(clashes).toEqual([]);
+  });
+
   it('draws the parallel group as a fork bar, one row of two steps, and a join bar', () => {
     const s = workflowSpine(fixture());
     expect(s.rows.map((r) => r.kind)).toEqual(['step', 'fork', 'parallel', 'join', 'step', 'step']);

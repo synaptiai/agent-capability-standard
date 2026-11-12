@@ -105,8 +105,20 @@ export interface SpineSpan {
 export interface LegendItem {
   /** A glyph key, or 'pips' for the risk pips. */
   glyph: string;
+  /**
+   * The lane mark drawn before the glyph: the gate diamond for a gate action,
+   * the failure cross for a failure action. One action glyph serves the gate
+   * lane, the failure lane and (for rollback) the step's role, so the mark
+   * keeps their legend entries apart.
+   */
+  marker?: string;
   label: string;
 }
+
+/** The mark that leads the failure lane, as the diamond leads the gate lane. */
+export const FAILURE_MARK = 'close';
+/** The mark that leads the gate lane. */
+export const GATE_MARK = 'diamond';
 
 export interface Spine {
   workflowId: string;
@@ -206,11 +218,12 @@ export function workflowSpine(wf: Workflow): Spine {
     if (has(role)) legend.push({ glyph: ROLE_GLYPH[role]!, label: role === 'mutating' ? `step ${ROLE_WORDS[role]}${alsoChange}` : `step ${ROLE_WORDS[role]}` });
   }
   if (steps.some((s) => s.condition !== null)) legend.push({ glyph: 'flow:condition', label: 'runs only when its condition holds (dashed tile)' });
-  if (steps.some((s) => s.gates.length > 0)) legend.push({ glyph: 'diamond', label: 'step has gates' });
+  if (steps.some((s) => s.gates.length > 0)) legend.push({ glyph: GATE_MARK, label: 'step has gates' });
   const gateActions = [...new Set(steps.flatMap((s) => s.gates))];
-  for (const a of gateActions) legend.push({ glyph: `gate:${a}`, label: GATE_WORDS[a] ?? `gate action ${a}` });
+  for (const a of gateActions) legend.push({ glyph: `gate:${a}`, marker: GATE_MARK, label: GATE_WORDS[a] ?? `gate action ${a}` });
+  if (steps.some((s) => s.failures.length > 0)) legend.push({ glyph: FAILURE_MARK, label: 'step says what to do on failure' });
   const failActions = [...new Set(steps.flatMap((s) => s.failures))];
-  for (const a of failActions) legend.push({ glyph: `fail:${a}`, label: FAILURE_WORDS[a] ?? `on failure, ${a}` });
+  for (const a of failActions) legend.push({ glyph: `fail:${a}`, marker: FAILURE_MARK, label: FAILURE_WORDS[a] ?? `on failure, ${a}` });
   if (steps.some((s) => s.workflowId !== null)) legend.push({ glyph: 'flow:invoke', label: 'runs another workflow' });
   if (rows.some((r) => r.kind === 'fork')) {
     legend.push({ glyph: 'fork', label: 'parallel group starts' }, { glyph: 'flow:join', label: 'parallel group joins' });
