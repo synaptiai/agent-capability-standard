@@ -50,6 +50,8 @@ const FIXTURE = [
   '',
   'one',
   '',
+  '---',
+  '',
   '### Example 2: Mutation Failure',
   '',
   'two',
@@ -120,16 +122,23 @@ describe('rehype-capability-skill', () => {
     for (const [name, mark] of rows) expect([name, mark]).toEqual([name, name! in out.properties ? ((out.required ?? []).includes(name!) ? 'required' : 'optional') : '']);
   });
 
-  it('makes each example a closed details whose summary keeps the H3 and its id, with no anchor link', async () => {
+  it('makes each example a details, the first open and the rest closed (visual spec 3.1), whose summary keeps the H3 and its id, with no anchor link', async () => {
     const html = await render('skills/mutate/SKILL.md');
     const details = [...html.matchAll(/<details class="skill-example"( open)?>/g)];
     expect(details).toHaveLength(2);
-    expect(details.every((d) => d[1] === undefined)).toBe(true);
+    expect(details.map((d) => d[1] !== undefined)).toEqual([true, false]);
     expect(html).toMatch(/<summary class="skill-example__summary">[^]*?<h3 id="example-1-happy-path">Example 1: Happy Path<\/h3><\/summary>/);
     const summaries = [...html.matchAll(/<summary class="skill-example__summary">([^]*?)<\/summary>/g)].map((m) => m[1]!);
     expect(summaries.some((s) => s.includes('heading-anchor'))).toBe(false);
     // The lead-in paragraph stays outside the examples.
-    expect(html).toMatch(/<p>Lead-in.<\/p>\s*<details class="skill-example">/);
+    expect(html).toMatch(/<p>Lead-in.<\/p>\s*<details class="skill-example" open>/);
+  });
+
+  it("drops the thematic break that ended an example in the Markdown, and keeps the example's text", async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    const first = html.slice(html.indexOf('<details class="skill-example" open>'), html.indexOf('</details>', html.indexOf('<details class="skill-example" open>')));
+    expect(first).toContain('<p>one</p>');
+    expect(first).not.toContain('<hr');
   });
 
   it('gives a "Failure" example the caution glyph and the others the code glyph', async () => {

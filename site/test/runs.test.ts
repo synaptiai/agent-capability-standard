@@ -25,21 +25,21 @@ describe('measureRuns on the fixture page', () => {
   const runs = measureRuns(fixture.geometry);
 
   it('finds the runs before, between and after the two counted figures', () => {
-    // Body 100..7900 (the closed details under #code adds its 50px summary); figures 1100..1400 and 6200..6300.
+    // Body 100..8450 (the closed details under #code adds its 50px summary; #short adds 400px); figures 1100..1400 and 6200..6300.
     expect(runs.map((r) => [r.top, r.bottom, r.height])).toEqual([
       [100, 1100, 1000],
       [1400, 6200, 4800],
-      [6300, 7900, 1600],
+      [6300, 8450, 2150],
     ]);
   });
 
   it('subtracts the exempt sections each run crosses', () => {
     // #notes 1400..4050 lies inside the second run: 4800 - 2650 = 2150.
-    // The visible tall fence 6500..7500 lies inside the third: 1600 - 1000 = 600.
+    // The open example 6500..7650 under #code lies inside the third: 2150 - 1150 = 1000.
     expect(runs.map((r) => [r.exempt, r.net, r.labels])).toEqual([
       [0, 1000, []],
       [2650, 2150, ['#notes (a)']],
-      [1000, 600, ['#code (b)']],
+      [1150, 1000, ['#code (b)']],
     ]);
     expect(longestRun(runs)?.net).toBe(2150);
   });
@@ -122,7 +122,7 @@ describe('exempt runs and scope', () => {
     expect(rows('template:capability')).toEqual(['examples:b']);
     expect(rows('/capabilities/rollback/')).toEqual(['intent:a']);
     expect(rows('template:domain')).toEqual(['customization-guide:b', 'integration-examples:b']);
-    expect(EXEMPT_RUNS.find((e) => e.page === 'template:capability')?.extent).toBe('first-tall-fence');
+    expect(EXEMPT_RUNS.find((e) => e.page === 'template:capability')?.extent).toBe('open-first-example');
     expect(exemptRunsFor('/rfcs/0001/', 'rfc').map((e) => e.anchor)).toEqual(['*']);
     expect(exemptRunsFor('/compliance/eu-ai-act/', 'prose').map((e) => e.anchor)).toEqual(['reading-order', 'document-register']);
   });

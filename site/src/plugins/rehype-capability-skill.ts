@@ -12,9 +12,10 @@
 //   becomes a <details> whose summary holds the heading with the code glyph
 //   (caution for a title that contains "Failure"). The
 //   heading's hidden anchor link is dropped, so the summary holds no link.
-//   Every example starts closed: an open first example was the longest run
-//   without a figure on most capability pages (its fences alone are often
-//   taller than a screen), and the summaries list every example.
+//   The first example starts open and the others closed (visual spec 3.1), so
+//   a reader sees one worked example without a click and the summaries list
+//   the rest. When the open example's fence alone is taller than a screen,
+//   the run it makes is exempt (category b, spec 3.12).
 // - Safety Constraints: the section's content sits in a panel with the
 //   caution glyph.
 // - Output Contract: the section's first code block folds into a
@@ -140,8 +141,8 @@ export default function rehypeCapabilitySkill() {
       if (table) markRequired(table);
     }
 
-    // Examples: one <details> per H3.
-    foldExamples(kids);
+    // Examples: one <details> per H3, the first one open.
+    foldExamples(kids, true);
   };
 }
 
@@ -236,8 +237,11 @@ function foldOutputFence(kids: RootContent[]): void {
   kids.splice(i, 1, fold);
 }
 
-/** Each "### Example" of the Examples section and its content up to the next H3 or H2 becomes a closed <details>. */
-function foldExamples(kids: RootContent[]): void {
+/**
+ * Each "### Example" of the Examples section and its content up to the next H3
+ * or H2 becomes a <details>; all closed, or the first open when `openFirst`.
+ */
+function foldExamples(kids: RootContent[], openFirst = false): void {
   const ex = sections(kids).get('examples');
   if (!ex) return;
   const [s, e] = ex;
@@ -250,13 +254,23 @@ function foldExamples(kids: RootContent[]): void {
     else groups.at(-1)!.body.push(c);
   }
   if (groups.length === 0) return;
-  const details = groups.map(({ h3, body }): Element => {
+  // A thematic break that ended an example in the Markdown ("---" between
+  // examples) is dropped: each example is its own panel, so a rule at the
+  // foot of an open one only adds height.
+  for (const g of groups) {
+    while (g.body.length > 0) {
+      const last = g.body.at(-1)!;
+      if ((last.type === 'text' && last.value.trim() === '') || isEl(last, 'hr')) g.body.pop();
+      else break;
+    }
+  }
+  const details = groups.map(({ h3, body }, n): Element => {
     h3.children = h3.children.filter((c) => !(isEl(c, 'a') && ((c.properties?.className as string[]) ?? []).includes('heading-anchor')));
     const failure = /failure/i.test(text(h3));
     return {
       type: 'element',
       tagName: 'details',
-      properties: { className: ['skill-example'] },
+      properties: { className: ['skill-example'], ...(openFirst && n === 0 ? { open: true } : {}) },
       children: [
         {
           type: 'element',
