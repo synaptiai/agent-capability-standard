@@ -49,6 +49,17 @@ This design creates three classes of risk:
 
 **Unauditable decisions.** When an agent orchestrates multi-step workflows (Category 10) or makes governance decisions (Category 13), there is no structural requirement to record the evidence chain that led to each decision. Post-hoc auditing becomes impossible when the reasoning trail was never captured.
 
+```mermaid
+---
+title: Three risks of optional safety
+---
+flowchart LR
+  accDescr: Treating safety as optional skills in Categories 8 and 13 leaves three classes of risk: ungrounded claims, as from a RAG pipeline in Category 6; irreversible mutations, in Categories 9, 12 and 14; and unauditable decisions, in Categories 10 and 13.
+  opt["Safety as optional skills, Categories 8 and 13"] --> r1["Ungrounded claims: RAG output, Category 6"]
+  opt --> r2["Irreversible mutations: Categories 9, 12, 14"]
+  opt --> r3["Unauditable decisions: Categories 10, 13"]
+```
+
 ### 2.2 The Principle: Safety Must Be Structural
 
 The fundamental insight motivating this proposal is that agent safety cannot be achieved through optional skills. Safety must be woven into the execution fabric itself. Consider an analogy: a programming language does not make memory safety "a library you can import." Languages like Rust encode memory safety into the type system. Similarly, agent frameworks should encode safety into their capability contracts.
@@ -666,6 +677,23 @@ steps:
       destination: "eu-west-1"
 ```
 
+
+```mermaid
+---
+title: The policy-checked export
+---
+flowchart TB
+  accDescr: The constrain step checks the export against three constraints, PII data residency and manager approval, which block on violation, and audit logging, which only warns; the export runs only when the check is compliant.
+  c["constrain, skill 160103"] --> r1["Data residency: block, critical"]
+  c --> r2["Manager approval: block, high"]
+  c --> r3["Export logging: warn, medium"]
+  r1 --> q{Compliant?}
+  r2 --> q
+  r3 --> q
+  q -->|yes| ex["Export, skill 090201"]
+  q -->|no| no[The export does not run]
+```
+
 > **Note:** The expression syntax used in `condition` fields (variable interpolation `${}`, comparison operators, method calls like `.startsWith()`, `.includes()`, logical operators `AND`/`OR`) is intentionally left implementation-defined. Conforming implementations SHOULD use an established expression language such as [Google CEL](https://github.com/google/cel-spec), [JSONPath](https://datatracker.ietf.org/doc/rfc9535/), or [Rego](https://www.openpolicyagent.org/docs/latest/policy-language/). The examples in this proposal use a pseudocode syntax for readability.
 
 ---
@@ -805,6 +833,18 @@ These extensions are designed to be fully backward compatible:
 | Checkpoint-before-high-risk rule | Opt-in | Enforced only when workflow validation is enabled |
 
 Implementations can adopt these extensions incrementally. A framework that only adds evidence anchors -- without checkpoints or constraints -- still gains traceability benefits. Full adoption provides the complete safety guarantee.
+
+
+```mermaid
+---
+title: Adopting the extensions in steps
+---
+flowchart LR
+  accDescr: A framework that adds only evidence anchors gains traceability; adding checkpoints and constraints as well, full adoption, gives the complete safety guarantee.
+  ea[Evidence anchors only] -->|gains| tr[Traceability]
+  ea -->|"add checkpoints and constraints"| full[Full adoption]
+  full -->|gives| sg[The complete safety guarantee]
+```
 
 ---
 

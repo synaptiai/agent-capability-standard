@@ -29,6 +29,17 @@ This RFC answers all three and specifies Standard v1.1.0
    (fresh context, model family, role, sender filtering) ship now; naming a
    specific agent waits for RFC-0002's identity object.
 
+```mermaid
+---
+title: The three questions and their answers
+---
+flowchart LR
+  accDescr: Q1, how to add fields, is answered by named, versioned extensions that a workflow must declare; Q2, how E2 relates to identity, by shipping the identity-free parts of E2 now and naming an agent later; Q3, why the validator and engine disagree, by specifying the rules and keeping one reference implementation.
+  q1["Q1: how to add fields"] --> a1["Named, versioned extensions that a workflow declares"]
+  q2["Q2: E2 and identity"] --> a2["E2 split: identity-free hints now, a named agent later"]
+  q3["Q3: validator and engine disagree"] --> a3["Rules specified, one reference implementation"]
+```
+
 ## Motivation
 
 Orchestrators built on the standard need to pause for external events,
@@ -98,6 +109,17 @@ of declaration and ontology, and a weaker declaration is W602 and has no
 effect. `mutation_overridable` lets `audit` (append-only, low risk, no
 checkpoint or approval) declare `mutation: false`.
 
+```mermaid
+---
+title: The effective safety flag
+---
+flowchart LR
+  accDescr: An omitted flag inherits from the ontology; a declared flag that is stricter than the ontology takes effect, and a weaker one is warning W602 and has no effect.
+  d{Step declares the flag?} -->|no| inh[Inherits the ontology value]
+  d -->|stricter| str[The declaration takes effect]
+  d -->|weaker| w["W602, no effect: the ontology value holds"]
+```
+
 ### 4) Diagnostics have fixed severities
 
 V/B/S/R/F codes are errors and the new W6xx codes are warnings; strict mode
@@ -140,6 +162,16 @@ before|after`.
 The validator and a sans-IO executor live in a Rust crate compiled into the
 Python package; `tools/validate_workflows.py` and the Python
 `WorkflowEngine` both call it, so they cannot disagree.
+
+```mermaid
+---
+title: One core behind both entry points
+---
+flowchart TB
+  accDescr: The validator and the sans-IO executor live in one Rust crate compiled into the Python package, and both tools/validate_workflows.py and the Python WorkflowEngine call it.
+  cli[The CLI validator] --> core["Rust core in the Python package: validator, sans-IO executor"]
+  eng[WorkflowEngine] --> core
+```
 
 ## Backward compatibility
 
@@ -276,6 +308,20 @@ more gaps on the standard's side, closed in the candidate:
   the act-after and ordered-after rules, as a handler is; reading a
   deferred output still defers it (§5.14). The rules themselves stay: the
   author opts out per step, where running ahead is safe.
+
+
+```mermaid
+---
+title: What a deferral holds back
+---
+flowchart LR
+  accDescr: A deferred step holds back the steps that read its output, the steps that may act on the world and the steps the ontology orders after it; a step marked after_deferral run is exempt from the last two but is still deferred when it reads a deferred output; steps that only read, reason or record run.
+  def[A deferred step] --> r[Steps that read its output]
+  def --> w[Steps that may act on the world]
+  def --> o[Steps the ontology orders after it]
+  w -.-> ex["With after_deferral: run, these two run"]
+  o -.-> ex
+```
 
 ## Open questions
 
