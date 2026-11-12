@@ -1290,8 +1290,10 @@
     }
   }
 
+  /* No list-item spacing from the prose styles: the boxes of a row start level. */
   .levels__col,
   .bumps__tile {
+    margin: 0;
     padding: var(--space-2);
     border: var(--border);
     background: var(--bg);
@@ -1600,6 +1602,12 @@
 
   .raised thead th a {
     font-family: var(--font-mono);
+  }
+
+  /* Section numbers such as 5.10 and 5.11 are wider than a cell: a gap between them. */
+  .fig__drawing .raised thead th,
+  .raised thead th {
+    padding: 2px 4px;
   }
 
   .raised tbody th {

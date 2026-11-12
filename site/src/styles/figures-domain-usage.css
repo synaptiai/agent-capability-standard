@@ -109,7 +109,6 @@
   }
 
   .wf-card--listed .wf-card__body {
-    flex-direction: column;
     align-items: flex-start;
   }
 }
