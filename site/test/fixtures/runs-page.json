@@ -17,5 +17,6 @@
       { "key": "1", "label": "#code (b)", "top": 6450, "bottom": 7450 }
     ]
   },
+  "small": [{ "top": 4100, "bottom": 4300 }],
   "missing": ["2"]
 }

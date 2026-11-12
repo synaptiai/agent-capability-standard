@@ -126,7 +126,7 @@ describe('the report', () => {
   it('fails an enforced page only on a net run over the limit, reports the rest, and flags a missing page anchor', () => {
     const missing = EXEMPT_RUNS.find((e) => e.page === '/start/overview/' && e.anchor === 'license')!;
     const pages = new Map([
-      ['/capabilities/x/', { wide: { template: 'capability', width: 1440, runs: [run(0, 2000), run(2000, 500)], missing: [] } }],
+      ['/capabilities/x/', { wide: { template: 'capability', width: 1440, runs: [run(0, 2000), run(2000, 500)], small: [{ top: 300, bottom: 340 }], missing: [] } }],
       ['/start/overview/', { wide: { template: 'prose', width: 1440, runs: [run(0, 3000, 1500, ['#quick-start (b)'])], missing: [missing] } }],
       ['/background/grounded-agency/', { wide: { template: 'prose', width: 1440, runs: [run(0, 5000)], missing: [] } }],
     ]);
@@ -139,7 +139,7 @@ describe('the report', () => {
     expect(s.missing).toEqual(['/start/overview/#license']);
     const lines = reportLines(s);
     expect(lines[0]).toMatch(/^report \/background\/grounded-agency\/ \[prose\] run of 5000px/);
-    expect(lines.find((l) => l.includes('/capabilities/x/'))).toMatch(/^FAIL /);
+    expect(lines.find((l) => l.includes('/capabilities/x/'))).toMatch(/^FAIL .*; 1 figure\(s\) inside drawn under 96x64px, not counted;/);
     expect(lines.find((l) => l.includes('/start/overview/'))).toMatch(/^exempt .*1500px exempt \(#quick-start \(b\)\), net 1500px/);
     expect(lines.at(-1)).toBe('STALE  exempt run /start/overview/#license: no such heading');
   });

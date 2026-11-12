@@ -49,12 +49,13 @@ export function collectGeometry({ entries, selector, min, vh }) {
   const { top, bottom } = y(bodyEl);
   const body = { top, bottom };
   const figures = [];
+  const small = [];
   for (const el of bodyEl.querySelectorAll(selector)) {
     const drawing = el.querySelector(':scope .fig__drawing') ?? el;
     const d = y(drawing);
-    if (d.width < min.width || d.height < min.height) continue;
     const f = y(el);
-    figures.push({ top: f.top, bottom: f.bottom });
+    if (d.width < min.width || d.height < min.height) small.push({ top: f.top, bottom: f.bottom });
+    else figures.push({ top: f.top, bottom: f.bottom });
   }
   const headings = [...bodyEl.querySelectorAll('h1, h2, h3, h4, h5, h6')].filter((h) => !h.closest('figure'));
   const level = (h) => Number(h.tagName.slice(1));
@@ -83,7 +84,7 @@ export function collectGeometry({ entries, selector, min, vh }) {
     if (fence && fence.height > vh) exempt.push({ key: e.key, label, top: fence.top, bottom: fence.bottom });
   }
   const template = [...document.body.classList].find((c) => c.startsWith('page--') && !c.startsWith('page--with') && !c.startsWith('page--no-'));
-  return { template: template ? template.slice('page--'.length) : '', geometry: { body, figures, exempt }, missing };
+  return { template: template ? template.slice('page--'.length) : '', geometry: { body, figures, exempt }, small, missing };
 }
 
 /** One page's result: its runs at `width`, and the exempt entries whose heading is missing. */
@@ -102,6 +103,7 @@ async function measurePage(page, url, width) {
   return {
     template: raw.template,
     width,
+    small: raw.small,
     runs: measureRuns(geometry),
     missing: raw.missing.filter((k) => applies.has(k)).map((k) => EXEMPT_RUNS[Number(k)]),
   };
@@ -122,7 +124,7 @@ export async function selfCheck(browser) {
     await page.setContent(readFileSync(FIXTURE, 'utf8'));
     const entries = want.entries.map((e, i) => ({ ...e, key: String(i), label: exemptLabel(e) }));
     const got = await page.evaluate(collectGeometry, { entries, selector: INFO_FIGURE_SELECTOR, min: MIN_DRAWING, vh: RUN_VIEWPORT.height });
-    const expected = { template: want.template, geometry: want.geometry, missing: want.missing };
+    const expected = { template: want.template, geometry: want.geometry, small: want.small, missing: want.missing };
     return isDeepStrictEqual(got, expected)
       ? []
       : [`the fixture page measured ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`];
@@ -146,6 +148,7 @@ export async function runSweep(dist, { only = null, concurrency = 6, log = () =>
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch(process.env.ACS_CHROMIUM ? { executablePath: process.env.ACS_CHROMIUM } : {});
   const pages = new Map(paths.map((p) => [p, {}]));
+  const failed = [];
   try {
     const broken = await selfCheck(browser);
     if (broken.length > 0) throw new Error(`check-runs: the collector is broken: ${broken.join('; ')}`);
@@ -158,7 +161,10 @@ export async function runSweep(dist, { only = null, concurrency = 6, log = () =>
           while (queue.length > 0) {
             const p = queue.shift();
             const res = await page.goto(base + p, { waitUntil: 'load' });
-            if (!res || res.status() !== 200) continue;
+            if (!res || res.status() !== 200) {
+              failed.push(`${p} at ${width}px: HTTP ${res ? res.status() : 'no response'}`);
+              continue;
+            }
             const r = await measurePage(page, p, width);
             if (r) pages.get(p)[width === NARROW ? 'narrow' : 'wide'] = r;
           }
@@ -172,7 +178,7 @@ export async function runSweep(dist, { only = null, concurrency = 6, log = () =>
     await browser.close();
     server.close();
   }
-  return summarise(pages, only === null);
+  return { ...summarise(pages, only === null), failed };
 }
 
 /**
@@ -193,7 +199,7 @@ export function summarise(pages, complete = true) {
     for (const e of exemptRunsFor(url, r.wide.template)) if (!r.wide.missing.includes(e)) found.add(e);
     // An entry for this page (not a whole template) must find its heading here.
     for (const e of r.wide.missing) if (!e.page.startsWith('template:')) missing.push(`${url}#${e.anchor}`);
-    results.push({ url, template: r.wide.template, enforced, longest, narrow, over, failing: enforced ? over.filter((run) => run.net > limit) : [] });
+    results.push({ url, template: r.wide.template, enforced, longest, narrow, over, small: r.wide.small ?? [], failing: enforced ? over.filter((run) => run.net > limit) : [] });
   }
   // A template entry is stale when no page of the template has its heading.
   const stale = complete
@@ -212,7 +218,9 @@ export function reportLines({ limit, results, missing }) {
     for (const run of r.over) {
       const scope = r.enforced ? (run.net > limit ? 'FAIL' : 'exempt') : 'report';
       const ex = run.exempt > 0 ? `, ${px(run.exempt)} exempt (${run.labels.join(', ')}), net ${px(run.net)}` : '';
-      lines.push(`${scope.padEnd(6)} ${r.url} [${r.template}] run of ${px(run.height)} from y=${px(run.top)}${ex}; longest at 360px ${px(r.narrow?.net ?? 0)}`);
+      const n = (r.small ?? []).filter((f) => f.top >= run.top && f.bottom <= run.bottom).length;
+      const sm = n > 0 ? `; ${n} figure(s) inside drawn under ${MIN_DRAWING.width}x${MIN_DRAWING.height}px, not counted` : '';
+      lines.push(`${scope.padEnd(6)} ${r.url} [${r.template}] run of ${px(run.height)} from y=${px(run.top)}${ex}${sm}; longest at 360px ${px(r.narrow?.net ?? 0)}`);
     }
   }
   for (const m of missing) lines.push(`STALE  exempt run ${m}: no such heading`);
@@ -233,6 +241,8 @@ if (isMain(import.meta.url)) {
     `check-runs: ${summary.results.length} pages; ${underTarget} meet the ${summary.target}px target; ` +
       `${failing.length} enforced page(s) have a run over ${summary.limit}px (${enforce ? 'enforced' : 'report only; set ACS_RUNS_ENFORCE=1 to fail'})`,
   );
+  for (const f of summary.failed) console.error(`check-runs: ${f}`);
+  if (summary.failed.length > 0) process.exit(1);
   if (summary.missing.length > 0) {
     console.error(`check-runs: ${summary.missing.length} exempt run(s) name a heading that does not exist`);
     process.exit(1);

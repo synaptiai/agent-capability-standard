@@ -4,6 +4,7 @@ import type { ExemptRun, PageGeometry, Run } from '../src/lib/runs';
 export interface PageResult {
   template: string;
   width: number;
+  small?: { top: number; bottom: number }[];
   runs: Run[];
   missing: ExemptRun[];
 }
@@ -17,6 +18,7 @@ export interface Summary {
     longest: Run | null;
     narrow: Run | null;
     over: Run[];
+    small: { top: number; bottom: number }[];
     failing: Run[];
   }[];
   missing: string[];
@@ -26,11 +28,11 @@ export function collectGeometry(args: {
   selector: string;
   min: { width: number; height: number };
   vh: number;
-}): { template: string; geometry: PageGeometry; missing: string[] } | null;
+}): { template: string; geometry: PageGeometry; small: { top: number; bottom: number }[]; missing: string[] } | null;
 export function selfCheck(browser: unknown): Promise<string[]>;
 export function runSweep(
   dist: string,
   options?: { only?: string[] | null; concurrency?: number; log?: (m: string) => void },
-): Promise<Summary>;
+): Promise<Summary & { failed: string[] }>;
 export function summarise(pages: Map<string, { wide?: PageResult; narrow?: PageResult }>, complete?: boolean): Summary;
 export function reportLines(summary: Summary): string[];
