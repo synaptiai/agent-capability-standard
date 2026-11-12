@@ -608,17 +608,6 @@ The validator operates at four conformance levels:
 **L3 (Contracts)**: Binding types vs. consumer schemas
 **L4 (Patches)**: Coercion registry and patch suggestions
 
-```mermaid
----
-title: The four validation levels
----
-flowchart LR
-  accDescr: The validator's four levels add, in turn, capability and prerequisite checks, schema and type inference, binding contracts, and patch suggestions.
-  l1["L1 Basic: capabilities, prerequisites"] --> l2["L2 Schema: $ref, type inference"]
-  l2 --> l3["L3 Contracts: binding types"]
-  l3 --> l4["L4 Patches: coercions, patches"]
-```
-
 ### 7.2 Error Model
 
 Diagnostics are categorized:

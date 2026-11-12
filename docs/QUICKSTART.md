@@ -25,8 +25,6 @@ The validator catches issues that would otherwise fail silently:
 
 Fixing these statically saves hours of runtime debugging and prevents data corruption from half-executed workflows.
 
----
-
 ```mermaid
 ---
 title: The six steps
@@ -39,6 +37,8 @@ flowchart TB
   s4 --> s5["5 Explore the capability ontology"]
   s5 --> s6["6 Choose your domain"]
 ```
+
+---
 
 ## Prerequisites
 

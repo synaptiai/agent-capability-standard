@@ -1053,8 +1053,6 @@ Ensure: Errors E, Suggestions S
 24: return E, S
 ```
 
----
-
 ```mermaid
 ---
 title: Algorithm 1 for each step
@@ -1070,6 +1068,8 @@ flowchart TB
   c3 --> store["Store the output schema under store_as"]
   store -->|next step| c1
 ```
+
+---
 
 ## Appendix D: Practitioner Adoption Guide
 

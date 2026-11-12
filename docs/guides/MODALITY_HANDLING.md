@@ -553,8 +553,6 @@ flowchart LR
       speed: 1.0
 ```
 
----
-
 ```mermaid
 ---
 title: Caption, then narration
@@ -565,6 +563,8 @@ flowchart TB
   t -->|caption_out.output| g["generate, domain: audio"]
   g --> n["narration_out (wav)"]
 ```
+
+---
 
 ## 4. Evidence Grounding for Modalities
 
@@ -731,8 +731,6 @@ For more information on OASF:
 - OASF Skill Categories: [https://schema.oasf.outshift.com/skill_categories](https://schema.oasf.outshift.com/skill_categories) (as of OASF v0.8.0, January 2026)
 - Full comparison: [docs/research/analysis/OASF_comparison.md](../research/analysis/OASF_comparison.md)
 
----
-
 ```mermaid
 ---
 title: Grounded Agency against OASF on modality
@@ -742,6 +740,8 @@ flowchart LR
   oasf["OASF: a skill per modality, in Computer Vision, Audio and Multi-modal categories"] -->|same expressiveness| ga["Grounded Agency: atomic capabilities with a domain parameter"]
   ga --> safe["Inherited: evidence anchors, confidence, checkpoint requirements"]
 ```
+
+---
 
 ## Appendix A: Domain Parameter Naming Conventions
 
