@@ -1,9 +1,9 @@
 ---
 // F-W2, which step reads which stored output (visual spec 3.3). A real
 // table: one row per step, one column per stored output (named by the step
-// that stores it). The step's own output is a cell with a 2px ink border and
-// the `flow:store` glyph; an output it reads is a cell with a thin border and
-// the `flow:read` glyph. Glyphs are drawn at 2x, so they can be told apart;
+// that stores it). The step's own output is a cell with an --ink border and
+// the `flow:store` glyph; an output it reads is a cell with a --line border
+// and the `flow:read` glyph in --ink-2. Glyphs are drawn at 2x, so they can be told apart;
 // no cell is a filled square, which on the same page means a required input. The table scrolls sideways in a TableWrap when narrow,
 // with the step column kept in view. Every cell also carries its meaning as
 // text, so the glyphs are never the only signal.
