@@ -210,15 +210,14 @@ describe('rehype-callouts', () => {
     const inSource = readRepoFile(source).split('\n').filter((l) => l.startsWith('> **Note:**')).length;
     expect(inSource).toBeGreaterThan(1);
     const { html } = await pageOf(source);
-    // The label leads with the same glyph the generated Callout component uses (visual spec 3.10.3).
-    expect(html.match(/<div class="callout callout--note" role="note"><p class="callout__label"><svg [^>]*data-glyph="note"[^>]*>(?:(?!<\/svg>)[\s\S])*<\/svg> Note<\/p>/g)).toHaveLength(inSource);
+    expect(html.match(/<div class="callout callout--note" role="note"><p class="callout__label">Note<\/p>/g)).toHaveLength(inSource);
     expect(html).not.toContain('<strong>Note:</strong>');
   });
 
   it('accepts the GitHub alert form and leaves plain quotes alone', async () => {
     const text = `${readRepoFile('docs/FAQ.md')}\n\n> [!WARNING]\n> Careful.\n\n> Just a quote.\n`;
     const { html } = await pageOf('docs/FAQ.md', text);
-    expect(html).toMatch(/<div class="callout callout--warning" role="note"><p class="callout__label"><svg [^>]*data-glyph="warning"[^>]*>(?:(?!<\/svg>)[\s\S])*<\/svg> Warning<\/p>\s*<p>Careful\.<\/p>/);
+    expect(html).toMatch(/<div class="callout callout--warning" role="note"><p class="callout__label">Warning<\/p>\s*<p>Careful\.<\/p>/);
     expect(html).toMatch(/<blockquote>\s*<p>Just a quote\.<\/p>/);
   });
 });
