@@ -215,6 +215,15 @@ describe('check-dist.mjs', () => {
     expect(problems(s)).toEqual(['[legends] /guide/: the legend "Key" draws the same glyph for "step rolls back" and "on failure, roll back"']);
   });
 
+  it('treats an element whose class ends in "key" as a legend too', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace(
+      '</h1>',
+      `</h1><dl class="diag-key"><div>${glyph(UNDO, 'a')}<dt>error</dt></div><div>${glyph(UNDO, 'b')}<dt>warning</dt></div></dl>`,
+    );
+    expect(problems(s)).toEqual(['[legends] /guide/: the legend "diag-key" draws the same glyph for "error" and "warning"']);
+  });
+
   it('passes a legend whose entries differ by a lane mark before the same glyph', () => {
     const s = cleanSite();
     s['guide/index.html'] = s['guide/index.html']!.replace(

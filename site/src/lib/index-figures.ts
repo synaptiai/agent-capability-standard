@@ -313,7 +313,12 @@ export function pageSize(text: string): { words: number; codeBlocks: number } {
       const drawing = f.split('\n').filter((l) => /[\u2500-\u257f]/.test(l)).length >= 2;
       if (!/^\s*mermaid\b/.test(info) && !drawing) codeBlocks += 1;
       return '';
-    });
+    })
+    // A link counts as its text; a destination, an image and an HTML tag are not words.
+    .replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ');
   return { words: (prose.match(/[A-Za-z0-9][\w'’.-]*/g) ?? []).length, codeBlocks };
 }
 

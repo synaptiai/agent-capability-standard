@@ -336,6 +336,14 @@
     font-family: var(--font-mono);
     font-size: 14px;
   }
+
+  /* Every row's words take the width of the longest, so the tracks are one
+     length and a row with its own scale reads as a share. */
+  .bar-list .pixel-bar__value {
+    flex: none;
+    width: var(--bar-words, auto);
+    font-family: var(--font-mono);
+  }
 }
 
 @layer components {

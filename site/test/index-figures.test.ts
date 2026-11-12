@@ -104,7 +104,8 @@ describe('background layer matrix', () => {
 
 describe('/start/ reading times', () => {
   it('counts words outside fences, and code blocks that are not diagrams', () => {
-    // Hand count: "One two three." and "Four five" are 5 words; the bash and the json fences are code
+    // Hand count: "One two three.", "Four five" and the link text "six" are 6 words (the link's
+    // destination, the badge image and the HTML tag are not words); the bash and the json fences are code
     // blocks; the mermaid fence and the box drawing are diagrams, not code; frontmatter is not text.
     const text = [
       '---',
@@ -122,12 +123,14 @@ describe('/start/ reading times', () => {
       '┌─┐',
       '└─┘',
       '```',
-      'Four five',
+      'Four five [six](https://x.y/z) ![badge](https://img.shields.io/b.svg) <br/>',
+      '',
+      '[ref]: https://x.y/ref',
       '```json',
       '{}',
       '```',
     ].join('\n');
-    expect(pageSize(text)).toEqual({ words: 5, codeBlocks: 2 });
+    expect(pageSize(text)).toEqual({ words: 6, codeBlocks: 2 });
   });
 
   it('rounds to whole minutes at 200 words a minute, with at least one', () => {

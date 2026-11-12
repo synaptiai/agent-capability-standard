@@ -280,8 +280,7 @@
 
     .spine .spine__purpose,
     .spine .spine__gates .spine__more,
-    .spine .spine__gates .spine__diamond,
-    .spine .spine__fail .spine__failmark {
+    .spine .spine__gates .spine__diamond {
       display: none;
     }
 

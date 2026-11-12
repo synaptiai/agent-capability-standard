@@ -15,7 +15,7 @@
 // - figures: every numbered figure on a page ("Fig n") has a
 //   "**Figure: {title}.**" block in the page's Markdown copy, and the copy has
 //   no block for a figure the page does not draw (visual spec 6.1);
-// - legends: no legend on a page draws the same glyph (or glyph pair) for two
+// - legends: no legend or key on a page draws the same glyph (or glyph pair) for two
 //   different entries;
 // - review: no built file outside the review pages (dist/_review/) points at
 //   them, so removing that folder before deploying leaves nothing dangling.
@@ -414,7 +414,7 @@ export function checkFigureCopies(fileList, read) {
 
 /**
  * No legend draws one glyph for two entries with different words. A legend
- * is an element with a class ending in "legend"; an entry is a child element
+ * is an element with a class ending in "legend" or "key"; an entry is a child element
  * with at least one SVG, keyed by the marks of all its SVGs, so two glyph keys
  * that draw the same grid count as one glyph.
  */
@@ -422,7 +422,7 @@ export function checkLegends(fileList, read) {
   const problems = [];
   for (const f of fileList.filter((x) => x.endsWith('.html'))) {
     const html = read(f);
-    for (const m of html.matchAll(/<([a-zA-Z][\w-]*)\b[^>]*\sclass="(?:[^"]*\s)?[\w-]*legend(?:\s[^"]*)?"[^>]*>/g)) {
+    for (const m of html.matchAll(/<([a-zA-Z][\w-]*)\b[^>]*\sclass="(?:[^"]*\s)?[\w-]*(?:legend|key)(?:\s[^"]*)?"[^>]*>/g)) {
       const name = /\saria-label="([^"]*)"/.exec(m[0])?.[1] ?? /class="([^"]*)"/.exec(m[0])[1];
       const words = new Map();
       for (const [a, b] of childElements(html, m.index)) {

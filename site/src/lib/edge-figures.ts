@@ -257,7 +257,7 @@ export function chainCaption(chains: Chain[]): string {
   const edges = chains.flatMap((c) => c.edges);
   const caps = new Set(chains.flatMap((c) => c.nodes));
   const types = [...new Set(edges.map((e) => e.type))];
-  return `${plural(edges.length, 'edge', 'edges')} of type ${types.join(' and ')} among ${plural(caps.size, 'capability', 'capabilities')}, each one an edge of the ontology; the fence below is the same example as text.`;
+  return `${plural(edges.length, 'edge', 'edges')} of type ${types.join(' and ')} among ${plural(caps.size, 'capability', 'capabilities')}, each one an edge of the ontology; the fence in this section is the same example as text.`;
 }
 
 // ------------------------------------------------------------- F-E5 changes

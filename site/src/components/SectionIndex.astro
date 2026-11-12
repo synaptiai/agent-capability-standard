@@ -71,7 +71,7 @@ function groupGlyph(label: string): string {
       <CountMatrix id={figId(f)} n={num(f)} matrix={f.matrix} />
     ) : f.kind === 'bars' ? (
       <Figure id={figId(f)} n={num(f)} title={f.bars.title} caption={f.bars.caption} kind="bar-list">
-        <ul class="bar-list">
+        <ul class="bar-list" style={`--bar-words: ${Math.max(...f.bars.rows.map((x) => x.words.length))}ch`}>
           {f.bars.rows.map((r) => (
             <li class="bar-list__row">
               <span class="bar-list__label">{r.url ? <a href={r.url}>{r.label}</a> : r.label}</span>
