@@ -30,6 +30,19 @@ This directory contains templates and shared patterns for skill development.
    full output schema is in the ontology, and `python tools/sync_skill_schemas.py`
    writes it to `skills/<name>/schemas/output_schema.yaml`
 
+```mermaid
+---
+title: Creating a new skill
+---
+flowchart TB
+  accDescr: A new skill starts as a copy of SKILL_TEMPLATE_ENHANCED.md, gets its required sections filled in, takes its capability names and layers from the ontology and its output types from output_contracts.md, has its output schema written by sync_skill_schemas.py, and is then validated.
+  cp["Copy SKILL_TEMPLATE_ENHANCED.md to skills/name/SKILL.md"] --> fill["Fill in frontmatter, description and workflow"]
+  fill --> names[Take capability names and layers from the ontology]
+  names --> out["Use output_contracts.md for output types"]
+  out --> sync["sync_skill_schemas.py writes the output schema"]
+  sync --> val["Validate with validate_workflows.py"]
+```
+
 ## Composition Patterns
 
 See `composition_patterns.md` for:
