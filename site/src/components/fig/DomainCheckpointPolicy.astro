@@ -1,0 +1,53 @@
+---
+// F-D3, the checkpoint policy (visual spec 3.5): each named trigger with its
+// level glyph (policy:*) and word. When two or more levels occur, a summary
+// strip on top splits the triggers by level, one segment per level sized by
+// its count, coloured by the risk tokens (--ink for "always"); the glyph,
+// count and word sit under each segment, so colour is never the only cue.
+// When every trigger has one level, no strip is drawn and the list header
+// says "All {n} triggers: {level}" (the 1.1.5 fallback).
+//
+// Props:
+// - profile: the profile mapping; renders nothing without checkpoint_policy.
+// - n, id: the figure number and its ref- id.
+import Figure from './Figure.astro';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import { checkpointCaption, checkpointHeader, checkpointPolicy, glyphOrNull, policyWord } from '../../lib/domain-figures';
+
+interface Props {
+  profile: Record<string, unknown>;
+  n: number;
+  id: string;
+}
+
+const { profile, n, id } = Astro.props;
+const policy = checkpointPolicy(profile);
+const header = policy ? checkpointHeader(policy) : null;
+const glyphOf = (level: string) => glyphOrNull(`policy:${level}`);
+---
+{policy && policy.triggers.length > 0 && (
+  <Figure id={id} n={n} title="When a checkpoint is made" caption={checkpointCaption(policy)} kind="checkpoint-policy">
+    {policy.levels.length > 1 && (
+      <div class="policy-strip" aria-hidden="true">
+        {policy.levels.map((l) => (
+          <div class={`policy-strip__part policy-strip__part--${l.level}`} style={`flex-grow: ${l.count}`} data-level={l.level} data-count={l.count}>
+            <span class="policy-strip__bar"></span>
+            <span class="policy-strip__label">{glyphOf(l.level) && <PixelGlyph name={glyphOf(l.level)!} />}<b>{l.count}</b> {policyWord(l.level)}</span>
+          </div>
+        ))}
+      </div>
+    )}
+    {header && (
+      <p class="policy-list__header">{glyphOf(policy.levels[0]!.level) && <PixelGlyph name={glyphOf(policy.levels[0]!.level)!} scale={3} />}<span>{header}</span></p>
+    )}
+    <ul class="policy-list" aria-label="Checkpoint triggers">
+      {policy.triggers.map((t) => (
+        <li data-level={t.level}>
+          {glyphOf(t.level) ? <PixelGlyph name={glyphOf(t.level)!} /> : <span class="policy-list__noglyph" aria-hidden="true"></span>}
+          <code>{t.name}</code>
+          {!header && <span class="policy-list__level">{policyWord(t.level)}</span>}
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}

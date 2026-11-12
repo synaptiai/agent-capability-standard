@@ -49,6 +49,9 @@ describe('typography', () => {
       '.step-strip__step--hit',
       '.icon-card__number',
       '.edge-card__number',
+      // Visual spec 1.2 and 3.6: the minimum confidence on each domains-index
+      // profile card is that card's hero number.
+      '.profile-card__number',
     ]);
     const display = rules()
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))

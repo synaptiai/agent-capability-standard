@@ -1,46 +1,72 @@
 ---
 // The domains overview: docs/domains/README.md as written (its H1 is the page
-// H1), then a card for each domain profile with its description, its highest
-// trust weight and how many of its workflows a catalog defines.
+// H1). Before its "Choosing a Domain" section come the profile cards (F-DI1,
+// visual spec 3.6), one per domain profile: its glyph, its trust weights as a
+// dot strip on one scale shared by every card, and its minimum confidence,
+// then one computed sentence grouping the profiles by what happens at low,
+// medium and high risk. Without that heading they follow the README.
 import { getEntry, render } from 'astro:content';
+import Figure from '../../components/fig/Figure.astro';
 import { loadProfiles } from '../../data/profiles';
 import DocLayout from '../../layouts/DocLayout.astro';
+import { domainGlyph, evidencePolicy, h2Section, profilesCaption, thresholdsSentence, trustAxis } from '../../lib/domain-figures';
 import { domainHref, refSlugger, routeByUrl } from '../../lib/generated';
 import { sortedTrustWeights } from '../../lib/views';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import type { PageMeta } from '../../plugins/remark-page-meta';
+import '../../styles/figures-domain.css';
+
+/** The README heading the cards and the sentence go before. */
+const CHOOSING_ANCHOR = 'choosing-a-domain';
 
 const route = routeByUrl('/domains/');
 const entry = await getEntry('docs', route.source!);
 if (!entry) throw new Error(`domains: no docs entry for ${route.source}`);
-const { Content, remarkPluginFrontmatter } = await render(entry);
+const { remarkPluginFrontmatter } = await render(entry);
+if (typeof entry.rendered?.html !== 'string') throw new Error(`domains: ${route.source} has no rendered HTML`);
+const html = entry.rendered.html;
+const at = h2Section(html, CHOOSING_ANCHOR)?.start ?? html.length;
+if (at === html.length) console.warn(`domains: ${route.source} has no #${CHOOSING_ANCHOR}; the profile cards follow the README`);
 const page = remarkPluginFrontmatter.page as PageMeta | undefined;
 const profiles = loadProfiles();
 const id = refSlugger();
+const axis = trustAxis(profiles);
+const pct = (v: number) => `${(((v - axis.min) / (axis.max - axis.min)) * 100).toFixed(3)}%`;
 ---
 <DocLayout route={route} title={page?.title ?? route.title} description={route.description ?? page?.description}>
   <article class="doc doc--domains" data-pagefind-body>
-    <div class="doc__body"><Content /></div>
+    <div class="doc__body" set:html={html.slice(0, at)} />
     <section class="domain-profiles">
       <h2 id={id('Domain profiles')}>Domain profiles</h2>
-      <p>One card per profile in the repository, read from the profile files.</p>
-      <ul class="section-index__cards">
-        {profiles.map((d) => {
-          const top = sortedTrustWeights(d.profile)[0];
-          const defined = d.workflows.filter((w) => w.defined).length;
-          const proposed = d.workflows.length - defined;
-          return (
-            <li class="section-index__card domain-card" data-domain={d.key}>
-              <a href={domainHref(d.key)}>{d.key}</a>
-              {d.description && <p>{d.description}</p>}
-              <dl class="domain-card__facts">
-                {top && <div><dt>Most trusted source</dt><dd><code>{top.source}</code> ({top.weight})</dd></div>}
-                <div><dt>Workflows in a catalog</dt><dd>{defined}</dd></div>
-                {proposed > 0 && <div><dt>Proposed workflows</dt><dd>{proposed}</dd></div>}
-              </dl>
-            </li>
-          );
-        })}
-      </ul>
+      <Figure id={id('Figure profile cards')} n={1} title="Trust weights of each profile" caption={profilesCaption(profiles)} kind="profile-cards">
+        <ul class="profile-cards">
+          {profiles.map((d) => {
+            const w = sortedTrustWeights(d.profile);
+            const conf = evidencePolicy(d.profile)?.minimumConfidence ?? null;
+            return (
+              <li data-domain={d.key}>
+                <a class="profile-card" href={domainHref(d.key)}>
+                  <span class="profile-card__head"><PixelGlyph name={domainGlyph(d.key)} scale={3} />{d.key}</span>
+                  {w.length > 0 && (
+                    <>
+                      <span class="profile-card__strip" aria-hidden="true">
+                        {w.map((x) => <span class="profile-card__tick" style={`left: ${pct(x.weight)}`}></span>)}
+                      </span>
+                      <span class="profile-card__axis" aria-hidden="true"><span>{axis.min.toFixed(2)}</span><span>{axis.max.toFixed(2)}</span></span>
+                      <span class="profile-card__facts">{w.length} trust weights, {w.at(-1)!.weight.toFixed(2)} to {w[0]!.weight.toFixed(2)}</span>
+                    </>
+                  )}
+                  {conf !== null && (
+                    <span class="profile-card__facts">Minimum confidence <span class="profile-card__number">{conf.toFixed(2)}</span></span>
+                  )}
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      </Figure>
+      <p class="domain-thresholds">{thresholdsSentence(profiles)}</p>
     </section>
+    <div class="doc__body" set:html={html.slice(at)} />
   </article>
 </DocLayout>
