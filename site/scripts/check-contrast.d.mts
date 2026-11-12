@@ -16,3 +16,4 @@ export function contrast(a: Rgb, b: Rgb): number;
 export function pairs(tokens: Record<string, string>): Pair[];
 export function pairRatio(pair: Pair, tokens: Record<string, string>): number;
 export function checkContrast(css: string): { checked: number; failures: string[]; problems: string[] };
+export const FIGURE_COLOUR_EXCEPTIONS: Readonly<Record<string, string>>;

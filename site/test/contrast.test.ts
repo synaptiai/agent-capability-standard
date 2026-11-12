@@ -97,7 +97,7 @@ describe('figure colours', () => {
 
   it('checks every colour token the figures use, in light and dark, or names it as an exception', () => {
     const covered = (t: string, tokens: Record<string, string>) =>
-      pairs(tokens).some((p: { fg?: string; bg?: string; anyOf?: { fg: string; bg: string }[] }) =>
+      pairs(tokens).some((p) =>
         [p.fg, p.bg, ...(p.anyOf ?? []).flatMap((a) => [a.fg, a.bg])].some((c) => c !== undefined && (context[t] ? context[t]!.test(c) : c.includes(`var(${t})`))),
       );
     const colours = [...used].filter((t) => !notColours(t));
