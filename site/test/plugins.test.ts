@@ -105,6 +105,16 @@ describe('shortDescription', () => {
     const text = `${'A sentence that is long enough to count. '.repeat(3)}${'more words '.repeat(30)}`;
     expect(shortDescription(text)).toBe('A sentence that is long enough to count. '.repeat(3).trim());
   });
+
+  it('does not end a sentence at the full stop of "Art." or "e.g."', () => {
+    // docs/compliance/eu-ai-act/annex_iv_technical_documentation.md opens
+    // "... requirements of EU AI Act Art. 11 and Annex IV ...".
+    const text = `This document fulfills the technical documentation requirements of EU AI Act Art. 11 and Annex IV, for example the system description, e.g. its intended purpose, and ${'more words '.repeat(20)}`;
+    const d = shortDescription(text, 160);
+    expect(d).not.toMatch(/Art\.$/);
+    expect(d).not.toMatch(/e\.g\.$/);
+    expect(d.endsWith('...')).toBe(true);
+  });
 });
 
 describe('remark-html-allowlist', () => {
