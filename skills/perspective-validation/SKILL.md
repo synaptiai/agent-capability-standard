@@ -55,19 +55,6 @@ Produce a **PVC report** (Perspective Validation Checklist) that scores the targ
 
 6) **Summarize actions**: Provide the top remediation actions (P0 first), with crisp “what to change” and “where it lives” guidance
 
-```mermaid
----
-title: A PVC review from scope to actions
----
-flowchart TB
-  accDescr: The review scopes the target, collects the evidence, scores each checklist test as PASS, PARTIAL, FAIL or N/A, writes the report from the template, validates it and fixes it until the validator passes, then summarizes the remediation actions, P0 first.
-  scope[Scope the review] --> ev[Collect evidence] --> score["Score each test: PASS, PARTIAL, FAIL, N/A"]
-  score --> write["Write the report from pvc_report_template.yaml"]
-  write --> val{"validate_pvc.py passes?"}
-  val -->|no: fix the report| write
-  val -->|yes| sum["Summarize actions, P0 first"]
-```
-
 ## Output Contract
 
 Return a structured object:

@@ -81,20 +81,6 @@ capabilities and workflow steps needed to do X safely."
    - Offer to validate workflow against ontology
    - Offer to scaffold gap capabilities if needed
 
-```mermaid
----
-title: From a task description to a workflow
----
-flowchart TB
-  accDescr: The skill loads the ontology and catalog, decomposes the task into capability matches with confidence scores, keeps matches at 0.6 or above, sends the rest to gap detection for proposals, synthesizes a workflow from the kept matches with its safety steps, and presents the results.
-  load[Load the ontology and catalog] --> an[Decompose the task into scored matches]
-  an --> cl{"Confidence 0.6 or more?"}
-  cl -->|yes| syn["Synthesize a workflow: dependencies, safety steps, ordering, conflicts, bindings"]
-  cl -->|"no, or unmatched"| gap[Detect gaps and propose capabilities]
-  syn --> pr[Present the results]
-  gap --> pr
-```
-
 ## Output Contract
 
 Return a structured object:
@@ -215,16 +201,6 @@ workflow:
       store_as: audit_out
   confidence: 0.93
 confidence: 0.93
-```
-
-
-```mermaid
----
-title: The workflow synthesized for example 2
----
-flowchart TB
-  accDescr: For deleting old log files the skill matches search, detect with domain time and mutate, adds checkpoint before the mutation and audit at the end, and orders them search, detect, checkpoint, mutate, audit.
-  search[search] --> detect["detect(time)"] --> checkpoint["checkpoint: added for the mutation"] --> mutate[mutate] --> audit["audit: added at the end"]
 ```
 
 ## Verification
