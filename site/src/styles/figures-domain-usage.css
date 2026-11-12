@@ -108,7 +108,10 @@
     border-style: dashed;
   }
 
+  /* The badge above the tiles: one row would make the drawing too short to
+     count as a figure (64px) on the figure-gap check. */
   .wf-card--listed .wf-card__body {
+    flex-direction: column;
     align-items: flex-start;
   }
 }
