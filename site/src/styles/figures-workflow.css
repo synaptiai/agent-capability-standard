@@ -5,6 +5,10 @@
  * corners, 2px lines, tokens only. Each figure lays itself out by the width
  * of its own .fig container, never the viewport.
  */
+/* Pages import this sheet, and it can load before the layout's tokens.css, so
+   the layer order is declared here too (the same order as tokens.css). */
+@layer reset, tokens, base, components, utilities;
+
 @layer components {
   /* ---------- F-W1 step spine ---------- */
 

@@ -5,10 +5,13 @@
 // capability and effective safety flags. Consecutive steps in one parallel
 // group sit in one box. A key above the rail says what a dashed, indented
 // card (a step with gates or a condition) means, and lists those steps.
+// Each card is closed; a button (shown only with JavaScript) opens or closes
+// them all, and following a link to a step opens its card.
 import type { Workflow } from '../data/workflows';
 import { diagramRuns, diagramSteps } from '../lib/views';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 import WorkflowStep from './WorkflowStep.astro';
+import '../styles/figures-workflow-page.css';
 
 interface Props {
   workflow: Workflow;
@@ -25,6 +28,7 @@ const branches = steps.filter((d) => d.branch).map((d) => d.step.index);
     {`A dashed card set in from the rail is a step with gates or a condition, so it may be skipped or end the run: ${branches.length === 1 ? 'step' : 'steps'} ${branches.length === 1 ? branches[0] : `${branches.slice(0, -1).join(', ')} and ${branches.at(-1)}`}.`}
   </p>
 )}
+<p class="wf-toggle"><button type="button" class="btn btn--quiet" data-wf-toggle data-open="false">Open every step</button></p>
 <ol class="wf" aria-label={`Steps of ${workflow.id}`} data-workflow={workflow.id}>
   {runs.map((run) =>
     run.group === null ? (
@@ -42,3 +46,33 @@ const branches = steps.filter((d) => d.branch).map((d) => d.step.index);
     ),
   )}
 </ol>
+
+<script>
+  // Open the card of the step a link points at (the step map, the data-flow
+  // grid and the cards' own links all point at #ref-step-n).
+  const openTarget = () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id.startsWith('ref-step-')) return;
+    const target = document.getElementById(id);
+    const card = target?.querySelector<HTMLDetailsElement>(':scope > details.wf-step__card') ?? target?.closest('details');
+    if (card && !card.open) {
+      card.open = true;
+      target?.scrollIntoView();
+    }
+  };
+  openTarget();
+  window.addEventListener('hashchange', openTarget);
+  document.addEventListener('click', (ev) => {
+    const a = (ev.target as Element | null)?.closest?.('a[href^="#ref-step-"]');
+    if (a && a.getAttribute('href') === location.hash) openTarget();
+  });
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-wf-toggle]')) {
+    const list = button.parentElement?.nextElementSibling;
+    button.addEventListener('click', () => {
+      const open = button.dataset.open !== 'true';
+      for (const d of list?.querySelectorAll<HTMLDetailsElement>('details.wf-step__card') ?? []) d.open = open;
+      button.dataset.open = String(open);
+      button.textContent = open ? 'Close every step' : 'Open every step';
+    });
+  }
+</script>
