@@ -251,11 +251,17 @@
     overflow-wrap: break-word;
   }
 
-  /* Code in a table cell stays on one line; the table scrolls instead. */
+  /* Code in a table cell stays on one line; the table scrolls instead. A
+     long path or expression (break-code, from rehype-tables) breaks after
+     its "/", "." and "_". */
   :is(td, th) > code,
   :is(td, th) > a > code {
     overflow-wrap: normal;
     white-space: nowrap;
+  }
+
+  :is(td, th) code.break-code {
+    white-space: normal;
   }
 
   /* Inline code in a heading (capability pages) keeps the display size and has no box. */

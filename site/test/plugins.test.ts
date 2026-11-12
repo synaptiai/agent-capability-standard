@@ -317,6 +317,16 @@ describe('rehype-tables', () => {
   });
 });
 
+describe('rehype-tables long code', () => {
+  it('lets a long path in a cell break after "/", "." and "_", and keeps a short one whole', async () => {
+    // 39 characters with slashes, dots and underscores; and a 6-character id with an underscore.
+    const text = `${readRepoFile('docs/FAQ.md')}\n\n## Paths\n\n| Where | What |\n|---|---|\n| \`grounded_agency/state/evidence_store.py\` | \`run_id\` |\n`;
+    const { html } = await pageOf('docs/FAQ.md', text);
+    expect(html).toContain('<code class="break-code">grounded_<wbr>agency/<wbr>state/<wbr>evidence_<wbr>store.<wbr>py</code>');
+    expect(html).toContain("<td><code>run_id</code></td>");
+  });
+});
+
 describe('remark-page-meta status badges', () => {
   it("draws the first clause of a compliance document's Status as a badge with its glyph, and keeps the rest", async () => {
     const source = 'docs/compliance/eu-ai-act/post_market_monitoring.md';

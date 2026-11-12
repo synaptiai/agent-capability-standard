@@ -141,6 +141,17 @@ describe('table marks', () => {
     expect(code).toContain('data-info-figure="enriched-table"');
   });
 
+  it('gives a step table a tile for an id written with its parameters, and none for a word that is not an id', async () => {
+    // As templates/composition_patterns.md writes its step tables.
+    const text = ['# T', '', '| Step | Capability | Purpose |', '|---|---|---|', '| 1 | `observe` | a |', '| 2 | `attribute` (domain: dependencies) | b |', '| 3 | `invoke` (workflow_id: world_model_build) | c |', ''].join('\n');
+    const { code } = await renderRepoFile('docs/FAQ.md', text);
+    const tiles = [...code.matchAll(/class="mini-tile mini-tile--24[^"]*"[^>]*data-capability="([a-z_]+)"/g)].map((m) => m[1]);
+    expect(tiles).toEqual(['observe', 'attribute', 'invoke']);
+    expect(code).toContain('data-info-figure="enriched-table"');
+    const plain = await renderRepoFile('docs/FAQ.md', ['# T', '', '| Capability | x |', '|---|---|', '| `observe` | a |', '| reflect (domain: self) | b |', ''].join('\n'));
+    expect(plain.code).not.toContain('mini-tile');
+  });
+
   it('leaves a table with fewer than three marked rows out of the figure count', async () => {
     const text = ['# T', '', '| Capability | Count |', '|---|---|', '| `plan` | 1 |', '| `verify` | 2 |', ''].join('\n');
     const { code } = await renderRepoFile('docs/FAQ.md', text);

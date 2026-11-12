@@ -14,7 +14,8 @@
 //   reported on the console, not failed.
 // - Enriched tables (3.10.11): a number column gets a pixel bar per row on one
 //   scale; a yes/no or ✓/— column gets check and cross glyphs; a Risk column
-//   gets pips; a capability column gets a 24px tile; a coverage grid whose
+//   gets pips; a capability column (an id, or an id and its parameters in
+//   parentheses) gets a 24px tile; a coverage grid whose
 //   cells list `domain:` values gets a count badge per cell. The cell text
 //   stays; the marks are aria-hidden or carry their own words.
 // - Workflow cells (3.10.10): a cell holding only a backticked workflow id gets
@@ -367,9 +368,14 @@ export function riskColumn(header: string, cells: string[]): ('low' | 'medium' |
 }
 
 /** The capability id a cell holds alone (in code or bold or plain), or null. */
+/**
+ * The capability a cell names: a capability id alone, or an id followed by
+ * its parameters in parentheses (`attribute` (domain: dependencies),
+ * `invoke` (workflow_id: x), as a step table writes them).
+ */
 function capabilityCell(cell: Element): string | null {
-  const t = clean(textOf(cell)).replace(/^`|`$/g, '');
-  return loadOntology().byId.has(t) ? t : null;
+  const m = /^`?([a-z_]+)`?(?:\s*\([^()]*\))?$/.exec(clean(textOf(cell)));
+  return m && loadOntology().byId.has(m[1]!) ? m[1]! : null;
 }
 
 /** The capability ids of a cell made only of ids joined by → (3.10.8), or null. */
