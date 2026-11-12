@@ -26,21 +26,6 @@
 | **Major NC** | Systematic failure or deviation that undermines AIMS effectiveness |
 | **N/A** | Not applicable (with documented justification) |
 
-```mermaid
----
-title: Where a finding goes
----
-flowchart LR
-  accDescr: Each check is classified as conforming, an opportunity for improvement, a minor or major nonconformity, or not applicable with a justification; nonconformities are documented as NCRs under the nonconformity procedure.
-  chk[Check] --> c["C: conforming"]
-  chk --> ofi["OFI: could be enhanced"]
-  chk --> mi[Minor NC]
-  chk --> ma[Major NC]
-  chk --> na["N/A: justified"]
-  mi --> ncr[An NCR]
-  ma --> ncr
-```
-
 ---
 
 ## Clause 1–3: Scope, Normative References, Terms and Definitions
@@ -153,18 +138,6 @@ flowchart LR
 | 6.1.5 | Are structural controls implemented for high-risk capabilities? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | PreToolUse hook, `requires_checkpoint`, `requires_approval` | Verify hook is active |
 | 6.1.6 | Are domain-specific risk treatments documented? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Risk treatment plan Section 5, domain profiles | |
 | 6.1.7 | Is residual risk assessed and accepted? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Risk treatment plan Section 7 | |
-
-```mermaid
----
-title: The risk steps that Clause 6.1 checks
----
-flowchart TB
-  accDescr: The Clause 6.1 checks follow AI risk from identification, through classification on the three-tier model and treatments for every tier with structural controls for the high-risk capabilities, to residual risk that is assessed and accepted.
-  id[Risks and opportunities identified] --> cl[Classified on the three-tier model]
-  cl --> tr[Treatments defined for low, medium and high]
-  tr --> sc[Structural controls for high-risk capabilities]
-  sc --> rr[Residual risk assessed and accepted]
-```
 
 ### 6.2 AI Objectives and Planning to Achieve Them
 
