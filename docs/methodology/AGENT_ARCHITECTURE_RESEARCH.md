@@ -162,9 +162,9 @@ flowchart TB
 title: BDI operations
 ---
 flowchart TB
-  accDescr: A BDI agent updates its beliefs, generates desires, filters desires into intentions, and executes the plans it has committed to.
-  b[Update beliefs] --> d[Generate desires]
-  d -->|filter| i[Intentions]
+  accDescr: BDI's operations are updating beliefs, generating desires, filtering desires into intentions, and executing plans; intentions are the committed plans being executed.
+  b[Update beliefs]
+  d[Generate desires] -->|filter| i["Intentions: committed plans"]
   i --> p[Execute plans]
 ```
 

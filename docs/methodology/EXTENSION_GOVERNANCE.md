@@ -185,7 +185,7 @@ To manage ontology evolution, we use tiers:
 title: The three tiers today
 ---
 flowchart TB
-  accDescr: Core holds 36 capabilities, validated with a stable API; Extended holds none, all having moved to Core in v1.0.0; Experimental holds none, and its proposals must graduate to Extended or be removed.
+  accDescr: Core holds 36 capabilities, validated with a stable API and full documentation; Extended holds none, all having moved to Core in v1.0.0; Experimental holds none and has no stability guarantees; an Experimental capability graduates to Extended, and an Extended one to Core.
   core["Core: 36 capabilities. Validated, stable API, full documentation"]
   ext["Extended: 0 capabilities. All migrated to Core in v1.0.0"]
   exp["Experimental: 0 capabilities. No stability guarantees"]

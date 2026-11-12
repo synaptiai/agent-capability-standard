@@ -313,7 +313,7 @@ flowchart LR
 title: Where the other candidates went
 ---
 flowchart LR
-  accDescr: reflect is covered by observe, infer by detect and classify, abstract by discover, instantiate by generate and transform, negotiate by synchronize, prioritize by compare, schedule by plan; monitor is a pattern of repeated observe, alert is detect then send, and validate is merged into verify.
+  accDescr: reflect is covered by observe, infer by detect and classify, abstract by discover, instantiate by generate and transform, negotiate by synchronize, prioritize by compare, schedule by plan; monitor is a pattern of repeated observe, alert is a composition of detect and send, and validate is merged into verify.
   reflect_c[reflect] --> observe
   monitor_c["monitor, repeated"] --> observe
   infer_c[infer] --> detect & classify
