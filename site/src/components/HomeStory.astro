@@ -73,11 +73,11 @@ const rb = s.rollbackStep.index;
 const vf = s.verifyStep.index;
 if (!(cp < ch && ch < rb)) throw new Error('HomeStory: expected checkpoint, then the change, then rollback');
 
-// Text sizes in viewBox units: 12 for labels, 10 for stored names. The
-// diagram is drawn at 1.2x or more wherever the stored names show (960px
-// and up), so no text renders under 12px; below that they are left out.
+// Text sizes in viewBox units: 12 for labels, 11 for stored names. Where
+// the stored names show (960px and up) the diagram is drawn at about 1.16x
+// or more, so they render at 12.7px or more; below 960px they are left out.
 const LABEL = 12;
-const STORE = 10;
+const STORE = 11;
 // A store_as name is cut to the room left beside the step's label. The mono
 // font's advance is a little over 0.6em, so 0.66em leaves a visible gap.
 const ADVANCE = 0.66;

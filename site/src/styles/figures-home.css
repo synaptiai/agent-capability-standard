@@ -6,6 +6,22 @@
  * only. Figures lay out by the width of their own .fig (a container).
  */
 @layer components {
+  /* ---------- hero ---------- */
+
+  /* The hero eyebrow leads with the mark instead of the square that other
+     eyebrows carry (visual spec 1.3 and 3.11). */
+  .home-opening__eyebrow {
+    gap: var(--space-3);
+  }
+
+  .home-opening__eyebrow::before {
+    content: none;
+  }
+
+  .home-opening__eyebrow .mark {
+    color: var(--ink);
+  }
+
   /* ---------- hero layer strip ---------- */
 
   .home-layers {

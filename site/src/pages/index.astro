@@ -45,6 +45,7 @@ import {
   WORKFLOWS_HEADING,
   type HomeLink,
 } from '../lib/home';
+import Mark from '../pixel/Mark.astro';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 import '../styles/figures-home.css';
 
@@ -72,7 +73,7 @@ const nextFig = () => ++fig;
 <DocLayout route={route} title="Agent Capability Standard" description={description} toc={false}>
   <article class="doc doc--home home" data-pagefind-body>
     <section class="home-opening">
-      <p class="eyebrow">Agent Capability Standard</p>
+      <p class="eyebrow home-opening__eyebrow"><Mark scale={4} />Agent Capability Standard</p>
       <h1 id={id(HOME_H1)}>{HOME_H1}</h1>
       <p class="lead"><InlineText parts={o.summary} /></p>
       <ul class="home-layers" aria-label={`The ${layers.length} layers`}>
