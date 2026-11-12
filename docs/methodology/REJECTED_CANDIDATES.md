@@ -41,6 +41,16 @@ These were considered but are actually compositions of atomic capabilities.
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
+
+```mermaid
+---
+title: mitigate as a composition
+---
+flowchart TB
+  accDescr: mitigate decomposes into measure, plan, constrain, checkpoint and mutate, in that order.
+  measure --> plan --> constrain --> checkpoint --> mutate
+```
+
 ```yaml
 mitigate:
   steps:
@@ -56,15 +66,6 @@ mitigate:
       purpose: Execute mitigation
 ```
 
-```mermaid
----
-title: mitigate as a composition
----
-flowchart TB
-  accDescr: mitigate decomposes into measure, plan, constrain, checkpoint and mutate, in that order.
-  measure --> plan --> constrain --> checkpoint --> mutate
-```
-
 **Why it's not atomic**: Mitigation is inherently multi-step. You must first understand the risk, then plan how to address it, then act. These are separate cognitive operations.
 
 ---
@@ -76,6 +77,16 @@ flowchart TB
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
+
+```mermaid
+---
+title: improve as a composition
+---
+flowchart TB
+  accDescr: improve decomposes into critique, plan, checkpoint, mutate and verify, in that order.
+  critique --> plan --> checkpoint --> mutate --> verify
+```
+
 ```yaml
 improve:
   steps:
@@ -91,15 +102,6 @@ improve:
       purpose: Confirm improvement
 ```
 
-```mermaid
----
-title: improve as a composition
----
-flowchart TB
-  accDescr: improve decomposes into critique, plan, checkpoint, mutate and verify, in that order.
-  critique --> plan --> checkpoint --> mutate --> verify
-```
-
 **Why it's not atomic**: "Improve" requires knowing what's wrong (critique), planning fixes (plan), doing the work (mutate), and checking results (verify). Each step is a distinct capability.
 
 ---
@@ -111,15 +113,6 @@ flowchart TB
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
-```yaml
-optimize:
-  steps:
-    - capability: discover
-      purpose: Find candidate solutions
-    - capability: compare
-      purpose: Evaluate alternatives and select the best option
-      loop: until optimal or max_iterations
-```
 
 ```mermaid
 ---
@@ -129,6 +122,16 @@ flowchart LR
   accDescr: optimize runs discover and then compare, and repeats until the result is optimal or the iteration limit is reached.
   discover --> compare
   compare -.->|"until optimal or max_iterations"| discover
+```
+
+```yaml
+optimize:
+  steps:
+    - capability: discover
+      purpose: Find candidate solutions
+    - capability: compare
+      purpose: Evaluate alternatives and select the best option
+      loop: until optimal or max_iterations
 ```
 
 **Why it's not atomic**: Optimization is iterative search. It repeats discovery and comparison, which are separate operations.
@@ -142,6 +145,16 @@ flowchart LR
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
+
+```mermaid
+---
+title: digital-twin as a composition
+---
+flowchart TB
+  accDescr: A digital twin decomposes into state, transition, simulate and integrate, in that order.
+  state --> transition --> simulate --> integrate
+```
+
 ```yaml
 digital_twin:
   steps:
@@ -155,15 +168,6 @@ digital_twin:
       purpose: Sync with real world
 ```
 
-```mermaid
----
-title: digital-twin as a composition
----
-flowchart TB
-  accDescr: A digital twin decomposes into state, transition, simulate and integrate, in that order.
-  state --> transition --> simulate --> integrate
-```
-
 **Why it's not atomic**: A digital twin is a *system* composed of world modeling, dynamics, and synchronization. These are separable concerns.
 
 ---
@@ -175,14 +179,6 @@ flowchart TB
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
-```yaml
-generalize:
-  steps:
-    - capability: discover
-      purpose: Find patterns in examples
-    - capability: generate
-      purpose: Create generalized rule/model
-```
 
 ```mermaid
 ---
@@ -191,6 +187,15 @@ title: generalize as a composition
 flowchart TB
   accDescr: generalize decomposes into discover, which finds the patterns, and then generate, which expresses them as a rule or model.
   discover -->|patterns| generate
+```
+
+```yaml
+generalize:
+  steps:
+    - capability: discover
+      purpose: Find patterns in examples
+    - capability: generate
+      purpose: Create generalized rule/model
 ```
 
 **Why it's not atomic**: Generalization requires first discovering patterns, then expressing them. The `discover` capability already handles pattern finding.
@@ -307,6 +312,17 @@ flowchart LR
 
 **Resolution**: Use `generate(modality: text, transform: translate, target_language: X)`.
 
+```mermaid
+---
+title: Redundant candidates 2.5 to 2.7
+---
+flowchart LR
+  accDescr: schedule is merged into plan, and summarize and translate into generate.
+  schedule_c[schedule] --> plan
+  summarize_c[summarize] --> generate
+  translate_c[translate] --> generate
+```
+
 ---
 
 ### 2.8 `provenance` (→ merge with `ground`)
@@ -357,13 +373,10 @@ flowchart LR
 
 ```mermaid
 ---
-title: Redundant candidates 2.5 to 2.11
+title: Redundant candidates 2.8 to 2.11
 ---
 flowchart LR
-  accDescr: schedule is merged into plan, summarize and translate into generate, provenance into ground, map-relationships into discover, diff-world-state into compare, and uncertainty-model becomes the confidence every capability outputs.
-  schedule_c[schedule] --> plan
-  summarize_c[summarize] --> generate
-  translate_c[translate] --> generate
+  accDescr: provenance is merged into ground, map-relationships into discover and diff-world-state into compare, and uncertainty-model becomes the confidence every capability outputs.
   provenance_c[provenance] --> ground
   maprel[map-relationships] --> discover
   diffws[diff-world-state] --> compare
@@ -445,6 +458,16 @@ These were considered but should be parameters of base capabilities.
 
 **Analysis**: Temporal and spatial are not distinct cognitive operations—they're domains to which reasoning is applied.
 
+```mermaid
+---
+title: Reasoning specializations as a domain
+---
+flowchart LR
+  accDescr: temporal-reasoning and spatial-reasoning are reasoning with domain temporal and domain spatial.
+  tr[temporal-reasoning] -->|"domain: temporal"| r[Reasoning]
+  sr[spatial-reasoning] -->|"domain: spatial"| r
+```
+
 ---
 
 ## 4. Rejected: Too Vague
@@ -460,6 +483,18 @@ These were considered but have unclear semantics.
 **Analysis**: "Process" could mean transform, analyze, validate, or many other things. It has no clear, specific semantics.
 
 **Resolution**: Use specific capabilities: `transform`, or `detect`, `classify` and `measure` for analysis.
+
+```mermaid
+---
+title: What process could mean
+---
+flowchart LR
+  accDescr: process could mean transform, or detect, classify and measure for analysis.
+  proc[process] --> transform
+  proc --> detect
+  proc --> classify
+  proc --> measure
+```
 
 ---
 
@@ -499,14 +534,10 @@ These were considered but have unclear semantics.
 
 ```mermaid
 ---
-title: What the vague terms could mean
+title: What analyze and understand could mean
 ---
 flowchart LR
-  accDescr: process could mean transform, or detect, classify and measure for analysis; analyze could mean detect, classify, measure or compare; understand is an outcome of detect, classify, measure and state.
-  proc[process] --> transform
-  proc --> detect
-  proc --> classify
-  proc --> measure
+  accDescr: analyze could mean detect, classify, measure or compare, and understand is an outcome of detect, classify, measure and state.
   an[analyze] --> detect
   an --> classify
   an --> measure
