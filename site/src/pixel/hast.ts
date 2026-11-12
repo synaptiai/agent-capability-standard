@@ -56,7 +56,11 @@ export function glyphElement(
 export function miniTileElement(id: string, { size = 24, relation, link = true }: { size?: 24 | 32 | 48; relation?: string; link?: boolean } = {}): Element {
   const cap = loadOntology().capabilities.find((c) => c.id === id);
   if (!cap) throw new Error(`miniTileElement: ${id} is not a capability in the ontology`);
+  const name = `${id}, ${cap.layer} layer${relation ? `: ${relation}` : ''}`;
+  // As in MiniTile.astro: a linked tile is named by hidden text, not an
+  // aria-label that would leave out the visible symbol (WCAG 2.5.3).
   const children: ElementContent[] = [el('span', { className: ['mini-tile__symbol'], ariaHidden: 'true', dataPagefindIgnore: '' }, [text(capabilitySymbol(id))])];
+  if (link) children.push(el('span', { className: ['visually-hidden'], dataPagefindIgnore: '' }, [text(name)]));
   if (size >= 32) children.push(glyphElement(cap.layer, { scale: size === 48 ? 2 : 1, className: 'mini-tile__glyph' }));
   return el(
     link ? 'a' : 'span',
@@ -64,7 +68,7 @@ export function miniTileElement(id: string, { size = 24, relation, link = true }
       className: ['mini-tile', `mini-tile--${size}`, 'has-layer'],
       href: link ? capabilityHref(id) : undefined,
       role: link ? undefined : 'img',
-      ariaLabel: `${id}, ${cap.layer} layer${relation ? `: ${relation}` : ''}`,
+      ariaLabel: link ? undefined : name,
       style: `--layer: var(--layer-${cap.layer})`,
       dataCapability: id,
       dataLayer: cap.layer,

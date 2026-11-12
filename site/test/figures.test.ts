@@ -174,9 +174,13 @@ describe('figure parts as hast, for rehype steps', () => {
     const layer = /^- id: mutate\n {2}layer: (\w+)$/m.exec(repoText('schemas/capability_ontology.yaml'))![1];
     const t = miniTileElement('mutate', { size: 32, relation: 'requires' });
     expect(t.tagName).toBe('a');
-    expect(t.properties.ariaLabel).toBe(`mutate, ${layer} layer: requires`);
+    // A linked tile is named by its own hidden text, not an aria-label that
+    // would leave out the visible symbol (WCAG 2.5.3); an image tile keeps one.
+    expect(t.properties.ariaLabel).toBeUndefined();
+    expect(JSON.stringify(t.children[1])).toContain(`mutate, ${layer} layer: requires`);
     expect(t.properties.className).toEqual(['mini-tile', 'mini-tile--32', 'has-layer']);
-    expect(t.children).toHaveLength(2);
+    expect(t.children).toHaveLength(3);
+    expect(miniTileElement('mutate', { size: 24, link: false }).properties).toMatchObject({ role: 'img', ariaLabel: `mutate, ${layer} layer` });
     expect(() => miniTileElement('teleport')).toThrow('not a capability');
   });
 

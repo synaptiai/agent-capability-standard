@@ -11,6 +11,12 @@
 // - relation: string, optional. Words added to the accessible name after a
 //   colon, e.g. "requires, precedes" -> "checkpoint, VERIFY layer: requires, precedes".
 // - link: boolean, default true. False renders a <span> with role="img".
+//
+// A linked tile takes its name from its own text, visually hidden after the
+// symbol, not from an aria-label: an aria-label that leaves out the visible
+// symbol fails WCAG 2.5.3 (axe label-content-name-mismatch). The symbol is
+// hidden from assistive technology, so the name is unchanged. A span tile is
+// an image and keeps its aria-label.
 // - current: boolean, default false. The selected or centre tile: a 4px
 //   border instead of 2px.
 // - class: string, optional.
@@ -40,8 +46,8 @@ const Tag = link ? 'a' : 'span';
   class:list={['mini-tile', `mini-tile--${size}`, current && 'mini-tile--current', 'has-layer', className]}
   href={link ? capabilityHref(id) : undefined}
   role={link ? undefined : 'img'}
-  aria-label={name}
+  aria-label={link ? undefined : name}
   style={`--layer: var(--layer-${cap.layer})`}
   data-capability={id}
   data-layer={cap.layer}
-><span class="mini-tile__symbol" aria-hidden="true" data-pagefind-ignore>{symbol}</span>{size >= 32 && <PixelGlyph name={cap.layer} scale={size === 48 ? 2 : 1} class="mini-tile__glyph" />}</Tag>
+><span class="mini-tile__symbol" aria-hidden="true" data-pagefind-ignore>{symbol}</span>{link && <span class="visually-hidden" data-pagefind-ignore>{name}</span>}{size >= 32 && <PixelGlyph name={cap.layer} scale={size === 48 ? 2 : 1} class="mini-tile__glyph" />}</Tag>
