@@ -35,12 +35,15 @@ interface Props {
 const { name, type, required = false, description, href, depth = 0, mark, markLabel } = Astro.props;
 if (mark && !markLabel) throw new Error(`Port ${name}: mark ${mark} needs a markLabel`);
 const glyphs = typeGlyphs(type);
+// A long dotted or snake_case path breaks after a '.' or '_' before it
+// breaks inside a word.
+const parts = name.split(/(?<=[._])/);
 ---
 <li class:list={['port', required ? 'port--required' : 'port--optional']} data-depth={depth} data-type={type}>
   <span class="port__pin" aria-hidden="true"></span>
   <span class="port__label">
     <span class="port__glyphs" aria-hidden="true">{glyphs.map((g) => <PixelGlyph name={g} />)}</span>
-    <code class="port__name">{href ? <a href={href}>{name}</a> : name}</code>
+    <code class="port__name">{href ? <a href={href}>{parts.map((p, i) => (i > 0 ? <><wbr />{p}</> : p))}</a> : parts.map((p, i) => (i > 0 ? <><wbr />{p}</> : p))}</code>
     {mark && <PixelGlyph name={mark} label={markLabel} class="port__mark" />}
     <code class="port__type">{type}</code>
   </span>
