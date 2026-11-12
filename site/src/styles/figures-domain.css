@@ -1,0 +1,576 @@
+/*
+ * Domain page and domains index figures (visual spec 3.5 and 3.6): the
+ * trust-weight and source meter lists, the approval ladder, the checkpoint
+ * strip and list, the evidence and compliance panels, the workflow cards and
+ * the profile cards. Square corners, 2px lines, tokens only. Each figure
+ * switches layout on the width of its own .fig (a container), never the
+ * viewport; "narrow" is below 640px (visual spec 4.1).
+ */
+@layer components {
+  /* Glyphs sit in the line here; .fig__drawing makes every svg a block. */
+  :is(.ladder, .meter-table, .policy-list, .policy-strip, .compliance-panel, .ladder-blocked, .wf-card__body) svg.pg {
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  /* Names in figure rows are plain mono text, not code chips. */
+  :is(.meter-table, .policy-list, .compliance-panel) :not(pre) > code,
+  .chip > code {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  /* A figure's table sits flush in the drawing; the caption follows it. */
+  .fig__drawing > .table-wrap {
+    margin-bottom: 0;
+  }
+
+  /* ---------- meter lists (F-D1, F-D5) ---------- */
+
+  .meter-table {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+
+  .meter-table th,
+  .meter-table td {
+    padding: 6px 0;
+    border: 0;
+    border-bottom: var(--px) solid var(--rule);
+    background: none;
+    text-align: left;
+    vertical-align: middle;
+    font-weight: 400;
+  }
+
+  .meter-table tr:last-child > * {
+    border-bottom: 0;
+  }
+
+  .meter-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    align-items: center;
+  }
+
+  .meter-row__name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--ink);
+  }
+
+  .meter-row__bar .pixel-bar__track {
+    min-width: 0;
+  }
+
+  .meter-table__value {
+    width: 3.5em;
+    padding-left: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--ink-2);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .meter-table td.meter-table__value {
+    text-align: right;
+  }
+
+  .meter-table__type {
+    width: 7.5em;
+    padding-left: var(--space-2);
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+
+  .meter-table__type > * {
+    vertical-align: middle;
+  }
+
+  .meter-table__glyph {
+    margin-right: 4px;
+    color: var(--ink);
+  }
+
+  @container (min-width: 640px) {
+    .meter-row {
+      grid-template-columns: 13rem minmax(0, 1fr);
+      gap: var(--space-3);
+    }
+  }
+
+  /* ---------- approval ladder (F-D2) ---------- */
+
+  .ladder {
+    width: 100%;
+    margin: 0;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: var(--space-2) 0;
+  }
+
+  .ladder th,
+  .ladder td {
+    padding: 6px;
+    border: var(--border);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .ladder thead th {
+    border-bottom: 0;
+    background: var(--bg-mut);
+    color: var(--ink);
+    font-size: 14px;
+  }
+
+  .ladder__level > * {
+    vertical-align: middle;
+  }
+
+  .ladder__level > span:last-child {
+    display: block;
+    margin-top: 4px;
+  }
+
+  .ladder__level .risk-pips {
+    margin: 0 6px;
+  }
+
+  .ladder__level--low {
+    color: var(--risk-low);
+  }
+
+  .ladder__level--medium {
+    color: var(--risk-medium);
+  }
+
+  .ladder__level--high {
+    color: var(--risk-high);
+  }
+
+  .ladder__level .risk-pips,
+  .ladder__level .pg {
+    color: inherit;
+  }
+
+  .ladder__level > span:last-child {
+    color: var(--ink);
+  }
+
+  .ladder__cell {
+    background: var(--bg);
+  }
+
+  .ladder__cell svg.pg {
+    display: block;
+    margin-bottom: var(--space-2);
+    color: var(--ink);
+  }
+
+  .ladder__word {
+    display: block;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  /* The outcome word carries the cell when narrow; the caption repeats the longer reading. */
+  .ladder__text {
+    display: none;
+    font-size: 14px;
+    line-height: 1.35;
+    color: var(--ink-2);
+    overflow-wrap: normal;
+  }
+
+  @container (min-width: 480px) {
+    .ladder__text {
+      display: block;
+    }
+  }
+
+  .ladder__cell--human {
+    background: var(--bg-mut);
+  }
+
+  /* A level no threshold covers: hatched with 2px rule stripes. */
+  .ladder__cell--gap {
+    background: repeating-linear-gradient(45deg, var(--rule) 0 2px, var(--bg) 2px 8px);
+  }
+
+  .ladder-blocked {
+    display: grid;
+    gap: var(--space-2);
+    margin: var(--space-3) var(--space-2) 0;
+    padding: var(--space-3);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .ladder-blocked__title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .ladder-blocked__list,
+  .tile-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ladder-blocked__list li,
+  .tile-list li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+  }
+
+  /* ---------- checkpoint policy (F-D3) ---------- */
+
+  .policy-strip {
+    display: flex;
+    gap: var(--px);
+    margin-bottom: var(--space-3);
+  }
+
+  .policy-strip__part {
+    display: grid;
+    align-content: start;
+    flex-basis: 0;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .policy-strip__bar {
+    height: 16px;
+    background: var(--ink);
+  }
+
+  .policy-strip__part--high_risk .policy-strip__bar {
+    background: var(--risk-high);
+  }
+
+  .policy-strip__part--medium_risk .policy-strip__bar {
+    background: var(--risk-medium);
+  }
+
+  .policy-strip__part--never .policy-strip__bar {
+    box-sizing: border-box;
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .policy-strip__label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 4px;
+    font-size: 14px;
+    line-height: 1.3;
+    color: var(--ink-2);
+  }
+
+  .policy-strip__label b {
+    color: var(--ink);
+  }
+
+  .policy-list__header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .policy-list {
+    display: grid;
+    gap: 6px var(--space-5);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @container (min-width: 640px) {
+    .policy-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .policy-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px var(--space-2);
+    margin: 0;
+    min-width: 0;
+  }
+
+  .policy-list li code {
+    overflow-wrap: anywhere;
+  }
+
+  .policy-list .pg {
+    color: var(--ink);
+  }
+
+  .policy-list li[data-level='high_risk'] .pg {
+    color: var(--risk-high);
+  }
+
+  .policy-list li[data-level='medium_risk'] .pg {
+    color: var(--risk-medium);
+  }
+
+  .policy-list__noglyph,
+  .compliance-panel__noglyph {
+    display: inline-block;
+    width: 14px;
+  }
+
+  .policy-list__level {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- evidence and compliance panels (F-D4, F-D7) ---------- */
+
+  .evidence-panel,
+  .compliance-panel {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+  }
+
+  .evidence-panel__row,
+  .compliance-panel__row {
+    display: grid;
+    gap: 4px var(--space-4);
+    min-width: 0;
+  }
+
+  @container (min-width: 640px) {
+    .evidence-panel__row,
+    .compliance-panel__row {
+      grid-template-columns: 13rem minmax(0, 1fr);
+      align-items: center;
+    }
+  }
+
+  .evidence-panel dt,
+  .compliance-panel dt {
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .evidence-panel dd,
+  .compliance-panel dd {
+    margin: 0;
+    min-width: 0;
+  }
+
+  .compliance-panel dd {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .compliance-panel .pg {
+    color: var(--ink);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .chip {
+    margin: 0;
+    padding: 2px 6px;
+    border: var(--px) solid var(--ink-3);
+    background: var(--bg);
+  }
+
+  .chip > code {
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------- the README's own profile section ---------- */
+
+  .domain-guide {
+    margin: var(--space-5) 0;
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .domain-guide > summary {
+    padding: var(--space-2) var(--space-3);
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .domain-guide > .doc__body {
+    padding: 0 var(--space-3) var(--space-3);
+  }
+
+  /* ---------- workflow cards (F-D6) ---------- */
+
+  .wf-card {
+    margin: var(--space-3) 0 var(--space-5);
+  }
+
+  .wf-card__body {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+    min-width: 0;
+  }
+
+  .wf-card__steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .wf-card__steps li {
+    display: flex;
+    margin: 0;
+  }
+
+  .wf-card__link {
+    font-weight: 700;
+  }
+
+  .wf-card__facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    color: var(--ink-2);
+  }
+
+  .wf-card--proposed {
+    border-style: dashed;
+    background: var(--bg);
+    box-shadow: none;
+  }
+
+  .wf-card__glyph {
+    display: inline-flex;
+    color: var(--ink-2);
+  }
+
+  /* ---------- domains index: profile cards (F-DI1) ---------- */
+
+  .profile-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .profile-cards > li {
+    display: grid;
+    margin: 0;
+  }
+
+  .profile-card {
+    display: grid;
+    align-content: start;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border: var(--border);
+    background: var(--bg);
+    box-shadow: var(--shadow-1);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .profile-card:hover,
+  .profile-card:focus-visible {
+    color: var(--ink);
+    transform: translate(-2px, -2px);
+    box-shadow: var(--shadow-2);
+  }
+
+  .profile-card__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 700;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+  }
+
+  .profile-card__strip {
+    position: relative;
+    height: 12px;
+    margin: var(--space-1) 0 0;
+    border-bottom: var(--px) solid var(--ink-3);
+  }
+
+  .profile-card__tick {
+    position: absolute;
+    bottom: 2px;
+    width: 4px;
+    height: 8px;
+    margin-left: -2px;
+    background: var(--indicator);
+  }
+
+  .profile-card__axis {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .profile-card__facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px var(--space-2);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .profile-card__number {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 32px;
+    line-height: 1;
+    color: var(--ink);
+  }
+
+  .domain-thresholds {
+    margin: var(--space-5) 0;
+  }
+}

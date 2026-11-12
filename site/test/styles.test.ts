@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'motion.css'].map((f) => ({
+const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'figures-domain.css', 'motion.css'].map((f) => ({
   file: f,
   css: readFileSync(`src/styles/${f}`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }));
@@ -43,6 +43,9 @@ describe('typography', () => {
       '.step-strip__step--hit',
       '.icon-card__number',
       '.edge-card__number',
+      // Visual spec 1.2 and 3.6: the minimum confidence on each domains-index
+      // profile card is that card's hero number.
+      '.profile-card__number',
     ]);
     const display = rules()
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))

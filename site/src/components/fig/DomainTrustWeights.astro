@@ -1,0 +1,48 @@
+---
+// F-D1, trust weights as a meter list (visual spec 3.5): one row per source,
+// highest first, each a name, a PixelBar on the shared 0 to 1 scale and the
+// value to two decimals. One series, so one hue (--indicator). The rows are a
+// real table; the bar sits in the name cell and is aria-hidden, so the table
+// reads as source and weight. When the figure is narrow the bar drops under
+// the name (the meter-list rule).
+//
+// Props:
+// - profile: the profile mapping, required.
+// - n: the figure number on the page.
+// - id: the figure id (a ref- id).
+import Figure from './Figure.astro';
+import TableWrap from '../TableWrap.astro';
+import PixelBar from './PixelBar.astro';
+import { trustCaption } from '../../lib/domain-figures';
+import { sortedTrustWeights } from '../../lib/views';
+
+interface Props {
+  profile: Record<string, unknown>;
+  n: number;
+  id: string;
+}
+
+const { profile, n, id } = Astro.props;
+const weights = sortedTrustWeights(profile);
+---
+<Figure id={id} n={n} title="Trust weight per source, highest first" caption={trustCaption(profile)} kind="trust-weights">
+  <TableWrap label="Trust weight per source, highest first">
+    <table class="meter-table">
+      <caption class="fig-sr">Trust weight per source, highest first</caption>
+      <thead class="fig-sr"><tr><th scope="col">Source</th><th scope="col">Weight</th></tr></thead>
+      <tbody>
+        {weights.map((w) => (
+          <tr data-source={w.source}>
+            <th scope="row">
+              <span class="meter-row">
+                <code class="meter-row__name">{w.source}</code>
+                <span class="meter-row__bar" aria-hidden="true"><PixelBar value={w.weight} max={1} ticks={[0.25, 0.5, 0.75, 1]} hideValue /></span>
+              </span>
+            </th>
+            <td class="meter-table__value">{w.weight.toFixed(2)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </TableWrap>
+</Figure>

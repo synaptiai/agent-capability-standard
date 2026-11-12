@@ -1,0 +1,53 @@
+---
+// F-D5, domain sources as a meter list with type glyphs (visual spec 3.5):
+// one row per source, highest default trust first, with its source:* glyph
+// and type word, its name, and default_trust as a PixelBar on 0 to 1. No
+// grouping by type: most profiles have one source per type. A real table;
+// the bar sits under the name when the figure is narrow, as in F-D1.
+//
+// Props:
+// - profile: the profile mapping; renders nothing without domain_sources.
+// - n, id: the figure number and its ref- id.
+import Figure from './Figure.astro';
+import TableWrap from '../TableWrap.astro';
+import PixelBar from './PixelBar.astro';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import { glyphOrNull, rankedSources, sourcesCaption } from '../../lib/domain-figures';
+
+interface Props {
+  profile: Record<string, unknown>;
+  n: number;
+  id: string;
+}
+
+const { profile, n, id } = Astro.props;
+const sources = rankedSources(profile);
+---
+{sources.length > 0 && (
+  <Figure id={id} n={n} title="Sources and their default trust" caption={sourcesCaption(sources)} kind="domain-sources">
+    <TableWrap label="Sources and their default trust">
+      <table class="meter-table meter-table--sources">
+        <caption class="fig-sr">Sources and their default trust</caption>
+        <thead class="fig-sr"><tr><th scope="col">Source</th><th scope="col">Type</th><th scope="col">Default trust</th></tr></thead>
+        <tbody>
+          {sources.map((s) => {
+            const g = glyphOrNull(`source:${s.type}`);
+            const ok = Number.isFinite(s.trust) && s.trust >= 0 && s.trust <= 1;
+            return (
+              <tr data-source-type={s.type}>
+                <th scope="row">
+                  <span class="meter-row">
+                    <span class="meter-row__name">{s.name}</span>
+                    {ok && <span class="meter-row__bar" aria-hidden="true"><PixelBar value={s.trust} max={1} ticks={[0.25, 0.5, 0.75, 1]} hideValue /></span>}
+                  </span>
+                </th>
+                <td class="meter-table__type">{g && <PixelGlyph name={g} scale={2} class="meter-table__glyph" />}<span>{s.type.replace(/_/g, ' ')}</span></td>
+                <td class="meter-table__value">{ok ? s.trust.toFixed(2) : String(s.trust)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </TableWrap>
+  </Figure>
+)}

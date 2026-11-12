@@ -1,0 +1,56 @@
+---
+// F-D4, the evidence policy panel (visual spec 3.5): minimum_confidence as
+// one PixelBar on 0 to 1, required_anchor_types as chips, and
+// require_grounding as 24px tiles with their ids. A <dl>, which is also its
+// text equivalent.
+//
+// Props:
+// - profile: the profile mapping; renders nothing without evidence_policy.
+// - n, id: the figure number and its ref- id.
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+import PixelBar from './PixelBar.astro';
+import { loadOntology } from '../../data/ontology';
+import { evidenceCaption, evidencePolicy } from '../../lib/domain-figures';
+
+interface Props {
+  profile: Record<string, unknown>;
+  n: number;
+  id: string;
+}
+
+const { profile, n, id } = Astro.props;
+const e = evidencePolicy(profile);
+const known = new Set(loadOntology().capabilities.map((c) => c.id));
+const conf = e?.minimumConfidence ?? null;
+---
+{e && (conf !== null || e.anchorTypes.length > 0 || e.grounding.length > 0) && (
+  <Figure id={id} n={n} title="What a claim must carry" caption={evidenceCaption(e)} kind="evidence-policy">
+    <dl class="evidence-panel">
+      {conf !== null && conf >= 0 && conf <= 1 && (
+        <div class="evidence-panel__row evidence-panel__row--confidence">
+          <dt>Minimum confidence</dt>
+          <dd><PixelBar value={conf} max={1} digits={2} ticks={[0.25, 0.5, 0.75, 1]} /></dd>
+        </div>
+      )}
+      {e.anchorTypes.length > 0 && (
+        <div class="evidence-panel__row">
+          <dt>Evidence anchor types</dt>
+          <dd><ul class="chips">{e.anchorTypes.map((a) => <li class="chip"><code>{a}</code></li>)}</ul></dd>
+        </div>
+      )}
+      {e.grounding.length > 0 && (
+        <div class="evidence-panel__row">
+          <dt>Must cite evidence</dt>
+          <dd>
+            <ul class="tile-list">
+              {e.grounding.map((c) => (
+                <li data-capability={c}>{known.has(c) && <MiniTile id={c} size={24} relation="must cite evidence" />}<code>{c}</code></li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+      )}
+    </dl>
+  </Figure>
+)}

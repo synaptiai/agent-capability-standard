@@ -125,17 +125,30 @@ describe('built site', () => {
     expect(tiles.sort()).toEqual(want);
   });
 
-  it('states the auto-approve threshold as a sentence, including none', () => {
-    // Expected: each profile's `auto_approve:` line, by line scan; the page for a profile is /domains/<file name with - for _>/.
-    const values = profileFiles().map((f) => ({
-      page: f.replace(/\.yaml$/, '').replaceAll('_', '-'),
-      level: /^ {2}auto_approve: (\w+)/m.exec(repoText(`schemas/profiles/${f}`))?.[1],
-    }));
-    expect(values.map((v) => v.level)).toContain('none');
-    for (const { page, level } of values) {
+  it('draws the approval ladder with the outcome the spec rule gives at each risk level, including auto_approve none', () => {
+    // Expected: each profile's threshold lines, by line scan, through the F-D2 rule as visual spec 3.5 words
+    // it (low < medium < high < critical; human if require_human <= L, else review if require_review <= L,
+    // else auto if auto_approve is not none and L <= auto_approve, else not covered). The page for a
+    // profile is /domains/<file name with - for _>/. This replaced a check of the old "Approved
+    // automatically" sentence, which the ladder figure took over (issue #125).
+    const order = ['low', 'medium', 'high', 'critical'];
+    const values = profileFiles().map((f) => {
+      const text = repoText(`schemas/profiles/${f}`);
+      const v = (k: string) => new RegExp(`^ {2}${k}: (\\w+)`, 'm').exec(text)?.[1];
+      return { page: f.replace(/\.yaml$/, '').replaceAll('_', '-'), auto: v('auto_approve'), review: v('require_review'), human: v('require_human') };
+    });
+    expect(values.map((v) => v.auto)).toContain('none');
+    for (const { page, auto, review, human } of values) {
+      const want = ['low', 'medium', 'high'].map((l) => {
+        const L = order.indexOf(l);
+        if (human && order.indexOf(human) <= L) return 'human';
+        if (review && order.indexOf(review) <= L) return 'review';
+        if (auto && auto !== 'none' && L <= order.indexOf(auto)) return 'auto';
+        return 'gap';
+      });
       const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
-      const dd = /<dt>Approved automatically<\/dt>\s*<dd>(.*?)<\/dd>/.exec(html)?.[1]?.replace(/<[^>]+>/g, '');
-      expect(dd, page).toBe(level === 'none' ? 'Nothing' : `${level} risk`);
+      const table = /<table class="ladder"[\s\S]*?<\/table>/.exec(html)?.[0] ?? '';
+      expect([...table.matchAll(/data-outcome="(\w+)"/g)].map((m) => m[1]), page).toEqual(want);
     }
   });
 
@@ -185,19 +198,60 @@ describe('built site', () => {
     expect(html).toContain('href="/community/governance/#decision-making"');
   });
 
-  it('puts the profile values after the README title and lead and before the README sections (design notes, ia-home 6.6)', () => {
-    // Expected: each domain README's first `# ` and `## ` lines, slugged by hand (lower case, spaces to hyphens).
-    const slug = (line: string) => line.replace(/^#+ /, '').toLowerCase().replace(/ /g, '-');
+  it('keeps the README heading order and draws the profile figures under its Domain Profile heading (visual spec 3.5)', () => {
+    // Expected: each domain README's `# `, `## ` and `### ` lines, slugged by hand (lower case, spaces to
+    // hyphens, dropping other punctuation), in file order. The figures replaced the README's own profile
+    // text, which moved into a <details> under them with its H3s as H4s (issue #125).
+    const slug = (line: string) => line.replace(/^#+ /, '').toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/ /g, '-');
     for (const d of pageDirs('domains')) {
-      const lines = repoText(`docs/domains/${d}/README.md`).split('\n');
+      const lines = repoText(`docs/domains/${d}/README.md`).split('\n').filter((l) => !/^```/.test(l));
+      const html = readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8');
+      const ids = [...html.matchAll(/<h[1-6][^>]*\sid="([^"]+)"/g)].map((m) => m[1]!);
       const h1 = slug(lines.find((l) => l.startsWith('# '))!);
-      const h2 = slug(lines.find((l) => l.startsWith('## '))!);
-      const ids = [...readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8').matchAll(/<h[1-6][^>]*\sid="([^"]+)"/g)].map((m) => m[1]);
-      const at = (id: string) => ids.indexOf(id);
-      expect(at(h1), `${d} ${h1}`).toBe(0);
-      expect(at('ref-profile-values'), d).toBeGreaterThan(at(h1));
-      expect(at('ref-workflows-in-this-profile'), d).toBeGreaterThan(at('ref-profile-values'));
-      expect(at(h2), `${d} ${h2}`).toBeGreaterThan(at('ref-workflows-in-this-profile'));
+      expect(ids.indexOf(h1), `${d} ${h1}`).toBe(0);
+      const profile = html.indexOf('id="domain-profile"');
+      const details = html.indexOf('<details class="domain-guide"');
+      expect(profile, d).toBeGreaterThan(0);
+      for (const kind of ['trust-weights', 'approval-ladder', 'checkpoint-policy', 'evidence-policy']) {
+        const at = html.indexOf(`data-fig-kind="${kind}"`);
+        expect(at, `${d} ${kind}`).toBeGreaterThan(profile);
+        expect(at, `${d} ${kind}`).toBeLessThan(details);
+      }
+      expect(html.indexOf('id="trust-weights"'), d).toBeGreaterThan(details);
+      expect(/<h4 id="trust-weights"/.test(html), d).toBe(true);
+    }
+  });
+
+  it('puts each workflow card directly under the README heading of its workflow (visual spec 3.5, F-D6)', () => {
+    // Expected: the ids each profile lists, by line scan; each README H3 under "Available Workflows" with
+    // its number removed, lower case, other characters as `_`.
+    for (const f of profileFiles()) {
+      const page = f.replace(/\.yaml$/, '').replaceAll('_', '-');
+      const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
+      const ids = profileWorkflowIds(repoText(`schemas/profiles/${f}`));
+      expect(ids.length, f).toBeGreaterThan(0);
+      for (const id of ids) {
+        const card = html.indexOf(`<div class="wf-card__body" data-workflow="${id}"`);
+        expect(card, `${page} ${id}`).toBeGreaterThan(0);
+        const before = html.slice(0, card);
+        const lastH3 = [...before.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].at(-1)!;
+        const title = lastH3[1]!.replace(/<[^>]*>/g, '').replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        expect(title, `${page} ${id}`).toBe(id);
+        expect(before.slice(lastH3.index! + lastH3[0].length, before.lastIndexOf('<figure')), `${page} ${id}`).not.toMatch(/<(p|ul|ol|pre|table)[\s>]/);
+      }
+    }
+  });
+
+  it('gives each domain profile figure a Figure block in the Markdown copy with the same caption', () => {
+    for (const d of pageDirs('domains')) {
+      const html = readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8');
+      const md = readFileSync(path.join(dist, 'domains', d, 'index.md'), 'utf8');
+      const figs = [...html.matchAll(/<figure [^>]*data-fig-kind="(\w[\w-]*)"[\s\S]*?<figcaption class="fig__caption">([\s\S]*?)<\/figcaption>/g)]
+        .filter((m) => m[1] !== 'workflow-card')
+        .map((m) => m[2]!.replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+      expect(figs.length, d).toBeGreaterThan(3);
+      expect((md.match(/^\*\*Figure: /gm) ?? []).length, d).toBe(figs.length);
+      for (const c of figs) expect(md, `${d}: ${c}`).toContain(c);
     }
   });
 
