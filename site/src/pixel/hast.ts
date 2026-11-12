@@ -46,7 +46,10 @@ export function glyphElement(
       ariaHidden: label ? undefined : 'true',
       dataGlyph: name,
     },
-    placedRects(g).map((r) => el('rect', { x: r.x, y: r.y, width: r.w, height: r.h, ...r.attrs })),
+    placedRects(g).map((r) => {
+      const props: Element['properties'] = { x: String(r.x), y: String(r.y), width: r.w, height: r.h };
+      return el('rect', Object.assign(props, r.attrs));
+    }),
   );
 }
 
