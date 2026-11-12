@@ -146,6 +146,37 @@ function joinText(join: unknown): string | null {
   return typeof join === 'string' ? join : JSON.stringify(join);
 }
 
+/**
+ * The read lane of the spine (visual spec 3.3, F-W1) row by row: for each
+ * step that reads earlier outputs, what its bracket draws in each row from
+ * the topmost producer's row down to its own. `top` is the line from the
+ * row's middle down, `through` the full height, `bottom` from the row's top
+ * to its middle with the chevron, and `stub` the tick into a producer's row
+ * (and into the reader's own). Steps of a parallel group share one row, so a
+ * producer in the reader's own row draws nothing.
+ */
+export interface ReadPiece {
+  row: number;
+  line: 'top' | 'through' | 'bottom';
+  stub: boolean;
+}
+
+export function readLane(spine: Pick<Spine, 'steps' | 'rowOf'>): { step: number; producers: number[]; pieces: ReadPiece[] }[] {
+  return spine.steps
+    .filter((s) => s.reads.length > 0)
+    .map((s) => {
+      const own = spine.rowOf.get(s.index)!;
+      const rows = new Set(s.reads.map((r) => spine.rowOf.get(r)!).filter((r) => r !== own));
+      const top = Math.min(own, ...rows);
+      const pieces: ReadPiece[] = [];
+      for (let r = top; r <= own && rows.size > 0; r += 1) {
+        const line = r === own ? 'bottom' : r === top ? 'top' : 'through';
+        pieces.push({ row: r, line, stub: r === own || rows.has(r) });
+      }
+      return { step: s.index, producers: s.reads.filter((r) => spine.rowOf.get(r) !== own), pieces };
+    });
+}
+
 /** The spine of a workflow (visual spec 3.3, F-W1). */
 export function workflowSpine(wf: Workflow): Spine {
   const diagram = diagramSteps(wf);

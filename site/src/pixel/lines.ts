@@ -206,3 +206,32 @@ export function edgeRects(type: string, x1: number, y1: number, x2: number, y2: 
   if (s.end === 'triangle') rects.push(...hollowTriangle(x2, y2, dir, s.ink, cell));
   return { rects, mid };
 }
+
+/** A rect's slice of one row, and the lines that run on below the row's first `row` pixels. */
+export interface RowSlice {
+  rects: (FigRect & { opacity?: number })[];
+  /** Vertical lines that cross the bottom of the row's first `row` pixels: drawn on to the row's real bottom. */
+  continues: { x: number; w: number; ink: Ink }[];
+}
+
+/**
+ * Cuts a drawing laid out on fixed rows of `row` pixels into one slice per
+ * row, each in its row's own coordinates, so a row can grow taller than
+ * `row` (its text wraps) and still carry its part of the drawing: the slice
+ * is drawn in the row's first `row` pixels, and every line that crossed into
+ * the next row is drawn on to the row's real bottom (`continues`).
+ */
+export function rowSlices(rects: readonly (FigRect & { opacity?: number })[], rows: number, row: number): RowSlice[] {
+  return Array.from({ length: rows }, (_, r) => {
+    const top = r * row;
+    const bottom = top + row;
+    const out: RowSlice = { rects: [], continues: [] };
+    for (const q of rects) {
+      const y1 = Math.max(q.y, top);
+      const y2 = Math.min(q.y + q.h, bottom);
+      if (y2 > y1) out.rects.push({ ...q, y: y1 - top, h: y2 - y1 });
+      if (q.y < bottom && q.y + q.h > bottom) out.continues.push({ x: q.x, w: q.w, ink: q.ink });
+    }
+    return out;
+  });
+}

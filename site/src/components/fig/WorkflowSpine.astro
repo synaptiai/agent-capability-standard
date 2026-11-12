@@ -1,7 +1,10 @@
 ---
 // F-W1, the step spine of a workflow (visual spec 3.3). It generalises the
-// home page's story diagram to every workflow: one 28px row per step, top to
-// bottom, each a link to that step's card. Each row shows the step number,
+// home page's story diagram to every workflow: one row per step, top to
+// bottom, each a link to that step's card. A row is 28px, or taller when
+// its purpose wraps: the marks sit in the row's first 28px, and the lanes
+// are drawn row by row (rowSlices, readLane), so a taller row carries its
+// part of each bracket down to its own bottom. Each row shows the step number,
 // a small periodic tile (dashed when the step has a condition), the step's
 // role glyph, its capability and purpose, its gate actions, its failure
 // actions and its risk pips. Two bracket lanes on the left join the
@@ -18,8 +21,8 @@
 // - id: string, required. A `ref-` id for the figure.
 import '../../styles/figures-workflow.css';
 import type { Workflow } from '../../data/workflows';
-import { FAILURE_MARK, spineStepWords, workflowSpine, ROLE_GLYPH, type SpineStep } from '../../lib/workflow-figures';
-import { bracket, chevron, glyphRects, laneOffsets, type FigRect } from '../../pixel/lines';
+import { FAILURE_MARK, readLane, spineStepWords, workflowSpine, ROLE_GLYPH, type SpineStep } from '../../lib/workflow-figures';
+import { bracket, chevron, glyphRects, laneOffsets, rowSlices, type FigRect, type Ink } from '../../pixel/lines';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import Figure from './Figure.astro';
 import Rects from './Rects.astro';
@@ -61,22 +64,29 @@ if (rbX !== undefined) {
   }
 }
 
-// The read lane on the right: for each reading step, an overlay from its
-// first producer's row down to its own row.
+// The left lanes cut into one slice per row (see the header).
+const laneSlices = rowSlices(laneRects, spine.rows.length, ROW);
+const inkFill = (ink: Ink) => (ink === 'current' ? 'currentColor' : `var(--${ink})`);
+
+// The read lane on the right: for each reading step, the pieces of its
+// bracket in each row from its first producer's row down to its own, shown
+// while the step's row is pointed at or focused, with its producers
+// outlined. The rules are written per workflow, keyed by step and row.
 const READ_W = 16;
-function readOverlay(s: SpineStep) {
-  const row = spine.rowOf.get(s.index)!;
-  const rows = s.reads.map((r) => spine.rowOf.get(r)!);
-  const top = Math.min(...rows);
-  const up = row - top;
-  const h = (up + 1) * ROW;
-  const x = READ_W / 2;
-  const rects: FigRect[] = [
-    ...rows.filter((r) => r !== row).flatMap((r) => bracket(x, (r - top) * ROW + ROW / 2, up * ROW + ROW / 2, 'left', 'ink', 6)),
-    ...chevron(2, up * ROW + ROW / 2, 'left', 'ink'),
-  ];
-  return { up, h, rects, boxes: [...new Set(rows)].filter((r) => r !== row).map((r) => r - top) };
-}
+const reads = readLane(spine);
+const scope = `.spine[data-workflow="${wf.id}"]`;
+const when = (k: number) => `${scope}:has(.spine__row[data-step="${k}"]:is(:hover, :focus-within))`;
+const piece = (k: number, row: number, part: string) => `${when(k)} [data-row="${row}"] > .spine__rl > .spine__rl-${part}`;
+const readRules = [
+  ...(['top', 'through', 'bottom'] as const).map((line) => [reads.flatMap((x) => x.pieces.filter((p) => p.line === line).map((p) => piece(x.step, p.row, line))), 'display: block;'] as const),
+  [reads.flatMap((x) => x.pieces.filter((p) => p.stub).map((p) => piece(x.step, p.row, 'stub'))), 'display: block;'] as const,
+  [reads.flatMap((x) => x.pieces.filter((p) => p.line === 'bottom').map((p) => piece(x.step, p.row, 'chev'))), 'display: block;'] as const,
+  [reads.flatMap((x) => x.producers.map((p) => `${when(x.step)} .spine__row[data-step="${p}"] > .spine__link`)), 'outline: var(--px) solid var(--ink); outline-offset: calc(-1 * var(--px));'] as const,
+]
+  .filter(([sels]) => sels.length > 0)
+  .map(([sels, decl]) => `${sels.join(',\n')} { ${decl} }`)
+  .join('\n');
+const chevRects = chevron(2, ROW / 2, 'left', 'ink');
 
 // The gate lane: a condition mark when the step has a condition, then the
 // gate diamond and one glyph per gate action. Narrow, it keeps the condition
@@ -110,29 +120,35 @@ const stepId = (k: number) => `ref-step-${k}`;
 <Figure id={id} n={n} title={spine.title} caption={spine.caption} kind="workflow-spine">
   <div
     class:list={['spine', spine.lanes.reads && 'spine--reads']}
-    style={`--spine-cols: ${columns(false)}; --spine-cols-narrow: ${columns(true)}; --spine-read: ${READ_W}px`}
+    style={`--spine-cols: ${columns(false)}; --spine-cols-narrow: ${columns(true)}; --spine-read: ${READ_W}px; --spine-lanes: ${laneWidth}px`}
     data-workflow={wf.id}
     data-rows={spine.rows.length}
   >
-    {laneWidth > 0 && (
-      <svg
-        class="spine__lanes"
-        width={laneWidth}
-        height={spine.rows.length * ROW}
-        viewBox={`0 0 ${laneWidth} ${spine.rows.length * ROW}`}
-        shape-rendering="crispEdges"
-        aria-hidden="true"
-        focusable="false"
-        data-lanes={[...lanes.keys()].join(' ')}
-      >
-        <Rects rects={laneRects} />
-      </svg>
-    )}
     <ol class="spine__rows" aria-label={`Steps of ${wf.id}`}>
-      {spine.rows.map((r) => {
+      {spine.rows.map((r, ri) => {
+        // This row's part of the left lanes and of the read lane.
+        const lanes = (
+          <>
+            {laneWidth > 0 && (
+              <span class="spine__lane" aria-hidden="true">
+                <svg width={laneWidth} height={ROW} viewBox={`0 0 ${laneWidth} ${ROW}`} shape-rendering="crispEdges" focusable="false">
+                  <Rects rects={laneSlices[ri]!.rects} />
+                </svg>
+                {laneSlices[ri]!.continues.map((c) => <span class="spine__lane-run" style={`left: ${c.x}px; width: ${c.w}px; background: ${inkFill(c.ink)}`}></span>)}
+              </span>
+            )}
+            {spine.lanes.reads && (
+              <span class="spine__rl" aria-hidden="true">
+                <span class="spine__rl-top"></span><span class="spine__rl-through"></span><span class="spine__rl-bottom"></span><span class="spine__rl-stub"></span>
+                <svg class="spine__rl-chev" width={READ_W} height={ROW} viewBox={`0 0 ${READ_W} ${ROW}`} shape-rendering="crispEdges" focusable="false"><Rects rects={chevRects} /></svg>
+              </span>
+            )}
+          </>
+        );
         if (r.kind === 'fork' || r.kind === 'join') {
           return (
-            <li class:list={['spine__bar', `spine__bar--${r.kind}`]} data-group={r.group}>
+            <li class:list={['spine__bar', `spine__bar--${r.kind}`]} data-group={r.group} data-row={ri}>
+              {lanes}
               <PixelGlyph name={r.kind === 'fork' ? 'fork' : 'flow:join'} />
               {r.kind === 'fork' ? (
                 <span><span class="spine__bar-word">Parallel group </span><code>{r.group}</code>: {r.size} {r.size === 1 ? 'step' : 'steps'}</span>
@@ -144,7 +160,6 @@ const stepId = (k: number) => `ref-step-${k}`;
         }
         const cells = r.kind === 'step' ? [r.step] : r.steps;
         const Row = (s: SpineStep, inGroup: boolean) => {
-          const o = s.reads.length > 0 ? readOverlay(s) : null;
           const role = ROLE_GLYPH[s.role];
           return (
             <li
@@ -154,6 +169,7 @@ const stepId = (k: number) => `ref-step-${k}`;
               data-gates={s.gates.length}
               data-failures={s.failures.length}
               data-reads={s.reads.join(' ') || undefined}
+              data-row={inGroup ? undefined : ri}
             >
               <a class="spine__link" href={`#${stepId(s.index)}`}>
                 <span class="spine__n">{s.index}</span>
@@ -188,21 +204,15 @@ const stepId = (k: number) => `ref-step-${k}`;
                   <span class="risk-pips" data-level={pips[s.risk]}>{Array.from({ length: pips[s.risk] }, () => <span class="risk-pips__pip"></span>)}</span>
                 </span>
               </a>
-              {o && (
-                <span class="spine__reads" aria-hidden="true" style={`--up: ${o.up}`}>
-                  {o.boxes.map((b) => <span class="spine__producer" style={`--at: ${b}`}></span>)}
-                  <svg width={READ_W} height={o.h} viewBox={`0 0 ${READ_W} ${o.h}`} shape-rendering="crispEdges" focusable="false">
-                    <Rects rects={o.rects} />
-                  </svg>
-                </span>
-              )}
+              {!inGroup && lanes}
             </li>
           );
         };
         return r.kind === 'step' ? (
           Row(r.step, false)
         ) : (
-          <li class:list={['spine__group', cells.length > 1 && 'spine__group--multi']} data-group={r.group}>
+          <li class:list={['spine__group', cells.length > 1 && 'spine__group--multi']} data-group={r.group} data-row={ri}>
+            {lanes}
             <ol class="spine__group-steps" aria-label={`Parallel group ${r.group}`}>
               {cells.map((s) => Row(s, true))}
             </ol>
@@ -211,6 +221,7 @@ const stepId = (k: number) => `ref-step-${k}`;
       })}
     </ol>
   </div>
+  {readRules && <style is:inline set:html={readRules} />}
   <ul class="spine-legend" aria-label="Key">
     {spine.legend.map((l) => (
       <li>
