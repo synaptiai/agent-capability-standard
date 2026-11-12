@@ -44,6 +44,17 @@
     min-width: 48px;
   }
 
+  /* An edge type's name stays whole: inline code may break anywhere, which
+     at 360px split "requires" one letter per line in the narrow first column.
+     The table scrolls inside its own region instead. The figure-table rule
+     in figures-spec.css lets phone-width ids break anywhere; this one is more
+     specific, so the summary's names are the exception. */
+  tr[data-edge-type] > :first-child,
+  .fig__drawing .table-wrap tr[data-edge-type] > :first-child code {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
   tr[data-edge-type] > :first-child .edge-summary__mark {
     margin-right: 6px;
   }
