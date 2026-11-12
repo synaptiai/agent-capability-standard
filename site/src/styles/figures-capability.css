@@ -394,16 +394,16 @@
     order: 0;
   }
 
+  /* The groups stack top to bottom (follows, this capability, precedes),
+     each tile with its ontology edge and catalog count under it. */
   .chain {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: var(--space-3) var(--space-2);
+    display: grid;
+    gap: var(--space-2);
   }
 
   .chain__group {
-    display: flex;
-    align-items: flex-end;
+    display: grid;
+    justify-items: start;
     gap: var(--space-2);
     min-width: 0;
   }
@@ -423,7 +423,7 @@
   .chain__tiles {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px var(--space-2);
+    gap: var(--space-3) var(--space-4);
     margin: 0;
     padding: 0;
     list-style: none;
@@ -445,7 +445,33 @@
   }
 
   .chain__arrow {
-    margin-bottom: 26px;
+    margin-left: 9px;
+    transform: rotate(90deg);
+    color: var(--ink-2);
+  }
+
+  .chain__item {
+    max-width: 11rem;
+  }
+
+  .chain__check {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--ink-2);
+    text-align: center;
+  }
+
+  .chain__edge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    color: var(--ink);
+  }
+
+  .chain__edge--none {
     color: var(--ink-2);
   }
 
@@ -673,13 +699,12 @@
     font-family: var(--font-mono);
   }
 
-  /* The other layers recede; this page's layer keeps its colour, glyph and name. */
-  .lbars .pixel-bar__fill {
-    background: var(--ink-3);
-  }
-
-  .lbars__row--current .pixel-bar__fill {
-    background: var(--layer);
+  /* Every bar is an amount, so every bar is --indicator (visual spec 1.2);
+     this page's layer is marked by its glyph in the layer colour, its name
+     in bold and a band behind the row. */
+  .lbars__row--current {
+    background: var(--bg-mut);
+    box-shadow: 0 0 0 var(--space-1) var(--bg-mut);
   }
 
   .lbars__row--current .lbars__glyph {
@@ -693,5 +718,147 @@
 
   .lbars__table {
     margin-bottom: 0;
+  }
+}
+
+@layer components {
+  /* ---------- layer page: workflows per capability (F-L3 bars) ---------- */
+  .ubars {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-3);
+    padding: 0;
+    list-style: none;
+  }
+
+  .ubars__row {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 8rem) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .ubars__name {
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+}
+
+@layer components {
+  /* ---------- F-C9 examples against the output ---------- */
+  .xfields {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .xfields__row {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .xfields__title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 700;
+  }
+
+  .xfields__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .xfields__chip--off {
+    color: var(--ink-2);
+    background: none;
+    border: var(--px) dashed var(--ink-3);
+    text-decoration: line-through;
+  }
+}
+
+@layer components {
+  /* ---------- F-C10 the skill's tools against the ontology ---------- */
+  .stools__flag {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-3);
+  }
+
+  .stools__rows {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .stools__row {
+    display: grid;
+    grid-template-columns: minmax(0, 16rem) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .stools__label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .stools__tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .stools__none {
+    color: var(--ink-2);
+  }
+
+  @container (max-width: 599px) {
+    .stools__row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+}
+
+@layer components {
+  /* A check is a sentence, not a step title, so it is set in the body weight. */
+  .pmap__title--check {
+    font-weight: 400;
+  }
+}
+
+@layer components {
+  /* ---------- F-C13 the workflows the examples run ---------- */
+  .xwf {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .xwf__row {
+    margin: 0;
+  }
+
+  .xwf__name {
+    margin: 0 0 var(--space-1);
+  }
+
+  .xwf__meta {
+    font-size: 14px;
+    color: var(--ink-2);
   }
 }

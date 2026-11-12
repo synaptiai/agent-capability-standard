@@ -192,7 +192,17 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
     </ul>
   </Figure>
 )}
-{slot === 'step' && <StepAnatomy id={idOf('step anatomy')} n={n} title={titled('Step anatomy')} rows={stepFieldRows(text, where)} />}
+{slot === 'step' && (() => {
+  // A field the §5.2 tables do not list links to the section the Standard
+  // names beside it ("`delay` (§5.13)" in the §5.9 extensions table).
+  const rows = stepFieldRows(text, where);
+  const links = new Map<string, string>();
+  for (const name of loadCatalogSchema().stepSlots.map((s) => s.name).filter((x) => !rows.has(x))) {
+    const m = new RegExp('`' + name + '`[^|\\n]*?\\(§(\\d+(?:\\.\\d+)*)\\)').exec(text);
+    if (m) links.set(name, sectionLink(m[1]!));
+  }
+  return <StepAnatomy id={idOf('step anatomy')} n={n} title={titled('Step anatomy')} rows={rows} links={links} />;
+})()}
 {slot === 'reference' && (
   <ReferenceAnatomy id={idOf('anatomy of a reference')} n={n} title={titled('Anatomy of a reference')} examples={bindingExamples(text, where)} rule={rootRule(text, where)} />
 )}
@@ -403,14 +413,6 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
         <p class="approval-flow__head">2. The decision an action record holds</p>
         <ul class="approval-flow__chips">{loadWorldStateSchema().approvalDecisions.map((d) => <li class="chip"><code>{d}</code></li>)}</ul>
       </div>
-      <div class="approval-flow__part">
-        <p class="approval-flow__head">3. Unattended and not asked, or unavailable: <code>when_unattended</code></p>
-        <ul class="approval-flow__plans">
-          {plans.map((p) => (
-            <li data-plan={p.plan}><code>{p.plan}</code>{p.isDefault && ' (default)'}<FlowArrow dir="right" length={16} /><span>{/^[A-Z]\d{3}$/.test(p.result) ? <DiagnosticTile code={p.result} /> : p.result}</span></li>
-          ))}
-        </ul>
-      </div>
     </div>
   </Figure>
 )}
@@ -565,12 +567,15 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
   <Figure id={idOf('where codes are raised')} n={n} title={titled('Where codes are raised')} caption={T.heatCaption(heat)} kind="code-heat">
     <TableWrap label="Diagnostic codes each section of chapter 5 names, by family">
       <table class="heat">
-        <thead><tr><th scope="col">Family</th>{heat.sections.map((s) => <th scope="col"><a href={sectionLink(s.n)} title={s.title}>{s.n}</a></th>)}</tr></thead>
+        <thead><tr><th scope="col">Section</th>{heat.families.map((f) => <th scope="col" data-family={f.prefix}><span class="diag-family diag-family--small" aria-hidden="true">{f.prefix}</span><span class="heat__fam">{f.name}</span></th>)}</tr></thead>
         <tbody>
-          {heat.families.map((f, i) => (
-            <tr data-family={f.prefix}>
-              <th scope="row"><span class="diag-family diag-family--small" aria-hidden="true">{f.prefix}</span>{f.name}</th>
-              {heat.counts[i]!.map((c) => <td class:list={['heat__cell', c > 0 && `heat__cell--${heatStep(c, heat.max)}`]} data-count={c}>{c > 0 ? c : ''}</td>)}
+          {heat.sections.map((s, j) => (
+            <tr>
+              <th scope="row"><a href={sectionLink(s.n)}>§{s.n}</a> {s.title}</th>
+              {heat.families.map((_, i) => {
+                const c = heat.counts[i]![j]!;
+                return <td class:list={['heat__cell', c > 0 && `heat__cell--${heatStep(c, heat.max)}`]} data-count={c}>{c > 0 ? c : ''}</td>;
+              })}
             </tr>
           ))}
         </tbody>

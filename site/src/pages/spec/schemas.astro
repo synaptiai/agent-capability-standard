@@ -39,7 +39,7 @@ const description = `The schema files of the Agent Capability Standard, grouped 
           <table class="schema-table">
             <caption class="fig-sr">{g.label}</caption>
             <thead>
-              <tr><th scope="col" class="schema-table__col-file">File</th><th scope="col">What it holds</th><th scope="col" class="schema-table__col-length">Length</th></tr>
+              <tr><th scope="col" class="schema-table__col-file">File and length</th><th scope="col">What it holds</th></tr>
             </thead>
             <tbody>
               {sh.tiles.map((t) => (
@@ -51,12 +51,12 @@ const description = `The schema files of the Agent Capability Standard, grouped 
                       {t.format}
                       {sh.key === 'required' && <span class="schema-table__stamp"><PixelGlyph name="mark:required" />Required</span>}
                     </span>
+                    <span class="schema-table__length"><PixelBar value={t.lines} max={shelfMax(sh)} label={`${t.lines} lines`} /></span>
                   </th>
                   <td>
                     {t.entry.purpose && <p class="schema-table__purpose">{t.entry.purpose}.</p>}
                     {t.entry.description && <p>{t.entry.description}</p>}
                   </td>
-                  <td><PixelBar value={t.lines} max={shelfMax(sh)} label={`${t.lines} lines`} /></td>
                 </tr>
               ))}
             </tbody>

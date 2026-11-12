@@ -84,6 +84,15 @@ export function approvalLadder(profile: Obj): Ladder | null {
   };
 }
 
+/**
+ * A ladder whose three levels have one outcome is a sentence, not a figure
+ * (visual spec 1.1 rule 5): the caption names the outcome and any blocked
+ * capabilities.
+ */
+export function ladderIsFigure(l: Ladder): boolean {
+  return new Set(l.rows.map((r) => r.outcome)).size > 1;
+}
+
 /** The outcomes at low, medium and high as words, e.g. "auto, review, human". */
 export function ladderKey(l: Ladder): string {
   return l.rows.map((r) => OUTCOME_WORD[r.outcome].toLowerCase()).join(', ');
@@ -109,7 +118,8 @@ export function trustCaption(profile: Obj): string {
   const top = w[0]!;
   const low = w.at(-1)!;
   if (w.length === 1) return `One source, ${top.source}, with weight ${top.weight.toFixed(2)}.`;
-  return `${w.length} sources, from ${top.source} at ${top.weight.toFixed(2)} down to ${low.source} at ${low.weight.toFixed(2)}; the scale runs only over that range.`;
+  const axis = trustAxis([{ profile } as unknown as DomainProfile]);
+  return `${w.length} sources, from ${top.source} at ${top.weight.toFixed(2)} down to ${low.source} at ${low.weight.toFixed(2)}; the scale runs from ${axis.min.toFixed(2)} to ${axis.max.toFixed(2)}, that range rounded out to 0.05.`;
 }
 
 // ---------------------------------------------------- F-D3 checkpoint policy
@@ -136,6 +146,11 @@ export function checkpointPolicy(profile: Obj): CheckpointPolicy | null {
 }
 
 export const policyWord = (level: string) => POLICY_WORD[level] ?? level.replace(/_/g, ' ');
+
+/** A policy that sets every trigger to one level is a sentence (visual spec 1.1.5), not a figure. */
+export function checkpointPolicyIsFigure(p: CheckpointPolicy): boolean {
+  return p.levels.length > 1;
+}
 
 /** "All 5 triggers: always" when one level is used (the 1.1.5 fallback), else null. */
 export function checkpointHeader(p: CheckpointPolicy): string | null {

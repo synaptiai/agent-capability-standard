@@ -325,6 +325,8 @@ export interface RiskSummary {
   agree: boolean;
   title: string;
   caption: string;
+  /** Printed in place of the figure when declared, computed and step risk agree. */
+  sentence: string;
 }
 
 function asRisk(v: unknown): Risk | null {
@@ -347,7 +349,11 @@ export function riskSummary(wf: Workflow): RiskSummary {
       ? `Declared, computed and highest step risk are all ${highest}.`
       : `Declared and highest step risk are both ${highest}; the catalog gives no computed risk.`
     : `The catalog declares ${declared}; the highest step risk is ${highest}${computed !== null ? `; the computed risk is ${computed}` : ''}.`;
-  return { steps, highest, highestSteps, declared, computed, agree, title, caption };
+  // When the three agree, the per-step risk is already the risk column of
+  // the step map (F-W1) and each step card, so the section is one sentence
+  // (visual spec 1.1 rule 5; issue #125 review: three figures showed it).
+  const sentence = `${caption.replace(/\.$/, '')}; the highest-risk step is step ${first.index} (${first.capability})${highestSteps.length > 1 ? `, with ${plural(highestSteps.length - 1, 'other', 'others')} at the same level` : ''}. The step map above gives each step's risk.`;
+  return { steps, highest, highestSteps, declared, computed, agree, title, caption, sentence };
 }
 
 // --------------------------------------------------------------- the inputs

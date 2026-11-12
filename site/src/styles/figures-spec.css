@@ -610,21 +610,6 @@
     list-style: none;
   }
 
-  .approval-flow__plans {
-    display: grid;
-    gap: var(--space-2);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .approval-flow__plans li {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
   /* ---------- F-S19 what a delegate binds ---------- */
 
   .deleg {
@@ -1187,9 +1172,48 @@
     white-space: nowrap;
   }
 
+  /* Sections are rows and families columns, so the grid is as wide as six
+     families and fits the column (issue #125 review: 17 section columns ran
+     past the frame). */
   .heat tbody th {
     text-align: left;
-    white-space: nowrap;
+    white-space: normal;
+    font-weight: 400;
+  }
+
+  .heat thead th {
+    vertical-align: bottom;
+  }
+
+  .heat td.heat__cell {
+    width: 32px;
+  }
+
+  @media (max-width: 599px) {
+    .heat tbody th {
+      font-size: 13px;
+    }
+
+    .heat td.heat__cell {
+      width: 28px;
+      min-width: 28px;
+      padding: 2px;
+    }
+  }
+
+  .heat thead .heat__fam {
+    display: block;
+  }
+
+  @media (max-width: 599px) {
+    .heat thead .heat__fam {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
   }
 
   .heat__cell {
@@ -1417,8 +1441,33 @@
     padding-inline: var(--space-2);
   }
 
-  .edge-type-table__count {
-    min-width: 6rem;
+  .edge-type-table__type {
+    width: 38%;
+  }
+
+  .edge-type-table__count,
+  .edge-type-table__props {
+    display: block;
+    margin-top: var(--space-1);
+    font-weight: 400;
+  }
+
+  .edge-type-table__props {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .diagnostics-table__name {
+    margin: 0 0 var(--space-1);
+  }
+
+  /* At phone width, identifiers in a figure's table may break anywhere, so a
+     long code name wraps instead of pushing the description off-screen. */
+  @media (max-width: 599px) {
+    .fig__drawing .table-wrap :is(td, th) code {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
   }
 
   .edge-type-table__desc,
@@ -1524,5 +1573,42 @@
   .diag-family-section h2 {
     display: flex;
     align-items: center;
+  }
+}
+
+@layer components {
+  /* ---------- F-X2 where a family's codes are raised (diagnostics page) ---------- */
+  .raised {
+    width: auto;
+  }
+
+  .raised th,
+  .raised td {
+    padding: 4px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .raised thead th a {
+    font-family: var(--font-mono);
+  }
+
+  .raised tbody th {
+    text-align: left;
+  }
+
+  .raised__cell {
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--rule);
+  }
+
+  .raised__cell--on {
+    background: var(--indicator);
+    border-color: var(--line);
+  }
+
+  .diag-family-section__lead {
+    color: var(--ink-2);
   }
 }

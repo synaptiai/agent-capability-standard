@@ -100,6 +100,82 @@ function boxFigure(pre: Element, heading: string): Element {
   ]);
 }
 
+// ---------- directory trees (3.10.5) ----------
+
+export interface DirNode {
+  name: string;
+  comment: string | null;
+  children: DirNode[];
+}
+
+/**
+ * A fence whose lines after an optional root line are all tree branches
+ * ("├── name  # comment", indented by "│   " or four spaces per level) and
+ * which names at least one directory (a name ending "/") is a directory
+ * tree. A decision tree (a branch with "→") is not one. Returns the root, or
+ * null when the fence is not a directory tree.
+ */
+export function directoryTree(code: string): DirNode | null {
+  const lines = code.split('\n').filter((l) => l.trim() !== '');
+  if (lines.length < 3 || lines.some((l) => l.includes('→'))) return null;
+  const split = (s: string): { name: string; comment: string | null } => {
+    const m = /^(.*?)\s+#\s*(.*)$/.exec(s);
+    return m ? { name: m[1]!.trim(), comment: m[2]!.trim() || null } : { name: s.trim(), comment: null };
+  };
+  const BRANCH = /^((?:│   |│\u00a0\u00a0 |    )*)(?:├── |└── )(.+)$/;
+  const first = BRANCH.test(lines[0]!) ? null : split(lines[0]!);
+  const root: DirNode = { name: first?.name ?? '', comment: first?.comment ?? null, children: [] };
+  const stack: { depth: number; node: DirNode }[] = [{ depth: 0, node: root }];
+  for (const l of lines.slice(first ? 1 : 0)) {
+    const m = BRANCH.exec(l);
+    if (!m) return null;
+    const depth = m[1]!.length / 4 + 1;
+    const node: DirNode = { ...split(m[2]!), children: [] };
+    while (stack.length > 1 && stack.at(-1)!.depth >= depth) stack.pop();
+    if (stack.at(-1)!.depth !== depth - 1) return null;
+    stack.at(-1)!.node.children.push(node);
+    stack.push({ depth, node });
+  }
+  const dirs = (n: DirNode): number => (n.name.endsWith('/') ? 1 : 0) + n.children.reduce((a, c) => a + dirs(c), 0);
+  return dirs(root) > 0 ? root : null;
+}
+
+function treeItems(nodes: DirNode[]): Element {
+  return el(
+    'ul',
+    { className: ['dir-tree'] },
+    nodes.map((n) =>
+      el('li', { className: ['dir-tree__item'] }, [
+        el('span', { className: ['dir-tree__row'] }, [
+          ...(n.name.endsWith('/') ? [glyphElement('folder', { className: 'dir-tree__glyph' })] : []),
+          el('code', { className: ['dir-tree__name'] }, [text(n.name)]),
+          ...(n.comment ? [el('span', { className: ['dir-tree__note'] }, [text(n.comment)])] : []),
+        ]),
+        ...(n.children.length > 0 ? [treeItems(n.children)] : []),
+      ]),
+    ),
+  );
+}
+
+/** The directory tree's caption: what it holds, counted from the parse. */
+export function directoryCaption(root: DirNode): string {
+  const all: DirNode[] = [];
+  const walk = (n: DirNode) => n.children.forEach((c) => (all.push(c), walk(c)));
+  walk(root);
+  const dirs = all.filter((n) => n.name.endsWith('/')).length;
+  const top = root.children.length;
+  return `${top} top-level entries${root.name ? ` in ${root.name}` : ''} and ${dirs} directories in all, each marked with the folder glyph; the text after a name is the source's comment on it.`;
+}
+
+function treeFigure(pre: Element, root: DirNode, heading: string, id: string): Element {
+  const f = figureFrame(id, heading ? `Directory tree: ${heading}` : 'Directory tree', directoryCaption(root), 'directory-tree', [
+    ...(root.name ? [el('p', { className: ['dir-tree__root'] }, [glyphElement('folder', { className: 'dir-tree__glyph' }), el('code', {}, [text(root.name)])])] : []),
+    treeItems(root.children),
+  ]);
+  f.children.push(el('details', { className: ['fig-details'] }, [el('summary', {}, [text('Text version')]), pre]));
+  return f;
+}
+
 // ---------- pattern fences ----------
 
 export interface PatternChain {
@@ -554,7 +630,7 @@ export function numberFigures(tree: Root): number {
   const walk = (node: Root | Element) => {
     for (const c of node.children) {
       if (!isEl(c)) continue;
-      if (c.tagName === 'figure' && classes(c).includes('fig') && !classes(c).includes('fig-ascii')) {
+      if (c.tagName === 'figure' && classes(c).includes('fig')) {
         n += 1;
         const eyebrow = c.children.find((k): k is Element => isEl(k, 'p') && classes(k).some((x) => x === 'fig__eyebrow' || x === 'fig-mermaid__eyebrow'));
         if (eyebrow) eyebrow.children = [text(`Fig ${n}`)];
@@ -607,6 +683,12 @@ export function drawProseFigures(tree: Root, repoPath: string, template = 'prose
       const lang = preLanguage(node);
       const code = textOf(node);
       if ((lang === 'plaintext' || lang === 'text') && isBoxDiagram(code)) {
+        const dir = directoryTree(code);
+        if (dir) {
+          kids[i] = treeFigure(node, dir, heading, uid(`ref-fig-tree-${heading.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'tree'}`));
+          report.ascii += 1;
+          continue;
+        }
         kids[i] = boxFigure(node, heading);
         report.ascii += 1;
         continue;

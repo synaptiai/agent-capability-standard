@@ -75,7 +75,7 @@ export function workflowTwin(workflowId: string): Twin {
     '## Steps',
     steps.join('\n'),
     '## Risk',
-    figure(risk.title, risk.caption, risk.steps.map((s) => `- Step ${s.index} (${code(s.capability)}): ${s.risk}`).join('\n')),
+    risk.agree ? risk.sentence : figure(risk.title, risk.caption, risk.steps.map((s) => `- Step ${s.index} (${code(s.capability)}): ${s.risk}`).join('\n')),
     '## Data flow',
     figure(flow.title, flow.caption, readsList(spine).map((l) => `- ${l}`).join('\n') || 'No step reads an earlier output.'),
     wf.success.length > 0 && '## Success criteria',

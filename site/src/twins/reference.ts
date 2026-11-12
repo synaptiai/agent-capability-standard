@@ -4,6 +4,8 @@ import { CITATION_SOURCE, loadCitation } from '../data/citation';
 import { DIAG_RS, loadDiagnostics } from '../data/diagnostics';
 import { loadOntology, ONTOLOGY_SOURCE } from '../data/ontology';
 import { currentStandard } from '../lib/generated';
+import { currentStandardText } from '../lib/spec-figures';
+import { codeGridCaption, diagnosticFamilies, familyRaised, familyRaisedCaption, familyRaisedIsFigure, familyRaisedTitle } from '../lib/spec-tail-figures';
 import { githubBlobUrl, readRepoFile } from '../lib/repo';
 import { allowedRfcStatuses, rfcRows } from '../lib/rfcs';
 import { kebab } from '../lib/routes';
@@ -40,11 +42,20 @@ export function diagnosticsTwin(): Twin {
   const diagnostics = loadDiagnostics();
   const std = currentStandard();
   const errors = diagnostics.filter((d) => d.severity === 'error').length;
+  const { source, text } = currentStandardText();
+  const families = diagnosticFamilies(text, source);
   const description = `The ${diagnostics.length} diagnostic codes of Standard ${std.version}: what each one means, its category and whether it is an error or a warning.`;
   const markdown = blocks(
     '# Diagnostics',
     `A validator or runtime reports a problem as a diagnostic code. Standard ${std.version} defines ${diagnostics.length} codes: ${errors} errors and ${diagnostics.length - errors} warnings. A workflow is valid when it has no errors; a warning marks a workflow that is accepted but suspect. Each code's severity is fixed.`,
     generatedLine([std.source, DIAG_RS]),
+    figure(`${diagnostics.length} diagnostic codes by family: ${errors} errors, ${diagnostics.length - errors} warnings`, codeGridCaption(families), table(['Family', 'Range', 'Severity', 'Codes'], families.map((f) => [f.name, code(f.range), f.severity, f.codes.map((d) => d.code).join(', ')]))),
+    ...families.map((f) => {
+      const r = familyRaised(text, f);
+      return familyRaisedIsFigure(r)
+        ? figure(familyRaisedTitle(f), familyRaisedCaption(f, r), table(['Code', 'Named in'], r.rows.map((x) => [x.code, x.in.map((n) => `§${n}`).join(', ') || 'no section of chapter 5'])))
+        : familyRaisedCaption(f, r);
+    }),
     table(
       ['Code', 'Name', 'Category', 'Severity', 'Description', 'Section'],
       diagnostics.map((d) => [

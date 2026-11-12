@@ -1,7 +1,10 @@
 ---
-// F-L3, the layer's usage matrix (visual spec 3.2): a real table with one
-// row per workflow that runs a capability of the layer and one column per
-// capability of the layer, headed by its periodic tile. A cell holds the
+// F-L3, the layer's usage (visual spec 3.2). The drawing is one bar per
+// capability of the layer: how many workflows run it, with its step count.
+// Most cells of the full matrix hold 1, so the matrix itself, a tall table
+// that said little at a glance (visual review), sits under the bars in
+// a <details>: one row per workflow that runs a capability of the layer and
+// one column per capability, headed by its periodic tile. A cell holds the
 // number of the workflow's steps that run that capability, printed on one of
 // the four heat steps with a 2px border, so the fill is never the only
 // signal; an empty cell is blank. The table scrolls inside its wrapper when
@@ -16,6 +19,7 @@ import { usageMatrix, usageMatrixCaption } from '../../lib/layer-figures';
 import TableWrap from '../TableWrap.astro';
 import Figure from './Figure.astro';
 import MiniTile from './MiniTile.astro';
+import PixelBar from './PixelBar.astro';
 
 interface Props {
   layerId: string;
@@ -26,11 +30,24 @@ const { layerId, n } = Astro.props;
 const m = usageMatrix(layerId);
 const title = `Workflows that use ${layerId} capabilities`;
 const ranges = heatRanges(m.max);
+const per = m.capabilities.map((c, i) => ({ c, steps: m.rows.reduce((k, r) => k + r.counts[i]!, 0), workflows: m.rows.filter((r) => r.counts[i]! > 0).length }));
+const maxW = Math.max(1, ...per.map((p) => p.workflows));
 ---
 {m.rows.length === 0 ? (
   <p>{usageMatrixCaption(layerId, m)}</p>
 ) : (
   <Figure id="ref-fig-layer-usage" n={n} title={title} caption={usageMatrixCaption(layerId, m)} kind="layer-usage">
+    <ul class="ubars" aria-label={`Workflows that run each ${layerId} capability`}>
+      {per.map((p) => (
+        <li class="ubars__row">
+          <MiniTile id={p.c} size={24} />
+          <code class="ubars__name">{p.c}</code>
+          <PixelBar value={p.workflows} max={maxW} label={`${p.workflows} ${p.workflows === 1 ? 'workflow' : 'workflows'}, ${p.steps} ${p.steps === 1 ? 'step' : 'steps'}`} />
+        </li>
+      ))}
+    </ul>
+    <details class="fig-details">
+    <summary>Every workflow against every {layerId} capability, as a table</summary>
     <TableWrap label={title}>
       <table class="umatrix">
         <caption class="fig-sr">{title}: steps per workflow and capability</caption>
@@ -64,5 +81,6 @@ const ranges = heatRanges(m.max);
         <li><span class="umatrix__swatch" style={`--cell: var(${HEAT_TOKENS[r.step - 1]!.fill})`}></span>{r.from === r.to ? `${r.from}` : `${r.from} to ${r.to}`} {r.to === 1 ? 'step' : 'steps'}</li>
       ))}
     </ul>
+    </details>
   </Figure>
 )}

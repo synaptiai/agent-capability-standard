@@ -78,16 +78,25 @@ function readOverlay(s: SpineStep) {
   return { up, h, rects, boxes: [...new Set(rows)].filter((r) => r !== row).map((r) => r - top) };
 }
 
-const gateCols = spine.lanes.gate ? 1 + spine.maxGates : 0;
+// The gate lane: a condition mark when the step has a condition, then the
+// gate diamond and one glyph per gate action. Narrow, it keeps the condition
+// mark, the first action and a "+n" count (the action glyph already says the
+// step has a gate, so the diamond goes).
+const GLYPH = 14;
+const GAP = 2;
+const COUNT = 20;
+const lane = (parts: number[]) => (parts.length === 0 ? 0 : parts.reduce((a, b) => a + b, 0) + GAP * (parts.length - 1));
+const gateWide = Math.max(0, ...spine.steps.map((s) => lane([...(s.condition !== null ? [GLYPH] : []), ...(s.gates.length > 0 ? [GLYPH, ...s.gates.map(() => GLYPH)] : [])])));
+const gateNarrow = Math.max(0, ...spine.steps.map((s) => lane([...(s.condition !== null ? [GLYPH] : []), ...(s.gates.length > 0 ? [GLYPH] : []), ...(s.gates.length > 1 ? [COUNT] : [])])));
+const gateCols = spine.lanes.gate ? 1 : 0;
 const failCols = spine.maxFailures;
-// Narrow, the gate lane keeps the first action and a "+n" count.
 const columns = (narrow: boolean) =>
   [
     'var(--spine-n)',
     '24px',
     '14px',
     'minmax(0, 1fr)',
-    ...(gateCols > 0 ? [`${narrow ? 14 + (spine.maxGates > 1 ? 20 : 0) : gateCols * 16 - 2}px`] : []),
+    ...(gateCols > 0 ? [`${narrow ? gateNarrow : gateWide}px`] : []),
     ...(failCols > 0 ? [`${failCols * 16 - 2}px`] : []),
     '22px',
     ...(spine.lanes.reads ? [`${READ_W}px`] : []),
@@ -123,9 +132,9 @@ const stepId = (k: number) => `ref-step-${k}`;
             <li class:list={['spine__bar', `spine__bar--${r.kind}`]} data-group={r.group}>
               <PixelGlyph name={r.kind === 'fork' ? 'fork' : 'flow:join'} />
               {r.kind === 'fork' ? (
-                <span>Parallel group <code>{r.group}</code>: {r.size} {r.size === 1 ? 'step' : 'steps'}</span>
+                <span><span class="spine__bar-word">Parallel group </span><code>{r.group}</code>: {r.size} {r.size === 1 ? 'step' : 'steps'}</span>
               ) : (
-                <span>Join <code>{r.group}</code>{r.join !== null && <>: <code>{r.join}</code></>}</span>
+                <span><span class="spine__bar-word">Join </span><code>{r.group}</code>{r.join !== null && <>: <code>{r.join}</code></>}</span>
               )}
             </li>
           );
@@ -160,7 +169,8 @@ const stepId = (k: number) => `ref-step-${k}`;
                 <span class="fig-sr">; {spineStepWords(s)}</span>
                 {gateCols > 0 && (
                   <span class="spine__gates" aria-hidden="true">
-                    {(s.gates.length > 0 || s.condition !== null) && <PixelGlyph name={s.gates.length > 0 ? 'diamond' : 'flow:condition'} class="spine__diamond" />}
+                    {s.condition !== null && <PixelGlyph name="flow:condition" class="spine__condition" />}
+                    {s.gates.length > 0 && <PixelGlyph name="diamond" class="spine__diamond" />}
                     {s.gates.map((g, i) => <PixelGlyph name={`gate:${g}`} class={i > 0 ? 'spine__more' : undefined} />)}
                     {s.gates.length > 1 && <span class="spine__count">+{s.gates.length - 1}</span>}
                   </span>

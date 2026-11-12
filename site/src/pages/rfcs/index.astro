@@ -56,6 +56,8 @@ const description = 'Requests for comments that propose changes to the Agent Cap
         ))}
       </ol>
     </Figure>
+    <details class="fig-details">
+    <summary>Every RFC with its title, status, target and date</summary>
     <TableWrap label="RFCs">
       <table class="rfc-table" id={tableId}>
         <caption>RFCs</caption>
@@ -65,16 +67,17 @@ const description = 'Requests for comments that propose changes to the Agent Cap
         <tbody>
           {rfcs.map((r) => (
             <tr data-status={r.status}>
-              <th scope="row"><a href={r.url}>{r.label}</a></th>
+              <th scope="row" class="rfc-table__id"><a href={r.url}>{r.label}</a></th>
               <td>{r.title}</td>
               <td><StatusBadge status={r.status} /></td>
               <td>{r.target && (r.targetUrl ? <a href={r.targetUrl}>{r.target}</a> : r.target)}</td>
-              <td>{r.date}</td>
+              <td class="rfc-table__date">{r.date}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </TableWrap>
+    </details>
     {proposals.length > 0 && (
       <section class="rfc-proposals">
         <h2 id={id('Proposals')}>Proposals</h2>

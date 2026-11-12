@@ -72,11 +72,11 @@ const pct = (v: number) => `${(((v - axis.min) / (axis.max - axis.min)) * 100).t
                         {w.map((x) => <span class="profile-card__tick" style={`left: ${pct(x.weight)}`}></span>)}
                       </span>
                       <span class="profile-card__axis" aria-hidden="true"><span>{axis.min.toFixed(2)}</span><span>{axis.max.toFixed(2)}</span></span>
-                      <span class="profile-card__facts">{w.length} trust weights, {w.at(-1)!.weight.toFixed(2)} to {w[0]!.weight.toFixed(2)}</span>
+                      <span class="profile-card__facts profile-card__facts--range">{w.length} trust weights, {w.at(-1)!.weight.toFixed(2)} to {w[0]!.weight.toFixed(2)}</span>
                     </>
                   )}
                   {conf !== null && (
-                    <span class="profile-card__facts">Minimum confidence <span class="profile-card__number">{conf.toFixed(2)}</span></span>
+                    <span class="profile-card__facts profile-card__facts--conf">Minimum confidence <span class="profile-card__number">{conf.toFixed(2)}</span></span>
                   )}
                 </a>
               </li>

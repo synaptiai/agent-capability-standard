@@ -27,5 +27,8 @@ export function foldFirstBox(html: string, summary: string): string {
   const m = /<figure class="fig fig-ascii"[\s\S]*?<\/figure>/.exec(html);
   if (!m) return html;
   const esc = summary.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${m[0]}</details>${html.slice(m.index + m[0].length)}`;
+  // The folded box is the text version of the figure drawn in its place,
+  // which takes its number, so the box loses its "Fig n" eyebrow.
+  const box = m[0].replace(/(<p class="fig__eyebrow"[^>]*>)Fig \d+(<\/p>)/, '$1Text version$2');
+  return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${box}</details>${html.slice(m.index + m[0].length)}`;
 }

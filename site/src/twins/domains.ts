@@ -14,6 +14,8 @@ import {
   evidenceCaption,
   evidencePolicy,
   ladderCaption,
+  ladderIsFigure,
+  checkpointPolicyIsFigure,
   OUTCOME_WORD,
   policyWord,
   profilesCaption,
@@ -83,13 +85,17 @@ function profileFigures(p: Record<string, unknown>): string[] {
   if (ladder) {
     const rows = ladder.rows.map((r) => [r.level, OUTCOME_WORD[r.outcome]]);
     const body = table(['Risk level', 'Outcome'], rows);
-    out.push(figure('What happens at each risk level', ladderCaption(ladder), ladder.blocked.length > 0 ? `${body}\n\nNever autonomous: ${ladder.blocked.map(code).join(', ')}.` : body));
+    out.push(
+      ladderIsFigure(ladder)
+        ? figure('What happens at each risk level', ladderCaption(ladder), ladder.blocked.length > 0 ? `${body}\n\nNever autonomous: ${ladder.blocked.map(code).join(', ')}.` : body)
+        : ladderCaption(ladder),
+    );
   }
   const policy = checkpointPolicy(p);
   if (policy && policy.triggers.length > 0) {
     const header = checkpointHeader(policy);
     const list = policy.triggers.map((t) => `- ${code(t.name)}: ${policyWord(t.level)}`).join('\n');
-    out.push(figure('When a checkpoint is made', checkpointCaption(policy), header ? `${header}.\n\n${list}` : list));
+    out.push(checkpointPolicyIsFigure(policy) ? figure('When a checkpoint is made', checkpointCaption(policy), header ? `${header}.\n\n${list}` : list) : `${checkpointCaption(policy)}\n\n${list}`);
   }
   const e = evidencePolicy(p);
   if (e && (e.minimumConfidence !== null || e.anchorTypes.length > 0 || e.grounding.length > 0)) {

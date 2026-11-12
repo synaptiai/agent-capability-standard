@@ -182,13 +182,11 @@
       --risk-high: #f87171;
       --on-risk-high: #0b111e;
       --ok: #86efac;
-      /* Count text: --ink on heat step 1, --bg on steps 2 to 4. The steps are
-         spread so step 1 to 3 differ in lightness by at least 1.5:1 each
-         (issue #125 review: the first three were hard to tell apart). */
-      --heat-1: #3e6b87;
-      --heat-2: #4f8fb8;
-      --heat-3: #70bde6;
-      --heat-4: #b8e8ff;
+      /* Count text: --ink on heat step 1, --bg on steps 2 to 4. */
+      --heat-1: #44728d;
+      --heat-2: #558fae;
+      --heat-3: #66acd0;
+      --heat-4: #7dd3fc;
       --on-heat-1: var(--ink);
       --on-heat-2: var(--bg);
       --on-heat-3: var(--bg);
@@ -245,10 +243,10 @@
     --on-risk-high: #0b111e;
     --ok: #86efac;
     /* Count text: --ink on heat step 1, --bg on steps 2 to 4. */
-    --heat-1: #3e6b87;
-    --heat-2: #4f8fb8;
-    --heat-3: #70bde6;
-    --heat-4: #b8e8ff;
+    --heat-1: #44728d;
+    --heat-2: #558fae;
+    --heat-3: #66acd0;
+    --heat-4: #7dd3fc;
     --on-heat-1: var(--ink);
     --on-heat-2: var(--bg);
     --on-heat-3: var(--bg);

@@ -19,7 +19,7 @@
 // 960px the script keeps the diagram in one box of the rail's shape, and
 // outside the story fills it with the grid (before) or the rail (after).
 import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
-import { story } from '../lib/home';
+import { story, storyExtraMarks } from '../lib/home';
 import { capabilitySymbol } from '../lib/views';
 import { chevron, glyphRects, type FigRect } from '../pixel/lines';
 import InlineText from './InlineText.astro';
@@ -194,6 +194,9 @@ const portY = (n: number, k: number) => rowY(first) + 2 * Math.round(((k + 1) * 
       <g data-beat="4" class="story__mark"><Rects rects={[...mark('mutating', ch), ...toChange]} /></g>
       <g data-beat="5" class="story__mark"><Rects rects={mark('verify', vf)} /></g>
       <g data-beat="6" class="story__mark"><Rects rects={[...mark('rollback', rb), ...back]} /></g>
+      {storyExtraMarks().map((x) => (
+        <g data-beat={String({ checkpoint: 3, mutating: 4, verify: 5, rollback: 6 }[x.role])} class="story__mark"><Rects rects={mark(x.role, x.index)} /></g>
+      ))}
     </svg>
   </div>
   <ol class="story__steps">

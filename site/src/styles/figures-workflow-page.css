@@ -174,3 +174,12 @@
     margin: 0;
   }
 }
+
+@layer components {
+  /* In a step card's summary the layer is its glyph only (the name is read
+     out), so the purpose fits on the capability's line more often. */
+  .layer-badge--compact {
+    gap: 0;
+    padding: 2px;
+  }
+}

@@ -633,10 +633,13 @@
 
   /* ---------- domains index: profile cards (F-DI1) ---------- */
 
+  /* One row per profile, every strip on one scale and in one column, so the
+     profiles compare at a glance (the visual review: cards in a grid put the
+     strips out of line when a name wrapped). Narrow, each row stacks. */
   .profile-cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
-    gap: var(--space-4);
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
     margin: 0;
     padding: 0;
     list-style: none;
@@ -649,9 +652,13 @@
 
   .profile-card {
     display: grid;
-    align-content: start;
-    gap: var(--space-2);
-    padding: var(--space-4);
+    grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) minmax(0, 10rem) minmax(0, 9rem);
+    grid-template-areas:
+      'head strip range conf'
+      'head axis range conf';
+    align-items: center;
+    gap: 0 var(--space-3);
+    padding: var(--space-2) var(--space-3);
     border: var(--border);
     background: var(--bg);
     box-shadow: var(--shadow-1);
@@ -667,6 +674,7 @@
   }
 
   .profile-card__head {
+    grid-area: head;
     display: flex;
     align-items: center;
     gap: var(--space-2);
@@ -677,6 +685,8 @@
   }
 
   .profile-card__strip {
+    grid-area: strip;
+    align-self: end;
     position: relative;
     height: 12px;
     margin: var(--space-1) 0 0;
@@ -693,6 +703,8 @@
   }
 
   .profile-card__axis {
+    grid-area: axis;
+    align-self: start;
     display: flex;
     justify-content: space-between;
     font-family: var(--font-mono);
@@ -707,6 +719,23 @@
     gap: 2px var(--space-2);
     font-size: 14px;
     color: var(--ink-2);
+  }
+
+  .profile-card__facts--range {
+    grid-area: range;
+  }
+
+  .profile-card__facts--conf {
+    grid-area: conf;
+  }
+
+  @media (max-width: 719px) {
+    .profile-card {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: 'head' 'strip' 'axis' 'range' 'conf';
+      gap: var(--space-1);
+      padding: var(--space-3);
+    }
   }
 
   .profile-card__number {

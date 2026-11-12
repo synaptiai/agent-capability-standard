@@ -1,9 +1,9 @@
 ---
 // One step of the workflow diagram (design notes, design-system section 12;
 // visual spec 3.3): its number on the rail, then a card that is a closed
-// <details>. The summary shows the capability, its layer, its effective risk
-// and its purpose, so the list reads as the text version of the step map
-// above it. Opening the card shows everything else the catalog says about
+// <details>. The summary shows the capability, its layer and its purpose;
+// each step's risk is the risk column of the step map above it, so the card
+// gives it only when opened (the visual review found it drawn three times). Opening the card shows everything else the catalog says about
 // the step: its flags, the checkpoint it relies on, its condition or gates
 // (drawn as a branch), the outputs it stores and reads, the workflow it runs,
 // its failure handling, its input bindings and any other fields. The summary
@@ -51,10 +51,9 @@ const has = (v: unknown) => v !== undefined && v !== null;
   <span class="wf-step__number">{step.index}</span>
   <details class="wf-step__card">
     <summary class="wf-step__summary">
-      <RiskBadge risk={e.risk} />
       <span class="wf-step__head">
         <code>{step.capability}</code>
-        <LayerBadge layer={step.layer} link={false} />
+        <LayerBadge layer={step.layer} link={false} compact />
         {step.domain && <span class="wf-step__domain">domain <code>{step.domain}</code></span>}
       </span>
       {step.purpose && <span class="wf-step__purpose">{step.purpose}</span>}
@@ -70,6 +69,7 @@ const has = (v: unknown) => v !== undefined && v !== null;
           <dt>Capability</dt>
           <dd><a href={capabilityHref(step.capability)}><code>{step.capability}</code></a>, in the <LayerBadge layer={step.layer} /> layer</dd>
         </div>
+        <div><dt>Risk</dt><dd><RiskBadge risk={e.risk} label="" /></dd></div>
         {role === 'mutating' && checkpointStep !== null && (
           <div><dt>Checkpoint</dt><dd><a href={`#${stepId(checkpointStep)}`}>step {checkpointStep}</a></dd></div>
         )}

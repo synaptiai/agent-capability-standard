@@ -17,6 +17,7 @@ import type { Paragraph, PhrasingContent, Root, RootContent } from 'mdast';
 import { toString } from 'mdast-util-to-string';
 import type { VFile } from 'vfile';
 import { headingText } from '../lib/anchors';
+import { blockText } from '../lib/md-sections';
 import { sourceOf } from './source';
 
 export interface PageMeta {
@@ -188,7 +189,7 @@ export default function remarkPageMeta() {
         // "This standard specifies:" introduces a list; the list is the substance.
         const list = tree.children[at + 1];
         if (text.endsWith(':') && list?.type === 'list') {
-          text = `${text} ${list.children.map((item) => toString(item).replace(/\s+/g, ' ').trim()).join('; ')}`;
+          text = `${text} ${list.children.map((item) => blockText(item).replace(/\s+/g, ' ').trim()).join('; ')}`;
         }
         description = shortDescription(text);
       }

@@ -11,7 +11,7 @@ import { loadDiagnostics } from '../../data/diagnostics';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { currentStandard, refSlugger, routeByUrl } from '../../lib/generated';
 import { currentStandardText } from '../../lib/spec-figures';
-import { codeGridCaption, diagnosticFamilies, familyTableCaption } from '../../lib/spec-tail-figures';
+import { codeGridCaption, diagnosticFamilies, familyRaised, familyRaisedCaption, familyRaisedIsFigure, familyRaisedTitle, familyTableCaption } from '../../lib/spec-tail-figures';
 import TableWrap from '../../components/TableWrap.astro';
 import DiagnosticTile from '../../components/fig/DiagnosticTile.astro';
 import Figure from '../../components/fig/Figure.astro';
@@ -29,6 +29,7 @@ const listed = families.reduce((a, f) => a + f.codes.length, 0);
 if (listed !== diagnostics.length) throw new Error(`diagnostics: the §9.1 families hold ${listed} codes, the tables ${diagnostics.length}`);
 const description = `The ${diagnostics.length} diagnostic codes of Standard ${std.version}: what each one means, its category and whether it is an error or a warning.`;
 const familyIds = families.map((f) => id(`${f.name} codes`));
+const raised = families.map((f) => familyRaised(text, f));
 let fig = 0;
 const figNo = () => ++fig;
 ---
@@ -54,18 +55,47 @@ const figNo = () => ++fig;
       </div>
       <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
     </Figure>
-    {families.map((f, i) => (
-      <section class="diag-family-section">
-        <h2 id={familyIds[i]}>{f.name} codes</h2>
-        <Figure id={id(`Figure: ${f.name} codes`)} n={figNo()} title={`${f.name} codes, ${f.range}`} caption={familyTableCaption(f)} kind="code-table">
+    {families.map((f, i) => {
+      const r = raised[i]!;
+      return (
+        <section class="diag-family-section">
+          <h2 id={familyIds[i]}>{f.name} codes</h2>
+          <p class="diag-family-section__lead">{familyTableCaption(f)}</p>
+          {familyRaisedIsFigure(r) ? (
+            <Figure id={id(`Figure: where ${f.name} codes are raised`)} n={figNo()} title={familyRaisedTitle(f)} caption={familyRaisedCaption(f, r)} kind="family-raised">
+              <TableWrap label={familyRaisedTitle(f)}>
+                <table class="raised">
+                  <thead>
+                    <tr>
+                      <th scope="col">Code</th>
+                      {r.sections.map((sec) => <th scope="col"><a href={`${std.url}#${sec.anchor}`} title={sec.title}>§{sec.n}</a></th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.rows.map((row) => (
+                      <tr>
+                        <th scope="row"><DiagnosticTile code={row.code} href={`#${row.anchor}`} /></th>
+                        {r.sections.map((sec) => (
+                          <td class:list={['raised__cell', row.in.includes(sec.n) && 'raised__cell--on']}>
+                            {row.in.includes(sec.n) ? <span class="fig-sr">named in §{sec.n}</span> : <span class="fig-sr">not named in §{sec.n}</span>}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableWrap>
+            </Figure>
+          ) : (
+            <p>{familyRaisedCaption(f, r)}</p>
+          )}
           <TableWrap label={`${f.name} codes of Standard ${std.version}`}>
             <table class="diagnostics-table">
               <caption>{f.name} codes of Standard {std.version}</caption>
               <thead>
                 <tr>
                   <th scope="col">Code</th>
-                  <th scope="col">Name</th>
-                  <th scope="col">Description</th>
+                  <th scope="col">Name and description</th>
                   <th scope="col">Section</th>
                 </tr>
               </thead>
@@ -73,16 +103,15 @@ const figNo = () => ++fig;
                 {f.codes.map((d) => (
                   <tr id={d.anchor} class="diagnostics-table__row" data-code={d.code} data-severity={d.severity}>
                     <th scope="row"><DiagnosticTile code={d.code} href={`#${d.anchor}`} /></th>
-                    <td><BreakCode text={d.name} /></td>
-                    <td><InlineMd md={d.descriptionMd} /></td>
+                    <td><p class="diagnostics-table__name"><BreakCode text={d.name} /></p><InlineMd md={d.descriptionMd} /></td>
                     <td><a href={`${std.url}#${d.sectionAnchor}`}>§{d.section}</a></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </TableWrap>
-        </Figure>
-      </section>
-    ))}
+        </section>
+      );
+    })}
   </article>
 </DocLayout>

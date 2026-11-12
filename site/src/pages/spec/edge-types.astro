@@ -113,19 +113,19 @@ const figNo = () => ++fig;
             <caption>Edge types and how many edges of each type the ontology has</caption>
             <thead>
               <tr>
-                <th scope="col">Type</th>
-                <th scope="col">Edges</th>
+                <th scope="col">Type, edges and properties</th>
                 <th scope="col">What it means</th>
-                <th scope="col">Properties</th>
               </tr>
             </thead>
             <tbody>
               {ontology.edgeTypes.map((t) => (
                 <tr data-edge-type={t.id}>
-                  <th scope="row"><a href={`#${typeId.get(t.id)}`}><code>{t.id}</code></a></th>
-                  <td class="edge-type-table__count"><PixelBar value={t.edges.length} max={Math.max(...ontology.edgeTypes.map((x) => x.edges.length))} /></td>
+                  <th scope="row" class="edge-type-table__type">
+                    <a href={`#${typeId.get(t.id)}`}><code>{t.id}</code></a>
+                    <span class="edge-type-table__count"><PixelBar value={t.edges.length} max={Math.max(...ontology.edgeTypes.map((x) => x.edges.length))} label={`${t.edges.length} ${t.edges.length === 1 ? 'edge' : 'edges'}`} /></span>
+                    <span class="edge-type-table__props">{[t.transitive ? 'transitive' : 'not transitive', t.symmetric ? 'symmetric' : 'not symmetric'].join(', ')}</span>
+                  </th>
                   <td><p class="edge-type-table__desc">{t.description}</p><p class="edge-type-table__sem">{t.semantics}</p></td>
-                  <td>{[t.transitive ? 'transitive' : 'not transitive', t.symmetric ? 'symmetric' : 'not symmetric'].join(', ')}</td>
                 </tr>
               ))}
             </tbody>

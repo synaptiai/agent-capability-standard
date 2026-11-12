@@ -188,7 +188,11 @@ describe('Markdown copies', () => {
     for (const wf of loadWorkflows().all) {
       const md = workflowTwin(wf.id).markdown;
       expect(md, wf.id).toContain(`**Figure: Steps of ${wf.id}: `);
-      expect(md, wf.id).toContain(`**Figure: Risk of ${wf.id}: `);
+      // The risk figure is drawn only when declared, computed and step risk
+      // disagree; otherwise the copy has the sentence the page prints.
+      const r = riskSummary(wf);
+      if (r.agree) expect(md, wf.id).toContain(r.sentence);
+      else expect(md, wf.id).toContain(`**Figure: Risk of ${wf.id}: `);
       expect(md, wf.id).toContain('**Figure: Which step reads which stored output.**');
       const block = md.slice(md.indexOf('**Figure: Steps of'));
       const rows = block.split('\n\n')[1]!.split('\n').slice(2);

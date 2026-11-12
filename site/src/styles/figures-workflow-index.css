@@ -173,12 +173,40 @@
     width: 34%;
   }
 
+  /* Wide, the goal has its own column. At phone width it moves under the id
+     and its strip, so the table fits (the visual review found the Goal column
+     cut at 360); the column is then hidden. One of the two is shown at any
+     width, so the goal is read once. */
+  .workflow-table__goal {
+    display: none;
+  }
+
+  .workflow-table__goal-col {
+    white-space: normal;
+  }
+
+  @media (max-width: 599px) {
+    .workflow-table th[scope='row'] {
+      width: 100%;
+    }
+
+    .workflow-table__goal {
+      display: block;
+      margin-top: var(--space-1);
+      font-weight: 400;
+    }
+
+    .workflow-table__goal-col {
+      display: none;
+    }
+  }
+
   .workflow-table__group th {
     background: var(--bg-mut);
     font-size: 14px;
   }
 
-  .workflow-table td:not(:nth-child(2)) {
+  .workflow-table td:not(.workflow-table__goal-col) {
     white-space: nowrap;
   }
 }

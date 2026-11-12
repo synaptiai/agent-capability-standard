@@ -35,7 +35,7 @@ import Figure from '../../components/fig/Figure.astro';
 import Port from '../../components/fig/Port.astro';
 import RiskStrip from '../../components/fig/RiskStrip.astro';
 import WorkflowSpine from '../../components/fig/WorkflowSpine.astro';
-import { inputsCaption, stepList } from '../../lib/workflow-figures';
+import { inputsCaption, riskSummary, stepList } from '../../lib/workflow-figures';
 
 export function getStaticPaths() {
   const { all } = loadWorkflows();
@@ -63,7 +63,8 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
 const inputRows = schemaRows(wf.inputs);
 // Figures are numbered in page order: the step map, the inputs (when there
 // are any), the risk, then the data flow.
-const figN = { spine: 1, inputs: 2, risk: inputRows.length > 0 ? 3 : 2, flow: inputRows.length > 0 ? 4 : 3 };
+const riskAgrees = riskSummary(wf).agree;
+const figN = { spine: 1, inputs: 2, risk: inputRows.length > 0 ? 3 : 2, flow: (inputRows.length > 0 ? 4 : 3) - (riskAgrees ? 1 : 0) };
 const topInputs = inputRows.filter((r) => r.depth === 0).length;
 ---
 <DocLayout route={route} title={wf.id} description={wf.goal}>
@@ -127,7 +128,7 @@ const topInputs = inputRows.filter((r) => r.depth === 0).length;
 
     <section class="workflow-risk">
       <h2 id={id('Risk')}>Risk</h2>
-      <RiskStrip wf={wf} n={figN.risk} id="ref-fig-risk" />
+      {riskAgrees ? <p class="workflow-risk__sentence">{riskSummary(wf).sentence}</p> : <RiskStrip wf={wf} n={figN.risk} id="ref-fig-risk" />}
       {wf.risk_propagation !== undefined && (
         <details class="workflow-details">
           <summary>Risk propagation as written in the catalog</summary>

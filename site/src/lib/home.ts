@@ -15,7 +15,7 @@ import { GITHUB_BASE, readRepoFile } from './repo';
 import { PAGE_GLYPHS } from '../pixel/glyphs-pages';
 import { chapterKey, principleKey, resolveGlyphKey, slugKey, TOOL_GLYPHS } from '../pixel/keys';
 import { kebab } from './routes';
-import { contractRows, diagramSteps, gateRows, stepRole } from './views';
+import { contractRows, diagramSteps, gateRows, stepRole, type StepRole } from './views';
 
 /** The one-sentence summary used as the page description and in llms.txt. */
 export function homeDescription(): string {
@@ -512,10 +512,29 @@ function words(xs: string[]): string {
   return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`;
 }
 
-/** Fig: the story. Its caption names the steps the four marks sit on. */
+/**
+ * The story's other steps with a safety role (stepRole, the rule every step
+ * map and strip uses), which carry their role mark too: in model_deployment,
+ * the constrain steps get the verify mark, as in the gallery's strip.
+ */
+export function storyExtraMarks(): { index: number; capability: string; role: Exclude<StepRole, 'plain'> }[] {
+  const s = story();
+  const shown = new Set([s.checkpointStep.index, s.changeStep.index, s.verifyStep.index, s.rollbackStep.index]);
+  return s.workflow.steps
+    .map((st) => ({ index: st.index, capability: st.capability, role: stepRole(st) }))
+    .filter((x): x is { index: number; capability: string; role: Exclude<StepRole, 'plain'> } => x.role !== 'plain' && !shown.has(x.index));
+}
+
+/** Fig: the story. Its caption names the steps the marks sit on. */
 export function storyCaption(): string {
   const s = story();
-  return `The ${s.workflow.id} workflow has ${s.workflow.steps.length} steps: it saves a checkpoint at step ${s.checkpointStep.index}, makes its change at step ${s.changeStep.index}, verifies at step ${s.verifyStep.index} and can roll back at step ${s.rollbackStep.index}.`;
+  const extra = storyExtraMarks();
+  const ROLE_WORDS: Record<string, string> = { checkpoint: 'checkpoint', mutating: 'change', verify: 'check', rollback: 'rollback' };
+  const more =
+    extra.length === 0
+      ? ''
+      : ` ${words(extra.map((x) => `step ${x.index} (${x.capability})`))} also ${extra.length === 1 ? 'carries' : 'carry'} the ${words([...new Set(extra.map((x) => ROLE_WORDS[x.role]!))])} mark, as on every step map.`;
+  return `The ${s.workflow.id} workflow has ${s.workflow.steps.length} steps: it saves a checkpoint at step ${s.checkpointStep.index}, makes its change at step ${s.changeStep.index}, verifies at step ${s.verifyStep.index} and can roll back at step ${s.rollbackStep.index}.${more}`;
 }
 
 /** Fig: the periodic table. The smallest and largest layers, from the ontology. */

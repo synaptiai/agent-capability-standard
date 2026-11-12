@@ -249,10 +249,10 @@ describe('drawing', async () => {
     expect(describeDiagram(parseMermaid('flowchart TB\n a --> b'), 'Process Pattern').title).toBe('Diagram: Process Pattern');
   });
 
-  it('draws a dotted link as 2px squares 6px apart, and a chevron of three steps', () => {
+  it('draws a dotted link as 2px squares 6px apart, and a chevron of four steps', () => {
     const rects = edgeRects({ from: 'a', to: 'b', style: 'dotted', arrow: true, label: null, points: [{ x: 10, y: 0 }, { x: 10, y: 30 }] });
-    // The line stops 6px short of the tip (y 24); squares at 0, 6, 12, 18; chevron rows at 24, 26, 28,
-    // reaching 6, 4 and 2px past the 2px line on each side.
+    // The line stops 8px short of the tip (y 22); squares at 0, 6, 12, 18; chevron rows at 22, 24, 26, 28,
+    // reaching 8, 6, 4 and 2px past the 2px line on each side.
     expect(rects).toEqual([
       { x: 10, y: 0, w: 2, h: 2 },
       { x: 10, y: 6, w: 2, h: 2 },
@@ -261,6 +261,7 @@ describe('drawing', async () => {
       { x: 8, y: 28, w: 6, h: 2 },
       { x: 6, y: 26, w: 10, h: 2 },
       { x: 4, y: 24, w: 14, h: 2 },
+      { x: 2, y: 22, w: 18, h: 2 },
     ]);
   });
 

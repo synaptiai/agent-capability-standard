@@ -9,13 +9,14 @@
 // and its Markdown copy match.
 import type { List, ListItem, Paragraph } from 'mdast';
 import { toString } from 'mdast-util-to-string';
+import { slug } from 'github-slugger';
 import { parse } from 'yaml';
 import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { loadOntology } from '../data/ontology';
 import { loadIdentityPolicy, loadTrustModel, RUNTIME_FIXTURE_DIR } from '../data/spec-sources';
 import { parseCatalog, type Workflow } from '../data/workflows';
 import { readRepoFile, trackedUnder } from './repo';
-import { sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
+import { blockText, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
 import { schemaListing } from './views';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -276,7 +277,7 @@ export function conformanceLevels(text: string, where: string): LevelColumn[] {
     const next = blocks[i + 1];
     if (next?.type !== 'list') throw new Error(`${where}: §10.2's ${m[1]} has no list after it`);
     const items = (next as List).children.map((li: ListItem) => {
-      const t = toString(li).replace(/\s+/g, ' ').trim();
+      const t = blockText(li).replace(/\s+/g, ' ').trim();
       return { text: t, sections: [...t.matchAll(/§(\d+(?:\.\d+)*)/g)].map((x) => x[1]!), codes: [...t.matchAll(/\b([A-Z]\d{3})\b/g)].map((x) => x[1]!) };
     });
     out.push({ level: m[1]!, name: m[2]!, items });
@@ -438,4 +439,44 @@ export function patternStrips(text: string, where: string): PatternStrip[] {
 export function patternCaption(p: PatternStrip): string {
   const reads = p.wf.steps.filter((s) => s.consumes.length > 0).length;
   return `${p.name}: ${plural(p.wf.steps.length, 'step', 'steps')} in order, ${reads} of them reading an earlier step's output.`;
+}
+
+// ---------------------------------------------- F-X2 where a family's codes are raised
+
+export interface FamilyRaised {
+  /** The §5.x sections that name at least one code of the family, in order. */
+  sections: { n: string; title: string; anchor: string }[];
+  /** Per code of the family: the section numbers that name it. */
+  rows: { code: string; anchor: string; severity: string; in: string[] }[];
+}
+
+/**
+ * Which sections of chapter 5 (the workflow DSL) name each code of a family:
+ * the rules a code enforces, read from where the Standard mentions it.
+ */
+export function familyRaised(text: string, f: Family): FamilyRaised {
+  const secs = chapter5Sections(text);
+  const named = secs.map((s) => new Set([...s.body.matchAll(/\b([A-Z]\d{3})\b/g)].map((m) => m[1]!)));
+  const rows = f.codes.map((d) => ({ code: d.code, anchor: d.anchor, severity: d.severity, in: secs.filter((_, j) => named[j]!.has(d.code)).map((s) => s.n) }));
+  const used = new Set(rows.flatMap((r) => r.in));
+  return { sections: secs.filter((s) => used.has(s.n)).map((s) => ({ n: s.n, title: s.title, anchor: slug(`${s.n} ${s.title}`) })), rows };
+}
+
+export function familyRaisedTitle(f: Family): string {
+  return `Where the workflow rules of §5 raise the ${f.range} codes`;
+}
+
+export function familyRaisedCaption(f: Family, r: FamilyRaised): string {
+  const none = r.rows.filter((x) => x.in.length === 0).map((x) => x.code);
+  const per = r.sections.map((s) => ({ s, n: r.rows.filter((x) => x.in.includes(s.n)).length })).sort((a, b) => b.n - a.n);
+  const top = per[0];
+  const lead = top
+    ? `${plural(r.rows.length - none.length, 'code', 'codes')} of ${r.rows.length} ${r.rows.length - none.length === 1 ? 'is' : 'are'} named in ${plural(r.sections.length, 'section', 'sections')} of chapter 5; §${top.s.n} ${top.s.title} names the most (${top.n})`
+    : `No section of chapter 5 names a ${f.range} code`;
+  return `${lead}${none.length > 0 && top ? `; ${list(none)} ${none.length === 1 ? 'is' : 'are'} named only outside chapter 5` : ''}.`;
+}
+
+/** True when the family's codes are named in at least two sections of chapter 5, so the grid shows more than one column. */
+export function familyRaisedIsFigure(r: FamilyRaised): boolean {
+  return r.sections.length >= 2 && r.rows.some((x) => x.in.length > 0);
 }

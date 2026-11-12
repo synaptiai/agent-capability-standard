@@ -113,12 +113,16 @@
     border-width: 4px;
   }
 
+  /* The symbol keeps its case ("Vr") wherever the tile sits, a table
+     header's capitals included. */
   .mini-tile__symbol {
     font-family: var(--font-display);
     font-weight: 400;
     font-synthesis: none;
     font-size: 16px;
     line-height: 1;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   .mini-tile--32 .mini-tile__symbol {

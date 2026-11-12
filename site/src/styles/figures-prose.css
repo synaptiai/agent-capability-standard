@@ -411,3 +411,52 @@
     display: none;
   }
 }
+
+@layer components {
+  /* ---------- directory trees (3.10.5): nested lists with 2px indent guides ---------- */
+  .dir-tree__root {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-1);
+  }
+
+  .dir-tree {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .dir-tree .dir-tree {
+    margin-left: 6px;
+    padding-left: var(--space-3);
+    border-left: var(--px) solid var(--ink-3);
+  }
+
+  .dir-tree__item {
+    margin: 0;
+  }
+
+  .dir-tree__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 var(--space-2);
+    padding: 2px 0;
+  }
+
+  .dir-tree__glyph {
+    align-self: center;
+    color: var(--ink-2);
+  }
+
+  .dir-tree__name {
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+
+  .dir-tree__note {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+}

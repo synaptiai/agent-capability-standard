@@ -240,6 +240,8 @@ export const UI_GLYPHS: Readonly<Record<string, readonly string[]>> = {
   'approve:review': ['#.....#', '#.....#', '###.###', '#=###=#', '###.###', '.......', '.......'],
   // required: an asterisk ("this must be present"), apart from the approval stamp.
   'mark:required': ['...#...', '##.#.##', '.#####.', '..###..', '.#####.', '##.#.##', '...#...'],
+  // human: a stick figure ("a person carries it out"), apart from the approval stamp.
+  'approve:human': ['...#...', '..###..', '...#...', '#######', '...#...', '..#.#..', '.#...#.'],
   // overridable: an open padlock ("a step may set it to false"), apart from rollback's undo arrow.
   'flag:overridable': ['.###...', '#...#..', '#...#..', '#......', '#######', '##.####', '#######'],
   // composed: four tiles in a square, a skill built from several capabilities.
@@ -382,7 +384,6 @@ export const GLYPH_ALIASES: Readonly<Record<string, string>> = {
   'fail:stop': 'stop',
   'fail:rollback': 'undo',
   'approve:auto': 'check',
-  'approve:human': 'source:human',
   'policy:high_risk': 'risk:high',
   'policy:medium_risk': 'risk:medium',
   'role:checkpoint': 'flag',

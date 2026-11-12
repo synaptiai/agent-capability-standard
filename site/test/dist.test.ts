@@ -150,7 +150,9 @@ describe('built site', () => {
       });
       const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
       const table = /<table class="ladder"[\s\S]*?<\/table>/.exec(html)?.[0] ?? '';
-      expect([...table.matchAll(/data-outcome="(\w+)"/g)].map((m) => m[1]), page).toEqual(want);
+      // One outcome at all three levels is a sentence, not a figure (visual spec 1.1 rule 5).
+      if (new Set(want).size === 1) expect(table, page).toBe('');
+      else expect([...table.matchAll(/data-outcome="(\w+)"/g)].map((m) => m[1]), page).toEqual(want);
     }
   });
 
@@ -264,6 +266,8 @@ describe('built site', () => {
       expect(profile, d).toBeGreaterThan(0);
       for (const kind of ['trust-weights', 'approval-ladder', 'checkpoint-policy', 'evidence-policy']) {
         const at = html.indexOf(`data-fig-kind="${kind}"`);
+        // The ladder and the checkpoint policy are sentences when every level or trigger has one value.
+        if (at === -1 && (kind === 'approval-ladder' || kind === 'checkpoint-policy')) continue;
         expect(at, `${d} ${kind}`).toBeGreaterThan(profile);
         expect(at, `${d} ${kind}`).toBeLessThan(details);
       }

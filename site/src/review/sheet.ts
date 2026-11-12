@@ -104,7 +104,7 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
       'tool:plugin', 'tool:sdk', 'section:start', 'section:guides', 'section:compliance', 'section:community', 'chapter:terms',
       'chapter:authority-trust-model', 'chapter:diagnostic-model', 'chapter:versioning-and-compatibility',
       'chapter:decision-frameworks', 'principle:grounded-claims', 'principle:auditable-transforms', 'principle:composable-atoms',
-      'principle:explicit-contracts', 'group:regulation', 'flow:condition', 'flag:overridable',
+      'principle:explicit-contracts', 'group:regulation', 'flow:condition', 'flag:overridable', 'approve:human',
     ],
   },
   // The one-per-page icons of the listing cards and home cards

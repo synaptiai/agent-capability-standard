@@ -21,9 +21,13 @@ interface Props {
   n: number;
   title: string;
   rows: Map<string, string>;
+  /** Links for fields the §5.2 tables do not list, to the section that defines them. */
+  links?: Map<string, string>;
 }
 
-const { id, n, title, rows } = Astro.props;
+const { id, n, title, rows, links = new Map() } = Astro.props;
+/** The schema's type without its null alternative: the §5.2 tables give the type, and a null value is an absent field. */
+const shown = (t: string) => t.split('|').filter((x) => x.trim() !== 'null').join('|') || t;
 const groups = stepAnatomy();
 ---
 <Figure id={id} n={n} title={title} caption={stepAnatomyCaption()} kind="step-anatomy">
@@ -37,10 +41,10 @@ const groups = stepAnatomy();
             {g.slots.map((s) => (
               <Port
                 name={s.name}
-                type={s.type}
+                type={shown(s.type)}
                 required={s.required}
                 description={s.description || undefined}
-                href={rows.has(s.name) ? `#${stepFieldId(rows.get(s.name)!)}` : undefined}
+                href={rows.has(s.name) ? `#${stepFieldId(rows.get(s.name)!)}` : links.get(s.name)}
               />
             ))}
           </ul>

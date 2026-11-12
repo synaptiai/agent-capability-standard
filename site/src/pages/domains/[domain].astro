@@ -25,7 +25,7 @@ import { readRepoFile } from '../../lib/repo';
 import { loadWorkflows } from '../../data/workflows';
 import { loadProfiles } from '../../data/profiles';
 import DocLayout from '../../layouts/DocLayout.astro';
-import { approvalLadder, domainGlyph, foldCapabilityList, splitReadme, type ReadmeParts } from '../../lib/domain-figures';
+import { approvalLadder, checkpointCaption, checkpointPolicy as readCheckpointPolicy, checkpointPolicyIsFigure, domainGlyph, ladderCaption, ladderIsFigure, policyWord, foldCapabilityList, splitReadme, type ReadmeParts } from '../../lib/domain-figures';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import { refSlugger, routesByTemplate } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
@@ -99,6 +99,7 @@ if (parts && unplaced.length > 0) console.warn(`domains: ${d.key}: no README hea
 const title = page?.title ?? `${d.key} domain`;
 // The hero under the title: the domain's glyph and four facts from the profile.
 const ladder = approvalLadder(p);
+const policy = readCheckpointPolicy(p);
 const blockedCount = ladder?.blocked.length ?? 0;
 const facts = [
   { term: 'Trust sources', value: String(weights.length) },
@@ -148,14 +149,25 @@ const facts = [
       {thresholds && (
         <>
           <h3 id={id('Risk thresholds')}>Risk thresholds</h3>
-          <ApprovalLadder profile={p} n={fig()} id={id('Figure approval ladder')} />
+          {ladder && !ladderIsFigure(ladder) ? (
+            <p>{ladderCaption(ladder)}</p>
+          ) : (
+            <ApprovalLadder profile={p} n={fig()} id={id('Figure approval ladder')} />
+          )}
         </>
       )}
 
       {checkpointPolicy && (
         <>
           <h3 id={id('Checkpoint policy')}>Checkpoint policy</h3>
-          <CheckpointPolicy profile={p} n={fig()} id={id('Figure checkpoint policy')} />
+          {policy && policy.triggers.length > 0 && !checkpointPolicyIsFigure(policy) ? (
+            <>
+              <p>{checkpointCaption(policy)}</p>
+              <ul class="domain-policy-list">{policy.triggers.map((t) => <li><code>{t.name}</code>: {policyWord(t.level)}</li>)}</ul>
+            </>
+          ) : (
+            <CheckpointPolicy profile={p} n={fig()} id={id('Figure checkpoint policy')} />
+          )}
         </>
       )}
 

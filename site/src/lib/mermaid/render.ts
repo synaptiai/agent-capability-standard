@@ -2,7 +2,7 @@
 // its accessible name, a one-sentence caption and a text version.
 // - Everything is a <rect> on even pixels: node outlines step at the corners
 //   instead of curving, links are runs of rects, dotted links are 2px squares
-//   with 4px gaps, and arrowheads are three-step chevrons. No path, no
+//   with 4px gaps, and arrowheads are four-step chevrons. No path, no
 //   stroke-dasharray, no colour value: the stylesheet colours the rects
 //   through the classes below with the theme tokens.
 // - The SVG is role="img", named by the visible title and described by the
@@ -108,11 +108,17 @@ function dots(a: Point, b: Point): R[] {
   return out;
 }
 
-/** A three-step chevron whose tip ends at `tip`, pointing along `dir`, for a line `t` thick. */
+/**
+ * A four-step arrowhead whose tip ends at `tip`, pointing along `dir`, for a
+ * line `t` thick: a stepped triangle 8px deep and up to t + 16 wide, so it
+ * reads at 1x (the visual review found three steps easy to miss).
+ */
+const ARROW_STEPS = 4;
+
 function chevron(tip: Point, dir: Heading, t: number): R[] {
   const lo = t === THIN ? 0 : t / 2;
   const out: R[] = [];
-  for (let step = 0; step < 3; step++) {
+  for (let step = 0; step < ARROW_STEPS; step++) {
     const half = 2 * (step + 1); // how far the step reaches past the line on each side
     const depth = 2 * (step + 1); // how far back from the tip this step sits
     const across = t + 2 * half;
@@ -134,7 +140,7 @@ function chevron(tip: Point, dir: Heading, t: number): R[] {
   return out;
 }
 
-const ARROW = 6;
+const ARROW = 2 * ARROW_STEPS;
 
 export function edgeRects(e: PlacedEdge): R[] {
   const t = e.style === 'thick' ? THICK : THIN;

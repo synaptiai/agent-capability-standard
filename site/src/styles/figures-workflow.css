@@ -120,6 +120,7 @@
 
   .spine__count {
     display: none;
+    flex: none;
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--ink-2);
@@ -256,9 +257,25 @@
       flex: 0 1 auto;
     }
 
+    /* Narrow, a group's bar keeps its glyph and ids (the fork and join glyphs
+       say which bar it is; the words stay for screen readers), so the ids
+       fit on the bar's one row. */
+    .spine__bar {
+      font-size: 12px;
+    }
+
+    .spine__bar .spine__bar-word {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
     .spine .spine__purpose,
     .spine .spine__gates .spine__more,
-    .spine .spine__gates:has(.spine__more) .spine__diamond {
+    .spine .spine__gates .spine__diamond {
       display: none;
     }
 

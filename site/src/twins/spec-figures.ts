@@ -120,7 +120,7 @@ export function specTailBlocks(): string[] {
     figure(
       'Where codes are raised, from §9.6',
       T.heatCaption(heat),
-      table(['Family', ...heat.sections.map((x) => `§${x.n}`)], heat.families.map((f, i) => [f.name, ...heat.counts[i]!.map(String)])),
+      table(['Section', ...heat.families.map((f) => f.name)], heat.sections.map((x, j) => [`§${x.n} ${x.title}`, ...heat.families.map((_, i) => String(heat.counts[i]![j]))])),
     ),
     figure('The conformance suite, from §10.3', T.suiteCaption(suite), table(['Part', 'Count', 'Folder'], suite.map((p) => [p.label, String(p.count), code(p.dir)]))),
   ];
