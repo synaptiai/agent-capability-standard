@@ -7,6 +7,10 @@ import {
   CAPABILITIES_INTRO,
   coverage,
   faq,
+  gallery,
+  galleryCaption,
+  GALLERY_FIG_TITLE,
+  GALLERY_INTRO,
   getStarted,
   HOME_H1,
   homeDescription,
@@ -14,15 +18,20 @@ import {
   opening,
   principles,
   story,
+  storyCaption,
+  STORY_FIG_TITLE,
   STORY_HEADING,
   storyIntro,
+  TABLE_FIG_TITLE,
+  tableCaption,
   WHY,
+  WORKFLOWS_HEADING,
   type Card,
   type HomeLink,
   type LinkSentence,
 } from '../lib/home';
 import { kebab } from '../lib/routes';
-import { blocks, code, fence, mdLink, mdUrl } from './md';
+import { blocks, code, fence, figure, mdLink, mdUrl, table } from './md';
 import type { Twin } from './types';
 
 /** A home link as Markdown: site pages go to their copies, other URLs stay. */
@@ -35,7 +44,9 @@ function sentence(x: LinkSentence): string {
 }
 
 function cards(list: (Card & { extra?: HomeLink })[]): string {
-  return list.map((c) => `- **${c.title}.** ${c.line} ${link(c.link)}${c.extra ? `, ${link(c.extra)}` : ''}`).join('\n');
+  return list
+    .map((c) => `- **${c.title}${c.count === undefined ? '' : ` (${c.count})`}.** ${c.line} ${link(c.link)}${c.extra ? `, ${link(c.extra)}` : ''}`)
+    .join('\n');
 }
 
 /** Indent continuation lines so they stay inside a numbered list item. */
@@ -62,19 +73,11 @@ export function homeTwin(): Twin {
     o.links.map(link).join(' | '),
     `${o.install.label}:`,
     fence('sh', o.install.commands.join('\n')),
-    '## Design principles',
-    `${p.intro} ${sentence(p.source)}`,
-    p.items.map((i, n) => `${n + 1}. **${i.title}.**${i.markdown.startsWith('-') ? '\n\n' : ' '}${indent(i.markdown)}`).join('\n\n'),
     '## Why a standard',
     WHY,
     `## ${STORY_HEADING}`,
     sentence(storyIntro()),
-    s.steps.map((st) => `${st.beat}. **${st.title}** ${inlineText(st.text)}`).join('\n'),
-    '## The capabilities',
-    `${inlineText(CAPABILITIES_INTRO)} ${link(CAPABILITIES_DERIVED)}.`,
-    ...ontology.layers.map(
-      (l) => `- ${mdLink(l.id, `/layers/${l.slug}/`)}: ${capabilitiesOfLayer(ontology, l.id).map((c) => mdLink(code(c.id), `/capabilities/${kebab(c.id)}/`)).join(', ')}`,
-    ),
+    figure(STORY_FIG_TITLE, storyCaption(), s.steps.map((st) => `${st.beat}. **${st.title}** ${inlineText(st.text)}`).join('\n')),
     '## What the standard covers',
     '### The standard',
     cards(cov.standard),
@@ -82,14 +85,40 @@ export function homeTwin(): Twin {
     cards(cov.data),
     '### Tools',
     cards(cov.tools),
-    '## Questions',
-    f.items.map((i) => `### ${i.question}\n\n${inlineText(i.answer)}`).join('\n\n'),
-    link(f.more),
+    '## The capabilities',
+    `${inlineText(CAPABILITIES_INTRO)} ${link(CAPABILITIES_DERIVED)}.`,
+    figure(
+      TABLE_FIG_TITLE,
+      tableCaption(),
+      ontology.layers
+        .map(
+          (l) => `- ${mdLink(l.id, `/layers/${l.slug}/`)}: ${capabilitiesOfLayer(ontology, l.id).map((c) => mdLink(code(c.id), `/capabilities/${kebab(c.id)}/`)).join(', ')}`,
+        )
+        .join('\n'),
+    ),
+    '## Design principles',
+    `${p.intro} ${sentence(p.source)}`,
+    p.items.map((i, n) => `${n + 1}. **${i.title}.**${i.markdown.startsWith('-') ? '\n\n' : ' '}${indent(i.markdown)}`).join('\n\n'),
+    `## ${WORKFLOWS_HEADING}`,
+    GALLERY_INTRO,
+    figure(
+      GALLERY_FIG_TITLE,
+      galleryCaption(),
+      table(
+        ['Workflow', 'Group', 'Steps', 'Checkpoints', 'Steps with gates', 'Risk'],
+        gallery().flatMap((g) =>
+          g.items.map((i) => [mdLink(code(i.workflow.id), `/workflows/${i.workflow.slug}/`), g.label, String(i.steps), String(i.checkpoints), String(i.gated), i.workflow.risk]),
+        ),
+      ),
+    ),
     '## Get started',
     `### ${AGENTS_HEADING}`,
     AGENTS_LINE,
     fence('text', g.prompt),
-    cards(g.cards),
+    g.cards.map((c, n) => `${n + 1}. **${c.title}.** ${c.line} ${link(c.link)}${c.extra ? `, ${link(c.extra)}` : ''}`).join('\n'),
+    '## Questions',
+    f.items.map((i) => `### ${i.question}\n\n${inlineText(i.answer)}`).join('\n\n'),
+    link(f.more),
   );
   return { title: 'Agent Capability Standard', description: homeDescription(), markdown };
 }

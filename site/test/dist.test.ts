@@ -469,6 +469,22 @@ describe('agent files', () => {
     expect(html).not.toContain('data-pagefind-weight');
   });
 
+  it('frames the home page figures with a name and a caption, and writes each into the Markdown copy (visual spec 6.1)', () => {
+    const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
+    const md = readFileSync(path.join(dist, 'index.md'), 'utf8');
+    const figs = [...html.matchAll(/<figure class="fig[^"]*"[^>]*aria-labelledby="([^"]+)"[\s\S]*?<figcaption class="fig__caption">([^<]+)<\/figcaption>/g)];
+    expect(figs.length).toBe(3);
+    for (const [, label, caption] of figs) {
+      const title = new RegExp(`id="${label}">([^<]+)<`).exec(html)![1]!;
+      expect(md).toContain(`**Figure: ${title.replace(/&amp;/g, '&')}.** ${caption!.replace(/&amp;/g, '&')}`);
+    }
+    // One gallery strip per catalog workflow, as many squares as steps.
+    const strips = [...html.matchAll(/<span role="img" aria-label="[^"]*" data-workflow="([^"]+)" data-steps="(\d+)" class="step-strip step-strip--10">/g)];
+    expect(strips.map((m) => [m[1], Number(m[2])])).toEqual([...allCatalogSteps()].map(([id, c]) => [id, c.length]));
+    // The story renders its final frame: no beat is hidden in the HTML.
+    expect(html).not.toMatch(/data-beat="\d"[^>]*class="[^"]*is-off/);
+  });
+
   it('gives the home page and its Markdown copy the same H2 headings and section sentences', () => {
     const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
     const md = readFileSync(path.join(dist, 'index.md'), 'utf8');

@@ -15,6 +15,7 @@
 // - heading: 'p' | 'h3', default 'p'. With 'h3', `id` is required and must start with `ref-`.
 // - id: string, optional.
 // Slot: the description (inline content).
+// Slot "body": block content (paragraphs, lists) in place of a one-line description.
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 
 interface Props {
@@ -40,4 +41,5 @@ const Title = heading;
     <p class="icon-card__number">{number}{numberLabel && <span class="fig-sr"> {numberLabel}</span>}</p>
   )}
   {Astro.slots.has('default') && <p class="icon-card__text"><slot /></p>}
+  {Astro.slots.has('body') && <div class="icon-card__text icon-card__body"><slot name="body" /></div>}
 </li>
