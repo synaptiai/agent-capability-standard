@@ -19,6 +19,7 @@ import { specOlderBlocks } from './spec-figures';
 import { SLOTS_BY_VERSION } from '../lib/spec-slots';
 import { proseFigureBlocks } from './prose';
 import { proseFigureEdits } from './prose-blocks';
+import { releaseFigureEdits } from './release-blocks';
 import { skillFigureEdits } from './skills';
 import { COMPOSED_SKILLS } from '../data/skills';
 import type { Root } from 'mdast';
@@ -60,6 +61,7 @@ async function buildTwin(route: Route): Promise<Twin> {
         ? (tree: Root) => [
             ...proseFigureEdits(tree, { foldBoxAfter: source === OVERVIEW_SOURCE ? PERIODIC_ANCHOR : undefined }),
             ...(skillEdits ? skillEdits(tree) : []),
+            ...(source === 'CHANGELOG.md' ? releaseFigureEdits(tree, readRepoFile(source)) : []),
           ]
         : undefined;
       const copy = markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title, extraEdits });
