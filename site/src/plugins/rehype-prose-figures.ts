@@ -26,6 +26,7 @@
 //   and a cross glyph, aria-hidden, so the headings and their ids read as before.
 // - F-O1 (3.10.14): on the OASF safety proposal, under "4.1", the OASF
 //   categories and the capabilities each maps to, from the mapping file.
+// - The release notes (CHANGELOG.md): see release-figures-hast.ts.
 // - Figures are numbered "Fig n" in page order, mermaid figures included.
 //
 // It runs on prose, RFC and skill pages only; the Standard and the generated
@@ -39,6 +40,8 @@ import { workflowHref } from '../lib/generated';
 import { routeForSource } from '../lib/routes';
 import { diagramSteps } from '../lib/views';
 import { glyphElement, miniTileElement, pixelBarElement } from '../pixel/hast';
+import { readRepoFile } from '../lib/repo';
+import { drawReleaseFigures, RELEASE_NOTES_SOURCE } from './release-figures-hast';
 import { sourceOf } from './source';
 
 const PLUGIN = 'rehype-prose-figures';
@@ -728,6 +731,8 @@ export function drawProseFigures(tree: Root, repoPath: string, template = 'prose
     }
   };
   walk(tree);
+  // The release notes (issue #125): a timeline, and figures and folds under long sections.
+  if (repoPath === RELEASE_NOTES_SOURCE) drawReleaseFigures(tree, readRepoFile(RELEASE_NOTES_SOURCE), uid);
   numberFigures(tree);
   return report;
 }

@@ -229,6 +229,133 @@
     gap: 2px;
   }
 
+  /* ---------- release notes (issue #125): timeline, section figures, folds ---------- */
+
+  .release-line {
+    margin: 0;
+  }
+
+  .release-line th[scope='row'] {
+    font-weight: 400;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .release-line__date {
+    display: block;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .release-line__cell {
+    min-width: 6rem;
+  }
+
+  .release-line__cell .pixel-bar {
+    width: 100%;
+  }
+
+  .release-line__none {
+    color: var(--ink-2);
+  }
+
+  /* Narrow: one block per release, each kind a labelled bar, so the four
+     kind columns never scroll sideways. The kind label is generated text;
+     the column header names it for screen readers. */
+  @container (max-width: 479px) {
+    .release-line,
+    .release-line tbody {
+      display: block;
+    }
+
+    .release-line thead {
+      display: none;
+    }
+
+    .release-line tr {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-1) var(--space-3);
+      padding: var(--space-2) 0;
+      border-bottom: var(--px) solid var(--rule);
+    }
+
+    .release-line th[scope='row'] {
+      grid-column: 1 / -1;
+      padding: 0;
+    }
+
+    .release-line__date {
+      display: inline;
+      margin-left: var(--space-2);
+    }
+
+    .release-line td {
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      font-size: 12px;
+    }
+
+    .release-line td::before {
+      content: attr(data-kind) / '';
+      display: block;
+      color: var(--ink-2);
+    }
+  }
+
+  .release-sec__label {
+    margin: var(--space-3) 0 var(--space-2);
+    font-weight: 600;
+  }
+
+  .release-sec__label:first-child {
+    margin-top: 0;
+  }
+
+  .release-sec__issues {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .release-sec__issue {
+    display: grid;
+    grid-template-columns: 5ch minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .release-sec__issue-name {
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  .release-sec__codes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .release-more {
+    margin: 0 0 var(--space-5);
+  }
+
+  .release-more > summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--link);
+  }
+
+  .release-more > ul {
+    margin-top: var(--space-2);
+  }
+
   /* ---------- page hero band (3.10.1, 3.10.12, 3.10.13) ---------- */
 
   .page-hero {
