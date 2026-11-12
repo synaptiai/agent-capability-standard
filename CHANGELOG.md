@@ -467,6 +467,19 @@ flowchart TB
   invokes) counts as a wait, so a checkpoint taken before it no longer silently covers a later
   `mutate` or `send`. The #114 port's checkin_recovery mutate was the first
   case found; revision 1.1e checkpoints again after the escalation.
+
+```mermaid
+---
+title: An invoke that can wait counts as a wait
+---
+flowchart TB
+  accDescr: An invoke of a catalog workflow that can wait counts as a wait, so a checkpoint taken before it no longer covers a later mutate or send; a new checkpoint is needed after it.
+  cp1[checkpoint] --> inv["invoke of a workflow that can wait"]
+  inv --> cp2[New checkpoint]
+  cp2 --> act["mutate or send"]
+  cp1 -.->|"no longer covers"| act
+```
+
 - **A recovery loop replaces every waiting delegate it runs again.** A loop
   from a later step (a blocked quorum, say) back to before the reviewers
   delegated them again without `replaces`, so the host could not cancel
@@ -632,6 +645,19 @@ flowchart LR
   deferred the SDK's `finally: await query.close()` — the call that terminates
   the CLI subprocess — to garbage collection, leaving the process alive past
   its consumer
+
+```mermaid
+---
+title: Closing the SDK's generator
+---
+flowchart TB
+  accDescr: When a caller breaks out of iteration, grounded_query now closes the SDK's generator, so the SDK's finally block runs query.close() and terminates the CLI subprocess; before, that was left to garbage collection and the process outlived its consumer.
+  brk[Caller breaks out of iteration] --> ac["grounded_query: aclose()"]
+  ac --> fin["SDK finally: query.close()"]
+  fin --> term[CLI subprocess terminates]
+  brk -.->|"before: no aclose"| gc["Left to garbage collection; the process stays alive"]
+```
+
 - `test_grounded_query_callable` no longer drives an unbounded billable API
   call. It still exercises the real SDK with no mock and no skip, but stops
   after the first message and runs under a timeout. The timeout bounds the
@@ -740,6 +766,15 @@ The full list is in the
 ### Changed
 - Flattened skills directory structure for Claude Code compatibility: skills
   moved from `skills/<category>/<skill>/` to `skills/<skill>/`
+
+```mermaid
+---
+title: The flattened skills directory
+---
+flowchart TB
+  accDescr: Skills moved from skills/category/skill/ to skills/skill/, one level shallower.
+  old["skills/category/skill/"] -->|flattened to| new["skills/skill/"]
+```
 
 ### Fixed
 - The PostToolUse hook reads its JSON from stdin instead of command-line
