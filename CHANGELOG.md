@@ -390,6 +390,19 @@ flowchart TB
   and `retry` take it, so a workflow can re-check a quiet worker and
   escalate only when the wait expires. A failure mode that handled lost
   liveness through `on_error: R401` must add R406
+
+```mermaid
+---
+title: Lost liveness and an expired wait
+---
+flowchart TB
+  accDescr: Lost liveness is R406, which failure modes and retry take, so a workflow can re-check a quiet worker; only an expired wait, R401, is escalated.
+  w[Wait on a worker] -->|liveness lost| r406[R406 LIVENESS_LOST]
+  r406 -->|"on_error or retry: re-check"| w
+  w -->|wait expires| r401[R401 timeout]
+  r401 --> esc[Escalate]
+```
+
 - **Migration:** binding `fresh_context`, `model_family` or `role` on
   `delegate`, or `accept_from` on `receive`/`synchronize`, now needs
   `delegation@1` in `workflow_extensions.requires` (V106). These inputs were
@@ -694,6 +707,18 @@ flowchart TB
   those files. The rewrite now strips every existing prefix before re-applying
   exactly one, so a tree a previous run had already doubled is repaired rather
   than left stable-but-corrupt (#107)
+
+```mermaid
+---
+title: The comment rewrite in sync_skill_schemas.py
+---
+flowchart TB
+  accDescr: Before, each run reapplied the rewrite to already-rewritten text and stacked another prefix; now the rewrite strips every existing prefix and then applies exactly one, which also repairs a doubled tree.
+  run[Each run of sync_skill_schemas.py] --> strip["Strip every existing (repo-level) prefix"]
+  strip --> one[Apply exactly one prefix]
+  run -.->|before| stack[Another prefix stacked on each run]
+```
+
 - `skills/receive/reference/event_schema.yaml` was an orphan copy that
   `sync_skill_schemas.py` could not reach, because the sync only bundles into
   skills that carry a `reference/workflow_catalog.yaml`. It is now resynced and
@@ -758,6 +783,16 @@ The full list is in the
 
 ### Changed
 - Migrated from 99 to 36 atomic capabilities with domain parameterization
+
+```mermaid
+---
+title: From 99 capabilities to 36
+---
+flowchart TB
+  accDescr: The 99 capabilities of v1.0.0 became 36 atomic capabilities, with domain parameters in place of domain-specific variants.
+  v99[99 capabilities] -->|domain parameterization| v36[36 atomic capabilities]
+```
+
 - Grounded Agency evaluation section reports the 51 steps in the reference
   workflows
 
