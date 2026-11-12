@@ -258,14 +258,26 @@
       column-gap: 4px;
     }
 
+    /* The purpose column is gone, so the name takes its space; at 13px with
+       a narrow inset the longest capability id (11 letters) fits beside the
+       gate and failure lanes. */
     .spine__cap {
       flex: 0 1 auto;
+      padding-inline: 2px;
+      font-size: 13px;
     }
 
     /* Narrow, a group's bar keeps its glyph and ids (the fork and join glyphs
        say which bar it is; the words stay for screen readers), so the ids
-       fit on the bar's one row. */
+       fit on the bar's one row. Its ids stay at 12px, the floor for figure
+       text, rather than code's smaller relative size. */
     .spine__bar {
+      gap: var(--space-1);
+      font-size: 12px;
+    }
+
+    .spine__bar code {
+      padding-inline: 1px;
       font-size: 12px;
     }
 
