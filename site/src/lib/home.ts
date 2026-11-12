@@ -533,7 +533,7 @@ export function storyCaption(): string {
   const more =
     extra.length === 0
       ? ''
-      : ` ${words(extra.map((x) => `step ${x.index} (${x.capability})`))} also ${extra.length === 1 ? 'carries' : 'carry'} the ${words([...new Set(extra.map((x) => ROLE_WORDS[x.role]!))])} mark, as on every step map.`;
+      : ` ${extra.length === 1 ? 'Step' : 'Steps'} ${words(extra.map((x) => `${x.index} (${x.capability})`))} also ${extra.length === 1 ? 'carries' : 'carry'} the ${words([...new Set(extra.map((x) => ROLE_WORDS[x.role]!))])} mark, as on every step map.`;
   return `The ${s.workflow.id} workflow has ${s.workflow.steps.length} steps: it saves a checkpoint at step ${s.checkpointStep.index}, makes its change at step ${s.changeStep.index}, verifies at step ${s.verifyStep.index} and can roll back at step ${s.rollbackStep.index}.${more}`;
 }
 

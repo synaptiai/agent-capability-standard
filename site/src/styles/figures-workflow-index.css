@@ -175,9 +175,10 @@
 
   /* Wide, the goal has its own column. At phone width it moves under the id
      and its strip, so the table fits (the visual review found the Goal column
-     cut at 360); the column is then hidden. One of the two is shown at any
+     cut at 360); the columns are then hidden. One of the two is shown at any
      width, so the goal is read once. */
-  .workflow-table__goal {
+  .workflow-table__goal,
+  .workflow-table__meta {
     display: none;
   }
 
@@ -187,7 +188,7 @@
 
   @media (max-width: 599px) {
     .workflow-table th[scope='row'] {
-      width: 100%;
+      width: auto;
     }
 
     .workflow-table__goal {
@@ -196,7 +197,19 @@
       font-weight: 400;
     }
 
-    .workflow-table__goal-col {
+    .workflow-table__meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-2);
+      margin-top: var(--space-1);
+      font-weight: 400;
+    }
+
+    /* Narrow, the risk and step count also move under the id, so the table
+       is one column and nothing is cut. */
+    .workflow-table__goal-col,
+    .workflow-table__side {
       display: none;
     }
   }

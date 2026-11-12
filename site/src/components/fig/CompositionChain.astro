@@ -9,7 +9,8 @@
 // section's own lists; words that are not capability ids are skipped. Under
 // each listed tile: the ontology edge between the pair (its mark and type)
 // and how many times the pair runs as neighbouring steps, in that order, in
-// the catalog workflows (chainChecks), which the list does not say. Drawn
+// the catalog workflows (chainChecks), which the list does not say. The
+// caption says how to read an edge phrase. Drawn
 // only when it has two or more tiles.
 //
 // Props:
@@ -18,6 +19,7 @@
 // - n: number, required. The figure number on the page.
 import type { Capability } from '../../data/ontology';
 import { chainCaption, chainChecks, type CompositionChain } from '../../lib/capability-figures';
+import { capabilitySymbol } from '../../lib/views';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import Figure from './Figure.astro';
 import MiniTile from './MiniTile.astro';
@@ -30,6 +32,10 @@ interface Props {
 
 const { cap, chain, n } = Astro.props;
 const checks = chainChecks(cap, chain);
+// Each edge reads as a phrase with this capability's symbol: "requires Mt"
+// under checkpoint is "checkpoint requires mutate"; "Mt precedes" under
+// verify is "mutate precedes verify".
+const sym = capabilitySymbol(cap.id);
 const check = (side: string, id: string) => checks.find((c) => c.side === side && c.id === id);
 const groups = [
   { key: 'follows', label: 'Commonly follows', ids: chain.follows, relation: `commonly before ${cap.id}` },
@@ -53,7 +59,7 @@ const groups = [
                   const c = check(g.key, id)!;
                   return (
                     <span class="chain__check">
-                      {c.edges.length > 0 ? c.edges.map((e) => <span class="chain__edge"><PixelGlyph name={`mark:${e.type}`} /><span>{e.type}{e.dir === 'into' ? ' (in)' : ''}</span></span>) : <span class="chain__edge chain__edge--none">no edge</span>}
+                      {c.edges.length > 0 ? c.edges.map((e) => <span class="chain__edge"><PixelGlyph name={`mark:${e.type}`} /><span>{e.dir === 'into' ? `${sym} ${e.type}` : `${e.type} ${sym}`}</span></span>) : <span class="chain__edge chain__edge--none">no edge</span>}
                       <span class="chain__count">{c.adjacent === 0 ? 'not next to it in a workflow' : `next to it ${c.adjacent}×`}</span>
                     </span>
                   );

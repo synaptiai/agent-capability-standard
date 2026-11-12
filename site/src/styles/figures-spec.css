@@ -1452,6 +1452,10 @@
     font-weight: 400;
   }
 
+  .edge-type-table__count .pixel-bar {
+    flex-wrap: wrap;
+  }
+
   .edge-type-table__props {
     font-size: 14px;
     color: var(--ink-2);
@@ -1461,10 +1465,11 @@
     margin: 0 0 var(--space-1);
   }
 
-  /* At phone width, identifiers in a figure's table may break anywhere, so a
-     long code name wraps instead of pushing the description off-screen. */
+  /* At phone width, identifiers in a figure's table cells may break
+     anywhere, so a long code name wraps instead of pushing the description
+     off-screen; a row header's id stays whole. */
   @media (max-width: 599px) {
-    .fig__drawing .table-wrap :is(td, th) code {
+    .fig__drawing .table-wrap td code {
       white-space: normal;
       overflow-wrap: anywhere;
     }
@@ -1578,13 +1583,17 @@
 
 @layer components {
   /* ---------- F-X2 where a family's codes are raised (diagnostics page) ---------- */
+  /* Positioned, so the cells' screen-reader text is clipped by the
+     scrolling wrapper instead of widening the page. */
   .raised {
+    position: relative;
     width: auto;
   }
 
+  .fig__drawing .raised :is(th, td),
   .raised th,
   .raised td {
-    padding: 4px;
+    padding: 2px;
     text-align: center;
     white-space: nowrap;
   }
@@ -1594,7 +1603,9 @@
   }
 
   .raised tbody th {
+    min-width: 5rem;
     text-align: left;
+    white-space: nowrap;
   }
 
   .raised__cell {

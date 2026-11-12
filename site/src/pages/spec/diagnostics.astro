@@ -68,7 +68,7 @@ const figNo = () => ++fig;
                   <thead>
                     <tr>
                       <th scope="col">Code</th>
-                      {r.sections.map((sec) => <th scope="col"><a href={`${std.url}#${sec.anchor}`} title={sec.title}>§{sec.n}</a></th>)}
+                      {r.sections.map((sec) => <th scope="col"><a href={`${std.url}#${sec.anchor}`} title={sec.title}>{sec.n}</a></th>)}
                     </tr>
                   </thead>
                   <tbody>

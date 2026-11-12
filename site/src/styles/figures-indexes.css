@@ -345,3 +345,12 @@
     white-space: nowrap;
   }
 }
+
+@layer components {
+  @media (max-width: 599px) {
+    .bar-list__row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2px;
+    }
+  }
+}

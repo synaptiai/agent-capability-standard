@@ -57,7 +57,7 @@ const coreSources = [...new Set(wfs.core.map((w) => w.source))];
           <table class="workflow-table">
             <caption>{g.label} ({g.items.length})</caption>
             <thead>
-              <tr><th scope="col">Workflow</th><th scope="col" class="workflow-table__goal-col">Goal</th><th scope="col">Risk</th><th scope="col">Steps</th></tr>
+              <tr><th scope="col">Workflow</th><th scope="col" class="workflow-table__goal-col">Goal</th><th scope="col" class="workflow-table__side">Risk</th><th scope="col" class="workflow-table__side">Steps</th></tr>
             </thead>
             {tableGroups(g.items).map((tg) => (
               <tbody>
@@ -73,10 +73,11 @@ const coreSources = [...new Set(wfs.core.map((w) => w.source))];
                         <span class="wf-strip__layers" aria-hidden="true">{layersUsed(w).map((l) => <PixelGlyph name={l} layer={l} />)}</span>
                       </span>
                       <span class="workflow-table__goal">{w.goal}</span>
+                      <span class="workflow-table__meta"><RiskBadge risk={w.risk} /> {w.steps.length} steps</span>
                     </th>
                     <td class="workflow-table__goal-col">{w.goal}</td>
-                    <td><RiskBadge risk={w.risk} label="" /></td>
-                    <td>{w.steps.length}</td>
+                    <td class="workflow-table__side"><RiskBadge risk={w.risk} label="" /></td>
+                    <td class="workflow-table__side">{w.steps.length}</td>
                   </tr>
                 ))}
               </tbody>

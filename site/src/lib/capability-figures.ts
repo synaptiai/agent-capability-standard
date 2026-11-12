@@ -6,7 +6,7 @@
 import { EDGE_TYPES, loadOntology, type Capability, type EdgeType, type Ontology } from '../data/ontology';
 import { capabilityUsage, loadWorkflows, type CapabilityUse } from '../data/workflows';
 import { sectionFence, sectionOrderedItems, sectionTableByHeader, tableRows } from './md-sections';
-import { contractRows, tableOrder, type SchemaRow } from './views';
+import { capabilitySymbol, contractRows, tableOrder, type SchemaRow } from './views';
 
 // ------------------------------------------------------------ F-C1 neighbours
 
@@ -256,7 +256,8 @@ export function chainCaption(cap: Capability, chain: CompositionChain, checks: C
   const top = [...seen].sort((a, b) => b.adjacent - a.adjacent)[0];
   return (
     `The skill lists ${plural(n, 'capability', 'capabilities')} as common neighbours of ${cap.id}; ${edged} of them ${edged === 1 ? 'has' : 'have'} an edge with it in the ontology, and ${seen.length} ${seen.length === 1 ? 'runs' : 'run'} next to it, in that order, in a catalog workflow` +
-    (top ? ` (${top.id} most often, ${plural(top.adjacent, 'time', 'times')}).` : '.')
+    (top ? ` (${top.id} most often, ${plural(top.adjacent, 'time', 'times')}).` : '.') +
+    ` Under each tile, an edge reads with ${cap.id}'s symbol in its place: "requires ${capabilitySymbol(cap.id)}" means the tile's capability requires ${cap.id}.`
   );
 }
 

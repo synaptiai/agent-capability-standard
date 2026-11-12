@@ -451,7 +451,8 @@
   }
 
   .chain__item {
-    max-width: 11rem;
+    align-content: start;
+    max-width: 12rem;
   }
 
   .chain__check {
@@ -860,5 +861,19 @@
   .xwf__meta {
     font-size: 14px;
     color: var(--ink-2);
+  }
+}
+
+@layer components {
+  /* Narrow, a bar row's label line sits above its bar, so a long printed
+     value never pushes the page sideways. */
+  @media (max-width: 599px) {
+    .ubars__row {
+      grid-template-columns: 24px minmax(0, 1fr);
+    }
+
+    .ubars__row > .pixel-bar {
+      grid-column: 1 / -1;
+    }
   }
 }
