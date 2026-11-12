@@ -13,6 +13,16 @@ enters through the timestamps you pass. So the same catalog, inputs,
 responses and times always produce the same actions, the same trace and
 the same snapshot, and a run can be saved and resumed anywhere.
 
+```mermaid
+---
+title: The executor and your host
+---
+flowchart LR
+  accDescr: The executor does no I/O; it tells your host the next action, your host does it and reports back a response, and the executor decides the next action from it.
+  exec[Executor in the Rust core] -->|action| host[Your host]
+  host -->|response| exec
+```
+
 The contract is [STANDARD-v1.1.0 §5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl).
 The executor's source is in `core/src/exec/`, and Python reaches it as
 `grounded_agency._core.Run`.
@@ -96,6 +106,19 @@ ontology contract requires, or the step fails (R402).
   to a failure mode that fires; an `end` whose expression errors does not
   fire). An expression that errors (R405) is fail-safe: a gate fires, a
   condition is false, and a failure mode does not fire.
+
+  ```mermaid
+  ---
+  title: What each gate action does
+  ---
+  flowchart LR
+    accDescr: A gate that fires with stop fails the step with R403, skip skips the step, rollback rolls back and then fails with R403, warn adds a trace event, and end ends the run successfully.
+    gate[A gate fires] --> r403["stop: R403"]
+    gate --> skip["skip: the step is skipped"]
+    gate --> rb["rollback: roll back, then R403"]
+    gate --> trace["warn: a trace event"]
+    gate --> ended["end: the run ends successfully"]
+  ```
 - **Checkpoints.** One checkpoint authorises one step that requires one,
   and is used only once the step is approved and about to run. When none
   is valid, the executor asks for a new one (`CreateCheckpoint`). A
@@ -127,6 +150,17 @@ ontology contract requires, or the step fails (R402).
   inputs that does not wait is your host's to filter: put the sender's
   `sender_identity` on each item you return, since an item without one
   counts as always-ask when `always_ask_trust_classes` is bound.
+
+  ```mermaid
+  ---
+  title: Approval in an unattended run
+  ---
+  flowchart TB
+    accDescr: An unattended run asks only a standing mandate; when there is none, or it answers unavailable, the run follows when_unattended, which fails with F502 by default, skips the step, or defers it to a queue.
+    ask[Step requires approval, run unattended] --> mandate{"Standing mandate approves?"}
+    mandate -->|approved| run[Step runs]
+    mandate -->|"none, or unavailable"| wu["when_unattended: fail (F502, default), skip, or defer_to_queue"]
+  ```
 - **Delays.** A step with `delay` (`wait@1`) sleeps that long after its
   condition and before-gates, before its approval and execution; when it wakes,
   earlier checkpoints no longer count, as after a wait.
@@ -157,6 +191,19 @@ ontology contract requires, or the step fails (R402).
   whose delegations replace none of the old run's. It can also escalate to a handler (the run ends `escalated`), or end the run
   with the step's code — R402 when `when` fired on a step that did not fail
   ([STANDARD §5.12](../../spec/STANDARD-v1.1.0.md#512-recovery-and-escalation)).
+
+  ```mermaid
+  ---
+  title: When a failure mode applies
+  ---
+  flowchart TB
+    accDescr: The first failure mode that matches the error code or whose when is true applies; its action runs first, then it loops back with recovery context up to max_loops, escalates to a handler, or ends the run with the step's code.
+    fm["First matching failure mode: on_error code or when true"] --> act["Its action first: rollback or pause_and_checkpoint"]
+    act -->|"loop back, up to max_loops"| loop["Earlier step, with _recovery context"]
+    act -->|escalate| handler["Handler; run ends escalated"]
+    act -->|end| code["Run ends with the step's code"]
+    loop -->|"loops run out"| ex["on_exhausted, or R404"]
+  ```
 - **Invocations.** An `invoke` step runs its workflow as a nested run, at
   most four deep, with `input_bindings.input` as its inputs; inputs the
   workflow does not declare, or a missing required one, fail the step
