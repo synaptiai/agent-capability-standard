@@ -225,7 +225,6 @@ flowchart TB
   run["validate_workflows.py --catalog my_first_workflow.yaml"] --> ok{Errors?}
   ok -->|no| pass[VALIDATION PASS]
   ok -->|yes| fix["Check names, unique store_as, binding references"]
-  fix -->|run again| run
 ```
 
 ---
@@ -379,11 +378,11 @@ fix_and_verify:
 title: The fix_and_verify workflow
 ---
 flowchart TB
-  accDescr: The workflow observes, detects, plans, states the invariants and checkpoints before the mutation, which a gate stops when there is no checkpoint; verify then checks the fix, a failed check rolls back to the plan step, and audit records the change.
+  accDescr: The workflow observes, detects, plans, states the invariants and checkpoints before the mutation, which a gate stops when there is no checkpoint; verify then checks the fix, and when it fails its failure mode rolls back and resumes at the plan step, up to 3 times; audit records the change.
   observe --> detect --> plan --> constrain --> checkpoint
   checkpoint -->|"gate: stop if no checkpoint_id"| mutate
   mutate --> verify
-  verify -->|"passed == false: rollback"| plan
+  verify -.->|"passed == false: rollback, resume at plan, max_loops 3"| plan
   verify -->|passed| audit
 ```
 
@@ -652,11 +651,11 @@ Before any mutation:
 title: The safety checklist around a mutation
 ---
 flowchart TB
-  accDescr: Before a mutation, add a checkpoint step and a gate that checks the checkpoint exists; after it, add a verify step; and give the steps failure modes with recovery.
+  accDescr: Before a mutation, add a checkpoint step and a gate that checks the checkpoint exists; after it, add a verify step; and add failure modes with recovery.
   cp[checkpoint] --> g{"gate: checkpoint exists"}
   g --> m[Mutation]
   m --> v[verify]
-  v -.-> fm["failure_modes with recovery"]
+  fm["Also: failure_modes with recovery"]
 ```
 
 ### 6.3 Documentation
