@@ -164,6 +164,16 @@ export function sectionCodesCaption(s: { heading: string; codes: Diagnostic[] })
   return `${plural(s.codes.length, 'code', 'codes')} of ${s.heading.toLowerCase()}, ${sev}; each tile links to the code's entry on the diagnostics page.`;
 }
 
+/** F-X1, the diagnostics page's code grid. */
+export function codeGridCaption(f: Family[]): string {
+  const sizes = [...f].sort((a, b) => b.codes.length - a.codes.length);
+  return `${sizes[0]!.name} is the largest family, with ${sizes[0]!.codes.length} codes, and ${sizes.at(-1)!.name} the smallest, with ${sizes.at(-1)!.codes.length}; each tile links to its row below.`;
+}
+
+export function familyTableCaption(f: Family): string {
+  return `${plural(f.codes.length, 'code', 'codes')} in ${f.range}, every one ${f.severity === 'error' ? 'an error' : 'a warning'}; the Section column names where the Standard defines it.`;
+}
+
 // ---------------------------------------------- F-S27 where codes are raised
 
 /** The §5.1 to §5.17 sections: number and the text up to the next §5.x heading (subsections included). */

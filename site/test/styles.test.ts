@@ -65,6 +65,9 @@ describe('typography', () => {
       // from the 9x9 concept glyphs. The letter is a hero character of its
       // tile, like a tile symbol.
       '.diag-family',
+      // Visual spec 3.8 (F-X1): each tile of the diagnostics code grid shows
+      // its code in the display font at 24px, as a periodic tile shows its symbol.
+      '.diag-tile--grid > .diag-tile__code',
     ]);
     const display = rules()
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))

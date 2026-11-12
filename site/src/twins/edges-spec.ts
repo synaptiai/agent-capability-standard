@@ -8,7 +8,7 @@ import { edgeTypesCaption, gateBranches, gateCaption, layerModelCaption, safetyC
 import { edgeExample, edgeMatrixCaption, layerPairCounts } from '../lib/edge-figures';
 import { edgeTypeCount, safetyRows } from '../lib/views';
 import { cell, code, figure, table } from './md';
-import { specEarlyBlocks, specLateBlocks } from './spec-figures';
+import { specEarlyBlocks, specLateBlocks, specTailBlocks } from './spec-figures';
 
 /** The edge types page: each type card's example sentence, and the matrix as layer-pair counts. */
 export function edgeTypesFigureBlocks(): string[] {
@@ -91,5 +91,6 @@ export function specFigureBlocks(): string[] {
       table(['Phase', 'Actions'], gateBranches(schema).map((b) => [b.phase, b.actions.map(code).join(', ')])),
     ),
     ...specLateBlocks(),
+    ...specTailBlocks(),
   ];
 }

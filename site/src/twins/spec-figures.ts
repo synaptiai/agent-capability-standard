@@ -9,6 +9,8 @@ import * as D from '../lib/spec-dsl-figures';
 import { REPLAY_FIXTURES, replay, replayCaption, replayRows } from '../lib/run-replay';
 import { loadWorldStateSchema } from '../data/spec-sources';
 import { cell, code, figure, table } from './md';
+import * as T from '../lib/spec-tail-figures';
+import { loadIdentityPolicy } from '../data/spec-sources';
 
 const REPLAY_TITLES: Record<string, string> = {
   'recovery-replay': 'A recovery that runs out, from §5.12',
@@ -94,5 +96,29 @@ export function specLateBlocks(): string[] {
       D.trustCaption(trust),
       table(['Trust class', 'Default weight', 'In the example'], trust.map((b) => [code(b.cls), String(b.weight), [b.accepted ? 'accepted' : '', b.alwaysAsk ? 'always ask' : ''].filter(Boolean).join(', ')])),
     ),
+  ];
+}
+
+/** The blocks for chapters 7 to 10: F-S24b, F-S25, F-S26, F-S27 and F-S29. */
+export function specTailBlocks(): string[] {
+  const { source, text } = currentStandardText();
+  const decay = T.decayColumns(text, source);
+  const fams = T.diagnosticFamilies(text, source);
+  const heat = T.codeHeat(text, source);
+  const suite = T.conformanceSuite(text, source);
+  return [
+    figure('Merge thresholds, from §7.3', T.thresholdsCaption(), table(['Threshold', 'Score'], loadIdentityPolicy().thresholds.map((t) => [code(t.name), String(t.value)]))),
+    figure(
+      'Decay with a floor: reference configuration, from §8.1',
+      T.decayCaption(decay),
+      table(['Age (half-lives)', 'Age (days)', 'Decay factor', 'Held by the floor'], decay.columns.map((c) => [String(c.halfLives), String(c.days), c.value.toFixed(3), c.floored ? 'Yes' : 'No'])),
+    ),
+    figure('Diagnostic families, from §9.1', T.familiesCaption(fams), table(['Family', 'Range', 'Severity', 'Codes'], fams.map((f) => [f.name, code(f.range), f.severity, String(f.codes.length)]))),
+    figure(
+      'Where codes are raised, from §9.6',
+      T.heatCaption(heat),
+      table(['Family', ...heat.sections.map((x) => `§${x.n}`)], heat.families.map((f, i) => [f.name, ...heat.counts[i]!.map(String)])),
+    ),
+    figure('The conformance suite, from §10.3', T.suiteCaption(suite), table(['Part', 'Count', 'Folder'], suite.map((p) => [p.label, String(p.count), code(p.dir)]))),
   ];
 }

@@ -23,6 +23,28 @@ export function edgeExample(info: EdgeTypeInfo): { from: string; to: string; sen
   return { from: e.from, to: e.to, sentence: `${e.from} ${phrase} ${e.to}${tail}` };
 }
 
+/** The caption of an edge type's card when it stands as its own figure (the edge types page). */
+export function edgeCardCaption(info: EdgeTypeInfo): string {
+  const n = edgeTypeCount(info);
+  const unit = info.symmetric ? (n === 1 ? 'pair' : 'pairs') : n === 1 ? 'edge' : 'edges';
+  const props = [info.transitive ? 'transitive' : 'not transitive', info.symmetric ? 'symmetric' : 'not symmetric'];
+  return `The ontology has ${n} ${info.id} ${unit}, ${props.join(' and ')}; the example is the first in ontology order: ${edgeExample(info).sentence}.`;
+}
+
+/** The caption of the generated table of edge types with a bar per declared count. */
+export function declaredCaption(o: Ontology = loadOntology()): string {
+  const top = [...o.edgeTypes].sort((a, b) => b.edges.length - a.edges.length)[0]!;
+  return `${o.edges.length} edges as the ontology declares them, a symmetric pair twice; ${top.id} is the most common type, with ${top.edges.length}.`;
+}
+
+/** The caption of the "Edge Type Summary" table drawn as a figure (F-E4), symmetric types counted by pair. */
+export function summaryCaption(o: Ontology = loadOntology()): string {
+  const counts = o.edgeTypes.map((t) => ({ t, n: edgeTypeCount(t) }));
+  const top = [...counts].sort((a, b) => b.n - a.n)[0]!;
+  const trans = o.edgeTypes.filter((t) => t.transitive).map((t) => t.id);
+  return `${o.edgeTypes.length} edge types, ${trans.length} of them transitive (${trans.join(', ')}); ${top.t.id} has the most edges, ${top.n}, and each bar counts a symmetric pair once.`;
+}
+
 // -------------------------------------------------------------- F-E2 matrix
 
 export interface MatrixCell {
