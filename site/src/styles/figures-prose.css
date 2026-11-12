@@ -5,6 +5,11 @@
  * the RFC lifecycle track. Kept apart from figures.css so branches merge
  * cleanly. Square corners, 2px lines, tokens only.
  */
+/* Declared here too, so the layers keep their order when this sheet loads
+   first: PageHero imports it, and on the section index pages it loads
+   before DocLayout's sheet. */
+@layer reset, tokens, base, components, utilities;
+
 @layer components {
   /* ---------- box diagram panels (3.10.4) ---------- */
 

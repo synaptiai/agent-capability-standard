@@ -326,6 +326,19 @@ describe('design system on the built site', () => {
     }
   });
 
+  it('declares the cascade layer order in the first stylesheet of every page', () => {
+    // Expected: base.css's order, reset < tokens < base < components <
+    // utilities. A layer is ranked by where it is first named, so a page whose
+    // first stylesheet opens with `@layer components{` ranks components below
+    // base, and the header and nav lose their component styles.
+    for (const f of pages()) {
+      const href = /<link rel="stylesheet" href="([^"]+)"/.exec(html(f))?.[1];
+      expect(href, f).toBeDefined();
+      const css = readFileSync(path.join(dist, href!), 'utf8');
+      expect(/^@layer reset[{,]/.test(css), `${f}: ${href} opens with ${css.slice(0, 40)}`).toBe(true);
+    }
+  });
+
   it('marks <html> with .js from the head script, which the no-JavaScript menu rules read', () => {
     for (const f of pages()) {
       expect(/^<!DOCTYPE html><html lang="en"><head><script>\s*\(\(\) => \{\s*document\.documentElement\.classList\.add\('js'\)/i.test(html(f)), f).toBe(true);
