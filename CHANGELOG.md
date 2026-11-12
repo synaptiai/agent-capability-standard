@@ -112,7 +112,7 @@ from this plugin release.
 title: The release workflow
 ---
 flowchart TB
-  accDescr: A pushed v tag, or a manual run on main that creates the tag, starts release.yml; release_notes.py refuses a tag that does not match plugin.json or has no CHANGELOG section, and otherwise the GitHub Release is published with that section as its notes.
+  accDescr: A pushed v* tag, or a manual run on main that creates the tag, starts release.yml; release_notes.py refuses a tag that does not match plugin.json or has no CHANGELOG section, and otherwise the GitHub Release is published with that section as its notes.
   tag[Pushed v* tag] --> wf[release.yml]
   man["Manual run on main: creates the tag"] --> wf
   wf --> rn{"release_notes.py: matches plugin.json, has a section?"}
