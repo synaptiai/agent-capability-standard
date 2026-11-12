@@ -48,6 +48,18 @@ The NIST AI RMF 1.0 organizes AI risk management into four core functions:
 | **MEASURE** | Analyze, assess, and track AI risks | ME-1 through ME-4 |
 | **MANAGE** | Prioritize and act on AI risks | MG-1 through MG-4 |
 
+```mermaid
+---
+title: How the four functions relate
+---
+flowchart LR
+  accDescr: GOVERN establishes the risk governance; MAP identifies the context and risks and MEASURE analyzes and tracks them; MANAGE prioritizes and acts on the risks using the output of MAP and MEASURE.
+  gv[GOVERN: establish governance] --> mp
+  gv --> me
+  mp[MAP: identify context and risks] --> mg[MANAGE: prioritize and act]
+  me[MEASURE: analyze and track] --> mg
+```
+
 ### 2.2 Grounded Agency Framework
 
 The Grounded Agency framework provides 36 atomic capabilities across 9 cognitive layers, composed through typed contracts with structural safety enforcement:
@@ -83,6 +95,15 @@ NIST AI RMF defines four organizational tiers for AI risk management maturity:
 | **Tier 3** | Repeatable | Organization-wide policies implemented consistently. Risk management is formalized and documented. |
 | **Tier 4** | Adaptive | Continuous improvement based on lessons learned. Automated monitoring, predictive risk indicators, organizational agility. |
 
+```mermaid
+---
+title: The four maturity tiers
+---
+flowchart LR
+  accDescr: Maturity rises from Tier 1 Partial, ad hoc and reactive, through Tier 2 Risk Informed and Tier 3 Repeatable to Tier 4 Adaptive, which improves continuously from lessons learned.
+  t1["Tier 1: Partial, ad hoc"] --> t2["Tier 2: Risk Informed"] --> t3["Tier 3: Repeatable"] --> t4["Tier 4: Adaptive"]
+```
+
 ### 3.2 Assessment Approach
 
 Each NIST category is assessed using:
@@ -99,6 +120,18 @@ Each NIST category is assessed using:
 | **Full** | Framework structurally enforces the requirement; no deployer action needed |
 | **Partial** | Framework provides structural support; deployer must configure or extend |
 | **Gap** | Framework does not address this requirement; deployer must implement independently |
+
+```mermaid
+---
+title: How coverage is decided
+---
+flowchart TB
+  accDescr: A requirement the framework enforces structurally is Full; one it supports but the deployer must configure or extend is Partial; one it does not address, which the deployer implements alone, is a Gap.
+  q1{Does the framework enforce it structurally?} -->|yes| full["Full: no deployer action"]
+  q1 -->|no| q2{Does it give structural support?}
+  q2 -->|yes| part["Partial: the deployer configures or extends"]
+  q2 -->|no| gap["Gap: the deployer implements it"]
+```
 
 ---
 
@@ -171,6 +204,15 @@ Each NIST category is assessed using:
 > | **Justification** | Domain profiles, risk treatment plan, competency framework, and compliance documentation provide risk-informed governance. GV-1.7 (decommissioning), GV-3 (DEIA), and GV-6 (third-party vendor assessment) are gaps that prevent Tier 3 classification. Organizational adoption depends on deployer commitment. |
 > | **Key gaps** | Decommissioning procedure (GV-1.7), DEIA policies (GV-3), third-party vendor assessment (GV-6) |
 
+```mermaid
+---
+title: GOVERN, current and target tier
+---
+flowchart LR
+  accDescr: GOVERN is at Tier 2, Risk Informed, and reaches Tier 3, Repeatable, by closing the decommissioning, DEIA and third-party vendor assessment gaps.
+  cur["Current: Tier 2, Risk Informed"] -->|"close GV-1.7, GV-3, GV-6"| tgt["Target: Tier 3, Repeatable"]
+```
+
 ---
 
 ## 5. MAP Function
@@ -232,6 +274,15 @@ Each NIST category is assessed using:
 > | **Justification** | Strong structural foundation: typed capability contracts, 7 domain profiles with trust weights, 3-tier risk classification, 7 edge types for dependency mapping, comprehensive risk treatment plan. Context establishment (MP-1) and categorization (MP-2) are formalized and repeatable. MP-5 (impact assessment) gap prevents Tier 4. |
 > | **Key gaps** | Formal impact assessment methodology for specific populations (MP-5); adaptive context updates from operational data |
 
+```mermaid
+---
+title: MAP, current and target tier
+---
+flowchart LR
+  accDescr: MAP is at Tier 3, Repeatable, and reaches Tier 4, Adaptive, with a formal impact assessment methodology and context that adapts from operational data.
+  cur["Current: Tier 3, Repeatable"] -->|"close MP-5, add adaptive context"| tgt["Target: Tier 4, Adaptive"]
+```
+
 ---
 
 ## 6. MEASURE Function
@@ -282,6 +333,15 @@ Each NIST category is assessed using:
 > | **Target Tier** | Tier 3 — Repeatable |
 > | **Justification** | Confidence scores and evidence anchors are structurally enforced on all outputs. Six validators provide repeatable structural evaluation. Temporal decay model tracks information freshness. However, real-time monitoring dashboards, aggregated reporting, alerting infrastructure, and automated external feedback collection are gaps. These prevent consistent, organization-wide measurement. |
 > | **Key gaps** | Real-time monitoring dashboard (ME-2.3), aggregated evaluation reporting (ME-2.2), automated feedback collection (ME-4) |
+
+```mermaid
+---
+title: MEASURE, current and target tier
+---
+flowchart LR
+  accDescr: MEASURE is at Tier 2, Risk Informed, and reaches Tier 3, Repeatable, with aggregated reporting, a real-time monitoring dashboard and automated feedback collection.
+  cur["Current: Tier 2, Risk Informed"] -->|"close ME-2.2, ME-2.3, ME-4"| tgt["Target: Tier 3, Repeatable"]
+```
 
 ---
 
@@ -334,6 +394,15 @@ Each NIST category is assessed using:
 > | **Target Tier** | Tier 4 — Adaptive |
 > | **Justification** | Strong structural enforcement: checkpoint-before-mutation is mandatory, rollback is available for state recovery, three-tier risk model assigns response priority, audit hooks provide comprehensive logging, and nonconformity procedure defines corrective action workflow. Risk treatment and documentation (MG-1.2, MG-2.1, MG-2.3, MG-4) are formalized and repeatable. Automated incident detection (MG-1.4) and tabletop scenario testing (MG-2.2) gaps prevent Tier 4. |
 > | **Key gaps** | Automated incident detection (MG-1.4), tabletop exercises (MG-2.2), formal third-party risk monitoring (MG-3) |
+
+```mermaid
+---
+title: MANAGE, current and target tier
+---
+flowchart LR
+  accDescr: MANAGE is at Tier 3, Repeatable, and reaches Tier 4, Adaptive, with automated incident detection, tabletop exercises and third-party risk monitoring.
+  cur["Current: Tier 3, Repeatable"] -->|"close MG-1.4, MG-2.2, MG-3"| tgt["Target: Tier 4, Adaptive"]
+```
 
 ---
 
@@ -425,6 +494,16 @@ The target profile achieves:
 | Build automated external feedback collection | G-07 (ME-4) | MEASURE → Tier 3+ | Feedback collection pipeline integrated with stakeholder channels |
 | Develop predictive risk indicators from confidence trends | — (advanced) | MEASURE → Tier 3+ | Trend analysis on EvidenceStore confidence data |
 | Enable continuous profile adaptation from operational data | — (advanced) | MAP → Tier 4 | Automated domain profile tuning based on operational metrics |
+
+```mermaid
+---
+title: Which gaps each phase closes
+---
+flowchart TB
+  accDescr: Phase 1, months 0 to 3, closes G-01 and G-09; Phase 2, months 3 to 6, closes G-02 to G-06 and G-10; Phase 3, months 6 to 12, closes G-07 and G-08.
+  p1["Phase 1, foundation, 0-3 months: G-01, G-09"] --> p2["Phase 2, core improvements, 3-6 months: G-02, G-03, G-04, G-05, G-06, G-10"]
+  p2 --> p3["Phase 3, adaptive maturity, 6-12 months: G-07, G-08"]
+```
 
 ### 9.4 Roadmap Visualization
 

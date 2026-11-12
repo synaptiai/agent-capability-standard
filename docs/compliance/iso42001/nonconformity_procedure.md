@@ -143,9 +143,31 @@ Each nonconformity shall be documented in an NCR containing:
 | Verified By | Person who verified effectiveness |
 | Status | Open / Contained / Corrected / Closed / Escalated |
 
+```mermaid
+---
+title: An NCR's status through the procedure
+---
+flowchart TB
+  accDescr: An NCR opens when the nonconformity is identified, becomes Contained after containment and Corrected after the correction, and after the effectiveness check is either Closed or Escalated.
+  open[Open] -->|contain| cont[Contained]
+  cont -->|correct| corr[Corrected]
+  corr -->|effectiveness verified| closed[Closed]
+  corr -->|or escalate| esc[Escalated]
+```
+
 ### 5.3 Root Cause Analysis
 
 Root cause analysis shall be performed for all Major and Critical nonconformities. For Minor nonconformities, root cause analysis is recommended but may be simplified.
+
+```mermaid
+---
+title: When root cause analysis is required
+---
+flowchart LR
+  accDescr: Root cause analysis is required for critical and major nonconformities, and recommended, possibly simplified, for minor ones.
+  sev{Severity} -->|Critical or Major| req[Root cause analysis required]
+  sev -->|Minor| rec[Recommended, may be simplified]
+```
 
 **Recommended Techniques:**
 
@@ -186,6 +208,18 @@ Corrective actions shall:
 | 3 | **Process change** | Medium | Update procedure, add review step |
 | 4 | **Training/awareness** | Lower | Training module, awareness communication |
 | 5 | **Documentation update** | Lowest | Update documentation, add warning |
+
+```mermaid
+---
+title: The corrective action hierarchy
+---
+flowchart TB
+  accDescr: Corrective actions prefer the higher tiers, from structural elimination, the most effective, through automated detection, process change and training to documentation updates, the least effective.
+  t1["Tier 1, structural elimination: highest"] -->|preferred over| t2["Tier 2, automated detection: high"]
+  t2 -->|preferred over| t3["Tier 3, process change: medium"]
+  t3 -->|preferred over| t4["Tier 4, training and awareness: lower"]
+  t4 -->|preferred over| t5["Tier 5, documentation update: lowest"]
+```
 
 ### 5.5 Effectiveness Verification
 

@@ -39,6 +39,18 @@ All AI operations shall maintain complete audit trails. Every skill invocation i
 - `EvidenceStore` captures tool executions as `EvidenceAnchor` objects
 - `ProvenanceRecord` schema links claims to agents, capabilities, and evidence
 
+```mermaid
+---
+title: What a ProvenanceRecord links
+---
+flowchart LR
+  accDescr: Every claim carries a ProvenanceRecord that links it to the agent, the capability and the evidence that produced it.
+  claim[Claim] --> pr[ProvenanceRecord]
+  pr --> ag[Agent]
+  pr --> cap[Capability]
+  pr --> ev[Evidence]
+```
+
 ### 3.3 Safety Through Structure
 
 High-risk operations shall require checkpoints and approval before execution. This is not a policy recommendation but a structural gate — mutations physically cannot proceed without a preceding checkpoint.
@@ -57,6 +69,17 @@ All state-changing operations shall be reversible. The checkpoint/rollback syste
 - `CheckpointTracker` manages checkpoint lifecycle with cryptographic IDs
 - `rollback` capability in VERIFY layer enables state restoration
 - `conflicts_with` edges prevent concurrent mutation and rollback
+
+```mermaid
+---
+title: How a state change stays reversible
+---
+flowchart TB
+  accDescr: A checkpoint saves the state before a state-changing operation, and within the checkpoint validity window the rollback capability can undo the operation by restoring that state.
+  cp[checkpoint] -->|saves the state before| op[State-changing operation]
+  op -.->|undone within the validity window by| rb[rollback]
+  rb -->|restores the saved state| cp
+```
 
 ### 3.5 Human Oversight
 
@@ -110,6 +133,17 @@ Top management shall:
 - Validates domain-specific trust weights and confidence thresholds
 - Reviews evidence requirements for domain profiles
 - Approves workflow configurations for their domain
+
+```mermaid
+---
+title: Who handles the domain profiles
+---
+flowchart LR
+  accDescr: The AI System Operator configures the domain profiles, the Domain Expert validates their trust weights and confidence thresholds, and the AI System Owner approves them.
+  op[AI System Operator] -->|configures| dp[Domain profiles]
+  de[Domain Expert] -->|validates| dp
+  ow[AI System Owner] -->|approves| dp
+```
 
 ## 6. AI Objectives
 
