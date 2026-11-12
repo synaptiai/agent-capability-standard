@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'motion.css'].map((f) => ({
+const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'figures-capability.css', 'motion.css'].map((f) => ({
   file: f,
   css: readFileSync(`src/styles/${f}`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }));

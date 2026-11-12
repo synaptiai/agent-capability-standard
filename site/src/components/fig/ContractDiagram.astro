@@ -1,0 +1,67 @@
+---
+// F-C2, a capability's contract as a typed block diagram of one box (visual
+// spec 3.1): input ports on the left against the box, the box (layer tint,
+// layer glyph, id), output ports on the right. Filled pins are required
+// fields, outlined pins optional ones. Each port links to its row in the
+// contract table below. When the figure is narrower than 640px it stacks:
+// inputs, a down chevron, the box, a down chevron, outputs.
+//
+// Props:
+// - cap: Capability, required.
+// - n: number, required. The figure number on the page.
+// - describedby: string, optional. Id of the element holding the tables.
+import type { Capability } from '../../data/ontology';
+import { contractCaption, contractRowId, contractSummary, contractTitle, GROUNDED_FIELDS } from '../../lib/capability-figures';
+import type { SchemaRow } from '../../lib/views';
+import { chevron, run } from '../../pixel/lines';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import Port from './Port.astro';
+import Rects from './Rects.astro';
+
+interface Props {
+  cap: Capability;
+  n: number;
+  describedby?: string;
+}
+
+const { cap, n, describedby } = Astro.props;
+const s = contractSummary(cap);
+const port = (side: 'in' | 'out', r: SchemaRow) => ({
+  name: r.path,
+  type: r.type,
+  required: r.required,
+  description: r.description,
+  href: `#${contractRowId(side, r.path)}`,
+  depth: (r.depth > 0 ? 1 : 0) as 0 | 1,
+  ...(GROUNDED_FIELDS.has(r.path) ? { mark: 'principle:grounded-claims', markLabel: 'grounded claim' } : {}),
+});
+const down = [...run(12, 0, 12, 14, 'ink-2'), ...chevron(12, 15, 'down', 'ink-2')];
+---
+<Figure id="ref-fig-contract" n={n} title={contractTitle(cap, s)} caption={contractCaption(cap, s)} describedby={describedby} kind="contract">
+  <div class="cdiag has-layer" style={`--layer: var(--layer-${cap.layer})`} data-inputs={s.inputCount} data-outputs={s.outputCount}>
+    <div class="cdiag__side cdiag__side--in">
+      <p class="cdiag__label" id="ref-cdiag-in">Inputs</p>
+      {s.inputs.length === 0 ? (
+        <p class="cdiag__none">None</p>
+      ) : (
+        <ul class="ports cdiag__ports" aria-labelledby="ref-cdiag-in">{s.inputs.map((r) => <Port {...port('in', r)} />)}</ul>
+      )}
+    </div>
+    <svg class="cdiag__flow cdiag__flow--in" viewBox="0 0 24 18" width="24" height="18" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={down} /></svg>
+    <div class="cdiag__box">
+      <PixelGlyph name={cap.layer} scale={3} class="cdiag__glyph" />
+      <code class="cdiag__id">{cap.id}</code>
+      <span class="cdiag__layer">{cap.layer}</span>
+    </div>
+    <svg class="cdiag__flow cdiag__flow--out" viewBox="0 0 24 18" width="24" height="18" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={down} /></svg>
+    <div class="cdiag__side cdiag__side--out">
+      <p class="cdiag__label" id="ref-cdiag-out">Outputs</p>
+      {s.outputs.length === 0 ? (
+        <p class="cdiag__none">None</p>
+      ) : (
+        <ul class="ports ports--out cdiag__ports" aria-labelledby="ref-cdiag-out">{s.outputs.map((r) => <Port {...port('out', r)} />)}</ul>
+      )}
+    </div>
+  </div>
+</Figure>

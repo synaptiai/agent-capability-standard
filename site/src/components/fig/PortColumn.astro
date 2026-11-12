@@ -1,0 +1,48 @@
+---
+// The compact port column the capability page puts under the skill's
+// "Inputs" or "Output Contract" heading (visual spec 3.1): the ontology
+// contract's fields as Port rows without descriptions, each name linking to
+// its row in the page's contract table, so the skill's own table can be read
+// against the contract.
+//
+// Props:
+// - cap: Capability, required.
+// - side: 'in' | 'out', required.
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { contractRowId, contractSummary, GROUNDED_FIELDS } from '../../lib/capability-figures';
+import Figure from './Figure.astro';
+import Port from './Port.astro';
+
+interface Props {
+  cap: Capability;
+  side: 'in' | 'out';
+  n: number;
+}
+
+const { cap, side, n } = Astro.props;
+const s = contractSummary(cap);
+const rows = side === 'in' ? s.inputs : s.outputs;
+const top = rows.filter((r) => r.depth === 0);
+const required = top.filter((r) => r.required).length;
+const what = side === 'in' ? 'input' : 'output';
+const title = `${side === 'in' ? 'Input' : 'Output'} ports of ${cap.id} in the ontology`;
+const caption =
+  top.length === 0
+    ? `The ontology gives ${cap.id} no ${what}s.`
+    : `The ontology contract has ${top.length} ${top.length === 1 ? what : `${what}s`}, ${required} required (filled pin); each name links to its row in the contract table.`;
+---
+<Figure id={`ref-fig-ports-${side}`} n={n} title={title} caption={caption} kind="ports" class="fig--compact">
+  <ul class:list={['ports', 'ports--compact', side === 'out' && 'ports--out']} aria-label={title}>
+    {rows.map((r) => (
+      <Port
+        name={r.path}
+        type={r.type}
+        required={r.required}
+        href={`#${contractRowId(side, r.path)}`}
+        depth={r.depth > 0 ? 1 : 0}
+        {...(GROUNDED_FIELDS.has(r.path) ? { mark: 'principle:grounded-claims', markLabel: 'grounded claim' } : {})}
+      />
+    ))}
+  </ul>
+</Figure>
