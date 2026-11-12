@@ -81,7 +81,7 @@ export default function rehypeCapabilitySkill() {
     const output = sections(kids).get('output-contract');
     if (output) {
       const [s, e] = output;
-      const at = kids.slice(s + 1, e).findIndex((c) => isEl(c, 'pre') || (isEl(c) && ((c.properties?.className as string[]) ?? []).includes('code-block')));
+      const at = kids.slice(s + 1, e).findIndex((c) => isEl(c, 'pre'));
       if (at !== -1) {
         const i = s + 1 + at;
         const fold: Element = {
