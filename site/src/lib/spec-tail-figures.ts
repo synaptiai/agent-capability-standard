@@ -356,6 +356,8 @@ export function decisionTree(text: string, where: string): TreeNode {
     const m = /^([│ ]*)[├└]── (.+)$/.exec(l);
     if (!m) throw new Error(`${where}: §12.1 tree line "${l}" is not a ├── or └── branch`);
     const depth = m[1]!.length / 4;
+    // The figure draws a question and one level of follow-up questions.
+    if (depth > 1) throw new Error(`${where}: §12.1's tree is deeper than two questions; the figure draws two`);
     const arrow = m[2]!.split(' → ');
     if (arrow.length !== 2) throw new Error(`${where}: §12.1 tree branch "${m[2]}" has no →`);
     while (stack.at(-1)!.depth >= depth) stack.pop();

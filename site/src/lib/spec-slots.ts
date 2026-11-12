@@ -96,7 +96,7 @@ export const SPEC_SLOTS_100: readonly SpecSlot[] = [
   { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' } },
   { key: 'pattern-0', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 0, startsWith: '- capability: plan' } },
   { key: 'pattern-1', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 1, startsWith: '- capability: retrieve' } },
-  { key: 'pattern-2', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 2, startsWith: '- capability: verify' } },
+  // Its Recovery Loop fence holds one step, which a strip would not add to.
 ];
 
 /** The slot map of each Standard version that has one, by version. */

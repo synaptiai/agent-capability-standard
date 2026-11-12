@@ -445,7 +445,7 @@ export function approverAsked(text: string, where: string): { kind: string; atte
 export function approvalCaption(plans: ApprovalPlan[]): string {
   const d = loadWorldStateSchema().approvalDecisions;
   const def = plans.find((p) => p.isDefault);
-  return `An approver decides ${list(d)}; when no one can be asked in an unattended run the step follows one of ${plural(plans.length, 'plan', 'plans')}${def ? `, ${def.plan} by default` : ''}.`;
+  return `The world-state schema records an approval decision as one of ${d.slice(0, -1).join(', ')} or ${d.at(-1)}; when no one can be asked in an unattended run the step follows one of ${plural(plans.length, 'plan', 'plans')}${def ? `, ${def.plan} by default` : ''}.`;
 }
 
 // ------------------------------------------------ F-S19 what a delegate binds

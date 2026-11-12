@@ -55,7 +55,7 @@ const figNo = () => ++fig;
     </Figure>
     {families.map((f, i) => (
       <section class="diag-family-section">
-        <h2 id={familyIds[i]}><span class="diag-family diag-family--small" aria-hidden="true">{f.prefix}</span>{f.name} codes</h2>
+        <h2 id={familyIds[i]}>{f.name} codes</h2>
         <Figure id={id(`Figure: ${f.name} codes`)} n={figNo()} title={`${f.name} codes, ${f.range}`} caption={familyTableCaption(f)} kind="code-table">
           <TableWrap label={`${f.name} codes of Standard ${std.version}`}>
             <table class="diagnostics-table">

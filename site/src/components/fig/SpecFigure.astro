@@ -31,7 +31,8 @@ import * as D from '../../lib/spec-dsl-figures';
 import { REPLAY_FIXTURES } from '../../lib/run-replay';
 import { loadCatalogEnums, loadWorldStateSchema } from '../../data/spec-sources';
 import { edgeRects } from '../../pixel/lines';
-import { refSlugger, specSectionHref } from '../../lib/generated';
+import { refSlugger } from '../../lib/generated';
+import { anchorsOf } from '../../lib/anchors';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import PixelBar from './PixelBar.astro';
 import Rects from './Rects.astro';
@@ -89,7 +90,12 @@ const REPLAY_TITLES: Record<string, string> = {
   'wait-replay': 'A wait that loses its source',
   'deferral-replay': 'What a deferral reaches',
 };
-const sectionLink = (sec: string) => specSectionHref(sec);
+// A link to a numbered section of this page's own Standard (1.0.0's links stay on 1.0.0).
+const sectionLink = (sec: string) => {
+  const e = anchorsOf(source, readRepoFile).entries.find((x) => x.text.startsWith(`${sec} `) || x.text.startsWith(`${sec}. `));
+  if (!e) throw new Error(`SpecFigure: ${source} has no section ${sec}`);
+  return `#${e.slug}`;
+};
 const sectionTitle = (sec: string) => {
   const m = new RegExp(`^#{2,4} ${sec.replace(/\./g, '\\.')}\\.? (.+)$`, 'm').exec(text);
   return m ? m[1]!.trim() : '';
@@ -298,14 +304,14 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
       {trig.tiles.map((t) => (
         <li class="trig-tile" data-kind={t.kind} data-attendance={t.attendance}>
           <code class="trig-tile__kind">{t.kind}</code>
-          <span class="trig-tile__att"><span class:list={['flag-cell', t.attendance === 'attended' ? 'flag-cell--on' : 'flag-cell--off']} aria-hidden="true">{t.attendance === 'attended' && <PixelGlyph name="source:human" scale={1} />}</span>{t.attendance === "the invoker's" ? 'as the invoker' : t.attendance}</span>
+          <span class="trig-tile__att">{t.attendance === 'attended' || t.attendance === 'unattended' ? <span class:list={['flag-cell', t.attendance === 'attended' ? 'flag-cell--on' : 'flag-cell--off']} aria-hidden="true">{t.attendance === 'attended' && <PixelGlyph name="source:human" scale={1} />}</span> : <span class="flag-cell flag-cell--inherit" aria-hidden="true"></span>}{t.attendance === "the invoker's" ? "the invoker's attendance" : t.attendance}</span>
           {t.kind === 'schedule' && (
             <span class="trig-tile__overlap">overlap:{' '}{trig.overlap.map((v) => <span class:list={['chip', 'chip--inner', v === trig.overlapDefault && 'chip--default']}><code>{v}</code>{v === trig.overlapDefault && ' (default)'}</span>)}</span>
           )}
         </li>
       ))}
     </ul>
-    <p class="trig-key"><span class="flag-cell flag-cell--on" aria-hidden="true"><PixelGlyph name="source:human" scale={1} /></span>someone is there to approve <span class="flag-cell flag-cell--off" aria-hidden="true"></span>no one is</p>
+    <p class="trig-key"><span class="flag-cell flag-cell--on" aria-hidden="true"><PixelGlyph name="source:human" scale={1} /></span>someone is there to approve <span class="flag-cell flag-cell--off" aria-hidden="true"></span>no one is <span class="flag-cell flag-cell--inherit" aria-hidden="true"></span>as the run that invoked it</p>
   </Figure>
 )}
 {slot === 'recovery-loop' && loopRange && (
@@ -394,7 +400,7 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
         </TableWrap>
       </div>
       <div class="approval-flow__part">
-        <p class="approval-flow__head">2. Asked: the decision</p>
+        <p class="approval-flow__head">2. The decision an action record holds</p>
         <ul class="approval-flow__chips">{loadWorldStateSchema().approvalDecisions.map((d) => <li class="chip"><code>{d}</code></li>)}</ul>
       </div>
       <div class="approval-flow__part">

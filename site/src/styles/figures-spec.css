@@ -227,6 +227,11 @@
     background: var(--ink);
   }
 
+  .flag-cell--inherit {
+    border-style: dashed;
+    border-color: var(--ink-2);
+  }
+
   .flag-key__pips,
   .flag-col__pips {
     display: inline-flex;
@@ -445,6 +450,10 @@
   .rloop__branch--loop {
     border: 2px solid var(--ink);
     border-left-width: 4px;
+  }
+
+  .rloop__then {
+    flex: 1 1 240px;
   }
 
   .rloop__when {
