@@ -1928,7 +1928,8 @@
   /* A table drawn as a figure sits in a narrower frame than the text column,
      so its cells take less side padding (issue #125 review: tables counted as
      figures scrolled at 1440 and hid their last column). */
-  .fig__drawing .table-wrap :is(th, td) {
+  /* The data-flow grid sets its own zero padding; it is not one of these. */
+  .fig__drawing .table-wrap table:not(.flow-grid) :is(th, td) {
     padding-inline: var(--space-2);
   }
 

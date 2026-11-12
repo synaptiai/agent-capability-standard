@@ -68,6 +68,21 @@ export function serve(dist) {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
+/**
+ * Figures that must fit their frame at the desktop width (run in the page):
+ * a data-flow grid is a figure whose last columns would look like steps that
+ * read nothing if they scrolled out of view. One line per grid that scrolls.
+ */
+export function wideScrollers() {
+  const out = [];
+  for (const grid of document.querySelectorAll('table.flow-grid')) {
+    const wrap = grid.closest('.table-wrap') ?? grid.parentElement;
+    const over = Math.round(wrap.scrollWidth - wrap.clientWidth);
+    if (over > 1) out.push(`the data-flow grid "${grid.querySelector('caption')?.textContent?.trim() ?? ''}" scrolls sideways by ${over}px`);
+  }
+  return out;
+}
+
 /** One line per finding: `theme width path: rule (impact) xN first-target`. */
 export async function runAxe(dist, { concurrency = 6, only = null, log = () => {} } = {}) {
   const { chromium } = await import('playwright');
@@ -105,6 +120,8 @@ export async function runAxe(dist, { concurrency = 6, only = null, log = () => {
               if (width === NARROW) {
                 const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
                 if (over > 0) findings.push(`${where}: the page scrolls sideways by ${over}px`);
+              } else {
+                for (const s of await page.evaluate(wideScrollers)) findings.push(`${where}: ${s}`);
               }
               runs += 1;
             }
@@ -132,5 +149,5 @@ if (isMain(import.meta.url)) {
     console.error(`check-axe: ${findings.length} problem(s):\n  ${findings.join('\n  ')}`);
     process.exit(1);
   }
-  console.log(`check-axe: ${pages} pages, ${runs} runs (${THEMES.join(' and ')} at ${WIDTHS.join(' and ')}px): no axe violations, no sideways scroll at ${NARROW}px`);
+  console.log(`check-axe: ${pages} pages, ${runs} runs (${THEMES.join(' and ')} at ${WIDTHS.join(' and ')}px): no axe violations, no sideways scroll at ${NARROW}px, no data-flow grid scrolls at ${Math.max(...WIDTHS)}px`);
 }
