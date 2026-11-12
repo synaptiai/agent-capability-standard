@@ -213,6 +213,16 @@ ordering only when both are present.
 **On the shipped catalog:** most of the engine's 36 V102 errors on the 9e2f65b
 `workflow_catalog.yaml` are this case.
 
+```mermaid
+---
+title: D2 catalog and verdicts
+---
+flowchart TB
+  accDescr: The workflow has a detect step and no observe; at 9e2f65b the validator passes and the engine reports V102, and after the fix it passes.
+  detect["detect, with no observe in the workflow"]
+  detect -.->|verdicts| res["Validator: pass. Engine: V102. After the fix: pass"]
+```
+
 Catalog `r03_precedes_absent.yaml`:
 
 ```yaml
@@ -337,6 +347,16 @@ mutation "Varies") pull in opposite directions. The engine's reading is the safe
 but it fails every shipped workflow: 11 audit steps in `workflow_catalog.yaml` declare
 `mutation: false`. On the current branch this passes because the ontology now marks audit
 `mutation_overridable: true` (v1.1.0 §4.1, §4.4, §5.2.1).
+
+```mermaid
+---
+title: D3 catalog and verdicts
+---
+flowchart TB
+  accDescr: The workflow has one audit step that declares mutation false; at 9e2f65b the validator passes and the engine reports F504, with V102, and after the fix it passes because audit is mutation_overridable.
+  a["audit, mutation: false"]
+  a -.->|verdicts| res["Validator: pass. Engine: F504, with V102. After the fix: pass, mutation_overridable"]
+```
 
 Catalog `r05_audit_mutation_false.yaml`:
 
