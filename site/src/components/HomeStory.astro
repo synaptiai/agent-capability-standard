@@ -109,9 +109,11 @@ const back: FigRect[] = [
   ...chevron(RX - 3, backY, 'right', 'ink'),
 ];
 
-// Below 960px the diagram is drawn larger by showing one part at a time:
-// the capability grid for beat 1, the rail for the later beats. The box keeps
-// the rail's shape so the text below does not move when the view changes.
+// Below 960px, with the story script, the diagram is drawn larger by showing
+// one part at a time: the capability grid for beat 1, the rail for the other
+// beats and outside the story. The box keeps the rail's shape throughout, so
+// it does not change size and the text below does not move. Without the
+// script (or with reduced motion) the whole diagram shows, as the final frame.
 const fullView = `0 0 ${W} ${H}`;
 const gridView = `0 0 ${W} ${gridBottom + 4}`;
 const railView = `0 ${railTop - 8} ${W} ${H - railTop + 8}`;
@@ -212,12 +214,16 @@ const portY = (n: number, k: number) => rowY(first) + 2 * Math.round(((k + 1) * 
     const parts = [...story.querySelectorAll<SVGElement>('[data-beat]')];
     const svg = story.querySelector<SVGSVGElement>('[data-story-svg]')!;
     const narrow = window.matchMedia('(max-width: 959px)');
-    // The final frame: every beat, the whole diagram, no step dimmed.
+    // The final frame: every beat, no step dimmed, the whole diagram. Below
+    // 960px the box keeps the rail's shape before, during and after the
+    // story, so it never changes size on screen; there the final frame is
+    // the rail with every beat on.
     const finalFrame = () => {
       delete story.dataset.playing;
       for (const p of parts) p.classList.remove('is-off');
       for (const s of steps) s.classList.remove('is-current');
-      if (svg.dataset.viewFull) svg.setAttribute('viewBox', svg.dataset.viewFull);
+      const view = narrow.matches ? svg.dataset.viewRail : svg.dataset.viewFull;
+      if (view) svg.setAttribute('viewBox', view);
     };
     const show = (b: number) => {
       story.dataset.playing = '';
@@ -250,6 +256,7 @@ const portY = (n: number, k: number) => rowY(first) + 2 * Math.round(((k + 1) * 
     // data-live spaces the steps out for scrolling; nothing is hidden until
     // the reader scrolls inside the story.
     story.dataset.live = '';
+    update();
     window.addEventListener('scroll', onScroll, { passive: true });
     narrow.addEventListener('change', () => (story.dataset.playing === undefined ? finalFrame() : update()));
     // A reader who turns on reduced motion mid-page gets the final frame.
