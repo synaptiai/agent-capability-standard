@@ -15,6 +15,14 @@
 
 /** 9x9 grids for pages, keyed `page:<name>`. */
 export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
+  // The Standard's pages (the /spec/ listing). A shield, for the security model.
+  'page:security': ['.#######.', '#########', '##.....##', '##..#..##', '##.###.##', '##..#..##', '.##...##.', '..##.##..', '...###...'],
+  // A plus over a row of tiles, for adding a capability.
+  'page:extending': ['....#....', '....#....', '..#####..', '....#....', '....#....', '.........', '###.###.#', '#=#.#=#.#', '###.###.#'],
+  // A flask, for the contributed conformance fixtures.
+  'page:fixtures': ['..#####..', '...#.#...', '...#.#...', '...#.#...', '..#...#..', '.#.....#.', '#=======#', '#=======#', '.#######.'],
+  // Version marks beside lines of text, for the Standard's changelog.
+  'page:spec-changelog': ['##.......', '##.######', '.........', '##.######', '##.......', '.........', '##.######', '##.####..', '.........'],
   // ---- Get started
   // A window of four panes, one filled: the view of the whole.
   'page:overview': ['#########', '#####...#', '#####...#', '#####...#', '#########', '#...#...#', '#...#...#', '#...#...#', '#########'],
@@ -198,6 +206,15 @@ export const PAGE_GLYPHS: Readonly<Record<string, string>> = {
   '/background/research/capability-mapping/': 'page:capability-mapping',
   '/background/research/benchmarks/': 'page:benchmarks',
   '/background/research/validator-engine-disagreements-1-0/': 'page:disagreements',
+
+  '/spec/conformance/': 'tool:conformance',
+  '/spec/conformance/contributed-fixtures/': 'page:fixtures',
+  '/spec/edge-types/': 'count:edges',
+  '/spec/diagnostics/': 'chapter:diagnostic-model',
+  '/spec/security/': 'page:security',
+  '/spec/schemas/': 'chapter:canonical-schemas',
+  '/spec/extending/': 'page:extending',
+  '/spec/changelog/': 'page:spec-changelog',
 
   '/community/contributing/': 'page:contributing',
   '/community/governance/': 'page:governance',

@@ -29,6 +29,10 @@ export const LISTING_INTROS: Readonly<Record<string, string>> = {
     'Guides to running workflows, the Claude Agent SDK, safety hooks, modality handling and writing skills.',
   '/compliance/':
     'How the standard supports compliance work under the EU AI Act, ISO/IEC 42001 and the NIST AI Risk Management Framework.',
+  '/spec/':
+    'The Standard itself, its conformance suite, the edge types, the diagnostic codes, the schemas, the security model and how to add a capability.',
+  '/community/':
+    'How to take part: contributing, governance, the code of conduct, the roadmap, the release notes, how to cite the standard and the press kit.',
   '/background/':
     'The research behind the standard: the whitepaper, the Grounded Agency paper, how the capabilities were derived, and supporting analysis.',
 };

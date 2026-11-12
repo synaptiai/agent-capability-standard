@@ -117,7 +117,6 @@
      squeezing the description to one letter a line. */
   .schema-table {
     width: 100%;
-    min-width: 34rem;
     table-layout: fixed;
   }
 
@@ -125,8 +124,11 @@
     width: 38%;
   }
 
-  .schema-table__col-length {
-    width: 12rem;
+  /* The length bar sits under the file name, so the table is two columns
+     and fits a phone (issue #125 review: the bars were off-screen at 360). */
+  .schema-table__length {
+    display: block;
+    margin-top: var(--space-1);
   }
 
   .schema-table__file {
@@ -309,5 +311,37 @@
   .skill-workflows__head span {
     color: var(--ink-2);
     font-size: 14px;
+  }
+}
+
+@layer components {
+  /* ---------- a listing's bar figure (release notes on /community/) ---------- */
+  .bar-list {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .bar-list__row {
+    display: grid;
+    grid-template-columns: minmax(0, 6rem) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .bar-list__label {
+    font-family: var(--font-mono);
+    font-size: 14px;
+  }
+}
+
+@layer components {
+  /* An RFC number and an ISO date never break across lines. */
+  .rfc-table__id,
+  .rfc-table__date {
+    white-space: nowrap;
   }
 }

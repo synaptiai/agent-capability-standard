@@ -58,10 +58,38 @@ Issues #3, #4, and #5 proposed additional capabilities for these layers. After f
 - `coordinate` = `decompose` + `delegate` + `synchronize` + `integrate`
 - `compress` = `recall` + `integrate` + `transform` + `persist`
 
+```mermaid
+---
+title: Proposals that are workflow patterns
+---
+flowchart LR
+  accDescr: Each proposal on the left is a composition of the existing capabilities it points to, as the list above says.
+  listen["listen"] --> receive["receive"]
+  coordinate["coordinate"] --> decompose["decompose"]
+  coordinate --> delegate["delegate"]
+  coordinate --> synchronize["synchronize"]
+  coordinate --> integrate["integrate"]
+  compress["compress"] --> recall["recall"]
+  compress --> integrate
+  compress --> transform["transform"]
+  compress --> persist["persist"]
+```
+
 **Proposals that are parameter variations:**
 - `sample` = `search` with `limit`
 - `scan` = `search` with exhaustive query
 - `broadcast` = `send` with multiple destinations
+
+```mermaid
+---
+title: Proposals that are parameter variations
+---
+flowchart LR
+  accDescr: Each proposal on the left is an existing capability with a parameter set, as the list above says.
+  sample["sample"] -->|with limit| search["search"]
+  scan["scan"] -->|exhaustive query| search
+  broadcast["broadcast"] -->|many destinations| send["send"]
+```
 
 **Proposals covered by existing capabilities:**
 - `observe` already exists
@@ -69,6 +97,18 @@ Issues #3, #4, and #5 proposed additional capabilities for these layers. After f
 - `handoff` covered by `delegate` with context
 - `forget` covered by `persist(ttl: 0)` or `mutate(delete)`
 - `index` and `associate` covered by MODEL layer capabilities
+
+```mermaid
+---
+title: Proposals covered by existing capabilities
+---
+flowchart LR
+  accDescr: Each proposal on the left is covered by the existing capability it points to, as the list above says.
+  negotiate["negotiate"] --> synchronize["synchronize"]
+  handoff["handoff"] --> delegate["delegate"]
+  forget["forget"] --> persist["persist"]
+  forget --> mutate["mutate"]
+```
 
 The 36-capability model represents genuinely **irreducible cognitive operations**. Workflow patterns belong in `schemas/workflow_catalog.yaml`, not as atomic capabilities.
 

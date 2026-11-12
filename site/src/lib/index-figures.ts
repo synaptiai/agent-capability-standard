@@ -51,7 +51,6 @@ export function rfcLanesCaption(lanes: readonly RfcLane[]): string {
   const all = lanes.flatMap((l) => l.rfcs);
   const numbered = all.filter((r) => r.numbered).length;
   const other = all.length - numbered;
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const targeted = lanes.filter((l) => l.target !== null);
   const byStatus = new Map<string, number>();
   for (const r of all) byStatus.set(r.status, (byStatus.get(r.status) ?? 0) + 1);
@@ -244,9 +243,52 @@ export function backgroundLayerMatrix(pages: readonly Doc[], layers: readonly { 
   };
 }
 
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Bars on one scale: a label (linked when it has a page), a value and its printed words. */
+export interface BarList {
+  title: string;
+  caption: string;
+  rows: { label: string; url?: string; value: number; words: string }[];
+}
+
+/**
+ * The releases in CHANGELOG.md, newest first: each "## [vX.Y.Z] — date"
+ * section with the number of change items (list lines) under it.
+ */
+export function releaseBars(changelog: string): BarList {
+  const lines = changelog.split('\n');
+  const rows: { label: string; value: number; words: string }[] = [];
+  let cur: { label: string; value: number; date: string } | null = null;
+  const flush = () => cur && rows.push({ label: cur.label, value: cur.value, words: `${plural(cur.value, 'change', 'changes')}, ${cur.date}` });
+  for (const l of lines) {
+    const h = /^## \[(v\d+\.\d+\.\d+[^\]]*)\]\s+—\s+(\d{4}-\d{2}-\d{2})/.exec(l);
+    if (h) {
+      flush();
+      cur = { label: h[1]!, value: 0, date: h[2]! };
+      continue;
+    }
+    if (/^## /.test(l)) {
+      flush();
+      cur = null;
+      continue;
+    }
+    if (cur && /^\s*[-*] /.test(l)) cur.value += 1;
+  }
+  flush();
+  if (rows.length === 0) throw new Error('CHANGELOG.md: no "## [vX.Y.Z] — date" section');
+  const top = [...rows].sort((a, b) => b.value - a.value)[0]!;
+  return {
+    title: 'Changes in each release, newest first',
+    caption: `${plural(rows.length, 'release', 'releases')} from ${rows.at(-1)!.label} to ${rows[0]!.label}; ${top.label} has the most changes (${top.value}), counted as list items in the release notes.`,
+    rows,
+  };
+}
+
 /** The listing figures of a section: where each goes (the page top, or under a group's heading, before its cards) and what it draws. */
 export type ListingFigure =
   | { at: 'top' | string; kind: 'matrix'; matrix: CountMatrix }
+  | { at: 'top' | string; kind: 'bars'; bars: BarList }
   | { at: string; kind: 'skills' };
 
 export function listingFigures(section: string, routes: readonly Route[], layers: readonly { id: string; capabilities: string[] }[]): ListingFigure[] {
@@ -262,6 +304,10 @@ export function listingFigures(section: string, routes: readonly Route[], layers
       return [{ at: 'Methodology', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'background'), layers) }];
     case 'start':
       return [{ at: 'top', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'start'), layers) }];
+    case 'spec':
+      return [{ at: 'top', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'spec'), layers) }];
+    case 'community':
+      return [{ at: 'top', kind: 'bars', bars: releaseBars(readRepoFile('CHANGELOG.md')) }];
     default:
       return [];
   }

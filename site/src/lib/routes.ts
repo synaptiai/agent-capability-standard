@@ -223,6 +223,7 @@ export function buildRoutes(): Route[] {
   };
   add(
     'spec',
+    { source: null, url: '/spec/', title: 'Overview', template: 'listing' },
     specRow(currentStd),
     prose('spec/CONFORMANCE.md', '/spec/conformance/', 'Conformance'),
     prose('tests/conformance/contrib/README.md', '/spec/conformance/contributed-fixtures/', 'Contributed fixtures'),
@@ -431,6 +432,7 @@ export function buildRoutes(): Route[] {
 
   add(
     'community',
+    { source: null, url: '/community/', title: 'Overview', template: 'listing' },
     prose('CONTRIBUTING.md', '/community/contributing/', 'Contributing'),
     prose('spec/GOVERNANCE.md', '/community/governance/', 'Governance'),
     prose('CODE_OF_CONDUCT.md', '/community/code-of-conduct/', 'Code of conduct'),

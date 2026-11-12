@@ -163,6 +163,7 @@ describe('sidebar order', () => {
 
   it('orders the Community section', () => {
     expect(urlsOf('community')).toEqual([
+      '/community/',
       '/community/contributing/',
       '/community/governance/',
       '/community/code-of-conduct/',

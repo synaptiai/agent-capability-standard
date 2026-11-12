@@ -10,6 +10,8 @@ import PixelGlyph from '../pixel/PixelGlyph.astro';
 import IconCard from './fig/IconCard.astro';
 import CountMatrix from './fig/CountMatrix.astro';
 import SkillWorkflows from './fig/SkillWorkflows.astro';
+import Figure from './fig/Figure.astro';
+import PixelBar from './fig/PixelBar.astro';
 import { loadOntology } from '../data/ontology';
 import { listingFigures, type ListingFigure } from '../lib/index-figures';
 import { ROUTES } from '../lib/routes';
@@ -64,7 +66,22 @@ function groupGlyph(label: string): string {
 }
 ---
 <div class="section-index">
-  {figures.filter((f) => f.at === 'top').map((f) => f.kind === 'matrix' && <CountMatrix id={figId(f)} n={num(f)} matrix={f.matrix} />)}
+  {figures.filter((f) => f.at === 'top').map((f) =>
+    f.kind === 'matrix' ? (
+      <CountMatrix id={figId(f)} n={num(f)} matrix={f.matrix} />
+    ) : f.kind === 'bars' ? (
+      <Figure id={figId(f)} n={num(f)} title={f.bars.title} caption={f.bars.caption} kind="bar-list">
+        <ul class="bar-list">
+          {f.bars.rows.map((r) => (
+            <li class="bar-list__row">
+              <span class="bar-list__label">{r.url ? <a href={r.url}>{r.label}</a> : r.label}</span>
+              <PixelBar value={r.value} max={Math.max(...f.bars.rows.map((x) => x.value))} label={r.words} />
+            </li>
+          ))}
+        </ul>
+      </Figure>
+    ) : null,
+  )}
   {groups.map((g) => (
     <section class="section-index__group">
       {g.label && (
@@ -74,7 +91,7 @@ function groupGlyph(label: string): string {
         </h2>
       )}
       {figures.filter((f) => f.at === g.label).map((f) =>
-        f.kind === 'skills' ? <SkillWorkflows id={figId(f)} n={num(f)} /> : <CountMatrix id={figId(f)} n={num(f)} matrix={f.matrix} />,
+        f.kind === 'skills' ? <SkillWorkflows id={figId(f)} n={num(f)} /> : f.kind === 'matrix' ? <CountMatrix id={figId(f)} n={num(f)} matrix={f.matrix} /> : null,
       )}
       <ul class="icon-cards section-index__icon-cards">
         {g.items.map((item) => (
