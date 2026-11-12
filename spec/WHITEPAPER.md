@@ -401,8 +401,8 @@ title: What the validator checks for each binding
 flowchart TB
   accDescr: For a binding the validator checks that the referenced store_as exists in a prior step, that the field path is valid in the producer's output schema, and that the type fits the consumer's input schema.
   ref["A binding ${step_out.field.path}"] --> c1[The store_as exists in a prior step]
-  c1 --> c2["The field path is valid in the producer's output schema"]
-  c2 --> c3["The type is compatible with the consumer's input schema"]
+  ref --> c2["The field path is valid in the producer's output schema"]
+  ref --> c3["The type is compatible with the consumer's input schema"]
 ```
 
 Typed annotations are required when type inference is ambiguous (union types, missing metadata, open schemas).
@@ -502,12 +502,12 @@ title: The parallel group in the example
 ---
 flowchart LR
   accDescr: search and retrieve run together in the gather group, which joins when all are complete, and integrate takes both outputs.
-  subgraph gather [parallel_group gather]
+  subgraph gather ["parallel_group gather, join: all_complete"]
     search
     retrieve
   end
   search -->|search_out| integrate
-  retrieve -->|"retrieve_out, join: all_complete"| integrate
+  retrieve -->|retrieve_out| integrate
 ```
 
 ---

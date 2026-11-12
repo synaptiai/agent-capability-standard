@@ -28,8 +28,8 @@ The action capabilities (`execute`, `mutate`, `send`) are constrained by ontolog
 title: What must come before an action
 ---
 flowchart LR
-  accDescr: checkpoint is required before mutate, send and rollback (solid lines, requires), and constrain should run before execute, mutate and send (dotted lines, soft_requires).
-  checkpoint --> mutate & send & rollback
+  accDescr: checkpoint is required before mutate and send (solid lines, requires), and constrain should run before execute, mutate and send (dotted lines, soft_requires).
+  checkpoint --> mutate & send
   constrain -.-> execute & mutate & send
 ```
 
@@ -64,7 +64,7 @@ Hard constraints prevent catastrophic entity conflation:
 title: The hard constraints on a merge
 ---
 flowchart TB
-  accDescr: Two entities are never merged when their unique identifiers conflict or their entity types are incompatible, and every merge or split is recorded in lineage.
+  accDescr: A candidate merge is never made when the unique identifiers conflict or the entity types are incompatible; otherwise the merge is made and recorded in lineage.
   c[Candidate merge] --> id{Conflicting unique identifiers?}
   id -->|yes| no1[Never merged]
   id -->|no| ty{Incompatible entity types?}
@@ -198,7 +198,7 @@ flowchart LR
 title: When recovery runs out
 ---
 flowchart TB
-  accDescr: A recovery loop repeats up to its max_loops limit, with a timeout on each step, and R404 is raised when recovery is exhausted.
+  accDescr: A recovery loop repeats up to its max_loops limit, and R404 is raised when recovery is exhausted.
   rec[Recovery loop] -->|"up to max_loops"| rec
   rec -->|exhausted| r404[R404 error]
 ```
@@ -268,9 +268,9 @@ title: Where the hooks run
 ---
 flowchart TB
   accDescr: Before a tool runs, pretooluse_require_checkpoint blocks a mutation without a checkpoint; after it runs, posttooluse_log_tool adds to the audit trail.
-  call[Tool call] --> pre{"pretooluse_require_checkpoint: checkpoint present?"}
-  pre -->|no| block[Mutation blocked]
-  pre -->|yes| run[Tool runs]
+  call[Tool call] --> pre{"pretooluse_require_checkpoint: mutation without a checkpoint?"}
+  pre -->|yes| block[Mutation blocked]
+  pre -->|no| run[Tool runs]
   run --> post["posttooluse_log_tool: audit trail"]
 ```
 

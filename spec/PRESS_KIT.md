@@ -35,7 +35,7 @@ This standard fixes that by making reliability *structural*.
 title: The four failures and what each lacks
 ---
 flowchart LR
-  accDescr: Agent systems fail in production because composition has no contracts, state has no provenance, conflict resolution has no trust model and safety has no checkpoints or rollback; the standard supplies each structurally.
+  accDescr: Agent systems fail in production because composition has no contracts, state has no provenance, conflict resolution has no trust model and safety has no checkpoints or rollback.
   c[Implicit composition] -->|lacks| c2[Contracts]
   s[Ungrounded state] -->|lacks| s2[Provenance]
   t[Undefined conflict resolution] -->|lacks| t2[A trust model]
