@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadOntology } from '../src/data/ontology';
 import {
+  chainCaption,
   chainChecks,
   compositionChain,
   exampleFields,
@@ -357,5 +358,18 @@ describe('procedureMap (F-C7)', () => {
     const m = procedureMap(one, 'fixture');
     expect(procedureMapIsFigure(m)).toBe(false);
     expect(procedureMapCaption(cap('retrieve'), m)).toBe("1 of the procedure's 3 steps uses the name of an input or output field of the retrieve skill as a word.");
+  });
+});
+
+describe('chainCaption', () => {
+  // spec/EDGE_TYPES.md: for requires, "the 'from' capability MUST be
+  // satisfied before 'to' can execute". The ontology's edge is
+  // checkpoint -> mutate, so the caption must say checkpoint runs first,
+  // never that checkpoint requires mutate.
+  it('reads an edge from its source to its target', () => {
+    const cap = loadOntology().capabilities.find((c) => c.id === 'mutate')!;
+    const text = chainCaption(cap, { follows: ['checkpoint'], precedes: [] });
+    expect(text).toContain("the tile's capability must run before mutate");
+    expect(text).not.toContain("the tile's capability requires mutate");
   });
 });

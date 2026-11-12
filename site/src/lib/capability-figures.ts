@@ -257,7 +257,7 @@ export function chainCaption(cap: Capability, chain: CompositionChain, checks: C
   return (
     `The skill lists ${plural(n, 'capability', 'capabilities')} as common neighbours of ${cap.id}; ${edged} of them ${edged === 1 ? 'has' : 'have'} an edge with it in the ontology, and ${seen.length} ${seen.length === 1 ? 'runs' : 'run'} next to it, in that order, in a catalog workflow` +
     (top ? ` (${top.id} most often, ${plural(top.adjacent, 'time', 'times')}).` : '.') +
-    ` Under each tile, an edge reads with ${cap.id}'s symbol in its place: "requires ${capabilitySymbol(cap.id)}" means the tile's capability requires ${cap.id}.`
+    ` Under each tile, an edge reads from its source to its target, with ${cap.id}'s symbol in its place: "requires ${capabilitySymbol(cap.id)}" is a requires edge from the tile's capability to ${cap.id}, so the tile's capability must run before ${cap.id}; "${capabilitySymbol(cap.id)} precedes" is a precedes edge from ${cap.id} to the tile's capability.`
   );
 }
 
