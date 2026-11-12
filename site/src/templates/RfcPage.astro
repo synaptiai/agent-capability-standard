@@ -4,10 +4,11 @@
 // `**Status:**` line (Draft, Accepted, Draft Proposal) as a status badge, and
 // the lifecycle track (F-R2). The track lists the states spec/GOVERNANCE.md
 // names, fills the current one, and shows the RFC's one `**Date:**` on that
-// state only, labelled "Dated": the RFC records no other date.
+// state only, labelled "Dated": the RFC records no other date. Only numbered
+// RFCs get the track; a proposal is not held to GOVERNANCE.md's statuses.
 import StatusBadge from '../components/StatusBadge.astro';
 import { allowedRfcStatuses } from '../lib/rfcs';
-import { lifecycleSentence, rfcLifecycle, sectionHero, splitH1, type LifecycleState } from '../lib/prose-page';
+import { isNumberedRfc, lifecycleSentence, rfcLifecycle, sectionHero, splitH1, type LifecycleState } from '../lib/prose-page';
 import type { Route } from '../lib/routes';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 import type { PageMeta } from '../plugins/remark-page-meta';
@@ -22,7 +23,7 @@ const { route, page } = Astro.props;
 const html = await Astro.slots.render('default');
 const { h1, rest } = splitH1(html);
 const hero = sectionHero(route.section);
-const life = page.status ? rfcLifecycle(page.status, allowedRfcStatuses(), route.source!) : null;
+const life = page.status && isNumberedRfc(route.source) ? rfcLifecycle(page.status, allowedRfcStatuses(), route.source!) : null;
 const states: { s: LifecycleState; outcome: boolean }[] = life ? [{ s: life.start, outcome: false }, ...life.outcomes.map((s) => ({ s, outcome: true }))] : [];
 ---
 <article class="doc doc--rfc" data-status={page.status ?? undefined} data-pagefind-body>

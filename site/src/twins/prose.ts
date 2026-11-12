@@ -7,7 +7,7 @@
 import { getEntry, render } from 'astro:content';
 import { allowedRfcStatuses } from '../lib/rfcs';
 import type { PageMeta } from '../plugins/remark-page-meta';
-import { lifecycleSentence, rfcLifecycle } from '../lib/prose-page';
+import { isNumberedRfc, lifecycleSentence, rfcLifecycle } from '../lib/prose-page';
 import type { Route } from '../lib/routes';
 import { OASF_PROPOSAL } from '../plugins/rehype-prose-figures';
 import { oasfMapTwin } from './oasf';
@@ -18,7 +18,7 @@ import { code, figure, table } from './md';
 /** Blocks to append to a prose or RFC page's copy. */
 export async function proseFigureBlocks(route: Route): Promise<string[]> {
   const out: string[] = [];
-  if (route.template === 'rfc') {
+  if (route.template === 'rfc' && isNumberedRfc(route.source)) {
     const entry = await getEntry('docs', route.source!);
     const page = entry ? ((await render(entry)).remarkPluginFrontmatter.page as PageMeta | undefined) : undefined;
     if (page?.status) out.push(`**Lifecycle.** ${lifecycleSentence(rfcLifecycle(page.status, allowedRfcStatuses(), route.source!), page.date)}`);

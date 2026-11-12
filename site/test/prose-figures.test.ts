@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { loadOasfMapping } from '../src/data/oasf';
 import { foldFirstBox } from '../src/lib/prose-figures';
-import { lifecycleSentence, rfcLifecycle, splitH1 } from '../src/lib/prose-page';
+import { isNumberedRfc, lifecycleSentence, rfcLifecycle, splitH1 } from '../src/lib/prose-page';
 import { readRepoFile } from '../src/lib/repo';
 import {
   capabilityChain,
@@ -179,6 +179,11 @@ describe('RFC pages', () => {
     const { code } = await renderRepoFile('spec/RFC-0002-agent-reliability-profile.md');
     expect(code).toMatch(/<h2 id="goals">\s*<svg [^>]*data-glyph="check"/);
     expect(code).toMatch(/<h2 id="non-goals">\s*<svg [^>]*data-glyph="close"/);
+  });
+
+  it('draws the lifecycle only for numbered RFCs, not the OASF proposal', () => {
+    expect(isNumberedRfc('spec/RFC-0002-agent-reliability-profile.md')).toBe(true);
+    expect(isNumberedRfc('docs/proposals/OASF_SAFETY_EXTENSIONS.md')).toBe(false);
   });
 
   it('takes the first h1 out of rendered html for the hero', () => {

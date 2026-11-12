@@ -50,6 +50,11 @@ export function rfcLifecycle(status: string, allowed: readonly string[], where: 
   return { start: state(allowed[0]!), outcomes: allowed.slice(1).map(state), current: hit };
 }
 
+/** True for a numbered RFC, the only kind GOVERNANCE.md's status list governs; a proposal on the RFC template gets no track. */
+export function isNumberedRfc(source: string | null): boolean {
+  return source !== null && /^spec\/RFC-\d{4}-[^/]+\.md$/.test(source);
+}
+
 /** The track's accessible sentence, which the Markdown copy repeats. */
 export function lifecycleSentence(l: Lifecycle, date: string | null): string {
   const outs = l.outcomes.map((o) => o.status);
