@@ -60,7 +60,7 @@ const SLOT_NAMES: Record<string, string> = {
   decay: 'Decay with a floor: reference configuration',
   families: 'Diagnostic families',
   'code-heat': 'Where codes are raised',
-  levels: 'What each conformance level checks',
+  levels: 'What each level checks',
   suite: 'The conformance suite',
   bumps: 'Which change bumps which number',
   'checkpoint-tree': 'Checkpoint decision tree',

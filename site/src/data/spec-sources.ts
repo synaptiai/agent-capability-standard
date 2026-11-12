@@ -179,6 +179,8 @@ export interface IdentityPolicy {
   /** alias_confidence_scoring.thresholds, highest first. */
   thresholds: { name: string; value: number }[];
   range: [number, number];
+  /** alias_confidence_scoring.output.action, split at `|` (merge, suggest, ignore, split_review). */
+  actions: string[];
 }
 
 let identityPolicy: IdentityPolicy | null = null;
@@ -197,7 +199,9 @@ export function loadIdentityPolicy(): IdentityPolicy {
     return { name, value };
   });
   thresholds.sort((a, b) => b.value - a.value);
-  identityPolicy = { thresholds, range: [lo, hi] };
+  const action = at(doc, ['alias_confidence_scoring', 'output', 'action'], f);
+  if (typeof action !== 'string' || !action.includes('|')) throw new Error(`${f}: alias_confidence_scoring.output.action is not a list of actions split by |`);
+  identityPolicy = { thresholds, range: [lo, hi], actions: action.split('|').map((a) => a.trim()) };
   return identityPolicy;
 }
 
@@ -220,6 +224,8 @@ export interface RuntimeFixture {
   start: number;
   script: ScriptEntry[];
   end: { kind: string; code?: string; outcome?: string; deferred?: { step: number; reason?: string }[] } & Obj;
+  /** The trace record kinds the run must emit, in order (empty when the fixture lists none). */
+  traceKinds: string[];
 }
 
 export function loadRuntimeFixture(name: string): RuntimeFixture {
@@ -249,5 +255,6 @@ export function loadRuntimeFixture(name: string): RuntimeFixture {
     start: typeof doc.start === 'number' ? doc.start : 0,
     script: doc.script as ScriptEntry[],
     end: doc.end as RuntimeFixture['end'],
+    traceKinds: Array.isArray(doc.trace_kinds) ? doc.trace_kinds.map(String) : [],
   };
 }

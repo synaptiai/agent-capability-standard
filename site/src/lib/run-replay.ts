@@ -33,6 +33,10 @@ export interface ReplayStep {
   answers: string[];
   /** Why the step was deferred, from the fixture's `end.deferred`, or what deferred it. */
   reason: string | null;
+  /** How many times a failure mode of this step fired: once per loop back from it, plus once when its loops ran out. */
+  fired: number;
+  /** The condition of the failure mode that fired, or null. */
+  condition: string | null;
 }
 
 export interface ReplayLoop {
@@ -45,11 +49,20 @@ export interface ReplayLoop {
   maxLoops: number | null;
 }
 
+/** A failure mode whose loops ran out (trace kind recovery_exhausted, or an R404 end). */
+export interface ReplayExhausted {
+  /** 1-based step whose loops ran out. */
+  from: number;
+  /** 1-based step of its on_exhausted handler, or null when it has none. */
+  handler: number | null;
+}
+
 export interface Replay {
   fixture: RuntimeFixture;
   wf: Workflow;
   steps: ReplayStep[];
   loops: ReplayLoop[];
+  exhausted: ReplayExhausted | null;
   /** The run's end: `Failed` with a code, or `Completed` with an outcome. */
   end: { kind: string; code: string | null; outcome: string | null };
 }
@@ -78,14 +91,20 @@ function stepOf(entry: RuntimeFixture['script'][number], steps: Step[], cursor: 
   return back;
 }
 
-/** max_loops of a failure mode of `from` whose recovery goes back to `to`'s store. */
-function maxLoopsOf(from: Step, to: Step): number | null {
+/** The failure mode of `from` whose recovery goes back to `to`'s store, or null. */
+function loopingMode(from: Step, to: Step): Obj | null {
   for (const fm of from.failure_modes ?? []) {
-    if (!isObj(fm) || !isObj(fm.recovery)) continue;
-    if (fm.recovery.goto_step !== to.store_as) continue;
-    return typeof fm.recovery.max_loops === 'number' ? fm.recovery.max_loops : 1;
+    if (isObj(fm) && isObj(fm.recovery) && fm.recovery.goto_step === to.store_as) return fm;
   }
   return null;
+}
+
+/** max_loops of a failure mode of `from` whose recovery goes back to `to`'s store (1, the §5.12 default, when it sets none). */
+function maxLoopsOf(from: Step, to: Step): number | null {
+  const fm = loopingMode(from, to);
+  if (!fm) return null;
+  const r = fm.recovery as Obj;
+  return typeof r.max_loops === 'number' ? r.max_loops : 1;
 }
 
 /** Why a step with no reason in `end.deferred` was deferred: its own approval plan in an unattended run. */
@@ -124,6 +143,16 @@ export function replay(name: string): Replay {
     last = i;
     cursor = i + 1;
   }
+  // A failure mode's loops ran out: the fixture traces it, or the run ends R404 (§5.12).
+  const lastLoop = loops.at(-1);
+  let exhausted: ReplayExhausted | null = null;
+  if (lastLoop && (fixture.traceKinds.includes('recovery_exhausted') || fixture.end.code === 'R404')) {
+    const fm = loopingMode(steps[lastLoop.from - 1]!, steps[lastLoop.to - 1]!);
+    const target = fm && isObj(fm.recovery) && isObj(fm.recovery.on_exhausted) ? fm.recovery.on_exhausted.goto_step : null;
+    const h = typeof target === 'string' ? steps.findIndex((x) => x.store_as === target) : -1;
+    if (typeof target === 'string' && h === -1) throw new Error(`${where}: on_exhausted names ${target}, which no step stores`);
+    exhausted = { from: lastLoop.from, handler: h === -1 ? null : h + 1 };
+  }
   const deferred = new Map((fixture.end.deferred ?? []).map((d) => [d.step, d.reason ?? null]));
   for (const k of deferred.keys()) if (!steps[k]) throw new Error(`${where}: end.deferred names step ${k}, which the workflow does not have`);
   const failed = fixture.end.kind === 'Failed';
@@ -138,7 +167,10 @@ export function replay(name: string): Replay {
     } else if (requests[i]! > 0) status = 'ran';
     else if (failed && i > lastRan) status = 'not-reached';
     else status = 'skipped';
-    return { n: i + 1, step, status, requests: requests[i]!, answers: answers[i]!, reason };
+    const fired = loops.filter((l) => l.from === i + 1).length + (exhausted?.from === i + 1 ? 1 : 0);
+    const mode = fired > 0 ? loopingMode(step, steps[loops.find((l) => l.from === i + 1)!.to - 1]!) : null;
+    const condition = mode && typeof mode.condition === 'string' ? mode.condition : null;
+    return { n: i + 1, step, status, requests: requests[i]!, answers: answers[i]!, reason, fired, condition };
   });
   const end = {
     kind: fixture.end.kind,
@@ -146,7 +178,7 @@ export function replay(name: string): Replay {
     outcome: typeof fixture.end.outcome === 'string' ? fixture.end.outcome : null,
   };
   if (!end.code && !end.outcome) throw new Error(`${where}: end has neither a code nor an outcome`);
-  return { fixture, wf, steps: out, loops, end };
+  return { fixture, wf, steps: out, loops, exhausted, end };
 }
 
 /** What the host answered, in words. */
@@ -171,6 +203,23 @@ export function replayCaption(r: Replay): string {
   return `In the conformance fixture ${r.fixture.name}, ${parts.join(', ')}${loops}, and the run ${end}.`;
 }
 
+/** Why a step's row reads as it does: its deferral reason, or what the host answered and how often its failure mode fired. */
+export function stepWhy(s: ReplayStep): string {
+  if (s.reason) return s.reason;
+  const said = [...new Set(s.answers.map((a) => ANSWER_WORDS[a] ?? a))].join('; ');
+  const fired = s.fired > 0 ? `its failure mode${s.condition ? ` "${s.condition}"` : ''} fired ${s.fired === 1 ? 'once' : `${s.fired} times`}` : '';
+  return [said, fired].filter(Boolean).join('; ');
+}
+
+/** The exit when a failure mode's loops ran out, in words. */
+export function exhaustedWords(r: Replay): string | null {
+  const x = r.exhausted;
+  if (!x) return null;
+  const loop = r.loops.filter((l) => l.from === x.from).at(-1)!;
+  const handler = x.handler === null ? 'it has no on_exhausted handler' : `on_exhausted runs step ${x.handler}${r.steps[x.handler - 1]!.step.store_as ? ` (${r.steps[x.handler - 1]!.step.store_as})` : ''}`;
+  return `Loops run out at step ${x.from} (max_loops ${loop.maxLoops ?? 1}): ${handler}, cause R404`;
+}
+
 /** The replay as rows for the Markdown copy. */
 export function replayRows(r: Replay): string[][] {
   return r.steps.map((s) => [
@@ -178,6 +227,6 @@ export function replayRows(r: Replay): string[][] {
     s.step.capability,
     s.step.store_as ?? '',
     s.status === 'ran' ? (s.requests > 1 ? `ran ${s.requests} times` : 'ran') : s.status === 'not-reached' ? 'not reached' : s.status,
-    s.reason ?? (s.answers.length > 0 ? [...new Set(s.answers.map((a) => ANSWER_WORDS[a] ?? a))].join('; ') : ''),
+    stepWhy(s),
   ]);
 }

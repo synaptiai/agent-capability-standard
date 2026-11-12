@@ -6,7 +6,7 @@
 import { loadOntology } from '../data/ontology';
 import { currentStandardText } from '../lib/spec-figures';
 import * as D from '../lib/spec-dsl-figures';
-import { REPLAY_FIXTURES, replay, replayCaption, replayRows } from '../lib/run-replay';
+import { exhaustedWords, REPLAY_FIXTURES, replay, replayCaption, replayRows } from '../lib/run-replay';
 import { loadWorldStateSchema } from '../data/spec-sources';
 import { cell, code, figure, table } from './md';
 import { readRepoFile } from '../lib/repo';
@@ -28,6 +28,7 @@ function replayBlock(slot: string): string {
     replayCaption(r),
     table(['Step', 'Capability', 'Stored as', 'What happened', 'Why'], replayRows(r).map((row) => [row[0]!, code(row[1]!), row[2] ? code(row[2]) : '', row[3]!, cell(row[4]!)])) +
       (r.loops.length > 0 ? `\n\n${r.loops.map((l) => `Loop ${l.count}${l.maxLoops !== null ? ` of max_loops ${l.maxLoops}` : ''}: from step ${l.from} back to step ${l.to}.`).join('\n')}` : '') +
+      (exhaustedWords(r) ? `\n\n${exhaustedWords(r)}.` : '') +
       `\n\nThe run ends ${r.end.code ? `failed, ${r.end.code}` : `${r.end.kind.toLowerCase()}, outcome ${r.end.outcome}`}.`,
   );
 }
@@ -110,7 +111,13 @@ export function specTailBlocks(): string[] {
   const heat = T.codeHeat(text, source);
   const suite = T.conformanceSuite(text, source);
   return [
-    figure('Merge thresholds, from §7.3', T.thresholdsCaption(), table(['Threshold', 'Score'], loadIdentityPolicy().thresholds.map((t) => [code(t.name), String(t.value)]))),
+    figure(
+      'Merge thresholds, from §7.3',
+      T.thresholdsCaption(),
+      table(['Threshold', 'Score'], loadIdentityPolicy().thresholds.map((t) => [code(t.name), String(t.value)])) +
+        '\n\n' +
+        table(['Band', 'Action', 'Given by'], [...T.mergeBands()].reverse().map((b) => [`${b.from} to ${b.to}`, b.action ? code(b.action) : 'none named', b.threshold ? `${T.THRESHOLD_ACTIONS[b.threshold]!.side === 'above' ? 'at or above' : 'below'} ${code(b.threshold)}` : ''])),
+    ),
     figure(
       'Decay with a floor: reference configuration, from §8.1',
       T.decayCaption(decay),

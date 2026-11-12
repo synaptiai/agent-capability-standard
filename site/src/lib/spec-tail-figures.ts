@@ -13,7 +13,7 @@ import { slug } from 'github-slugger';
 import { parse } from 'yaml';
 import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { loadOntology } from '../data/ontology';
-import { loadIdentityPolicy, loadTrustModel, RUNTIME_FIXTURE_DIR } from '../data/spec-sources';
+import { loadIdentityPolicy, loadTrustModel, RUNTIME_FIXTURE_DIR, type IdentityPolicy } from '../data/spec-sources';
 import { parseCatalog, type Workflow } from '../data/workflows';
 import { readRepoFile, trackedUnder } from './repo';
 import { blockText, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
@@ -121,10 +121,65 @@ export function tableFigureCaption(key: string, text: string, where: string): st
 
 // ---------------------------------------------- F-S24b merge thresholds
 
+/**
+ * What each threshold of identity_resolution_policy.yaml leads to: the
+ * output action its name gives, and which side of it that action applies.
+ * The file names the actions (`output.action`: merge|suggest|ignore|
+ * split_review) and says a split review follows when confidence "drops
+ * below force_split_review"; a merge threshold applies at or above its value,
+ * and no_merge below it. A threshold the file adds or renames, or an action
+ * it drops, fails the build here.
+ */
+export const THRESHOLD_ACTIONS: Readonly<Record<string, { action: string; side: 'above' | 'below' }>> = {
+  auto_merge: { action: 'merge', side: 'above' },
+  suggest_merge: { action: 'suggest', side: 'above' },
+  no_merge: { action: 'ignore', side: 'below' },
+  force_split_review: { action: 'split_review', side: 'below' },
+};
+
+export interface MergeBand {
+  from: number;
+  to: number;
+  /** The action the band leads to, or null where no threshold names one. */
+  action: string | null;
+  /** The threshold that gives the action. */
+  threshold: string | null;
+}
+
+/**
+ * The bands between the thresholds, lowest first. A band takes the action of
+ * the "above" threshold at its lower edge, or else of the "below" threshold
+ * at its upper edge; a band neither reaches has no action.
+ */
+export function mergeBands(p: IdentityPolicy = loadIdentityPolicy()): MergeBand[] {
+  const where = 'identity_resolution_policy.yaml';
+  const names = p.thresholds.map((t) => t.name);
+  const known = Object.keys(THRESHOLD_ACTIONS);
+  if (names.slice().sort().join() !== known.slice().sort().join()) throw new Error(`${where}: thresholds are ${names.join(', ')}; the merge thresholds figure knows ${known.join(', ')}`);
+  for (const [n, a] of Object.entries(THRESHOLD_ACTIONS)) if (!p.actions.includes(a.action)) throw new Error(`${where}: output.action has no ${a.action}, which ${n} leads to`);
+  const asc = [...p.thresholds].sort((a, b) => a.value - b.value);
+  const edges = [p.range[0], ...asc.map((t) => t.value), p.range[1]];
+  const at = (v: number) => asc.find((t) => t.value === v);
+  return edges.slice(1).map((to, i) => {
+    const from = edges[i]!;
+    const lower = at(from);
+    const upper = at(to);
+    const t = lower && THRESHOLD_ACTIONS[lower.name]!.side === 'above' ? lower : upper && THRESHOLD_ACTIONS[upper.name]!.side === 'below' ? upper : null;
+    return { from, to, action: t ? THRESHOLD_ACTIONS[t.name]!.action : null, threshold: t?.name ?? null };
+  });
+}
+
+/** A band in words: "merge from 0.9 to 1", "ignore from 0.4 to 0.6". */
+export function bandWords(b: MergeBand): string {
+  return `${b.action ?? 'no action'} from ${b.from} to ${b.to}`;
+}
+
 export function thresholdsCaption(): string {
   const p = loadIdentityPolicy();
-  const t = p.thresholds;
-  return `${plural(t.length, 'threshold', 'thresholds')} on the ${p.range[0]} to ${p.range[1]} alias-confidence scale of identity_resolution_policy.yaml, from ${t[0]!.name} at ${t[0]!.value} down to ${t.at(-1)!.name} at ${t.at(-1)!.value}.`;
+  const bands = mergeBands(p);
+  const named = [...bands].reverse().filter((b) => b.action !== null);
+  const open = bands.filter((b) => b.action === null);
+  return `${plural(p.thresholds.length, 'threshold', 'thresholds')} of identity_resolution_policy.yaml cut the ${p.range[0]} to ${p.range[1]} alias-confidence scale into ${bands.length} bands, named by the action each leads to: ${list(named.map(bandWords))}${open.length > 0 ? `; no threshold names an action ${list(open.map((b) => `from ${b.from} to ${b.to}`))}` : ''}.`;
 }
 
 // ---------------------------------------------- F-S25 decay with a floor
@@ -299,10 +354,35 @@ export function heatCaption(h: CodeHeat): string {
 
 // ---------------------------------------------- F-S28 conformance levels
 
+/** A piece of a §10.2 bullet: plain text, or a § reference or diagnostic code drawn as a chip. */
+export type LevelPart = { kind: 'text' | 'section' | 'code'; value: string };
+
 export interface LevelColumn {
   level: string;
   name: string;
-  items: { text: string; sections: string[]; codes: string[] }[];
+  items: { text: string; sections: string[]; codes: string[]; parts: LevelPart[] }[];
+}
+
+const REF = String.raw`§\d+(?:\.\d+)*|\b[A-Z]\d{3}\b`;
+
+/**
+ * A bullet cut into text and chips: a bracketed list of references, such as
+ * "(§5.1, §5.2)" or "(B202, B201)", becomes one chip per reference in its
+ * place, without the brackets; a reference elsewhere in the text stays a chip
+ * too. Joining the parts' values with the brackets put back gives the text.
+ */
+export function levelParts(text: string): LevelPart[] {
+  const out: LevelPart[] = [];
+  const group = new RegExp(String.raw`\s?\(((?:${REF})(?:,\s*(?:${REF}))*)\)|(${REF})`, 'g');
+  let last = 0;
+  for (const m of text.matchAll(group)) {
+    if (m.index! > last) out.push({ kind: 'text', value: text.slice(last, m.index) });
+    const refs = m[1] ? m[1].split(/,\s*/) : [m[2]!];
+    for (const r of refs) out.push(r.startsWith('§') ? { kind: 'section', value: r.slice(1) } : { kind: 'code', value: r });
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) out.push({ kind: 'text', value: text.slice(last) });
+  return out;
 }
 
 /** §10.2's lists: a "**Ln (Name)**" paragraph and the list after it. */
@@ -317,7 +397,7 @@ export function conformanceLevels(text: string, where: string): LevelColumn[] {
     if (next?.type !== 'list') throw new Error(`${where}: §10.2's ${m[1]} has no list after it`);
     const items = (next as List).children.map((li: ListItem) => {
       const t = blockText(li).replace(/\s+/g, ' ').trim();
-      return { text: t, sections: [...t.matchAll(/§(\d+(?:\.\d+)*)/g)].map((x) => x[1]!), codes: [...t.matchAll(/\b([A-Z]\d{3})\b/g)].map((x) => x[1]!) };
+      return { text: t, sections: [...t.matchAll(/§(\d+(?:\.\d+)*)/g)].map((x) => x[1]!), codes: [...t.matchAll(/\b([A-Z]\d{3})\b/g)].map((x) => x[1]!), parts: levelParts(t) };
     });
     out.push({ level: m[1]!, name: m[2]!, items });
   });

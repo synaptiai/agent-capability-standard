@@ -126,6 +126,91 @@ export function safetyOrderCaption(groups: OrderGroup[]): string {
   return `checkpoint is required before ${list(req)}; ${plural(prec, 'precedes edge orders', 'precedes edges order')} checkpoint, plan and constrain before their targets when both are present; constrain is recommended before ${list(soft)}.`;
 }
 
+/** An edge group of F-S1 drawn as a lane: a source, an edge type and its targets. */
+export interface OrderLane {
+  source: string;
+  type: EdgeType;
+  targets: string[];
+  y: number;
+  /** x of the drop from the source to the lane. */
+  sx: number;
+  /** x of each drop from the lane to a target, in `targets` order. */
+  tx: number[];
+}
+
+export interface OrderLayout {
+  width: number;
+  height: number;
+  sources: { id: string; x: number }[];
+  targets: { id: string; x: number; incoming: { source: string; type: EdgeType }[] }[];
+  lanes: OrderLane[];
+  /** Tops of the source tiles, the target ports and the target tiles. */
+  sourceTop: number;
+  portY: number;
+  targetTop: number;
+  /** The x span of each target's port bar. */
+  ports: { id: string; from: number; to: number }[];
+}
+
+/** F-S1 geometry (visual spec 3.9 and 2.4): a gutter for the lane marks, one 80px column per target. */
+export const ORDER_GEOM = { gutter: 24, col: 104, gap: 16, tile: 32, label: 18, laneGap: 20, chevron: { requires: 20, other: 10 }, slotGap: 2 } as const;
+
+/**
+ * Sources on top and targets below, joined by one horizontal lane per
+ * (source, edge type): a drop from the source to its lane, the lane, and a
+ * drop from the lane to each target, ending in the type's chevron on the
+ * target's port bar. Targets are in table order; sources sit over columns
+ * spread evenly across them. A target's drops sit side by side on its port,
+ * requires first, each as wide as its chevron.
+ */
+export function safetyOrderLayout(groups: OrderGroup[], o: Ontology = loadOntology()): OrderLayout {
+  const g = ORDER_GEOM;
+  const order = tableOrder(o);
+  const targetIds = [...new Set(groups.flatMap((x) => x.edges.flatMap((e) => e.targets)))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const cx = (i: number) => g.gutter + i * (g.col + g.gap) + g.col / 2;
+  const width = g.gutter + targetIds.length * g.col + (targetIds.length - 1) * g.gap;
+  const span = Math.max(1, targetIds.length - 1);
+  const sourceCols = groups.map((_, j) => (groups.length === 1 ? 0 : Math.round((j * span) / (groups.length - 1))));
+  const sourceTop = g.label;
+  const laneTop = sourceTop + g.tile + 14;
+  const raw = groups.flatMap((grp, j) => grp.edges.map((e, k) => ({ source: grp.source, type: e.type, targets: e.targets, j, k, n: grp.edges.length })));
+  const lanes: OrderLane[] = raw.map((l, i) => ({
+    source: l.source,
+    type: l.type,
+    targets: l.targets,
+    y: laneTop + i * g.laneGap,
+    sx: cx(sourceCols[l.j]!) + (l.n === 1 ? 0 : (l.k - (l.n - 1) / 2) * 16),
+    tx: [],
+  }));
+  const portY = laneTop + (lanes.length - 1) * g.laneGap + 18;
+  const ports: OrderLayout['ports'] = [];
+  const targets = targetIds.map((id, i) => {
+    const incoming = lanes.filter((l) => l.targets.includes(id)).sort((a, b) => Number(b.type === 'requires') - Number(a.type === 'requires'));
+    const w = (t: EdgeType) => (t === 'requires' ? g.chevron.requires : g.chevron.other);
+    const total = incoming.reduce((a, l) => a + w(l.type), 0) + (incoming.length - 1) * g.slotGap;
+    if (total > g.col) throw new Error(`safety ordering: ${id} has ${incoming.length} incoming edges, wider than its ${g.col}px column`);
+    let x = cx(i) - total / 2;
+    for (const l of incoming) {
+      l.tx[l.targets.indexOf(id)] = x + w(l.type) / 2;
+      x += w(l.type) + g.slotGap;
+    }
+    ports.push({ id, from: cx(i) - Math.max(total, g.tile) / 2, to: cx(i) + Math.max(total, g.tile) / 2 });
+    return { id, x: cx(i), incoming: incoming.map((l) => ({ source: l.source, type: l.type })) };
+  });
+  const targetTop = portY + 6;
+  return {
+    width,
+    height: targetTop + g.tile + g.label + 2,
+    sources: groups.map((grp, j) => ({ id: grp.source, x: cx(sourceCols[j]!) })),
+    targets,
+    lanes,
+    sourceTop,
+    portY,
+    targetTop,
+    ports,
+  };
+}
+
 // ------------------------------------------------ F-S6 safety defaults
 
 export const FLAG_ROWS = [
