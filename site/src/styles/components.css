@@ -1247,6 +1247,20 @@
     white-space: nowrap;
   }
 
+  /* Three tiles to a row in a phone-width table: a tighter side padding and
+     12px ids, so the longest id ("synchronize", 11 characters) shows whole
+     instead of ending in an ellipsis. */
+  @container (max-width: 479px) {
+    .capability-tile {
+      padding-inline: 6px;
+    }
+
+    .capability-tile__id {
+      font-size: 12px;
+      letter-spacing: -0.02em;
+    }
+  }
+
   /* ---------- workflow diagram ---------- */
 
   .wf {

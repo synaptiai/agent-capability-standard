@@ -46,8 +46,10 @@ const parts = name.split(/(?<=[._])/);
 <li class:list={['port', required ? 'port--required' : 'port--optional']} data-depth={depth} data-type={type}>
   <span class="port__pin" aria-hidden="true"></span>
   <span class="port__label">
-    <span class="port__glyphs" aria-hidden="true">{glyphs.map((g) => <PixelGlyph name={g} />)}</span>
-    <code class="port__name">{href ? <a href={href}>{parts.map((p, i) => (i > 0 ? <><wbr />{p}</> : p))}</a> : parts.map((p, i) => (i > 0 ? <><wbr />{p}</> : p))}</code>
+    <span class="port__key">
+      <span class="port__glyphs" aria-hidden="true">{glyphs.map((g) => <PixelGlyph name={g} />)}</span>
+      <code class="port__name">{href ? <a href={href}>{parts.map((p, i) => (i > 0 ? <><wbr />{p}</> : p))}</a> : parts.map((p, i) => (i > 0 ? <><wbr />{p}</> : p))}</code>
+    </span>
     {mark && <PixelGlyph name={mark} label={markLabel} class="port__mark" />}
     <code class="port__type">{type}</code>
     {more && <span class="port__more" aria-hidden="true">+</span>}

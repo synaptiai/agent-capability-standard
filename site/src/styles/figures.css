@@ -218,7 +218,16 @@
     min-width: 0;
   }
 
+  .port__key {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .port__glyphs {
+    flex: none;
     display: inline-flex;
     gap: 2px;
     color: var(--ink-2);
