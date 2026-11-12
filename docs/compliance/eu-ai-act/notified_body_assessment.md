@@ -32,6 +32,16 @@ Under the internal control procedure, the provider:
 
 **No external involvement required.** The provider self-certifies.
 
+```mermaid
+---
+title: The Annex VI procedure
+---
+flowchart TB
+  accDescr: Under internal control the provider verifies its quality management system against Art. 17, examines the technical documentation against Art. 8-15, verifies design, development and post-market monitoring, issues the EU declaration of conformity and affixes the CE marking.
+  v1["Verify the QMS against Art. 17"] --> v2["Examine the technical documentation against Art. 8-15"] --> v3["Verify design, development and post-market monitoring"]
+  v3 --> decl["Issue the EU declaration of conformity (Art. 47)"] --> ce["Affix the CE marking (Art. 48)"]
+```
+
 ### 2.2 Annex VII — Conformity Assessment with Notified Body
 
 Under the notified body procedure:
@@ -47,19 +57,12 @@ Under the notified body procedure:
 
 ```mermaid
 ---
-title: The two conformity assessment procedures
+title: The Annex VII procedure
 ---
 flowchart TB
-  accDescr: Under Annex VI the provider checks its own quality management system and documentation; under Annex VII a notified body assesses them and issues a certificate; both routes end with the provider's EU declaration of conformity and the CE marking.
-  subgraph vi [Annex VI: internal control]
-    v1["Provider verifies the QMS against Art. 17"] --> v2["Provider examines the technical documentation against Art. 8-15"] --> v3["Provider verifies design, development and post-market monitoring"]
-  end
-  subgraph vii [Annex VII: notified body]
-    n1["Provider selects a notified body designated under Art. 39"] --> n2["Notified body assesses the QMS"] --> n3["Notified body assesses the technical documentation"] --> n4["Notified body issues a certificate"]
-  end
-  v3 --> decl["Provider issues the EU declaration of conformity (Art. 47)"]
-  n4 -->|the declaration references the certificate| decl
-  decl --> ce["Provider affixes the CE marking (Art. 48)"]
+  accDescr: The provider selects a notified body designated under Art. 39, which assesses the quality management system and the technical documentation and issues a certificate; the provider then issues the EU declaration of conformity referencing it and affixes the CE marking.
+  n1["Provider selects a notified body (Art. 39)"] --> n2["Notified body assesses the QMS"] --> n3["Notified body assesses the technical documentation"] --> n4["Notified body issues a certificate"]
+  n4 -->|referenced by| decl["Provider issues the EU declaration of conformity"] --> ce["Provider affixes the CE marking"]
 ```
 
 ## 3. Decision Tree

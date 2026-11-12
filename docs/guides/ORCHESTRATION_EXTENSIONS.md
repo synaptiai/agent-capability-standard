@@ -552,8 +552,9 @@ with each event a step waits for (`schemas/agent_identity_schema.yaml`):
     item["Item from a listed class, or with no identity or trust class"] -->|read by| s1[A step]
     s1 -->|read by| s2["A later step: a summary, injected context, an invoke"]
     s2 --> q{Needs approval?}
-    q -->|attended run| person["Asked of a person, even with a standing mandate"]
-    q -->|unattended run| wu[Follows when_unattended]
+    q -->|yes| att{Attended run?}
+    att -->|yes| person["Asked of a person, even with a standing mandate"]
+    att -->|no| wu[Follows when_unattended]
   ```
 - On a step that does not wait, your host receives the inputs, applies
   them to what it returns, and must put the `sender_identity` it applied

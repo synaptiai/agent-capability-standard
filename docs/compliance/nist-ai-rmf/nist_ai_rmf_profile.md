@@ -53,9 +53,10 @@ The NIST AI RMF 1.0 organizes AI risk management into four core functions:
 title: How the four functions relate
 ---
 flowchart LR
-  accDescr: GOVERN establishes the risk governance; MAP identifies the context and risks and MEASURE analyzes and tracks them; MANAGE prioritizes and acts on the risks using the output of MAP and MEASURE.
+  accDescr: GOVERN establishes the risk governance for mapping, measuring and managing; MAP identifies the context and risks and MEASURE analyzes and tracks them; MANAGE prioritizes and acts on the risks using the output of MAP and MEASURE.
   gv[GOVERN: establish governance] --> mp
   gv --> me
+  gv --> mg
   mp[MAP: identify context and risks] --> mg[MANAGE: prioritize and act]
   me[MEASURE: analyze and track] --> mg
 ```
@@ -204,15 +205,6 @@ flowchart TB
 > | **Justification** | Domain profiles, risk treatment plan, competency framework, and compliance documentation provide risk-informed governance. GV-1.7 (decommissioning), GV-3 (DEIA), and GV-6 (third-party vendor assessment) are gaps that prevent Tier 3 classification. Organizational adoption depends on deployer commitment. |
 > | **Key gaps** | Decommissioning procedure (GV-1.7), DEIA policies (GV-3), third-party vendor assessment (GV-6) |
 
-```mermaid
----
-title: GOVERN, current and target tier
----
-flowchart LR
-  accDescr: GOVERN is at Tier 2, Risk Informed, and reaches Tier 3, Repeatable, by closing the decommissioning, DEIA and third-party vendor assessment gaps.
-  cur["Current: Tier 2, Risk Informed"] -->|"close GV-1.7, GV-3, GV-6"| tgt["Target: Tier 3, Repeatable"]
-```
-
 ---
 
 ## 5. MAP Function
@@ -274,15 +266,6 @@ flowchart LR
 > | **Justification** | Strong structural foundation: typed capability contracts, 7 domain profiles with trust weights, 3-tier risk classification, 7 edge types for dependency mapping, comprehensive risk treatment plan. Context establishment (MP-1) and categorization (MP-2) are formalized and repeatable. MP-5 (impact assessment) gap prevents Tier 4. |
 > | **Key gaps** | Formal impact assessment methodology for specific populations (MP-5); adaptive context updates from operational data |
 
-```mermaid
----
-title: MAP, current and target tier
----
-flowchart LR
-  accDescr: MAP is at Tier 3, Repeatable, and reaches Tier 4, Adaptive, with a formal impact assessment methodology and context that adapts from operational data.
-  cur["Current: Tier 3, Repeatable"] -->|"close MP-5, add adaptive context"| tgt["Target: Tier 4, Adaptive"]
-```
-
 ---
 
 ## 6. MEASURE Function
@@ -333,15 +316,6 @@ flowchart LR
 > | **Target Tier** | Tier 3 — Repeatable |
 > | **Justification** | Confidence scores and evidence anchors are structurally enforced on all outputs. Six validators provide repeatable structural evaluation. Temporal decay model tracks information freshness. However, real-time monitoring dashboards, aggregated reporting, alerting infrastructure, and automated external feedback collection are gaps. These prevent consistent, organization-wide measurement. |
 > | **Key gaps** | Real-time monitoring dashboard (ME-2.3), aggregated evaluation reporting (ME-2.2), automated feedback collection (ME-4) |
-
-```mermaid
----
-title: MEASURE, current and target tier
----
-flowchart LR
-  accDescr: MEASURE is at Tier 2, Risk Informed, and reaches Tier 3, Repeatable, with aggregated reporting, a real-time monitoring dashboard and automated feedback collection.
-  cur["Current: Tier 2, Risk Informed"] -->|"close ME-2.2, ME-2.3, ME-4"| tgt["Target: Tier 3, Repeatable"]
-```
 
 ---
 
@@ -394,15 +368,6 @@ flowchart LR
 > | **Target Tier** | Tier 4 — Adaptive |
 > | **Justification** | Strong structural enforcement: checkpoint-before-mutation is mandatory, rollback is available for state recovery, three-tier risk model assigns response priority, audit hooks provide comprehensive logging, and nonconformity procedure defines corrective action workflow. Risk treatment and documentation (MG-1.2, MG-2.1, MG-2.3, MG-4) are formalized and repeatable. Automated incident detection (MG-1.4) and tabletop scenario testing (MG-2.2) gaps prevent Tier 4. |
 > | **Key gaps** | Automated incident detection (MG-1.4), tabletop exercises (MG-2.2), formal third-party risk monitoring (MG-3) |
-
-```mermaid
----
-title: MANAGE, current and target tier
----
-flowchart LR
-  accDescr: MANAGE is at Tier 3, Repeatable, and reaches Tier 4, Adaptive, with automated incident detection, tabletop exercises and third-party risk monitoring.
-  cur["Current: Tier 3, Repeatable"] -->|"close MG-1.4, MG-2.2, MG-3"| tgt["Target: Tier 4, Adaptive"]
-```
 
 ---
 

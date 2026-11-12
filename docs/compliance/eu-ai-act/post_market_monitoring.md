@@ -182,11 +182,11 @@ title: Reporting a serious incident
 ---
 flowchart TB
   accDescr: A serious incident is detected and assessed at once, escalated to L4 and contained within an hour, reported in preliminary form within 24 hours, notified to the market surveillance authority within 15 days and investigated in full within 30 days, with follow-up notifications when the causal link is unclear.
-  s1[Detect and assess the incident at once] -->|within 1 hour| s2[Escalate to L4 and contain the system]
-  s2 -->|within 24 hours| s3[Prepare the preliminary incident report]
-  s3 -->|within 15 days of awareness| s4[Notify the market surveillance authority]
-  s4 -->|within 30 days| s5[Write the detailed investigation report]
-  s5 -.->|if the causal link is unclear| s6[Send follow-up notifications]
+  s1["Detect and assess the incident: immediately"] --> s2["Escalate to L4 and contain the system: within 1 hour"]
+  s2 --> s3["Preliminary incident report: within 24 hours"]
+  s3 --> s4["Notify the market surveillance authority: within 15 days of awareness"]
+  s4 --> s5["Detailed investigation report: within 30 days"]
+  s5 -.->|if the causal link is unclear| s6[Follow-up notifications]
 ```
 
 ### 7.3 Notification Content (Art. 62(1))

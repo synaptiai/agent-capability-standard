@@ -143,18 +143,6 @@ Each nonconformity shall be documented in an NCR containing:
 | Verified By | Person who verified effectiveness |
 | Status | Open / Contained / Corrected / Closed / Escalated |
 
-```mermaid
----
-title: An NCR's status through the procedure
----
-flowchart TB
-  accDescr: An NCR opens when the nonconformity is identified, becomes Contained after containment and Corrected after the correction, and after the effectiveness check is either Closed or Escalated.
-  open[Open] -->|contain| cont[Contained]
-  cont -->|correct| corr[Corrected]
-  corr -->|effectiveness verified| closed[Closed]
-  corr -->|or escalate| esc[Escalated]
-```
-
 ### 5.3 Root Cause Analysis
 
 Root cause analysis shall be performed for all Major and Critical nonconformities. For Minor nonconformities, root cause analysis is recommended but may be simplified.
