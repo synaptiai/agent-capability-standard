@@ -299,6 +299,20 @@
     margin: var(--space-4) 0 0;
   }
 
+  /* On a phone the text column beside the tile is too narrow for a label
+     column, so each fact's value goes under its label. The extra class
+     outranks the shared facts-list rule in components.css. */
+  @media (max-width: 599px) {
+    .page-hero .skill-meta {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: 0;
+    }
+
+    .page-hero .skill-meta dd {
+      margin-bottom: var(--space-2);
+    }
+  }
+
   .skill-tools {
     display: flex;
     flex-wrap: wrap;
