@@ -100,6 +100,17 @@ When new OASF versions add coverage for currently unmapped capabilities:
 3. Move the capability from `coverage_gaps.unmapped` to `coverage_gaps.partial` (or remove entirely)
 4. Consider deprecating the corresponding `GA-` extension code
 
+```mermaid
+---
+title: When OASF adds coverage for a capability
+---
+flowchart TB
+  accDescr: When a new OASF version covers a capability the mapping does not, the new code is added to categories, the capability's reverse_mapping gains it, the capability moves from unmapped to partial or leaves the gaps, and its GA- extension code may be deprecated.
+  a["Add the OASF code to categories"] --> b["Add it to the capability's reverse_mapping"]
+  b --> c["Move the capability from unmapped to partial, or remove it from the gaps"]
+  c -.->|consider| d["Deprecate the GA- extension code"]
+```
+
 ## Safety Notes
 
 - **`send` (GA-005)** requires checkpoint enforcement before invocation. This is the only high-risk GA extension. OASF consumers must ensure checkpoint safety when mapping to this capability.
