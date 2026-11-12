@@ -1,7 +1,8 @@
 ---
 // F-CI1, risk by layer (visual spec 3.11): a real table with a row per risk
 // level (its glyph, pips and word) and a column per layer (its glyph and
-// name, linking to the layer page). A cell is the number of that layer's
+// name; not links, since the columns are too narrow for a 24px target on a
+// phone, and the layer cards below link to each layer). A cell is the number of that layer's
 // capabilities at that risk, printed on one of the four heat steps with a
 // 2px border; an empty cell is blank. It shows where the medium- and
 // high-risk capabilities sit, which the periodic table does not. A scale
@@ -10,7 +11,6 @@
 // Props:
 // - n: number, required. The figure number on the page.
 import { HEAT_TOKENS, heatRanges, heatStep } from '../../lib/edge-figures';
-import { layerHref } from '../../lib/generated';
 import { riskByLayer, riskByLayerCaption } from '../../lib/layer-figures';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import TableWrap from '../TableWrap.astro';
@@ -35,7 +35,7 @@ const pips = { low: 1, medium: 2, high: 3 } as const;
           <th scope="col" class="umatrix__corner">Risk</th>
           {m.layers.map((l) => (
             <th scope="col" class="riskmap__layer has-layer" style={`--layer: var(--layer-${l})`}>
-              <a href={layerHref(l)}><PixelGlyph name={l} scale={2} /><span class="riskmap__layer-name">{l}</span></a>
+              <span class="riskmap__layer-head"><PixelGlyph name={l} scale={2} /><span class="riskmap__layer-name">{l}</span></span>
             </th>
           ))}
         </tr>
