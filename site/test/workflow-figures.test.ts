@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadOntology } from '../src/data/ontology';
 import { loadWorkflows, parseCatalog } from '../src/data/workflows';
-import { dataFlowGrid, indexStripLabel, readsList, riskSummary, workflowSpine } from '../src/lib/workflow-figures';
+import { dataFlowGrid, indexStripLabel, readsList, riskSummary, stripKey, workflowSpine } from '../src/lib/workflow-figures';
 import { workflowsIndexTwin, workflowTwin } from '../src/twins/workflows';
 import { allCatalogSteps, catalogFiles, repoText } from './independent';
 import { ALL_GRIDS, resolveGlyphKey } from '../src/pixel/keys';
@@ -239,5 +239,21 @@ describe('Markdown copies', () => {
       const wf = loadWorkflows().byId.get(id);
       if (wf) expect(indexStripLabel(wf), id).toContain(`uses layers ${layers.join(', ')}`);
     }
+  });
+});
+
+describe('stripKey (F-C4 on capability pages)', () => {
+  it('names the highlighted tile, a symbol tile, each role the other steps take and the gate bar, read off the fixture', () => {
+    // The fixture's steps: checkpoint (role, gated), search, search (plain), mutate (role, gated), invoke (plain, gated).
+    const key = stripKey([fixture()], 'search');
+    expect(key.map((k) => k.kind)).toEqual(['here', 'symbol', 'role', 'role', 'gate']);
+    expect(key.map((k) => (k.kind === 'role' ? k.role : null)).filter(Boolean)).toEqual(['checkpoint', 'mutating']);
+    // The first plain step that is not search is invoke (step 5).
+    expect(key[1]).toMatchObject({ kind: 'symbol', capability: 'invoke' });
+  });
+
+  it('leaves out a role only the highlighted capability takes', () => {
+    // Highlighting mutate: its own steps are ringed, so "makes the change" is not in the key.
+    expect(stripKey([fixture()], 'mutate').some((k) => k.kind === 'role' && k.role === 'mutating')).toBe(false);
   });
 });

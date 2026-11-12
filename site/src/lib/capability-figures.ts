@@ -173,7 +173,7 @@ export function contractRowId(side: 'in' | 'out', path: string): string {
 export function usageCaption(cap: Capability, usage: CapabilityUse[] = capabilityUsage(cap.id)): string {
   if (usage.length === 0) return `No reference or domain workflow uses ${cap.id} yet.`;
   const steps = usage.reduce((n, u) => n + u.steps.length, 0);
-  return `${plural(usage.length, 'workflow uses', 'workflows use')} ${cap.id}, in ${plural(steps, 'step', 'steps')} in all; its steps are the squares that carry its symbol.`;
+  return `${plural(usage.length, 'workflow uses', 'workflows use')} ${cap.id}, in ${plural(steps, 'step', 'steps')} in all; its steps are the squares in an ink ring, and the key under the strips names the other squares.`;
 }
 
 /** The step list after a workflow name: "step 16", "steps 3 and 7". */

@@ -54,7 +54,7 @@ export const ROLE_GLYPH: Readonly<Record<StepRole, string | null>> = {
 // Checkpoint and rollback steps change state too (their mutation flag is
 // true, and the page header counts them), so the mutating role is worded as
 // the step that makes the workflow's change, not as the only one that writes.
-const ROLE_WORDS: Readonly<Record<Exclude<StepRole, 'plain'>, string>> = {
+export const ROLE_WORDS: Readonly<Record<Exclude<StepRole, 'plain'>, string>> = {
   checkpoint: 'saves a checkpoint',
   verify: 'checks a result',
   rollback: 'rolls back',
@@ -400,4 +400,32 @@ export function indexStripLabel(wf: Workflow): string {
     ...(cps.length > 0 ? [`checkpoint at ${stepList(cps)}`] : []),
     `uses layers ${layersUsed(wf).join(', ')}`,
   ].join('; ');
+}
+
+// --------------------------------------------------------------- strip key
+
+/** One entry of a step-strip key: which tile it shows, and what it means. */
+export type StripKeyItem =
+  | { kind: 'here'; capability: string; label: string }
+  | { kind: 'symbol'; capability: string; label: string }
+  | { kind: 'role'; role: Exclude<StepRole, 'plain'>; label: string }
+  | { kind: 'gate'; label: string };
+
+/**
+ * The key under a set of step strips in which `capability`'s steps are
+ * marked (F-C4): that capability's tile, the symbol tile of any other plain
+ * step, each role tile the strips show (in the spine legend's order and
+ * words) and the gate notch, each only when a strip has one.
+ */
+export function stripKey(wfs: readonly Workflow[], capability: string): StripKeyItem[] {
+  const all = wfs.flatMap((w) => diagramSteps(w));
+  const others = all.filter((d) => d.step.capability !== capability);
+  const out: StripKeyItem[] = [{ kind: 'here', capability, label: `a step that runs ${capability}` }];
+  const example = others.find((d) => d.role === 'plain');
+  if (example) out.push({ kind: 'symbol', capability: example.step.capability, label: `another step, by its capability's symbol (${capabilitySymbol(example.step.capability)} is ${example.step.capability})` });
+  for (const role of ['checkpoint', 'mutating', 'verify', 'rollback'] as const) {
+    if (others.some((d) => d.role === role)) out.push({ kind: 'role', role, label: `step ${ROLE_WORDS[role]}` });
+  }
+  if (all.some((d) => (d.step.gates?.length ?? 0) > 0)) out.push({ kind: 'gate', label: 'bar under a step: it has gates' });
+  return out;
 }

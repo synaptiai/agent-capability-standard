@@ -353,12 +353,53 @@
     color: var(--ink-2);
   }
 
+  /* Name and step numbers on one line, the strip on the next, so every strip
+     starts at the same x and a long name never squeezes its strip into two
+     lines. */
   @container (min-width: 640px) {
     .runs__row {
-      grid-template-columns: max-content minmax(0, 1fr) max-content;
-      align-items: center;
-      gap: var(--space-3);
+      grid-template-columns: max-content minmax(0, 1fr);
+      grid-template-areas:
+        'name steps'
+        'strip strip';
+      align-items: baseline;
+      column-gap: var(--space-3);
     }
+
+    .runs__name {
+      grid-area: name;
+    }
+
+    .runs__steps {
+      grid-area: steps;
+    }
+
+    .runs__row > .step-strip {
+      grid-area: strip;
+    }
+  }
+
+  /* The key under the strips: each tile the strips use, drawn the same way. */
+  .strip-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: var(--space-4) 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .strip-key li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* Room round the tile for the ring and, below it, the gate bar. */
+  .strip-key .step-strip {
+    padding: 3px 3px 6px;
   }
 
   .runs__more {

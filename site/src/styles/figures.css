@@ -373,6 +373,18 @@
     line-height: 1;
   }
 
+  /* With symbols on every plain step, the highlighted capability's steps
+     carry an ink ring outside their layer border; the strip leaves room for it. */
+  .step-strip--rings {
+    gap: 8px 6px;
+    padding: 2px;
+  }
+
+  .step-strip__step--here {
+    outline: var(--px) solid var(--ink);
+    outline-offset: 1px;
+  }
+
   /* A step with gates has a 2px notch under it. */
   .step-strip__step--gate::after {
     content: '';
