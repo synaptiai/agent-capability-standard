@@ -8,7 +8,8 @@ import { githubBlobUrl, readRepoFile } from '../lib/repo';
 import { allowedRfcStatuses, rfcRows } from '../lib/rfcs';
 import { kebab } from '../lib/routes';
 import { schemaGroups, schemaListing } from '../lib/views';
-import { blocks, cell, code, fence, generatedLine, markdownCopy, mdLink, mdUrl, table } from './md';
+import { blocks, cell, code, fence, figure, generatedLine, markdownCopy, mdLink, mdUrl, table } from './md';
+import { RFC_FIG_TITLE, rfcLanes, rfcLanesCaption, SHELF_MIN_ROWS, schemaShelves, shelfCaption, shelfTitle } from '../lib/index-figures';
 import { edgeTypesFigureBlocks } from './edges-spec';
 import type { Twin } from './types';
 
@@ -67,17 +68,23 @@ export function schemasTwin(): Twin {
     '# Schemas',
     `These are the schema files in the repository, each linked to GitHub. Section 6.1 of the ${mdLink('Standard', `${std.url}`)} says what each required schema must hold. Workflow catalogs are listed under ${mdLink('Workflows', '/workflows/')} and domain profiles under ${mdLink('Domains', '/domains/')}.`,
     generatedLine([std.source]),
-    ...schemaGroups(std.version).map((g) => {
-      const items = entries.filter((e) => e.group === g.key);
-      if (items.length === 0) return null;
-      return blocks(
-        `## ${g.label}`,
-        g.intro,
-        items
-          .map((e) => `- [${code(e.source)}](${githubBlobUrl(e.source)})${e.purpose ? `: ${e.purpose}.` : ''}${e.description ? ` ${e.description}` : ''}`)
-          .join('\n'),
-      );
-    }),
+    ...(() => {
+      const groups = schemaGroups(std.version);
+      const shelves = schemaShelves(entries, groups);
+      const maxLines = Math.max(...shelves.flatMap((sh) => sh.tiles.map((t) => t.lines)));
+      return shelves.map((sh) => {
+        const g = groups.find((x) => x.key === sh.key)!;
+        const rows = table(
+          ['File', 'What it holds', 'Lines'],
+          sh.tiles.map((t) => [
+            `[${code(t.entry.source)}](${githubBlobUrl(t.entry.source)})${sh.key === 'required' ? ' (required)' : ''}`,
+            cell([t.entry.purpose ? `${t.entry.purpose}.` : '', t.entry.description].filter(Boolean).join(' ')),
+            String(t.lines),
+          ]),
+        );
+        return blocks(`## ${g.label}`, g.intro, sh.tiles.length >= SHELF_MIN_ROWS ? figure(shelfTitle(sh), shelfCaption(sh, maxLines), rows) : rows);
+      });
+    })(),
   );
   return { title: 'Schemas', description, markdown };
 }
@@ -91,6 +98,16 @@ export async function rfcsIndexTwin(): Promise<Twin> {
   const markdown = blocks(
     '# RFCs',
     `An RFC proposes a change to the standard. Its status is ${allowed.slice(0, -1).join(', ')} or ${allowed.at(-1)}. How an RFC is decided is described under ${mdLink('Decision-making', '/community/governance/#decision-making')} on the Governance page.`,
+    (() => {
+      const lanes = rfcLanes(rows);
+      return figure(
+        RFC_FIG_TITLE,
+        rfcLanesCaption(lanes),
+        lanes
+          .map((l) => `- ${l.target ?? 'No target'}${l.version ? (l.url ? ' (published)' : ' (not yet published)') : ''}: ${l.rfcs.map((r) => `${mdLink(r.label, r.url)} (${r.status})`).join(', ')}`)
+          .join('\n'),
+      );
+    })(),
     table(
       ['RFC', 'Title', 'Status', 'Target', 'Date'],
       rfcs.map((r) => [mdLink(r.label, r.url), cell(r.title), r.status, r.target ? cell(r.target) : '', r.date ?? '']),

@@ -7,12 +7,21 @@ import DocLayout from '../../layouts/DocLayout.astro';
 import { currentStandard, pageHref, refSlugger, routeByUrl, specSectionHref } from '../../lib/generated';
 import { githubBlobUrl, readRepoFile } from '../../lib/repo';
 import { schemaGroups, schemaListing } from '../../lib/views';
+import TableWrap from '../../components/TableWrap.astro';
+import Figure from '../../components/fig/Figure.astro';
+import PixelBar from '../../components/fig/PixelBar.astro';
+import { SHELF_MIN_ROWS, schemaShelves, shelfCaption, shelfTitle } from '../../lib/index-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import '../../styles/figures-indexes.css';
 
 const route = routeByUrl('/spec/schemas/');
 const std = currentStandard();
 const entries = schemaListing(readRepoFile(std.source));
 const id = refSlugger();
 const GROUPS = schemaGroups(std.version);
+const shelves = schemaShelves(entries, GROUPS);
+const maxLines = Math.max(...shelves.flatMap((sh) => sh.tiles.map((t) => t.lines)));
+let fig = 0;
 const description = `The schema files of the Agent Capability Standard, grouped by what the Standard requires of them, with a link to each file.`;
 ---
 <DocLayout route={route} title="Schemas" description={description}>
@@ -24,21 +33,44 @@ const description = `The schema files of the Agent Capability Standard, grouped 
       Workflow catalogs are listed on the <a href={pageHref('/workflows/')}>workflows page</a> and domain profiles on
       the <a href={pageHref('/domains/')}>domains page</a>.
     </p>
-    {GROUPS.map((g) => {
-      const items = entries.filter((e) => e.group === g.key);
-      return items.length === 0 ? null : (
-        <section class="schema-group" data-group={g.key}>
+    {shelves.map((sh) => {
+      const g = GROUPS.find((x) => x.key === sh.key)!;
+      const table = (
+        <TableWrap label={g.label}>
+          <table class="schema-table">
+            <caption class="fig-sr">{g.label}</caption>
+            <thead>
+              <tr><th scope="col" class="schema-table__col-file">File</th><th scope="col">What it holds</th><th scope="col" class="schema-table__col-length">Length</th></tr>
+            </thead>
+            <tbody>
+              {sh.tiles.map((t) => (
+                <tr data-schema={t.entry.name}>
+                  <th scope="row" class="schema-table__file">
+                    <PixelGlyph name="chapter:canonical-schemas" scale={2} />
+                    <a href={githubBlobUrl(t.entry.source)}><code>{t.file}</code></a>
+                    <span class="schema-table__meta">
+                      {t.format}
+                      {sh.key === 'required' && <span class="schema-table__stamp"><PixelGlyph name="stamp" />Required</span>}
+                    </span>
+                  </th>
+                  <td>
+                    {t.entry.purpose && <p class="schema-table__purpose">{t.entry.purpose}.</p>}
+                    {t.entry.description && <p>{t.entry.description}</p>}
+                  </td>
+                  <td><PixelBar value={t.lines} max={maxLines} label={`${t.lines} lines`} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      );
+      return (
+        <section class="schema-group" data-group={sh.key}>
           <h2 id={id(g.label)}>{g.label}</h2>
-          <p>{g.intro}</p>
-          <ul class="section-index__cards">
-            {items.map((e) => (
-              <li class="section-index__card schema-card" data-schema={e.name}>
-                <a href={githubBlobUrl(e.source)}><code>{e.source}</code></a>
-                {e.purpose && <p class="schema-card__purpose">{e.purpose}.</p>}
-                {e.description && <p>{e.description}</p>}
-              </li>
-            ))}
-          </ul>
+          <p>{g.intro}{sh.tiles[0]!.entry.source.includes('/', 'schemas/'.length) && <> In <code>{sh.tiles[0]!.entry.source.split('/').slice(0, -1).join('/')}/</code>.</>}</p>
+          {sh.tiles.length >= SHELF_MIN_ROWS ? (
+            <Figure id={id(`fig-${g.label}`)} n={++fig} title={shelfTitle(sh)} caption={shelfCaption(sh, maxLines)} kind="schema-shelf">{table}</Figure>
+          ) : table}
         </section>
       );
     })}

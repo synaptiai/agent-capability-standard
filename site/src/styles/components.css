@@ -953,58 +953,6 @@
 
   /* ---------- cards and listings ---------- */
 
-  .section-index__cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
-    gap: var(--space-4);
-    list-style: none;
-    padding: 0;
-  }
-
-  .section-index__card {
-    position: relative;
-    margin: 0 !important;
-    padding: var(--space-4);
-    border: var(--border);
-    background: var(--bg-sub);
-    box-shadow: var(--shadow-1);
-  }
-
-  .section-index__card > a:first-child {
-    font-weight: 700;
-    font-size: 18px;
-    line-height: 1.25;
-    color: var(--ink);
-    text-decoration: none;
-  }
-
-  /* A card whose first link is the card: the whole card is the target. */
-  .section-index__card > a:first-child::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-  }
-
-  .section-index__card:has(> a:first-child:hover) {
-    transform: translate(-1px, -1px);
-    box-shadow: var(--shadow-2);
-  }
-
-  .section-index__card:has(> a:first-child:focus-visible) {
-    outline: var(--px) solid var(--ink);
-    outline-offset: 2px;
-  }
-
-  .section-index__card > a:first-child:focus-visible {
-    outline: none;
-  }
-
-  .section-index__card p {
-    margin: var(--space-2) 0 0;
-    font-size: 15px;
-    color: var(--ink-2);
-  }
-
   .capability-card {
     padding: var(--space-4);
     border: var(--border);

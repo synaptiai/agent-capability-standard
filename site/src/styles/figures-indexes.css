@@ -1,0 +1,313 @@
+/*
+ * Figures of the section index pages, the RFC index and the schemas page
+ * (visual spec 3.11): F-R1 RFCs by target version, F-SC1 the schema files,
+ * and the figures the guides, compliance and background listings carry.
+ * Square corners, 2px lines, tokens only. Each figure lays out by the width
+ * of its own .fig (a container).
+ */
+@layer components {
+  /* ---------- F-R1 RFCs by target version ---------- */
+
+  .rfc-lanes {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .rfc-lane {
+    display: grid;
+    grid-template-columns: 11rem minmax(0, 1fr);
+    gap: var(--space-3);
+    align-items: center;
+    margin: 0;
+    padding: var(--space-3);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .rfc-lane[data-target='none'] {
+    border-style: dashed;
+  }
+
+  .rfc-lane__label {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    font-weight: 600;
+  }
+
+  .rfc-lane__note {
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: var(--ink-2);
+  }
+
+  .rfc-lane__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .rfc-tile-item {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-1);
+    margin: 0;
+  }
+
+  /* A 40px tile with the RFC's number, framed in its status colour. */
+  .rfc-tile {
+    --c: var(--ink-2);
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border: var(--px) solid var(--c);
+    box-shadow: 2px 2px 0 var(--c);
+    background: var(--bg-sub);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .rfc-tile:hover,
+  .rfc-tile:focus-visible {
+    transform: translate(-2px, -2px);
+    box-shadow: 4px 4px 0 var(--c);
+  }
+
+  .rfc-tile--accepted {
+    --c: var(--ok);
+  }
+
+  .rfc-tile--draft {
+    --c: var(--risk-medium);
+  }
+
+  .rfc-tile--rejected {
+    --c: var(--risk-high);
+  }
+
+  .rfc-tile--superseded {
+    --c: var(--risk-low);
+  }
+
+  @container (max-width: 599px) {
+    .rfc-lane {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .rfc-proposals__cards .status-badge {
+    margin-right: var(--space-1);
+  }
+
+  /* ---------- F-SC1 the schema files, one enriched table per group ---------- */
+
+  /* Fixed columns, so a long file name wraps in its own column instead of
+     squeezing the description to one letter a line. */
+  .schema-table {
+    width: 100%;
+    min-width: 34rem;
+    table-layout: fixed;
+  }
+
+  .schema-table__col-file {
+    width: 38%;
+  }
+
+  .schema-table__col-length {
+    width: 12rem;
+  }
+
+  .schema-table__file {
+    font-weight: 400;
+  }
+
+  .schema-table__file .pg {
+    vertical-align: -2px;
+    margin-right: var(--space-2);
+  }
+
+  .schema-table__file code {
+    font-size: 13px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+  }
+
+  .schema-table__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    margin-top: var(--space-1);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .schema-table__stamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .schema-table__purpose {
+    font-weight: 600;
+  }
+
+  .schema-table td p {
+    margin: 0;
+  }
+
+  .schema-table td p + p {
+    margin-top: var(--space-1);
+  }
+
+
+  /* ---------- count matrices on the listing pages ---------- */
+
+  .count-matrix__table {
+    border-collapse: separate;
+    border-spacing: 4px;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .count-matrix__table th,
+  .count-matrix__table td {
+    border: 0;
+    padding: 0;
+  }
+
+  .count-matrix__corner,
+  .count-matrix__col {
+    vertical-align: bottom;
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: var(--ink-2);
+  }
+
+  .count-matrix__corner {
+    text-align: left;
+  }
+
+  .count-matrix__col {
+    min-width: 40px;
+    text-align: center;
+  }
+
+  .count-matrix__col .pg {
+    display: block;
+    margin: 0 auto var(--space-1);
+  }
+
+  /* Layer names run upwards, so nine columns fit the text column without
+     breaking a name inside a word. */
+  .count-matrix__col.has-layer span {
+    display: inline-block;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+  }
+
+  /* Card text can hold long paths and code; let it wrap inside the card. */
+  .section-index .icon-card__text {
+    overflow-wrap: anywhere;
+  }
+
+  .count-matrix__row {
+    min-width: 10rem;
+    max-width: 14rem;
+    padding-right: var(--space-2);
+    text-align: left;
+    font-weight: 400;
+  }
+
+  .count-matrix__row .pg {
+    display: inline-block;
+    margin-right: var(--space-2);
+    vertical-align: -1px;
+  }
+
+  .count-matrix__cell {
+    min-width: 40px;
+    height: 32px;
+    box-shadow: inset 0 0 0 2px var(--line);
+    background: var(--bg-sub);
+    color: var(--ink-2);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .count-matrix__cell[data-heat='0'] {
+    box-shadow: inset 0 0 0 2px var(--rule);
+  }
+
+  .count-matrix__scale {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .count-matrix__scale li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .count-matrix__swatch {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    box-shadow: inset 0 0 0 2px var(--line);
+  }
+
+  /* ---------- the composed skills and their workflows ---------- */
+
+  .skill-workflows__list {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .skill-workflows__row {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .skill-workflows__head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+  }
+
+  .skill-workflows__head span {
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+}
