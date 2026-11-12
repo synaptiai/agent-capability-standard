@@ -91,7 +91,7 @@ A functional category grouping capabilities by their primary purpose. The 9 cogn
 - **EXECUTE**: Change the world (execute, mutate, send)
 - **VERIFY**: Ensure correctness (verify, checkpoint, rollback, constrain, audit)
 - **REMEMBER**: Persistence across invocations (persist, recall)
-- **COORDINATE**: Multi-agent interaction (delegate, synchronize, invoke)
+- **COORDINATE**: Multi-agent and user interaction (delegate, synchronize, invoke, inquire)
 
 Layers are derived from cognitive architecture theory (BDI, SOAR, ReAct) and control theory.
 
