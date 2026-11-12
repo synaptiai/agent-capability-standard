@@ -48,9 +48,9 @@ Each category contains 2-11 subcategories with hierarchical numerical coding (e.
 title: How OASF codes its skills
 ---
 flowchart TB
-  accDescr: OASF has 15 primary categories, each category has 2 to 11 subcategories, and a skill's numerical code sits under its subcategory, as 10101 sits under 101.
-  cat["Primary category: 15 of them"] -->|2 to 11 each| sub["Subcategory, for example 101"]
-  sub --> skill["Skill, for example 10101"]
+  accDescr: OASF has 15 primary categories, each category contains 2 to 11 subcategories, and the codes are hierarchical numbers, so skill 10101 sits under 101.
+  cat["Primary category: 15 of them"] -->|2 to 11 each| sub[Subcategory]
+  sub -->|hierarchical numerical coding| skill["Skill: 10101 sits under 101"]
 ```
 
 ### 1.2 Grounded Agency Capability Ontology
@@ -197,10 +197,10 @@ flowchart LR
 title: Safety built into the capabilities
 ---
 flowchart TB
-  accDescr: In Grounded Agency, constrain enforces policies before execution, mutate and send structurally require a checkpoint, and verify validates after execution.
-  con[constrain] -->|policies, before execution| hi["mutate, send"]
-  cp[checkpoint] -->|required before| hi
-  hi -->|after execution| ver[verify]
+  accDescr: In Grounded Agency, constrain enforces policies before execution and verify validates after it, and the high-risk capabilities mutate and send structurally require a checkpoint.
+  con["constrain: enforces policies"] -->|before| ex[Execution]
+  ex -->|after| ver["verify: validates"]
+  cp[checkpoint] -->|structurally required before| hi["High risk: mutate, send"]
 ```
 
 ### 3.3 Composability Comparison
@@ -452,8 +452,8 @@ title: The MLOps model deployment
 ---
 flowchart TB
   accDescr: The deployment checks the model artifacts and the deployment policies with constrain, checkpoints, executes, verifies, measures performance, audits, and rolls back to the checkpoint if verification failed.
-  c1[constrain] -->|artifacts| c2[constrain]
-  c2 -->|policies| checkpoint
+  c1["constrain: model artifacts"] --> c2["constrain: deployment policies"]
+  c2 --> checkpoint
   checkpoint --> execute --> verify --> measure --> audit
   audit -->|if verification failed| rollback
 ```

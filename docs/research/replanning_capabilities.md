@@ -24,12 +24,11 @@ Add **1 new atomic capability** (`inquire`) and document **2 workflow patterns**
 title: The recommendation in one picture
 ---
 flowchart LR
-  accDescr: World change detection and continuous monitoring become the monitor-and-replan workflow pattern, goal uncertainty becomes the clarify-intent pattern and the new atomic capability inquire, and re-planning triggers become detect with the plan-invalidation domain.
-  wc[World change detection] --> mr[monitor-and-replan pattern]
-  cm[Continuous monitoring] --> mr
-  gu[Goal uncertainty] --> ci[clarify-intent pattern]
-  gu --> inq["inquire: new atomic capability"]
-  rt[Re-planning triggers] --> det["detect, domain: plan-invalidation"]
+  accDescr: World change detection and continuous monitoring become workflow patterns using existing capabilities, goal uncertainty handling becomes one new atomic capability, inquire, and re-planning triggers extend detect with the plan-invalidation domain.
+  wc[World change detection] --> wp["Workflow pattern using existing capabilities"]
+  cm[Continuous monitoring] --> wp
+  gu[Goal uncertainty handling] --> inq["One new atomic capability: inquire"]
+  rt[Re-planning triggers] --> det["Extend detect with domain: plan-invalidation"]
 ```
 
 ---
@@ -208,8 +207,8 @@ title: monitor as a composition
 ---
 flowchart TB
   accDescr: monitor decomposes into observe, state, compare of the current with the expected state, and detect of the divergence.
-  observe --> state --> compare
-  compare -->|"current vs expected"| detect
+  observe --> state --> compare["compare(current_state, expected_state)"]
+  compare --> detect["detect(divergence)"]
 ```
 
 However, we should extend `detect` to recognize "plan-invalidation" as a valid domain:
@@ -250,7 +249,7 @@ title: replan as a composition
 ---
 flowchart TB
   accDescr: replan is critique of the current plan against the violations, followed by plan with the revised goal and new constraints.
-  critique -->|what is wrong| plan
+  critique["critique(current_plan, violations)"] --> plan["plan(revised_goal, new_constraints)"]
 ```
 
 ### 3.4 Candidate: `inquire` (Goal Clarification)
@@ -268,8 +267,8 @@ title: The decomposition first considered for inquire
 ---
 flowchart TB
   accDescr: The first decomposition considered for inquire is measure the ambiguity, generate clarifying questions, and receive the clarification; the analysis below finds it debatable.
-  measure -->|ambiguity| generate
-  generate -->|clarifying questions| receive
+  measure["measure(ambiguity)"] --> generate["generate(clarifying_questions)"]
+  generate --> receive["receive(clarification)"]
 ```
 
 Wait — let's reconsider. The generation of clarifying questions is specialized:
@@ -330,9 +329,9 @@ title: infer-goal as a composition
 ---
 flowchart TB
   accDescr: infer-goal observes the context, classifies the likely intents, compares them, and grounds the selected intent.
-  observe -->|context| classify
-  classify -->|likely intents| compare
-  compare -->|selected intent| ground
+  observe["observe(context)"] --> classify["classify(likely_intents)"]
+  classify --> compare["compare(intents)"]
+  compare --> ground["ground(selected_intent)"]
 ```
 
 ---
@@ -483,11 +482,11 @@ title: monitor-and-replan as proposed here
 ---
 flowchart TB
   accDescr: The proposed pattern observes, builds the state, compares it with the plan's assumptions and detects violations; critique stops the run when there are none, and plan is skipped when the violation is minor.
-  observe -->|current_state| state
+  observe --> state
   state -->|world_state| compare
   compare -->|comparison| detect
-  detect -->|violations| critique
-  critique -.->|"gate: no violations, stop"| stop[Plan stays valid]
+  detect --> critique
+  critique -.->|"gate: violations.detected == false, stop"| stop[Plan stays valid]
   critique -->|plan_assessment| plan
   plan -.->|"gate: minor, skip"| keep[Continue with the current plan]
 ```
@@ -552,8 +551,8 @@ clarify-intent:
 title: clarify-intent as proposed here
 ---
 flowchart TB
-  accDescr: The proposed pattern critiques the request for ambiguity, asks clarifying questions with inquire unless the request is already clear, sends them to the user, receives the answer, and integrates it with the original request.
-  critique -->|ambiguity_analysis| inquire
+  accDescr: The proposed pattern critiques the request for ambiguity, asks clarifying questions with inquire unless ambiguity_analysis.confidence is above 0.85, sends them to the user, receives the answer, and integrates it with the original request.
+  critique --> inquire
   inquire -.->|"gate: confidence above 0.85, skip"| clear[Request clear enough]
   inquire -->|questions| send
   send --> receive
