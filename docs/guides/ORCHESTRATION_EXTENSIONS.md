@@ -43,6 +43,18 @@ fields without listing it in `workflow_extensions.requires` is rejected
 know. That is deliberate. A consumer built for 1.0 would otherwise run the
 workflow and silently ignore, for example, a wait or an approval.
 
+```mermaid
+---
+title: Extensions are must-understand
+---
+flowchart TB
+  accDescr: A workflow that uses an extension's fields without listing it in workflow_extensions.requires is rejected with V106, and so is one that lists an extension the validator does not know; otherwise the validator checks it.
+  q1{"Uses an extension's fields without listing it?"} -->|yes| v1[V106: rejected]
+  q1 -->|no| q2{"Lists an extension the validator does not know?"}
+  q2 -->|yes| v2[V106: rejected]
+  q2 -->|no| ok[Validated]
+```
+
 ## Triggers (`triggers@1`)
 
 `triggers` lists the ways a run can start. Each trigger has a `kind`:
@@ -56,6 +68,18 @@ workflow and silently ignore, for example, a wait or an approval.
 
 `attendance: attended | unattended` overrides the default. It matters for
 approval steps: an unattended run cannot wait for a person in the session.
+
+```mermaid
+---
+title: Each trigger kind's default attendance
+---
+flowchart LR
+  accDescr: Schedule and event triggers start unattended runs, a manual trigger starts an attended run, and an invoked run takes the invoker's attendance; attendance overrides the default.
+  sch[schedule] --> un[unattended]
+  ev[event] --> un
+  man[manual] --> at[attended]
+  inv[invoke] --> inh["the invoker's attendance"]
+```
 
 ### Schedules
 
@@ -77,6 +101,18 @@ approval steps: an unattended run cannot wait for a person in the session.
 - `overlap` says what happens when a run is still going at the next fire
   time: `skip` it, keep at most one queued run (`buffer_one`), or start
   runs concurrently (`allow_all`).
+
+
+```mermaid
+---
+title: A fire time while a run is still going
+---
+flowchart LR
+  accDescr: When a run is still going at the next fire time, overlap skip skips the new run, buffer_one keeps at most one queued run, and allow_all starts the runs concurrently.
+  fire[Next fire time, a run still going] -->|skip| s1[The new run is skipped]
+  fire -->|buffer_one| s2[At most one run queued]
+  fire -->|allow_all| s3[Runs start concurrently]
+```
 
 ### Events
 
@@ -298,6 +334,20 @@ and what the decision binds to:
   change before the step runs, the approval no longer applies. `recheck`
   re-reads a source just before acting and asks again (`reask`), replans or
   stops when it changed.
+
+
+  ```mermaid
+  ---
+  title: What an approval is bound to
+  ---
+  flowchart TB
+    accDescr: The decision is bound to the SHA-256 digest of the values shown; if they change before the step runs the approval no longer applies, and recheck re-reads a source just before acting and asks again, replans or stops when it changed.
+    shown[Values shown to the approver] -->|SHA-256| dg[Digest]
+    dg --> dec[Decision bound to the digest]
+    dec --> rc{"recheck: source changed just before acting?"}
+    rc -->|no| run[The step runs]
+    rc -->|yes| act["reask, replan or stop"]
+  ```
 - A `standing_mandate` approver names its mandate in `mandate_ref`, for
   pre-approved routine actions. It needs no one present, so it is asked
   even in an unattended run; your host answers `approved`, or
@@ -344,6 +394,18 @@ and what the decision binds to:
   The `mutate` needs its own `when_unattended`: when the mandate covers
   the send, nothing is deferred, and an unattended run reaches the
   `mutate` with no one to approve it.
+
+
+  ```mermaid
+  ---
+  title: The nightly sweep with no mandate for the send
+  ---
+  flowchart TB
+    accDescr: When no mandate covers the send, it is deferred to the queue; the independent read-only retrieve still runs, the mutate that acts on the world is queued too, and the run ends deferred, listing every deferral.
+    send["send: deferred to the queue"] --> retrieve["retrieve: read-only and independent, runs"]
+    retrieve --> mutate["mutate: acts on the world, queued too"]
+    mutate --> end1["Run ends deferred, listing every deferral"]
+  ```
 - A step that must run whether or not an earlier action was deferred,
   such as an escalation to a person, can say so with
   `after_deferral: run`. It is then deferred only if it reads a deferred
@@ -451,6 +513,18 @@ with each event a step waits for (`schemas/agent_identity_schema.yaml`):
   known values: a reference that resolves to anything else, including an
   optional input that was left out, fails the step (R402) rather than
   turning the check off.
+
+
+  ```mermaid
+  ---
+  title: Which items a sender check keeps
+  ---
+  flowchart TB
+    accDescr: With sender_check or accept_trust_classes bound, an item whose sender has an identity authenticated the accepted way and of an accepted trust class is kept with sender and sender_identity; any other item is dropped and counted.
+    item[An item arrives] --> q{"Sender has an identity, authenticated the accepted way, of an accepted trust class?"}
+    q -->|yes| keep["Kept, with sender and sender_identity"]
+    q -->|no| drop[Dropped and counted]
+  ```
 - `authenticated_by` is one of `session_id`, `chat_user_id`,
   `code_host_login`, `directory_id`, `api_key`, `signed_token`, or your own
   `x-` value. Trust classes are `owner`, `decision_person`,
@@ -467,6 +541,20 @@ with each event a step waits for (`schemas/agent_identity_schema.yaml`):
   validator warns (W606) when that would leave only a mandate. The mark
   follows references: if your host carries an item's content into a later
   step by other means, the executor cannot see it.
+
+
+  ```mermaid
+  ---
+  title: How the always-ask mark spreads
+  ---
+  flowchart TB
+    accDescr: An item from a listed trust class, or with no identity or trust class, marks every step that reads it directly or through other steps; a marked step that needs approval is asked of a person even when its approval names a standing mandate, or follows when_unattended in an unattended run.
+    item["Item from a listed class, or with no identity or trust class"] -->|read by| s1[A step]
+    s1 -->|read by| s2["A later step: a summary, injected context, an invoke"]
+    s2 --> q{Needs approval?}
+    q -->|attended run| person["Asked of a person, even with a standing mandate"]
+    q -->|unattended run| wu[Follows when_unattended]
+  ```
 - On a step that does not wait, your host receives the inputs, applies
   them to what it returns, and must put the `sender_identity` it applied
   them to on each item it returns: the executor marks from it.
