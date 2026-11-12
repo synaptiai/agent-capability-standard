@@ -167,8 +167,10 @@
     overflow-wrap: anywhere;
   }
 
+  /* One column on a phone. The extra class outranks the shared facts-list
+     rule in components.css, which can load after this sheet. */
   @media (max-width: 599px) {
-    .wf-step__facts {
+    .wf-step__body .wf-step__facts {
       grid-template-columns: minmax(0, 1fr);
     }
 
