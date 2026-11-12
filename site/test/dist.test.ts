@@ -403,6 +403,80 @@ describe('design system on the built site', () => {
   });
 });
 
+// Issue #125 rollout: the Standard's, the edge types page's and the
+// diagnostics page's figures. Expected values come from scans of the
+// ontology, the Standard and the built HTML, never from the figure code.
+describe('Standard, edge types and diagnostics figures on the built site', () => {
+  const page = (rel: string) => readFileSync(path.join(dist, rel), 'utf8');
+  const figures = (h: string) => [...h.matchAll(/<figure\b([^>]*)>([\s\S]*?)<\/figure>/g)].map((m) => ({ attrs: m[1]!, body: m[2]! }));
+  const SPEC_PAGES = ['spec/1.1.0/index.html', 'spec/1.0.0/index.html', 'spec/edge-types/index.html', 'spec/diagnostics/index.html'];
+
+  it('names every figure by its title and gives it a caption, with no slot marker left behind', () => {
+    for (const f of SPEC_PAGES) {
+      const h = page(f);
+      expect(h, f).not.toContain('data-fig-slot');
+      const figs = figures(h).filter((x) => /class="fig\b/.test(x.attrs));
+      expect(figs.length, f).toBeGreaterThan(0);
+      for (const x of figs) {
+        const label = /aria-labelledby="([^"]+)"/.exec(x.attrs)?.[1];
+        expect(label, `${f}: ${x.attrs}`).toBeDefined();
+        const title = new RegExp(`id="${label}"[^>]*>([^<]+)<`).exec(x.body)?.[1]?.trim();
+        expect(title, `${f}: ${label}`).toBeTruthy();
+        expect(x.body, `${f}: ${label}`).toMatch(/<figcaption class="fig__caption">[^<]+<\/figcaption>/);
+      }
+    }
+  });
+
+  it('hides each figure svg or names it as an image, and never puts a link inside an image', () => {
+    // The F-E2 matrix names its image with aria-label; the rest point at their figure's title.
+    for (const f of SPEC_PAGES) {
+      for (const x of figures(page(f))) {
+        for (const svg of x.body.matchAll(/<svg\b([^>]*)>([\s\S]*?)<\/svg>/g)) {
+          const a = svg[1]!;
+          const ok = /aria-hidden="true"/.test(a) || (/role="img"/.test(a) && /aria-label(ledby)?="[^"]+"/.test(a));
+          expect(ok, `${f}: <svg${a.slice(0, 80)}>`).toBe(true);
+          if (/role="img"/.test(a)) expect(svg[2]).not.toContain('<a ');
+        }
+      }
+    }
+  });
+
+  it('draws one edge-type card figure per edge type of the ontology, each the first edge of its type', () => {
+    const h = page('spec/edge-types/index.html');
+    const triples = ontologyEdgeTriples();
+    const types = [...new Set(triples.map((t) => t.type))];
+    const cards = figures(h).filter((x) => /data-fig-kind="edge-type-card"/.test(x.attrs));
+    expect(cards).toHaveLength(types.length);
+    for (const t of types) {
+      const first = triples.find((x) => x.type === t)!;
+      const card = cards.find((c) => c.body.includes(`data-edge-type="${t}"`));
+      expect(card, t).toBeDefined();
+      expect(card!.body).toContain(`data-capability="${first.from}"`);
+      expect(card!.body).toContain(`data-capability="${first.to}"`);
+    }
+    // The summary table and the declared-edges table are figures too.
+    expect(figures(h).filter((x) => /data-fig-kind="edge-(summary|type-table)"/.test(x.attrs))).toHaveLength(2);
+  });
+
+  it('draws one code-grid tile per diagnostic code, each linking to its own row', () => {
+    const h = page('spec/diagnostics/index.html');
+    const grid = figures(h).find((x) => /data-fig-kind="code-grid"/.test(x.attrs))!;
+    const tiles = [...grid.body.matchAll(/<a\b[^>]*>/g)].map((m) => m[0]).filter((a) => /class="diag-tile/.test(a)).map((a) => /href="#([a-z]\d{3})"/.exec(a)?.[1] ?? '');
+    const scanned = Object.values(diagnosticRowsPerSection(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`))).reduce((a, b) => a + b, 0);
+    expect(tiles).toHaveLength(scanned);
+    for (const t of tiles) expect(h).toContain(`<tr id="${t}"`);
+  });
+
+  it('turns every code of the current Standard\'s §9.2 to §9.7 tables into a tile linking to the diagnostics page', () => {
+    const v = standardFileVersions()[0]!;
+    const h = page(`spec/${v}/index.html`);
+    const want = Object.values(diagnosticRowsPerSection(repoText(`spec/STANDARD-v${v}.md`))).reduce((a, b) => a + b, 0);
+    const tables = figures(h).filter((x) => /data-fig-kind="code-table"/.test(x.attrs));
+    const tiles = tables.flatMap((x) => [...x.body.matchAll(/<a\b[^>]*>/g)].map((m) => m[0]).filter((a) => /class="diag-tile/.test(a) && /href="\/spec\/diagnostics\/#[a-z]\d{3}"/.test(a)));
+    expect(tiles).toHaveLength(want);
+  });
+});
+
 describe('dist checks on a fixture', () => {
   it('reports headings with no id, on any page', () => {
     expect(bareHeadings('/p/', '<h1>T</h1><h2 class="x">A</h2><h2 id="b">B</h2>')).toBe('/p/: 2 heading(s) without an id');

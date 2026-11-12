@@ -71,7 +71,7 @@ export function chapterKeywords(text: string): ChapterKeywords[] {
     if (/^### /.test(line)) skip = /^### 1\.2 /.test(line);
     if (!cur || skip) continue;
     for (const g of KEYWORD_GROUPS) {
-      for (const w of g.words) cur.counts[g.id] += (line.match(new RegExp(`(?<![A-Za-z])${w}(?![A-Za-z])`, 'g')) ?? []).length;
+      for (const w of g.words) cur.counts[g.id] += (line.match(new RegExp(`(?<![A-Za-z0-9_])${w}(?![A-Za-z0-9_])`, 'g')) ?? []).length;
     }
   }
   if (out.length === 0) throw new Error('spec figures: the Standard has no "## N." chapters');
