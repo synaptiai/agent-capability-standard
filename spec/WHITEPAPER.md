@@ -43,6 +43,15 @@ The Agent Capability Standard provides structural reliability:
 - **Add safety**: Implement checkpoints for high-risk mutations (1 week)
 - **Expand**: Progress to full conformance as value is demonstrated (1 quarter)
 
+```mermaid
+---
+title: The recommended adoption path
+---
+flowchart LR
+  accDescr: Start by running the validator on existing workflows in about a day, add checkpoints for high-risk mutations in about a week, and progress to full conformance over a quarter as the value shows.
+  s1["Start small: validate existing workflows, 1 day"] --> s2["Add safety: checkpoints for high-risk mutations, 1 week"] --> s3["Expand: full conformance, 1 quarter"]
+```
+
 The standard is framework-agnostic and modular. Adopt what you need; expand as complexity grows.
 
 ---
@@ -296,6 +305,18 @@ Rather than creating separate capabilities for each domain (detect-anomaly, dete
 ```
 
 This preserves expressiveness while maintaining a minimal, learnable ontology.
+
+
+```mermaid
+---
+title: From domain variants to a domain parameter
+---
+flowchart LR
+  accDescr: The domain-specific variants detect-anomaly, detect-entity and detect-drift of the 99-capability model become one atomic verb, detect, with a domain parameter.
+  a[detect-anomaly] --> d["detect, with domain: anomaly, entity or drift"]
+  e[detect-entity] --> d
+  r[detect-drift] --> d
+```
 
 #### Atomicity Validation
 
@@ -608,6 +629,16 @@ The validator operates at four conformance levels:
 **L3 (Contracts)**: Binding types vs. consumer schemas
 **L4 (Patches)**: Coercion registry and patch suggestions
 
+
+```mermaid
+---
+title: The four validation levels
+---
+flowchart LR
+  accDescr: Validation rises from L1, capability existence and prerequisites, through L2 reference resolution and type inference and L3 binding types against consumer schemas, to L4 coercions and patch suggestions.
+  l1["L1 Basic: existence, prerequisites"] --> l2["L2 Schema: refs, type inference"] --> l3["L3 Contracts: binding types"] --> l4["L4 Patches: coercions, patches"]
+```
+
 ### 7.2 Error Model
 
 Diagnostics are categorized:
@@ -657,6 +688,18 @@ We evaluate the validator by:
 - **Positive fixtures**: Valid workflows that must pass
 - **Negative fixtures**: Invalid workflows that must fail with specific error codes
 - **Patch fixtures**: Invalid workflows with expected patch suggestions
+
+
+```mermaid
+---
+title: The three kinds of fixture
+---
+flowchart LR
+  accDescr: Positive fixtures are valid workflows that must pass, negative fixtures are invalid workflows that must fail with specific error codes, and patch fixtures are invalid workflows with expected patch suggestions.
+  pos[Positive fixture: valid] -->|must| pass[Pass]
+  neg[Negative fixture: invalid] -->|must| fail[Fail with a specific code]
+  pat[Patch fixture: invalid] -->|must| patch[Yield the expected patch]
+```
 
 ### 8.2 Trust Model Evaluation
 
@@ -724,6 +767,18 @@ The `debug_code_change` workflow:
 7. Checkpoints
 8. Applies and verifies
 9. Rolls back if needed
+
+
+```mermaid
+---
+title: The incident triage workflow
+---
+flowchart TB
+  accDescr: The debug_code_change workflow inspects the failing behavior, searches for related patterns, maps dependencies, models expected behavior, critiques causes, plans a minimal fix, checkpoints, applies and verifies the fix, and rolls back if needed.
+  i[Inspect failing behavior] --> s[Search related patterns] --> m[Map dependencies] --> e[Model expected behavior]
+  e --> c[Critique causes] --> p[Plan a minimal fix] --> k[Checkpoint] --> a[Apply and verify]
+  a -.->|if needed| r[Roll back]
+```
 
 ### 9.3 Capability Gap Analysis
 

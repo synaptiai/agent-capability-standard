@@ -188,6 +188,17 @@ edges:
   - {from: verify, to: constrain, type: alternative_to}
 ```
 
+
+```mermaid
+---
+title: The three example edges
+---
+flowchart TB
+  accDescr: In the example, mutate precedes verify, verify precedes audit, and verify is an alternative to constrain.
+  mutate[mutate] -->|precedes| verify[verify] -->|precedes| audit[audit]
+  verify ---|alternative_to| constrain[constrain]
+```
+
 Key design decisions:
 
 1. **100% Schema Coverage**: All 36 capabilities have both `input_schema` and `output_schema`, enabling static type checking.
@@ -829,6 +840,17 @@ This transparency is critical for deploying agents in high-stakes domains (healt
 **Runtime enforcement**: Extend the validator to check types at execution time with gradual typing semantics. This would catch errors from dynamic data (e.g., API responses with unexpected shapes) while preserving the design-time guarantee for statically-known flows.
 
 **Learned trust weights**: Use reinforcement learning from conflict resolution feedback to calibrate source authority. Historical logs of which source "won" conflicts—and whether downstream verification succeeded—provide training signal.
+
+
+```mermaid
+---
+title: Where learned trust weights would come from
+---
+flowchart TB
+  accDescr: Historical logs of which source won each conflict, and whether downstream verification then succeeded, would give the training signal that reinforcement learning uses to calibrate source authority.
+  logs["Logs: which source won, did verification succeed"] -->|training signal| rl[Reinforcement learning]
+  rl -->|calibrates| auth[Source authority weights]
+```
 
 **Multi-agent protocols**: Extend the COORDINATE layer with formal protocols for delegation, negotiation, and consensus. This would enable principled composition of multiple Grounded Agency instances with explicit trust boundaries.
 
