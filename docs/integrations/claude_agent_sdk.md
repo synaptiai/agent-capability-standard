@@ -276,6 +276,17 @@ The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop and Subage
 
 A reservation that is never consumed or released lapses after `checkpoint_reservation_seconds` (default 600).
 
+```mermaid
+---
+title: What happens to a checkpoint reservation
+---
+flowchart TB
+  accDescr: PreToolUse applies the rate limit and reserves the checkpoint for the call; after a successful mutation PostToolUse consumes it, and after an error, no change, or a failed or interrupted call the reservation is released and the checkpoint stays valid.
+  pre["PreToolUse: rate limit, reserve the checkpoint for the tool_use_id"] --> run[Tool call]
+  run -->|mutated| consume["PostToolUse: consume the checkpoint"]
+  run -->|"error, no change, failure"| release["PostToolUse or PostToolUseFailure: release; the checkpoint stays valid"]
+```
+
 This provides defense-in-depth alongside the `can_use_tool` permission callback:
 
 ```python
@@ -402,6 +413,17 @@ runtime.register_agent(
 adapter.orchestrator = runtime
 options = adapter.wrap_options(base_options)
 # options.agents now contains SDK-compatible AgentDefinition dicts
+```
+
+```mermaid
+---
+title: The two agents in the example
+---
+flowchart TB
+  accDescr: The analyst agent has search, retrieve and classify and the writer agent has generate and mutate; the orchestration runtime holds both, and wrap_options exports them as SDK agent definitions.
+  analyst["analyst: search, retrieve, classify"] --> rt[OrchestrationRuntime]
+  writer["writer: generate, mutate"] --> rt
+  rt -->|"adapter.orchestrator, wrap_options()"| agents["options.agents: SDK AgentDefinition dicts"]
 ```
 
 ## Configuration Options
