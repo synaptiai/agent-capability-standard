@@ -1,15 +1,24 @@
 ---
-// The home page (design notes, ia-home section 5; plan Phase 6). No sidebar.
-// Sections in order: opening, design principles, why a standard, the scroll
-// story, the capabilities, what the standard covers, questions, get started.
+// The home page (design notes, ia-home section 5; visual spec 3.11). No
+// sidebar. Sections in order: opening with the layer strip, why a standard,
+// the scroll story, what the standard covers, the capabilities, design
+// principles, the workflow gallery, get started, questions. The story comes
+// before the coverage cards (the spec lists it after them) so that no run
+// of the page without an information figure is longer than 2 screens
+// (visual spec 4.2): the hero, the reasons and 21 cards are longer than that.
 // Everything it says comes from src/lib/home.ts, which its Markdown copy also
 // reads, and the counts, versions and names come from the data.
 import CapabilityTable from '../components/CapabilityTable.astro';
 import CopyBlock from '../components/CopyBlock.astro';
 import HomeStory from '../components/HomeStory.astro';
 import InlineText from '../components/InlineText.astro';
+import RiskBadge from '../components/RiskBadge.astro';
+import Figure from '../components/fig/Figure.astro';
+import IconCard from '../components/fig/IconCard.astro';
+import StepStrip from '../components/fig/StepStrip.astro';
+import { loadOntology } from '../data/ontology';
 import DocLayout from '../layouts/DocLayout.astro';
-import { pageHref, refSlugger, routeByUrl } from '../lib/generated';
+import { layerHref, pageHref, refSlugger, routeByUrl, workflowHref } from '../lib/generated';
 import {
   AGENTS_HEADING,
   AGENTS_LINE,
@@ -17,17 +26,28 @@ import {
   CAPABILITIES_INTRO,
   coverage,
   faq,
+  gallery,
+  galleryCaption,
+  GALLERY_FIG_TITLE,
+  GALLERY_INTRO,
   getStarted,
   HOME_H1,
   homeDescription,
   opening,
   principles,
+  STORY_FIG_TITLE,
   STORY_HEADING,
+  storyCaption,
   storyIntro,
+  TABLE_FIG_TITLE,
+  tableCaption,
   WHY,
+  WORKFLOWS_HEADING,
   type HomeLink,
 } from '../lib/home';
+import Mark from '../pixel/Mark.astro';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
+import '../styles/figures-home.css';
 
 const route = routeByUrl('/');
 const id = refSlugger();
@@ -36,22 +56,36 @@ const p = principles();
 const cov = coverage();
 const f = faq();
 const g = getStarted();
+const layers = loadOntology().layers;
 const description = homeDescription();
 /** A site page through the route check, or an outside URL as it is. */
 const href = (l: HomeLink) => (l.url.startsWith('/') ? pageHref(l.url) : l.url);
 const si = storyIntro();
 const groups = [
-  { title: 'The standard', cards: cov.standard, glyph: 'note' },
-  { title: 'Reference data', cards: cov.data, glyph: 'hash' },
-  { title: 'Tools', cards: cov.tools, glyph: 'code' },
+  { title: 'The standard', cards: cov.standard },
+  { title: 'Reference data', cards: cov.data },
+  { title: 'Tools', cards: cov.tools },
 ] as const;
+const wfGroups = gallery();
+let fig = 0;
+const nextFig = () => ++fig;
 ---
 <DocLayout route={route} title="Agent Capability Standard" description={description} toc={false}>
   <article class="doc doc--home home" data-pagefind-body>
     <section class="home-opening">
-      <p class="eyebrow">Agent Capability Standard</p>
+      <p class="eyebrow home-opening__eyebrow"><Mark scale={4} />Agent Capability Standard</p>
       <h1 id={id(HOME_H1)}>{HOME_H1}</h1>
       <p class="lead"><InlineText parts={o.summary} /></p>
+      <ul class="home-layers" aria-label={`The ${layers.length} layers`}>
+        {layers.map((l) => (
+          <li>
+            <a class="home-layers__link has-layer" href={layerHref(l.id)} style={`--layer: var(--layer-${l.id})`}>
+              <PixelGlyph name={l.id} layer={l.id} scale={3} />
+              <span class="home-layers__name">{l.id}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
       <p class="home-opening__version">{o.versionLine}</p>
       <p class="home-opening__links">
         {/* The space between links keeps their words apart in search. */}
@@ -65,27 +99,6 @@ const groups = [
       <CopyBlock label={o.install.label} text={o.install.commands.join('\n')} />
     </section>
 
-    <section class="home-section home-section--alt home-principles">
-      <h2 id={id('Design principles')}>Design principles</h2>
-      <p>
-        {p.intro} {p.source.before}<a href={href(p.source.link)}>{p.source.link.text}</a>{p.source.after}
-      </p>
-      <ol class="home-principles__list">
-        {p.items.map((item) => (
-          <li>
-            <h3 id={id(item.title)}>{item.title}</h3>
-            {item.blocks.map((b) =>
-              b.kind === 'p' ? (
-                <p><InlineText parts={b.text} /></p>
-              ) : (
-                <ul>{b.items.map((line) => <li><InlineText parts={line} /></li>)}</ul>
-              ),
-            )}
-          </li>
-        ))}
-      </ol>
-    </section>
-
     <section class="home-section home-why">
       <h2 id={id('Why a standard')}>Why a standard</h2>
       <p>{WHY}</p>
@@ -96,62 +109,136 @@ const groups = [
       <p>
         {si.before}<a href={href(si.link)}>{si.link.code ? <code>{si.link.text}</code> : si.link.text}</a>{si.after}
       </p>
-      <HomeStory id={id} />
+      <Figure id={id('fig-story')} n={nextFig()} title={STORY_FIG_TITLE} caption={storyCaption()} kind="story" wide class="home-story__fig">
+        <HomeStory id={id} />
+      </Figure>
     </section>
 
-    <section class="home-section home-capabilities">
-      <h2 id={id('The capabilities')}>The capabilities</h2>
-      <p>
-        <InlineText parts={CAPABILITIES_INTRO} /> <a href={href(CAPABILITIES_DERIVED)}>{CAPABILITIES_DERIVED.text}</a>.
-      </p>
-      <CapabilityTable />
-    </section>
-
-    <section class="home-section home-section--alt home-covers">
+    <section class="home-section home-covers">
       <h2 id={id('What the standard covers')}>What the standard covers</h2>
       {groups.map((grp) => (
         <section class="home-covers__group">
           <h3 id={id(grp.title)}>{grp.title}</h3>
-          <ul class="home-cards">
+          <ul class="icon-cards home-covers__cards">
             {grp.cards.map((c) => (
-              <li class="home-card">
-                <PixelGlyph name={grp.glyph} />
-                <p class="home-card__title"><a href={href(c.link)}>{c.title}</a></p>
-                <p class="home-card__line">{c.line}{c.section && <> ({c.section})</>}</p>
-              </li>
+              <IconCard
+                glyph={c.glyph!}
+                title={c.title}
+                href={href(c.link)}
+                number={c.count}
+                eyebrow={c.section}
+              >{c.line}</IconCard>
             ))}
           </ul>
         </section>
       ))}
     </section>
 
-    <section class="home-section home-faq">
-      <h2 id={id('Questions')}>Questions</h2>
-      {f.items.map((item) => (
-        <details class="home-faq__item">
-          <summary>{item.question}</summary>
-          <p><InlineText parts={item.answer} /></p>
-        </details>
-      ))}
-      <p><a href={href(f.more)}>{f.more.text}</a></p>
+    <section class="home-section home-section--alt home-capabilities">
+      <h2 id={id('The capabilities')}>The capabilities</h2>
+      <p>
+        <InlineText parts={CAPABILITIES_INTRO} /> <a href={href(CAPABILITIES_DERIVED)}>{CAPABILITIES_DERIVED.text}</a>.
+      </p>
+      <Figure id={id('fig-table')} n={nextFig()} title={TABLE_FIG_TITLE} caption={tableCaption()} kind="periodic-table" class="home-table__fig">
+        <CapabilityTable />
+      </Figure>
     </section>
 
-    <section class="home-section home-section--alt home-start">
+    <section class="home-section home-principles">
+      <h2 id={id('Design principles')}>Design principles</h2>
+      <p>
+        {p.intro} {p.source.before}<a href={href(p.source.link)}>{p.source.link.text}</a>{p.source.after}
+      </p>
+      <ul class="icon-cards home-principles__cards">
+        {p.items.map((item) => (
+          <IconCard glyph={item.glyph} title={item.title} eyebrow={item.number} heading="h3" id={id(item.title)}>
+            <Fragment slot="body">
+              {item.blocks.map((b) =>
+                b.kind === 'p' ? (
+                  <p><InlineText parts={b.text} /></p>
+                ) : (
+                  <ul>{b.items.map((line) => <li><InlineText parts={line} /></li>)}</ul>
+                ),
+              )}
+            </Fragment>
+          </IconCard>
+        ))}
+      </ul>
+    </section>
+
+    <section class="home-section home-section--alt home-workflows">
+      <h2 id={id(WORKFLOWS_HEADING)}>{WORKFLOWS_HEADING}</h2>
+      <p>{GALLERY_INTRO}</p>
+      <Figure id={id('fig-gallery')} n={nextFig()} title={GALLERY_FIG_TITLE} caption={galleryCaption()} wide kind="workflow-gallery">
+        <div class="wf-gallery">
+          {wfGroups.map((grp) => {
+            const label = id(`gallery-${grp.label}`);
+            return (
+              <section class="wf-gallery__group">
+                <p class="wf-gallery__label" id={label}>
+                  <PixelGlyph name={grp.glyph} scale={2} />
+                  <span>{grp.label}</span>
+                </p>
+                <ul class="wf-gallery__list" aria-labelledby={label}>
+                  {grp.items.map((it) => (
+                    <li class="wf-gallery__item" data-workflow={it.workflow.id}>
+                      <p class="wf-gallery__head">
+                        <a class="wf-gallery__name" href={workflowHref(it.workflow.id)}>{it.workflow.id}</a>
+                        <span class="wf-gallery__steps">{it.steps} steps</span>
+                        <RiskBadge risk={it.workflow.risk} />
+                      </p>
+                      <StepStrip wf={it.workflow} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+        <ul class="wf-gallery__legend" aria-label="Key">
+          <li><span class="step-strip step-strip--10" aria-hidden="true"><span class="step-strip__step step-strip__step--plain"></span></span>A step</li>
+          {(['checkpoint', 'mutating', 'verify', 'rollback'] as const).map((role) => (
+            <li>
+              <span class="step-strip step-strip--10" aria-hidden="true"><span class="step-strip__step step-strip__step--role"><PixelGlyph name={`role:${role}`} scale={1} /></span></span>
+              {{ checkpoint: 'Checkpoint', mutating: 'Changes state', verify: 'Verifies', rollback: 'Rollback' }[role]}
+            </li>
+          ))}
+          <li><span class="step-strip step-strip--10" aria-hidden="true"><span class="step-strip__step step-strip__step--plain step-strip__step--gate"></span></span>Has a gate</li>
+        </ul>
+      </Figure>
+    </section>
+
+    <section class="home-section home-start">
       <h2 id={id('Get started')}>Get started</h2>
       <div class="home-agents">
         <h3 id={id(AGENTS_HEADING)}>{AGENTS_HEADING}</h3>
         <p>{AGENTS_LINE}</p>
         <CopyBlock label="Prompt" text={g.prompt} />
       </div>
-      <ul class="home-cards home-cards--start">
-        {g.cards.map((c) => (
-          <li class="home-card">
-            <p class="home-card__title"><a href={href(c.link)}>{c.title}</a></p>
-            <p class="home-card__line">{c.line}</p>
-            {c.extra && <p class="home-card__line"><a href={href(c.extra)}>{c.extra.text}</a></p>}
+      <ol class="home-steps">
+        {g.cards.map((c, i) => (
+          <li class="home-step">
+            <span class="home-step__badge" aria-hidden="true">
+              <span class="home-step__number" data-pagefind-ignore>{i + 1}</span>
+              <PixelGlyph name={c.glyph!} scale={3} />
+            </span>
+            <p class="home-step__title"><a href={href(c.link)}>{c.title}</a></p>
+            <p class="home-step__line">{c.line}</p>
+            {c.extra && <p class="home-step__line"><a href={href(c.extra)}>{c.extra.text}</a></p>}
           </li>
         ))}
-      </ul>
+      </ol>
+    </section>
+
+    <section class="home-section home-section--alt home-faq">
+      <h2 id={id('Questions')}>Questions</h2>
+      {f.items.map((item) => (
+        <details class="home-faq__item">
+          <summary><PixelGlyph name="note" /><span>{item.question}</span></summary>
+          <p><InlineText parts={item.answer} /></p>
+        </details>
+      ))}
+      <p><a href={href(f.more)}>{f.more.text}</a></p>
     </section>
   </article>
 </DocLayout>

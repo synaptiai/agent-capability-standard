@@ -52,6 +52,9 @@ describe('typography', () => {
       // Visual spec 1.2 and 3.6: the minimum confidence on each domains-index
       // profile card is that card's hero number.
       '.profile-card__number',
+      // Visual spec 3.11 (issue #125): the home page's get-started steps are
+      // numbered with pixel step badges in the display font.
+      '.home-step__number',
     ]);
     const display = rules()
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))
@@ -189,8 +192,12 @@ describe('dimmed text', () => {
   });
 
   it('dims story steps other than the current one with --ink-3, a checked text colour', () => {
+    // Visual spec 1.2: the story's default render is its final frame, so
+    // steps are dimmed only while the reader scrolls inside it
+    // (data-playing), never as soon as the script loads (data-live).
     const all = rules();
-    expect(all.some((r) => r.selectors.includes('.story[data-live] .story__step') && /color:\s*var\(--ink-3\)/.test(r.body))).toBe(true);
+    expect(all.some((r) => r.selectors.includes('.story[data-playing] .story__step') && /color:\s*var\(--ink-3\)/.test(r.body))).toBe(true);
+    expect(all.some((r) => r.selectors.includes('.story[data-live] .story__step') && /color:/.test(r.body))).toBe(false);
   });
 });
 

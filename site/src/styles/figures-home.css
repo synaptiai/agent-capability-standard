@@ -1,0 +1,324 @@
+/*
+ * The home page's figures and glyph aids (visual spec 3.11): the layer strip
+ * in the hero, the coverage and principle card grids, the workflow gallery,
+ * the numbered get-started tiles and the question glyphs. Also the group
+ * glyphs of the section listing pages. Square corners, 2px lines, tokens
+ * only. Figures lay out by the width of their own .fig (a container).
+ */
+@layer components {
+  /* ---------- hero ---------- */
+
+  /* The hero eyebrow leads with the mark instead of the square that other
+     eyebrows carry (visual spec 1.3 and 3.11). */
+  .home-opening__eyebrow {
+    gap: var(--space-3);
+  }
+
+  .home-opening__eyebrow::before {
+    content: none;
+  }
+
+  .home-opening__eyebrow .mark {
+    color: var(--ink);
+  }
+
+  /* ---------- hero layer strip ---------- */
+
+  .home-layers {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: var(--space-1);
+    max-width: 56rem;
+    margin: var(--space-5) 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .home-layers li {
+    margin: 0;
+  }
+
+  .home-layers__link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-1);
+    border: var(--px) solid transparent;
+    color: var(--ink-2);
+    text-decoration: none;
+  }
+
+  .home-layers__link:hover,
+  .home-layers__link:focus-visible {
+    border-color: var(--layer);
+    background: var(--tint);
+    color: var(--ink);
+  }
+
+  .home-layers__name {
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 0.04em;
+  }
+
+  /* ---------- card grids ---------- */
+
+  .home-covers__group + .home-covers__group {
+    margin-top: var(--space-6);
+  }
+
+  .home-covers__cards,
+  .home-principles__cards {
+    margin: var(--space-4) 0 0;
+  }
+
+  /* Coverage cards are compact: five to a row on a wide screen, and the
+     glyph sits beside the eyebrow and title instead of above them. */
+  .icon-cards.home-covers__cards {
+    grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+  }
+
+  .home-covers__cards .icon-card {
+    grid-template-columns: 27px minmax(0, 1fr);
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+  }
+
+  .home-covers__cards .icon-card > * {
+    grid-column: 2;
+  }
+
+  .home-covers__cards .icon-card__glyph {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-items: flex-start;
+  }
+
+  .home-covers__cards .icon-card__number,
+  .home-covers__cards .icon-card__text {
+    grid-column: 1 / -1;
+  }
+
+  .home-covers__cards .icon-card__text {
+    font-size: 15px;
+  }
+
+  /* The principles hold lists of different lengths, so they flow down
+     columns in order (3.1, 3.2, ...) instead of a grid of equal rows. */
+  .icon-cards.home-principles__cards {
+    display: block;
+    columns: 3 300px;
+    column-gap: var(--space-5);
+  }
+
+  .home-principles__cards .icon-card {
+    break-inside: avoid;
+    margin-bottom: var(--space-5);
+  }
+
+  .home-principles__cards .icon-card__title {
+    font-size: 22px;
+  }
+
+  .icon-card__body > :first-child {
+    margin-top: 0;
+  }
+
+  .icon-card__body > :last-child {
+    margin-bottom: 0;
+  }
+
+  .icon-card__body ul {
+    padding-left: var(--space-4);
+  }
+
+  /* ---------- figures on a page band ---------- */
+
+  /* The periodic table keeps the full home column, as it had before it was
+     framed; its own grid already fits the width. */
+  .home-table__fig .fig__drawing {
+    overflow-wrap: normal;
+  }
+
+  /* The story's text steps sit inside the frame with the diagram, so the
+     sticky canvas has the whole story to travel in. */
+  .home-story__fig .story {
+    margin-top: 0;
+  }
+
+  /* ---------- workflow gallery (F-H2) ---------- */
+
+  .wf-gallery {
+    display: grid;
+    gap: var(--space-5);
+  }
+
+  .wf-gallery__label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  .wf-gallery__list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3) var(--space-5);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @container (min-width: 640px) {
+    .wf-gallery__list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .wf-gallery__item {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding-bottom: var(--space-2);
+    border-bottom: var(--px) solid var(--rule);
+  }
+
+  .wf-gallery__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+  }
+
+  .wf-gallery__name {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+
+  .wf-gallery__steps {
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .wf-gallery__head .risk-badge {
+    margin-left: auto;
+  }
+
+  .wf-gallery__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: var(--space-4) 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .wf-gallery__legend li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  /* ---------- get started: numbered tiles ---------- */
+
+  .home-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (min-width: 1024px) {
+    .home-steps {
+      gap: var(--space-5);
+    }
+  }
+
+  .home-step {
+    display: grid;
+    align-content: start;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-4);
+    border: var(--border);
+    background: var(--bg-sub);
+    box-shadow: var(--shadow-1);
+  }
+
+  .home-step__badge {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    color: var(--ink);
+  }
+
+  /* The step number: a 32px tile, the number in the display font, inverted
+     like the role steps of a step strip (--accent is kept for the current item). */
+  .home-step__number {
+    display: inline-grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: 32px;
+    height: 32px;
+    background: var(--ink);
+    color: var(--bg);
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  .home-step__title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .home-step__title a {
+    color: var(--ink);
+  }
+
+  .home-step__line {
+    margin: 0;
+    color: var(--ink-2);
+  }
+
+  /* ---------- questions ---------- */
+
+  .home-faq__item summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .home-faq__item summary .pg {
+    flex: none;
+  }
+
+  /* ---------- listing pages: group glyphs ---------- */
+
+  .section-index__label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .section-index__label .pg {
+    flex: none;
+  }
+}

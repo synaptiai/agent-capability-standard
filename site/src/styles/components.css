@@ -1683,65 +1683,8 @@
     margin-top: 0;
   }
 
-  .home-principles__list {
-    display: grid;
-    gap: var(--space-4);
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-    padding: 0;
-    list-style: none;
-    counter-reset: principle;
-  }
-
-  .home-principles__list > li {
-    counter-increment: principle;
-    margin: 0;
-    padding: var(--space-4);
-    border: var(--border);
-    background: var(--bg);
-  }
-
-  .home-principles__list h3 {
-    margin-top: 0;
-  }
-
-  .home-principles__list h3::before {
-    content: counter(principle) '. ';
-  }
-
-  .home-principles__list p:last-child,
-  .home-principles__list ul:last-child {
-    margin-bottom: 0;
-  }
-
   .home-why p {
     max-width: 46rem;
-  }
-
-  .home-cards {
-    display: grid;
-    gap: var(--space-4);
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
-    padding: 0;
-    margin: 0 0 var(--space-5);
-    list-style: none;
-  }
-
-  .home-card {
-    margin: 0;
-    padding: var(--space-4);
-    border: var(--border);
-    background: var(--bg);
-  }
-
-  .home-card__title {
-    margin: var(--space-2) 0 var(--space-1);
-    font-weight: 700;
-  }
-
-  .home-card__line {
-    margin: 0;
-    color: var(--ink-2);
-    font-size: 15px;
   }
 
   .home-faq__item {
@@ -1838,15 +1781,20 @@
     }
   }
 
-  /* Steps other than the current one are dimmed with --ink-3, which
-     check-contrast holds to 4.5:1 on every surface, not with opacity. */
+  /* With the story script, the steps are spaced out for scrolling. While
+     the reader scrolls inside the story (data-playing), steps other than the
+     current one are dimmed with --ink-3, which check-contrast holds to 4.5:1
+     on every surface, not with opacity. */
   .story[data-live] .story__step {
     min-height: 45vh;
-    color: var(--ink-3);
     transition: color var(--step-hover);
   }
 
-  .story[data-live] .story__step h3 {
+  .story[data-playing] .story__step {
+    color: var(--ink-3);
+  }
+
+  .story[data-playing] .story__step h3 {
     color: inherit;
   }
 
@@ -1856,7 +1804,7 @@
     }
   }
 
-  .story[data-live] .story__step.is-current {
+  .story[data-playing] .story__step.is-current {
     color: var(--ink);
   }
 
@@ -1872,57 +1820,58 @@
     fill: var(--layer);
   }
 
-  .story__used {
-    fill: none;
-    stroke: var(--ink);
-    stroke-width: 2;
+  /* Frames are a filled rect under an inset one, so every edge is a 2px
+     rect on even pixels (visual spec 1.2), not a centred stroke. */
+  .story__frame,
+  .story__edge {
+    fill: var(--line);
   }
 
   .story__block {
     fill: var(--bg);
-    stroke: var(--line);
-    stroke-width: 2;
   }
 
   .story__on {
     fill: color-mix(in srgb, var(--layer) 22%, var(--bg));
-    stroke: var(--line);
-    stroke-width: 2;
   }
 
   .story__stripe {
     fill: var(--layer);
   }
 
-  .story__port,
-  .story__mark {
+  .story__port {
     fill: var(--ink);
   }
 
+  /* The role glyphs and connector lines paint with currentColor. */
+  .story__mark {
+    color: var(--ink);
+  }
+
+  /* Sizes are set on the elements in viewBox units (see HomeStory). */
   .story__label {
     fill: var(--ink);
     font-family: var(--font-mono);
-    font-size: 10px;
   }
 
   .story__store {
     fill: var(--ink-3);
     font-family: var(--font-mono);
-    font-size: 8px;
     text-anchor: end;
   }
 
-  /* Narrow: the story script shows one part of the diagram at a time in a
-     box of the rail's shape, the labels are larger, and the stored names,
-     which would be too small to read, are left out. */
+  /* Narrow: while the reader scrolls inside the story, the script shows one
+     part of the diagram at a time in a box of the rail's shape. The labels
+     are larger, and the stored names, which would be too small to read, are
+     left out. */
   @media (max-width: 959px) {
-    .story[data-live] .story__svg {
+    .story[data-playing] .story__svg {
       aspect-ratio: var(--rail-aspect);
       max-height: 45vh;
     }
 
     .story__label {
-      font-size: 13px;
+      font-size: 14px;
     }
 
     .story__store {

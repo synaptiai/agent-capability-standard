@@ -1,20 +1,24 @@
 ---
-// The home page's scroll story: text steps beside a sticky pixel diagram that
-// builds as the reader scrolls. Everything is drawn here from the ontology and
-// the model_deployment workflow as SVG rects; nothing is copied or typed in.
-// - Beat 1: every capability as a square, in a column per layer; the ones the
-//   workflow uses are outlined.
+// The home page's scroll story: text steps beside a sticky pixel diagram.
+// Everything is drawn here from the ontology and the model_deployment
+// workflow as rects on a 2px grid; nothing is copied or typed in.
+// - Beat 1: every capability as a square, in a column per layer under that
+//   layer's glyph; the ones the workflow uses carry an ink frame.
 // - Beat 2: the workflow's steps as a rail, with the first step's contract
 //   shown as input and output ports.
 // - Beats 3 to 6: the checkpoint, the step that changes state (with a line
 //   from the checkpoint it depends on), verify, and rollback (with a line
-//   back to the checkpoint).
-// Without JavaScript, or with reduced motion, every beat shows at once and no
-// step is dimmed. With JavaScript an IntersectionObserver sets the current
-// beat from the text step in the middle of the screen.
+//   back to the checkpoint). Each is marked with its shared role glyph.
+// The server-rendered diagram is the final frame: every beat shows (visual
+// spec 1.2). That is what a reader without JavaScript, with reduced motion,
+// a print or a full-page capture sees. Only when the reader scrolls inside
+// the story does the script hide the beats after the current step, and it
+// shows the final frame again when the story leaves the screen.
 import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
 import { story } from '../lib/home';
+import { chevron, glyphRects, type FigRect } from '../pixel/lines';
 import InlineText from './InlineText.astro';
+import Rects from './fig/Rects.astro';
 
 interface Props {
   id: (text: string) => string;
@@ -26,23 +30,28 @@ const svgTitle = id('story-svg-title');
 const ontology = loadOntology();
 const used = new Set(s.workflow.steps.map((x) => x.capability));
 
-// Grid of capabilities.
+// Every coordinate below is a multiple of 2 (visual spec 1.2).
 const W = 320;
-const SQ = 14;
-const GAP = 3;
-const pitch = Math.floor((W - 20) / ontology.layers.length);
+const X0 = 8;
+const PITCH = 34;
+const SQ = 18;
+const ROW_GAP = 2;
+const HEAD = 8;
+const GLYPH = 2; // the layer glyphs at 2x: 18px, as wide as a square
+const gridTop = HEAD + 9 * GLYPH + 6;
 const maxRows = Math.max(...ontology.layers.map((l) => l.capabilities.length));
-const gridTop = 12;
+const colX = (i: number) => X0 + i * PITCH + (PITCH - SQ) / 2;
+const heads = ontology.layers.map((layer, i) => ({ layer: layer.id, x: colX(i) }));
 const squares = ontology.layers.flatMap((layer, i) =>
   capabilitiesOfLayer(ontology, layer.id).map((cap, j) => ({
     id: cap.id,
     layer: layer.id,
-    x: 10 + i * pitch + (pitch - SQ) / 2,
-    y: gridTop + j * (SQ + GAP),
+    x: colX(i),
+    y: gridTop + j * (SQ + ROW_GAP),
     used: used.has(cap.id),
   })),
 );
-const gridBottom = gridTop + maxRows * (SQ + GAP);
+const gridBottom = gridTop + maxRows * (SQ + ROW_GAP);
 
 // Rail of steps.
 const railTop = gridBottom + 24;
@@ -51,6 +60,7 @@ const BH = 22;
 const RX = 60;
 const RW = 196;
 const rowY = (index: number) => railTop + (index - 1) * ROW;
+/** The centre line of a step's block; runs are centred on it, so their rects land on even pixels. */
 const mid = (index: number) => rowY(index) + BH / 2;
 const H = railTop + s.workflow.steps.length * ROW + 6;
 
@@ -61,17 +71,48 @@ const cp = s.checkpointStep.index;
 const ch = s.changeStep.index;
 const rb = s.rollbackStep.index;
 const vf = s.verifyStep.index;
-// A store_as name is cut to the room left beside the step's label (the mono
-// font is about 0.6em wide: 6px at the 10px label size, 4.8px at 8px).
+if (!(cp < ch && ch < rb)) throw new Error('HomeStory: expected checkpoint, then the change, then rollback');
+
+// Text sizes in viewBox units: 12 for labels, 11 for stored names. Where
+// the stored names show (960px and up) the diagram is drawn at about 1.16x
+// or more, so they render at 12.7px or more; below 960px they are left out.
+const LABEL = 12;
+const STORE = 11;
+// A store_as name is cut to the room left beside the step's label. The mono
+// font's advance is a little over 0.6em, so 0.66em leaves a visible gap.
+const ADVANCE = 0.66;
 const storeText = (index: number, cap: string, name: string): string => {
-  const room = Math.floor((RW - 11 - `${index} ${cap}`.length * 6 - 14) / 4.8);
+  const room = Math.floor((RW - 10 - `${index} ${cap}`.length * LABEL * ADVANCE - 16) / (STORE * ADVANCE));
   return name.length <= room ? name : `${name.slice(0, Math.max(0, room - 1))}…`;
 };
-// The line back from rollback enters the checkpoint block near its top,
-// above the line out to the step that changes state (which leaves at the
-// middle), and runs further left, so the two lines never cross or touch.
-const backY = rowY(cp) + 4;
-if (!(cp < ch && ch < rb)) throw new Error('HomeStory: expected checkpoint, then the change, then rollback');
+
+// The role marks: the shared 7x7 role glyphs at 2x, right of the rail.
+const MARK_X = RX + RW + 10;
+const mark = (role: string, index: number) => glyphRects(`role:${role}`, MARK_X, mid(index) - 7, 2);
+
+// Lines are 2px rects whose top-left corners sit on even pixels: a line
+// "at" an odd centre line y covers y - 1 to y + 1.
+const hLine = (x1: number, x2: number, y: number): FigRect => ({ x: x1, y: y - 1, w: x2 - x1, h: 2, ink: 'ink' });
+const vLine = (x: number, y1: number, y2: number): FigRect => ({ x, y: y1 - 1, w: 2, h: y2 - y1 + 2, ink: 'ink' });
+// Beat 4: a line from the checkpoint to the step that changes state, along
+// the left of the rail, ending in a chevron at the block.
+const toChange: FigRect[] = [
+  hLine(46, RX, mid(cp)),
+  vLine(46, mid(cp), mid(ch)),
+  hLine(46, RX - 6, mid(ch)),
+  ...chevron(RX - 3, mid(ch), 'right', 'ink'),
+];
+// Beat 6: the line back from rollback enters the checkpoint block near its
+// top, above the line out to the step that changes state, and runs further
+// left, so the two lines never cross or touch.
+const backY = rowY(cp) + 5;
+const back: FigRect[] = [
+  hLine(34, RX, mid(rb)),
+  vLine(34, backY, mid(rb)),
+  hLine(34, RX - 6, backY),
+  ...chevron(RX - 3, backY, 'right', 'ink'),
+];
+
 // Below 960px the diagram is drawn larger by showing one part at a time:
 // the capability grid for beat 1, the rail for the later beats. The box keeps
 // the rail's shape so the text below does not move when the view changes.
@@ -81,7 +122,8 @@ const railView = `0 ${railTop - 8} ${W} ${H - railTop + 8}`;
 const portsIn = s.contractInputs.length;
 const portsOut = s.contractOutputs.length;
 const first = s.contractStep.index;
-const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) - 2;
+/** Ports spread down the block's edge, each on an even pixel. */
+const portY = (n: number, k: number) => rowY(first) + 2 * Math.round(((k + 1) * BH) / (n + 1) / 2) - 2;
 ---
 <div class="story" data-story>
   <div class="story__canvas">
@@ -102,19 +144,29 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
         checkpoint, the step that changes state, verify and rollback marked.
       </title>
       <g data-beat="1">
-        {squares.map((q) => (
-          <rect class="story__cap" x={q.x} y={q.y} width={SQ} height={SQ} style={`--layer: var(--layer-${q.layer})`} />
+        {heads.map((h) => (
+          <g class="story__head has-layer" style={`--layer: var(--layer-${h.layer}); color: var(--layer)`}>
+            <Rects rects={glyphRects(h.layer, h.x, HEAD, GLYPH)} />
+          </g>
         ))}
-      </g>
-      <g data-beat="1">
-        {squares.filter((q) => q.used).map((q) => (
-          <rect class="story__used" x={q.x - 2} y={q.y - 2} width={SQ + 4} height={SQ + 4} />
-        ))}
+        {squares.map((q) =>
+          q.used ? (
+            <>
+              <rect class="story__frame" x={q.x} y={q.y} width={SQ} height={SQ} />
+              <rect class="story__cap" x={q.x + 4} y={q.y + 4} width={SQ - 8} height={SQ - 8} style={`--layer: var(--layer-${q.layer})`} />
+            </>
+          ) : (
+            <rect class="story__cap" x={q.x} y={q.y} width={SQ} height={SQ} style={`--layer: var(--layer-${q.layer})`} />
+          ),
+        )}
       </g>
 
       <g data-beat="2">
         {s.workflow.steps.map((st) => (
-          <rect class="story__block" x={RX} y={rowY(st.index)} width={RW} height={BH} />
+          <>
+            <rect class="story__edge" x={RX} y={rowY(st.index)} width={RW} height={BH} />
+            <rect class="story__block" x={RX + 2} y={rowY(st.index) + 2} width={RW - 4} height={BH - 4} />
+          </>
         ))}
       </g>
       {s.workflow.steps.map((st) => {
@@ -122,10 +174,10 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
         return beat === null ? null : (
           <rect
             class="story__on"
-            x={RX}
-            y={rowY(st.index)}
-            width={RW}
-            height={BH}
+            x={RX + 2}
+            y={rowY(st.index) + 2}
+            width={RW - 4}
+            height={BH - 4}
             style={`--layer: var(--layer-${st.layer})`}
             data-beat={beat}
           />
@@ -134,47 +186,19 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
       <g data-beat="2">
         {s.workflow.steps.map((st) => (
           <>
-            <rect class="story__stripe" x={RX} y={rowY(st.index)} width={5} height={BH} style={`--layer: var(--layer-${st.layer})`} />
-            <text class="story__label" x={RX + 11} y={mid(st.index) + 3.5}>{st.index} {st.capability}</text>
-            {st.store_as && <text class="story__store" x={RX + RW - 6} y={mid(st.index) + 3}>{storeText(st.index, st.capability, st.store_as)}</text>}
+            <rect class="story__stripe" x={RX + 2} y={rowY(st.index) + 2} width={4} height={BH - 4} style={`--layer: var(--layer-${st.layer})`} />
+            <text class="story__label" x={RX + 10} y={mid(st.index) + 4} font-size={LABEL}>{st.index} {st.capability}</text>
+            {st.store_as && <text class="story__store" x={RX + RW - 6} y={mid(st.index) + 4} font-size={STORE}>{storeText(st.index, st.capability, st.store_as)}</text>}
           </>
         ))}
         {Array.from({ length: portsIn }, (_, k) => <rect class="story__port" x={RX - 6} y={portY(portsIn, k)} width={6} height={4} />)}
         {Array.from({ length: portsOut }, (_, k) => <rect class="story__port" x={RX + RW} y={portY(portsOut, k)} width={6} height={4} />)}
       </g>
 
-      <g data-beat="3" class="story__mark">
-        <rect x={RX + RW + 8} y={mid(cp) - 6} width={12} height={3} />
-        <rect x={RX + RW + 8} y={mid(cp) - 1} width={12} height={3} />
-        <rect x={RX + RW + 8} y={mid(cp) + 4} width={12} height={3} />
-      </g>
-
-      <g data-beat="4" class="story__mark">
-        <rect x={46} y={mid(cp)} width={RX - 46} height={2} />
-        <rect x={46} y={mid(cp)} width={2} height={mid(ch) - mid(cp) + 2} />
-        <rect x={46} y={mid(ch)} width={RX - 46} height={2} />
-        <rect x={RX + RW + 9} y={mid(ch) - 1} width={10} height={8} />
-        <rect x={RX + RW + 11} y={mid(ch) - 6} width={2} height={5} />
-        <rect x={RX + RW + 15} y={mid(ch) - 6} width={2} height={5} />
-        <rect x={RX + RW + 11} y={mid(ch) - 7} width={6} height={2} />
-      </g>
-
-      <g data-beat="5" class="story__mark">
-        <rect x={RX + RW + 8} y={mid(vf) + 1} width={3} height={3} />
-        <rect x={RX + RW + 11} y={mid(vf) + 3} width={3} height={3} />
-        <rect x={RX + RW + 14} y={mid(vf)} width={3} height={3} />
-        <rect x={RX + RW + 17} y={mid(vf) - 3} width={3} height={3} />
-        <rect x={RX + RW + 20} y={mid(vf) - 6} width={3} height={3} />
-      </g>
-
-      <g data-beat="6" class="story__mark">
-        <rect x={34} y={mid(rb)} width={RX - 34} height={2} />
-        <rect x={34} y={backY} width={2} height={mid(rb) - backY + 2} />
-        <rect x={34} y={backY} width={RX - 40} height={2} />
-        <rect x={RX - 6} y={backY - 3} width={2} height={8} />
-        <rect x={RX - 4} y={backY - 1} width={2} height={4} />
-        <rect x={RX + RW + 9} y={mid(rb) - 4} width={8} height={8} transform={`rotate(45 ${RX + RW + 13} ${mid(rb)})`} />
-      </g>
+      <g data-beat="3" class="story__mark"><Rects rects={mark('checkpoint', cp)} /></g>
+      <g data-beat="4" class="story__mark"><Rects rects={[...mark('mutating', ch), ...toChange]} /></g>
+      <g data-beat="5" class="story__mark"><Rects rects={mark('verify', vf)} /></g>
+      <g data-beat="6" class="story__mark"><Rects rects={[...mark('rollback', rb), ...back]} /></g>
     </svg>
   </div>
   <ol class="story__steps">
@@ -190,39 +214,57 @@ const portY = (n: number, k: number) => rowY(first) + ((k + 1) * BH) / (n + 1) -
 <script>
   const story = document.querySelector<HTMLElement>('[data-story]');
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-  if (story && 'IntersectionObserver' in window && !reduce.matches) {
+  if (story && !reduce.matches) {
     const steps = [...story.querySelectorAll<HTMLElement>('[data-story-step]')];
     const parts = [...story.querySelectorAll<SVGElement>('[data-beat]')];
     const svg = story.querySelector<SVGSVGElement>('[data-story-svg]')!;
     const narrow = window.matchMedia('(max-width: 959px)');
-    let beat = 1;
+    // The final frame: every beat, the whole diagram, no step dimmed.
+    const finalFrame = () => {
+      delete story.dataset.playing;
+      for (const p of parts) p.classList.remove('is-off');
+      for (const s of steps) s.classList.remove('is-current');
+      if (svg.dataset.viewFull) svg.setAttribute('viewBox', svg.dataset.viewFull);
+    };
     const show = (b: number) => {
-      beat = b;
+      story.dataset.playing = '';
       for (const p of parts) p.classList.toggle('is-off', Number(p.dataset.beat) > b);
       for (const s of steps) s.classList.toggle('is-current', Number(s.dataset.storyStep) === b);
       const view = !narrow.matches ? svg.dataset.viewFull : b === 1 ? svg.dataset.viewGrid : svg.dataset.viewRail;
       if (view) svg.setAttribute('viewBox', view);
     };
-    narrow.addEventListener('change', () => show(beat));
+    // The current step is the last one whose heading has come up past the
+    // line: the middle of the screen when wide; lower when narrow, where the
+    // diagram covers the top of the screen.
+    const update = () => {
+      const vh = window.innerHeight;
+      const box = story.getBoundingClientRect();
+      if (box.bottom < vh * 0.5 || box.top > vh * 0.5) return finalFrame();
+      const line = vh * (narrow.matches ? 0.8 : 0.55);
+      let beat = 1;
+      for (const s of steps) if (s.getBoundingClientRect().top < line) beat = Number(s.dataset.storyStep);
+      show(beat);
+    };
+    let queued = false;
+    const onScroll = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        update();
+      });
+    };
+    // data-live spaces the steps out for scrolling; nothing is hidden until
+    // the reader scrolls inside the story.
     story.dataset.live = '';
-    show(1);
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) if (e.isIntersecting) show(Number((e.target as HTMLElement).dataset.storyStep));
-      },
-      // Below 960px the diagram sits on top of the screen, so a step becomes
-      // current when its heading comes up into the lower part of the screen,
-      // and stays readable below the diagram while it is current.
-      { rootMargin: narrow.matches ? '-75% 0px -15% 0px' : '-45% 0px -45% 0px' },
-    );
-    for (const s of steps) io.observe(s);
-    // A reader who turns on reduced motion mid-page gets the full diagram.
+    window.addEventListener('scroll', onScroll, { passive: true });
+    narrow.addEventListener('change', () => (story.dataset.playing === undefined ? finalFrame() : update()));
+    // A reader who turns on reduced motion mid-page gets the final frame.
     reduce.addEventListener('change', () => {
       if (!reduce.matches) return;
-      io.disconnect();
+      window.removeEventListener('scroll', onScroll);
       delete story.dataset.live;
-      for (const p of parts) p.classList.remove('is-off');
-      if (svg.dataset.viewFull) svg.setAttribute('viewBox', svg.dataset.viewFull);
+      finalFrame();
     });
   }
 </script>
