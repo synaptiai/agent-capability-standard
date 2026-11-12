@@ -6,6 +6,8 @@
 // the row header's direction glyph). Each tile is
 // a 32px MiniTile with an edge mark for each relationship under it; the marks,
 // not colour, carry the edge types, and a legend names the types present.
+// Hovering or focusing a tile underlines its types in the legend at 4px
+// (CSS only, in figures-capability-skill.css).
 //
 // Props:
 // - cap: Capability, required.
@@ -73,7 +75,7 @@ const head = (g: NeighbourGroup) => `ref-nbhd-${g}`;
               </p>
               <ul class="nbhd__tiles" aria-labelledby={head(row.group)}>
                 {row.items.map((x) => (
-                  <li class="nbhd__cell" data-capability={x.id} data-relations={x.relations.length}>
+                  <li class="nbhd__cell" data-capability={x.id} data-relations={x.relations.length} data-types={[...new Set(x.relations.map((r) => r.type))].join(' ')}>
                     <MiniTile id={x.id} size={32} relation={relationWords(x)} />
                     <span class="nbhd__marks" aria-hidden="true">
                       {x.relations.map((r) => <PixelGlyph name={`mark:${r.type}`} class="nbhd__mark" />)}
@@ -88,7 +90,7 @@ const head = (g: NeighbourGroup) => `ref-nbhd-${g}`;
     </div>
     <ul class="nbhd-legend" aria-label="Edge types in this figure">
       {legendOrder.map((t) => (
-        <li><PixelGlyph name={`mark:${t}`} /><code>{t}</code> <span>{EDGE_LABELS[t].out.toLowerCase()}</span></li>
+        <li data-type={t}><PixelGlyph name={`mark:${t}`} /><code>{t}</code> <span>{EDGE_LABELS[t].out.toLowerCase()}</span></li>
       ))}
     </ul>
   </Figure>

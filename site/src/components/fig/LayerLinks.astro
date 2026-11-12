@@ -5,7 +5,10 @@
 // layer's glyph tile and name, a bar of its edge count (one scale for the
 // whole figure, every track the same length) and an edge mark for each
 // type present. The edges
-// themselves are listed in the table under the figure.
+// themselves are listed in the table under the figure, and hovering or
+// focusing a row shows that row's edges in a tooltip panel ("verify →
+// execute (precedes)"); the panel is hidden from screen readers, which
+// read the same edges in the table.
 //
 // Props:
 // - layerId: string, required.
@@ -71,6 +74,9 @@ const label = { into: `Into ${layerId}`, out: `Out of ${layerId}` };
                   <span class="fig-sr">{l.edges.length === 1 ? 'edge' : 'edges'}</span>
                   <span class="llinks__marks">
                     {l.types.map((t) => <PixelGlyph name={`mark:${t}`} label={t} />)}
+                  </span>
+                  <span class="llinks__tip" aria-hidden="true">
+                    {l.edges.map((e) => <span><code>{e.from}</code> → <code>{e.to}</code> ({e.type})</span>)}
                   </span>
                 </li>
               ))}

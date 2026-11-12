@@ -13,9 +13,23 @@ import ContractDiagram from '../../components/fig/ContractDiagram.astro';
 import Neighbourhood from '../../components/fig/Neighbourhood.astro';
 import WhereItRuns from '../../components/fig/WhereItRuns.astro';
 import SafetyPanel from '../../components/fig/SafetyPanel.astro';
-import { compositionChain, neighbours, splitAtH2s } from '../../lib/capability-figures';
-import { readRepoFile } from '../../lib/repo';
+import OutputFields from '../../components/fig/OutputFields.astro';
+import SafetySequence from '../../components/fig/SafetySequence.astro';
+import {
+  compositionChain,
+  edgeRules,
+  neighbours,
+  outputFields,
+  outputFieldsCaption,
+  outputFieldsIsFigure,
+  safetySequence,
+  sequenceCaption,
+  sequenceIsFigure,
+  splitAtH2s,
+} from '../../lib/capability-figures';
+import { currentStandardText } from '../../lib/spec-figures';
 import '../../styles/figures-capability.css';
+import '../../styles/figures-capability-skill.css';
 import ContractTable from '../../components/ContractTable.astro';
 import LayerBadge from '../../components/LayerBadge.astro';
 import { loadOntology, ONTOLOGY_SOURCE } from '../../data/ontology';
@@ -23,7 +37,7 @@ import { loadVersions } from '../../data/versions';
 import { capabilityUsage } from '../../data/workflows';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { capabilityHref, refSlugger, routesByTemplate, specSectionHref } from '../../lib/generated';
-import { COMMIT_SHA, githubBlobUrl } from '../../lib/repo';
+import { COMMIT_SHA, githubBlobUrl, readRepoFile } from '../../lib/repo';
 import type { Route } from '../../lib/routes';
 import { contractRows, EDGE_LABELS, edgeGroups } from '../../lib/views';
 import TableWrap from '../../components/TableWrap.astro';
@@ -56,8 +70,12 @@ await render(entry);
 if (typeof entry.rendered?.html !== 'string') throw new Error(`capabilities: ${route.source} has no rendered HTML`);
 const skill = splitAtH2s(entry.rendered.html);
 const fm = entry.data;
-const chain = compositionChain(readRepoFile(route.source!));
+const skillText = readRepoFile(route.source!);
+const chain = compositionChain(skillText);
 const chainLength = chain.follows.length + chain.precedes.length + 1;
+const fields = outputFields(cap, skillText, route.source!);
+const sequence = safetySequence(cap, ontology);
+const std = currentStandardText();
 
 // Figures are numbered in page order; a figure that falls back to a sentence takes no number.
 let figN = 0;
@@ -65,11 +83,18 @@ const next = () => ++figN;
 const nRelations = groups.length > 0 && neighbours(cap, ontology).length > 0 ? next() : 0;
 const nContract = next();
 const nUsage = usage.length > 0 ? next() : 0;
-// The skill's Inputs and Output Contract sections get no port figure: the
-// contract figure above already draws the same ports, and the skill's own
-// table follows each heading (the review counted each input four times).
-const after: Record<string, { kind: 'chain'; n: number }> = {};
+// The skill's Inputs section gets no port figure: the contract figure above
+// already draws the same ports, and the skill's own table follows the
+// heading (the review counted each input four times). Under Output Contract
+// the page draws what the contract figure does not: which of the skill's
+// output fields the contract declares (F-C6). Under Safety Constraints it
+// draws where the capability may run in a step list (F-C5).
+type After = { kind: 'chain' | 'output' | 'sequence'; n: number } | { kind: 'sentence'; text: string };
+const after: Record<string, After> = {};
 for (const part of skill.parts) {
+  if (part.id === 'output-contract') after[part.id] = outputFieldsIsFigure(fields) ? { kind: 'output', n: next() } : { kind: 'sentence', text: outputFieldsCaption(cap, fields) };
+  if (part.id === 'safety-constraints')
+    after[part.id] = sequenceIsFigure(sequence) ? { kind: 'sequence', n: next() } : { kind: 'sentence', text: sequenceCaption(cap, sequence, edgeRules(std.text, std.source)) };
   if (part.id === 'composition-patterns' && chainLength >= 2) after[part.id] = { kind: 'chain', n: next() };
 }
 const skillFacts = (
@@ -203,6 +228,9 @@ const skillFacts = (
             <>
               <Fragment set:html={part.head} />
               {fig?.kind === 'chain' && <CompositionChain cap={cap} chain={chain} n={fig.n} />}
+              {fig?.kind === 'output' && <OutputFields cap={cap} fields={fields} n={fig.n} />}
+              {fig?.kind === 'sequence' && <SafetySequence cap={cap} n={fig.n} />}
+              {fig?.kind === 'sentence' && <p>{fig.text}</p>}
               <Fragment set:html={part.body} />
             </>
           );

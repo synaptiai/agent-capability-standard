@@ -5,10 +5,15 @@
 // - Procedure: the top-level ordered list gets numbered pixel tiles (CSS).
 // - Examples: each "### Example N" and the content up to the next H3 or H2
 //   becomes a <details> whose summary holds the heading with the code glyph
-//   (caution for a title that contains "Failure"). The first is open. The
+//   (caution for a title that contains "Failure"). The
 //   heading's hidden anchor link is dropped, so the summary holds no link.
+//   Every example starts closed: an open first example was the longest run
+//   without a figure on most capability pages (its fences alone are often
+//   taller than a screen), and the summaries list every example.
 // - Safety Constraints: the section's content sits in a panel with the
 //   caution glyph.
+// - Output Contract: the section's first code block folds into a
+//   <details>, under the page's figure of the same fields.
 // The port columns and the composition chain are Astro figures, which the
 // page puts under their headings.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
@@ -71,6 +76,27 @@ export default function rehypeCapabilitySkill() {
       kids.splice(s + 1, e - s - 1, panel);
     }
 
+    // Output Contract: the section's first code block folds under a summary,
+    // because the page draws its fields as a figure (F-C6) above it.
+    const output = sections(kids).get('output-contract');
+    if (output) {
+      const [s, e] = output;
+      const at = kids.slice(s + 1, e).findIndex((c) => isEl(c, 'pre'));
+      if (at !== -1) {
+        const i = s + 1 + at;
+        const fold: Element = {
+          type: 'element',
+          tagName: 'details',
+          properties: { className: ['fig-details', 'skill-fence'] },
+          children: [
+            { type: 'element', tagName: 'summary', properties: {}, children: [{ type: 'text', value: 'The output as the skill writes it, in YAML' }] },
+            kids[i] as ElementContent,
+          ],
+        };
+        kids.splice(i, 1, fold);
+      }
+    }
+
     // Examples: one <details> per H3.
     const ex = sections(kids).get('examples');
     if (ex) {
@@ -84,13 +110,13 @@ export default function rehypeCapabilitySkill() {
         else groups.at(-1)!.body.push(c);
       }
       if (groups.length > 0) {
-        const details = groups.map(({ h3, body }, i): Element => {
+        const details = groups.map(({ h3, body }): Element => {
           h3.children = h3.children.filter((c) => !(isEl(c, 'a') && ((c.properties?.className as string[]) ?? []).includes('heading-anchor')));
           const failure = /failure/i.test(text(h3));
           return {
             type: 'element',
             tagName: 'details',
-            properties: { className: ['skill-example'], open: i === 0 ? true : undefined },
+            properties: { className: ['skill-example'] },
             children: [
               {
                 type: 'element',

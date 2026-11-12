@@ -9,15 +9,25 @@ import {
   contractCaption,
   contractSummary,
   contractTitle,
+  edgeRules,
   neighbourGroupLabel,
+  outputFields,
+  outputFieldsCaption,
+  outputFieldsIsFigure,
+  outputFieldsTitle,
+  safetySequence,
+  sequenceCaption,
+  sequenceIsFigure,
+  sequenceTitle,
   neighbourhoodCaption,
   neighbourhoodTitle,
   neighbours,
   stepWords,
   usageCaption,
 } from '../lib/capability-figures';
-import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle } from '../lib/layer-figures';
-import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, layerUsage, safetyRows, type SchemaRow } from '../lib/views';
+import { currentStandardText } from '../lib/spec-figures';
+import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle, riskByLayer, riskByLayerCaption, usageMatrix, usageMatrixCaption } from '../lib/layer-figures';
+import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, safetyRows, type SchemaRow } from '../lib/views';
 import { blocks, cell, code, figure, generatedLine, markdownCopy, mdLink, table } from './md';
 import type { Twin } from './types';
 
@@ -72,6 +82,33 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
           ),
         );
   const summary = contractSummary(cap);
+  const skillText = readRepoFile(skillSource);
+  const fields = outputFields(cap, skillText, skillSource);
+  const outputBlock = outputFieldsIsFigure(fields)
+    ? figure(
+        outputFieldsTitle(cap, fields),
+        outputFieldsCaption(cap, fields),
+        table(
+          ['Field of the skill\'s output', 'In the contract'],
+          [
+            ...fields.skill.map((f) => [code(f.name), f.inContract ? (f.required ? 'Yes, required' : 'Yes, optional') : 'No, the skill\'s own']),
+            ...fields.missing.map((m) => [code(m), 'Yes, but the skill leaves it out']),
+          ],
+        ),
+      )
+    : outputFieldsCaption(cap, fields);
+  const std = currentStandardText();
+  const rules = edgeRules(std.text, std.source);
+  const seq = safetySequence(cap, ontology);
+  const seqRows = [
+    ...seq.before.flatMap((x) => x.types.map((t) => [`Before ${cap.id}`, capLink(x.id), code(t), rules[t].level, rules[t].code])),
+    ...(seq.approval ? [['Approval', 'Each use needs approval', code('requires_approval'), '', '']] : []),
+    ...seq.after.flatMap((x) => x.types.map((t) => [`After ${cap.id}`, capLink(x.id), code(t), rules[t].level, rules[t].code])),
+    ...seq.apart.map((id) => ['Never in the same parallel group', capLink(id), code('conflicts_with'), rules.conflicts_with.level, rules.conflicts_with.code]),
+  ];
+  const sequenceBlock = sequenceIsFigure(seq)
+    ? figure(sequenceTitle(cap), sequenceCaption(cap, seq, rules), table(['Where', 'Capability', 'Rule', 'Enforcement', 'Diagnostic'], seqRows))
+    : sequenceCaption(cap, seq, rules);
   const usedList = usage.map((u) => `- ${mdLink(code(u.workflowId), `/workflows/${u.slug}/`)}: ${stepWords(u.steps)}`).join('\n');
   const used = usage.length === 0 ? usageCaption(cap, usage) : figure(`${cap.id} in workflows`, usageCaption(cap, usage), usedList);
   const markdown = blocks(
@@ -81,6 +118,7 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
     `Layer: ${mdLink(cap.layer, `/layers/${ontology.layers.find((l) => l.id === cap.layer)!.slug}/`)}`,
     '## Safety',
     table(['Property', 'Value'], safetyRows(cap).map((r) => [r.term, r.value])),
+    sequenceBlock,
     '## Relationships',
     neighbourhood,
     relationships,
@@ -90,10 +128,11 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
     contractTable(contractRows(cap.input_schema)),
     '### Outputs',
     contractTable(contractRows(cap.output_schema)),
+    outputBlock,
     '## Used in workflows',
     used,
     '## Claude Code skill',
-    markdownCopy(skillSource, readRepoFile(skillSource), { shiftHeadings: 1 }),
+    markdownCopy(skillSource, skillText, { shiftHeadings: 1 }),
   );
   return { title: cap.id, description: cap.description, markdown };
 }
@@ -105,7 +144,6 @@ export function layerTwin(layerId: string): Twin {
   const caps = capabilitiesOfLayer(ontology, layer.id);
   const sentence = `${layer.description.replace(/\.$/, '')}.`;
   const crossing = crossLayerEdges(layer.id, ontology);
-  const usage = layerUsage(layer.id);
   const markdown = blocks(
     `# ${layer.id}`,
     sentence,
@@ -136,11 +174,15 @@ export function layerTwin(layerId: string): Twin {
           .join('\n\n'),
     '## Workflows that use this layer',
     figure(stepsTitle(layer.id, stepsPerLayer()), stepsCaption(layer.id, stepsPerLayer()), table(['Layer', 'Steps'], stepsPerLayer().map((r) => [r.layer, String(r.steps)]))),
-    usage.length === 0
-      ? 'No workflow uses a capability of this layer.'
-      : usage
-          .map((u) => `- ${mdLink(code(u.workflow.id), `/workflows/${u.workflow.slug}/`)}: ${u.capabilities.map(code).join(', ')}`)
-          .join('\n'),
+    (() => {
+      const m = usageMatrix(layer.id);
+      if (m.rows.length === 0) return usageMatrixCaption(layer.id, m);
+      return figure(
+        `Workflows that use ${layer.id} capabilities`,
+        usageMatrixCaption(layer.id, m),
+        table(['Workflow', ...m.capabilities.map(code)], m.rows.map((r) => [mdLink(code(r.workflow.id), `/workflows/${r.workflow.slug}/`), ...r.counts.map((c) => (c === 0 ? '' : String(c)))])),
+      );
+    })(),
   );
   return { title: layer.id, description: `${sentence} ${layer.capabilities.length} capabilities.`, markdown };
 }
@@ -162,7 +204,11 @@ export function capabilitiesIndexTwin(): Twin {
         ),
       ),
     ),
-    '## Counts',
+    '## Risk by layer',
+    (() => {
+      const m = riskByLayer(ontology);
+      return figure('Capabilities by risk level and layer', riskByLayerCaption(m), table(['Risk', ...m.layers], m.rows.map((r) => [r.risk, ...r.counts.map((c) => (c === 0 ? '' : String(c)))])));
+    })(),
     table(['Risk', 'Capabilities'], RISKS.map((r) => [r, String(ontology.capabilities.filter((c) => c.risk === r).length)])),
     `${ontology.capabilities.filter((c) => c.mutation).length} of the ${n} capabilities change state.`,
     table(['Edge type', 'Edges'], ontology.edgeTypes.map((t) => [code(t.id), String(t.edges.length)])),

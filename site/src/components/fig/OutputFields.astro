@@ -1,0 +1,58 @@
+---
+// F-C6, the skill's output against the capability's output contract (the
+// rollout's figure for the skill's Output Contract section): every top-level
+// field of the section's YAML fence as a chip, split into the fields the
+// ontology's output contract declares (filled pin when required, hollow when
+// optional) and the fields the skill adds, which no validator checks. A
+// third row lists contract fields the fence leaves out, when there are any.
+// The fence itself stays on the page, folded under the figure.
+//
+// Props:
+// - cap: Capability, required.
+// - fields: OutputFields, required. From outputFields().
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { contractRowId, outputFieldsCaption, outputFieldsTitle, type OutputFields } from '../../lib/capability-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import PixelBar from './PixelBar.astro';
+
+interface Props {
+  cap: Capability;
+  fields: OutputFields;
+  n: number;
+}
+
+const { cap, fields, n } = Astro.props;
+const inContract = fields.skill.filter((f) => f.inContract);
+const own = fields.skill.filter((f) => !f.inContract);
+const max = Math.max(1, fields.skill.length + fields.missing.length);
+const rows = [
+  { key: 'contract', label: `In ${cap.id}'s output contract`, glyph: 'check', items: inContract.map((f) => ({ name: f.name, pin: f.required ? 'required' : 'optional' })) },
+  { key: 'own', label: "The skill's own, outside the contract", glyph: 'type:open', items: own.map((f) => ({ name: f.name, pin: 'none' })) },
+  { key: 'missing', label: 'In the contract, not in the skill', glyph: 'close', items: fields.missing.map((name) => ({ name, pin: 'none' })) },
+].filter((r) => r.items.length > 0);
+---
+<Figure id="ref-fig-output-fields" n={n} title={outputFieldsTitle(cap, fields)} caption={outputFieldsCaption(cap, fields)} kind="output-fields">
+  <div class="ofields has-layer" style={`--layer: var(--layer-${cap.layer})`}>
+    {rows.map((r) => (
+      <div class="ofields__row" data-row={r.key} data-count={r.items.length}>
+        <p class="ofields__label" id={`ref-ofields-${r.key}`}>
+          <PixelGlyph name={r.glyph} />
+          <span>{r.label}</span>
+          <span class="ofields__count">{r.items.length}</span>
+        </p>
+        <span class="ofields__bar" aria-hidden="true"><PixelBar value={r.items.length} max={max} hideValue /></span>
+        <ul class="ofields__chips" aria-labelledby={`ref-ofields-${r.key}`}>
+          {r.items.map((x) => (
+            <li class="ofields__chip" data-pin={x.pin}>
+              {x.pin !== 'none' && <span class="port__pin ofields__pin" aria-hidden="true"></span>}
+              <code>{r.key === 'contract' || r.key === 'missing' ? <a href={`#${contractRowId('out', x.name)}`}>{x.name}</a> : x.name}</code>
+              {x.pin !== 'none' && <span class="fig-sr">, {x.pin}</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </div>
+</Figure>

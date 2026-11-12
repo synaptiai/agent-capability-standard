@@ -231,6 +231,19 @@
     color: var(--ink-2);
   }
 
+  /* "+": the field has nested fields the figure does not draw (visual spec F-C2). */
+  .port__more {
+    display: inline-grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border: var(--px) solid var(--ink-2);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1;
+  }
+
   /* Wide: the description is a tooltip panel on hover or focus. It stays in the accessibility tree. */
   .port__desc {
     order: 10;

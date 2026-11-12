@@ -1,0 +1,183 @@
+/*
+ * The layer page's row tooltips on the edge map (F-L2) and its usage matrix
+ * (F-L3), and the capabilities index's risk-by-layer table (F-CI1) and
+ * layer cards (visual spec 3.2 and 3.11). Kept apart from
+ * figures-capability.css so the rollout's branches merge cleanly.
+ *
+ * Pages import this file, and a page's styles can load before the layout's
+ * tokens.css, so the layer order is declared here too (the same order).
+ */
+@layer reset, tokens, base, components, utilities;
+
+@layer components {
+  /* ---------- F-L2: a row's edges in a tooltip panel on hover or focus ---------- */
+
+  .llinks__row {
+    position: relative;
+  }
+
+  .llinks__tip {
+    display: none;
+  }
+
+  .llinks__row:is(:hover, :focus-within) > .llinks__tip {
+    position: absolute;
+    top: 100%;
+    left: 40px;
+    z-index: 2;
+    display: grid;
+    gap: 2px;
+    box-sizing: border-box;
+    max-width: calc(100% - 40px);
+    padding: var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+    box-shadow: var(--shadow-1);
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .llinks__tip code {
+    color: var(--ink);
+  }
+
+  /* ---------- F-L3: the usage matrix ---------- */
+
+  .umatrix {
+    width: auto;
+    border-collapse: separate;
+    border-spacing: 2px;
+    font-size: 14px;
+  }
+
+  /* Positioned, so the visually hidden text in a cell stays inside the scroll box. */
+  .umatrix th,
+  .umatrix td {
+    position: relative;
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .umatrix thead th {
+    vertical-align: bottom;
+  }
+
+  .umatrix__corner {
+    text-align: left;
+    font-weight: 700;
+    color: var(--ink-2);
+  }
+
+  .umatrix__head {
+    width: 28px;
+    text-align: center;
+  }
+
+  .umatrix .umatrix__name {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    padding-right: var(--space-3);
+    background: var(--bg-sub);
+    text-align: left;
+    font-weight: 400;
+    white-space: nowrap;
+  }
+
+  .umatrix .umatrix__cell {
+    box-sizing: border-box;
+    width: 28px;
+    height: 28px;
+    border: var(--px) solid var(--line);
+    background: var(--cell);
+    color: var(--cell-ink);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .umatrix .umatrix__cell--empty {
+    border-color: var(--rule);
+    background: var(--bg);
+  }
+
+  .umatrix__scale {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .umatrix__scale > li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+  }
+
+  .umatrix__swatch {
+    box-sizing: border-box;
+    width: 16px;
+    height: 16px;
+    border: var(--px) solid var(--line);
+    background: var(--cell);
+  }
+
+  /* ---------- F-CI1: risk by layer ---------- */
+
+  .riskmap .riskmap__layer {
+    padding-bottom: var(--space-1);
+    text-align: center;
+  }
+
+  .riskmap__layer-head {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--ink);
+  }
+
+  .riskmap__layer .pg {
+    color: var(--layer);
+  }
+
+  .riskmap__layer-name {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .riskmap .riskmap__risk {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 40px;
+    font-weight: 700;
+    text-transform: capitalize;
+  }
+
+  .riskmap tr[data-risk='low'] .riskmap__risk > :not(:last-child) {
+    color: var(--risk-low);
+  }
+
+  .riskmap tr[data-risk='medium'] .riskmap__risk > :not(:last-child) {
+    color: var(--risk-medium);
+  }
+
+  .riskmap tr[data-risk='high'] .riskmap__risk > :not(:last-child) {
+    color: var(--risk-high);
+  }
+
+  .riskmap .riskmap__cell {
+    width: 48px;
+    height: 40px;
+    font-size: 14px;
+  }
+}
