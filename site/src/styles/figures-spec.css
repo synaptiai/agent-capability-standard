@@ -1670,7 +1670,9 @@
       padding: 0 var(--space-1);
       font-family: var(--font-mono);
       font-size: 12px;
-      color: var(--ink);
+      /* The chip keeps the cell's --indicator fill (= heat step 4), so its
+         label takes the text colour checked against that step. */
+      color: var(--on-heat-4);
     }
 
     .raised__cell--on::before {
