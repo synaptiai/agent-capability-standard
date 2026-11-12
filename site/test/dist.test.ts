@@ -116,8 +116,9 @@ describe('built site', () => {
     // Expected: the §4.4 table of the newest Standard, by line scan (mutate, send and rollback).
     const want = standardCheckpointCapabilities(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`)).sort();
     expect(want).toContain('rollback');
+    // The capability page shows the flag as the safety panel's "Needs checkpoint" cell (visual spec F-C3).
     const badged = pageDirs('capabilities').filter((c) =>
-      readFileSync(path.join(dist, 'capabilities', c, 'index.html'), 'utf8').includes('>Checkpoint required<'),
+      /data-safety="checkpoint" data-on="true"/.test(readFileSync(path.join(dist, 'capabilities', c, 'index.html'), 'utf8')),
     );
     expect(badged).toEqual(want);
     const overview = readFileSync(path.join(dist, 'capabilities', 'index.html'), 'utf8');
@@ -136,6 +137,31 @@ describe('built site', () => {
       const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
       const dd = /<dt>Approved automatically<\/dt>\s*<dd>(.*?)<\/dd>/.exec(html)?.[1]?.replace(/<[^>]+>/g, '');
       expect(dd, page).toBe(level === 'none' ? 'Nothing' : `${level} risk`);
+    }
+  });
+
+  it('draws one F-C1 tile per neighbour and one edge mark per relationship on every capability page', () => {
+    // Expected: the line-scanned edge triples; a symmetric type counts once per pair (visual spec 6.3).
+    const sym = new Set(symmetricEdgeTypes());
+    const rel = new Map<string, Set<string>>();
+    const add = (id: string, key: string) => rel.set(id, (rel.get(id) ?? new Set()).add(key));
+    for (const t of ontologyEdgeTriples()) {
+      if (sym.has(t.type)) {
+        add(t.from, `${t.to} ${t.type}`);
+        add(t.to, `${t.from} ${t.type}`);
+      } else {
+        add(t.from, `${t.to} ${t.type} out`);
+        add(t.to, `${t.from} ${t.type} in`);
+      }
+    }
+    expect(rel.get('mutate')?.size).toBeGreaterThan(0);
+    for (const c of pageDirs('capabilities')) {
+      const html = readFileSync(path.join(dist, 'capabilities', c, 'index.html'), 'utf8');
+      const id = /<article [^>]*data-capability="([a-z_]+)"/.exec(html)![1]!;
+      const want = rel.get(id) ?? new Set();
+      const fig = /<figure[^>]*id="ref-fig-relationships"[\s\S]*?<\/figure>/.exec(html)?.[0] ?? '';
+      expect((fig.match(/class="nbhd__cell"/g) ?? []).length, id).toBe(new Set([...want].map((k) => k.split(' ')[0])).size);
+      expect((fig.match(/class="pg nbhd__mark"/g) ?? []).length, id).toBe(want.size);
     }
   });
 

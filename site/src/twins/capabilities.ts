@@ -5,8 +5,19 @@ import { loadVersions } from '../data/versions';
 import { capabilityUsage } from '../data/workflows';
 import { readRepoFile } from '../lib/repo';
 import { kebab } from '../lib/routes';
-import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, layerUsage, type SchemaRow } from '../lib/views';
-import { blocks, cell, code, generatedLine, markdownCopy, mdLink, table } from './md';
+import {
+  contractCaption,
+  contractSummary,
+  contractTitle,
+  neighbourGroupLabel,
+  neighbourhoodCaption,
+  neighbourhoodTitle,
+  neighbours,
+  stepWords,
+  usageCaption,
+} from '../lib/capability-figures';
+import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, layerUsage, safetyRows, type SchemaRow } from '../lib/views';
+import { blocks, cell, code, figure, generatedLine, markdownCopy, mdLink, table } from './md';
 import type { Twin } from './types';
 
 const capLink = (id: string) => mdLink(code(id), `/capabilities/${kebab(id)}/`);
@@ -54,22 +65,41 @@ export function capabilityTwin(capId: string, skillSource: string): Twin {
                 ],
           )
           .join('\n');
-  const used =
-    usage.length === 0
-      ? 'No reference or domain workflow uses this capability.'
-      : usage.map((u) => `- ${mdLink(code(u.workflowId), `/workflows/${u.slug}/`)}: ${u.steps.length === 1 ? 'step' : 'steps'} ${u.steps.join(', ')}`).join('\n');
+  const near = neighbours(cap, ontology);
+  const neighbourhood =
+    near.length === 0
+      ? null
+      : figure(
+          neighbourhoodTitle(cap, near),
+          neighbourhoodCaption(cap, near),
+          table(
+            ['Capability', 'Row', 'Relationships'],
+            near.map((x) => [
+              capLink(x.id),
+              neighbourGroupLabel(x.group, cap.id),
+              x.relations.map((r) => `${code(r.type)} (${{ in: 'into', out: 'out of', 'both-ways': 'both ways' }[r.direction]})`).join(', '),
+            ]),
+          ),
+        );
+  const summary = contractSummary(cap);
+  const usedList = usage.map((u) => `- ${mdLink(code(u.workflowId), `/workflows/${u.slug}/`)}: ${stepWords(u.steps)}`).join('\n');
+  const used = usage.length === 0 ? usageCaption(cap, usage) : figure(`${cap.id} in workflows`, usageCaption(cap, usage), usedList);
   const markdown = blocks(
     `# ${cap.id}`,
     cap.description,
     generatedLine([ONTOLOGY_SOURCE, skillSource]) + ` Ontology version ${loadVersions().ontology}.`,
     flagLines(cap).join('\n'),
+    '## Safety',
+    table(['Property', 'Value'], safetyRows(cap).map((r) => [r.term, r.value])),
+    '## Relationships',
+    neighbourhood,
+    relationships,
     '## Contract',
+    `**Figure: ${contractTitle(cap, summary)}.** ${contractCaption(cap, summary)} The tables below list every field.`,
     '### Inputs',
     contractTable(contractRows(cap.input_schema)),
     '### Outputs',
     contractTable(contractRows(cap.output_schema)),
-    '## Relationships',
-    relationships,
     '## Used in workflows',
     used,
     '## Claude Code skill',
