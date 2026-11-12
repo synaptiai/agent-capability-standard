@@ -7,7 +7,9 @@
 // - rehype: rehypeHeadingIds runs first so the autolink plugin and everything
 //   after it see the ids (Astro's own later pass keeps ids already set).
 //   Keywords and callouts come next, then the figure marks (chapter glyphs,
-//   the edge summary table), and tables are wrapped last.
+//   the edge summary table), then tables are wrapped and task lists marked.
+//   The capability-skill step (numbered procedure steps, collapsed examples)
+//   runs last, on the finished tree of the 36 capability skills.
 // SmartyPants is off so heading ids match GitHub's (it would turn "--" into an
 // en dash before the ids are made).
 import { rehypeHeadingIds, type ShikiConfig, type UnifiedProcessorOptions } from '@astrojs/markdown-remark';
