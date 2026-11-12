@@ -487,7 +487,10 @@
     margin: 0;
   }
 
-  @container (min-width: 300px) {
+  /* Three columns from 340px: below that a cell is too narrow for
+     "CHECKPOINT" or "OVERRIDABLE" on one line (the Standard's §4.4 figure
+     at a 360px viewport). */
+  @container (min-width: 340px) {
     .safety-panel__grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
