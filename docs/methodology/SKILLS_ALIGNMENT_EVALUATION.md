@@ -389,12 +389,10 @@ flowchart TB
 title: The three options
 ---
 flowchart TB
-  accDescr: Option A keeps 35 capabilities and documents act's modes; option B splits act into execute and mutate for 36; option C also adds wait for 37; send is kept in B and C.
-  a["A: keep 35, act with implicit modes"]
-  b["B: 36, act becomes execute + mutate"]
-  c["C: 37, execute + mutate, plus wait"]
-  a -->|split act| b
-  b -->|add wait| c
+  accDescr: The recommended changes are three alternative options: A keeps 35 capabilities and documents act's implicit modes; B splits act into execute and mutate for 36 and keeps send; C splits act, adds wait and keeps send, for 37.
+  q[One of three options] --> a["A: 35, document act's modes"]
+  q --> b["B: 36, split act, keep send"]
+  q --> c["C: 37, split act, add wait, keep send"]
 ```
 
 ### Verdict

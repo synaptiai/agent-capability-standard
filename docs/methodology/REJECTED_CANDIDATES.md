@@ -119,9 +119,8 @@ improve:
 title: optimize as a composition
 ---
 flowchart LR
-  accDescr: optimize runs discover and then compare, and repeats until the result is optimal or the iteration limit is reached.
-  discover --> compare
-  compare -.->|"until optimal or max_iterations"| discover
+  accDescr: optimize runs discover and then compare, and the compare step loops until the result is optimal or max_iterations is reached.
+  discover --> compare["compare(loop until optimal or max_iterations)"]
 ```
 
 ```yaml
@@ -494,10 +493,10 @@ These were considered but have unclear semantics.
 
 ```mermaid
 ---
-title: What process could mean
+title: What to use instead of process
 ---
 flowchart LR
-  accDescr: process could mean transform, or detect, classify and measure for analysis.
+  accDescr: Instead of process, use transform, or detect, classify and measure for analysis.
   proc[process] --> transform
   proc --> detect
   proc --> classify
