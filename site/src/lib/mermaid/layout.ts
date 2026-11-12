@@ -215,7 +215,12 @@ export async function layoutDiagram(d: Diagram, options: LayoutOptions = {}): Pr
     const chip = n.capability && !options.compact ? chipSize(f) : null;
     const content = textWidth(lines, f) + (chip ? chip.w + chip.gap : 0);
     const w = up4(Math.max(sp.minW, content + 2 * (sp.padX + BORDER + inset)));
-    const h = up4(Math.max(lines.length * f.lineH, chip ? chip.h : 0) + 2 * (sp.padY + BORDER) + (n.shape === 'cylinder' ? 6 : 0));
+    const h0 = up4(Math.max(lines.length * f.lineH, chip ? chip.h : 0) + 2 * (sp.padY + BORDER) + (n.shape === 'cylinder' ? 6 : 0));
+    // Left to right, a box with several edges on one side is tall enough to
+    // give each its own 16px of that side, so edges that fan out from it
+    // (or into it) leave and arrive apart and can be traced.
+    const fan = direction === 'LR' ? Math.max(d.edges.filter((e) => e.from === n.id).length, d.edges.filter((e) => e.to === n.id).length) : 0;
+    const h = fan > 2 ? Math.max(h0, up4(fan * 16 + 8)) : h0;
     elkNodes.set(n.id, { id: n.id, width: w, height: h });
   }
   for (const g of d.groups) {

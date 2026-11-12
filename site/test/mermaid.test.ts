@@ -177,6 +177,16 @@ describe('layoutDiagram', async () => {
     }
   });
 
+  it('left to right, gives each of four edges leaving one box its own 16px of the side', async () => {
+    // The FAQ's "coordinate" proposal points to four capabilities; the edges used to leave 8px apart.
+    const l = await layoutDiagram(parseMermaid('flowchart LR\n a[A] --> b[B]\n a --> c[C]\n a --> d[D]\n a --> e[E]'));
+    checkGrid(l);
+    const a = l.nodes.find((n) => n.id === 'a')!;
+    expect(a.h).toBeGreaterThanOrEqual(4 * 16);
+    const starts = l.edges.map((e) => e.points[0]!.y).sort((x, y) => x - y);
+    for (let i = 1; i < starts.length; i++) expect(starts[i]! - starts[i - 1]!).toBeGreaterThanOrEqual(12);
+  });
+
   it('keeps each node of a subgraph inside the subgraph box', async () => {
     const s = await layoutDiagram(parseMermaid('flowchart LR\n subgraph s [Side]\n  x[X] --> y[Y]\n end\n y --> z[Z]'));
     checkGrid(s);
