@@ -1,4 +1,5 @@
 ---
+import { capabilitySymbol } from '../lib/views';
 // The home page (design notes, ia-home section 5; visual spec 3.11). No
 // sidebar. Sections in order: opening with the layer strip, why a standard,
 // the scroll story, what the standard covers, the capabilities, design
@@ -187,7 +188,7 @@ const nextFig = () => ++fig;
                         <span class="wf-gallery__steps">{it.steps} steps</span>
                         <RiskBadge risk={it.workflow.risk} />
                       </p>
-                      <StepStrip wf={it.workflow} size={20} />
+                      <StepStrip wf={it.workflow} size={20} symbols />
                     </li>
                   ))}
                 </ul>
@@ -196,7 +197,7 @@ const nextFig = () => ++fig;
           })}
         </div>
         <ul class="wf-gallery__legend" aria-label="Key">
-          <li><span class="step-strip step-strip--20" aria-hidden="true"><span class="step-strip__step step-strip__step--plain"></span></span>A step</li>
+          <li><span class="step-strip step-strip--20" aria-hidden="true"><span class="step-strip__step step-strip__step--hit has-layer" style="--layer: var(--layer-perceive)">{capabilitySymbol('retrieve')}</span></span>A step: its capability's symbol, in its layer's colour</li>
           {(['checkpoint', 'mutating', 'verify', 'rollback'] as const).map((role) => (
             <li>
               <span class="step-strip step-strip--20" aria-hidden="true"><span class="step-strip__step step-strip__step--role"><PixelGlyph name={`role:${role}`} scale={2} /></span></span>

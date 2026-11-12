@@ -497,7 +497,7 @@ export const STORY_FIG_TITLE = `From capabilities to the steps of ${STORY_WORKFL
 export const TABLE_FIG_TITLE = 'The periodic table of capabilities';
 export const GALLERY_FIG_TITLE = 'Every workflow, one square per step';
 export const WORKFLOWS_HEADING = 'The workflows';
-export const GALLERY_INTRO = 'The catalogs ship reference workflows and workflows for each domain. Each one is a list of steps, and the squares below show them in order.';
+export const GALLERY_INTRO = 'The catalogs ship reference workflows and workflows for each domain. Each one is a list of steps. Below, each square is one step, in order, marked with the symbol of the capability it runs or with its safety role.';
 
 /** Words for a list: "a", "a and b", "a, b and c". */
 function words(xs: string[]): string {

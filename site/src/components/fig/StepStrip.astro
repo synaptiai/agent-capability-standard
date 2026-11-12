@@ -16,6 +16,9 @@
 // - highlight: string, optional. A capability id; needs size 16 or 20.
 // - href: string, optional. Makes the strip one link with the strip's name.
 // - label: string, optional. Replaces the computed accessible name.
+// - symbols: boolean, optional; needs size 16 or 20 and no highlight. Draws
+//   each plain step as its capability's two-letter symbol on its layer tint,
+//   so a gallery of strips shows what each workflow does, not only its length.
 import type { Workflow } from '../../data/workflows';
 import { loadOntology } from '../../data/ontology';
 import { capabilitySymbol, diagramSteps } from '../../lib/views';
@@ -27,10 +30,12 @@ interface Props {
   highlight?: string;
   href?: string;
   label?: string;
+  symbols?: boolean;
 }
 
-const { wf, size = 10, highlight, href, label } = Astro.props;
+const { wf, size = 10, highlight, href, label, symbols = false } = Astro.props;
 if (size !== 10 && size !== 16 && size !== 20) throw new Error(`StepStrip ${wf.id}: size must be 10, 16 or 20, got ${size}`);
+if (symbols && (size === 10 || highlight)) throw new Error(`StepStrip ${wf.id}: symbols needs size 16 or 20 and no highlight`);
 if (highlight && size === 10) throw new Error(`StepStrip ${wf.id}: highlight needs size 16 or 20, where the symbol fits`);
 const steps = diagramSteps(wf);
 const layerOf = (id: string) => loadOntology().capabilities.find((c) => c.id === id)?.layer;
@@ -54,7 +59,7 @@ const Tag = href ? 'a' : 'span';
   data-workflow={wf.id}
   data-steps={steps.length}
 >{steps.map((d) => {
-  const hit = highlight !== undefined && d.step.capability === highlight;
+  const hit = (highlight !== undefined && d.step.capability === highlight) || (symbols && d.role === 'plain');
   const role = d.role !== 'plain' && !hit ? d.role : null;
   const gated = (d.step.gates?.length ?? 0) > 0;
   return (
