@@ -12,7 +12,6 @@
 // - inner: string | null, required. The wrapped block's HTML, or null.
 // - source: string, required. The Standard's repo path.
 // - slots: SpecSlot[], optional. The page's slot map (SPEC_SLOTS_100 on 1.0.0).
-import { fieldTable, fieldsCaption } from '../../lib/edge-figures';
 import {
   annotationGrammar,
   bindingExamples,
@@ -80,9 +79,9 @@ const titled = (name: string) => `${name}, from §${def.section.trim()}`;
 const idOf = (name: string) => refSlugger()(`Figure: ${name}`);
 const o = loadOntology();
 const schema = loadCatalogSchema();
-const KNOWN = ['fields', 'layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
-const OLDER = ['ports-5.1', 'ports-5.2', 'ports-6.2', 'categories'];
-const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'world-state-fields', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
+const KNOWN = ['layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
+const OLDER = ['categories', ...Object.keys(T.TABLE_FIGURES)];
+const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
 const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
@@ -118,7 +117,6 @@ const quorum = slot === 'quorum' ? D.quorumExample(text, where) : null;
 const trust = slot === 'trust-classes' ? D.trustClassBars(text, where) : [];
 const sender = slot === 'sender-filter' ? D.senderFilter(text, where) : [];
 const shelf = slot === 'schema-shelf' ? T.schemaShelf(text, where) : [];
-const wsRows = slot === 'world-state-fields' ? T.fieldRows(text, '6.3 ', where) : [];
 const policy = slot === 'merge-thresholds' ? loadIdentityPolicy() : null;
 const decay = slot === 'decay' ? T.decayColumns(text, where) : null;
 const families = slot === 'families' ? T.diagnosticFamilies(text, where) : [];
@@ -155,23 +153,14 @@ const decayRects: FigRect[] = decay
     ]
   : [];
 const codesSec = slot.startsWith('codes-') ? T.sectionCodes(text, slot.slice(6), where) : null;
-const PORT_TITLES: Record<string, [string, string]> = { 'ports-5.1': ['Workflow fields', 'A workflow'], 'ports-5.2': ['Step fields', 'A step'], 'ports-6.2': ['Event fields', 'A canonical event'] };
-const portRows = slot in PORT_TITLES ? T.fieldRows(text, `${slot.slice(6)} `, where) : [];
+const tableFig = T.TABLE_FIGURES[slot] ?? null;
 const categories = slot === 'categories' ? T.categoryCounts(text, where) : [];
 const isOutcome = (n: T.TreeNode) => n.branches.length === 0;
 const pct = (v: number, max: number) => `${((v / max) * 100).toFixed(3)}%`;
 const line = (type: string) => edgeRects(type, 2, 8, 46, 8).rects;
-const fields = slot === 'fields' ? fieldTable(text, '4.1 ', where) : [];
 const grammar = slot === 'annotations' ? annotationGrammar(text, where) : null;
 const failures = slot === 'failures' ? failureBranches(text, where, schema) : [];
 ---
-{slot === 'fields' && (
-  <Figure id={idOf('capability fields')} n={n} title={titled('Capability fields')} caption={fieldsCaption(fields, 'A capability has')} kind="capability-fields">
-    <ul class="ports ports--out spec-ports">
-      {fields.map((f) => <Port name={f.name} type={f.type} required={f.required} description={f.description} />)}
-    </ul>
-  </Figure>
-)}
 {slot === 'layers' && <LayerModel id={idOf('layer model')} n={n} title={titled('Layer model')} />}
 {slot === 'edges' && (
   <Figure id={idOf('edge types')} n={n} title={titled('Edge types')} caption={edgeTypesCaption(o)} kind="edge-types">
@@ -506,16 +495,6 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
     </ul>
   </Figure>
 )}
-{slot === 'world-state-fields' && (
-  <Figure id={idOf('world-state fields')} n={n} title={titled('World-state fields')} caption={T.fieldGroupsCaption(wsRows, 'A world state snapshot')} kind="world-state-fields">
-    {T.fieldGroups(wsRows).map((g) => (
-      <div class="ws-group">
-        <p class="deleg__ext">{g.prefix ? <>under <code>{g.prefix}</code></> : 'top level'}</p>
-        <ul class="ports ports--out spec-ports">{g.rows.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} />)}</ul>
-      </div>
-    ))}
-  </Figure>
-)}
 {slot === 'merge-thresholds' && policy && (
   <Figure id={idOf('merge thresholds')} n={n} title={titled('Merge thresholds')} caption={T.thresholdsCaption()} kind="merge-thresholds">
     <div class="scale">
@@ -679,9 +658,9 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
     <Fragment set:html={inner} />
   </Figure>
 )}
-{slot in PORT_TITLES && (
-  <Figure id={idOf(PORT_TITLES[slot]![0])} n={n} title={titled(PORT_TITLES[slot]![0])} caption={T.fieldGroupsCaption(portRows, PORT_TITLES[slot]![1])} kind="field-ports">
-    <ul class="ports ports--out spec-ports">{portRows.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} />)}</ul>
+{tableFig && inner && (
+  <Figure id={idOf(tableFig.name)} n={n} title={titled(tableFig.name)} caption={T.tableFigureCaption(slot, text, where)} kind="field-table">
+    <Fragment set:html={inner} />
   </Figure>
 )}
 {slot === 'categories' && (

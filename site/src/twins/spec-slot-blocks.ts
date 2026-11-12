@@ -6,7 +6,6 @@
 // function the page's <figcaption> calls, so the words agree) and, where
 // the figure works something out from its source (an order, a tally, the
 // outcomes of a tree), that result as a short table or list.
-import { fieldTable, fieldsCaption } from '../lib/edge-figures';
 import { annotationCaption, annotationGrammar, annotationGroups, bindingExamples, failureBranches, failureCaption, referenceCaption } from '../lib/spec-figures';
 import type { SpecSlot } from '../lib/spec-slots';
 import * as D from '../lib/spec-dsl-figures';
@@ -17,7 +16,7 @@ import { cell, code, figure, table } from './md';
 
 /** The figure's title as the page prints it: "{name}, from §{n}". */
 export function slotTitle(slot: SpecSlot, text: string, where: string): string {
-  const name = SLOT_NAMES[slot.key] ?? (slot.key.startsWith('codes-') ? `${T.sectionCodes(text, slot.key.slice(6), where).heading} by code` : null);
+  const name = SLOT_NAMES[slot.key] ?? T.TABLE_FIGURES[slot.key]?.name ?? (slot.key.startsWith('codes-') ? `${T.sectionCodes(text, slot.key.slice(6), where).heading} by code` : null);
   if (slot.key.startsWith('pattern-')) {
     const p = T.patternStrips(text, where)[Number(slot.key.slice(8))];
     if (!p) throw new Error(`${where}: §12.5 has no pattern fence for ${slot.key}`);
@@ -31,7 +30,6 @@ export function slotTitle(slot: SpecSlot, text: string, where: string): string {
 const SLOT_NAMES: Record<string, string> = {
   requirements: 'Where the requirements are',
   'safety-order': 'Safety ordering',
-  fields: 'Capability fields',
   layers: 'Layer model',
   edges: 'Edge types',
   safety: 'Safety-critical capabilities',
@@ -58,7 +56,6 @@ const SLOT_NAMES: Record<string, string> = {
   'trust-classes': 'Trust classes',
   'sender-filter': 'The sender filter',
   'schema-shelf': 'Schema shelf',
-  'world-state-fields': 'World-state fields',
   'merge-thresholds': 'Merge thresholds',
   decay: 'Decay with a floor: reference configuration',
   families: 'Diagnostic families',
@@ -67,13 +64,8 @@ const SLOT_NAMES: Record<string, string> = {
   suite: 'The conformance suite',
   bumps: 'Which change bumps which number',
   'checkpoint-tree': 'Checkpoint decision tree',
-  'ports-5.1': 'Workflow fields',
-  'ports-5.2': 'Step fields',
-  'ports-6.2': 'Event fields',
   categories: 'Error categories',
 };
-
-const PORT_WHAT: Record<string, string> = { 'ports-5.1': 'A workflow', 'ports-5.2': 'A step', 'ports-6.2': 'A canonical event' };
 
 /** The decision tree as a nested list: each question, its answers and where they lead. */
 function treeList(n: T.TreeNode, depth = 0): string[] {
@@ -92,8 +84,6 @@ export function slotBlock(slot: SpecSlot, source: string): string {
   const at = `§${slot.section.trim()}`;
   const drawn = (what: string) => `The figure draws the ${what} of ${at} above.`;
   switch (slot.key) {
-    case 'fields':
-      return figure(title, fieldsCaption(fieldTable(text, '4.1 ', where), 'A capability has'), drawn('table'));
     case 'reference':
       return figure(title, referenceCaption(bindingExamples(text, where)), drawn('examples'));
     case 'annotations': {
@@ -144,8 +134,6 @@ export function slotBlock(slot: SpecSlot, source: string): string {
     }
     case 'schema-shelf':
       return figure(title, T.shelfCaption(T.schemaShelf(text, where)), drawn('table'));
-    case 'world-state-fields':
-      return figure(title, T.fieldGroupsCaption(T.fieldRows(text, '6.3 ', where), 'A world state snapshot'), drawn('table'));
     case 'levels': {
       const cols = T.conformanceLevels(text, where);
       return figure(title, T.levelsCaption(cols), table(['Level', 'Name', 'Requirements listed'], cols.map((c) => [c.level, c.name, String(c.items.length)])));
@@ -164,7 +152,7 @@ export function slotBlock(slot: SpecSlot, source: string): string {
     }
   }
   if (slot.key.startsWith('codes-')) return figure(title, T.sectionCodesCaption(T.sectionCodes(text, slot.key.slice(6), where)), drawn('table'));
-  if (slot.key in PORT_WHAT) return figure(title, T.fieldGroupsCaption(T.fieldRows(text, `${slot.key.slice(6)} `, where), PORT_WHAT[slot.key]!), drawn('table'));
+  if (slot.key in T.TABLE_FIGURES) return figure(title, T.tableFigureCaption(slot.key, text, where), `The figure is the table of ${at} above.`);
   if (slot.key.startsWith('pattern-')) {
     const p = T.patternStrips(text, where)[Number(slot.key.slice(8))]!;
     return figure(
