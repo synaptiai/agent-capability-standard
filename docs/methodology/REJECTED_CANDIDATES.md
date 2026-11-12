@@ -236,6 +236,16 @@ Evaluation is comparison with an implicit baseline (criteria). When you "evaluat
 
 **Resolution**: Use `compare(target, criteria)` for evaluation.
 
+```mermaid
+---
+title: Redundant candidates 2.1 and 2.2
+---
+flowchart LR
+  accDescr: validate is merged into verify, and evaluate into compare.
+  validate_c[validate] -->|merged into| verify
+  evaluate_c[evaluate] -->|merged into| compare
+```
+
 ---
 
 ### 2.3 `decide` (→ merge with `compare`)
@@ -266,12 +276,10 @@ A decision is the output of comparison. You compare options to decide.
 
 ```mermaid
 ---
-title: Redundant candidates 2.1 to 2.4
+title: Redundant candidates 2.3 and 2.4
 ---
 flowchart LR
-  accDescr: validate is merged into verify, and evaluate, decide and prioritize are merged into compare.
-  validate_c[validate] -->|merged into| verify
-  evaluate_c[evaluate] -->|merged into| compare
+  accDescr: decide and prioritize are merged into compare.
   decide_c[decide] -->|merged into| compare
   prioritize_c[prioritize] -->|merged into| compare
 ```
