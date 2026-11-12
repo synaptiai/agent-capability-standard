@@ -175,6 +175,19 @@ deploy_with_escalation:
   give the target's required inputs (S304) and nothing it does not declare
   (S303); a `${...}` reference is checked when the step runs (R402).
 
+```mermaid
+---
+title: From a failure to a handler
+---
+flowchart TB
+  accDescr: A failure mode fires on a runtime code or an expression; its recovery loops back to the goto_step up to max_loops, and when the loop runs out, or with action escalate, a handler step runs once and ends the run as escalated.
+  fail["Failure mode fires: on_error code or when expression"] --> loop["Recovery loops back to goto_step, inject_context readable as _recovery"]
+  loop -->|"up to max_loops"| fail
+  loop -->|"loops run out: on_exhausted"| handler["Handler: an invoke step with handler: true, run once"]
+  fail -->|"action: escalate"| handler
+  handler --> ended["Run ends with outcome escalated"]
+```
+
 ## Waiting for an event (`wait@1`)
 
 A `receive` step with `wait` pauses the run until a matching event arrives
@@ -232,6 +245,18 @@ delegates, then waits for that delegate's result (see
   a delegation that returned no `task_id`), fails the step (R402) at once:
   a null key would match every event that lacks it, and such a filter
   would drop every sender.
+
+```mermaid
+---
+title: How a wait ends
+---
+flowchart TB
+  accDescr: A waiting step goes on when a matching event arrives, fails with R401 when its timeout lapses, and fails with R406 when liveness is lost; a checkpoint taken before the wait no longer covers a later step that requires one.
+  wait["receive, synchronize or delegate step with wait"] -->|matching event| data["Event in the step's output, run goes on"]
+  wait -->|timeout lapses| r401[R401]
+  wait -->|liveness lost| r406[R406]
+  data --> cp["Take the checkpoint after the wait (W608)"]
+```
 
 To pause without an event, give the step a `delay` (`wait@1` too): it
 waits that long after its condition and gates, then goes on. Sampling
@@ -382,6 +407,17 @@ as an item's principal whoever authenticated delivering it, not a sender
 named in the item. So when a peer relays the owner's answer, the principal
 is the peer, and `accept_from: [owner]` drops it.
 
+```mermaid
+---
+title: Who counts as the sender
+---
+flowchart TB
+  accDescr: The principal is whoever authenticated delivering an item, so when a peer relays the owner's answer the principal is the peer, and a step with accept_from owner drops it.
+  owner[Owner's answer] -->|relayed by| peer[Peer agent]
+  peer -->|"delivers, principal: peer"| step["receive with accept_from: [owner]"]
+  step --> dropped["Dropped and counted"]
+```
+
 ## Sender identity (`identity@1`)
 
 A principal says *who* delivered an item; an **identity** also says how the
@@ -491,6 +527,17 @@ before the run goes on:
   least `min_pass` pass, and at least `min_full` of the passes have scope
   `full`; its output gains a `tally` (with `full_passes`).
 
+```mermaid
+---
+title: A review quorum
+---
+flowchart LR
+  accDescr: Reviewers are delegate steps that run before the quorum; their verdicts go to a blocking constrain step, which lets the run go on only when the quorum is met.
+  ra[Reviewer A: delegate step] -->|verdict| q["Blocking constrain step with quorum"]
+  rb[Reviewer B: delegate step] -->|verdict| q
+  q -->|quorum met| next[Run goes on]
+```
+
 Reviewers can have different rules. Give `forbidden_inputs` a mapping to
 keep one reviewer away from what another may read, for example a verifier
 that sees the earlier rounds and a fresh reviewer that must not:
@@ -551,6 +598,18 @@ maps to one party count once. Each reviewer must then be a waiting
 delegate, and `verdicts` must reference only their results. A
 model family counts toward `require_model_families` only when the host
 attests it.
+
+```mermaid
+---
+title: Replacing a reviewer that hangs
+---
+flowchart TB
+  accDescr: When reviewer B goes silent with R406 or runs out of time with R401, its step's retry delegates again, with replaces naming the old delegation; reviewer A is not asked again.
+  b["Reviewer B's waiting delegate step"] -->|"R406 silent or R401 timed out"| retry["retry: delegate again, replaces the old task_id"]
+  retry --> b2[New result for reviewer B]
+  a["Reviewer A's result"] --> verdicts["verdicts list for the constrain step"]
+  b2 --> verdicts
+```
 
 Placing a delegated step on a particular host or device is not part of
 the standard; RFC-0003 records it as an open question.
