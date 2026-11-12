@@ -488,13 +488,18 @@ export function skillInputNames(skillText: string, where: string): string[] {
 }
 
 /**
- * True when `text` uses `field` as a whole word (not part of a longer name).
- * This is a word match, not a reading of what the step does: a field named
- * with an English word ("data", "options") is marked wherever the step uses
- * that word, and the caption says so.
+ * True when `text` uses `field` as a whole word (not part of a longer name),
+ * with an underscore and a space counted as the same: "Extract decision
+ * rationale" names `decision_rationale`. The spaced form ignores case, as a
+ * step title capitalises its first word. This is a word match, not a reading
+ * of what the step does: a field named with an English word ("data",
+ * "options") is marked wherever the step uses that word, and the caption
+ * says so.
  */
 function names(text: string, field: string): boolean {
-  return new RegExp(`(?<![A-Za-z0-9_])${field}(?![A-Za-z0-9_])`).test(text);
+  const edge = (p: string) => `(?<![A-Za-z0-9_])${p}(?![A-Za-z0-9_])`;
+  if (new RegExp(edge(field)).test(text)) return true;
+  return field.includes('_') && new RegExp(edge(field.split('_').join('[ _]')), 'i').test(text);
 }
 
 /**

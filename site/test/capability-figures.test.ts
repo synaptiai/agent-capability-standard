@@ -370,6 +370,16 @@ describe('procedureMap (F-C7)', () => {
     expect(m.steps[2]!.writes).toEqual(['result']);
   });
 
+  it('counts a field named with spaces for underscores, in any case', () => {
+    // Audit's step 3 is titled "Extract decision rationale"; its field is decision_rationale.
+    const text = SKILL.replace('2) **Read it**: no field named here (limits and targets are other words)', '2) **Collect Evidence anchors**: one per claim');
+    const m = procedureMap(text, 'fixture');
+    expect(m.steps[1]!.writes).toEqual(['evidence_anchors']);
+    // A longer name that only contains the words is not a match.
+    const longer = SKILL.replace('2) **Read it**: no field named here (limits and targets are other words)', '2) **Read it**: list the evidence anchorsets');
+    expect(procedureMap(longer, 'fixture').steps[1]!.writes).toEqual([]);
+  });
+
   it('falls back to a sentence when fewer than two steps name a field', () => {
     const one = SKILL.replace('fill `result` and evidence_anchors', 'finish');
     const m = procedureMap(one, 'fixture');
