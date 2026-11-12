@@ -191,10 +191,20 @@ debug_code_change:
     purpose: Run targeted verification and return PASS/FAIL.
     store_as: verify_out
     input_bindings:
-      target: "${bug.component}"
-      conditions: ["tests_pass", "symptom_resolved"]
+      target:
+        component: "${bug.component}"
+        execution: "${execute_out}"
+      conditions: ["tests_pass", "symptom_resolved", "public_interfaces_unchanged"]
+  - capability: rollback
+    purpose: If verify FAIL, revert safely.
+    store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    gates:
+    - when: ${verify_out} == null || ${verify_out.passed} == true   # <-- Roll back only on failure
+      action: skip
   - capability: audit
-    purpose: Record what changed and why.
+    purpose: Record what changed and why, and whether it was rolled back.
     store_as: audit_out
     input_bindings:
       event:
@@ -202,14 +212,7 @@ debug_code_change:
         component: "${bug.component}"
         plan: "${plan_out.steps: array<object>}"
         verified: "${verify_out.passed}"
-  - capability: rollback
-    purpose: If verify FAIL, revert safely.
-    store_as: rollback_out
-    input_bindings:
-      checkpoint_id: "${checkpoint_out.checkpoint_id}"
-    gates:
-    - when: ${verify_out.passed} == true   # <-- Roll back only on failure
-      action: skip
+        rolled_back: "${rollback_out.restored}"
   inputs:
     bug:                             # <-- The workflow's input: what to fix
       type: object
@@ -241,15 +244,16 @@ Key observations:
 title: The steps of debug_code_change
 ---
 flowchart TB
-  accDescr: debug_code_change runs observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, audit and rollback in order; critique reads attribute_out, audit reads plan_out and verify_out, and rollback reads checkpoint_out and is skipped when verify passed.
-  observe --> search --> attribute
-  attribute -->|attribute_out.causes| constrain
-  constrain --> critique --> plan --> checkpoint
+  accDescr: debug_code_change runs observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, rollback and audit in order; critique reads attribute_out, rollback reads checkpoint_out and is skipped when verify passed, and audit reads plan_out, verify_out and rollback_out.
+  observe --> search --> attribute --> constrain --> critique --> plan --> checkpoint
   checkpoint -->|checkpoint first| execute
-  execute --> verify
-  verify -->|"verify_out, plan_out"| audit
-  audit --> rollback
-  rollback -.->|"gate: skip when verify_out.passed is true"| skip[Skipped]
+  execute --> verify --> rollback
+  rollback -->|rollback_out.restored| audit
+  attribute -.->|attribute_out.causes| critique
+  checkpoint -.->|checkpoint_out.checkpoint_id| rollback
+  plan -.->|plan_out.steps| audit
+  verify -.->|verify_out.passed| audit
+  rollback -.->|"gate: skip when verify passed"| skip[Skipped]
 ```
 
 ## Step 5: Explore the Capability Ontology (2 min)
