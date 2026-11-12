@@ -678,10 +678,12 @@ describe('agent files', () => {
   });
 
   it('copies a Markdown page from its source, changing only link targets and adding a Source line', () => {
-    // Pairs from the design notes' URL scheme: source file -> page.
+    // Pairs from the design notes' URL scheme: source file -> page. Pages
+    // with no mermaid fence: a fence gains its text version after it in the
+    // copy, which test/mermaid.test.ts checks.
     const version = standardFileVersions()[0]!;
     const pairs: [string, string][] = [
-      ['docs/QUICKSTART.md', 'start/quickstart'],
+      ['docs/GLOSSARY.md', 'start/glossary'],
       ['spec/GOVERNANCE.md', 'community/governance'],
       [`spec/STANDARD-v${version}.md`, `spec/${version}`],
     ];
