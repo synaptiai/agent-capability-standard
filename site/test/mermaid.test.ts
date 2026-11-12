@@ -215,6 +215,16 @@ describe('layoutDiagram', async () => {
     const tooWide = parseMermaid(`flowchart LR\n${Array.from({ length: 12 }, (_, i) => ` n${i}[A rather long label ${i}] --> n${i + 1}`).join('\n')}`);
     expect(await layoutsFor(tooWide)).toMatch(/px wide, more than the 684px/);
   });
+
+  it('keeps a label of up to 34 characters on one line when the page has room (review: four-line boxes)', async () => {
+    // 'Requirements for production agents' is 34 characters, one line;
+    // 'Atomicity validation: each is irreducible' is 41 characters: two lines
+    // at 34 a line, where 22 a line gave three.
+    const one = await layoutsFor(parseMermaid('flowchart TB\n a[Requirements for production agents] --> b[Atomicity validation: each is irreducible]'));
+    if (typeof one === 'string') throw new Error(one);
+    const lines = one.wide.nodes.map((n) => n.lines.length);
+    expect(lines).toEqual([1, 2]);
+  });
 });
 
 describe('drawing', async () => {

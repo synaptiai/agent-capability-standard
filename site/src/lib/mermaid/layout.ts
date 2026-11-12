@@ -31,7 +31,12 @@ export const WIDE_BUDGET = 684;
 /** Widest drawing at a 360px viewport: 328px of content less 8px padding and 2px border each side. */
 export const NARROW_BUDGET = 308;
 
-/** Characters per label line, for the authored layout and the phone layout. */
+/**
+ * Characters per label line: the longest the page layout tries first (so a
+ * label in a narrow drawing is not wrapped into four short lines), the
+ * page layout's fallback, and the phone layout.
+ */
+export const WRAP_LONG = 34;
 export const WRAP_WIDE = 22;
 export const WRAP_NARROW = 10;
 

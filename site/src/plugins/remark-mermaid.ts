@@ -9,7 +9,7 @@ import type { Code, Heading, Root } from 'mdast';
 import { toString } from 'mdast-util-to-string';
 import { visit } from 'unist-util-visit';
 import type { VFile } from 'vfile';
-import { FONT_NARROW, layoutDiagram, NARROW_BUDGET, WIDE_BUDGET, WRAP_NARROW, type Layout } from '../lib/mermaid/layout';
+import { FONT_NARROW, layoutDiagram, NARROW_BUDGET, WIDE_BUDGET, WRAP_LONG, WRAP_NARROW, type Layout } from '../lib/mermaid/layout';
 import { MermaidError, parseMermaid, type Diagram, type Direction } from '../lib/mermaid/parse';
 import { figureElement } from '../lib/mermaid/render';
 import { markCapabilities } from '../lib/mermaid/capabilities';
@@ -41,8 +41,10 @@ function bodyLine(node: Code, n: number): number {
 
 /** Both layouts for a diagram, or the reason it cannot be drawn. */
 export async function layoutsFor(d: Diagram): Promise<{ wide: Layout; narrow: Layout | null } | string> {
-  // The page layout uses long lines; a diagram too wide for them gets shorter ones.
-  let wide = await layoutDiagram(d);
+  // The page layout uses the longest lines that fit the page; a diagram too
+  // wide for them gets shorter ones.
+  let wide = await layoutDiagram(d, { wrapAt: WRAP_LONG });
+  if (wide.width > WIDE_BUDGET) wide = await layoutDiagram(d);
   if (wide.width > WIDE_BUDGET) wide = await layoutDiagram(d, { wrapAt: WRAP_NARROW });
   if (wide.width > WIDE_BUDGET) {
     return `the drawing is ${wide.width}px wide, more than the ${WIDE_BUDGET}px a page has; draw it top to bottom (flowchart TB) or shorten the labels`;
