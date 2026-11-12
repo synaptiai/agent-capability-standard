@@ -1,9 +1,11 @@
 ---
 // F-C1, a capability's relationships with one tile per neighbour (visual
-// spec 3.1). A vertical stack: the "into" row, the capability itself, then
+// spec 3.1). Narrow, a vertical stack: the "into" row, the capability itself, then
 // the "out of", "both directions" and "either way" rows, each joined to one
 // rail on the left by a stub whose chevrons give the direction (the stub is
-// the row header's direction glyph). Each tile is
+// the row header's direction glyph). Wide (640px and up), two columns: the
+// "into" row and the capability on the left, the other rows on the right,
+// with no rail (figures-capability.css). Each tile is
 // a 32px MiniTile with an edge mark for each relationship under it; the marks,
 // not colour, carry the edge types, and a legend names the types present.
 // Hovering or focusing a tile underlines its types in the legend at 4px
