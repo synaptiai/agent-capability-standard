@@ -268,7 +268,8 @@ title: Where the hooks run
 ---
 flowchart TB
   accDescr: Before a tool runs, pretooluse_require_checkpoint blocks a mutation without a checkpoint; after it runs, posttooluse_log_tool adds to the audit trail.
-  call[Tool call] --> pre{"pretooluse_require_checkpoint: mutation without a checkpoint?"}
+  call[Tool call] --> hook[pretooluse_require_checkpoint]
+  hook --> pre{"A mutation without a checkpoint?"}
   pre -->|yes| block[Mutation blocked]
   pre -->|no| run[Tool runs]
   run --> post["posttooluse_log_tool: audit trail"]

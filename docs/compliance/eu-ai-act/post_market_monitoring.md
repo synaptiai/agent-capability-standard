@@ -72,17 +72,16 @@ Beyond existing telemetry, the following data points should be collected at the 
 ---
 title: Who monitors at each cadence
 ---
-flowchart TB
-  accDescr: Continuous checks are automated by hooks and the SDK, daily and weekly monitoring falls to the AI System Operator, monthly and quarterly reviews to the AI Safety Officer, with the AI System Owner joining quarterly, and the annual audit to the AI System Owner, with an external audit if applicable; the quarterly review report feeds the AIMS-MGR-001 management review.
+flowchart LR
+  accDescr: Continuous checks are automated by hooks and the SDK, daily and weekly monitoring falls to the AI System Operator, monthly and quarterly reviews to the AI Safety Officer, with the AI System Owner joining quarterly, and the annual audit to the AI System Owner, with an external audit if applicable; the quarterly review report goes to the AIMS-MGR-001 management review.
   auto["Automated: hooks and SDK"] --> c[Continuous]
   op[AI System Operator] --> d[Daily]
   op --> w[Weekly]
   so[AI Safety Officer] --> m[Monthly]
-  so --> q[Quarterly]
+  so --> q["Quarterly: report to AIMS-MGR-001"]
   ow[AI System Owner] --> q
   ow --> a[Annual]
   ext["External audit, if applicable"] -.-> a
-  q -->|quarterly review report| mgr["Management review (AIMS-MGR-001)"]
 ```
 
 ### 4.2 Event-Triggered Monitoring
@@ -138,18 +137,6 @@ In addition to scheduled monitoring, the following events trigger immediate moni
 | **L2** | Warning | KPI breaches alert threshold; pattern of anomalies | Within 8 hours | AI System Operator + AI Safety Officer | Root cause investigation; corrective action per AIMS-NCR-001; deployer notification if affected |
 | **L3** | Critical | Safety KPI failure (checkpoint, evidence coverage); multiple concurrent warnings | Within 2 hours | AI Safety Officer + AI System Owner | Affected capability suspended or restricted; immediate corrective action; deployer notification; preliminary incident assessment |
 | **L4** | Incident | Serious incident per Art. 62 definition; system poses risk to health/safety/rights | Immediate | AI System Owner + Legal/Regulatory | System withdrawal or recall initiated; Art. 62 notification within 15 days; market surveillance authority engagement |
-
-```mermaid
----
-title: The four escalation levels
----
-flowchart TB
-  accDescr: A KPI approaching its alert threshold or an isolated anomaly is L1, a breached alert threshold or a pattern of anomalies is L2, a safety KPI failure or several concurrent warnings is L3, and a serious incident under Art. 62 is L4, with the response time shrinking from the next business day to immediate.
-  c1["A KPI approaching its alert threshold; an isolated anomaly"] --> l1["L1 Info: respond next business day"]
-  c2["A KPI breaches its alert threshold; a pattern of anomalies"] --> l2["L2 Warning: respond within 8 hours"]
-  c3["A safety KPI fails; several warnings at once"] --> l3["L3 Critical: respond within 2 hours"]
-  c4["A serious incident under Art. 62"] --> l4["L4 Incident: respond immediately"]
-```
 
 ### 6.2 Escalation Matrix by Profile
 
