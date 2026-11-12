@@ -13,6 +13,16 @@ This document classifies the Grounded Agency framework's 7 domain profiles again
 
 **Critical distinction:** The Grounded Agency framework is *infrastructure* — a capability ontology, safety model, and composition engine — not an AI system itself. AI systems *built on* this framework inherit its safety properties but are classified based on their *intended purpose* and *deployment context*, not the framework alone. This document assesses the framework's structural readiness for each risk tier.
 
+```mermaid
+---
+title: What gets classified
+---
+flowchart TB
+  accDescr: The framework is infrastructure, not an AI system; an AI system built on it inherits its safety properties and is classified by its intended purpose and deployment context.
+  fw["Grounded Agency framework: infrastructure"] -->|built on, inherits safety properties| sys[AI system]
+  sys -->|"classified by intended purpose and deployment context"| tier[EU AI Act risk tier]
+```
+
 ## 2. EU AI Act Risk Taxonomy
 
 The EU AI Act establishes four risk tiers:
@@ -65,6 +75,21 @@ The Grounded Agency framework provides:
 | **Vision** | Context-dependent | Potentially Area 1 (biometric) | If used for biometric identification → High Risk | Determined per deployment; conservative assessment |
 | **Audio** | Context-dependent | Potentially Area 1 (biometric) | If used for speaker identification → High Risk | Determined per deployment; conservative assessment |
 | **Multimodal** | Context-dependent | Potentially Area 1 (biometric) | Inherits highest risk from component modalities | Determined per deployment; conservative assessment |
+
+```mermaid
+---
+title: Each domain profile's risk tier
+---
+flowchart LR
+  accDescr: Healthcare and manufacturing are high risk, personal assistant is limited risk, and data analysis, vision, audio and multimodal depend on the deployment.
+  hc[Healthcare] --> high["High Risk (Annex III)"]
+  mf[Manufacturing] --> high
+  pa[Personal Assistant] --> lim["Limited Risk (Art. 50)"]
+  da[Data Analysis] --> ctx["Context-dependent: decided per deployment"]
+  vi[Vision] --> ctx
+  au[Audio] --> ctx
+  mm[Multimodal] --> ctx
+```
 
 ### 4.2 Detailed Profile Assessments
 
@@ -165,6 +190,17 @@ The Grounded Agency framework provides:
 **Risk Inheritance Rule:** If a multimodal system combines vision (potentially biometric) with audio (potentially speaker identification), the combined system inherits the highest applicable risk tier. Example: a video analysis system with facial recognition + speaker verification is classified under Annex III Area 1.
 
 **Framework Readiness:** The multimodal profile requires `source_modality` and `target_modality` evidence anchors, enabling modality-specific risk tracking. The `minimum_confidence: 0.75` threshold is the lowest among all profiles, reflecting the inherent uncertainty in cross-modal transformations.
+
+```mermaid
+---
+title: The multimodal inheritance rule
+---
+flowchart LR
+  accDescr: A system that combines vision used for facial recognition with audio used for speaker verification inherits the highest applicable tier, here Annex III Area 1.
+  v["Vision: facial recognition"] --> sys[Combined multimodal system]
+  a["Audio: speaker verification"] --> sys
+  sys -->|inherits the highest tier| area1[Annex III Area 1]
+```
 
 ## 5. Three-Tier Risk Model Mapping
 
