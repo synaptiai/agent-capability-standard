@@ -1,8 +1,10 @@
 ---
 // A count matrix as a table with heat cells (visual spec 1.2 heat steps):
 // rows are pages, columns what they cite or name, each cell the count,
-// always printed. An enriched table, so it scrolls inside TableWrap when the
-// column is narrow, and it is its own text equivalent.
+// always printed. An enriched table, and its own text equivalent. In a
+// narrow figure (under 480px) each row becomes a line: the row's name, then
+// a chip for each nonzero cell with its column's name (figures-indexes.css),
+// so no column is hidden off to the side.
 //
 // Props:
 // - id: string, required. A ref- id for the figure.
@@ -45,10 +47,10 @@ const ranges = heatRanges(max);
               {r.glyph && <PixelGlyph name={r.glyph} />}
               {r.url ? <a href={r.url}>{r.label}</a> : r.label}
             </th>
-            {r.counts.map((count) => {
+            {r.counts.map((count, j) => {
               const s = heatStep(count, max);
               return (
-                <td class="count-matrix__cell" data-heat={s} style={s === 0 ? undefined : `background: var(${HEAT_TOKENS[s - 1]!.fill}); color: var(${HEAT_TOKENS[s - 1]!.text})`}>
+                <td class="count-matrix__cell" data-heat={s} data-col={m.columns[j]!.label} style={s === 0 ? undefined : `background: var(${HEAT_TOKENS[s - 1]!.fill}); color: var(${HEAT_TOKENS[s - 1]!.text})`}>
                   {count}
                 </td>
               );

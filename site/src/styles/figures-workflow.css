@@ -393,6 +393,53 @@
     background: var(--bg);
   }
 
+  /* Narrow: one line per step, with its store and read cells, each numbered
+     by the step whose output it is, instead of a grid whose columns would sit
+     off to the side. */
+  @container (max-width: 479px) {
+    .flow-grid,
+    .flow-grid tbody {
+      display: block;
+    }
+
+    .flow-grid thead {
+      display: none;
+    }
+
+    .flow-grid tr {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-1);
+      padding: 2px 0;
+      border-bottom: var(--px) solid var(--rule);
+    }
+
+    .flow-grid tbody th {
+      position: static;
+      flex: 0 0 9.5rem;
+      background: none;
+    }
+
+    .flow-grid td {
+      display: none;
+      width: auto;
+    }
+
+    .flow-grid td[data-cell] {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-2);
+    }
+
+    .flow-grid td[data-cell]::after {
+      content: attr(data-col) / '';
+    }
+  }
+
   /* ---------- F-W3 risk strip ---------- */
 
   .risk-strip {

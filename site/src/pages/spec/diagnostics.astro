@@ -76,7 +76,7 @@ const figNo = () => ++fig;
                       <tr>
                         <th scope="row"><DiagnosticTile code={row.code} href={`#${row.anchor}`} /></th>
                         {r.sections.map((sec) => (
-                          <td class:list={['raised__cell', row.in.includes(sec.n) && 'raised__cell--on']}>
+                          <td class:list={['raised__cell', row.in.includes(sec.n) && 'raised__cell--on']} data-sec={sec.n}>
                             {row.in.includes(sec.n) ? <span class="fig-sr">named in §{sec.n}</span> : <span class="fig-sr">not named in §{sec.n}</span>}
                           </td>
                         ))}

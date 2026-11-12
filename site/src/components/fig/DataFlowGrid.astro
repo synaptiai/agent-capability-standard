@@ -4,9 +4,12 @@
 // that stores it). The step's own output is a cell with an --ink border and
 // the `flow:store` glyph; an output it reads is a cell with a --line border
 // and the `flow:read` glyph in --ink-2. Glyphs are drawn at 2x, so they can be told apart;
-// no cell is a filled square, which on the same page means a required input. The table scrolls sideways in a TableWrap when narrow,
-// with the step column kept in view. Every cell also carries its meaning as
-// text, so the glyphs are never the only signal.
+// no cell is a filled square, which on the same page means a required input.
+// In a narrow figure (under 480px) each row becomes a line: the step, then
+// its store and read cells, each with the number of the step whose output
+// it is (figures-workflow.css), so no column is hidden off to the side.
+// Every cell also carries its meaning as text, so the glyphs are never the
+// only signal.
 //
 // Props:
 // - wf: Workflow, required.
@@ -47,8 +50,8 @@ const stepId = (k: number) => `ref-step-${k}`;
         {grid.rows.map((r) => (
           <tr data-step={r.index}>
             <th scope="row"><a href={`#${stepId(r.index)}`}><span class="flow-grid__n">{r.index}</span> <code>{r.capability}</code></a></th>
-            {r.cells.map((c) => (
-              <td data-cell={c ?? undefined}>
+            {r.cells.map((c, j) => (
+              <td data-cell={c ?? undefined} data-col={grid.columns[j]!.index}>
                 {c === null ? (
                   <span class="flow-grid__cell flow-grid__cell--empty" aria-hidden="true"></span>
                 ) : (
