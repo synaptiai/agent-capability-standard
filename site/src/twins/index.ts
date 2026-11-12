@@ -19,6 +19,8 @@ import { specOlderBlocks } from './spec-figures';
 import { SLOTS_BY_VERSION } from '../lib/spec-slots';
 import { proseFigureBlocks } from './prose';
 import { proseFigureEdits } from './prose-blocks';
+import { skillFigureEdits } from './skills';
+import { COMPOSED_SKILLS } from '../data/skills';
 import type { Root } from 'mdast';
 import { PROSE_TEMPLATES } from '../plugins/rehype-prose-figures';
 import { OVERVIEW_SOURCE, PERIODIC_ANCHOR } from '../lib/prose-figures';
@@ -51,8 +53,14 @@ async function buildTwin(route: Route): Promise<Twin> {
       const meta = await sourceMeta(route);
       const title = route.template === 'spec' ? route.title : meta.title;
       // Prose, RFC and skill pages draw figures from their own fences; each gets its block before the fence.
+      // A composed skill's page also draws figures from data under its H2s; each gets its block there.
+      const skillDir = route.template === 'skill' ? source.split('/')[1] : undefined;
+      const skillEdits = skillDir !== undefined && skillDir in COMPOSED_SKILLS ? skillFigureEdits(skillDir, source) : undefined;
       const extraEdits = PROSE_TEMPLATES.has(route.template)
-        ? (tree: Root) => proseFigureEdits(tree, { foldBoxAfter: source === OVERVIEW_SOURCE ? PERIODIC_ANCHOR : undefined })
+        ? (tree: Root) => [
+            ...proseFigureEdits(tree, { foldBoxAfter: source === OVERVIEW_SOURCE ? PERIODIC_ANCHOR : undefined }),
+            ...(skillEdits ? skillEdits(tree) : []),
+          ]
         : undefined;
       const copy = markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title, extraEdits });
       // The Standard's site-drawn figures add their text equivalents (visual spec 3.9),

@@ -525,12 +525,12 @@ export function procedureMapIsFigure(m: ProcedureMap): boolean {
 }
 
 /** F-C7's title. */
-export function procedureMapTitle(cap: Capability): string {
+export function procedureMapTitle(cap: Pick<Capability, 'id'>): string {
   return `The field names each step of the ${cap.id} procedure uses`;
 }
 
 /** F-C7's caption, or the sentence printed in its place. */
-export function procedureMapCaption(cap: Capability, m: ProcedureMap): string {
+export function procedureMapCaption(cap: Pick<Capability, 'id'>, m: ProcedureMap): string {
   const k = naming(m).length;
   const named = new Set(m.steps.flatMap((s) => s.writes));
   const silent = m.outputs.filter((f) => !named.has(f));

@@ -1,0 +1,53 @@
+---
+// The verification checks of a composed skill against the workflow it runs:
+// one row per checkbox item of the skill's Verification section, its bold
+// title, then a tile for each step whose stored output (`store_as`) the
+// check names as a word, with the step number; each tile links to the
+// step's card on the workflow's page. A check that names no output gets a
+// dash. The list stays on the page under the figure.
+//
+// Props:
+// - wf: Workflow, required.
+// - checks: CheckSteps, required. From checkSteps().
+// - n: number, required. The figure's number on the page.
+import '../../styles/figures-skill.css';
+import type { Workflow } from '../../data/workflows';
+import { workflowHref } from '../../lib/generated';
+import { checkStepsCaption, checkStepsTitle, type CheckSteps } from '../../lib/skill-figures';
+import { capabilitySymbol } from '../../lib/views';
+import Figure from './Figure.astro';
+
+interface Props {
+  wf: Workflow;
+  checks: CheckSteps;
+  n: number;
+}
+
+const { wf, checks, n } = Astro.props;
+const page = workflowHref(wf.id);
+const step = (k: number) => wf.steps.find((s) => s.index === k)!;
+---
+<Figure id="ref-fig-check-steps" n={n} title={checkStepsTitle(wf)} caption={checkStepsCaption(wf, checks)} kind="check-steps">
+  <ol class="csteps" aria-label="Verification checks with the steps whose output each names">
+    {checks.checks.map((c) => (
+      <li class="csteps__row" data-steps={c.steps.length}>
+        <span class="csteps__title"><span class="csteps__n" aria-hidden="true">{c.n}</span><span>{c.title}</span></span>
+        <span class="csteps__steps">
+          {c.steps.length === 0 ? (
+            <span class="csteps__none">no step output named</span>
+          ) : (
+            c.steps.map((k) => {
+              const s = step(k);
+              return (
+                <a class="csteps__step" href={`${page}#ref-step-${k}`}>
+                  <span class="mini-tile mini-tile--24 has-layer" style={`--layer: var(--layer-${s.layer})`} aria-hidden="true" data-pagefind-ignore><span class="mini-tile__symbol">{capabilitySymbol(s.capability)}</span></span>
+                  <span>{k} <code>{s.store_as}</code></span>
+                </a>
+              );
+            })
+          )}
+        </span>
+      </li>
+    ))}
+  </ol>
+</Figure>

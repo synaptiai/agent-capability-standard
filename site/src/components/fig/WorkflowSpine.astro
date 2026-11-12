@@ -16,6 +16,9 @@
 // - wf: Workflow, required.
 // - n: number, required. The figure's number on the page.
 // - id: string, required. A `ref-` id for the figure.
+// - stepPage: string, optional. The URL of the page that holds the step
+//   cards (a composed skill's page links to its workflow's page); by
+//   default the links point at cards on the same page.
 import '../../styles/figures-workflow.css';
 import type { Workflow } from '../../data/workflows';
 import { FAILURE_MARK, spineStepWords, workflowSpine, ROLE_GLYPH, type SpineStep } from '../../lib/workflow-figures';
@@ -28,9 +31,10 @@ interface Props {
   wf: Workflow;
   n: number;
   id: string;
+  stepPage?: string;
 }
 
-const { wf, n, id } = Astro.props;
+const { wf, n, id, stepPage = '' } = Astro.props;
 const spine = workflowSpine(wf);
 const ROW = 28;
 const mid = (row: number) => row * ROW + ROW / 2;
@@ -155,7 +159,7 @@ const stepId = (k: number) => `ref-step-${k}`;
               data-failures={s.failures.length}
               data-reads={s.reads.join(' ') || undefined}
             >
-              <a class="spine__link" href={`#${stepId(s.index)}`}>
+              <a class="spine__link" href={`${stepPage}#${stepId(s.index)}`}>
                 <span class="spine__n">{s.index}</span>
                 <span
                   class:list={['mini-tile', 'mini-tile--24', 'has-layer', 'spine__tile', s.condition !== null && 'spine__tile--condition']}

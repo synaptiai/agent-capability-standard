@@ -8,7 +8,8 @@
 // numbered list stays on the page under the figure.
 //
 // Props:
-// - cap: Capability, required.
+// - cap: the capability, or for a composed skill its directory name with no
+//   layer, required. Output chips take the layer's colour, or --ink without one.
 // - map: ProcedureMap, required. From procedureMap().
 // - n: number, required. The figure number on the page.
 import type { Capability } from '../../data/ontology';
@@ -16,7 +17,7 @@ import { procedureMapCaption, procedureMapTitle, type ProcedureMap } from '../..
 import Figure from './Figure.astro';
 
 interface Props {
-  cap: Capability;
+  cap: Pick<Capability, 'id'> & { layer?: string };
   map: ProcedureMap;
   n: number;
 }
@@ -24,7 +25,7 @@ interface Props {
 const { cap, map, n } = Astro.props;
 ---
 <Figure id="ref-fig-procedure" n={n} title={procedureMapTitle(cap)} caption={procedureMapCaption(cap, map)} kind="procedure-map">
-  <div class="pmap has-layer" style={`--layer: var(--layer-${cap.layer})`}>
+  <div class:list={['pmap', cap.layer && 'has-layer']} style={cap.layer ? `--layer: var(--layer-${cap.layer})` : '--layer: var(--ink)'}>
     <p class="pmap__head" aria-hidden="true">
       <span>Step</span>
       <span>Inputs it uses by name</span>

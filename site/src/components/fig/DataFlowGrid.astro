@@ -15,6 +15,9 @@
 // - wf: Workflow, required.
 // - n: number, required. The figure's number on the page.
 // - id: string, required. A `ref-` id for the figure.
+// - stepPage: string, optional. The URL of the page that holds the step
+//   cards (a composed skill's page links to its workflow's page); by
+//   default the links point at cards on the same page.
 import '../../styles/figures-workflow.css';
 import type { Workflow } from '../../data/workflows';
 import { dataFlowGrid } from '../../lib/workflow-figures';
@@ -26,9 +29,10 @@ interface Props {
   wf: Workflow;
   n: number;
   id: string;
+  stepPage?: string;
 }
 
-const { wf, n, id } = Astro.props;
+const { wf, n, id, stepPage = '' } = Astro.props;
 const grid = dataFlowGrid(wf);
 const stepId = (k: number) => `ref-step-${k}`;
 ---
@@ -49,7 +53,7 @@ const stepId = (k: number) => `ref-step-${k}`;
       <tbody>
         {grid.rows.map((r) => (
           <tr data-step={r.index}>
-            <th scope="row"><a href={`#${stepId(r.index)}`}><span class="flow-grid__n">{r.index}</span> <code>{r.capability}</code></a></th>
+            <th scope="row"><a href={`${stepPage}#${stepId(r.index)}`}><span class="flow-grid__n">{r.index}</span> <code>{r.capability}</code></a></th>
             {r.cells.map((c, j) => (
               <td data-cell={c ?? undefined} data-col={grid.columns[j]!.index}>
                 {c === null ? (

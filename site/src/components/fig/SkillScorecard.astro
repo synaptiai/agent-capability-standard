@@ -1,0 +1,41 @@
+---
+// The checks a composed skill's scorecard rates, by the checklist family
+// they sit under: one row per family (its letter, name and id prefix), then
+// a chip per check with its id and title from the checklist, and the
+// ratings the contract allows. The ids come from the Output Contract fence
+// and must equal the checklist's check headings, or the build fails.
+//
+// Props:
+// - card: Scorecard, required. From scorecard().
+// - n: number, required. The figure's number on the page.
+import '../../styles/figures-skill.css';
+import { scorecardCaption, scorecardTitle, type Scorecard } from '../../lib/skill-figures';
+import Figure from './Figure.astro';
+
+interface Props {
+  card: Scorecard;
+  n: number;
+}
+
+const { card, n } = Astro.props;
+---
+<Figure id="ref-fig-scorecard" n={n} title={scorecardTitle(card)} caption={scorecardCaption(card)} kind="scorecard">
+  <div class="scard">
+    <ol class="scard__families">
+      {card.families.map((f) => (
+        <li class="scard__family" data-checks={f.checks.length}>
+          <p class="scard__name">
+            <span class="scard__letter" aria-hidden="true">{f.letter}</span>
+            <span>{f.name} <code class="scard__code">{f.code}</code></span>
+          </p>
+          <ul class="scard__checks">
+            {f.checks.map((c) => (
+              <li class="scard__check"><code>{c.id}</code> <span>{c.title}</span></li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ol>
+    <p class="scard__ratings"><span class="scard__ratings-label">Each check is rated</span> {card.ratings.map((r) => <code class="scard__rating">{r}</code>)}</p>
+  </div>
+</Figure>

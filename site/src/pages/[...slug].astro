@@ -40,7 +40,7 @@ const { title, headTitle, description } = pageHead(route, page);
     <RfcPage route={route} page={page}><Content /></RfcPage>
   )}
   {route.template === 'skill' && (
-    <SkillPage route={route} page={page} frontmatter={entry.data}><Content /></SkillPage>
+    <SkillPage route={route} page={page} frontmatter={entry.data} html={entry.rendered?.html} />
   )}
   {route.template === 'raw' && <RawPage route={route} page={page} />}
   {route.template === 'prose' && (
