@@ -1,6 +1,13 @@
 ---
-// A listing of pages as cards, in groups. Group headings get `ref-` ids.
-import type { ListingGroup } from '../lib/listing';
+// A listing of pages as icon cards, in groups (visual spec 3.11). Each group
+// heading carries the group's glyph, and each card the glyph of what it links
+// to (visual spec 2.2, "Listing groups"). Group headings get `ref-` ids.
+import type { ListingGroup, ListingItem } from '../lib/listing';
+import { LISTING_GROUP_GLYPHS } from '../pixel/glyphs-groups';
+import { resolveGlyphKey } from '../pixel/keys';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+import IconCard from './fig/IconCard.astro';
+import '../styles/figures-home.css';
 
 interface Props {
   groups: ListingGroup[];
@@ -9,17 +16,57 @@ interface Props {
 }
 
 const { groups, id } = Astro.props;
+
+/** Templates whose card takes the glyph of the page's site section. */
+const SECTION_GLYPH_TEMPLATES = new Set(['prose', 'raw', 'listing', 'citation']);
+
+/** A card's glyph, by the template of the page it links to. */
+function cardGlyph(item: ListingItem): string {
+  const r = item.route;
+  const key =
+    r.template === 'capability' || r.template === 'layer'
+      ? r.group!
+      : r.template === 'workflow'
+        ? 'section:workflows'
+        : r.template === 'domain'
+          ? `domain:${r.title}`
+          : r.template === 'skill'
+            ? 'skill:composed'
+            : r.template === 'rfc'
+              ? 'section:rfcs'
+              : r.template === 'spec'
+                ? 'section:spec'
+                : SECTION_GLYPH_TEMPLATES.has(r.template)
+                  ? `section:${r.section}`
+                  : null;
+  if (key === null || resolveGlyphKey(key) === null) {
+    throw new Error(`SectionIndex: no glyph for the card of ${r.url} (template ${r.template}, key ${key})`);
+  }
+  return key;
+}
+
+function groupGlyph(label: string): string {
+  const key = LISTING_GROUP_GLYPHS[label];
+  if (!key) throw new Error(`SectionIndex: the listing group "${label}" has no glyph in LISTING_GROUP_GLYPHS`);
+  return key;
+}
 ---
 <div class="section-index">
   {groups.map((g) => (
     <section class="section-index__group">
-      {g.label && <h2 id={id(g.label)}>{g.label}</h2>}
-      <ul class="section-index__cards">
+      {g.label && (
+        <h2 class="section-index__label" id={id(g.label)}>
+          <PixelGlyph name={groupGlyph(g.label)} scale={3} />
+          <span>{g.label}</span>
+        </h2>
+      )}
+      <ul class="icon-cards section-index__icon-cards">
         {g.items.map((item) => (
-          <li class="section-index__card" data-template={item.route.template}>
-            <a href={item.url}>{item.title}</a>
-            {item.description && <p>{item.description}</p>}
-          </li>
+          item.description ? (
+            <IconCard glyph={cardGlyph(item)} title={item.title} href={item.url}>{item.description}</IconCard>
+          ) : (
+            <IconCard glyph={cardGlyph(item)} title={item.title} href={item.url} />
+          )
         ))}
       </ul>
     </section>
