@@ -48,15 +48,19 @@ The NIST AI RMF 1.0 organizes AI risk management into four core functions:
 | **MEASURE** | Analyze, assess, and track AI risks | ME-1 through ME-4 |
 | **MANAGE** | Prioritize and act on AI risks | MG-1 through MG-4 |
 
+GOVERN makes teams responsible for mapping, measuring and managing AI risks
+(GV-2), and MANAGE prioritizes and acts on the risks that the MAP and
+MEASURE functions assess (MG-1).
+
 ```mermaid
 ---
 title: How the four functions relate
 ---
 flowchart LR
-  accDescr: GOVERN establishes the risk governance for mapping, measuring and managing; MAP identifies the context and risks and MEASURE analyzes and tracks them; MANAGE prioritizes and acts on the risks using the output of MAP and MEASURE.
-  gv[GOVERN: establish governance] --> mp
-  gv --> me
-  gv --> mg
+  accDescr: GOVERN makes teams responsible for mapping, measuring and managing AI risks; MAP identifies the context and risks and MEASURE analyzes and tracks them; MANAGE prioritizes and acts on the risks that MAP and MEASURE assess.
+  gv[GOVERN: establish governance] -->|responsible for| mp
+  gv -->|responsible for| me
+  gv -->|responsible for| mg
   mp[MAP: identify context and risks] --> mg[MANAGE: prioritize and act]
   me[MEASURE: analyze and track] --> mg
 ```
@@ -318,7 +322,7 @@ flowchart LR
 title: Where ME-2.2 evaluation evidence is captured
 ---
 flowchart LR
-  accDescr: The EvidenceStore captures tool executions as evidence anchors, the checkpoint tracker records state transitions, and the audit log records every skill invocation; aggregated reporting over them is a gap.
+  accDescr: The EvidenceStore captures tool executions as evidence anchors, the checkpoint tracker records state transitions, and the audit log records every skill invocation.
   es[EvidenceStore] --> a1[Evidence anchors]
   ct[Checkpoint tracker] --> a2[State transitions]
   al[Audit log] --> a3[Skill invocations]
