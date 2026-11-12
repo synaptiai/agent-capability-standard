@@ -15,30 +15,53 @@ export interface LayerLink {
   edges: (CrossLayerEdge & { type: EdgeType })[];
 }
 
+export interface LayerLinks {
+  into: LayerLink[];
+  out: LayerLink[];
+  /** Symmetric edges (conflicts_with, alternative_to), which run both ways: the capability page's "Either way". */
+  either: LayerLink[];
+}
+
+/** Rows of LayerLinks in the order the figure and the copy list them. */
+export const LAYER_LINK_SIDES = ['into', 'out', 'either'] as const;
+
 /**
  * Edges between a layer and each other layer, split by direction: "into"
  * holds edges whose source is outside the layer, "out" edges whose source is
- * inside it. A symmetric edge is counted once, on the side it is first
- * declared from, as crossLayerEdges() lists it. Rows are in layer order.
+ * inside it, and "either" the symmetric edges, which have no direction (each
+ * pair once, as crossLayerEdges() lists it). Rows are in layer order.
  */
-export function layerLinks(layerId: string, ontology: Ontology = loadOntology()): { into: LayerLink[]; out: LayerLink[] } {
-  const all = crossLayerEdges(layerId, ontology).flatMap((g) => g.edges.map((e) => ({ ...e, type: g.type })));
-  const side = (dir: 'in' | 'out'): LayerLink[] =>
+export function layerLinks(layerId: string, ontology: Ontology = loadOntology()): LayerLinks {
+  const groups = crossLayerEdges(layerId, ontology);
+  const all = groups.flatMap((g) => g.edges.map((e) => ({ ...e, type: g.type, symmetric: g.symmetric })));
+  const side = (keep: (e: (typeof all)[number]) => boolean): LayerLink[] =>
     ontology.layers
       .map((l) => {
-        const edges = all.filter((e) => e.direction === dir && e.otherLayer === l.id);
+        const edges = all.filter((e) => keep(e) && e.otherLayer === l.id).map(({ symmetric: _s, ...e }) => e);
         return { layer: l.id, types: EDGE_TYPES.filter((t) => edges.some((e) => e.type === t)), edges };
       })
       .filter((x) => x.edges.length > 0);
-  return { into: side('in'), out: side('out') };
+  return { into: side((e) => !e.symmetric && e.direction === 'in'), out: side((e) => !e.symmetric && e.direction === 'out'), either: side((e) => e.symmetric) };
+}
+
+/** True when every row has the same number of edges, so bars would all be one length. */
+export function layerLinksEqual(links: LayerLinks): boolean {
+  const counts = new Set(LAYER_LINK_SIDES.flatMap((k) => links[k].map((l) => l.edges.length)));
+  return counts.size <= 1;
 }
 
 /** F-L2's caption. */
-export function layerLinksCaption(layerId: string, links: { into: LayerLink[]; out: LayerLink[] }): string {
+export function layerLinksCaption(layerId: string, links: LayerLinks): string {
   const n = (ls: LayerLink[]) => ls.reduce((k, l) => k + l.edges.length, 0);
-  const into = n(links.into);
-  const out = n(links.out);
-  return `${plural(into, 'edge comes', 'edges come')} into ${layerId} from ${plural(links.into.length, 'other layer', 'other layers')}, and ${plural(out, 'edge goes', 'edges go')} out of it to ${plural(links.out.length, 'layer', 'layers')}.`;
+  const parts = [
+    ...(links.into.length > 0 ? [`${plural(n(links.into), 'edge comes', 'edges come')} into ${layerId} from ${plural(links.into.length, 'other layer', 'other layers')}`] : []),
+    ...(links.out.length > 0 ? [`${plural(n(links.out), 'edge goes', 'edges go')} out of ${layerId} to ${plural(links.out.length, 'other layer', 'other layers')}`] : []),
+    ...(links.either.length > 0 ? [`${plural(n(links.either), 'edge runs', 'edges run')} both ways with ${plural(links.either.length, 'other layer', 'other layers')}`] : []),
+  ];
+  const text = parts.length === 0 ? `No edge joins ${layerId} to another layer` : parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
+  const first = links.into[0] ?? links.out[0] ?? links.either[0];
+  const same = first && layerLinksEqual(links) ? ` Every row has ${plural(first.edges.length, 'edge', 'edges')}, so the figure prints the count and draws no bars.` : '';
+  return `${text}.${same}`;
 }
 
 export interface LayerSteps {
@@ -65,7 +88,9 @@ export function stepsCaption(layerId: string, rows: LayerSteps[]): string {
   const rank = rows.findIndex((r) => r.layer === layerId) + 1;
   const mine = rows[rank - 1]?.steps ?? 0;
   const pct = total === 0 ? 0 : Math.round((mine / total) * 100);
-  return `${mine} of the ${total} steps in all workflows run ${layerId} capabilities (${pct}%), ${rank === 1 ? 'the most' : `the ${ordinal(rank)} most`} of the ${rows.length} layers.`;
+  // A share that rounds to 0 but is not 0 prints as "<1%".
+  const share = pct === 0 && mine > 0 ? '<1' : String(pct);
+  return `${mine} of the ${total} steps in all workflows run ${layerId} capabilities (${share}%), ${rank === 1 ? 'the most' : `the ${ordinal(rank)} most`} of the ${rows.length} layers.`;
 }
 
 function ordinal(n: number): string {

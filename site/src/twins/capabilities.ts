@@ -51,7 +51,7 @@ import {
   TOOL_POWER_WORDS,
 } from '../lib/capability-figures';
 import { currentStandardText } from '../lib/spec-figures';
-import { layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle, riskByLayer, riskByLayerCaption, usageMatrix, usageMatrixCaption } from '../lib/layer-figures';
+import { LAYER_LINK_SIDES, layerLinks, layerLinksCaption, stepsCaption, stepsPerLayer, stepsTitle, riskByLayer, riskByLayerCaption, usageMatrix, usageMatrixCaption } from '../lib/layer-figures';
 import { contractRows, crossLayerEdges, EDGE_LABELS, edgeGroups, safetyRows, type SchemaRow } from '../lib/views';
 import { loadWorkflows } from '../data/workflows';
 import { blocks, cell, code, figure, generatedLine, markdownCopy, mdLink, table } from './md';
@@ -246,8 +246,8 @@ export function layerTwin(layerId: string): Twin {
           layerLinksCaption(layer.id, layerLinks(layer.id, ontology)),
           table(
             ['Direction', 'Other layer', 'Edges', 'Types'],
-            (['into', 'out'] as const).flatMap((d) =>
-              layerLinks(layer.id, ontology)[d].map((l) => [d === 'into' ? `Into ${layer.id}` : `Out of ${layer.id}`, l.layer, String(l.edges.length), l.types.map(code).join(', ')]),
+            LAYER_LINK_SIDES.flatMap((d) =>
+              layerLinks(layer.id, ontology)[d].map((l) => [{ into: `Into ${layer.id}`, out: `Out of ${layer.id}`, either: 'Either way' }[d], l.layer, String(l.edges.length), l.types.map(code).join(', ')]),
             ),
           ),
         ),

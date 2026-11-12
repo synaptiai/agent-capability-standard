@@ -4,7 +4,7 @@
 // functions under test.
 import { describe, expect, it } from 'vitest';
 import { loadOntology } from '../src/data/ontology';
-import { layerLinks, riskByLayer, riskByLayerCaption, stepsPerLayer, usageMatrix } from '../src/lib/layer-figures';
+import { layerLinks, riskByLayer, riskByLayerCaption, stepsCaption, stepsPerLayer, usageMatrix } from '../src/lib/layer-figures';
 import { allCatalogSteps, claudeLayerTable, ontologyEdgeTriples, repoText, symmetricEdgeTypes } from './independent';
 
 const layerOf = new Map(claudeLayerTable().flatMap((r) => r.capabilities.map((c) => [c, r.id] as const)));
@@ -22,13 +22,18 @@ describe('layerLinks (F-L2)', () => {
     return true;
   });
 
-  it.each(claudeLayerTable().map((r) => r.id))('%s: edge counts and types to each other layer, by direction', (layer) => {
+  it.each(claudeLayerTable().map((r) => r.id))('%s: edge counts and types to each other layer, by direction, symmetric edges either way', (layer) => {
     const got = layerLinks(layer);
-    const want = (dir: 'into' | 'out') => {
+    const want = (dir: 'into' | 'out' | 'either') => {
       const m = new Map<string, { n: number; types: Set<string> }>();
       for (const t of cross) {
-        const here = dir === 'into' ? layerOf.get(t.to) : layerOf.get(t.from);
-        const there = dir === 'into' ? layerOf.get(t.from) : layerOf.get(t.to);
+        if ((dir === 'either') !== sym.has(t.type)) continue;
+        const inward = layerOf.get(t.to) === layer;
+        if (dir === 'into' && !inward) continue;
+        if (dir === 'out' && layerOf.get(t.from) !== layer) continue;
+        if (dir === 'either' && !inward && layerOf.get(t.from) !== layer) continue;
+        const here = layer;
+        const there = inward ? layerOf.get(t.from) : layerOf.get(t.to);
         if (here !== layer) continue;
         const e = m.get(there!) ?? { n: 0, types: new Set() };
         e.n++;
@@ -40,6 +45,14 @@ describe('layerLinks (F-L2)', () => {
     const shown = (ls: ReturnType<typeof layerLinks>['into']) => Object.fromEntries(ls.map((l) => [l.layer, `${l.edges.length} ${[...l.types].sort().join(',')}`]));
     expect(shown(got.into)).toEqual(want('into'));
     expect(shown(got.out)).toEqual(want('out'));
+    expect(shown(got.either)).toEqual(want('either'));
+  });
+
+  it('REMEMBER: its two VERIFY edges are both symmetric, so VERIFY is one "either way" row, not one row each way', () => {
+    // From the ontology: rollback conflicts_with persist, persist alternative_to checkpoint (both types symmetric).
+    const got = layerLinks('REMEMBER');
+    expect(got.either.map((l) => [l.layer, l.edges.length])).toEqual([['VERIFY', 2]]);
+    expect([...got.into, ...got.out].some((l) => l.layer === 'VERIFY')).toBe(false);
   });
 });
 
@@ -51,6 +64,15 @@ describe('stepsPerLayer (F-L4)', () => {
     expect(got).toHaveLength(loadOntology().layers.length);
     expect(Object.fromEntries(got.filter((r) => r.steps > 0).map((r) => [r.layer, r.steps]))).toEqual(Object.fromEntries(want));
     for (let i = 1; i < got.length; i++) expect(got[i - 1]!.steps).toBeGreaterThanOrEqual(got[i]!.steps);
+  });
+});
+
+describe('stepsCaption (F-L4)', () => {
+  it('prints a share that rounds to 0 but is not 0 as <1%', () => {
+    // Hand-made rows: 1 of 277 is 0.36%.
+    const rows = [{ layer: 'PERCEIVE', steps: 276 }, { layer: 'REMEMBER', steps: 1 }];
+    expect(stepsCaption('REMEMBER', rows)).toContain('1 of the 277 steps in all workflows run REMEMBER capabilities (<1%)');
+    expect(stepsCaption('PERCEIVE', rows)).toContain('(100%)');
   });
 });
 

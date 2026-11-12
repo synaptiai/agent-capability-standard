@@ -1,10 +1,11 @@
 ---
 // F-L2, the edges between a layer and the other layers (visual spec 3.2):
 // the same rail stack as F-C1, with the layers whose edges point into this
-// one above it and the layers it points to below. Each row is the other
-// layer's glyph tile and name, a bar of its edge count (one scale for the
-// whole figure, every track the same length) and an edge mark for each
-// type present. The edges
+// one above it, the layers it points to below, and then the layers it shares
+// a symmetric edge with ("Either way", as on capability pages). Each row is
+// the other layer's glyph tile and name, a bar of its edge count (one scale
+// for the whole figure, every track the same length; only the count when
+// every row has the same count) and an edge mark for each type present. The edges
 // themselves are listed in the table under the figure, and hovering or
 // focusing a row shows that row's edges in a tooltip panel ("verify →
 // execute (precedes)"); the panel is hidden from screen readers, which
@@ -16,7 +17,7 @@
 // - describedby: string, optional. Id of the element that lists the edges.
 import { loadOntology } from '../../data/ontology';
 import { layerHref } from '../../lib/generated';
-import { layerLinks, layerLinksCaption, type LayerLink } from '../../lib/layer-figures';
+import { layerLinks, layerLinksCaption, layerLinksEqual, type LayerLink } from '../../lib/layer-figures';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import { railStub, STUB_H, STUB_W } from '../../pixel/rail';
 import Figure from './Figure.astro';
@@ -32,14 +33,17 @@ interface Props {
 const { layerId, n, describedby } = Astro.props;
 const ontology = loadOntology();
 const links = layerLinks(layerId, ontology);
-const max = Math.max(1, ...[...links.into, ...links.out].map((l) => l.edges.length));
-type Row = { kind: 'centre' } | { kind: 'into' | 'out'; items: LayerLink[] };
+const max = Math.max(1, ...[...links.into, ...links.out, ...links.either].map((l) => l.edges.length));
+// Bars only when the counts differ: equal bars would all be full length and say nothing.
+const bars = !layerLinksEqual(links);
+type Row = { kind: 'centre' } | { kind: 'into' | 'out' | 'either'; items: LayerLink[] };
 const rows: Row[] = [
   ...(links.into.length > 0 ? [{ kind: 'into' as const, items: links.into }] : []),
   { kind: 'centre' as const },
   ...(links.out.length > 0 ? [{ kind: 'out' as const, items: links.out }] : []),
+  ...(links.either.length > 0 ? [{ kind: 'either' as const, items: links.either }] : []),
 ];
-const label = { into: `Into ${layerId}`, out: `Out of ${layerId}` };
+const label = { into: `Into ${layerId}`, out: `Out of ${layerId}`, either: 'Either way' };
 ---
 <Figure id="ref-fig-layer-edges" n={n} title={`Edges between ${layerId} and other layers`} caption={layerLinksCaption(layerId, links)} describedby={describedby} kind="layer-edges">
   <div class="nbhd llinks">
@@ -70,7 +74,7 @@ const label = { into: `Into ${layerId}`, out: `Out of ${layerId}` };
                 <li class="llinks__row has-layer" style={`--layer: var(--layer-${l.layer})`} data-layer={l.layer} data-edges={l.edges.length}>
                   <span class="llinks__tile" aria-hidden="true"><PixelGlyph name={l.layer} scale={2} /></span>
                   <a class="llinks__name" href={layerHref(l.layer)}>{l.layer}</a>
-                  <PixelBar value={l.edges.length} max={max} />
+                  {bars ? <PixelBar value={l.edges.length} max={max} /> : <span class="llinks__count">{l.edges.length}</span>}
                   <span class="fig-sr">{l.edges.length === 1 ? 'edge' : 'edges'}</span>
                   <span class="llinks__marks">
                     {l.types.map((t) => <PixelGlyph name={`mark:${t}`} label={t} />)}

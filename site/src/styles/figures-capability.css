@@ -179,30 +179,30 @@
      rail and its stubs join the rows of one stack, so they are not drawn
      across two columns; each row's heading names its direction. */
   @container (min-width: 640px) {
-    .nbhd {
+    .nbhd:not(.llinks) {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       grid-auto-flow: row dense;
       column-gap: var(--space-5);
       align-items: start;
     }
 
-    .nbhd__row--into,
-    .nbhd__row--centre {
+    .nbhd:not(.llinks) > .nbhd__row--into,
+    .nbhd:not(.llinks) > .nbhd__row--centre {
       grid-column: 1;
     }
 
-    .nbhd__row--out,
-    .nbhd__row--both,
-    .nbhd__row--either {
+    .nbhd:not(.llinks) > .nbhd__row--out,
+    .nbhd:not(.llinks) > .nbhd__row--both,
+    .nbhd:not(.llinks) > .nbhd__row--either {
       grid-column: 2;
     }
 
-    .nbhd__row[data-rail] {
+    .nbhd:not(.llinks) > .nbhd__row[data-rail] {
       grid-template-columns: minmax(0, 1fr);
       padding-bottom: var(--space-4);
     }
 
-    .nbhd__rail {
+    .nbhd:not(.llinks) .nbhd__rail {
       display: none;
     }
   }

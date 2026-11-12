@@ -16,6 +16,13 @@
     position: relative;
   }
 
+  /* The edge count, printed in place of a bar when every row has the same count. */
+  .llinks__count {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
   .llinks__tip {
     display: none;
   }
