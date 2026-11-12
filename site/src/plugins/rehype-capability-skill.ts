@@ -9,6 +9,8 @@
 //   heading's hidden anchor link is dropped, so the summary holds no link.
 // - Safety Constraints: the section's content sits in a panel with the
 //   caution glyph.
+// - Output Contract: the section's first code block folds into a
+//   <details>, under the page's figure of the same fields.
 // The port columns and the composition chain are Astro figures, which the
 // page puts under their headings.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
@@ -69,6 +71,27 @@ export default function rehypeCapabilitySkill() {
         children: [glyphElement('caution', { scale: 3, className: 'skill-safety__glyph' }), { type: 'element', tagName: 'div', properties: { className: ['skill-safety__body'] }, children: body }],
       };
       kids.splice(s + 1, e - s - 1, panel);
+    }
+
+    // Output Contract: the section's first code block folds under a summary,
+    // because the page draws its fields as a figure (F-C6) above it.
+    const output = sections(kids).get('output-contract');
+    if (output) {
+      const [s, e] = output;
+      const at = kids.slice(s + 1, e).findIndex((c) => isEl(c, 'pre') || (isEl(c) && ((c.properties?.className as string[]) ?? []).includes('code-block')));
+      if (at !== -1) {
+        const i = s + 1 + at;
+        const fold: Element = {
+          type: 'element',
+          tagName: 'details',
+          properties: { className: ['fig-details', 'skill-fence'] },
+          children: [
+            { type: 'element', tagName: 'summary', properties: {}, children: [{ type: 'text', value: 'The output as the skill writes it, in YAML' }] },
+            kids[i] as ElementContent,
+          ],
+        };
+        kids.splice(i, 1, fold);
+      }
     }
 
     // Examples: one <details> per H3.
