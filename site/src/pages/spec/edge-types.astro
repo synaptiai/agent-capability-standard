@@ -114,22 +114,18 @@ const figNo = () => ++fig;
             <thead>
               <tr>
                 <th scope="col">Type</th>
-                <th scope="col">Description</th>
-                <th scope="col">Semantics</th>
-                <th scope="col">Transitive</th>
-                <th scope="col">Symmetric</th>
                 <th scope="col">Edges</th>
+                <th scope="col">What it means</th>
+                <th scope="col">Properties</th>
               </tr>
             </thead>
             <tbody>
               {ontology.edgeTypes.map((t) => (
                 <tr data-edge-type={t.id}>
                   <th scope="row"><a href={`#${typeId.get(t.id)}`}><code>{t.id}</code></a></th>
-                  <td>{t.description}</td>
-                  <td>{t.semantics}</td>
-                  <td>{t.transitive ? 'Yes' : 'No'}</td>
-                  <td>{t.symmetric ? 'Yes' : 'No'}</td>
-                  <td><PixelBar value={t.edges.length} max={Math.max(...ontology.edgeTypes.map((x) => x.edges.length))} /></td>
+                  <td class="edge-type-table__count"><PixelBar value={t.edges.length} max={Math.max(...ontology.edgeTypes.map((x) => x.edges.length))} /></td>
+                  <td><p class="edge-type-table__desc">{t.description}</p><p class="edge-type-table__sem">{t.semantics}</p></td>
+                  <td>{[t.transitive ? 'transitive' : 'not transitive', t.symmetric ? 'symmetric' : 'not symmetric'].join(', ')}</td>
                 </tr>
               ))}
             </tbody>

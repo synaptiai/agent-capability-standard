@@ -9,6 +9,9 @@ import { edgeExample, edgeMatrixCaption, layerPairCounts } from '../lib/edge-fig
 import { edgeTypeCount, safetyRows } from '../lib/views';
 import { cell, code, figure, table } from './md';
 import { specEarlyBlocks, specLateBlocks, specTailBlocks } from './spec-figures';
+import { slotBlocks } from './spec-slot-blocks';
+import { SPEC_SLOTS } from '../lib/spec-slots';
+import { loadVersions } from '../data/versions';
 
 /** The edge types page: each type card's example sentence, and the matrix as layer-pair counts. */
 export function edgeTypesFigureBlocks(): string[] {
@@ -49,8 +52,7 @@ export function specFigureBlocks(): string[] {
   const o = loadOntology();
   const schema = loadCatalogSchema();
   const yes = (b: boolean) => (b ? 'Yes' : 'No');
-  return [
-    '## Figures on this page',
+  const rich = [
     ...specEarlyBlocks().slice(0, 2),
     figure(
       'Layer model, from §4.2',
@@ -93,4 +95,5 @@ export function specFigureBlocks(): string[] {
     ...specLateBlocks(),
     ...specTailBlocks(),
   ];
+  return slotBlocks(SPEC_SLOTS, loadVersions().standard.current.source, rich);
 }

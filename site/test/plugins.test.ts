@@ -71,6 +71,14 @@ describe('remark-page-meta', () => {
     expect(page.description!.length).toBeLessThanOrEqual(203);
   });
 
+  it('skips a labelled note ("**Documentation:** ...") when choosing a description (README.md)', async () => {
+    // README.md's first paragraph after the badges is a "**Documentation:**" note
+    // saying where to read the site; its card on /start/ read "Documentation: acs...".
+    expect(readRepoFile('README.md')).toMatch(/^\*\*Documentation:\*\* /m);
+    const { page } = await pageOf('README.md');
+    expect(page.description).not.toMatch(/^Documentation:/);
+  });
+
   it('takes a SKILL.md title and description from its frontmatter', async () => {
     const text = readRepoFile('skills/debug-workflow/SKILL.md');
     const name = /^name: (.+)$/m.exec(text)![1];

@@ -56,7 +56,7 @@ async function buildTwin(route: Route): Promise<Twin> {
           : source === loadVersions().standard.current.source
             ? specFigureBlocks()
             : older && SLOTS_BY_VERSION[older.version]
-              ? specOlderBlocks(source)
+              ? specOlderBlocks(source, SLOTS_BY_VERSION[older.version]!)
               : [];
       return { title, description: meta.description, markdown: figures.length > 0 ? blocks(copy, ...figures) : copy };
     }

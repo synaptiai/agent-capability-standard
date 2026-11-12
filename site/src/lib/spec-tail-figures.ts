@@ -171,7 +171,12 @@ export function codeGridCaption(f: Family[]): string {
 }
 
 export function familyTableCaption(f: Family): string {
-  return `${plural(f.codes.length, 'code', 'codes')} in ${f.range}, every one ${f.severity === 'error' ? 'an error' : 'a warning'}; the Section column names where the Standard defines it.`;
+  // The family's table has no Category or Severity column, so both must be one value for the family.
+  const cats = [...new Set(f.codes.map((d) => d.category))];
+  if (cats.length !== 1 || f.codes.some((d) => d.severity !== f.severity)) {
+    throw new Error(`diagnostics: family ${f.prefix} mixes categories (${cats.join(', ')}) or severities; restore those columns`);
+  }
+  return `${plural(f.codes.length, 'code', 'codes')} in ${f.range}, category ${cats[0]}, every one ${f.severity === 'error' ? 'an error' : 'a warning'}; the last column names the section of the Standard that defines each code.`;
 }
 
 /**

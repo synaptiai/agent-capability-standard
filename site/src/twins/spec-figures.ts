@@ -12,6 +12,8 @@ import { cell, code, figure, table } from './md';
 import { readRepoFile } from '../lib/repo';
 import * as T from '../lib/spec-tail-figures';
 import { loadIdentityPolicy } from '../data/spec-sources';
+import type { SpecSlot } from '../lib/spec-slots';
+import { slotBlocks } from './spec-slot-blocks';
 
 const REPLAY_TITLES: Record<string, string> = {
   'recovery-replay': 'A recovery that runs out, from §5.12',
@@ -124,15 +126,14 @@ export function specTailBlocks(): string[] {
   ];
 }
 
-/** An older Standard's figure blocks: the keyword counts, the one figure there that adds to its own text. */
-export function specOlderBlocks(source: string): string[] {
+/** An older Standard's figure blocks: one per figure its page draws, the keyword counts with their table. */
+export function specOlderBlocks(source: string, slots: readonly SpecSlot[]): string[] {
   const chapters = D.chapterKeywords(readRepoFile(source));
-  return [
-    '## Figures on this page',
+  return slotBlocks(slots, source, [
     figure(
       'Where the requirements are, from §1.2',
       D.keywordsCaption(chapters),
       table(['Chapter', ...D.KEYWORD_GROUPS.map((g) => g.label)], chapters.map((c) => [`${c.n}. ${c.title}`, ...D.KEYWORD_GROUPS.map((g) => String(c.counts[g.id]))])),
     ),
-  ];
+  ]);
 }

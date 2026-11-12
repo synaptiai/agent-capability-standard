@@ -1410,6 +1410,27 @@
     overflow-wrap: normal;
   }
 
+  /* A table drawn as a figure sits in a narrower frame than the text column,
+     so its cells take less side padding (issue #125 review: tables counted as
+     figures scrolled at 1440 and hid their last column). */
+  .fig__drawing .table-wrap :is(th, td) {
+    padding-inline: var(--space-2);
+  }
+
+  .edge-type-table__count {
+    min-width: 6rem;
+  }
+
+  .edge-type-table__desc,
+  .edge-type-table__sem {
+    margin: 0;
+  }
+
+  .edge-type-table__sem {
+    margin-top: var(--space-1);
+    color: var(--ink-2);
+  }
+
   .approval-flow > *,
   .deleg > *,
   .quorum > * {

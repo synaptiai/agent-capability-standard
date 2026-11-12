@@ -164,12 +164,22 @@ export default function remarkPageMeta() {
     let description = str(fm.description);
     if (description === null) {
       const start = h1Index === -1 ? 0 : h1Index + 1;
-      // Skip the header block and rows of badges (paragraphs of images only).
+      // Skip the header block, rows of badges (paragraphs of images only) and
+      // labelled notes ("**Documentation:** ..."), which say where to read
+      // the page rather than what it is.
+      const labelled = (n: (typeof tree.children)[number]): boolean => {
+        if (n.type !== 'paragraph') return false;
+        const [first, second] = n.children;
+        if (first?.type !== 'strong') return false;
+        const label = toString(first).trim();
+        return label.endsWith(':') || (second?.type === 'text' && second.value.startsWith(':'));
+      };
       const at = tree.children.findIndex(
         (n, i) =>
           i >= start &&
           i !== headerIndex &&
           n.type === 'paragraph' &&
+          !labelled(n) &&
           toString(n, { includeImageAlt: false }).trim() !== '',
       );
       const para = tree.children[at];

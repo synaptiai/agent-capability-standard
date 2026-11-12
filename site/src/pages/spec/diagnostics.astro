@@ -5,6 +5,7 @@
 // Visual spec 3.8: the code grid (F-X1) shows each family's codes as tiles,
 // each linking to its row; the table is then given one family at a time,
 // each table a figure whose Code column holds the same tiles.
+import BreakCode from '../../components/BreakCode.astro';
 import InlineMd from '../../components/InlineMd.astro';
 import { loadDiagnostics } from '../../data/diagnostics';
 import DocLayout from '../../layouts/DocLayout.astro';
@@ -64,8 +65,6 @@ const figNo = () => ++fig;
                 <tr>
                   <th scope="col">Code</th>
                   <th scope="col">Name</th>
-                  <th scope="col">Category</th>
-                  <th scope="col">Severity</th>
                   <th scope="col">Description</th>
                   <th scope="col">Section</th>
                 </tr>
@@ -74,9 +73,7 @@ const figNo = () => ++fig;
                 {f.codes.map((d) => (
                   <tr id={d.anchor} class="diagnostics-table__row" data-code={d.code} data-severity={d.severity}>
                     <th scope="row"><DiagnosticTile code={d.code} href={`#${d.anchor}`} /></th>
-                    <td><code>{d.name}</code></td>
-                    <td>{d.category}</td>
-                    <td><span class:list={['severity-badge', `severity-badge--${d.severity}`]}>{d.severity}</span></td>
+                    <td><BreakCode text={d.name} /></td>
                     <td><InlineMd md={d.descriptionMd} /></td>
                     <td><a href={`${std.url}#${d.sectionAnchor}`}>§{d.section}</a></td>
                   </tr>

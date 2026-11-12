@@ -221,9 +221,9 @@ export function euArticleMatrix(pages: readonly Doc[]): CountMatrix {
 }
 
 /**
- * The background pages against the layers of the capabilities they name in
+ * A section's pages against the layers of the capabilities they name in
  * code spans (`mutate`). A plain word such as "plan" is not counted, since it
- * may not mean the capability.
+ * may not mean the capability; the title and caption say so.
  */
 export function backgroundLayerMatrix(pages: readonly Doc[], layers: readonly { id: string; capabilities: string[] }[]): CountMatrix {
   const layerOf = new Map(layers.flatMap((l) => l.capabilities.map((c) => [c, l.id] as const)));
@@ -235,8 +235,8 @@ export function backgroundLayerMatrix(pages: readonly Doc[], layers: readonly { 
   const top = [...rows].sort((a, b) => sum(b.counts) - sum(a.counts))[0]!;
   const none = rows.filter((r) => sum(r.counts) === 0).map((r) => r.label);
   return {
-    title: 'How often each page names a capability, by layer',
-    caption: `Across the ${rows.length} pages, capabilities of ${totals[0]!.id} are named most (${totals[0]!.n} times) and of ${totals.at(-1)!.id} least (${totals.at(-1)!.n}). The ${top.label} names the most (${sum(top.counts)}).${none.length ? ` ${joinAnd(none)} ${none.length === 1 ? 'names' : 'name'} none.` : ''}`,
+    title: 'How often each page names a capability as code, by layer',
+    caption: `Only a capability name set as code counts, since a plain word such as "plan" may not mean the capability. Across the ${rows.length} pages, capabilities of ${totals[0]!.id} are named most (${totals[0]!.n} times) and of ${totals.at(-1)!.id} least (${totals.at(-1)!.n}). The ${top.label} names the most (${sum(top.counts)}).${none.length ? ` ${joinAnd(none)} ${none.length === 1 ? 'names' : 'name'} none as code.` : ''}`,
     rowHead: 'Page',
     unit: 'mentions',
     columns: layers.map((l) => ({ key: l.id, label: l.id, layer: l.id })),
@@ -260,6 +260,8 @@ export function listingFigures(section: string, routes: readonly Route[], layers
       ];
     case 'background':
       return [{ at: 'Methodology', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'background'), layers) }];
+    case 'start':
+      return [{ at: 'top', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'start'), layers) }];
     default:
       return [];
   }
