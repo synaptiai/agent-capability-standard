@@ -93,7 +93,17 @@ describe('figure colours', () => {
   // Theme-independent sizes and the per-element context variables.
   const notColours = (t: string) => /^--(px|space-|shadow-\d|font-|step-|radius|pip|header-|sidebar-|toc-|content-|frame-)/.test(t) || t === '--border';
   // --layer and --tint are set per element from --layer-<ID>; the script checks every layer.
-  const context: Record<string, RegExp> = { '--layer': /--layer-/, '--tint': /--layer-.*--tint-amount/ };
+  // The others are set per element too, each only from tokens the script checks:
+  // --c, the RFC index tile's status colour (figures-indexes.css): --ink-2,
+  // --ok or a risk colour on --bg-sub; --cell and --cell-ink, a heat cell's
+  // fill and count (UsageMatrix, RiskByLayer): --heat-N and --on-heat-N.
+  const context: Record<string, RegExp> = {
+    '--layer': /--layer-/,
+    '--tint': /--layer-.*--tint-amount/,
+    '--c': /var\(--(risk-(low|medium|high)|ok)\)/,
+    '--cell': /var\(--heat-\d\)/,
+    '--cell-ink': /var\(--on-heat-\d\)/,
+  };
 
   it('checks every colour token the figures use, in light and dark, or names it as an exception', () => {
     const covered = (t: string, tokens: Record<string, string>) =>

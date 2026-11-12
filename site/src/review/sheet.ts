@@ -2,6 +2,7 @@
 // similar shapes sit next to each other, the closest pairs by mask distance,
 // and the reuse aliases.
 import { GLYPH_ALIASES } from '../pixel/glyphs';
+import { CARD_GRIDS, PAGE_GRIDS } from '../pixel/glyphs-pages';
 import { gridMask, gridPairs, maskDistance, type GridPair } from '../pixel/grid';
 import { ALL_GRIDS } from '../pixel/keys';
 
@@ -105,6 +106,11 @@ export const GLYPH_FAMILIES: readonly { title: string; keys: readonly string[] }
       'principle:explicit-contracts', 'group:regulation',
     ],
   },
+  // The one-per-page icons of the listing cards and home cards
+  // (glyphs-pages.ts), grouped by what they are for rather than by shape:
+  // there are many, and each is checked for distance against every other
+  // grid whichever heading it sits under.
+  { title: 'Page and card icons', keys: [...Object.keys(PAGE_GRIDS), ...Object.keys(CARD_GRIDS)] },
 ];
 
 export interface SheetFamily {
