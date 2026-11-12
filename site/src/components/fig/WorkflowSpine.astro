@@ -1,0 +1,210 @@
+---
+// F-W1, the step spine of a workflow (visual spec 3.3). It generalises the
+// home page's story diagram to every workflow: one 28px row per step, top to
+// bottom, each a link to that step's card. Each row shows the step number,
+// a small periodic tile (dashed when the step has a condition), the step's
+// role glyph, its capability and purpose, its gate actions, its failure
+// actions and its risk pips. Two bracket lanes on the left join the
+// checkpoint to the step that relies on it and the rollback back to its
+// checkpoint. A parallel group is a fork bar, its steps side by side, and a
+// join bar. Pointing at or focusing a row outlines the steps it reads from
+// and draws a bracket from them in the lane on the right; nothing is drawn
+// there at rest. Lanes no row uses are not drawn, and the legend lists only
+// the glyphs this workflow uses. All geometry comes from workflowSpine().
+//
+// Props:
+// - wf: Workflow, required.
+// - n: number, required. The figure's number on the page.
+// - id: string, required. A `ref-` id for the figure.
+import '../../styles/figures-workflow.css';
+import type { Workflow } from '../../data/workflows';
+import { spineStepWords, workflowSpine, ROLE_GLYPH, type SpineStep } from '../../lib/workflow-figures';
+import { bracket, chevron, glyphRects, laneOffsets, type FigRect } from '../../pixel/lines';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import Rects from './Rects.astro';
+
+interface Props {
+  wf: Workflow;
+  n: number;
+  id: string;
+}
+
+const { wf, n, id } = Astro.props;
+const spine = workflowSpine(wf);
+const ROW = 28;
+const mid = (row: number) => row * ROW + ROW / 2;
+
+// Left lanes: the rollback bracket outside, the checkpoint bracket inside it.
+const lanes = laneOffsets([
+  { id: 'rollback', used: spine.lanes.rollback },
+  { id: 'checkpoint', used: spine.lanes.checkpoint },
+], 2);
+const laneWidth = lanes.size === 0 ? 0 : 8 * lanes.size + 6;
+const laneRects: (FigRect & { opacity?: number })[] = [];
+const cpX = lanes.get('checkpoint');
+if (cpX !== undefined) {
+  const cx = cpX + 4;
+  for (const s of spine.checkpointSpans) {
+    laneRects.push(...bracket(cx, mid(s.from), mid(s.to), 'right', 'ink-2', 6));
+    laneRects.push(...chevron(cx + 7, mid(s.to), 'right', 'ink-2'));
+    laneRects.push(...glyphRects('role:checkpoint', cx - 3, mid(s.from) - 12, 1));
+  }
+}
+const rbX = lanes.get('rollback');
+if (rbX !== undefined) {
+  const cx = rbX + 4;
+  for (const s of spine.rollbackSpans) {
+    laneRects.push(...bracket(cx, mid(s.from), mid(s.to), 'right', 'ink', laneWidth - cx - 2));
+    laneRects.push(...chevron(laneWidth - 1, mid(s.from), 'right', 'ink'));
+    laneRects.push(...glyphRects('role:rollback', cx - 3, mid(s.to) + 3, 1));
+  }
+}
+
+// The read lane on the right: for each reading step, an overlay from its
+// first producer's row down to its own row.
+const READ_W = 16;
+function readOverlay(s: SpineStep) {
+  const row = spine.rowOf.get(s.index)!;
+  const rows = s.reads.map((r) => spine.rowOf.get(r)!);
+  const top = Math.min(...rows);
+  const up = row - top;
+  const h = (up + 1) * ROW;
+  const x = READ_W / 2;
+  const rects: FigRect[] = [
+    ...rows.filter((r) => r !== row).flatMap((r) => bracket(x, (r - top) * ROW + ROW / 2, up * ROW + ROW / 2, 'left', 'ink', 6)),
+    ...chevron(2, up * ROW + ROW / 2, 'left', 'ink'),
+  ];
+  return { up, h, rects, boxes: [...new Set(rows)].filter((r) => r !== row).map((r) => r - top) };
+}
+
+const gateCols = spine.lanes.gate ? 1 + spine.maxGates : 0;
+const failCols = spine.maxFailures;
+// Narrow, the gate lane keeps the first action and a "+n" count.
+const columns = (narrow: boolean) =>
+  [
+    'var(--spine-n)',
+    '24px',
+    '14px',
+    'minmax(0, 1fr)',
+    ...(gateCols > 0 ? [`${narrow ? 14 + (spine.maxGates > 1 ? 20 : 0) : gateCols * 16 - 2}px`] : []),
+    ...(failCols > 0 ? [`${failCols * 16 - 2}px`] : []),
+    '22px',
+    ...(spine.lanes.reads ? [`${READ_W}px`] : []),
+  ].join(' ');
+const pips = { low: 1, medium: 2, high: 3 } as const;
+const stepId = (k: number) => `ref-step-${k}`;
+---
+<Figure id={id} n={n} title={spine.title} caption={spine.caption} kind="workflow-spine">
+  <div
+    class:list={['spine', spine.lanes.reads && 'spine--reads']}
+    style={`--spine-cols: ${columns(false)}; --spine-cols-narrow: ${columns(true)}; --spine-read: ${READ_W}px`}
+    data-workflow={wf.id}
+    data-rows={spine.rows.length}
+  >
+    {laneWidth > 0 && (
+      <svg
+        class="spine__lanes"
+        width={laneWidth}
+        height={spine.rows.length * ROW}
+        viewBox={`0 0 ${laneWidth} ${spine.rows.length * ROW}`}
+        shape-rendering="crispEdges"
+        aria-hidden="true"
+        focusable="false"
+        data-lanes={[...lanes.keys()].join(' ')}
+      >
+        <Rects rects={laneRects} />
+      </svg>
+    )}
+    <ol class="spine__rows" aria-label={`Steps of ${wf.id}`}>
+      {spine.rows.map((r) => {
+        if (r.kind === 'fork' || r.kind === 'join') {
+          return (
+            <li class:list={['spine__bar', `spine__bar--${r.kind}`]} data-group={r.group}>
+              <PixelGlyph name={r.kind === 'fork' ? 'fork' : 'flow:join'} />
+              {r.kind === 'fork' ? (
+                <span>Parallel group <code>{r.group}</code>: {r.size} {r.size === 1 ? 'step' : 'steps'}</span>
+              ) : (
+                <span>Join <code>{r.group}</code>{r.join !== null && <>: <code>{r.join}</code></>}</span>
+              )}
+            </li>
+          );
+        }
+        const cells = r.kind === 'step' ? [r.step] : r.steps;
+        const Row = (s: SpineStep, inGroup: boolean) => {
+          const o = s.reads.length > 0 ? readOverlay(s) : null;
+          const role = ROLE_GLYPH[s.role];
+          return (
+            <li
+              class:list={['spine__row', inGroup && 'spine__row--in-group']}
+              data-step={s.index}
+              data-role={s.role}
+              data-gates={s.gates.length}
+              data-failures={s.failures.length}
+              data-reads={s.reads.join(' ') || undefined}
+            >
+              <a class="spine__link" href={`#${stepId(s.index)}`}>
+                <span class="spine__n">{s.index}</span>
+                <span
+                  class:list={['mini-tile', 'mini-tile--24', 'has-layer', 'spine__tile', s.condition !== null && 'spine__tile--condition']}
+                  style={`--layer: var(--layer-${s.layer})`}
+                  aria-hidden="true"
+                  data-pagefind-ignore
+                ><span class="mini-tile__symbol">{s.symbol}</span></span>
+                <span class="spine__role" aria-hidden="true">{role && <PixelGlyph name={role} />}</span>
+                <span class="spine__text">
+                  <code class="spine__cap">{s.capability}</code>
+                  {s.workflowId !== null && <PixelGlyph name="nested" class="spine__nested" />}
+                  {s.purpose && <span class="spine__purpose">{s.purpose}</span>}
+                </span>
+                <span class="fig-sr">; {spineStepWords(s)}</span>
+                {gateCols > 0 && (
+                  <span class="spine__gates" aria-hidden="true">
+                    {(s.gates.length > 0 || s.condition !== null) && <PixelGlyph name={s.gates.length > 0 ? 'diamond' : 'flow:condition'} class="spine__diamond" />}
+                    {s.gates.map((g, i) => <PixelGlyph name={`gate:${g}`} class={i > 0 ? 'spine__more' : undefined} />)}
+                    {s.gates.length > 1 && <span class="spine__count">+{s.gates.length - 1}</span>}
+                  </span>
+                )}
+                {failCols > 0 && (
+                  <span class="spine__fail" aria-hidden="true">{s.failures.map((f) => <PixelGlyph name={`fail:${f}`} />)}</span>
+                )}
+                <span class="spine__risk" aria-hidden="true" data-risk={s.risk}>
+                  <span class="risk-pips" data-level={pips[s.risk]}>{Array.from({ length: pips[s.risk] }, () => <span class="risk-pips__pip"></span>)}</span>
+                </span>
+              </a>
+              {o && (
+                <span class="spine__reads" aria-hidden="true" style={`--up: ${o.up}`}>
+                  {o.boxes.map((b) => <span class="spine__producer" style={`--at: ${b}`}></span>)}
+                  <svg width={READ_W} height={o.h} viewBox={`0 0 ${READ_W} ${o.h}`} shape-rendering="crispEdges" focusable="false">
+                    <Rects rects={o.rects} />
+                  </svg>
+                </span>
+              )}
+            </li>
+          );
+        };
+        return r.kind === 'step' ? (
+          Row(r.step, false)
+        ) : (
+          <li class:list={['spine__group', cells.length > 1 && 'spine__group--multi']} data-group={r.group}>
+            <ol class="spine__group-steps" aria-label={`Parallel group ${r.group}`}>
+              {cells.map((s) => Row(s, true))}
+            </ol>
+          </li>
+        );
+      })}
+    </ol>
+  </div>
+  <ul class="spine-legend" aria-label="Key">
+    {spine.legend.map((l) => (
+      <li>
+        {l.glyph === 'pips' ? (
+          <span class="risk-pips" aria-hidden="true">{[1, 2, 3].map(() => <span class="risk-pips__pip"></span>)}</span>
+        ) : (
+          <PixelGlyph name={l.glyph} />
+        )}
+        <span>{l.label}</span>
+      </li>
+    ))}
+  </ul>
+</Figure>

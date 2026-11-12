@@ -4,7 +4,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'motion.css'].map((f) => ({
+// figures-workflow.css (issue #125) holds the workflow figures, kept apart so branches merge cleanly.
+const STYLES = ['tokens.css', 'base.css', 'components.css', 'figures.css', 'figures-workflow.css', 'motion.css'].map((f) => ({
   file: f,
   css: readFileSync(`src/styles/${f}`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }));
@@ -148,7 +149,7 @@ describe('definitions', () => {
     expect(unused).toEqual([]);
   });
 
-  it.each(['components.css', 'figures.css'])('uses every class %s defines on a single class selector', (file) => {
+  it.each(['components.css', 'figures.css', 'figures-workflow.css'])('uses every class %s defines on a single class selector', (file) => {
     const css = STYLES.find((s) => s.file === file)!.css;
     const markup = listFiles('src').filter((f) => /\.(astro|ts)$/.test(f)).map((f) => readFileSync(f, 'utf8')).join('\n');
     const lone = rules()
