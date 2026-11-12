@@ -5,6 +5,8 @@
 // top. Rows turn vertical in a container narrower than 480px. The fence
 // under the figure is its text equivalent. A key under the tiles names the
 // capability behind each symbol (the tiles' accessible names already do).
+// The frame is as wide as the chain and its key (fig--fit), not the column,
+// so a three-tile chain does not sit in a wide empty panel.
 //
 // Props:
 // - id: string, required. A ref- id for the figure.
@@ -31,7 +33,7 @@ const relation = (from: string, edges: { a: string; b: string; type: string; fro
     .map((e) => cellReading({ from: e.from, to: e.to, types: [e.type as never] }))
     .join('; ');
 ---
-<Figure id={id} n={n} title={heading} caption={caption} kind="edge-chain">
+<Figure id={id} n={n} title={heading} caption={caption} kind="edge-chain" class="fig--fit">
   <div class="edge-chains">
     {chains.map((c) => (
       <ol class:list={['edge-chain', c.form === 'tree' ? 'edge-chain--tree' : 'edge-chain--row']} data-form={c.form}>

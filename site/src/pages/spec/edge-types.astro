@@ -11,7 +11,7 @@ import { loadOntology, ONTOLOGY_SOURCE, type EdgeType } from '../../data/ontolog
 import DocLayout from '../../layouts/DocLayout.astro';
 import { capabilityHref, refSlugger, routeByUrl } from '../../lib/generated';
 import { CHAIN_SECTIONS, EDGE_TYPES_SOURCE, fieldTable, fieldsCaption } from '../../lib/edge-figures';
-import { cutAfterHeadings, type Anchor } from '../../lib/inject';
+import { cutAfterHeadings, foldFirstTable, type Anchor } from '../../lib/inject';
 import { githubBlobUrl, readRepoFile } from '../../lib/repo';
 import type { PageMeta } from '../../plugins/remark-page-meta';
 import TableWrap from '../../components/TableWrap.astro';
@@ -64,9 +64,9 @@ const figNo = () => ++fig;
 <DocLayout route={route} title={page?.title ?? route.title} description={route.description ?? page?.description}>
   <article class="doc doc--edge-types" data-pagefind-body>
     <div class="doc__body">
-      {segments.map((s) => (
+      {segments.map((s, i) => (
         <>
-          <Fragment set:html={s.html} />
+          <Fragment set:html={i > 0 && segments[i - 1]!.key?.kind === 'changes' ? foldFirstTable(s.html, 'The same changes as the table in the source') : s.html} />
           {s.key?.kind === 'card' && (
             <div class="edge-card-host"><EdgeTypeCard info={info.get(s.key.type)!} /></div>
           )}

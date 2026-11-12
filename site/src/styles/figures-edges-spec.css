@@ -25,8 +25,45 @@
     color: var(--ink);
   }
 
+  /* The count column stacks its bar over its number, so the table fits the
+     46rem column at 1440 without scrolling. */
   .edge-summary__count {
-    min-width: 10rem;
+    min-width: 5rem;
+  }
+
+  td.edge-summary__count {
+    padding-right: 0;
+  }
+
+  .edge-summary__count .pixel-bar {
+    display: grid;
+    gap: 4px;
+  }
+
+  .edge-summary__count .pixel-bar__track {
+    min-width: 48px;
+  }
+
+  tr[data-edge-type] > :first-child .edge-summary__mark {
+    margin-right: 6px;
+  }
+
+  .edge-summary__count .pixel-bar__value {
+    font-size: 12px;
+  }
+
+  /* ---------- a figure as wide as its drawing (F-E3) ---------- */
+
+  /* The title and caption take the frame's width but do not widen it. */
+  .fig.fig--fit {
+    width: fit-content;
+    min-width: min(26rem, 100%);
+    max-width: 100%;
+  }
+
+  .fig--fit :is(.fig__title, .fig__caption) {
+    width: 0;
+    min-width: 100%;
   }
 
   /* ---------- edge-type cards placed under each type's H3 (F-E1) ---------- */
@@ -177,6 +214,12 @@
       display: grid;
       grid-template-columns: 11rem 20px auto;
     }
+  }
+
+  .edge-changes__why {
+    grid-column: 1 / -1;
+    font-size: 14px;
+    color: var(--ink-2);
   }
 
   .edge-changes__pair {

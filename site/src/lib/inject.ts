@@ -69,3 +69,15 @@ export function cutAfterHeadings<K>(html: string, anchors: readonly Anchor<K>[],
   out.push({ html: html.slice(last), key: null });
   return out;
 }
+
+/**
+ * The first table (in its .table-wrap) of `html`, folded into a <details>
+ * with `summary`, for a source table whose figure, placed just before it,
+ * already shows everything it says. html with no table is returned as is.
+ */
+export function foldFirstTable(html: string, summary: string): string {
+  const m = /<div class="table-wrap"[^>]*>[\s\S]*?<\/table><\/div>/.exec(html);
+  if (!m) return html;
+  const esc = summary.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${m[0]}</details>${html.slice(m.index + m[0].length)}`;
+}

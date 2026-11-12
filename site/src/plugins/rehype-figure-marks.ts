@@ -125,7 +125,7 @@ function edgeSummary(tree: Root, problems: string[]): void {
   const headers = cellsOf(head).map((c) => hastText(c).trim());
   const flagCols = ['Transitive', 'Symmetric'].map((h) => headers.indexOf(h));
   if (flagCols.includes(-1)) problems.push(`the edge type summary table has no ${['Transitive', 'Symmetric'].filter((_, i) => flagCols[i] === -1).join(' or ')} column`);
-  head.children.push({ type: 'element', tagName: 'th', properties: {}, children: [{ type: 'text', value: 'In the ontology' }] });
+  head.children.push({ type: 'element', tagName: 'th', properties: {}, children: [{ type: 'text', value: 'Count' }] });
   const seen = new Set<string>();
   for (const tr of rowsOf(table, 'tbody')) {
     const cells = cellsOf(tr);
