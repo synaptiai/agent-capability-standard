@@ -34,6 +34,12 @@ import {
   schemaRows,
 } from '../../lib/views';
 import TableWrap from '../../components/TableWrap.astro';
+import DataFlowGrid from '../../components/fig/DataFlowGrid.astro';
+import Figure from '../../components/fig/Figure.astro';
+import Port from '../../components/fig/Port.astro';
+import RiskStrip from '../../components/fig/RiskStrip.astro';
+import WorkflowSpine from '../../components/fig/WorkflowSpine.astro';
+import { inputsCaption } from '../../lib/workflow-figures';
 
 export function getStaticPaths() {
   const { all } = loadWorkflows();
@@ -62,6 +68,11 @@ const gatesHref = specSectionHref('5.6');
 const checkpoints = wf.steps.filter((s) => s.capability === 'checkpoint').length;
 const changing = wf.steps.filter((s) => s.effective.mutation).length;
 const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
+const inputRows = schemaRows(wf.inputs);
+// Figures are numbered in page order: the step map, the inputs (when there
+// are any), the risk, then the data flow.
+const figN = { spine: 1, inputs: 2, risk: inputRows.length > 0 ? 3 : 2, flow: inputRows.length > 0 ? 4 : 3 };
+const topInputs = inputRows.filter((r) => r.depth === 0).length;
 ---
 <DocLayout route={route} title={wf.id} description={wf.goal}>
   <article class="doc doc--workflow" data-workflow={wf.id} data-catalog={wf.catalog} data-pagefind-body>
@@ -94,9 +105,27 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
 
     {wf.description && <p class="workflow-description">{wf.description}</p>}
 
+    <WorkflowSpine wf={wf} n={figN.spine} id="ref-fig-step-map" />
+
     <section class="workflow-inputs">
       <h2 id={id('Inputs')}>Inputs</h2>
-      <ContractTable rows={schemaRows(wf.inputs)} caption={`Inputs of ${wf.id}`} from={wf.source} />
+      {inputRows.length === 0 ? (
+        <ContractTable rows={inputRows} caption={`Inputs of ${wf.id}`} from={wf.source} />
+      ) : (
+        <>
+          <Figure id="ref-fig-inputs" n={figN.inputs} title={`Inputs of ${wf.id}`} caption={inputsCaption(wf)} kind="workflow-inputs" class={topInputs > 4 ? 'wf-inputs wf-inputs--two' : 'wf-inputs'}>
+            <ul class="ports ports--out">
+              {inputRows.map((r) => (
+                <Port name={r.path} type={r.type} required={r.required} description={r.description} depth={r.depth > 0 ? 1 : 0} />
+              ))}
+            </ul>
+          </Figure>
+          <details class="workflow-details">
+            <summary>Inputs as a table, with constraints</summary>
+            <ContractTable rows={inputRows} caption={`Inputs of ${wf.id}`} from={wf.source} />
+          </details>
+        </>
+      )}
     </section>
 
     <section class="workflow-steps">
@@ -104,8 +133,20 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
       <WorkflowDiagram workflow={wf} />
     </section>
 
+    <section class="workflow-risk">
+      <h2 id={id('Risk')}>Risk</h2>
+      <RiskStrip wf={wf} n={figN.risk} id="ref-fig-risk" />
+      {wf.risk_propagation !== undefined && (
+        <details class="workflow-details">
+          <summary>Risk propagation as written in the catalog</summary>
+          <YamlBlock value={wf.risk_propagation} />
+        </details>
+      )}
+    </section>
+
     <section class="workflow-step-details">
       <h2 id={id('Bindings and details')}>Bindings and details</h2>
+      <DataFlowGrid wf={wf} n={figN.flow} id="ref-fig-data-flow" />
       {wf.steps.map((step) => {
         const gates = gateRows(step);
         const reads = producerSteps(wf, step);
@@ -148,10 +189,10 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
               {step.retry !== undefined && step.retry !== null && <div><dt>Retry</dt><dd><code>{JSON.stringify(step.retry)}</code></dd></div>}
             </dl>
             {Object.keys(step.input_bindings).length > 0 && (
-              <>
-                <p class="workflow-step__label">Input bindings</p>
+              <details class="workflow-details">
+                <summary>Input bindings</summary>
                 <YamlBlock value={step.input_bindings} />
-              </>
+              </details>
             )}
             {gates.length > 0 && (
               <TableWrap label={`Gates of step ${step.index}`}>
@@ -190,13 +231,10 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
     {wf.data_flow !== undefined && (
       <section class="workflow-data-flow">
         <h2 id={id('Data flow')}>Data flow</h2>
-        <YamlBlock value={wf.data_flow} />
-      </section>
-    )}
-    {wf.risk_propagation !== undefined && (
-      <section class="workflow-risk-propagation">
-        <h2 id={id('Risk propagation')}>Risk propagation</h2>
-        <YamlBlock value={wf.risk_propagation} />
+        <details class="workflow-details">
+          <summary>As written in the catalog</summary>
+          <YamlBlock value={wf.data_flow} />
+        </details>
       </section>
     )}
     {wf.workflow_extensions !== undefined && (

@@ -1,0 +1,54 @@
+---
+// F-W3, declared and step risk (visual spec 3.3): one 16px cell per step
+// with its risk drawn as 1 to 3 bars in the risk colour, the step numbers
+// under them (the highest in bold), then the risk badges. When the
+// declared, computed and highest step risk agree they collapse into one
+// badge; otherwise each is shown, and the caption states the values without
+// judging which is right.
+//
+// Props:
+// - wf: Workflow, required.
+// - n: number, required. The figure's number on the page.
+// - id: string, required. A `ref-` id for the figure.
+import '../../styles/figures-workflow.css';
+import type { Workflow } from '../../data/workflows';
+import { riskSummary } from '../../lib/workflow-figures';
+import RiskBadge from '../RiskBadge.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  wf: Workflow;
+  n: number;
+  id: string;
+}
+
+const { wf, n, id } = Astro.props;
+const r = riskSummary(wf);
+const bars = { low: 1, medium: 2, high: 3 } as const;
+---
+<Figure id={id} n={n} title={r.title} caption={r.caption} kind="workflow-risk">
+  <div class="risk-strip" data-agree={r.agree ? 'true' : 'false'}>
+    <ol class="risk-strip__cells" aria-label={`Risk of each step of ${wf.id}`}>
+      {r.steps.map((s) => (
+        <li class:list={['risk-strip__cell', r.highestSteps.includes(s.index) && 'risk-strip__cell--top']} data-step={s.index} data-risk={s.risk}>
+          <span class="risk-strip__box" data-risk={s.risk} aria-hidden="true">
+            <span class="risk-strip__pips">{Array.from({ length: bars[s.risk] }, () => <span></span>)}</span>
+          </span>
+          <span class="risk-strip__n" aria-hidden="true">{s.index}</span>
+          <span class="fig-sr">Step {s.index}, {s.capability}: {s.risk}</span>
+        </li>
+      ))}
+    </ol>
+    <ul class="risk-strip__badges">
+      {r.agree ? (
+        <li><RiskBadge risk={r.highest} label={r.computed !== null ? 'Declared, computed and step risk' : 'Declared and step risk'} /></li>
+      ) : (
+        <>
+          <li><RiskBadge risk={r.highest} label="Highest step risk" /></li>
+          <li><RiskBadge risk={r.declared} label="Declared workflow risk" /></li>
+          {r.computed !== null && <li><RiskBadge risk={r.computed} label="Computed risk" /></li>}
+        </>
+      )}
+    </ul>
+  </div>
+</Figure>

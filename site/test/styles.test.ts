@@ -154,7 +154,7 @@ describe('definitions', () => {
     expect(unused).toEqual([]);
   });
 
-  it.each(['components.css', 'figures.css'])('uses every class %s defines on a single class selector', (file) => {
+  it.each(STYLES.map((s) => s.file).filter((f) => f === 'components.css' || f.startsWith('figures')))('uses every class %s defines on a single class selector', (file) => {
     const css = STYLES.find((s) => s.file === file)!.css;
     const markup = listFiles('src').filter((f) => /\.(astro|ts)$/.test(f)).map((f) => readFileSync(f, 'utf8')).join('\n');
     const lone = rules()
