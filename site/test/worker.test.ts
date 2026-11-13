@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { parseAccept, prefersMarkdown } from '../src/worker/accept';
 import type { Env, WorkerConfig } from '../src/worker/env';
 import { createHandler } from '../src/worker/site';
+import { pageSearchTerms, TERMS_PER_PAGE } from '../src/worker/terms';
 import { REPO_ROOT } from '../src/lib/repo';
 
 const PLUGIN_VERSION = (JSON.parse(readFileSync(path.join(REPO_ROOT, '.claude-plugin/plugin.json'), 'utf8')) as { version: string }).version;
@@ -479,9 +480,16 @@ describe('MCP server: tools', () => {
     expect(r.structuredContent.total).toBe(2);
   });
 
-  it('search_standard needs every word of the query and honours limit', async () => {
+  it('search_standard ranks pages with every word first, still lists pages with some, and honours limit', async () => {
     const { body } = await callTool('search_standard', { query: 'checkpoint install', limit: 5 });
-    expect(body.result!.structuredContent.results.map((x: any) => x.path)).toEqual(['/guides/getting-started/']);
+    const r = body.result!.structuredContent;
+    expect(r.terms).toEqual(['checkpoint', 'install']);
+    expect(r.matched).toBe('all');
+    // The guide has both words; the workflow has "checkpoint" only, in its description.
+    expect(r.results.map((x: any) => [x.path, x.matchedTerms])).toEqual([
+      ['/guides/getting-started/', 2],
+      ['/workflows/debug-code-change/', 1],
+    ]);
     const one = await callTool('search_standard', { query: 'checkpoint', limit: 1 });
     expect(one.body.result!.structuredContent.results).toHaveLength(1);
     expect(one.body.result!.structuredContent.total).toBe(2);
@@ -489,11 +497,17 @@ describe('MCP server: tools', () => {
 
   it('search_standard drops stopwords and meets word forms ("mutation" finds "mutate")', async () => {
     const { body } = await callTool('search_standard', { query: 'checkpoint before mutation' });
+    expect(body.result!.structuredContent.terms).toEqual(['checkpoint', 'mutat']);
     expect(body.result!.structuredContent.matched).toBe('all');
-    expect(body.result!.structuredContent.results.map((x: any) => x.path)).toEqual(['/workflows/debug-code-change/']);
+    // The workflow's description has both words; mutate has one, in its title and id.
+    expect(body.result!.structuredContent.results.map((x: any) => [x.path, x.matchedTerms])).toEqual([
+      ['/capabilities/mutate/', 1],
+      ['/workflows/debug-code-change/', 2],
+      ['/guides/getting-started/', 1],
+    ]);
   });
 
-  it('search_standard falls back to pages with any of the words when none has them all', async () => {
+  it('search_standard reports "any" when no page has every word', async () => {
     const { body } = await callTool('search_standard', { query: 'install teleport' });
     expect(body.result!.structuredContent.matched).toBe('any');
     expect(body.result!.structuredContent.results.map((x: any) => x.path)).toEqual(['/guides/getting-started/']);
@@ -567,6 +581,76 @@ describe('MCP server: tools', () => {
     delete files['/api/v1/pages.json'];
     const { body } = await rpc('tools/call', { name: 'search_standard', arguments: { query: 'mutate' } }, { env: fakeEnv(files) });
     expect(body.result!.isError).toBe(true);
+  });
+});
+
+describe('MCP server: search quality', () => {
+  // Hand-written pages that reproduce the review of c24b7af: a page with
+  // every query word in its description and headings, and the two capability
+  // pages, each with one word in its title and the other only in its body
+  // text (its search_terms). A diagnostic code is only in body text.
+  const page = (p: string, title: string, description: string | null, headings: string[], terms: string, section = 'background') => ({
+    url: `${BASE}${p}`,
+    markdown_url: `${BASE}${p}index.md`,
+    title,
+    description,
+    section,
+    headings: headings.map((text) => ({ level: 2, text })),
+    search_terms: terms,
+  });
+  const pages = [
+    page('/background/benchmarks/', 'Benchmark suite', 'Scenarios that checkpoint before a mutation.', ['Checkpoint scenarios', 'Mutation recovery'], 'benchmark scenario w602'),
+    page('/capabilities/checkpoint/', 'checkpoint', 'Save state so it can be restored.', ['Safety'], 'mutat restor snapshot', 'capabilities'),
+    page('/capabilities/mutate/', 'mutate', 'Change persistent state.', ['Safety'], 'checkpoint rollback', 'capabilities'),
+    page('/spec/diagnostics/', 'Diagnostics', 'Every diagnostic code.', ['Warnings'], 'v102 w601 w602 warn', 'spec'),
+    page('/rfcs/0004/', 'RFC-0004: Agent identity', 'Trust classes and their weights.', ['Trust classes map to weights'], 'identity trust', 'rfcs'),
+    page('/domains/audio/', 'Audio Domain', 'A profile for audio.', ['Trust Weights'], 'audio trust weight', 'domains'),
+  ];
+  const caps = ['checkpoint', 'mutate'].map((id) => ({ id, description: '', page_url: `${BASE}/capabilities/${id}/` }));
+  const files: Record<string, FakeFile> = {
+    '/api/v1/pages.json': { body: JSON.stringify({ count: pages.length, pages }), type: 'application/json' },
+    '/api/v1/capabilities.json': { body: JSON.stringify({ count: 2, capabilities: caps }), type: 'application/json' },
+    '/api/v1/workflows.json': { body: JSON.stringify({ count: 0, workflows: [] }), type: 'application/json' },
+    '/api/v1/diagnostics.json': {
+      body: JSON.stringify({ count: 1, diagnostics: [{ code: 'W602', severity: 'warning', page_url: `${BASE}/spec/diagnostics/#w602` }] }),
+      type: 'application/json',
+    },
+  };
+  const search = async (query: string) =>
+    (await rpc('tools/call', { name: 'search_standard', arguments: { query } }, { env: fakeEnv(files) })).body.result!.structuredContent;
+
+  it('"checkpoint before mutation" ranks the checkpoint and mutate capabilities first', async () => {
+    const r = await search('checkpoint before mutation');
+    expect(r.results.slice(0, 2).map((x: any) => x.id).sort()).toEqual(['checkpoint', 'mutate']);
+    expect(r.results.map((x: any) => x.path)).toContain('/background/benchmarks/');
+  });
+
+  it('finds a diagnostic code in body text and ranks the page that defines it first', async () => {
+    const r = await search('W602');
+    expect(r.results.map((x: any) => x.path)).toEqual(['/spec/diagnostics/', '/background/benchmarks/']);
+  });
+
+  it('ranks a page with the query as a heading above one with the words apart', async () => {
+    const r = await search('trust weights');
+    expect(r.results[0].path).toBe('/domains/audio/');
+  });
+});
+
+describe('page search terms (built into pages.json)', () => {
+  it('keeps every diagnostic code, the words that set a page apart, and no link targets', () => {
+    const filler = Array.from({ length: TERMS_PER_PAGE + 10 }, (_, i) => `filler${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`).join(' ');
+    const [a, b] = pageSearchTerms([
+      `Mutations need a checkpoint. Checkpoint the mutation first; W602 warns. See [the guide](https://example.com/teleport/). ${filler} standard standard`,
+      'The standard names capabilities. Standard text.',
+    ]);
+    const ta = a!.split(' ');
+    expect(ta).toContain('w602');
+    expect(ta).toContain('checkpoint');
+    expect(ta).toContain('mutat');
+    expect(ta).not.toContain('teleport');
+    expect(ta).not.toContain('standard'); // on every page: sets nothing apart
+    expect(ta.length).toBeLessThanOrEqual(TERMS_PER_PAGE + 1);
+    expect(b!.split(' ')).toContain('capabilit');
   });
 });
 

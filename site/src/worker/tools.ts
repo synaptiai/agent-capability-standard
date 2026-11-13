@@ -4,6 +4,7 @@
 import type { PageEntry, RecordEntry, SiteData } from './data';
 import { sitePath, unwrap } from './data';
 import type { WorkerConfig } from './env';
+import { isCode, searchTerms, stem, words } from './terms';
 
 type Json = Record<string, unknown>;
 
@@ -110,7 +111,7 @@ export const TOOLS = [
     name: 'search_standard',
     title: 'Search the Standard',
     description:
-      'Search every page of the Agent Capability Standard site and the capability names and descriptions for words in a query. Returns ranked matches with their page path, URL, Markdown URL and, for capabilities and workflows, the id to pass to read_capability or read_workflow. Start here.',
+      'Search the pages of the Agent Capability Standard site for the words of a query. It matches page titles, descriptions, headings, capability and workflow ids, and each page\'s search terms: the words that most set its text apart, and every diagnostic code it names (such as V102). It does not search every word of the full text. Results are ranked by where the words appear and how many of them a page has, so a page with only some of the words can still appear. Returns each match with its page path, URL, Markdown URL and, for a capability or workflow, the id to pass to read_capability or read_workflow. Start here.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -124,7 +125,8 @@ export const TOOLS = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'The query as received.' },
-        matched: { type: 'string', enum: ['all', 'any'], description: '"all" when every result has every search word; "any" when no page had them all and results have some.' },
+        terms: { type: 'array', items: { type: 'string' }, description: 'The search words taken from the query: stopwords dropped, lower case, stemmed.' },
+        matched: { type: 'string', enum: ['all', 'any'], description: '"all" when at least one result has every search word (or nothing matched); "any" when no page has them all.' },
         total: { type: 'integer', description: 'How many entries matched, before the limit.' },
         results: {
           type: 'array',
@@ -139,14 +141,15 @@ export const TOOLS = [
               markdownUrl: { type: 'string' },
               section: { type: 'string' },
               description: { type: 'string' },
+              matchedTerms: { type: 'integer', description: 'How many of the search words this result has.' },
               score: { type: 'number', description: 'Higher is a closer match.' },
             },
-            required: ['kind', 'title', 'path', 'url', 'markdownUrl', 'score'],
+            required: ['kind', 'title', 'path', 'url', 'markdownUrl', 'matchedTerms', 'score'],
             additionalProperties: false,
           },
         },
       },
-      required: ['query', 'matched', 'total', 'results'],
+      required: ['query', 'terms', 'matched', 'total', 'results'],
       additionalProperties: false,
     },
     annotations: { title: 'Search the Standard', ...ANNOTATIONS },
@@ -193,10 +196,6 @@ function failed(message: string): ToolResult {
 
 // ------------------------------------------------------------ search
 
-function words(s: string): string[] {
-  return s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-}
-
 interface Kind {
   kind: 'page' | 'capability' | 'workflow';
   id?: string;
@@ -214,31 +213,29 @@ function kindOf(path: string, caps: Map<string, RecordEntry>, flows: Map<string,
   return m ? { kind: 'capability', id: m[1]! } : { kind: 'page' };
 }
 
-/** Words too common to narrow a search. */
-const STOPWORDS = new Set(
-  'a an and are as at be before by can do does for from how i in into is it its of on or should that the then this to what when where which who why with'.split(' '),
-);
-
-/** A crude stem, so "mutation", "mutates" and "mutate" meet at "mutat". */
-export function stem(word: string): string {
-  for (const suffix of ['ations', 'ation', 'ions', 'ion', 'ing', 'ies', 'ed', 'es', 's', 'e']) {
-    if (word.endsWith(suffix) && word.length - suffix.length >= 4) return word.slice(0, -suffix.length);
-  }
-  return word;
-}
-
-/** The search terms of a query: its words without stopwords (all of them when every word is one), stemmed. */
-export function searchTerms(query: string): string[] {
-  const all = words(query);
-  const kept = all.filter((w) => !STOPWORDS.has(w));
-  return [...new Set((kept.length > 0 ? kept : all).map(stem))];
+/** How one page matches a query: how many of its search terms it has, and a score for ranking. */
+export interface PageMatch {
+  matched: number;
+  score: number;
 }
 
 /**
- * Score one page against the search terms. With `all`, a page that misses a
- * term scores 0; without it, each term that matches adds to the score.
+ * Match one page against the search terms. Each term the page has counts in
+ * `matched` and adds to the score: most for the capability or workflow id
+ * and for a diagnostic code the page defines (`defines`), then the title,
+ * the path, the description and headings, the section, and least the page's
+ * own search terms (its body text). The query as a phrase adds more in the
+ * title or a heading. The score is then scaled by the share of the terms the
+ * page has, so a page with every word outranks a page with half of them
+ * unless the half sits in its title or id.
  */
-export function scorePage(page: PageEntry, terms: readonly string[], phrase: string, record: RecordEntry | undefined, all = true): number {
+export function scorePage(
+  page: PageEntry,
+  terms: readonly string[],
+  phrase: string,
+  record: RecordEntry | undefined,
+  defines: ReadonlySet<string> = new Set(),
+): PageMatch {
   const title = page.title.toLowerCase();
   const titleWords = words(title).map(stem);
   const path = page.path.toLowerCase();
@@ -246,6 +243,7 @@ export function scorePage(page: PageEntry, terms: readonly string[], phrase: str
   const heads = page.headings.join(' \n ').toLowerCase();
   const section = page.section.toLowerCase();
   let score = 0;
+  let matched = 0;
   for (const t of terms) {
     let s = 0;
     if (titleWords.includes(t)) s += 6;
@@ -254,12 +252,30 @@ export function scorePage(page: PageEntry, terms: readonly string[], phrase: str
     if (desc.includes(t)) s += 2;
     if (heads.includes(t)) s += 2;
     if (section.includes(t)) s += 1;
+    if (page.terms.includes(t)) s += 1;
     if (record && stem(record.id.toLowerCase()) === t) s += 10;
-    if (s === 0 && all) return 0;
+    if (defines.has(t)) s += 10;
+    if (s > 0) matched += 1;
     score += s;
   }
-  if (phrase.length > 0 && title.includes(phrase)) score += 8;
-  return score;
+  if (matched === 0) return { matched, score: 0 };
+  if (phrase.includes(' ')) {
+    if (title.includes(phrase)) score += 8;
+    else if (heads.includes(phrase)) score += 4;
+  } else if (phrase.length > 0 && title.includes(phrase)) score += 8;
+  return { matched, score: Math.round((score * matched * 100) / terms.length) / 100 };
+}
+
+/** Each diagnostic code (lower case, as a search term) and the path of the page that defines it, from /api/v1/diagnostics.json. */
+async function codePages(data: SiteData, cfg: WorkerConfig): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const j = (await data.json('/api/v1/diagnostics.json')) as { diagnostics?: unknown } | null;
+  if (!j || !Array.isArray(j.diagnostics)) return out;
+  for (const d of j.diagnostics as Record<string, unknown>[]) {
+    const p = typeof d.code === 'string' ? sitePath(String(d.page_url ?? '').replace(/#.*$/, ''), cfg.origin) : null;
+    if (p !== null) out.set((d.code as string).toLowerCase(), p);
+  }
+  return out;
 }
 
 async function searchStandard(a: Json, data: SiteData, cfg: WorkerConfig): Promise<ToolResult> {
@@ -281,17 +297,15 @@ async function searchStandard(a: Json, data: SiteData, cfg: WorkerConfig): Promi
   const caps = byPath(capList);
   const flows = byPath(await data.collection('workflows'));
   const phrase = words(query).join(' ');
+  const codes = terms.some(isCode) ? await codePages(data, cfg) : new Map<string, string>();
+  const defines = (path: string) => new Set(terms.filter((t) => codes.get(t) === path));
   const entries = pages.map((p) => ({ p, k: kindOf(p.path, caps, flows, capList !== null) }));
-  const rank = (all: boolean) =>
-    entries
-      .map((e) => ({ ...e, score: scorePage(e.p, terms, phrase, e.k.record, all) }))
-      .filter((e) => e.score > 0)
-      .sort((x, y) => y.score - x.score || x.p.path.localeCompare(y.p.path));
-  // Pages that match every term first; when none does, pages that match any.
-  let scored = rank(true);
-  const matched: 'all' | 'any' = scored.length > 0 || terms.length === 1 ? 'all' : 'any';
-  if (matched === 'any') scored = rank(false);
-  const results = scored.slice(0, limit).map(({ p, k, score }) => ({
+  const scored = entries
+    .map((e) => ({ ...e, ...scorePage(e.p, terms, phrase, e.k.record, defines(e.p.path)) }))
+    .filter((e) => e.matched > 0)
+    .sort((x, y) => y.score - x.score || y.matched - x.matched || x.p.path.localeCompare(y.p.path));
+  const matched: 'all' | 'any' = scored.length === 0 || scored.some((e) => e.matched === terms.length) ? 'all' : 'any';
+  const results = scored.slice(0, limit).map(({ p, k, score, matched: has }) => ({
     kind: k.kind,
     ...(k.id ? { id: k.id } : {}),
     title: p.title,
@@ -300,9 +314,10 @@ async function searchStandard(a: Json, data: SiteData, cfg: WorkerConfig): Promi
     markdownUrl: `${cfg.origin}${p.markdownPath}`,
     section: p.section,
     description: p.description || k.record?.description || '',
+    matchedTerms: has,
     score,
   }));
-  return ok({ query, matched, total: scored.length, results });
+  return ok({ query, terms, matched, total: scored.length, results });
 }
 
 // ------------------------------------------------------------ reads

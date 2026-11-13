@@ -223,6 +223,9 @@ function schemas(): Record<string, Schema> {
         obj('A heading of the page.', { level: { type: 'integer', enum: [2, 3], description: 'The heading level.' }, text: str('The heading text.') }),
         'Its H2 and H3 headings, in order.',
       ),
+      search_terms: str(
+        'Words for search, separated by spaces: every diagnostic code the page names, and the words that most set its text apart from the other pages, lower case and stemmed ("mutation" becomes "mutat"). The MCP server\'s search_standard tool matches query words against them.',
+      ),
     }),
     ApiIndex: obj('The entry point of the API.', {
       ...envelopeProps(),

@@ -1,7 +1,10 @@
 // /api/v1/pages.json: every page of the site, for agents that search before
-// they read (the MCP server's search_standard tool and the in-page WebMCP
-// search use it). Titles, descriptions and headings come from each page's
-// Markdown copy, so they are the words an agent will find when it reads it.
+// they read (the MCP server's search_standard tool uses it). Titles,
+// descriptions and headings come from each page's Markdown copy, so they are
+// the words an agent will find when it reads it.
+// The search terms (search_terms) are stems of the copy's body text, made with
+// the worker's own word functions so a query meets them as written.
+import { pageSearchTerms } from '../worker/terms';
 import { computeAnchors } from './anchors';
 import { API_BASE, envelope, type JsonObject } from './api';
 import { SITE_ORIGIN } from './origin';
@@ -18,10 +21,13 @@ export function pageHeadings(markdown: string): { level: number; text: string }[
 }
 
 export async function pageResources(): Promise<JsonObject[]> {
-  const out: JsonObject[] = [];
-  for (const r of [...ROUTES].sort((a, b) => SECTIONS.findIndex((s) => s.id === a.section) - SECTIONS.findIndex((s) => s.id === b.section) || a.order - b.order)) {
-    const t = await twinFor(r);
-    out.push({
+  const routes = [...ROUTES].sort((a, b) => SECTIONS.findIndex((s) => s.id === a.section) - SECTIONS.findIndex((s) => s.id === b.section) || a.order - b.order);
+  const twins = [];
+  for (const r of routes) twins.push(await twinFor(r));
+  const terms = pageSearchTerms(twins.map((t) => t.markdown));
+  return routes.map((r, i) => {
+    const t = twins[i]!;
+    return {
       url: `${SITE_ORIGIN}${r.url}`,
       markdown_url: `${SITE_ORIGIN}${r.url}index.md`,
       title: t.title,
@@ -31,9 +37,9 @@ export async function pageResources(): Promise<JsonObject[]> {
       group: r.group ?? null,
       source: r.source,
       headings: pageHeadings(t.markdown),
-    });
-  }
-  return out;
+      search_terms: terms[i]!,
+    };
+  });
 }
 
 export async function pagesFile(): Promise<JsonObject> {

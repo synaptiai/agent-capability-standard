@@ -13,6 +13,8 @@ export interface PageEntry {
   description: string;
   section: string;
   headings: string[];
+  /** The page's search terms: stems of its body text and the diagnostic codes it names. */
+  terms: string[];
 }
 
 /** A capability or a workflow, from /api/v1/capabilities.json or /api/v1/workflows.json. */
@@ -64,7 +66,8 @@ export function toPageEntry(raw: unknown, origin: string): PageEntry | null {
         .map((h) => (typeof h === 'string' ? h : h && typeof h === 'object' ? str((h as Record<string, unknown>).text ?? (h as Record<string, unknown>).title) : ''))
         .filter((h) => h !== '')
     : [];
-  return { path, markdownPath: md, title: str(r.title), description: str(r.description), section: str(r.section), headings };
+  const terms = str(r.search_terms).split(' ').filter((t) => t !== '');
+  return { path, markdownPath: md, title: str(r.title), description: str(r.description), section: str(r.section), headings, terms };
 }
 
 export function toRecordEntry(raw: unknown, origin: string): RecordEntry | null {

@@ -1049,7 +1049,32 @@ describe('Cloudflare Pages worker in the build output', () => {
     expect(uris).toContain(`https://acs.synapti.ai/spec/${v.standard.current.version}/index.md`);
     expect(existsSync(path.join(dist, 'spec', v.standard.current.version, 'index.md'))).toBe(true);
   });
+  it('answers the review queries of search_standard from the built page index', async () => {
+    // The queries and the pages they should find come from the review of
+    // c24b7af: the tool's own example query missed both capabilities, a
+    // diagnostic code found nothing, and "trust weights" ranked an RFC first.
+    const worker = await loadWorker();
+    const search = async (query: string) => {
+      const res = await worker.fetch(
+        new Request('https://acs.synapti.ai/mcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_standard', arguments: { query, limit: 5 } } }),
+        }),
+        { ASSETS: distAssets() },
+      );
+      return ((await res.json()) as { result: { structuredContent: { results: { path: string; id?: string }[] } } }).result.structuredContent.results;
+    };
+    const example = await search('checkpoint before mutation');
+    expect(example[0]!.id).toBe('mutate');
+    expect(example.slice(0, 3).map((r) => r.id)).toContain('checkpoint');
+    const codes = (JSON.parse(readFileSync(path.join(dist, 'api/v1/diagnostics.json'), 'utf8')).diagnostics as { code: string }[]).map((d) => d.code);
+    expect(codes).toContain('W602');
+    expect((await search('W602'))[0]!.path).toBe('/spec/diagnostics/');
+    expect((await search('trust weights'))[0]!.path).toMatch(/^\/domains\//);
+  });
 });
+
 
 describe('WebMCP tools on the built site', () => {
   const pages = () => [...ROUTES.map((r) => pageFile(r.url)), '404.html'];
