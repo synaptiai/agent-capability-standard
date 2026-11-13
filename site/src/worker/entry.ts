@@ -16,6 +16,11 @@
 // styles, the search index, fonts, images, robots.txt, the sitemap and
 // llms.txt). Those stay free, unlimited static requests; every other request
 // counts against the Workers plan (100,000 a day on the Free plan).
+// When that daily allowance runs out, the project's "Fail open / closed"
+// setting (Settings > Runtime) decides what happens: fail open keeps
+// serving the static files, so pages stay readable and only the worker's
+// additions (Markdown negotiation, /mcp, the server card) stop until the
+// allowance resets; fail closed returns an error page instead.
 //
 // Cloudflare's documentation says _headers and _redirects are not applied to
 // responses a worker returns, so the worker applies the same rules itself

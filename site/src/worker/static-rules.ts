@@ -69,3 +69,18 @@ export function withStaticRules(url: URL, res: Response): Response {
 export function redirectTarget(redirects: Readonly<Record<string, string>>, path: string): string | null {
   return Object.prototype.hasOwnProperty.call(redirects, path) ? redirects[path]! : null;
 }
+
+/**
+ * For the Markdown copy of a page address that redirects to another page,
+ * the copy of the target: with "/spec/" -> "/spec/1.1.0/", both
+ * "/spec/index.md" and "/spec.md" give "/spec/1.1.0/index.md". Null otherwise.
+ */
+export function markdownRedirect(redirects: Readonly<Record<string, string>>, path: string): string | null {
+  let page: string | null = null;
+  if (path.endsWith('/index.md')) page = path.slice(0, -'index.md'.length);
+  else if (path.endsWith('.md') && path.length > '/.md'.length) page = `${path.slice(0, -'.md'.length)}/`;
+  if (page === null) return null;
+  const target = redirectTarget(redirects, page);
+  return target !== null && target.endsWith('/') ? `${target}index.md` : null;
+}
+

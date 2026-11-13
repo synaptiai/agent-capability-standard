@@ -90,6 +90,16 @@ export function unwrap(json: unknown, key: string): Record<string, unknown> | nu
 }
 
 /** Reads the site's files. One instance per request; each index is read at most once in it. */
+/** A site file that exists but could not be read: any status but 200 or 404, or JSON that does not parse. */
+export class ReadFailed extends Error {
+  constructor(
+    readonly path: string,
+    readonly reason: string,
+  ) {
+    super(`${path} could not be read (${reason})`);
+  }
+}
+
 export class SiteData {
   private pagesP: Promise<PageEntry[] | null> | null = null;
   private readonly records = new Map<string, Promise<RecordEntry[] | null>>();
@@ -102,10 +112,16 @@ export class SiteData {
     private readonly origin: string,
   ) {}
 
-  /** GET a file; null when it is not there (any status but 200). */
+  /**
+   * GET a file; null when it is not there (404). Any other status is a read
+   * failure, not a missing file, and throws ReadFailed, so a tool never tells
+   * an agent that an id does not exist because a read failed.
+   */
   async file(path: string): Promise<Response | null> {
     const res = await this.assets.fetch(new Request(new URL(path, this.base), { method: 'GET', headers: { Accept: '*/*' } }));
-    return res.status === 200 ? res : null;
+    if (res.status === 200) return res;
+    if (res.status === 404) return null;
+    throw new ReadFailed(path, `HTTP ${res.status}`);
   }
 
   async text(path: string): Promise<string | null> {
@@ -119,11 +135,11 @@ export class SiteData {
     try {
       return JSON.parse(t) as unknown;
     } catch {
-      return null;
+      throw new ReadFailed(path, 'not valid JSON');
     }
   }
 
-  /** Every page in /api/v1/pages.json; null when the file is missing or unreadable. */
+  /** Every page in /api/v1/pages.json; null when the file is missing (a failed read throws ReadFailed). */
   pages(): Promise<PageEntry[] | null> {
     this.pagesP ??= this.json('/api/v1/pages.json').then((j) => {
       if (j === null) return null;
@@ -134,7 +150,7 @@ export class SiteData {
     return this.pagesP;
   }
 
-  /** The records of a collection file, e.g. ("capabilities") -> /api/v1/capabilities.json; null when it is missing or unreadable. */
+  /** The records of a collection file, e.g. ("capabilities") -> /api/v1/capabilities.json; null when it is missing (a failed read throws ReadFailed). */
   collection(name: 'capabilities' | 'workflows'): Promise<RecordEntry[] | null> {
     let p = this.records.get(name);
     if (!p) {

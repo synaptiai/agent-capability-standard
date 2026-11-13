@@ -174,9 +174,9 @@ export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
     async execute(input) {
       const query = stringArg(input, 'query');
       const raw = input?.limit;
-      const limit =
-        raw === undefined ? SEARCH_LIMIT_DEFAULT : Number.isInteger(raw) ? Math.min(Math.max(raw as number, 1), SEARCH_LIMIT_MAX) : NaN;
-      if (Number.isNaN(limit)) throw new Error(`"limit" must be an integer from 1 to ${SEARCH_LIMIT_MAX}.`);
+      // Rejected, not clamped, as the MCP tool of the same name does.
+      const limit = raw === undefined ? SEARCH_LIMIT_DEFAULT : (raw as number);
+      if (!Number.isInteger(limit) || limit < 1 || limit > SEARCH_LIMIT_MAX) throw new Error(`"limit" must be an integer from 1 to ${SEARCH_LIMIT_MAX}.`);
       const pf = await deps.loadPagefind();
       if (!pf) throw new Error('The search index could not load. Try again, or read /llms.txt for a list of pages.');
       const found = await pf.search(query);
@@ -186,7 +186,10 @@ export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
       // on a one-letter prefix of a made-up word.
       const items: PagefindResultData[] = [];
       for (let i = 0; i < all.length && items.length < limit; i += limit) {
-        const batch = await Promise.all(all.slice(i, i + limit).map((r) => r.data()));
+        // One fragment that fails to load drops that result, not the whole search.
+        const settled = await Promise.allSettled(all.slice(i, i + limit).map((r) => r.data()));
+        const batch = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []));
+        if (batch.length === 0 && settled.length > 0 && items.length === 0) throw new Error('Search results could not load. Try again.');
         for (const r of batch) {
           const matched = [...wordsAt(r.content, r.locations), ...(r.meta.title ?? '').split(/\s+/)];
           if (items.length < limit && isRealMatch(query, matched)) items.push(r);
@@ -258,7 +261,7 @@ export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
       type: 'object',
       properties: {
         path: { type: 'string', minLength: 1, description: 'The page path on this site, such as "/workflows/", or its full URL.' },
-        section: { type: 'string', minLength: 1, maxLength: 200, description: 'A heading of the page, such as "Safety" (case ignored): return only that section.' },
+        section: { type: 'string', minLength: 1, maxLength: 200, description: 'A heading of the page, such as "Safety" (case ignored): return only that section. When a heading repeats, name it with the headings above it, such as "Claude Code skill > Inputs".' },
         offset: { type: 'integer', minimum: 0, default: 0, description: 'Where to start, in characters: the offset the previous part ends with.' },
       },
       required: ['path'],

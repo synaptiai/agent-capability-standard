@@ -5,10 +5,13 @@
 // read from the repository (plugin.json), never from the code under test.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseAccept, prefersMarkdown } from '../src/worker/accept';
 import type { Env, WorkerConfig } from '../src/worker/env';
 import { createHandler } from '../src/worker/site';
+import { scorePage } from '../src/worker/tools';
+import { pagePart } from '../src/worker/page-text';
+import type { PageEntry } from '../src/worker/data';
 import { HEADER_RULES } from '../src/worker/static-rules';
 import { pageSearchTerms, TERMS_PER_PAGE } from '../src/worker/terms';
 import { validate } from './json-schema-lite';
@@ -895,5 +898,179 @@ describe('static-file rules applied by the worker', () => {
       } else if (/^https?:/.test(line)) rules.push({ pattern: '(host)', headers: {} });
     }
     expect(HEADER_RULES.map((r) => ({ pattern: r.pattern, headers: { ...r.headers } }))).toEqual(rules.filter((r) => r.pattern !== '(host)'));
+  });
+});
+
+describe('read failures and failing open', () => {
+  it('a file that answers 503 is a read failure, never "no capability with that id"', async () => {
+    const env = fakeEnv();
+    const inner = env.ASSETS.fetch.bind(env.ASSETS);
+    env.ASSETS.fetch = async (input) => {
+      const req = input instanceof Request ? input : new Request(input);
+      if (new URL(req.url).pathname === '/api/v1/capabilities/mutate.json') return new Response('busy', { status: 503 });
+      return inner(input);
+    };
+    const { res, body } = await rpc('tools/call', { name: 'read_capability', arguments: { id: 'mutate' } }, { env });
+    expect(res.status).toBe(503);
+    expect(body.error?.code).toBe(-32603);
+    expect(body.error?.message).toContain('/api/v1/capabilities/mutate.json');
+    expect(body.error?.message).not.toMatch(/no capability/i);
+  });
+
+  it('a capability file that does not exist is still "not found"', async () => {
+    const { body } = await callTool('read_capability', { id: 'nosuch' });
+    expect(JSON.stringify(body)).toMatch(/no capability/i);
+  });
+
+  it('answers 503 problem+json when the static files fail too', async () => {
+    const env: Env = { ASSETS: { fetch: async () => { throw new Error('boom'); } } };
+    const api = await handle(new Request(`${BASE}/api/v1/capabilities.json`), env);
+    expect(api.status).toBe(503);
+    expect(api.headers.get('Content-Type')).toBe('application/problem+json');
+    expect(api.headers.get('Retry-After')).toBe('30');
+    const page = await handle(new Request(`${BASE}/capabilities/mutate/`), env);
+    expect(page.status).toBe(503);
+    expect(page.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+  });
+});
+
+describe('logging', () => {
+  it('logs why a request failed open', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const env = fakeEnv();
+      let first = true;
+      const inner = env.ASSETS.fetch.bind(env.ASSETS);
+      env.ASSETS.fetch = async (input) => {
+        if (first) {
+          first = false;
+          throw new Error('asset read failed');
+        }
+        return inner(input);
+      };
+      const res = await handle(new Request(`${BASE}/`, { headers: { Accept: 'text/markdown' } }), env);
+      expect(res.status).toBe(200);
+      expect(spy).toHaveBeenCalledWith('worker: request failed, serving the static file', 'GET', '/', expect.objectContaining({ message: 'asset read failed' }));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('scorePage matches whole words', () => {
+  const page = (over: Partial<PageEntry>): PageEntry => ({
+    path: '/p/',
+    markdownPath: '/p/index.md',
+    title: 'Examples',
+    description: 'A taxonomy annex',
+    section: 'guides',
+    headings: ['Examples of use'],
+    terms: [],
+    ...over,
+  });
+
+  it('a one-letter term matches no page by the letters inside its words', () => {
+    // "examples", "taxonomy" and "annex" each contain an "e" or an "x".
+    expect(scorePage(page({}), ['e'], 'e', undefined).matched).toBe(0);
+    expect(scorePage(page({}), ['x'], 'x', undefined).matched).toBe(0);
+  });
+
+  it('still matches a word through its stem', () => {
+    // stem("mutation") = stem("mutate") = "mutat"
+    expect(scorePage(page({ title: 'mutate' }), ['mutat'], 'mutation', undefined).matched).toBe(1);
+  });
+
+  it('gives a multi-word workflow id its bonus when the query names every word of it', () => {
+    const p = page({ path: '/workflows/debug-code-change/', title: 'Debug a code change', headings: [] });
+    const rec = { id: 'debug_code_change', description: '', path: p.path };
+    const terms = ['debug', 'code', 'chang'];
+    // Hand count per term without the id: title 6 + path 3 = 9; with the id bonus 10/3 each: 3 * (9 + 10/3) = 37.
+    // The title "debug a code change" does not contain the phrase "debug code change", so no phrase bonus.
+    expect(scorePage(p, terms, 'debug code change', rec).score).toBeCloseTo(37, 1);
+    expect(scorePage(p, terms, 'debug code change', undefined).score).toBeCloseTo(27, 1);
+  });
+});
+
+describe('pagePart with a repeated heading', () => {
+  const md = '# mutate\n\n## Contract\n\n### Inputs\n\ncontract inputs\n\n## Claude Code skill\n\n### Inputs\n\nskill inputs\n\n## Safety\n\nsafe\n';
+
+  it('names every match instead of returning the first', () => {
+    const part = pagePart(md, { section: 'Inputs' });
+    expect(part.ok).toBe(false);
+    if (!part.ok) {
+      // The H1 is the page title, not a section, so paths start at ##.
+      expect(part.headings).toEqual(['Contract > Inputs', 'Claude Code skill > Inputs']);
+      expect(part.message).toContain('2 sections headed "Inputs"');
+    }
+  });
+
+  it('reads the one named with its parent', () => {
+    const part = pagePart(md, { section: 'Claude Code skill > Inputs' });
+    expect(part.ok && part.markdown).toBe('### Inputs\n\nskill inputs\n\n');
+  });
+
+  it('still reads a heading that appears once by its name alone', () => {
+    const part = pagePart(md, { section: 'safety' });
+    expect(part.ok && part.markdown).toBe('## Safety\n\nsafe\n');
+  });
+});
+
+
+describe('a page address that redirects', () => {
+  // CFG.redirects sends /spec/ to /spec/1.1.0/, as public/_redirects does.
+  const specPages = {
+    pages: [
+      { url: `${BASE}/spec/`, markdown_url: `${BASE}/spec/index.md`, title: 'Specification', description: 'Overview', section: 'spec', headings: [] },
+      { url: `${BASE}/spec/1.1.0/`, markdown_url: `${BASE}/spec/1.1.0/index.md`, title: 'The Standard 1.1.0', description: 'The specification', section: 'spec', headings: [] },
+    ],
+  };
+  const files = {
+    ...FILES,
+    '/api/v1/pages.json': { body: JSON.stringify(specPages), type: 'application/json' },
+    '/spec/index.md': { body: '# Specification\n\nOverview listing.\n', type: 'text/markdown; charset=utf-8' },
+  };
+
+  it('sends its Markdown copy to the copy of the page it redirects to', async () => {
+    for (const p of ['/spec/index.md', '/spec.md']) {
+      const res = await handle(new Request(`${BASE}${p}`), fakeEnv(files));
+      expect(res.status, p).toBe(302);
+      expect(res.headers.get('Location'), p).toBe('/spec/1.1.0/index.md');
+    }
+  });
+
+  it('read_page on it reads the page it redirects to', async () => {
+    const { body } = await rpc('tools/call', { name: 'read_page', arguments: { path: '/spec/' } }, { env: fakeEnv(files) });
+    expect(body.result?.structuredContent?.markdown).toBe('# The Standard\n');
+    expect(body.result?.structuredContent?.url).toBe(`${BASE}/spec/1.1.0/`);
+  });
+
+  it('search_standard does not return it', async () => {
+    const { body } = await rpc('tools/call', { name: 'search_standard', arguments: { query: 'specification' } }, { env: fakeEnv(files) });
+    const urls = (body.result?.structuredContent?.results as { url: string }[]).map((r) => r.url);
+    expect(urls).toContain(`${BASE}/spec/1.1.0/`);
+    expect(urls).not.toContain(`${BASE}/spec/`);
+  });
+});
+
+describe('MCP origins and versions', () => {
+  it('accepts the origin of a browser extension or an editor webview', async () => {
+    for (const origin of ['chrome-extension://abcdef', 'moz-extension://x', 'vscode-webview://x', 'https://example.com', 'http://localhost:3000']) {
+      const { res } = await rpc('tools/list', undefined, { headers: { Origin: origin } });
+      expect(res.status, origin).toBe(200);
+    }
+  });
+
+  it('still refuses a value that is not an origin', async () => {
+    for (const origin of ['https://example.com/path', 'not an origin', 'https://']) {
+      const { res } = await rpc('tools/list', undefined, { headers: { Origin: origin } });
+      expect(res.status, origin).toBe(403);
+    }
+  });
+
+  it('names an unsupported protocol version in the header as that', async () => {
+    const { res, body } = await rpc('tools/list', undefined, { headers: { 'MCP-Protocol-Version': '2024-13-01' } });
+    expect(res.status).toBe(400);
+    expect(body.error?.code).toBe(-32022);
+    expect(body.error?.data?.requested).toBe('2024-13-01');
   });
 });

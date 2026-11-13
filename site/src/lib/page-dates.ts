@@ -12,6 +12,8 @@
 // shallow clone is an error, not a quiet wrong answer (CI checks out the full
 // history for this reason).
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { loadProfiles } from '../data/profiles';
 import { loadVersions } from '../data/versions';
 import { CORE_CATALOG, loadWorkflows } from '../data/workflows';
@@ -87,6 +89,8 @@ export function pageSources(route: Route, routes: readonly Route[] = ROUTES): st
       break;
   }
   const all = [...new Set([...own, ...extra])].sort();
+  // A renamed or mistyped source would otherwise drop out of the date silently.
+  for (const p of all) if (!existsSync(path.join(REPO_ROOT, p))) throw new Error(`page-dates: ${route.url} names ${p}, which does not exist`);
   if (all.length === 0) throw new Error(`page-dates: ${route.url} (${route.template}) names no file it is built from`);
   return all;
 }

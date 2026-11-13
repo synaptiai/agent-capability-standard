@@ -40,3 +40,11 @@ describe('frontmatter', () => {
     expect(frontmatter(route, { title: 'T', description: null }, null)).toBe('---\ntitle: "T"\ncanonical: "https://acs.synapti.ai/a/b/"\n---\n\n');
   });
 });
+
+describe('pageSources', () => {
+  it('fails on a source file that does not exist', async () => {
+    const { pageSources } = await import('../src/lib/page-dates');
+    const route = { source: 'docs/NO_SUCH_FILE.md', url: '/nowhere/', section: 'guides', template: 'prose' } as unknown as Route;
+    expect(() => pageSources(route)).toThrow(/page-dates: \/nowhere\/ names docs\/NO_SUCH_FILE\.md, which does not exist/);
+  });
+});

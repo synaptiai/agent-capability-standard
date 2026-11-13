@@ -68,7 +68,7 @@ export const TOOLS = [
           type: 'string',
           minLength: 1,
           maxLength: 200,
-          description: 'A heading of the page, such as "Safety" (any level from ##, case ignored): return only that section, up to the next heading of its level.',
+          description: 'A heading of the page, such as "Safety" (any level from ##, case ignored): return only that section, up to the next heading of its level. When a heading repeats, name it with the headings above it, such as "Claude Code skill > Inputs".',
         },
         offset: {
           type: 'integer',
@@ -255,24 +255,30 @@ export function scorePage(
   record: RecordEntry | undefined,
   defines: ReadonlySet<string> = new Set(),
 ): PageMatch {
+  // Terms match whole stemmed words, never parts of words: "e" must not
+  // match every page that has an "e" in its title.
+  const stems = (x: string) => new Set(words(x).map(stem));
   const title = page.title.toLowerCase();
-  const titleWords = words(title).map(stem);
-  const path = page.path.toLowerCase();
-  const desc = `${page.description} ${record?.description ?? ''}`.toLowerCase();
+  const titleWords = stems(title);
+  const pathWords = stems(page.path);
+  const descWords = stems(`${page.description} ${record?.description ?? ''}`);
   const heads = page.headings.join(' \n ').toLowerCase();
-  const section = page.section.toLowerCase();
+  const headWords = stems(heads);
+  const sectionWords = stems(page.section);
+  // An id such as debug_code_change is several words; it counts when the query has all of them.
+  const idWords = record ? [...stems(record.id)] : [];
+  const idMatched = idWords.length > 0 && idWords.every((w) => terms.includes(w));
   let score = 0;
   let matched = 0;
   for (const t of terms) {
     let s = 0;
-    if (titleWords.includes(t)) s += 6;
-    else if (title.includes(t)) s += 4;
-    if (path.includes(t)) s += 3;
-    if (desc.includes(t)) s += 2;
-    if (heads.includes(t)) s += 2;
-    if (section.includes(t)) s += 1;
+    if (titleWords.has(t)) s += 6;
+    if (pathWords.has(t)) s += 3;
+    if (descWords.has(t)) s += 2;
+    if (headWords.has(t)) s += 2;
+    if (sectionWords.has(t)) s += 1;
     if (page.terms.includes(t)) s += 1;
-    if (record && stem(record.id.toLowerCase()) === t) s += 10;
+    if (idMatched && idWords.includes(t)) s += 10 / idWords.length;
     if (defines.has(t)) s += 10;
     if (s > 0) matched += 1;
     score += s;
@@ -318,7 +324,8 @@ async function searchStandard(a: Json, data: SiteData, cfg: WorkerConfig): Promi
   const phrase = words(query).join(' ');
   const codes = terms.some(isCode) ? await codePages(data, cfg) : new Map<string, string>();
   const defines = (path: string) => new Set(terms.filter((t) => codes.get(t) === path));
-  const entries = pages.map((p) => ({ p, k: kindOf(p.path, caps, flows, capList !== null) }));
+  // A page whose address redirects (such as /spec/) is never what a reader sees there, so it is not a result.
+  const entries = pages.filter((p) => redirectedPage(cfg, p.path) === p.path).map((p) => ({ p, k: kindOf(p.path, caps, flows, capList !== null) }));
   const scored = entries
     .map((e) => ({ ...e, ...scorePage(e.p, terms, phrase, e.k.record, defines(e.p.path)) }))
     .filter((e) => e.matched > 0)
@@ -386,6 +393,12 @@ export function normalizePagePath(input: string, origin: string): string | null 
   return s;
 }
 
+/** The page a path shows: the target of a redirect to a page, or the path itself. */
+export function redirectedPage(cfg: WorkerConfig, path: string): string {
+  const target = Object.prototype.hasOwnProperty.call(cfg.redirects, path) ? cfg.redirects[path]! : null;
+  return target !== null && target.endsWith('/') ? target : path;
+}
+
 async function readPage(a: Json, data: SiteData, cfg: WorkerConfig): Promise<ToolResult> {
   onlyKeys(a, ['path', 'section', 'offset'], 'read_page');
   const raw = requiredString(a, 'path', 'read_page', { max: 300 });
@@ -398,7 +411,9 @@ async function readPage(a: Json, data: SiteData, cfg: WorkerConfig): Promise<Too
   if (path === null) throw new InvalidParams(`read_page: "${raw}" is not a page path on ${cfg.origin}`);
   const pages = await data.pages();
   if (pages === null) return failed('The page index (/api/v1/pages.json) could not be read, so the page cannot be looked up. Try again later.');
-  const page = pages.find((p) => p.path === path);
+  // A page address that redirects (such as /spec/) reads the page it redirects to, as a browser would.
+  const shown = redirectedPage(cfg, path);
+  const page = pages.find((p) => p.path === shown);
   if (!page) return failed(`There is no page at ${path}. Use a path from search_standard results, such as "/capabilities/mutate/".`);
   const markdown = await data.text(page.markdownPath);
   if (markdown === null) return failed(`The Markdown copy of ${path} (${page.markdownPath}) could not be read.`);
@@ -406,9 +421,9 @@ async function readPage(a: Json, data: SiteData, cfg: WorkerConfig): Promise<Too
   if (!part.ok) return failed(part.headings.length > 0 ? `${part.message} Its headings: ${part.headings.join(', ')}.` : part.message);
   const cut = part.offset > 0 || part.nextOffset !== null;
   return ok({
-    path,
+    path: page.path,
     title: page.title,
-    url: `${cfg.origin}${path}`,
+    url: `${cfg.origin}${page.path}`,
     markdownUrl: `${cfg.origin}${page.markdownPath}`,
     ...(section !== undefined ? { section } : {}),
     markdown: part.markdown,

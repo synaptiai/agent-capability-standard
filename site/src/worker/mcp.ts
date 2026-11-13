@@ -21,7 +21,7 @@
 
 import { LLMS_TXT_MEDIA_TYPE, OPENAPI_MEDIA_TYPE } from '../lib/agent-contract';
 import { accepts } from './accept';
-import { SiteData } from './data';
+import { SiteData, ReadFailed } from './data';
 import type { Env, WorkerConfig } from './env';
 import { instructions, LEGACY_VERSIONS, MODERN_VERSIONS, serverInfo, SUPPORTED_VERSIONS } from './identity';
 import { callTool, InvalidParams, isToolName, TOOLS } from './tools';
@@ -68,12 +68,15 @@ function rpcError(id: Id | null, e: RpcError): Response {
   return json({ jsonrpc: '2.0', id, error: { code: e.code, message: e.message, ...(e.data === undefined ? {} : { data: e.data }) } }, e.status);
 }
 
-/** A valid serialized origin ("https://example.com"), or "null". */
-function validOrigin(value: string): boolean {
+/**
+ * A valid serialized origin, "scheme://host[:port]" in any scheme (a browser
+ * extension sends chrome-extension://<id>), or "null".
+ */
+export function validOrigin(value: string): boolean {
   if (value === 'null') return true;
   try {
     const u = new URL(value);
-    return (u.protocol === 'https:' || u.protocol === 'http:') && u.origin === value;
+    return u.host !== '' && `${u.protocol}//${u.host}` === value;
   } catch {
     return false;
   }
@@ -189,7 +192,13 @@ async function dispatch(method: string, params: Json, ctx: Ctx): Promise<Json> {
 function checkModern(request: Request, msg: Json, params: Json, metaVersion: unknown): void {
   const header = request.headers.get('MCP-Protocol-Version');
   const meta = (params._meta ?? {}) as Json;
-  if (typeof metaVersion !== 'string') throw new RpcError(-32602, `params._meta["${META_VERSION}"] is required`, 400);
+  if (typeof metaVersion !== 'string') {
+    // A header naming a version this server does not speak is that problem, not a missing _meta.
+    if (header !== null && !SUPPORTED_VERSIONS.includes(header)) {
+      throw new RpcError(-32022, 'Unsupported protocol version', 400, { supported: [...SUPPORTED_VERSIONS], requested: header });
+    }
+    throw new RpcError(-32602, `params._meta["${META_VERSION}"] is required`, 400);
+  }
   if (header === null) throw new RpcError(-32020, 'Header mismatch: the MCP-Protocol-Version header is missing', 400);
   if (header !== metaVersion) {
     throw new RpcError(-32020, `Header mismatch: MCP-Protocol-Version header value '${header}' does not match body value '${metaVersion}'`, 400);
@@ -311,6 +320,11 @@ export async function handleMcp(request: Request, env: Env, cfg: WorkerConfig): 
     return json({ jsonrpc: '2.0', id, result: out });
   } catch (e) {
     if (e instanceof RpcError) return rpcError(id, e);
+    if (e instanceof ReadFailed) {
+      console.error('mcp: read failed', method, e.path, e.reason);
+      return rpcError(id, new RpcError(-32603, `The site's data could not be read (${e.path}: ${e.reason}). Try again.`, 503));
+    }
+    console.error('mcp: internal error', method, e);
     return rpcError(id, new RpcError(-32603, 'Internal error', 500));
   }
 }

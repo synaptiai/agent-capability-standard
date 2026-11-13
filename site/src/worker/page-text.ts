@@ -71,10 +71,33 @@ export function pagePart(markdown: string, opts: { section?: string; offset?: nu
   let text = markdown;
   if (opts.section !== undefined) {
     const heads = markdownHeadings(markdown);
-    const i = heads.findIndex((h) => same(h.text, opts.section!.trim()));
-    if (i === -1) {
+    // Each heading's path: the headings above it, then itself ("Contract > Inputs").
+    const paths: string[][] = [];
+    heads.forEach((h, j) => {
+      let parent = -1;
+      for (let k = j - 1; k >= 0; k--) if (heads[k]!.level < h.level) { parent = k; break; }
+      paths.push([...(parent === -1 ? [] : paths[parent]!), h.text]);
+    });
+    // "Inputs" names a heading; "Claude Code skill > Inputs" names it under a parent.
+    const want = opts.section.split('>').map((x) => x.trim()).filter((x) => x.length > 0);
+    const hits = heads
+      .map((_, j) => j)
+      .filter((j) => {
+        const p = paths[j]!;
+        return want.length > 0 && want.length <= p.length && want.every((w, k) => same(w, p[p.length - want.length + k]!));
+      });
+    if (hits.length === 0) {
       return { ok: false, message: `The page has no section headed "${opts.section}".`, headings: heads.map((h) => h.text) };
     }
+    if (hits.length > 1) {
+      const names = hits.map((j) => paths[j]!.join(' > '));
+      return {
+        ok: false,
+        message: `The page has ${hits.length} sections headed "${opts.section}". Name one with the headings above it: ${names.map((n) => `"${n}"`).join(', ')}.`,
+        headings: names,
+      };
+    }
+    const i = hits[0]!;
     const h = heads[i]!;
     const next = heads.slice(i + 1).find((n) => n.level <= h.level);
     text = markdown.slice(h.start, next ? next.start : markdown.length);

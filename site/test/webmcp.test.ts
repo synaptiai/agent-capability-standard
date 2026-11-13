@@ -249,3 +249,31 @@ describe('one set of tool names and id patterns for the MCP server and WebMCP', 
     expect(cap.test('MUTATE')).toBe(false);
   });
 });
+
+describe('WebMCP search failures', () => {
+  it('rejects an out-of-range limit instead of clamping it, as the MCP tool does', async () => {
+    const { tool } = setup();
+    await expect(tool('search_standard').execute({ query: 'checkpoint', limit: 50 })).rejects.toThrow(/"limit" must be an integer from 1 to 25/);
+    await expect(tool('search_standard').execute({ query: 'checkpoint', limit: 0 })).rejects.toThrow(/"limit" must be an integer from 1 to 25/);
+  });
+
+  it('drops a result whose fragment fails to load and keeps the others', async () => {
+    const results: PagefindResultData[] = JSON.parse(fixture('pagefind-checkpoint.json'));
+    const pagefind: PagefindApi = {
+      search: async () => ({
+        results: results.map((r, i) => ({ data: async () => (i === 0 ? Promise.reject(new Error('Failed to fetch')) : r) })),
+      }),
+    };
+    const all = await setup().tool('search_standard').execute({ query: 'checkpoint' });
+    const out = await setup({ pagefind }).tool('search_standard').execute({ query: 'checkpoint' });
+    expect(typeof out).toBe('string');
+    expect(out).not.toContain(results[0]!.url);
+    expect(all).toContain(results[0]!.url);
+  });
+
+  it('says the results could not load when every fragment fails', async () => {
+    const pagefind: PagefindApi = { search: async () => ({ results: [{ data: async () => Promise.reject(new Error('Failed to fetch')) }] }) };
+    await expect(setup({ pagefind }).tool('search_standard').execute({ query: 'checkpoint' })).rejects.toThrow(/could not load/);
+  });
+});
+

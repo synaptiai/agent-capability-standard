@@ -20,7 +20,7 @@ import { namesHtml, prefersMarkdown } from './accept';
 import type { Env, WorkerConfig } from './env';
 import { MCP_PATH, SERVER_CARD_TYPE, serverCard } from './identity';
 import { CORS_HEADERS, handleMcp, mcpInternalError } from './mcp';
-import { isPagesDevHost, redirectTarget, withStaticRules } from './static-rules';
+import { isPagesDevHost, markdownRedirect, redirectTarget, withStaticRules } from './static-rules';
 
 /**
  * User agents that get the Markdown copy of a page even when they ask for
@@ -167,13 +167,30 @@ async function notFound(request: Request, url: URL, original: Response, cfg: Wor
   return res;
 }
 
+/** The answer when neither the worker nor the static files can answer: 503, problem+json under /api/. */
+function unavailable(url: URL): Response {
+  const headers = { 'Retry-After': '30', 'Cache-Control': 'no-store', ...robotsHeaders(url) };
+  if (url.pathname.startsWith('/api/')) {
+    const body = { type: 'about:blank', title: 'Service Unavailable', status: 503, detail: 'The file could not be read. Try again.', instance: url.pathname };
+    return new Response(JSON.stringify(body), { status: 503, headers: { 'Content-Type': 'application/problem+json', ...CORS_HEADERS, ...headers } });
+  }
+  return new Response('Service unavailable. Try again.\n', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8', ...headers } });
+}
+
 export function createHandler(cfg: WorkerConfig) {
   return async function handle(request: Request, env: Env): Promise<Response> {
     try {
       return await route(request, env, cfg);
-    } catch {
+    } catch (e) {
       // Fail open: if anything here breaks, the static files are still served as they are.
-      return withStaticRules(new URL(request.url), await env.ASSETS.fetch(request));
+      const url = new URL(request.url);
+      console.error('worker: request failed, serving the static file', request.method, url.pathname, e);
+      try {
+        return withStaticRules(url, await env.ASSETS.fetch(request));
+      } catch (again) {
+        console.error('worker: static file read failed too', request.method, url.pathname, again);
+        return unavailable(url);
+      }
     }
   };
 }
@@ -188,7 +205,9 @@ async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Res
     const status = request.method === 'GET' || request.method === 'HEAD' ? 301 : 308;
     return new Response(null, { status, headers: { Location: `${path.replace(/\/{2,}/g, '/')}${url.search}`, ...robotsHeaders(url) } });
   }
-  const redirect = redirectTarget(cfg.redirects, path);
+  // The Markdown copy of a redirected page address follows the same redirect
+  // as the page: /spec/index.md and /spec.md go to /spec/1.1.0/index.md.
+  const redirect = redirectTarget(cfg.redirects, path) ?? markdownRedirect(cfg.redirects, path);
   if (redirect !== null) {
     return new Response(null, { status: 302, headers: { Location: `${redirect}${url.search}`, ...robotsHeaders(url) } });
   }
@@ -197,7 +216,8 @@ async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Res
     // JSON-RPC error, never the static 404 that failing open would give.
     try {
       return await handleMcp(request, env, cfg);
-    } catch {
+    } catch (e) {
+      console.error('worker: /mcp failed', request.method, e);
       return mcpInternalError();
     }
   }

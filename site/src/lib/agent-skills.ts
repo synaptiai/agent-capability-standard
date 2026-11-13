@@ -38,9 +38,17 @@ export interface Skill {
 export function skillFrontmatter(text: string, source: string): { name: string; description: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
   if (!m) throw new Error(`agent-skills: ${source} has no front matter`);
-  const fm = parse(m[1]!) as Record<string, unknown>;
-  if (typeof fm.name !== 'string' || typeof fm.description !== 'string') throw new Error(`agent-skills: ${source} lacks a name or description`);
-  return { name: fm.name, description: fm.description.trim() };
+  let fm: unknown;
+  try {
+    fm = parse(m[1]!);
+  } catch (e) {
+    throw new Error(`agent-skills: ${source} front matter is not valid YAML: ${(e as Error).message}`);
+  }
+  if (fm === null || typeof fm !== 'object') throw new Error(`agent-skills: ${source} front matter is empty or not a mapping`);
+  const rec = fm as Record<string, unknown>;
+  if (typeof rec.name !== 'string' || typeof rec.description !== 'string') throw new Error(`agent-skills: ${source} lacks a name or description`);
+  const { name, description } = fm as { name: string; description: string };
+  return { name, description: description.trim() };
 }
 
 export function sha256(bytes: Buffer): string {
