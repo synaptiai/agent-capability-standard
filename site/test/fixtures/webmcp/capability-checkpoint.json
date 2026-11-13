@@ -1,0 +1,7 @@
+{
+  "id": "checkpoint",
+  "layer": "VERIFY",
+  "description": "Create a restorable snapshot before a mutation.",
+  "risk": "low",
+  "mutation": true
+}

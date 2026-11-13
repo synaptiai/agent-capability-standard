@@ -17,6 +17,7 @@ import PageActions from '../components/PageActions.astro';
 import PrevNext from '../components/PrevNext.astro';
 import Sidebar from '../components/Sidebar.astro';
 import Toc from '../components/Toc.astro';
+import WebMcp from '../components/WebMcp.astro';
 import { loadVersions } from '../data/versions';
 import { SITEMAP_PATH } from '../lib/agent-files';
 import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
@@ -132,5 +133,6 @@ const olderStandard = loadVersions().standard.previous.find((p) => route.url ===
         Fonts: {FONT_CREDITS.join(', ')}, under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.
       </p>
     </footer>
+    <WebMcp />
   </body>
 </html>
