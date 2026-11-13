@@ -135,6 +135,23 @@ describe('Accept negotiation', () => {
   });
 });
 
+describe('paths with repeated slashes', () => {
+  it.each([
+    ['//evil.example/capabilities/mutate/index.md', {}, '/evil.example/capabilities/mutate/index.md'],
+    ['//evil.example/capabilities/mutate.md', {}, '/evil.example/capabilities/mutate.md'],
+    ['//evil.example/capabilities/mutate/', { Accept: 'text/markdown' }, '/evil.example/capabilities/mutate/'],
+    ['/capabilities//mutate/?x=1', {}, '/capabilities/mutate/?x=1'],
+  ])('%s redirects to the path with single slashes, never reading a file under another host', async (p, headers, location) => {
+    const env = fakeEnv();
+    // The URL parser keeps "//evil.example" in the path of an absolute URL.
+    const res = await handle(new Request(`${BASE}${p}`, { headers }), env);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('Location')).toBe(location);
+    expect(res.headers.get('Link')).toBeNull();
+    expect(env.calls).toEqual([]);
+  });
+});
+
 describe('pages and their Markdown copies', () => {
   it('answers Accept: text/markdown on a page with its Markdown copy, Vary and a canonical link', async () => {
     const res = await get('/', { Accept: 'text/markdown' });

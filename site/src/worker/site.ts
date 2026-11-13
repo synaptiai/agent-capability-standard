@@ -10,6 +10,7 @@
 //   Markdown 404, and /api/v1/* gets an RFC 9457 problem+json 404.
 // - /mcp is the docs MCP server (mcp.ts); its server card is at
 //   /mcp/server-card and /.well-known/mcp/server-card.json.
+// - A path with repeated slashes redirects to the same path with single ones.
 // Every other request goes to the static files unchanged.
 
 import { namesHtml, prefersMarkdown } from './accept';
@@ -129,7 +130,12 @@ function asset(env: Env, request: Request, url: URL, path: string): Promise<Resp
     const v = request.headers.get(h);
     if (v !== null) headers.set(h, v);
   }
-  return env.ASSETS.fetch(new Request(new URL(path, url), { method: 'GET', headers }));
+  // Set the path on a copy of the request URL rather than resolving it, so
+  // the host is always the request's own.
+  const target = new URL(url);
+  target.pathname = path;
+  target.search = '';
+  return env.ASSETS.fetch(new Request(target, { method: 'GET', headers }));
 }
 
 /** Whether a static-file answer is the copy itself (200) or a "not modified" for it (304). */
@@ -171,6 +177,13 @@ export function createHandler(cfg: WorkerConfig) {
 async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
+  // A path with "//" would read as a host name where it is resolved as a
+  // URL ("//evil.example/a" -> https://evil.example/a) and would end up in a
+  // canonical link. Send the client to the same path with single slashes.
+  if (path.includes('//')) {
+    const status = request.method === 'GET' || request.method === 'HEAD' ? 301 : 308;
+    return new Response(null, { status, headers: { Location: `${path.replace(/\/{2,}/g, '/')}${url.search}`, ...robotsHeaders(url) } });
+  }
   if (path === MCP_PATH) {
     // The MCP endpoint is not a file: if handling it fails, the client gets a
     // JSON-RPC error, never the static 404 that failing open would give.
