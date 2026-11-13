@@ -16,6 +16,7 @@ import { PAGE_GLYPHS } from '../pixel/glyphs-pages';
 import { chapterKey, principleKey, resolveGlyphKey, slugKey, TOOL_GLYPHS } from '../pixel/keys';
 import { kebab } from './routes';
 import { contractRows, diagramSteps, gateRows, stepRole, type StepRole } from './views';
+import { andList } from './words';
 
 /** The one-sentence summary used as the page description and in llms.txt. */
 export function homeDescription(): string {
@@ -507,11 +508,6 @@ export const GALLERY_FIG_TITLE = 'Every workflow, one square per step';
 export const WORKFLOWS_HEADING = 'The workflows';
 export const GALLERY_INTRO = 'The catalogs ship reference workflows and workflows for each domain. Each one is a list of steps. Below, each square is one step, in order, marked with the symbol of the capability it runs or with its safety role.';
 
-/** Words for a list: "a", "a and b", "a, b and c". */
-function words(xs: string[]): string {
-  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`;
-}
-
 /**
  * The story's other steps with a safety role (stepRole, the rule every step
  * map and strip uses), which carry their role mark too: in model_deployment,
@@ -533,7 +529,7 @@ export function storyCaption(): string {
   const more =
     extra.length === 0
       ? ''
-      : ` ${extra.length === 1 ? 'Step' : 'Steps'} ${words(extra.map((x) => `${x.index} (${x.capability})`))} also ${extra.length === 1 ? 'carries' : 'carry'} the ${words([...new Set(extra.map((x) => ROLE_WORDS[x.role]!))])} mark, as on every step map.`;
+      : ` ${extra.length === 1 ? 'Step' : 'Steps'} ${andList(extra.map((x) => `${x.index} (${x.capability})`))} also ${extra.length === 1 ? 'carries' : 'carry'} the ${andList([...new Set(extra.map((x) => ROLE_WORDS[x.role]!))])} mark, as on every step map.`;
   return `The ${s.workflow.id} workflow has ${s.workflow.steps.length} steps: it saves a checkpoint at step ${s.checkpointStep.index}, makes its change at step ${s.changeStep.index}, verifies at step ${s.verifyStep.index} and can roll back at step ${s.rollbackStep.index}.${more}`;
 }
 
@@ -543,7 +539,7 @@ export function tableCaption(): string {
   const sizes = o.layers.map((l) => ({ id: l.id, n: capabilitiesOfLayer(o, l.id).length }));
   const min = Math.min(...sizes.map((x) => x.n));
   const max = Math.max(...sizes.map((x) => x.n));
-  const at = (n: number) => words(sizes.filter((x) => x.n === n).map((x) => x.id));
+  const at = (n: number) => andList(sizes.filter((x) => x.n === n).map((x) => x.id));
   return `${o.capabilities.length} capabilities in ${o.layers.length} layers, from ${min} in ${at(min)} to ${max} in ${at(max)}.`;
 }
 

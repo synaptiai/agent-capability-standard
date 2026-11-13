@@ -2,15 +2,12 @@
 // version that lists every group, box and link. The HTML figure and the
 // page's Markdown copy both use these, so they say the same thing.
 import type { Diagram, MermaidEdge } from './parse';
+import { plural } from '../words';
 
 export interface TextVersion {
   title: string;
   caption: string;
   items: string[];
-}
-
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 function edgeWords(d: Diagram, e: MermaidEdge): string {

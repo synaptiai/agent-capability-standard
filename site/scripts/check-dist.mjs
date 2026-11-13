@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
 import { REVIEW_DIR } from '../src/lib/review.ts';
 import { isMain } from './is-main.mjs';
+import { bodyClasses, templateOf } from './page-template.mjs';
 
 export const NOT_FOUND_PAGE = '404.html';
 const COPY = 'index.md';
@@ -440,9 +441,7 @@ export const DRAWN_TEMPLATES = [
 
 /** A page's template, from its body's `page--<template>` class. */
 export function pageTemplate(html) {
-  const cls = /<body\b[^>]*\sclass="([^"]*)"/.exec(html)?.[1] ?? '';
-  const t = cls.split(/\s+/).find((c) => c.startsWith('page--') && !c.startsWith('page--with') && !c.startsWith('page--no-'));
-  return t ? t.slice('page--'.length) : null;
+  return templateOf(bodyClasses(html));
 }
 
 /** `html` with every element whose tag is `name`, or whose class matches `cls`, cut out. */

@@ -20,6 +20,7 @@ import {
 } from '../lib/release-figures';
 import { pixelBarElement } from '../pixel/hast';
 import { diagnosticTileElement } from './rehype-spec-slots';
+import { hastText, isEl } from './hast';
 
 /** The source whose page gets these figures. */
 export const RELEASE_NOTES_SOURCE = 'CHANGELOG.md';
@@ -31,14 +32,6 @@ const el = (tagName: string, properties: Element['properties'], children: Elemen
   children,
 });
 const text = (value: string): ElementContent => ({ type: 'text', value });
-const isEl = (n: unknown, tag?: string): n is Element =>
-  typeof n === 'object' && n !== null && (n as Element).type === 'element' && (tag === undefined || (n as Element).tagName === tag);
-
-function textOf(n: ElementContent | Element): string {
-  if (n.type === 'text') return n.value;
-  if (n.type === 'element') return n.children.map((c) => textOf(c)).join('');
-  return '';
-}
 
 function frame(id: string, title: string, caption: string, kind: string, drawing: ElementContent[]): Element {
   return el('figure', { className: ['fig', 'fig-prose'], id, ariaLabelledBy: [`${id}-title`], dataFigKind: kind }, [
@@ -51,7 +44,7 @@ function frame(id: string, title: string, caption: string, kind: string, drawing
 
 /** The release a rendered H2 heads, by its "[version]" text. */
 function releaseOf(h2: Element, releases: Release[]): Release | undefined {
-  const t = textOf(h2);
+  const t = hastText(h2);
   return releases.find((r) => t.includes(`[${r.version}]`));
 }
 
@@ -135,7 +128,7 @@ export function drawReleaseFigures(tree: Root, changelog: string, uid: (base: st
       continue;
     }
     if (node.tagName !== 'h3' || !rel) continue;
-    const name = textOf(node).trim();
+    const name = hastText(node).trim();
     const section = rel.kinds.find((k) => k.kind === name);
     if (!section || section.entries.length < LONG_SECTION) continue;
     const j = kids.findIndex((k, n) => n > i && isEl(k));

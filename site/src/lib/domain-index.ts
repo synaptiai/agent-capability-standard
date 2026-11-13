@@ -9,9 +9,8 @@ import type { DomainProfile } from '../data/profiles';
 import { loadWorkflows } from '../data/workflows';
 import { headingText, parseMarkdown } from './anchors';
 import { approvalLadder, checkpointPolicy, ladderCaption, policyWord, type Ladder } from './domain-figures';
+import { andList, plural } from './words';
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const andList = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** The README section the per-profile figures go into (its GitHub id). */

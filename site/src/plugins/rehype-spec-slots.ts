@@ -16,8 +16,8 @@ import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { diagnosticHref } from '../lib/generated';
 import { SPEC_SLOTS, type SlotBlock, type SpecSlot } from '../lib/spec-slots';
 import { glyphElement } from '../pixel/hast';
-import { hastText } from './rehype-figure-marks';
 import { failWith, sourceOf } from './source';
+import { hastText, isEl } from './hast';
 
 export interface RehypeSpecSlotsOptions {
   /** Repo path of the current Standard (diagnostic tiles). */
@@ -28,8 +28,6 @@ export interface RehypeSpecSlotsOptions {
 
 const PLUGIN = 'rehype-spec-slots';
 
-const isEl = (n: unknown, tag?: string): n is Element =>
-  typeof n === 'object' && n !== null && (n as Element).type === 'element' && (tag === undefined || (n as Element).tagName === tag);
 const isHeading = (n: Element) => /^h[1-6]$/.test(n.tagName);
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 

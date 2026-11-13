@@ -22,6 +22,7 @@ import type { Route } from '../lib/routes';
 import { contractRows, diagramSteps, sortedTrustWeights } from '../lib/views';
 import { laneOffsets } from '../pixel/lines';
 import { TOOL_GLYPHS } from '../pixel/keys';
+import { plural } from '../lib/words';
 
 const route: Route = { source: null, url: '/_review/parts/', section: 'home', order: 0, template: 'not-found', title: 'Figure parts' };
 const id = refSlugger();
@@ -70,7 +71,6 @@ const counted = [
   { glyph: 'count:edges', title: 'Edges', n: k.edgeCount },
 ];
 const list = (ns: number[]) => `${ns.length === 1 ? 'step' : 'steps'} ${ns.join(', ')}`;
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 ---
 <DocLayout route={route} title="Figure parts" noindex toc={false}>
   <article class="doc parts-sheet">

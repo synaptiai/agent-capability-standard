@@ -35,8 +35,8 @@ import { readRepoFile, TRACKED_FILES } from './repo';
 import { capabilitySymbol, gateRows } from './views';
 import { riskSummary } from './workflow-figures';
 import type { Code, Heading } from 'mdast';
+import { plural } from './words';
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 // ------------------------------------------------------------ example matches
 

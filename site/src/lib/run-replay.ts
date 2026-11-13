@@ -12,6 +12,7 @@
 import { loadOntology } from '../data/ontology';
 import { parseCatalog, type Step, type Workflow } from '../data/workflows';
 import { loadRuntimeFixture, type RuntimeFixture } from '../data/spec-sources';
+import { plural } from './words';
 
 /** The fixtures the site draws, by the figure that draws them (visual spec 3.9). */
 export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
@@ -187,7 +188,6 @@ export const ANSWER_WORDS: Readonly<Record<string, string>> = {
   LivenessLost: 'the source stopped answering',
 };
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** One sentence for the figure's caption and its Markdown copy. */
 export function replayCaption(r: Replay): string {

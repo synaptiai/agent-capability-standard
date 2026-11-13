@@ -31,7 +31,7 @@
 //
 // It runs on prose, RFC and skill pages only; the Standard and the generated
 // pages draw their own figures.
-import type { Element, ElementContent, Root, RootContent } from 'hast';
+import type { Element, ElementContent, Root } from 'hast';
 import type { VFile } from 'vfile';
 import { loadOasfMapping, OASF_MAPPING_TYPES, type OasfMappingType } from '../data/oasf';
 import { loadOntology } from '../data/ontology';
@@ -43,6 +43,7 @@ import { glyphElement, miniTileElement, pixelBarElement } from '../pixel/hast';
 import { readRepoFile } from '../lib/repo';
 import { drawReleaseFigures, RELEASE_NOTES_SOURCE } from './release-figures-hast';
 import { sourceOf } from './source';
+import { hastText, isEl } from './hast';
 
 const PLUGIN = 'rehype-prose-figures';
 
@@ -64,20 +65,11 @@ const el = (tagName: string, properties: Element['properties'], children: Elemen
 });
 const text = (value: string): ElementContent => ({ type: 'text', value });
 
-const isEl = (n: unknown, tag?: string): n is Element =>
-  typeof n === 'object' && n !== null && (n as Element).type === 'element' && (tag === undefined || (n as Element).tagName === tag);
 
 const classes = (e: Element): string[] => {
   const c = e.properties?.className;
   return Array.isArray(c) ? c.map(String) : [];
 };
-
-/** All text of a node, aria-hidden parts included. */
-export function textOf(n: ElementContent | Root | RootContent): string {
-  if (n.type === 'text') return n.value;
-  if (n.type !== 'element' && n.type !== 'root') return '';
-  return (n.children as ElementContent[]).map(textOf).join('');
-}
 
 const HEADING = /^h[1-6]$/;
 
@@ -377,7 +369,7 @@ export function riskColumn(header: string, cells: string[]): ('low' | 'medium' |
  * `invoke` (workflow_id: x), as a step table writes them).
  */
 function capabilityCell(cell: Element): string | null {
-  const m = /^`?([a-z_]+)`?(?:\s*\([^()]*\))?$/.exec(clean(textOf(cell)));
+  const m = /^`?([a-z_]+)`?(?:\s*\([^()]*\))?$/.exec(clean(hastText(cell)));
   return m && loadOntology().byId.has(m[1]!) ? m[1]! : null;
 }
 
@@ -444,17 +436,17 @@ function enrichTable(table: Element): number {
   const head = rowsOf(table, 'thead')[0];
   const body = rowsOf(table, 'tbody');
   if (!head || body.length === 0) return 0;
-  const headers = cellsOf(head).map((c) => clean(textOf(c)));
+  const headers = cellsOf(head).map((c) => clean(hastText(c)));
   const marked = new Set<number>();
   const col = (i: number) => body.map((tr) => cellsOf(tr)[i]);
 
   // A "Total" row is a sum, not a row of the scale.
-  const isTotal = (tr: Element) => /^total\b/i.test(clean(textOf(cellsOf(tr)[0] ?? el('td', {}))));
+  const isTotal = (tr: Element) => /^total\b/i.test(clean(hastText(cellsOf(tr)[0] ?? el('td', {}))));
   const scaleRows = body.filter((tr) => !isTotal(tr));
 
   // Coverage grid: half or more of the data cells list domain: values.
   const data = body.flatMap((tr) => cellsOf(tr).slice(1));
-  const withDomains = data.filter((c) => domainValues(textOf(c)) > 0);
+  const withDomains = data.filter((c) => domainValues(hastText(c)) > 0);
   const coverage = headers.length >= 4 && data.length > 0 && withDomains.length * 2 >= data.length;
   if (coverage) {
     const firstCaps = body.map((tr) => capabilityCell(cellsOf(tr)[0]!));
@@ -467,9 +459,9 @@ function enrichTable(table: Element): number {
     }
     body.forEach((tr, r) => {
       const cells = cellsOf(tr);
-      const rowName = clean(textOf(cells[0]!));
+      const rowName = clean(hastText(cells[0]!));
       cells.slice(1).forEach((cell, j) => {
-        const n = domainValues(textOf(cell));
+        const n = domainValues(hastText(cell));
         if (n === 0) return;
         cell.children.unshift(heatBadge(n, `${n} ${n === 1 ? 'domain' : 'domains'} for ${rowName}, ${headers[j + 1]}:`));
         marked.add(r);
@@ -483,7 +475,7 @@ function enrichTable(table: Element): number {
   headers.forEach((h, i) => {
     const cells = col(i);
     if (cells.some((c) => c === undefined)) return;
-    const texts = cells.map((c) => textOf(c!));
+    const texts = cells.map((c) => hastText(c!));
 
     // Capability column: every cell holds a capability id alone.
     const caps = cells.map((c) => capabilityCell(c!));
@@ -503,7 +495,7 @@ function enrichTable(table: Element): number {
       cells.forEach((c, r) => {
         const ids = chains[r];
         if (!ids) return;
-        const words = textOf(c!);
+        const words = hastText(c!);
         const row: ElementContent[] = [];
         ids.forEach((id, k) => {
           if (k > 0) row.push(glyphElement('chevron-right', { className: 'prose-chain__chevron' }));
@@ -520,7 +512,7 @@ function enrichTable(table: Element): number {
     // Workflow ids: a backticked id the catalog knows.
     const wfs = cells.map((c) => {
       const kids = c!.children.filter((k) => !(k.type === 'text' && k.value.trim() === ''));
-      return kids.length === 1 && isEl(kids[0], 'code') && loadWorkflows().byId.has(textOf(kids[0]!)) ? textOf(kids[0]!) : null;
+      return kids.length === 1 && isEl(kids[0], 'code') && loadWorkflows().byId.has(hastText(kids[0]!)) ? hastText(kids[0]!) : null;
     });
     if (wfs.filter(Boolean).length >= 2) {
       cells.forEach((c, r) => {
@@ -546,7 +538,7 @@ function enrichTable(table: Element): number {
       return;
     }
     // Yes/no column; a Total row keeps its text only.
-    const yn = yesNoColumn(cells.flatMap((c, r) => (isTotal(body[r]!) ? [] : [textOf(c!)])));
+    const yn = yesNoColumn(cells.flatMap((c, r) => (isTotal(body[r]!) ? [] : [hastText(c!)])));
     if (yn) {
       let k = 0;
       cells.forEach((c, r) => {
@@ -561,12 +553,12 @@ function enrichTable(table: Element): number {
     // Number column, on one scale; a Total row keeps its text only.
     const scaleCells = scaleRows.map((tr) => cellsOf(tr)[i]);
     if (scaleCells.some((c) => c === undefined)) return;
-    const nums = numberColumn(h, scaleCells.map((c) => textOf(c!)));
+    const nums = numberColumn(h, scaleCells.map((c) => hastText(c!)));
     if (nums) {
       const max = nums.fraction ? 1 : Math.max(...nums.values);
       scaleRows.forEach((tr, k) => {
         const c = cellsOf(tr)[i]!;
-        c.children = [pixelBarElement(nums.values[k]!, max, { label: clean(textOf(c)) })];
+        c.children = [pixelBarElement(nums.values[k]!, max, { label: clean(hastText(c)) })];
         c.properties = { ...c.properties, className: [...classes(c), 'prose-bar-cell'] };
         marked.add(body.indexOf(tr));
       });
@@ -679,7 +671,7 @@ export function drawProseFigures(tree: Root, repoPath: string, template = 'prose
     const node = kids[i]!;
     if (!isEl(node)) continue;
     if (HEADING.test(node.tagName)) {
-      heading = textOf(node).replace(/\s+/g, ' ').trim();
+      heading = hastText(node).replace(/\s+/g, ' ').trim();
       const g = template === 'rfc' && node.tagName === 'h2' ? RFC_HEADING_GLYPHS[heading] : undefined;
       if (g) node.children.unshift(glyphElement(g, { scale: 3, className: 'rfc-heading-glyph' }));
       if (repoPath === OASF_PROPOSAL && node.tagName === 'h3' && heading.startsWith(OASF_ANCHOR)) {
@@ -690,7 +682,7 @@ export function drawProseFigures(tree: Root, repoPath: string, template = 'prose
     }
     if (node.tagName === 'pre') {
       const lang = preLanguage(node);
-      const code = textOf(node);
+      const code = hastText(node);
       if ((lang === 'plaintext' || lang === 'text') && isBoxDiagram(code)) {
         const dir = directoryTree(code);
         if (dir) {

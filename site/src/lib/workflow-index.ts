@@ -8,9 +8,8 @@ import { PROPOSED_WORKFLOWS } from '../data/proposed-workflows';
 import { loadProfiles } from '../data/profiles';
 import { loadWorkflows, type Workflow } from '../data/workflows';
 import { stepList } from './workflow-figures';
+import { andList, plural } from './words';
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const andList = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
 export interface FamilyChild {
   workflow: Workflow;

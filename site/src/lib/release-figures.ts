@@ -10,6 +10,7 @@
 //   issues with the number of entries citing each, and the codes as tiles
 //   linked to the diagnostics page. Every long section shows its first
 //   SHOWN_ENTRIES entries and folds the rest; the Markdown copy keeps them all.
+import { plural } from './words';
 
 /** A kind section with this many entries or more gets its own figure and folds. */
 export const LONG_SECTION = 8;
@@ -117,7 +118,6 @@ export function kindCount(r: Release, kind: string): number {
   return r.kinds.filter((k) => k.kind === kind).reduce((n, k) => n + k.entries.length, 0);
 }
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export const TIMELINE_TITLE = 'Releases and the entries under each kind of change, newest first';
 

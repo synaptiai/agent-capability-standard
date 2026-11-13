@@ -5,12 +5,11 @@ import type { DomainProfile } from '../data/profiles';
 import type { Workflow } from '../data/workflows';
 import { resolveGlyphKey } from '../pixel/keys';
 import { diagramSteps, sortedTrustWeights } from './views';
+import { andList, plural } from './words';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const andList = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
 /** The glyph key of a domain: the profile key with `-` read as `_` (visual spec 2.2). */
 export function domainGlyph(key: string): string {

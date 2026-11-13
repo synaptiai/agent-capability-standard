@@ -7,6 +7,7 @@ import { EDGE_TYPES, loadOntology, type Capability, type EdgeType, type Ontology
 import { capabilityUsage, loadWorkflows, type CapabilityUse } from '../data/workflows';
 import { sectionFence, sectionOrderedItems, sectionTableByHeader, tableRows } from './md-sections';
 import { capabilitySymbol, contractRows, tableOrder, type SchemaRow } from './views';
+import { andList, plural } from './words';
 
 // ------------------------------------------------------------ F-C1 neighbours
 
@@ -75,8 +76,6 @@ export function relationWords(n: Neighbour): string {
   return n.relations.map((r) => `${r.type}, ${way[r.direction]}`).join('; ');
 }
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const wordList = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
 /** Counts behind F-C1's name and caption: relations by direction. */
 export function neighbourCounts(list: Neighbour[]): { relations: number; capabilities: number; into: number; out: number; bothWays: number } {
@@ -452,7 +451,7 @@ export function outputFieldsCaption(cap: Capability, f: OutputFields): string {
   const added = f.skill.length - inC.length;
   if (!outputFieldsDiffer(f)) {
     const opt = f.skill.length - req;
-    const which = req === 0 ? 'the contract requires none of them' : opt === 0 ? 'the contract requires all of them' : `the contract requires ${wordList(inC.filter((x) => x.required).map((x) => x.name))} and leaves the other ${opt} optional`;
+    const which = req === 0 ? 'the contract requires none of them' : opt === 0 ? 'the contract requires all of them' : `the contract requires ${andList(inC.filter((x) => x.required).map((x) => x.name))} and leaves the other ${opt} optional`;
     return `Every field of the skill's output is a field of ${cap.id}'s output contract, and the skill names all of them; ${which}.`;
   }
   const missing = f.missing.length === 0 ? '' : `; it leaves out ${plural(f.missing.length, 'contract field', 'contract fields')} (${f.missing.join(', ')})`;
@@ -619,10 +618,10 @@ export function exampleFieldsCaption(_cap: Capability, f: ExampleFields): string
     const all = f.examples.length === 2 ? 'Both examples' : `All ${f.examples.length} examples`;
     return shown.length === f.outputs.length
       ? `${all} of the skill write out every one of its ${plural(f.outputs.length, 'output field', 'output fields')}.`
-      : `${all} of the skill write out the same ${shown.length} of its ${plural(f.outputs.length, 'output field', 'output fields')}, and ${f.examples.length === 2 ? 'neither' : 'none'} writes out ${wordList(none)}.`;
+      : `${all} of the skill write out the same ${shown.length} of its ${plural(f.outputs.length, 'output field', 'output fields')}, and ${f.examples.length === 2 ? 'neither' : 'none'} writes out ${andList(none)}.`;
   }
   if (!exampleFieldsIsFigure(f)) return `${lead}: no example writes out an output field by name.`;
-  return `${lead}: ${all.length === 0 ? 'no field is in every example' : `${wordList(all)} ${all.length === 1 ? 'is' : 'are'} in every example`}${none.length === 0 ? '' : `, and ${wordList(none)} ${none.length === 1 ? 'is' : 'are'} in none`}.`;
+  return `${lead}: ${all.length === 0 ? 'no field is in every example' : `${andList(all)} ${all.length === 1 ? 'is' : 'are'} in every example`}${none.length === 0 ? '' : `, and ${andList(none)} ${none.length === 1 ? 'is' : 'are'} in none`}.`;
 }
 
 // ------------------------------------------------------------ F-C10 the skill's tools against the ontology
@@ -680,9 +679,9 @@ export function skillToolsCaption(cap: Capability, t: SkillTools): string {
         ? `, so the skill has no tool that can make the change itself`
         : ', and every tool only reads'
       : t.mutation
-        ? `, and ${wordList(can)} can make the change`
-        : `, so ${wordList(can)} ${can.length === 1 ? 'is' : 'are'} more than the capability needs`;
-  return `The skill may use ${plural(n, 'tool', 'tools')}: ${wordList(parts)}; ${flag}${verdict}.`;
+        ? `, and ${andList(can)} can make the change`
+        : `, so ${andList(can)} ${can.length === 1 ? 'is' : 'are'} more than the capability needs`;
+  return `The skill may use ${plural(n, 'tool', 'tools')}: ${andList(parts)}; ${flag}${verdict}.`;
 }
 
 // ------------------------------------------------------------ F-C11 verification checks against the fields
@@ -731,7 +730,7 @@ export function verificationMapCaption(_cap: Capability, m: CheckMap): string {
   const silent = m.outputs.filter((f) => !named.has(f));
   return (
     `${k} of the ${plural(m.checks.length, 'check', 'checks')} ${k === 1 ? 'uses' : 'use'} the name of an input or output field as a word` +
-    (silent.length === 0 ? '; every output field is named by a check.' : `; ${plural(silent.length, 'output field', 'output fields')} of ${m.outputs.length} ${silent.length === 1 ? 'is' : 'are'} named by no check (${wordList(silent)}).`)
+    (silent.length === 0 ? '; every output field is named by a check.' : `; ${plural(silent.length, 'output field', 'output fields')} of ${m.outputs.length} ${silent.length === 1 ? 'is' : 'are'} named by no check (${andList(silent)}).`)
   );
 }
 
@@ -770,7 +769,7 @@ export function inputGroupsTitle(cap: Capability): string {
 export function inputGroupsCaption(_cap: Capability, g: InputGroups): string {
   const core = g.groups.find((x) => x.extension === null)?.inputs.length ?? 0;
   const ext = g.groups.filter((x) => x.extension !== null);
-  return `${plural(core, 'input works', 'inputs work')} without an extension; ${wordList(ext.map((x) => `${plural(x.inputs.length, 'input needs', 'inputs need')} ${x.extension}`))}. A workflow that binds an extension's input must declare that extension.`;
+  return `${plural(core, 'input works', 'inputs work')} without an extension; ${andList(ext.map((x) => `${plural(x.inputs.length, 'input needs', 'inputs need')} ${x.extension}`))}. A workflow that binds an extension's input must declare that extension.`;
 }
 
 // ------------------------------------------------------------ F-C13 the workflows the examples run

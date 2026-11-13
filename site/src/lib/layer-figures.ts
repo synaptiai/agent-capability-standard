@@ -4,8 +4,8 @@
 import { EDGE_TYPES, loadOntology, RISKS, type EdgeType, type Ontology, type Risk } from '../data/ontology';
 import { loadWorkflows, type Workflow } from '../data/workflows';
 import { crossLayerEdges, type CrossLayerEdge } from './views';
+import { plural } from './words';
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export interface LayerLink {
   /** The layer at the other end. */

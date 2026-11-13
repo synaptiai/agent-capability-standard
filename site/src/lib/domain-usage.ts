@@ -10,11 +10,10 @@ import { loadOntology } from '../data/ontology';
 import { headingText, parseMarkdown } from './anchors';
 import { evidencePolicy, headingWorkflowId } from './domain-figures';
 import { htmlHeadings } from './inject';
+import { andList, plural } from './words';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const andList = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
 /** The README heading the usage examples sit under. */
 export const USAGE_HEADING = 'Capability Usage';

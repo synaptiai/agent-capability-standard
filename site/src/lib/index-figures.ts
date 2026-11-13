@@ -8,6 +8,7 @@ import { statusStyle } from './status';
 import type { SchemaEntry } from './views';
 import { currentStandardText } from './spec-figures';
 import { diagnosticFamilies } from './spec-tail-figures';
+import { andList, plural } from './words';
 
 // ------------------------------------------------------------ F-R1
 
@@ -59,15 +60,11 @@ export function rfcLanesCaption(lanes: readonly RfcLane[]): string {
   const statuses = [...byStatus].map(([s, n]) => `${n} ${n === 1 ? 'is' : 'are'} ${s}`);
   const unpublished = targeted.filter((l) => l.version !== null && l.url === null).map((l) => l.target!);
   return [
-    `${plural(numbered, 'RFC', 'RFCs')}${other ? ` and ${plural(other, 'proposal', 'proposals')}` : ''} across ${plural(targeted.length, 'target version', 'target versions')}; ${joinAnd(statuses)}.`,
-    unpublished.length ? `${joinAnd(unpublished)} ${unpublished.length === 1 ? 'has' : 'have'} no published text on this site yet.` : '',
+    `${plural(numbered, 'RFC', 'RFCs')}${other ? ` and ${plural(other, 'proposal', 'proposals')}` : ''} across ${plural(targeted.length, 'target version', 'target versions')}; ${andList(statuses)}.`,
+    unpublished.length ? `${andList(unpublished)} ${unpublished.length === 1 ? 'has' : 'have'} no published text on this site yet.` : '',
   ]
     .filter(Boolean)
     .join(' ');
-}
-
-function joinAnd(items: readonly string[]): string {
-  return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
 }
 
 // ------------------------------------------------------------ F-SC1
@@ -205,7 +202,7 @@ export function isoClauseMatrix(pages: readonly Doc[]): CountMatrix {
   const widest = [...rows].sort((a, b) => b.counts.filter(Boolean).length - a.counts.filter(Boolean).length)[0]!;
   return {
     title: 'Which ISO/IEC 42001 clauses each document cites',
-    caption: `The ${rows.length} documents cite ${clauses.length} clauses: ${joinAnd(clauses)}. Clause ${most.c} is cited by the most documents (${most.docs}); the ${widest.label.toLowerCase()} cites the most clauses (${widest.counts.filter(Boolean).length}).`,
+    caption: `The ${rows.length} documents cite ${clauses.length} clauses: ${andList(clauses)}. Clause ${most.c} is cited by the most documents (${most.docs}); the ${widest.label.toLowerCase()} cites the most clauses (${widest.counts.filter(Boolean).length}).`,
     rowHead: 'Document',
     unit: 'citations',
     columns: clauses.map((c) => ({ key: c, label: `Clause ${c}` })),
@@ -257,7 +254,7 @@ export function backgroundLayerMatrix(pages: readonly Doc[], layers: readonly { 
   const none = rows.filter((r) => sum(r.counts) === 0).map((r) => r.label);
   return {
     title: 'How often each page names a capability as code, by layer',
-    caption: `Only a capability name set as code counts, since a plain word such as "plan" may not mean the capability. Across the ${rows.length} pages, capabilities of ${totals[0]!.id} are named most (${totals[0]!.n} times) and of ${totals.at(-1)!.id} least (${totals.at(-1)!.n}). The ${top.label} names the most (${sum(top.counts)}).${none.length ? ` ${joinAnd(none)} ${none.length === 1 ? 'names' : 'name'} none as code, so ${none.length === 1 ? 'it has' : 'they have'} no row.` : ''}`,
+    caption: `Only a capability name set as code counts, since a plain word such as "plan" may not mean the capability. Across the ${rows.length} pages, capabilities of ${totals[0]!.id} are named most (${totals[0]!.n} times) and of ${totals.at(-1)!.id} least (${totals.at(-1)!.n}). The ${top.label} names the most (${sum(top.counts)}).${none.length ? ` ${andList(none)} ${none.length === 1 ? 'names' : 'name'} none as code, so ${none.length === 1 ? 'it has' : 'they have'} no row.` : ''}`,
     rowHead: 'Page',
     unit: 'mentions',
     columns: layers.map((l) => ({ key: l.id, label: l.id, layer: l.id })),
@@ -266,7 +263,6 @@ export function backgroundLayerMatrix(pages: readonly Doc[], layers: readonly { 
   };
 }
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
  * Bars: a label (linked when it has a page), a value and its printed words.
@@ -456,9 +452,9 @@ export function suiteCoverage(parts: readonly SuitePart[], families: readonly Fa
   const missing = families.flatMap((f) => f.codes.filter((c) => !expected.has(c)));
   return {
     title: COVERAGE_FIG_TITLE,
-    caption: `The suite's ${fixtures} fixtures and cases (${joinAnd(parts.map((p) => `${p.count} ${p.label.charAt(0).toLowerCase()}${p.label.slice(1)}`))}) expect ${hit} of the ${all} diagnostic codes. ${
-      full.length > 0 ? `Every ${joinAnd(full)} code is expected; ` : ''
-    }${low.f.name} has the smallest share, ${low.value} of ${low.max}.${missing.length === 0 ? '' : ` No fixture or case expects ${joinAnd(missing)}.`}`,
+    caption: `The suite's ${fixtures} fixtures and cases (${andList(parts.map((p) => `${p.count} ${p.label.charAt(0).toLowerCase()}${p.label.slice(1)}`))}) expect ${hit} of the ${all} diagnostic codes. ${
+      full.length > 0 ? `Every ${andList(full)} code is expected; ` : ''
+    }${low.f.name} has the smallest share, ${low.value} of ${low.max}.${missing.length === 0 ? '' : ` No fixture or case expects ${andList(missing)}.`}`,
     head: ['Family', 'Codes the suite expects'],
     rows: rows.map(({ f: _f, ...r }) => r),
   };

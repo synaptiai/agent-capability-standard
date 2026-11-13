@@ -13,9 +13,8 @@ import { referenceRoots } from '../data/workflows';
 import { readRepoFile } from './repo';
 import { sectionBlocks, sectionFence, sectionTableByHeader, tableCodes, tableRows } from './md-sections';
 import { typeGlyphs } from './views';
+import { andList, plural } from './words';
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const list = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
 /** The current Standard's path and text. */
 export function currentStandardText(): { source: string; text: string } {
@@ -29,7 +28,7 @@ export function layerModelCaption(o: Ontology = loadOntology()): string {
   const sizes = o.layers.map((l) => l.capabilities.length);
   const big = o.layers.filter((l) => l.capabilities.length === Math.max(...sizes)).map((l) => l.id);
   const small = o.layers.filter((l) => l.capabilities.length === Math.min(...sizes)).map((l) => l.id);
-  return `${plural(o.capabilities.length, 'capability', 'capabilities')} in ${plural(o.layers.length, 'layer', 'layers')}, from ${Math.max(...sizes)} in ${list(big)} to ${Math.min(...sizes)} in ${list(small)}, each shown with its cognitive mapping.`;
+  return `${plural(o.capabilities.length, 'capability', 'capabilities')} in ${plural(o.layers.length, 'layer', 'layers')}, from ${Math.max(...sizes)} in ${andList(big)} to ${Math.min(...sizes)} in ${andList(small)}, each shown with its cognitive mapping.`;
 }
 
 // --------------------------------------------------- F-S4 edge types
@@ -54,8 +53,8 @@ export function safetyCritical(o: Ontology = loadOntology()): Capability[] {
 export function safetyCriticalCaption(o: Ontology = loadOntology()): string {
   const caps = safetyCritical(o);
   const viaEdge = caps.filter((c) => !c.requires_checkpoint && !c.requires_approval).map((c) => c.id);
-  const tail = viaEdge.length > 0 ? `; ${list(viaEdge)} ${viaEdge.length === 1 ? 'needs' : 'need'} one only through a requires edge from checkpoint` : '';
-  return `In the ontology, ${plural(caps.length, 'capability needs', 'capabilities need')} a checkpoint or approval before each use: ${list(caps.map((c) => c.id))}${tail}.`;
+  const tail = viaEdge.length > 0 ? `; ${andList(viaEdge)} ${viaEdge.length === 1 ? 'needs' : 'need'} one only through a requires edge from checkpoint` : '';
+  return `In the ontology, ${plural(caps.length, 'capability needs', 'capabilities need')} a checkpoint or approval before each use: ${andList(caps.map((c) => c.id))}${tail}.`;
 }
 
 // ------------------------------------------------------ F-S5 step anatomy
@@ -101,7 +100,7 @@ export function stepAnatomyCaption(schema: CatalogSchema = loadCatalogSchema()):
   const groups = stepAnatomy(schema);
   const all = groups.flatMap((g) => g.slots);
   const req = all.filter((s) => s.required).map((s) => s.name);
-  return `A step has ${plural(all.length, 'field', 'fields')} in ${plural(groups.length, 'group', 'groups')}; ${plural(req.length, 'is', 'are')} required (${list(req)}), and the rest are optional.`;
+  return `A step has ${plural(all.length, 'field', 'fields')} in ${plural(groups.length, 'group', 'groups')}; ${plural(req.length, 'is', 'are')} required (${andList(req)}), and the rest are optional.`;
 }
 
 // ------------------------------------------ F-S7 anatomy of a reference
@@ -172,7 +171,7 @@ export function referenceCaption(examples: { parts: ReferenceParts }[]): string 
   const seg = examples.flatMap((e) => e.parts.segments);
   const kinds = [...new Set(seg.map((s) => s.kind))];
   const typed = examples.filter((e) => e.parts.annotation).length;
-  return `The ${plural(examples.length, 'example', 'examples')} of §5.3 split into a root, ${plural(seg.length, 'path segment', 'path segments')} (${list(kinds.map((k) => `${k}`))}) and ${plural(typed, 'type annotation', 'type annotations')}.`;
+  return `The ${plural(examples.length, 'example', 'examples')} of §5.3 split into a root, ${plural(seg.length, 'path segment', 'path segments')} (${andList(kinds.map((k) => `${k}`))}) and ${plural(typed, 'type annotation', 'type annotations')}.`;
 }
 
 // --------------------------------------------- F-S8 annotation types
@@ -249,7 +248,7 @@ export function gateCaption(schema: CatalogSchema = loadCatalogSchema()): string
   const b = gateBranches(schema);
   const parts = b.map((x) => `${x.phase} the step it can take ${plural(x.actions.length, 'action', 'actions')}`);
   const lost = schema.afterGateForbidden;
-  return `A gate's \`when\` decides; ${parts.join(', and ')}${lost.length > 0 ? `, since an after-gate cannot ${list(lost)}` : ''}.`.replace(/`/g, '');
+  return `A gate's \`when\` decides; ${parts.join(', and ')}${lost.length > 0 ? `, since an after-gate cannot ${andList(lost)}` : ''}.`.replace(/`/g, '');
 }
 
 /**
@@ -275,5 +274,5 @@ export function failureBranches(text: string, where: string, schema: CatalogSche
 
 export function failureCaption(branches: { action: string; effect: string }[]): string {
   const none = branches.filter((b) => /^None\b/.test(b.effect)).map((b) => b.action);
-  return `A fired failure mode takes one of ${plural(branches.length, 'action', 'actions')}; ${list(none)} change nothing before recovery, and the others act first.`;
+  return `A fired failure mode takes one of ${plural(branches.length, 'action', 'actions')}; ${andList(none)} change nothing before recovery, and the others act first.`;
 }

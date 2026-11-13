@@ -7,6 +7,7 @@
 import type { Risk } from '../data/ontology';
 import type { Workflow } from '../data/workflows';
 import { capabilitySymbol, diagramRuns, diagramSteps, failureRows, gateRows, producerSteps, schemaRows, type StepRole } from './views';
+import { plural } from './words';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -20,7 +21,6 @@ export function stepList(ns: readonly number[]): string {
   return `steps ${ns.slice(0, -1).join(', ')} and ${ns.at(-1)}`;
 }
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 // --------------------------------------------------------------- the spine
 

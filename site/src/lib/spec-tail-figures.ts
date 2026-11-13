@@ -18,9 +18,8 @@ import { parseCatalog, type Workflow } from '../data/workflows';
 import { readRepoFile, trackedUnder } from './repo';
 import { blockText, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
 import { schemaListing } from './views';
+import { andList, plural } from './words';
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const list = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
 // ---------------------------------------------- F-S23 the schema shelf
 
@@ -77,7 +76,7 @@ export function fieldGroups(rows: FieldRow[]): { prefix: string | null; rows: Fi
 export function fieldGroupsCaption(rows: FieldRow[], what: string): string {
   const req = rows.filter((r) => r.required).length;
   const groups = fieldGroups(rows).filter((g) => g.prefix);
-  return `${what} has ${plural(rows.length, 'field', 'fields')}, ${req} required${groups.length > 0 ? `; ${list(groups.map((g) => `${plural(g.rows.length, 'sits', 'sit')} under ${g.prefix}`))}` : ''}.`;
+  return `${what} has ${plural(rows.length, 'field', 'fields')}, ${req} required${groups.length > 0 ? `; ${andList(groups.map((g) => `${plural(g.rows.length, 'sits', 'sit')} under ${g.prefix}`))}` : ''}.`;
 }
 
 // ---------------------------------------------- field tables shown as figures
@@ -161,7 +160,7 @@ export function thresholdsCaption(): string {
   const bands = mergeBands(p);
   const named = [...bands].reverse().filter((b) => b.action !== null);
   const open = bands.filter((b) => b.action === null);
-  return `${plural(p.thresholds.length, 'threshold', 'thresholds')} of identity_resolution_policy.yaml cut the ${p.range[0]} to ${p.range[1]} alias-confidence scale into ${bands.length} bands, named by the action each leads to: ${list(named.map(bandWords))}${open.length > 0 ? `; no threshold names an action ${list(open.map((b) => `from ${b.from} to ${b.to}`))}` : ''}.`;
+  return `${plural(p.thresholds.length, 'threshold', 'thresholds')} of identity_resolution_policy.yaml cut the ${p.range[0]} to ${p.range[1]} alias-confidence scale into ${bands.length} bands, named by the action each leads to: ${andList(named.map(bandWords))}${open.length > 0 ? `; no threshold names an action ${andList(open.map((b) => `from ${b.from} to ${b.to}`))}` : ''}.`;
 }
 
 // ---------------------------------------------- F-S25 decay with a floor
@@ -276,7 +275,7 @@ export function categoryCounts(text: string, where: string): { name: string; ran
 export function categoryCaption(c: { name: string; count: number }[]): string {
   const max = Math.max(...c.map((x) => x.count));
   const top = c.filter((x) => x.count === max).map((x) => x.name);
-  return `${plural(c.reduce((a, x) => a + x.count, 0), 'code', 'codes')} in ${plural(c.length, 'category', 'categories')}; ${list(top)} ${top.length === 1 ? 'has' : 'have'} the most, ${max}${top.length === 1 ? '' : ' each'}.`;
+  return `${plural(c.reduce((a, x) => a + x.count, 0), 'code', 'codes')} in ${plural(c.length, 'category', 'categories')}; ${andList(top)} ${top.length === 1 ? 'has' : 'have'} the most, ${max}${top.length === 1 ? '' : ' each'}.`;
 }
 
 // ---------------------------------------------- F-S27 where codes are raised
@@ -389,7 +388,7 @@ export function conformanceLevels(text: string, where: string): LevelColumn[] {
 }
 
 export function levelsCaption(cols: LevelColumn[]): string {
-  return `${list(cols.map((c) => `${c.level} lists ${c.items.length}`))} requirements; §10.2 states each level's list on its own.`;
+  return `${andList(cols.map((c) => `${c.level} lists ${c.items.length}`))} requirements; §10.2 states each level's list on its own.`;
 }
 
 // ---------------------------------------------- F-S29 the conformance suite
@@ -428,7 +427,7 @@ export function suiteCaption(parts: SuitePart[]): string {
     const words = p.label.replace(/ \(.+\)$/, '').toLowerCase();
     return p.count === 1 ? words.replace(/s$/, '') : words;
   };
-  return `The repository's conformance suite: ${list(parts.map((p) => `${p.count} ${name(p)}`))}; ${name(top)} are the largest part.`;
+  return `The repository's conformance suite: ${andList(parts.map((p) => `${p.count} ${name(p)}`))}; ${name(top)} are the largest part.`;
 }
 
 // ---------------------------------------------- F-S30 which change bumps which number
@@ -442,7 +441,7 @@ export function versionBumps(text: string, where: string): { bump: string; chang
 }
 
 export function bumpsCaption(b: { bump: string; changes: string[] }[]): string {
-  return `Of the ${plural(b.reduce((a, x) => a + x.changes.length, 0), 'schema change', 'schema changes')} §11.4 lists, ${list(b.filter((x) => x.changes.length > 0).map((x) => `${x.changes.length} need a ${x.bump} release`))}.`;
+  return `Of the ${plural(b.reduce((a, x) => a + x.changes.length, 0), 'schema change', 'schema changes')} §11.4 lists, ${andList(b.filter((x) => x.changes.length > 0).map((x) => `${x.changes.length} need a ${x.bump} release`))}.`;
 }
 
 // ---------------------------------------------- F-S31 checkpoint decision tree
@@ -480,7 +479,7 @@ export function treeCaption(t: TreeNode): string {
   const walk = (n: TreeNode) => (n.branches.length === 0 ? leaves.push(n.text) : n.branches.forEach((b) => walk(b.node)));
   walk(t);
   const questions = (n: TreeNode): number => (n.branches.length === 0 ? 0 : 1 + n.branches.reduce((a, b) => a + questions(b.node), 0));
-  return `${plural(questions(t), 'question leads', 'questions lead')} to ${plural(leaves.length, 'outcome', 'outcomes')}: ${list(leaves.map((x) => x.toLowerCase()))}.`;
+  return `${plural(questions(t), 'question leads', 'questions lead')} to ${plural(leaves.length, 'outcome', 'outcomes')}: ${andList(leaves.map((x) => x.toLowerCase()))}.`;
 }
 
 // ---------------------------------------------- F-S32 pattern strips
@@ -574,7 +573,7 @@ export function familyRaisedCaption(f: Family, r: FamilyRaised): string {
   const lead = top
     ? `${plural(r.rows.length - none.length, 'code', 'codes')} of ${r.rows.length} ${r.rows.length - none.length === 1 ? 'is' : 'are'} named in ${plural(r.sections.length, 'section', 'sections')} of chapter 5; §${top.s.n} ${top.s.title} names the most (${top.n})`
     : `No section of chapter 5 names a ${f.range} code`;
-  return `${lead}${none.length > 0 && top ? `; ${list(none)} ${none.length === 1 ? 'is' : 'are'} named only outside chapter 5` : ''}.`;
+  return `${lead}${none.length > 0 && top ? `; ${andList(none)} ${none.length === 1 ? 'is' : 'are'} named only outside chapter 5` : ''}.`;
 }
 
 /** True when the family's codes are named in at least two sections of chapter 5, so the grid shows more than one column. */

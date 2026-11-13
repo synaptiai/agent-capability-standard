@@ -19,6 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve, sitemapPaths } from './check-axe.mjs';
 import { isMain } from './is-main.mjs';
+import { templateOf } from './page-template.mjs';
 import {
   EXEMPT_RUNS,
   exemptLabel,
@@ -37,8 +38,8 @@ import {
 const NARROW = 360;
 
 /**
- * Runs in the page: the geometry measureRuns() needs, the page's template
- * (from the body's `page--<template>` class) and the anchors of its exempt
+ * Runs in the page: the geometry measureRuns() needs, the body's classes
+ * (withTemplate() reads the template from them) and the anchors of its exempt
  * entries that are missing. Self-contained, because Playwright serialises it.
  */
 export function collectGeometry({ entries, selector, min, vh }) {
@@ -94,8 +95,14 @@ export function collectGeometry({ entries, selector, min, vh }) {
     const box = y(open);
     if (code > vh) exempt.push({ key: e.key, label, top: box.top, bottom: box.bottom });
   }
-  const template = [...document.body.classList].find((c) => c.startsWith('page--') && !c.startsWith('page--with') && !c.startsWith('page--no-'));
-  return { template: template ? template.slice('page--'.length) : '', geometry: { body, figures, exempt }, small, missing };
+  return { classes: [...document.body.classList], geometry: { body, figures, exempt }, small, missing };
+}
+
+/** collectGeometry's result with the page's template in place of its body classes ('' when none). */
+export function withTemplate(raw) {
+  if (!raw) return null;
+  const { classes, ...rest } = raw;
+  return { template: templateOf(classes) ?? '', ...rest };
 }
 
 /** One page's result: its runs at `width`, and the exempt entries whose heading is missing. */
@@ -107,7 +114,7 @@ async function measurePage(page, url, width) {
   const entries = EXEMPT_RUNS.map((e, i) => ({ ...e, key: String(i), label: exemptLabel(e) })).filter(
     (e) => e.page.startsWith('template:') || pageMatches(e.page, url, ''),
   );
-  const raw = await page.evaluate(collectGeometry, { entries, selector: INFO_FIGURE_SELECTOR, min: MIN_DRAWING, vh: RUN_VIEWPORT.height });
+  const raw = withTemplate(await page.evaluate(collectGeometry, { entries, selector: INFO_FIGURE_SELECTOR, min: MIN_DRAWING, vh: RUN_VIEWPORT.height }));
   if (!raw) return null;
   const applies = new Set(entries.filter((e) => pageMatches(e.page, url, raw.template)).map((e) => e.key));
   const geometry = { ...raw.geometry, exempt: raw.geometry.exempt.filter((e) => applies.has(e.key)) };
@@ -134,7 +141,7 @@ export async function selfCheck(browser) {
   try {
     await page.setContent(readFileSync(FIXTURE, 'utf8'));
     const entries = want.entries.map((e, i) => ({ ...e, key: String(i), label: exemptLabel(e) }));
-    const got = await page.evaluate(collectGeometry, { entries, selector: INFO_FIGURE_SELECTOR, min: MIN_DRAWING, vh: RUN_VIEWPORT.height });
+    const got = withTemplate(await page.evaluate(collectGeometry, { entries, selector: INFO_FIGURE_SELECTOR, min: MIN_DRAWING, vh: RUN_VIEWPORT.height }));
     const expected = { template: want.template, geometry: want.geometry, small: want.small, missing: want.missing };
     return isDeepStrictEqual(got, expected)
       ? []

@@ -7,10 +7,10 @@ import { EDGE_TYPES, loadOntology, type EdgeType, type EdgeTypeInfo, type Ontolo
 import { readRepoFile } from './repo';
 import { sectionFence, sectionTable, tableCodes, tableRows } from './md-sections';
 import { capabilitySymbol, crossLayerEdges, EDGE_LABELS, edgeTypeCount, tableOrder } from './views';
+import { plural } from './words';
 
 export const EDGE_TYPES_SOURCE = 'spec/EDGE_TYPES.md';
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 // ------------------------------------------------------------- F-E1 cards
 

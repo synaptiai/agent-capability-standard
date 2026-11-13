@@ -17,6 +17,7 @@ import { edgeTypeCount } from '../lib/views';
 import { chapterKey } from '../pixel/keys';
 import { glyphElement, pixelBarElement } from '../pixel/hast';
 import { failWith, sourceOf } from './source';
+import { hastText, isEl } from './hast';
 
 export interface RehypeFigureMarksOptions {
   /** Repo paths of every Standard version (chapter glyphs). */
@@ -29,15 +30,6 @@ export interface RehypeFigureMarksOptions {
 
 const PLUGIN = 'rehype-figure-marks';
 
-/** Text of a hast node, aria-hidden parts included (heading-anchor links hold no text). */
-export function hastText(n: ElementContent | Root): string {
-  if (n.type === 'text') return n.value;
-  if (n.type !== 'element' && n.type !== 'root') return '';
-  return n.children.map((c) => hastText(c as ElementContent)).join('');
-}
-
-const isEl = (n: unknown, tag?: string): n is Element =>
-  typeof n === 'object' && n !== null && (n as Element).type === 'element' && (tag === undefined || (n as Element).tagName === tag);
 
 /** Elements of the root between the heading that matches and the next heading of the same or a higher level. */
 function sectionElements(tree: Root, match: (h: Element) => boolean): Element[] | null {

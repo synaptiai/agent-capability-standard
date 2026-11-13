@@ -42,16 +42,10 @@ import { COMPOSED_SKILLS } from '../data/skills';
 import { contractRows } from '../lib/views';
 import { glyphElement } from '../pixel/hast';
 import { sourceOf } from './source';
+import { hastText, isEl } from './hast';
 
 const SKILL = /^skills\/([a-z_]+)\/SKILL\.md$/;
 
-const isEl = (n: RootContent | ElementContent | undefined, tag?: string): n is Element =>
-  n?.type === 'element' && (tag === undefined || n.tagName === tag);
-
-function text(n: RootContent | ElementContent): string {
-  if (n.type === 'text') return n.value;
-  return n.type === 'element' ? n.children.map(text).join('') : '';
-}
 
 /** Index ranges [start, end) of each H2 section of the root, keyed by the H2's id. */
 function sections(children: RootContent[]): Map<string, [number, number]> {
@@ -156,12 +150,12 @@ export function markRequired(table: Element): number {
   const rows = (sec: Element | undefined) => (sec ? sec.children.filter((c): c is Element => isEl(c, 'tr')) : []);
   const cells = (tr: Element) => tr.children.filter((c): c is Element => isEl(c, 'td') || isEl(c, 'th'));
   const head = rows(part('thead'))[0];
-  const at = head ? cells(head).findIndex((c) => text(c).trim() === 'Required') : -1;
+  const at = head ? cells(head).findIndex((c) => hastText(c).trim() === 'Required') : -1;
   if (at === -1) return 0;
   let marked = 0;
   for (const tr of rows(part('tbody'))) {
     const c = cells(tr)[at];
-    const v = c ? text(c).trim().toLowerCase() : '';
+    const v = c ? hastText(c).trim().toLowerCase() : '';
     if (!c || (v !== 'yes' && v !== 'no')) continue;
     c.children.unshift(glyphElement(v === 'yes' ? 'check' : 'close', { className: `skill-req skill-req--${v}` }), txt(' '));
     marked += 1;
@@ -191,7 +185,7 @@ export function markContract(table: Element, cap: Capability): number {
   const rows = (sec: Element | undefined) => (sec ? sec.children.filter((c): c is Element => isEl(c, 'tr')) : []);
   const cells = (tr: Element) => tr.children.filter((c): c is Element => isEl(c, 'td') || isEl(c, 'th'));
   const head = rows(part('thead'))[0];
-  if (!head || text(cells(head)[0]!).trim() !== 'Field') return 0;
+  if (!head || hastText(cells(head)[0]!).trim() !== 'Field') return 0;
   const contract = new Map(contractRows(cap.output_schema).filter((r) => r.depth <= 1).map((r) => [r.path, r.required]));
   const body = rows(part('tbody'));
   type Mark = 'required' | 'optional' | 'own';
@@ -202,7 +196,7 @@ export function markContract(table: Element, cap: Capability): number {
   };
   // One entry per field the row names, or null when the row names a path the column cannot mark.
   const marks = body.map((tr): { name: string; mark: Mark }[] | null => {
-    const names = text(cells(tr)[0]!).replace(/`/g, '').split('/').map((x) => x.trim());
+    const names = hastText(cells(tr)[0]!).replace(/`/g, '').split('/').map((x) => x.trim());
     const out = names.map((name) => ({ name, mark: markOf(name) }));
     return out.every((x) => x.mark !== null) ? (out as { name: string; mark: Mark }[]) : null;
   });
@@ -267,10 +261,10 @@ export const LONG_OUTPUT_LINES = 100;
 function foldLongOutput(body: RootContent[]): void {
   body.forEach((c, i) => {
     if (!isEl(c, 'pre')) return;
-    const lines = text(c).replace(/\n$/, '').split('\n').length;
+    const lines = hastText(c).replace(/\n$/, '').split('\n').length;
     if (lines <= LONG_OUTPUT_LINES) return;
     const lead = body.slice(0, i).reverse().find((x) => isEl(x));
-    if (!lead || !/^\s*Output\b/.test(text(lead))) return;
+    if (!lead || !/^\s*Output\b/.test(hastText(lead))) return;
     body[i] = {
       type: 'element',
       tagName: 'details',
@@ -310,7 +304,7 @@ function foldExamples(kids: RootContent[], openFirst = false): void {
   if (openFirst) foldLongOutput(groups[0]!.body);
   const details = groups.map(({ h3, body }, n): Element => {
     h3.children = h3.children.filter((c) => !(isEl(c, 'a') && ((c.properties?.className as string[]) ?? []).includes('heading-anchor')));
-    const failure = /failure/i.test(text(h3));
+    const failure = /failure/i.test(hastText(h3));
     return {
       type: 'element',
       tagName: 'details',

@@ -17,9 +17,8 @@ import { loadCatalogEnums, loadIdentitySchema, loadTrustModel, loadWorldStateSch
 import { chapterKey } from '../pixel/keys';
 import { sectionBlocks, sectionFence, sectionTable, tableCodes, tableRows } from './md-sections';
 import { contractRows, tableOrder, type SchemaRow } from './views';
+import { andList, plural } from './words';
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const list = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -115,7 +114,7 @@ export function checkSafetyOrder(text: string, where: string, groups: OrderGroup
   }
   const drawn = new Set(groups.flatMap((g) => [g.source, ...g.edges.flatMap((e) => e.targets)]));
   const missing = [...codes].filter((c) => caps.has(c) && !drawn.has(c));
-  if (missing.length > 0) throw new Error(`${where}: §3.3 names ${list(missing)}, which the safety ordering figure does not draw`);
+  if (missing.length > 0) throw new Error(`${where}: §3.3 names ${andList(missing)}, which the safety ordering figure does not draw`);
 }
 
 export function safetyOrderCaption(groups: OrderGroup[]): string {
@@ -123,7 +122,7 @@ export function safetyOrderCaption(groups: OrderGroup[]): string {
   const req = of('checkpoint', 'requires');
   const soft = of('constrain', 'soft_requires');
   const prec = groups.flatMap((g) => g.edges.filter((e) => e.type === 'precedes')).reduce((a, e) => a + e.targets.length, 0);
-  return `checkpoint is required before ${list(req)}; ${plural(prec, 'precedes edge orders', 'precedes edges order')} checkpoint, plan and constrain before their targets when both are present; constrain is recommended before ${list(soft)}.`;
+  return `checkpoint is required before ${andList(req)}; ${plural(prec, 'precedes edge orders', 'precedes edges order')} checkpoint, plan and constrain before their targets when both are present; constrain is recommended before ${andList(soft)}.`;
 }
 
 /** An edge group of F-S1 drawn as a lane: a source, an edge type and its targets. */
@@ -258,7 +257,7 @@ export function flagWords(c: Capability): string {
 export function safetyDefaultsCaption(o: Ontology = loadOntology()): string {
   const n = (f: (c: Capability) => boolean) => o.capabilities.filter(f).length;
   const viaEdge = o.capabilities.filter(checkpointViaEdge).map((c) => c.id);
-  const edge = viaEdge.length > 0 ? ` (${n((c) => c.requires_checkpoint)} by their flag, and ${list(viaEdge)} through a requires edge from checkpoint)` : '';
+  const edge = viaEdge.length > 0 ? ` (${n((c) => c.requires_checkpoint)} by their flag, and ${andList(viaEdge)} through a requires edge from checkpoint)` : '';
   return `Of ${o.capabilities.length} capabilities, ${n((c) => c.risk === 'high')} are high risk, ${n((c) => c.mutation)} change state, ${n((c) => c.requires_checkpoint || checkpointViaEdge(c))} need a checkpoint${edge} and ${n((c) => c.requires_approval)} need approval; a step may raise any of these, and a weaker value is ignored with W602.`;
 }
 
@@ -324,7 +323,7 @@ export function precedenceLadder(text: string, where: string): Rung[] {
 export function precedenceCaption(rungs: Rung[]): string {
   const ops = rungs.slice(0, -1);
   const na = ops.filter((r) => /non-associative/.test(r.note ?? '')).map((r) => r.rule);
-  return `${plural(ops.length, 'operator level', 'operator levels')} from the loosest, ${ops[0]!.rule}, to the tightest, ${ops.at(-1)!.rule}, above the operands of ${rungs.at(-1)!.rule}${na.length > 0 ? `; ${list(na)} does not chain` : ''}.`;
+  return `${plural(ops.length, 'operator level', 'operator levels')} from the loosest, ${ops[0]!.rule}, to the tightest, ${ops.at(-1)!.rule}, above the operands of ${rungs.at(-1)!.rule}${na.length > 0 ? `; ${andList(na)} does not chain` : ''}.`;
 }
 
 // ------------------------------------------------ §5.8.3 static checks
@@ -398,7 +397,7 @@ export function triggerTiles(text: string, where: string): { tiles: TriggerTile[
   }
   const e = loadCatalogEnums();
   const missing = e.triggerKinds.filter((k) => !map.has(k));
-  if (missing.length > 0) throw new Error(`${where}: §5.10's attendance row gives no default for ${list(missing)}`);
+  if (missing.length > 0) throw new Error(`${where}: §5.10's attendance row gives no default for ${andList(missing)}`);
   const sched = rows.find((r) => r[0] === 'schedule')?.[1] ?? '';
   const overlapDefault = e.overlap.find((o) => new RegExp(`${o} \\(default\\)`).test(sched)) ?? null;
   return { tiles: e.triggerKinds.map((kind) => ({ kind, attendance: map.get(kind)! })), overlap: e.overlap, overlapDefault };
@@ -406,7 +405,7 @@ export function triggerTiles(text: string, where: string): { tiles: TriggerTile[
 
 export function triggersCaption(tiles: TriggerTile[]): string {
   const un = tiles.filter((t) => t.attendance === 'unattended').map((t) => t.kind);
-  return `A run starts in one of ${plural(tiles.length, 'way', 'ways')}; ${list(un)} runs are unattended unless a trigger says otherwise, so no one is there to approve a step.`;
+  return `A run starts in one of ${plural(tiles.length, 'way', 'ways')}; ${andList(un)} runs are unattended unless a trigger says otherwise, so no one is there to approve a step.`;
 }
 
 // ------------------------------------------------ F-S14 recovery loop
@@ -459,7 +458,7 @@ export function recoveryBranches(text: string, where: string): { loop: RecoveryB
 
 export function recoveryCaption(rows: { recovery: string; codes: string[] }[]): string {
   const codes = [...new Set(rows.flatMap((r) => r.codes))];
-  return `A fired failure mode loops back, runs its on_exhausted handler once the loops run out, or ends the run; ${plural(rows.length, 'branch', 'branches')} in all, ending with ${list(codes)} where no handler takes over.`;
+  return `A fired failure mode loops back, runs its on_exhausted handler once the loops run out, or ends the run; ${plural(rows.length, 'branch', 'branches')} in all, ending with ${andList(codes)} where no handler takes over.`;
 }
 
 // ------------------------------------------------ F-S15 a wait on a timeline
@@ -548,7 +547,7 @@ export function silentCaption(s: { wait: string; handler: string; modes: SilentM
       ? `${m.code} loops back to ${s.wait} up to ${plural(m.maxLoops ?? 1, 'time', 'times')}${m.onExhausted ? `, then goes to ${m.onExhausted}` : ''}`
       : `${m.code} escalates to ${m.goto} at once`,
   );
-  return `A silent source and a lapsed wait are handled apart: ${list(parts)}.`;
+  return `A silent source and a lapsed wait are handled apart: ${andList(parts)}.`;
 }
 
 // ------------------------------------------------ F-S17 approval
@@ -570,7 +569,7 @@ export function approvalPlans(text: string, where: string): ApprovalPlan[] {
   });
   const e = loadCatalogEnums().whenUnattended;
   const names = plans.map((p) => p.plan);
-  if (e.length !== names.length || e.some((x) => !names.includes(x))) throw new Error(`${where}: §5.14 lists the plans ${list(names)}, the schema ${list(e)}`);
+  if (e.length !== names.length || e.some((x) => !names.includes(x))) throw new Error(`${where}: §5.14 lists the plans ${andList(names)}, the schema ${andList(e)}`);
   return plans;
 }
 
@@ -582,7 +581,7 @@ export function approverAsked(text: string, where: string): { kind: string; atte
   if (/A standing_mandate approver needs no one present, so it is asked in an unattended run too/.test(prose)) rule.standing_mandate = true;
   if (/A human approver is not asked in an unattended run/.test(prose)) rule.human = false;
   const missing = kinds.filter((k) => !(k in rule));
-  if (missing.length > 0) throw new Error(`${where}: §5.14 no longer says whether ${list(missing)} is asked in an unattended run`);
+  if (missing.length > 0) throw new Error(`${where}: §5.14 no longer says whether ${andList(missing)} is asked in an unattended run`);
   return kinds.map((kind) => ({ kind, attended: true, unattended: rule[kind]! }));
 }
 
@@ -633,7 +632,7 @@ export function delegateGroups(text: string, where: string): { inputs: DelegateG
 export function delegateCaption(g: { inputs: DelegateGroup[]; outputs: SchemaRow[] }): string {
   const parts = g.inputs.filter((x) => x.extension).map((x) => `${plural(x.rows.length, 'input needs', 'inputs need')} ${x.extension}`);
   const eff = g.outputs.filter((r) => r.depth === 1).map((r) => r.name);
-  return `delegate takes ${plural(g.inputs.reduce((a, x) => a + x.rows.length, 0), 'input', 'inputs')}: ${list(parts)}; the host reports what it used as effective (${list(eff)}).`;
+  return `delegate takes ${plural(g.inputs.reduce((a, x) => a + x.rows.length, 0), 'input', 'inputs')}: ${andList(parts)}; the host reports what it used as effective (${andList(eff)}).`;
 }
 
 // ------------------------------------------------ F-S20 a quorum tally
@@ -671,7 +670,7 @@ export function quorumExample(text: string, where: string): QuorumExample {
 }
 
 export function quorumCaption(q: QuorumExample): string {
-  return `${plural(q.reviewers.length, 'reviewer', 'reviewers')} vote; the step passes with ${plural(q.minPass, 'pass', 'passes')}${q.minFull ? `, ${q.minFull} of them full-scope,` : ''} and no ${list(q.blocking)}, while ${list(q.other)} counts for neither side.`;
+  return `${plural(q.reviewers.length, 'reviewer', 'reviewers')} vote; the step passes with ${plural(q.minPass, 'pass', 'passes')}${q.minFull ? `, ${q.minFull} of them full-scope,` : ''} and no ${andList(q.blocking)}, while ${andList(q.other)} counts for neither side.`;
 }
 
 /** The rows of §5.16's field table with the diagnostic codes each description names. */
@@ -683,7 +682,7 @@ export function quorumFieldCodes(text: string, where: string): { field: string; 
     .map((r) => ({ field: r[0]!, codes: [...new Set([...(r[1] ?? '').matchAll(/\b[A-Z]\d{3}\b/g)].map((m) => m[0]))] }))
     .map((r) => {
       const bad = r.codes.filter((c) => !known.has(c));
-      if (bad.length > 0) throw new Error(`${where}: §5.16's ${r.field} row names ${list(bad)}, not diagnostic codes`);
+      if (bad.length > 0) throw new Error(`${where}: §5.16's ${r.field} row names ${andList(bad)}, not diagnostic codes`);
       return r;
     });
 }
@@ -691,7 +690,7 @@ export function quorumFieldCodes(text: string, where: string): { field: string; 
 export function quorumFieldsCaption(rows: { field: string; codes: string[] }[]): string {
   const withCodes = rows.filter((r) => r.codes.length > 0);
   const codes = [...new Set(rows.flatMap((r) => r.codes))].sort();
-  return `${withCodes.length} of the ${rows.length} quorum fields name the code their violation raises: ${list(codes)}; a missing required field is S304 and a malformed value S303.`;
+  return `${withCodes.length} of the ${rows.length} quorum fields name the code their violation raises: ${andList(codes)}; a missing required field is S304 and a malformed value S303.`;
 }
 
 // ------------------------------------------------ F-S21 trust classes
@@ -721,7 +720,7 @@ export function trustClassBars(text: string, where: string): TrustClassBar[] {
 export function trustCaption(bars: TrustClassBar[]): string {
   const acc = bars.filter((b) => b.accepted).map((b) => b.cls);
   const ask = bars.filter((b) => b.alwaysAsk).map((b) => b.cls);
-  return `${plural(bars.length, 'trust class', 'trust classes')} by default weight, from ${bars[0]!.cls} (${bars[0]!.weight}) to ${bars.at(-1)!.cls} (${bars.at(-1)!.weight}); the example keeps items from ${list(acc)} and always asks a person about ${list(ask)}.`;
+  return `${plural(bars.length, 'trust class', 'trust classes')} by default weight, from ${bars[0]!.cls} (${bars[0]!.weight}) to ${bars.at(-1)!.cls} (${bars.at(-1)!.weight}); the example keeps items from ${andList(acc)} and always asks a person about ${andList(ask)}.`;
 }
 
 // ------------------------------------------------ F-S22 the sender filter
@@ -736,5 +735,5 @@ export function senderFilter(text: string, where: string): { input: string; effe
 export function senderCaption(rows: { input: string; drops: boolean }[]): string {
   const drop = rows.filter((r) => r.drops).map((r) => r.input);
   const mark = rows.filter((r) => !r.drops).map((r) => r.input);
-  return `An item passes ${plural(rows.length, 'check', 'checks')} in turn: ${list(drop)} can drop it, and ${list(mark)} keeps it but may mark it always-ask.`;
+  return `An item passes ${plural(rows.length, 'check', 'checks')} in turn: ${andList(drop)} can drop it, and ${andList(mark)} keeps it but may mark it always-ask.`;
 }

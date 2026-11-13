@@ -28,7 +28,8 @@ export function collectGeometry(args: {
   selector: string;
   min: { width: number; height: number };
   vh: number;
-}): { template: string; geometry: PageGeometry; small: { top: number; bottom: number }[]; missing: string[] } | null;
+}): { classes: string[]; geometry: PageGeometry; small: { top: number; bottom: number }[]; missing: string[] } | null;
+export function withTemplate<T extends { classes: string[] }>(raw: T | null): (Omit<T, 'classes'> & { template: string }) | null;
 export function selfCheck(browser: unknown): Promise<string[]>;
 export function runSweep(
   dist: string,
