@@ -101,6 +101,7 @@ export const EXCLUSIONS: readonly { pattern: RegExp; reason: string }[] = [
   { pattern: /^docs\/schemas(\/|$)/, reason: 'symlink to schemas/' },
   { pattern: /^skills\/[^/]+\/reference\//, reason: 'synced copies' },
   { pattern: /^CLAUDE\.md$/, reason: 'agent instructions' },
+  { pattern: /^AGENTS\.md$/, reason: 'agent instructions (llms.txt links it on GitHub)' },
   { pattern: /^\.github\//, reason: 'repository plumbing' },
   { pattern: /^\.claude\//, reason: 'agent configuration and memory' },
   { pattern: /^docs\/(MEDIUM_ARTICLE[^/]*|PROJECT_ARTICLE|TWITTER_THREAD)\.md$/, reason: 'drafts' },
@@ -440,6 +441,11 @@ export function buildRoutes(): Route[] {
     prose('CHANGELOG.md', '/community/release-notes/', 'Release notes'),
     { source: null, url: '/community/citation/', title: 'Cite this standard', template: 'citation', data: 'CITATION.cff' },
     prose('spec/PRESS_KIT.md', '/community/press-kit/', 'Press kit'),
+    // The pages about the site itself, at the top level where people and
+    // crawlers look for them.
+    prose('docs/site/ABOUT.md', '/about/', 'About this site', 'This site'),
+    prose('docs/site/CONTACT.md', '/contact/', 'Contact', 'This site'),
+    prose('docs/site/PRIVACY.md', '/privacy/', 'Privacy', 'This site'),
   );
 
   for (const [source, description] of Object.entries(DESCRIPTIONS)) {

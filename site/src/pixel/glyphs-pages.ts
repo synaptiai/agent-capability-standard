@@ -137,6 +137,12 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   // A pair of quotation marks.
   'page:citation': ['.........', '.........', '###..###.', '###..###.', '###..###.', '..#....#.', '.#....#..', '.........', '.........'],
   // A microphone on a stand.
+  // The pages about the site itself. A bold lower-case i, for about.
+  'page:about': ['...##....', '...##....', '.........', '..###....', '...##....', '...##....', '...##....', '...##....', '..####...'],
+  // A speech bubble with a tail, for contact.
+  'page:contact': ['.#######.', '#.......#', '#.##.##.#', '#.......#', '#.####..#', '.#######.', '..#......', '.#.......', '.........'],
+  // A padlock, for privacy.
+  'page:privacy': ['...###...', '..#...#..', '..#...#..', '.#######.', '.#######.', '.###.###.', '.###.###.', '.#######.', '.#######.'],
   'page:press-kit': ['...###...', '..#####..', '..#####..', '..#####..', '.#.###.#.', '.#.....#.', '..#####..', '....#....', '..#####..'],
 
   // ---- RFCs
@@ -223,6 +229,9 @@ export const PAGE_GLYPHS: Readonly<Record<string, string>> = {
   '/community/release-notes/': 'page:release-notes',
   '/community/citation/': 'page:citation',
   '/community/press-kit/': 'page:press-kit',
+  '/about/': 'page:about',
+  '/contact/': 'page:contact',
+  '/privacy/': 'page:privacy',
 
   '/rfcs/proposals/oasf-safety-extensions/': 'page:oasf-safety-extensions',
 };
