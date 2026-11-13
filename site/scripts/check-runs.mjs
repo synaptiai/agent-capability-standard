@@ -21,6 +21,8 @@ import { serve, sitemapPaths } from './check-axe.mjs';
 import { isMain } from './is-main.mjs';
 import { templateOf } from './page-template.mjs';
 import {
+  CURRENT_STANDARD,
+  ENFORCED_URLS,
   EXEMPT_RUNS,
   exemptLabel,
   exemptRunsFor,
@@ -105,18 +107,29 @@ export function withTemplate(raw) {
   return { template: templateOf(classes) ?? '', ...rest };
 }
 
-/** One page's result: its runs at `width`, and the exempt entries whose heading is missing. */
-async function measurePage(page, url, width) {
+/**
+ * The current Standard's page, from the build's _redirects file: the build
+ * writes "/spec/ /spec/<current>/ 302" from the versions data
+ * (src/lib/redirects.ts). Throws when the file has no such line.
+ */
+export function standardUrlFrom(redirects) {
+  const m = /^\/spec\/\s+(\/spec\/[^\s]+\/)\s+30[12]\s*$/m.exec(redirects);
+  if (!m) throw new Error('check-runs: _redirects does not send /spec/ to the current Standard');
+  return m[1];
+}
+
+/** One page's result: its runs at `width`, and the exempt entries whose heading is missing; null when it has no page body. */
+async function measurePage(page, url, width, standardUrl) {
   await page.evaluate(() => document.fonts.ready);
   // The template is known only once the page has loaded, so send every entry
   // that names this URL or any template, each with a unique key, and keep
   // the ones that apply after.
   const entries = EXEMPT_RUNS.map((e, i) => ({ ...e, key: String(i), label: exemptLabel(e) })).filter(
-    (e) => e.page.startsWith('template:') || pageMatches(e.page, url, ''),
+    (e) => e.page.startsWith('template:') || pageMatches(e.page, url, '', standardUrl),
   );
   const raw = withTemplate(await page.evaluate(collectGeometry, { entries, selector: INFO_FIGURE_SELECTOR, min: MIN_DRAWING, vh: RUN_VIEWPORT.height }));
   if (!raw) return null;
-  const applies = new Set(entries.filter((e) => pageMatches(e.page, url, raw.template)).map((e) => e.key));
+  const applies = new Set(entries.filter((e) => pageMatches(e.page, url, raw.template, standardUrl)).map((e) => e.key));
   const geometry = { ...raw.geometry, exempt: raw.geometry.exempt.filter((e) => applies.has(e.key)) };
   return {
     template: raw.template,
@@ -162,6 +175,7 @@ export async function runSweep(dist, { only = null, concurrency = 6, log = () =>
   const unknown = (only ?? []).filter((p) => !all.includes(p));
   if (unknown.length > 0) throw new Error(`check-runs: not in the sitemap: ${unknown.join(', ')}`);
   const paths = only ?? all;
+  const standardUrl = standardUrlFrom(readFileSync(path.join(dist, '_redirects'), 'utf8'));
   const server = await serve(dist);
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch(process.env.ACS_CHROMIUM ? { executablePath: process.env.ACS_CHROMIUM } : {});
@@ -183,8 +197,9 @@ export async function runSweep(dist, { only = null, concurrency = 6, log = () =>
               failed.push(`${p} at ${width}px: HTTP ${res ? res.status() : 'no response'}`);
               continue;
             }
-            const r = await measurePage(page, p, width);
+            const r = await measurePage(page, p, width, standardUrl);
             if (r) pages.get(p)[width === NARROW ? 'narrow' : 'wide'] = r;
+            else failed.push(`${p} at ${width}px: no .doc-main__body to measure`);
           }
           await page.close();
         }),
@@ -196,25 +211,40 @@ export async function runSweep(dist, { only = null, concurrency = 6, log = () =>
     await browser.close();
     server.close();
   }
-  return { ...summarise(pages, only === null), failed };
+  const summary = summarise(pages, { complete: only === null, standardUrl });
+  assertMeasured(paths, summary.results, failed);
+  return { ...summary, failed };
+}
+
+/**
+ * Throws, listing the pages that failed, when the sweep measured no page or
+ * fewer pages than it was given: a page skipped in silence would pass.
+ */
+export function assertMeasured(paths, results, failed) {
+  if (results.length > 0 && results.length >= paths.length) return;
+  const what = results.length === 0 ? 'no page' : `${results.length} of ${paths.length} pages`;
+  throw new Error(`check-runs: measured ${what}${failed.length > 0 ? `:\n  ${failed.join('\n  ')}` : ''}`);
 }
 
 /**
  * Turn per-page measurements into the report. `complete` is true when every
- * page was measured, so an entry whose anchor no page has can be called stale.
+ * page was measured, so an entry whose anchor no page has can be called
+ * stale, and so can an enforced URL or an exempt run's page that is not
+ * among the pages. `standardUrl` is the current Standard's page, which
+ * CURRENT_STANDARD names.
  */
-export function summarise(pages, complete = true) {
+export function summarise(pages, { complete = true, standardUrl = null } = {}) {
   const limit = RUN_LIMIT_VH * RUN_VIEWPORT.height;
   const results = [];
   const missing = [];
   const found = new Set();
   for (const [url, r] of pages) {
     if (!r.wide) continue;
-    const enforced = isEnforced(url, r.wide.template);
+    const enforced = isEnforced(url, r.wide.template, standardUrl);
     const longest = longestRun(r.wide.runs);
     const narrow = r.narrow ? longestRun(r.narrow.runs) : null;
     const over = r.wide.runs.filter((run) => run.height > limit);
-    for (const e of exemptRunsFor(url, r.wide.template)) if (!r.wide.missing.includes(e)) found.add(e);
+    for (const e of exemptRunsFor(url, r.wide.template, EXEMPT_RUNS, standardUrl)) if (!r.wide.missing.includes(e)) found.add(e);
     // An entry for this page (not a whole template) must find its heading here.
     for (const e of r.wide.missing) if (!e.page.startsWith('template:')) missing.push(`${url}#${e.anchor}`);
     results.push({ url, template: r.wide.template, enforced, longest, narrow, over, small: r.wide.small ?? [], failing: enforced ? over.filter((run) => run.net > limit) : [] });
@@ -225,11 +255,22 @@ export function summarise(pages, complete = true) {
         (e) => `${e.page}#${e.anchor}`,
       )
     : [];
-  return { limit, target: RUN_TARGET_VH * RUN_VIEWPORT.height, results, missing: [...missing, ...stale] };
+  // An enforced URL, or an exempt run's page named by URL, that no measured page is.
+  const measured = results.map((r) => r.url);
+  const named = (page) => (page === CURRENT_STANDARD ? (standardUrl ?? `${CURRENT_STANDARD} (unresolved)`) : page);
+  const unmatched = complete
+    ? [
+        ...ENFORCED_URLS.filter((u) => !measured.some((url) => pageMatches(u, url, '', standardUrl))).map((u) => `enforced page ${named(u)}`),
+        ...[...new Set(EXEMPT_RUNS.filter((e) => !e.page.startsWith('template:')).map((e) => e.page))]
+          .filter((page) => !measured.some((url) => pageMatches(page, url, '', standardUrl)))
+          .map((page) => `exempt run page ${named(page)}`),
+      ]
+    : [];
+  return { limit, target: RUN_TARGET_VH * RUN_VIEWPORT.height, results, missing: [...missing, ...stale], unmatched };
 }
 
-/** Report lines: every run over the limit, then the missing anchors. */
-export function reportLines({ limit, results, missing }) {
+/** Report lines: every run over the limit, then the missing anchors, then the pages named but not measured. */
+export function reportLines({ limit, results, missing, unmatched = [] }) {
   const lines = [];
   const px = (n) => `${Math.round(n)}px`;
   for (const r of [...results].sort((a, b) => (b.longest?.net ?? 0) - (a.longest?.net ?? 0))) {
@@ -242,6 +283,7 @@ export function reportLines({ limit, results, missing }) {
     }
   }
   for (const m of missing) lines.push(`STALE  exempt run ${m}: no such heading`);
+  for (const u of unmatched) lines.push(`STALE  ${u}: not among the pages measured`);
   return lines;
 }
 
@@ -271,6 +313,10 @@ if (isMain(import.meta.url)) {
   if (summary.failed.length > 0) process.exit(1);
   if (summary.missing.length > 0) {
     console.error(`check-runs: ${summary.missing.length} exempt run(s) name a heading that does not exist`);
+    process.exit(1);
+  }
+  if (summary.unmatched.length > 0) {
+    console.error(`check-runs: ${summary.unmatched.length} enforced or exempt page(s) are not among the pages measured`);
     process.exit(1);
   }
   if (enforce && failing.length > 0) process.exit(1);

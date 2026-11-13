@@ -6,8 +6,10 @@
 // the scope list in 4.2.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { reportLines, summarise } from '../scripts/check-runs.mjs';
+import { assertMeasured, reportLines, standardUrlFrom, summarise } from '../scripts/check-runs.mjs';
+import { loadVersions } from '../src/data/versions';
 import {
+  CURRENT_STANDARD,
   EXEMPT_RUNS,
   exemptRunsFor,
   isEnforced,
@@ -83,7 +85,7 @@ describe('exempt runs and scope', () => {
 
   it('seeds every row of the spec 3.12 table', () => {
     const rows = (page: string) => EXEMPT_RUNS.filter((e) => e.page === page).map((e) => `${e.anchor}:${e.category}`);
-    expect(rows('/spec/1.1.0/')).toEqual([
+    expect(rows(CURRENT_STANDARD)).toEqual([
       '13-references:c',
       'appendix-a-layer-reference:c',
       'appendix-b-reserved-identifiers:c',
@@ -129,10 +131,15 @@ describe('exempt runs and scope', () => {
 
   it('enforces the generated templates and the four named pages, and only reports the rest', () => {
     for (const t of ['home', 'capability', 'layer', 'workflow', 'domain', 'edge-types', 'diagnostics']) expect(isEnforced('/x/', t), t).toBe(true);
-    for (const u of ['/spec/1.1.0/', '/start/overview/', '/workflows/patterns/', '/guides/claude-agent-sdk/']) expect(isEnforced(u, 'prose'), u).toBe(true);
+    // The current Standard's page, from the versions data: the newest spec/STANDARD-v*.md.
+    const current = `/spec/${loadVersions().standard.current.version}/`;
+    for (const u of [current, '/start/overview/', '/workflows/patterns/', '/guides/claude-agent-sdk/']) expect(isEnforced(u, 'prose', current), u).toBe(true);
     for (const u of ['/background/grounded-agency/', '/background/whitepaper/', '/guides/modality-handling/', '/rfcs/proposals/oasf-safety-extensions/', '/spec/1.0.0/']) {
-      expect(isEnforced(u, u === '/spec/1.0.0/' ? 'spec' : 'prose'), u).toBe(false);
+      expect(isEnforced(u, u === '/spec/1.0.0/' ? 'spec' : 'prose', current), u).toBe(false);
     }
+    // Which version is current is not typed here: a later Standard moves the enforced page with it.
+    expect(isEnforced('/spec/9.9.9/', 'spec', '/spec/9.9.9/')).toBe(true);
+    expect(isEnforced(current, 'spec', '/spec/9.9.9/')).toBe(false);
   });
 
   it('limits a run to two 900px viewports, measured 1440px wide', () => {
@@ -151,7 +158,7 @@ describe('the report', () => {
       ['/start/overview/', { wide: { template: 'prose', width: 1440, runs: [run(0, 3000, 1500, ['#quick-start (b)'])], missing: [missing] } }],
       ['/background/grounded-agency/', { wide: { template: 'prose', width: 1440, runs: [run(0, 5000)], missing: [] } }],
     ]);
-    const s = summarise(pages);
+    const s = summarise(pages, { complete: false });
     expect(s.results.map((r) => [r.url, r.over.length, r.failing.length])).toEqual([
       ['/capabilities/x/', 1, 1],
       ['/start/overview/', 1, 0],
@@ -168,5 +175,40 @@ describe('the report', () => {
   it('calls a template entry stale when no page of its template has the heading', () => {
     const pages = new Map([['/domains/a/', { wide: { template: 'domain', width: 1440, runs: [], missing: EXEMPT_RUNS.filter((e) => e.page === 'template:domain') } }]]);
     expect(summarise(pages).missing).toEqual(['template:domain#customization-guide', 'template:domain#integration-examples']);
+  });
+});
+
+describe('the sweep covers every page it names', () => {
+  it('reads the current Standard from the /spec/ redirect the build writes', () => {
+    expect(standardUrlFrom('/spec /spec/2.0.0/ 302\n/spec/ /spec/2.0.0/ 302\n')).toBe('/spec/2.0.0/');
+    expect(() => standardUrlFrom('/old /new 301\n')).toThrow(/does not send \/spec\//);
+  });
+
+  it('names every enforced URL and exempt-run page that is not among the pages measured', () => {
+    const run = { template: 'prose', width: 1440, runs: [], missing: [] };
+    // Every enforced URL and exempt-run page of visual spec 3.12 and 4.2 but
+    // /workflows/patterns/ and /community/citation/, with the Standard at 9.9.9.
+    const urls = ['/spec/9.9.9/', '/start/overview/', '/guides/claude-agent-sdk/', '/capabilities/rollback/', '/compliance/eu-ai-act/', '/rfcs/0001/'];
+    const pages = new Map(urls.map((u) => [u, { wide: run }]));
+    expect(summarise(pages, { standardUrl: '/spec/9.9.9/' }).unmatched).toEqual(['enforced page /workflows/patterns/', 'exempt run page /community/citation/']);
+    // Without the Standard's URL its entries match no page.
+    expect(summarise(pages).unmatched).toEqual([
+      `enforced page ${CURRENT_STANDARD} (unresolved)`,
+      'enforced page /workflows/patterns/',
+      `exempt run page ${CURRENT_STANDARD} (unresolved)`,
+      'exempt run page /community/citation/',
+    ]);
+    expect(reportLines(summarise(pages, { standardUrl: '/spec/9.9.9/' })).at(-1)).toBe('STALE  exempt run page /community/citation/: not among the pages measured');
+    // A sweep of chosen pages (--paths) cannot say what is missing.
+    expect(summarise(pages, { complete: false, standardUrl: '/spec/9.9.9/' }).unmatched).toEqual([]);
+  });
+
+  it('throws when it measured no page, or fewer than it was given, listing the failures', () => {
+    const r = (url: string) => ({ url }) as never;
+    expect(() => assertMeasured(['/a/', '/b/'], [], [])).toThrow('check-runs: measured no page');
+    expect(() => assertMeasured(['/a/', '/b/'], [r('/a/')], ['/b/ at 1440px: no .doc-main__body to measure'])).toThrow(
+      'check-runs: measured 1 of 2 pages:\n  /b/ at 1440px: no .doc-main__body to measure',
+    );
+    expect(() => assertMeasured(['/a/', '/b/'], [r('/a/'), r('/b/')], [])).not.toThrow();
   });
 });

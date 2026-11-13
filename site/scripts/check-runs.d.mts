@@ -22,7 +22,11 @@ export interface Summary {
     failing: Run[];
   }[];
   missing: string[];
+  /** Enforced URLs and exempt-run pages that are not among the pages measured (complete runs only). */
+  unmatched: string[];
 }
+export function standardUrlFrom(redirects: string): string;
+export function assertMeasured(paths: string[], results: Summary['results'], failed: string[]): void;
 export function collectGeometry(args: {
   entries: (ExemptRun & { key: string; label: string })[];
   selector: string;
@@ -35,5 +39,8 @@ export function runSweep(
   dist: string,
   options?: { only?: string[] | null; concurrency?: number; log?: (m: string) => void },
 ): Promise<Summary & { failed: string[] }>;
-export function summarise(pages: Map<string, { wide?: PageResult; narrow?: PageResult }>, complete?: boolean): Summary;
-export function reportLines(summary: Summary): string[];
+export function summarise(
+  pages: Map<string, { wide?: PageResult; narrow?: PageResult }>,
+  options?: { complete?: boolean; standardUrl?: string | null },
+): Summary;
+export function reportLines(summary: Omit<Summary, 'unmatched'> & { unmatched?: string[] }): string[];

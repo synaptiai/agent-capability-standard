@@ -25,6 +25,14 @@ export const INFO_FIGURE_SELECTOR = 'figure.fig, [data-info-figure]';
 export const MIN_DRAWING = { width: 96, height: 64 } as const;
 
 /**
+ * Stands for the current Standard's page in ENFORCED_URLS and in an exempt
+ * run's `page`. This file has no imports, so the sweep resolves it from the
+ * build: the /spec/ redirect, which the build writes from the versions data
+ * (src/lib/redirects.ts).
+ */
+export const CURRENT_STANDARD = 'standard:current';
+
+/**
  * Why a run may be long (visual spec 3.12): (a) narrative with nothing a
  * figure can be drawn from; (b) commands and code; (c) references.
  */
@@ -32,8 +40,9 @@ export type RunCategory = 'a' | 'b' | 'c';
 
 export interface ExemptRun {
   /**
-   * A page URL ('/spec/1.1.0/'), a URL pattern in which `*` stands for one
-   * path segment (the RFC pages are '/rfcs/' + '*' + '/'), or a whole template ('template:domain').
+   * A page URL ('/start/overview/'), a URL pattern in which `*` stands for one
+   * path segment (the RFC pages are '/rfcs/' + '*' + '/'), a whole template
+   * ('template:domain'), or CURRENT_STANDARD for the current Standard's page.
    */
   page: string;
   /**
@@ -57,10 +66,10 @@ export interface ExemptRun {
 
 /** The exempt runs of visual spec 3.12, by page and heading anchor. */
 export const EXEMPT_RUNS: readonly ExemptRun[] = [
-  { page: '/spec/1.1.0/', anchor: '13-references', category: 'c', run: '§13 References' },
-  { page: '/spec/1.1.0/', anchor: 'appendix-a-layer-reference', category: 'c', run: 'Appendix A' },
-  { page: '/spec/1.1.0/', anchor: 'appendix-b-reserved-identifiers', category: 'c', run: 'Appendix B' },
-  { page: '/spec/1.1.0/', anchor: 'appendix-c-changes-from-100', category: 'c', run: 'Appendix C' },
+  { page: CURRENT_STANDARD, anchor: '13-references', category: 'c', run: '§13 References' },
+  { page: CURRENT_STANDARD, anchor: 'appendix-a-layer-reference', category: 'c', run: 'Appendix A' },
+  { page: CURRENT_STANDARD, anchor: 'appendix-b-reserved-identifiers', category: 'c', run: 'Appendix B' },
+  { page: CURRENT_STANDARD, anchor: 'appendix-c-changes-from-100', category: 'c', run: 'Appendix C' },
   { page: '/start/overview/', anchor: 'why-this-matters', category: 'a', run: 'Why This Matters' },
   { page: '/start/overview/', anchor: 'quick-start', category: 'b', run: 'Quick Start' },
   { page: '/start/overview/', anchor: 'claude-agent-sdk-integration', category: 'b', run: 'Claude Agent SDK Integration' },
@@ -129,15 +138,19 @@ export const ENFORCED_TEMPLATES: readonly string[] = [
   'edge-types',
   'diagnostics',
 ];
-export const ENFORCED_URLS: readonly string[] = ['/spec/1.1.0/', '/start/overview/', '/workflows/patterns/', '/guides/claude-agent-sdk/'];
+export const ENFORCED_URLS: readonly string[] = [CURRENT_STANDARD, '/start/overview/', '/workflows/patterns/', '/guides/claude-agent-sdk/'];
 
-/** Whether a page is in the enforced scope. */
-export function isEnforced(url: string, template: string): boolean {
-  return ENFORCED_URLS.includes(url) || ENFORCED_TEMPLATES.includes(template);
+/**
+ * Whether a page is in the enforced scope. `standardUrl` is the current
+ * Standard's page, which CURRENT_STANDARD names (null: none is known).
+ */
+export function isEnforced(url: string, template: string, standardUrl: string | null = null): boolean {
+  return ENFORCED_URLS.some((u) => pageMatches(u, url, template, standardUrl)) || ENFORCED_TEMPLATES.includes(template);
 }
 
-/** Whether an entry's `page` names this page, by URL, URL pattern or template. */
-export function pageMatches(page: string, url: string, template: string): boolean {
+/** Whether an entry's `page` names this page, by URL, URL pattern, template or CURRENT_STANDARD. */
+export function pageMatches(page: string, url: string, template: string, standardUrl: string | null = null): boolean {
+  if (page === CURRENT_STANDARD) return standardUrl !== null && url === standardUrl;
   if (page.startsWith('template:')) return page === `template:${template}`;
   if (!page.includes('*')) return page === url;
   const escape = (part: string) => part.replace(/[.+?^$()|[\]\\{}]/g, '\\$&');
@@ -146,8 +159,8 @@ export function pageMatches(page: string, url: string, template: string): boolea
 }
 
 /** The exempt runs that apply to a page, by its URL and its template. */
-export function exemptRunsFor(url: string, template: string, runs: readonly ExemptRun[] = EXEMPT_RUNS): ExemptRun[] {
-  return runs.filter((r) => pageMatches(r.page, url, template));
+export function exemptRunsFor(url: string, template: string, runs: readonly ExemptRun[] = EXEMPT_RUNS, standardUrl: string | null = null): ExemptRun[] {
+  return runs.filter((r) => pageMatches(r.page, url, template, standardUrl));
 }
 
 /** The label a run report gives an exempt section: its anchor and category. */

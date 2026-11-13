@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadCounts } from '../src/data/counts';
+import { loadVersions } from '../src/data/versions';
 import { RESERVED_WORKFLOW_SLUGS } from '../src/data/workflows';
 import { checkDistDir } from '../scripts/check-dist.mjs';
 import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
@@ -852,7 +853,7 @@ describe('exempt runs', () => {
   it('name headings that exist on their pages', () => {
     const problems: string[] = [];
     for (const e of EXEMPT_RUNS) {
-      const pages = ROUTES.filter((r) => pageMatches(e.page, r.url, r.template));
+      const pages = ROUTES.filter((r) => pageMatches(e.page, r.url, r.template, `/spec/${loadVersions().standard.current.version}/`));
       if (pages.length === 0) {
         problems.push(`${e.page}: no page`);
         continue;
