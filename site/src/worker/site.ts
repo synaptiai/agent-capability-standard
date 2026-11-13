@@ -15,7 +15,7 @@
 import { namesHtml, prefersMarkdown } from './accept';
 import type { Env, WorkerConfig } from './env';
 import { MCP_PATH, SERVER_CARD_TYPE, serverCard } from './identity';
-import { CORS_HEADERS, handleMcp } from './mcp';
+import { CORS_HEADERS, handleMcp, mcpInternalError } from './mcp';
 
 /**
  * User agents that get the Markdown copy of a page even when they ask for
@@ -171,7 +171,15 @@ export function createHandler(cfg: WorkerConfig) {
 async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (path === MCP_PATH) return handleMcp(request, env, cfg);
+  if (path === MCP_PATH) {
+    // The MCP endpoint is not a file: if handling it fails, the client gets a
+    // JSON-RPC error, never the static 404 that failing open would give.
+    try {
+      return await handleMcp(request, env, cfg);
+    } catch {
+      return mcpInternalError();
+    }
+  }
   if (path === `${MCP_PATH}/server-card` || path === '/.well-known/mcp/server-card.json') return serverCardResponse(request, url, cfg);
   if (request.method !== 'GET' && request.method !== 'HEAD') return env.ASSETS.fetch(request);
 

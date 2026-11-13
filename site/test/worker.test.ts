@@ -334,6 +334,61 @@ async function rpc(method: string, params?: Record<string, unknown>, opts: { hea
 
 const callTool = (name: string, args: unknown, modern = false) => rpc('tools/call', { name, arguments: args }, { modern });
 
+describe('MCP server: request bodies', () => {
+  const LIMIT = 64 * 1024; // the 64 KiB limit the server states in its 413 message
+  const HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+
+  /** A chunked body with no Content-Length: `chunks` chunks of `size` bytes, counting what the server pulls. */
+  function streamed(chunks: number, size: number) {
+    let pulled = 0;
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (sent === chunks) return c.close();
+        sent += 1;
+        pulled += size;
+        c.enqueue(new Uint8Array(size).fill(0x20));
+      },
+    });
+    return { stream, pulled: () => pulled };
+  }
+
+  it('stops reading a chunked body without Content-Length once it passes 64 KiB, and answers 413', async () => {
+    const body = streamed(128, 16 * 1024); // 2 MiB in all
+    const env = fakeEnv();
+    const res = await handle(new Request(`${BASE}/mcp`, { method: 'POST', headers: HEADERS, body: body.stream, duplex: 'half' } as RequestInit), env);
+    expect(res.status).toBe(413);
+    expect(((await res.json()) as any).error.code).toBe(-32600);
+    expect(body.pulled()).toBeLessThanOrEqual(LIMIT + 2 * 16 * 1024);
+  });
+
+  it('counts bytes, not characters', async () => {
+    // 40,000 two-byte characters: 80,000 bytes, under 64 Ki characters.
+    const text = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping', params: { pad: '\u00e9'.repeat(40_000) } });
+    expect(text.length).toBeLessThan(LIMIT);
+    expect(new TextEncoder().encode(text).length).toBeGreaterThan(LIMIT);
+    const enc = new TextEncoder().encode(text);
+    const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(enc); c.close(); } });
+    const res = await handle(new Request(`${BASE}/mcp`, { method: 'POST', headers: HEADERS, body: stream, duplex: 'half' } as RequestInit), fakeEnv());
+    expect(res.status).toBe(413);
+  });
+
+  it('answers a body that fails to read with a JSON-RPC internal error, not a static file', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.error(new Error('connection reset'));
+      },
+    });
+    const env = fakeEnv();
+    const res = await handle(new Request(`${BASE}/mcp`, { method: 'POST', headers: HEADERS, body: stream, duplex: 'half' } as RequestInit), env);
+    expect(res.status).toBe(500);
+    expect(res.headers.get('Content-Type')).toBe('application/json');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(await res.json()).toEqual({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Internal error' } });
+    expect(env.calls).toEqual([]);
+  });
+});
+
 describe('MCP server: protocol', () => {
   it('answers initialize with the server name, the plugin version and instructions that start with search_standard', async () => {
     const { res, body } = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });

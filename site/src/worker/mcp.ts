@@ -210,6 +210,40 @@ function checkModern(request: Request, msg: Json, params: Json, metaVersion: unk
   }
 }
 
+/**
+ * The request body as text, read a chunk at a time; null as soon as it passes
+ * `max` bytes, without reading the rest (a chunked body has no
+ * Content-Length to check first).
+ */
+async function readBody(request: Request, max: number): Promise<string | null> {
+  if (request.body === null) return '';
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    all.set(c, at);
+    at += c.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+
+/** The answer when handling a request to the MCP endpoint throws: a JSON-RPC internal error. */
+export function mcpInternalError(): Response {
+  return rpcError(null, new RpcError(-32603, 'Internal error', 500));
+}
+
 /** Handle a request to the MCP endpoint. */
 export async function handleMcp(request: Request, env: Env, cfg: WorkerConfig): Promise<Response> {
   const origin = request.headers.get('Origin');
@@ -226,10 +260,11 @@ export async function handleMcp(request: Request, env: Env, cfg: WorkerConfig): 
   if (!accepts(accept, 'application/json')) {
     return rpcError(null, new RpcError(-32600, 'Not Acceptable: this server answers with application/json; send Accept: application/json, text/event-stream', 406));
   }
+  const tooLarge = () => rpcError(null, new RpcError(-32600, `Request body larger than ${MAX_BODY} bytes`, 413));
   const length = Number(request.headers.get('Content-Length') ?? '0');
-  if (length > MAX_BODY) return rpcError(null, new RpcError(-32600, `Request body larger than ${MAX_BODY} bytes`, 413));
-  const text = await request.text();
-  if (text.length > MAX_BODY) return rpcError(null, new RpcError(-32600, `Request body larger than ${MAX_BODY} bytes`, 413));
+  if (length > MAX_BODY) return tooLarge();
+  const text = await readBody(request, MAX_BODY);
+  if (text === null) return tooLarge();
 
   let body: unknown;
   try {
