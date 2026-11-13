@@ -10,6 +10,7 @@
 //   issues with the number of entries citing each, and the codes as tiles
 //   linked to the diagnostics page. Every long section shows its first
 //   SHOWN_ENTRIES entries and folds the rest; the Markdown copy keeps them all.
+import { codeLines } from './md-sections';
 import { plural } from './words';
 
 /** A kind section with this many entries or more gets its own figure and folds. */
@@ -38,8 +39,24 @@ export interface Release {
   kinds: KindSection[];
 }
 
-const RELEASE = /^## \[([^\]]+)\](?:\s+—\s+(\d{4}-\d{2}-\d{2}))?\s*$/;
+// Keep a Changelog writes "## [1.0.0] - 2017-06-20"; this changelog uses an
+// em dash. Any dash is accepted, as scripts/release_notes.py accepts any
+// "## [version]" heading.
+const RELEASE = /^## \[([^\]]+)\](?:\s+[—–-]\s+(\d{4}-\d{2}-\d{2}))?\s*$/;
 const KIND = /^### (.+?)\s*$/;
+const BULLET = /^[-*+] /;
+
+/**
+ * A release heading's version and date, or null when `line` is not a
+ * "## [" heading. Throws on a "## [" heading in another form, so a section
+ * is never dropped from the figures without notice.
+ */
+export function releaseHeading(line: string): { version: string; date: string | null } | null {
+  if (!line.startsWith('## [')) return null;
+  const r = RELEASE.exec(line);
+  if (!r) throw new Error(`CHANGELOG.md: "${line}" is not "## [version]" or "## [version] - YYYY-MM-DD"`);
+  return { version: r[1]!, date: r[2] ?? null };
+}
 const CODE = /\b[VWFSRB]\d{3}\b/g;
 
 /** The issue numbers an entry cites as "#N", in first-seen order. */
@@ -65,22 +82,23 @@ export function parseReleases(changelog: string): Release[] {
     }
     entry = null;
   };
-  for (const line of changelog.split('\n')) {
-    const r = RELEASE.exec(line);
+  const code = codeLines(changelog);
+  for (const [i, line] of changelog.split('\n').entries()) {
+    const r = code[i] ? null : releaseHeading(line);
     if (r) {
       closeEntry();
-      rel = { version: r[1]!, date: r[2] ?? null, heading: line.slice(3).trim(), kinds: [] };
+      rel = { version: r.version, date: r.date, heading: line.slice(3).trim(), kinds: [] };
       out.push(rel);
       kind = null;
       continue;
     }
-    if (/^## /.test(line) || /^# /.test(line)) {
+    if (!code[i] && (/^## /.test(line) || /^# /.test(line))) {
       closeEntry();
       rel = null;
       kind = null;
       continue;
     }
-    const k = KIND.exec(line);
+    const k = code[i] ? null : KIND.exec(line);
     if (k && rel) {
       closeEntry();
       kind = { kind: k[1]!, entries: [] };
@@ -88,7 +106,7 @@ export function parseReleases(changelog: string): Release[] {
       continue;
     }
     if (!kind) continue;
-    if (/^- /.test(line)) {
+    if (BULLET.test(line)) {
       closeEntry();
       entry = [line.slice(2)];
     } else if (entry && /^\s+\S/.test(line)) {

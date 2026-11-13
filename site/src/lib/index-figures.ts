@@ -1,6 +1,8 @@
 // Data and captions for the figures of the section index pages, the RFC
 // index and the schemas page (visual spec 3.11). The pages and their Markdown
 // copies both read these, so the words agree.
+import { codeLines } from './md-sections';
+import { releaseHeading } from './release-figures';
 import { readRepoFile, trackedUnder } from './repo';
 import type { Route } from './routes';
 import type { RfcRow } from './rfcs';
@@ -278,7 +280,7 @@ export interface BarList {
 }
 
 /**
- * The releases in CHANGELOG.md, newest first: each "## [vX.Y.Z] — date"
+ * The releases in CHANGELOG.md, newest first: each "## [vX.Y.Z] — date" (any dash)
  * section with the number of change items (list lines) under it.
  */
 export function releaseBars(changelog: string): BarList {
@@ -286,19 +288,20 @@ export function releaseBars(changelog: string): BarList {
   const rows: { label: string; value: number; words: string }[] = [];
   let cur: { label: string; value: number; date: string } | null = null;
   const flush = () => cur && rows.push({ label: cur.label, value: cur.value, words: `${plural(cur.value, 'change', 'changes')}, ${cur.date}` });
-  for (const l of lines) {
-    const h = /^## \[(v\d+\.\d+\.\d+[^\]]*)\]\s+—\s+(\d{4}-\d{2}-\d{2})/.exec(l);
-    if (h) {
+  const code = codeLines(changelog);
+  for (const [i, l] of lines.entries()) {
+    const h = code[i] ? null : releaseHeading(l);
+    if (h && /^v\d+\.\d+\.\d+/.test(h.version) && h.date) {
       flush();
-      cur = { label: h[1]!, value: 0, date: h[2]! };
+      cur = { label: h.version, value: 0, date: h.date };
       continue;
     }
-    if (/^## /.test(l)) {
+    if (!code[i] && /^## /.test(l)) {
       flush();
       cur = null;
       continue;
     }
-    if (cur && /^\s*[-*] /.test(l)) cur.value += 1;
+    if (cur && !code[i] && /^\s*[-*+] /.test(l)) cur.value += 1;
   }
   flush();
   if (rows.length === 0) throw new Error('CHANGELOG.md: no "## [vX.Y.Z] — date" section');

@@ -1,6 +1,13 @@
 // The release notes figures (issue #125). Expected values are counted by hand
 // from the fixture below, never taken from the functions under test.
+import type { Root } from 'hast';
+import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import remarkRehype from 'remark-rehype';
+import { unified } from 'unified';
 import { describe, expect, it } from 'vitest';
+import { releaseBars } from '../src/lib/index-figures';
+import { drawReleaseFigures } from '../src/plugins/release-figures-hast';
 import {
   entryCodes,
   entryIssues,
@@ -9,6 +16,7 @@ import {
   kindsInUse,
   LONG_SECTION,
   parseReleases,
+  releaseHeading,
   sectionCodes,
   sectionHasFigure,
 } from '../src/lib/release-figures';
@@ -87,5 +95,56 @@ describe('long sections', () => {
     expect(sectionHasFigure(added, new Set())).toBe(true);
     const plain = { kind: 'Added', entries: Array.from({ length: LONG_SECTION }, () => ({ text: 'x', issues: [], codes: [] })) };
     expect(sectionHasFigure(plain, new Set())).toBe(false);
+  });
+});
+
+describe('release headings and bullets as Keep a Changelog writes them', () => {
+  // Keep a Changelog 1.1.0 writes "## [1.1.0] - 2019-02-15" with "- " bullets;
+  // CommonMark also allows "* " and "+ ".
+  const text = ['# Changelog', '', '## [v3.0.0] - 2027-02-01', '', '### Added', '* star', '+ plus', '- dash', '', '## [v2.0.0] – 2027-01-01', '', '### Fixed', '- one', ''].join('\n');
+
+  it('reads a hyphen or an en dash between version and date', () => {
+    expect(parseReleases(text).map((r) => [r.version, r.date])).toEqual([
+      ['v3.0.0', '2027-02-01'],
+      ['v2.0.0', '2027-01-01'],
+    ]);
+    expect(releaseBars(text).rows.map((r) => [r.label, r.value])).toEqual([
+      ['v3.0.0', 3],
+      ['v2.0.0', 1],
+    ]);
+  });
+
+  it('counts "* ", "+ " and "- " entries', () => {
+    expect(parseReleases(text)[0]!.kinds[0]!.entries.map((e) => e.text)).toEqual(['star', 'plus', 'dash']);
+  });
+
+  it('throws on a "## [" heading in another form instead of dropping the section', () => {
+    expect(() => releaseHeading('## [v3.0.0] 2027-02-01')).toThrow(/is not "## \[version\]"/);
+    expect(() => parseReleases(text.replace('## [v2.0.0] – 2027-01-01', '## [v2.0.0] (2027-01-01)'))).toThrow(/v2\.0\.0\] \(2027/);
+    expect(() => releaseBars(text.replace('## [v2.0.0] – 2027-01-01', '## [v2.0.0] (2027-01-01)'))).toThrow(/v2\.0\.0\] \(2027/);
+  });
+});
+
+describe('the rendered entries of every kind section match the parser', () => {
+  const draw = (md: string) => {
+    const p = unified().use(remarkParse).use(remarkGfm).use(remarkRehype);
+    const tree = p.runSync(p.parse(md)) as Root;
+    drawReleaseFigures(tree, md, (b) => b);
+    return tree;
+  };
+
+  it('passes when every section renders the entries the parser counts', () => {
+    expect(() => draw(FIXTURE)).not.toThrow();
+  });
+
+  it('throws for a short section whose rendered list differs from the parsed entries', () => {
+    // An ordered list renders one item the parser does not count as an entry.
+    const md = ['## [v1.0.0] — 2026-01-24', '', '### Removed', '- removed 0', '', '1. numbered', ''].join('\n');
+    expect(() => draw(md)).toThrow(/v1\.0\.0 Removed renders 2 entries, the parser found 1/);
+  });
+
+  it('matches two sections of the same kind in one release by order', () => {
+    const md = ['## [v1.0.0] — 2026-01-24', '', '### Fixed', '- a', '- b', '', '### Fixed', '- c', ''].join('\n');
+    expect(() => draw(md)).not.toThrow();
   });
 });

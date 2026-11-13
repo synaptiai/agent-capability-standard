@@ -104,6 +104,11 @@ function sectionFigure(r: Release, k: Release['kinds'][number], known: ReadonlyS
   return frame(id, sectionTitle(r, k), sectionCaption(r, k, known), 'release-section', parts);
 }
 
+/** Throws when the parser found kind sections of a release that the page did not render. */
+function unrendered(rel: Release | undefined, kinds: Release['kinds']): void {
+  if (rel && kinds.length > 0) throw new Error(`${RELEASE_NOTES_SOURCE}: ${rel.version} renders no heading for ${kinds.map((k) => `"### ${k.kind}"`).join(', ')}`);
+}
+
 /**
  * Draw the timeline before the first release heading, and under each long
  * kind section its figure (when it has one), then fold its entries after the
@@ -120,24 +125,40 @@ export function drawReleaseFigures(tree: Root, changelog: string, uid: (base: st
     if (r && typeof k.properties?.id === 'string') ids.set(r.version, k.properties.id);
   }
   let rel: Release | undefined;
+  // The kind sections of the current release in order, matched to its H3s by
+  // position, so two sections of the same kind each meet their own heading.
+  let kinds: Release['kinds'] = [];
   for (let i = 0; i < kids.length; i++) {
     const node = kids[i]!;
     if (!isEl(node)) continue;
     if (node.tagName === 'h2') {
+      unrendered(rel, kinds);
       rel = releaseOf(node, releases);
+      kinds = rel ? [...rel.kinds] : [];
       continue;
     }
     if (node.tagName !== 'h3' || !rel) continue;
     const name = hastText(node).trim();
-    const section = rel.kinds.find((k) => k.kind === name);
-    if (!section || section.entries.length < LONG_SECTION) continue;
+    const section = kinds.shift();
+    if (!section || section.kind !== name) {
+      throw new Error(`${RELEASE_NOTES_SOURCE}: ${rel.version} renders "### ${name}" where the parser found ${section ? `"### ${section.kind}"` : 'no more kind sections'}`);
+    }
+    // Every list between this H3 and the next heading: its items are the entries.
+    const lists: number[] = [];
+    for (let j = i + 1; j < kids.length; j++) {
+      const k = kids[j]!;
+      if (isEl(k) && /^h[1-6]$/.test(k.tagName)) break;
+      if (isEl(k, 'ul') || isEl(k, 'ol')) lists.push(j);
+    }
+    const rendered = lists.reduce((n, j) => n + (kids[j] as Element).children.filter((c) => isEl(c, 'li')).length, 0);
+    if (rendered !== section.entries.length) {
+      throw new Error(`${RELEASE_NOTES_SOURCE}: ${rel.version} ${name} renders ${rendered} entries, the parser found ${section.entries.length}`);
+    }
+    if (section.entries.length < LONG_SECTION) continue;
     const j = kids.findIndex((k, n) => n > i && isEl(k));
     const list = kids[j];
-    if (!isEl(list, 'ul')) throw new Error(`${RELEASE_NOTES_SOURCE}: "### ${name}" under ${rel.version} is not followed by a list`);
+    if (lists.length !== 1 || lists[0] !== j || !isEl(list, 'ul')) throw new Error(`${RELEASE_NOTES_SOURCE}: "### ${name}" under ${rel.version} is not followed by one list`);
     const items = list.children.filter((c): c is Element => isEl(c, 'li'));
-    if (items.length !== section.entries.length) {
-      throw new Error(`${RELEASE_NOTES_SOURCE}: ${rel.version} ${name} renders ${items.length} entries, the parser found ${section.entries.length}`);
-    }
     const rest = items.slice(SHOWN_ENTRIES);
     list.children = items.slice(0, SHOWN_ENTRIES);
     const more = el('details', { className: ['release-more'] }, [
@@ -149,6 +170,7 @@ export function drawReleaseFigures(tree: Root, changelog: string, uid: (base: st
       kids.splice(i + 1, 0, sectionFigure(rel, section, known, uid(`ref-fig-release-${rel.version}-${name}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-'))));
     }
   }
+  unrendered(rel, kinds);
   const first = kids.findIndex((k) => isEl(k, 'h2'));
   kids.splice(first < 0 ? kids.length : first, 0, timelineFigure(releases, ids, uid('ref-fig-releases')));
 }
