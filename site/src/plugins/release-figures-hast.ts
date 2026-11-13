@@ -42,10 +42,14 @@ function frame(id: string, title: string, caption: string, kind: string, drawing
   ]);
 }
 
-/** The release a rendered H2 heads, by its "[version]" text. */
+/**
+ * The release a rendered H2 heads: by its "[version]" text, or by its
+ * opening version when a link definition ("[v2.0.0]: https://…", as Keep a
+ * Changelog writes) renders the brackets as a link.
+ */
 function releaseOf(h2: Element, releases: Release[]): Release | undefined {
-  const t = hastText(h2);
-  return releases.find((r) => t.includes(`[${r.version}]`));
+  const t = hastText(h2).trim();
+  return releases.find((r) => t.includes(`[${r.version}]`) || t === r.version || t.startsWith(`${r.version} `));
 }
 
 function timelineFigure(releases: Release[], ids: Map<string, string>, id: string): Element {
@@ -171,6 +175,9 @@ export function drawReleaseFigures(tree: Root, changelog: string, uid: (base: st
     }
   }
   unrendered(rel, kinds);
+  // A release whose heading the page does not render as one would skip every check above.
+  const headed = releases.filter((r) => !kids.some((k) => isEl(k, 'h2') && releaseOf(k, releases) === r));
+  if (headed.length > 0) throw new Error(`${RELEASE_NOTES_SOURCE}: no rendered heading for ${headed.map((r) => r.version).join(', ')}`);
   const first = kids.findIndex((k) => isEl(k, 'h2'));
   kids.splice(first < 0 ? kids.length : first, 0, timelineFigure(releases, ids, uid('ref-fig-releases')));
 }

@@ -143,6 +143,18 @@ describe('the rendered entries of every kind section match the parser', () => {
     expect(() => draw(md)).toThrow(/v1\.0\.0 Removed renders 2 entries, the parser found 1/);
   });
 
+  it('finds a release whose heading a link definition renders as a link, and checks it', () => {
+    // Keep a Changelog closes the file with "[v1.0.0]: https://…" link definitions.
+    const md = ['## [v1.0.0] - 2026-01-24', '', '### Removed', '- removed 0', '', '1. numbered', '', '[v1.0.0]: https://example.com/v1.0.0', ''].join('\n');
+    expect(() => draw(md)).toThrow(/v1\.0\.0 Removed renders 2 entries, the parser found 1/);
+  });
+
+  it('throws when a parsed release has no rendered heading', () => {
+    const p = unified().use(remarkParse).use(remarkGfm).use(remarkRehype);
+    const tree = p.runSync(p.parse('## Other\n\ntext\n')) as Root;
+    expect(() => drawReleaseFigures(tree, '## [v1.0.0] - 2026-01-24\n\n### Fixed\n- a\n', (b) => b)).toThrow('CHANGELOG.md: no rendered heading for v1.0.0');
+  });
+
   it('matches two sections of the same kind in one release by order', () => {
     const md = ['## [v1.0.0] — 2026-01-24', '', '### Fixed', '- a', '- b', '', '### Fixed', '- c', ''].join('\n');
     expect(() => draw(md)).not.toThrow();
