@@ -1,0 +1,73 @@
+---
+// F-D1, trust weights as a dot list (visual spec 3.5): one row per source,
+// highest first, each a name, a square mark at its weight on a labelled
+// scale, and the value to two decimals. The scale runs from the profile's
+// lowest weight to its highest, rounded out to 0.05 (trustAxis), with a tick
+// every 0.05 and its ends and middle labelled: weights that sit close
+// together (healthcare: 0.72 to 0.98) are spread out, and since a position
+// is read against the labels rather than a bar's length from zero, a scale
+// that does not start at 0 does not mislead. One series, so one hue
+// (--indicator). The rows are a real table; the scale sits in the name cell
+// and is aria-hidden, so the table reads as source and weight. When the
+// figure is narrow the scale drops under the name (the meter-list rule).
+//
+// Props:
+// - profile: the profile mapping, required.
+// - n: the figure number on the page.
+// - id: the figure id (a ref- id).
+import Figure from './Figure.astro';
+import TableWrap from '../TableWrap.astro';
+import { trustAxis, trustCaption } from '../../lib/domain-figures';
+import type { DomainProfile } from '../../data/profiles';
+import { sortedTrustWeights } from '../../lib/views';
+
+interface Props {
+  profile: Record<string, unknown>;
+  n: number;
+  id: string;
+}
+
+const { profile, n, id } = Astro.props;
+const weights = sortedTrustWeights(profile);
+const axis = trustAxis([{ profile } as unknown as DomainProfile]);
+const pct = (v: number) => `${(((v - axis.min) / (axis.max - axis.min)) * 100).toFixed(3)}%`;
+const steps = Math.round((axis.max - axis.min) / 0.05);
+const ticks = Array.from({ length: steps + 1 }, (_, i) => axis.min + i * 0.05);
+const mid = axis.min + Math.round(steps / 2) * 0.05;
+---
+<Figure id={id} n={n} title="Trust weight per source, highest first" caption={trustCaption(profile)} kind="trust-weights">
+  <TableWrap label="Trust weight per source, highest first">
+    <table class="meter-table">
+      <caption class="fig-sr">Trust weight per source, highest first</caption>
+      <thead>
+        <tr>
+          <th scope="col">
+            <span class="meter-row">
+              <span>Source</span>
+              <span class="dot-scale" aria-hidden="true">
+                {[axis.min, mid, axis.max].map((v, i) => <span class:list={['dot-scale__label', `dot-scale__label--${['start', 'mid', 'end'][i]}`]} style={`left: ${pct(v)}`}>{v.toFixed(2)}</span>)}
+              </span>
+            </span>
+          </th>
+          <th scope="col">Weight</th>
+        </tr>
+      </thead>
+      <tbody>
+        {weights.map((w) => (
+          <tr data-source={w.source}>
+            <th scope="row">
+              <span class="meter-row">
+                <code class="meter-row__name">{w.source}</code>
+                <span class="dot-track" aria-hidden="true">
+                  {ticks.map((t) => <span class="dot-track__tick" style={`left: ${pct(t)}`}></span>)}
+                  <span class="dot-track__mark" style={`left: ${pct(w.weight)}`}></span>
+                </span>
+              </span>
+            </th>
+            <td class="meter-table__value">{w.weight.toFixed(2)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </TableWrap>
+</Figure>

@@ -1,0 +1,113 @@
+---
+// F-WI2, the workflow family map of the workflows index (visual spec 3.4).
+// `part="reference"` draws the reference workflows: each workflow that runs
+// others as a parent tile with a nested connector to each child, labelled by
+// the parent's steps that run it, then the workflows that run on their own.
+// `part="domain"` draws the domain workflows grouped by domain, under the
+// domain glyph, with the workflows a profile lists that no catalog defines
+// yet as dashed, unlinked tiles with the status:proposed glyph and the word
+// "Proposed" (the caption says no catalog defines them). Each tile
+// shows the step count and the risk pips and word. All data comes from
+// lib/workflow-index.ts, which the Markdown copy also calls.
+//
+// Props:
+// - part: 'reference' | 'domain', required.
+// - n: number, required. The figure's number on the page.
+// - id: string, required. A `ref-` id.
+import '../../styles/figures-workflow-index.css';
+import { domainGlyph } from '../../lib/domain-figures';
+import { domainHref, workflowHref } from '../../lib/generated';
+import { domainMap, idPieces, referenceMap } from '../../lib/workflow-index';
+import { stepList } from '../../lib/workflow-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import RiskBadge from '../RiskBadge.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  part: 'reference' | 'domain';
+  n: number;
+  id: string;
+}
+
+const { part, n, id } = Astro.props;
+const ref = part === 'reference' ? referenceMap() : null;
+const dom = part === 'domain' ? domainMap() : null;
+const title = ref?.title ?? dom!.title;
+const caption = ref?.caption ?? dom!.caption;
+---
+<Figure id={id} n={n} title={title} caption={caption} kind={`workflow-family-${part}`} class="fam">
+  {ref && (
+    <div class="fam__body">
+      {ref.families.length > 0 && (
+        <section class="fam__group" aria-labelledby={`${id}-runs`}>
+          <p class="fam__label" id={`${id}-runs`}><PixelGlyph name="flow:invoke" /> Runs other workflows</p>
+          {ref.families.map((f) => (
+            <div class="fam-family" data-parent={f.parent.id}>
+              <a class="fam-tile" href={workflowHref(f.parent.id)} data-workflow={f.parent.id}>
+                <code class="fam-tile__id">{idPieces(f.parent.id).map((p, i) => <>{i > 0 && <wbr />}{p}</>)}</code>
+                <span class="fam-tile__facts"><span>{f.parent.steps.length} {f.parent.steps.length === 1 ? 'step' : 'steps'}</span><RiskBadge risk={f.parent.risk} /></span>
+              </a>
+              <ul class="fam-family__children" aria-label={`Workflows ${f.parent.id} runs`}>
+                {f.children.map((c) => (
+                  <li class="fam-family__child">
+                    <span class="fam-family__edge"><PixelGlyph name="flow:invoke" /> {stepList(c.steps)}</span>
+                    <a class="fam-tile" href={workflowHref(c.workflow.id)} data-workflow={c.workflow.id}>
+                      <code class="fam-tile__id">{idPieces(c.workflow.id).map((p, i) => <>{i > 0 && <wbr />}{p}</>)}</code>
+                      <span class="fam-tile__facts"><span>{c.workflow.steps.length} {c.workflow.steps.length === 1 ? 'step' : 'steps'}</span><RiskBadge risk={c.workflow.risk} /></span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </section>
+      )}
+      {ref.standalone.length > 0 && (
+        <section class="fam__group" aria-labelledby={`${id}-own`}>
+          <p class="fam__label" id={`${id}-own`}>Run on their own</p>
+          <ul class="fam__tiles">
+            {ref.standalone.map((wf) => (
+              <li>
+                <a class="fam-tile" href={workflowHref(wf.id)} data-workflow={wf.id}>
+                  <code class="fam-tile__id">{idPieces(wf.id).map((p, i) => <>{i > 0 && <wbr />}{p}</>)}</code>
+                  <span class="fam-tile__facts"><span>{wf.steps.length} {wf.steps.length === 1 ? 'step' : 'steps'}</span><RiskBadge risk={wf.risk} /></span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  )}
+  {dom && (
+    <div class="fam__body fam__body--domains">
+      {dom.groups.map((g) => (
+        <section class="fam__group" aria-labelledby={`${id}-${g.domain}`}>
+          <p class="fam__label" id={`${id}-${g.domain}`}>
+            <PixelGlyph name={domainGlyph(g.domain)} scale={2} />
+            <a href={domainHref(g.domain)}>{g.domain}</a>
+            <span class="fam__count">{g.defined.length > 0 ? `${g.defined.length} in a catalog` : `${g.proposed.length} proposed`}</span>
+          </p>
+          <ul class="fam__tiles">
+            {g.defined.map((wf) => (
+              <li>
+                <a class="fam-tile" href={workflowHref(wf.id)} data-workflow={wf.id}>
+                  <code class="fam-tile__id">{idPieces(wf.id).map((p, i) => <>{i > 0 && <wbr />}{p}</>)}</code>
+                  <span class="fam-tile__facts"><span>{wf.steps.length} {wf.steps.length === 1 ? 'step' : 'steps'}</span><RiskBadge risk={wf.risk} /></span>
+                </a>
+              </li>
+            ))}
+            {g.proposed.map((p) => (
+              <li>
+                <span class="fam-tile fam-tile--proposed" data-workflow={p}>
+                  <code class="fam-tile__id">{idPieces(p).map((x, i) => <>{i > 0 && <wbr />}{x}</>)}</code>
+                  <span class="fam-tile__facts"><PixelGlyph name="status:proposed" scale={2} />Proposed</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  )}
+</Figure>

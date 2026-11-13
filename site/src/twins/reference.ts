@@ -4,11 +4,16 @@ import { CITATION_SOURCE, loadCitation } from '../data/citation';
 import { DIAG_RS, loadDiagnostics } from '../data/diagnostics';
 import { loadOntology, ONTOLOGY_SOURCE } from '../data/ontology';
 import { currentStandard } from '../lib/generated';
+import { currentStandardText } from '../lib/spec-figures';
+import { codeGridCaption, diagnosticFamilies, familyRaised, familyRaisedCaption, familyRaisedIsFigure, familyRaisedTitle } from '../lib/spec-tail-figures';
 import { githubBlobUrl, readRepoFile } from '../lib/repo';
 import { allowedRfcStatuses, rfcRows } from '../lib/rfcs';
 import { kebab } from '../lib/routes';
 import { schemaGroups, schemaListing } from '../lib/views';
-import { blocks, cell, code, fence, generatedLine, markdownCopy, mdLink, mdUrl, table } from './md';
+import { blocks, cell, code, fence, figure, generatedLine, markdownCopy, mdLink, mdUrl, table } from './md';
+import { RFC_FIG_TITLE, rfcLanes, rfcLanesCaption, SHELF_MIN_ROWS, SHELF_OVERVIEW_TITLE, schemaShelves, shelfCaption, shelfOverviewCaption, shelfTitle } from '../lib/index-figures';
+import { edgeMatrixBlock, edgeTypesFigureBlocks } from './edges-spec';
+import { declaredCaption } from '../lib/edge-figures';
 import type { Twin } from './types';
 
 export function edgeTypesTwin(source: string, title: string, description: string | null): Twin {
@@ -16,13 +21,19 @@ export function edgeTypesTwin(source: string, title: string, description: string
   const capLink = (id: string) => mdLink(code(id), `/capabilities/${kebab(id)}/`);
   const markdown = blocks(
     markdownCopy(source, readRepoFile(source), { sourceNote: true }),
+    ...edgeTypesFigureBlocks(),
     '## Edge types in the ontology',
     `${generatedLine([ONTOLOGY_SOURCE])} Ontology version ${o.version}. It has ${o.edgeTypes.length} edge types and ${o.edges.length} edges, counted as the ontology declares them, so a symmetric pair declared in both directions appears twice.`,
-    table(
-      ['Type', 'Description', 'Semantics', 'Transitive', 'Symmetric', 'Edges'],
-      o.edgeTypes.map((t) => [code(t.id), cell(t.description), cell(t.semantics), t.transitive ? 'Yes' : 'No', t.symmetric ? 'Yes' : 'No', String(t.edges.length)]),
+    figure(
+      'Edges of each type, as declared',
+      declaredCaption(o),
+      table(
+        ['Type', 'Description', 'Semantics', 'Transitive', 'Symmetric', 'Edges'],
+        o.edgeTypes.map((t) => [code(t.id), cell(t.description), cell(t.semantics), t.transitive ? 'Yes' : 'No', t.symmetric ? 'Yes' : 'No', String(t.edges.length)]),
+      ),
     ),
     '## All edges',
+    edgeMatrixBlock(),
     ...o.edgeTypes.map((t) =>
       blocks(
         `### ${code(t.id)} (${t.edges.length})`,
@@ -37,11 +48,20 @@ export function diagnosticsTwin(): Twin {
   const diagnostics = loadDiagnostics();
   const std = currentStandard();
   const errors = diagnostics.filter((d) => d.severity === 'error').length;
+  const { source, text } = currentStandardText();
+  const families = diagnosticFamilies(text, source);
   const description = `The ${diagnostics.length} diagnostic codes of Standard ${std.version}: what each one means, its category and whether it is an error or a warning.`;
   const markdown = blocks(
     '# Diagnostics',
     `A validator or runtime reports a problem as a diagnostic code. Standard ${std.version} defines ${diagnostics.length} codes: ${errors} errors and ${diagnostics.length - errors} warnings. A workflow is valid when it has no errors; a warning marks a workflow that is accepted but suspect. Each code's severity is fixed.`,
     generatedLine([std.source, DIAG_RS]),
+    figure(`${diagnostics.length} diagnostic codes by family: ${errors} errors, ${diagnostics.length - errors} warnings`, codeGridCaption(families), table(['Family', 'Range', 'Severity', 'Codes'], families.map((f) => [f.name, code(f.range), f.severity, f.codes.map((d) => d.code).join(', ')]))),
+    ...families.map((f) => {
+      const r = familyRaised(text, f);
+      return familyRaisedIsFigure(r)
+        ? figure(familyRaisedTitle(f), familyRaisedCaption(f, r), table(['Code', 'Named in'], r.rows.map((x) => [x.code, x.in.map((n) => `§${n}`).join(', ') || 'no section of chapter 5'])))
+        : familyRaisedCaption(f, r);
+    }),
     table(
       ['Code', 'Name', 'Category', 'Severity', 'Description', 'Section'],
       diagnostics.map((d) => [
@@ -65,17 +85,30 @@ export function schemasTwin(): Twin {
     '# Schemas',
     `These are the schema files in the repository, each linked to GitHub. Section 6.1 of the ${mdLink('Standard', `${std.url}`)} says what each required schema must hold. Workflow catalogs are listed under ${mdLink('Workflows', '/workflows/')} and domain profiles under ${mdLink('Domains', '/domains/')}.`,
     generatedLine([std.source]),
-    ...schemaGroups(std.version).map((g) => {
-      const items = entries.filter((e) => e.group === g.key);
-      if (items.length === 0) return null;
-      return blocks(
-        `## ${g.label}`,
-        g.intro,
-        items
-          .map((e) => `- [${code(e.source)}](${githubBlobUrl(e.source)})${e.purpose ? `: ${e.purpose}.` : ''}${e.description ? ` ${e.description}` : ''}`)
-          .join('\n'),
+    (() => {
+      const shelves = schemaShelves(entries, schemaGroups(std.version));
+      return figure(
+        SHELF_OVERVIEW_TITLE,
+        shelfOverviewCaption(shelves),
+        shelves.map((sh) => `- ${sh.label}: ${sh.tiles.map((t) => `${code(t.file)}${sh.key === 'required' ? ' (required)' : ''}`).join(', ')}`).join('\n'),
       );
-    }),
+    })(),
+    ...(() => {
+      const groups = schemaGroups(std.version);
+      const shelves = schemaShelves(entries, groups);
+      return shelves.map((sh) => {
+        const g = groups.find((x) => x.key === sh.key)!;
+        const rows = table(
+          ['File', 'What it holds', 'Lines'],
+          sh.tiles.map((t) => [
+            `[${code(t.entry.source)}](${githubBlobUrl(t.entry.source)})${sh.key === 'required' ? ' (required)' : ''}`,
+            cell([t.entry.purpose ? `${t.entry.purpose}.` : '', t.entry.description].filter(Boolean).join(' ')),
+            String(t.lines),
+          ]),
+        );
+        return blocks(`## ${g.label}`, g.intro, sh.tiles.length >= SHELF_MIN_ROWS ? figure(shelfTitle(sh), shelfCaption(sh), rows) : rows);
+      });
+    })(),
   );
   return { title: 'Schemas', description, markdown };
 }
@@ -89,6 +122,16 @@ export async function rfcsIndexTwin(): Promise<Twin> {
   const markdown = blocks(
     '# RFCs',
     `An RFC proposes a change to the standard. Its status is ${allowed.slice(0, -1).join(', ')} or ${allowed.at(-1)}. How an RFC is decided is described under ${mdLink('Decision-making', '/community/governance/#decision-making')} on the Governance page.`,
+    (() => {
+      const lanes = rfcLanes(rows);
+      return figure(
+        RFC_FIG_TITLE,
+        rfcLanesCaption(lanes),
+        lanes
+          .map((l) => `- ${l.target ?? 'No target'}${l.version ? (l.url ? ' (published)' : ' (not yet published)') : ''}: ${l.rfcs.map((r) => `${mdLink(r.label, r.url)} (${r.status})`).join(', ')}`)
+          .join('\n'),
+      );
+    })(),
     table(
       ['RFC', 'Title', 'Status', 'Target', 'Date'],
       rfcs.map((r) => [mdLink(r.label, r.url), cell(r.title), r.status, r.target ? cell(r.target) : '', r.date ?? '']),

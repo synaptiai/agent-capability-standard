@@ -20,6 +20,15 @@ This QMS applies to:
 - The full AI lifecycle: design, development, testing, deployment, post-market monitoring
 - All 36 capabilities in the ontology, all 7 domain profiles, and all 12 workflow patterns
 
+```mermaid
+---
+title: The lifecycle this QMS covers
+---
+flowchart TB
+  accDescr: The QMS covers the full AI lifecycle, from design through development, testing and deployment to post-market monitoring.
+  d[Design] --> dev[Development] --> t[Testing] --> dep[Deployment] --> pmm[Post-market monitoring]
+```
+
 ## 3. Art. 17 Compliance Matrix
 
 ### 3.1 Requirement (a) — Strategy for Regulatory Compliance

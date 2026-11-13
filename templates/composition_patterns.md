@@ -85,6 +85,24 @@ ${checkpoint_out.checkpoint_id}                       → rollback.checkpoint_id
 
 `execute`, `verify` and `rollback` can be skipped, so `exit_code`, `verified` and `rolled_back` read null in the audit when their step did not run.
 
+```mermaid
+---
+title: Debug Code Change, gates and recovery
+---
+flowchart TB
+  accDescr: After plan and checkpoint, execute is skipped when the plan has no steps and the run goes on to audit; otherwise verify checks the fix, a FAIL verdict sends the run through rollback to audit, a pass goes straight to audit, and an execute or verify that fails with R401 or R402 rolls back to the checkpoint and ends the run with no audit.
+  plan[plan] --> checkpoint[checkpoint] --> g1{Plan has steps?}
+  g1 -->|"no: execute, verify, rollback skipped"| audit[audit]
+  g1 -->|yes| execute[execute]
+  execute --> verify[verify]
+  verify --> g2{Verdict passed?}
+  g2 -->|yes: rollback skipped| audit
+  g2 -->|FAIL| rollback[rollback]
+  rollback --> audit
+  execute -.->|"R401 or R402"| stop["Roll back to the checkpoint, run ends with the step's error"]
+  verify -.->|"R401 or R402"| stop
+```
+
 ### Gates and Conditions
 
 ```yaml
@@ -160,6 +178,15 @@ retrieve → observe → detect → classify → integrate → state → transit
 ```
 
 Identity resolution (a single v1 capability) is the composition `detect` (domain: entity) → `classify` → `integrate`.
+
+```mermaid
+---
+title: Identity resolution as a composition
+---
+flowchart LR
+  accDescr: Identity resolution, a single capability in v1, is detect with domain entity, then classify, then integrate.
+  d["detect(entity)"] --> c[classify] --> i[integrate]
+```
 
 ### Detailed Steps
 
@@ -343,6 +370,26 @@ rollback:
   - when: ${mutate_out} == null || ${verify_out.passed} == true
     action: skip
     message: No mutation was applied, or the twin passed verification. No rollback needed.
+```
+
+```mermaid
+---
+title: Digital Twin Sync Loop, gates and recovery
+---
+flowchart TB
+  accDescr: After constrain and checkpoint, mutate runs only when the plan is compliant and stops if no checkpoint was created; when mutate is skipped, execute, verify and rollback are skipped too; otherwise a FAIL verdict sends the run through rollback, and both paths go on to audit and explain.
+  constrain[constrain] --> checkpoint[checkpoint] --> g1{Compliant?}
+  g1 -->|"no: skip to audit"| audit[audit]
+  g1 -->|yes| g0{Checkpoint created?}
+  g0 -->|no| halt[stop]
+  g0 -->|yes| mutate[mutate]
+  mutate --> execute[execute]
+  execute --> verify[verify]
+  verify --> g2{Passed?}
+  g2 -->|yes| audit
+  g2 -->|FAIL| rollback[rollback]
+  rollback --> audit
+  audit --> explain[explain]
 ```
 
 Timeouts: `mutate`, `execute` and `verify` 5m. `receive` and `verify` retry up to 3 times with exponential backoff. The workflow declares `workflow_extensions` for input bindings, conditions, parallel groups and gates (`supports_recovery_loops: false`).

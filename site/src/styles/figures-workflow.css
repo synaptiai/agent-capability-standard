@@ -1,0 +1,658 @@
+/*
+ * Figures of the workflow pages and the workflows index (visual spec 3.3 and
+ * 3.4): the step spine (F-W1), the data-flow grid (F-W2), the risk strip
+ * (F-W3), the inputs ports (F-W4) and the index strips (F-WI1). Square
+ * corners, 2px lines, tokens only. Each figure lays itself out by the width
+ * of its own .fig container, never the viewport.
+ */
+/* Pages import this sheet, and it can load before the layout's tokens.css, so
+   the layer order is declared here too (the same order as tokens.css). */
+@layer reset, tokens, base, components, utilities;
+
+@layer components {
+  /* ---------- F-W1 step spine ---------- */
+
+  .spine {
+    --spine-n: 24px;
+    display: flex;
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  /* The left lanes, row by row: the row's slice of the brackets in its
+     first 28px, and each line that runs on drawn to the row's bottom. */
+  .spine__lane {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: var(--spine-lanes);
+    color: var(--ink-2);
+    pointer-events: none;
+  }
+
+  .spine__lane svg {
+    display: block;
+    overflow: visible;
+  }
+
+  .spine__lane-run {
+    position: absolute;
+    top: 28px;
+    bottom: 0;
+  }
+
+  .spine__rows,
+  .spine__group-steps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* A row is at least 28px; at wide widths its purpose wraps and the row
+     grows, with every mark kept in its first 28px. */
+  .spine__rows {
+    display: grid;
+    grid-auto-rows: minmax(28px, auto);
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .spine__rows > li {
+    position: relative;
+    padding-left: var(--spine-lanes);
+  }
+
+  .spine__row,
+  .spine__group {
+    position: relative;
+    margin: 0;
+    min-width: 0;
+  }
+
+  .spine__link {
+    display: grid;
+    grid-template-columns: var(--spine-cols);
+    align-items: start;
+    column-gap: 6px;
+    min-height: 28px;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .spine__link > :is(.spine__n, .spine__role, .spine__gates, .spine__fail) {
+    height: 28px;
+  }
+
+  .spine__link > .spine__n {
+    line-height: 28px;
+  }
+
+  .spine__link > .spine__tile {
+    margin-top: 2px;
+  }
+
+  .spine__link > .spine__risk {
+    margin-top: 6px;
+  }
+
+  .spine__link:hover {
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  .spine__n {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink-2);
+    text-align: right;
+  }
+
+  .spine__tile--condition {
+    border-style: dashed;
+  }
+
+  .spine__role {
+    display: inline-flex;
+    align-items: center;
+    color: var(--ink);
+  }
+
+  /* Wide: the id, then the purpose, wrapping under it; the first line sits
+     in the middle of the row's first 28px. */
+  .spine__text {
+    display: block;
+    min-width: 0;
+    padding: 4px 0;
+    line-height: 20px;
+    overflow-wrap: anywhere;
+  }
+
+  .spine__cap {
+    font-weight: 700;
+  }
+
+  .spine__nested {
+    margin-left: var(--space-1);
+    vertical-align: -2px;
+    color: var(--ink-2);
+  }
+
+  .spine__purpose {
+    margin-left: var(--space-2);
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .spine__gates,
+  .spine__fail {
+    display: flex;
+    overflow: hidden;
+    align-items: center;
+    gap: 2px;
+    color: var(--ink);
+  }
+
+  .spine__count {
+    display: none;
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  /* Pips sit on the page fill, where the risk colours are checked. */
+  .spine__risk {
+    display: grid;
+    place-items: center;
+    height: 16px;
+    background: var(--bg);
+  }
+
+  .spine__risk .risk-pips__pip {
+    height: 8px;
+  }
+
+  .spine__risk[data-risk='low'] {
+    color: var(--risk-low);
+  }
+
+  .spine__risk[data-risk='medium'] {
+    color: var(--risk-medium);
+  }
+
+  .spine__risk[data-risk='high'] {
+    color: var(--risk-high);
+  }
+
+  /* The read lane, row by row: each piece is shown by the workflow's own
+     rules (WorkflowSpine) while a row that reads is pointed at or focused. */
+  .spine__rl {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--spine-read);
+    color: var(--ink);
+    pointer-events: none;
+  }
+
+  /* .spine in front, to win over the figure rule that shows every svg. */
+  .spine .spine__rl > * {
+    display: none;
+    position: absolute;
+    background: currentColor;
+  }
+
+  .spine__rl-top {
+    left: 7px;
+    width: 2px;
+    top: 13px;
+    bottom: 0;
+  }
+
+  .spine__rl-through {
+    left: 7px;
+    width: 2px;
+    top: 0;
+    bottom: 0;
+  }
+
+  .spine__rl-bottom {
+    left: 7px;
+    width: 2px;
+    top: 0;
+    height: 15px;
+  }
+
+  .spine__rl-stub {
+    left: 2px;
+    width: 6px;
+    top: 13px;
+    height: 2px;
+  }
+
+  .spine__rl > .spine__rl-chev {
+    top: 0;
+    left: 0;
+    background: none;
+  }
+
+  /* Parallel groups: a fork bar, the steps side by side, a join bar. */
+  .spine__rows > .spine__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 28px;
+    margin: 0;
+    padding-left: calc(var(--spine-lanes) + var(--spine-n) + 6px);
+    color: var(--ink-2);
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .spine__bar > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .spine__group-steps {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .spine__row--in-group {
+    position: static;
+  }
+
+  .spine__group--multi .spine__link {
+    grid-template-columns: var(--spine-n) 24px 14px minmax(0, 1fr) 22px;
+  }
+
+  .spine__group--multi :is(.spine__gates, .spine__fail, .spine__purpose) {
+    display: none;
+  }
+
+  /* Without the purpose a row is one line: a long id is cut with an ellipsis
+     (its full id is in the row's accessible name). */
+  .spine__group--multi .spine__text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .spine-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    padding: var(--space-3) 0 0;
+    border-top: var(--px) solid var(--rule);
+    list-style: none;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .spine-legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+  }
+
+  .spine-legend svg {
+    color: var(--ink);
+  }
+
+  .spine-legend__glyphs {
+    display: inline-flex;
+    gap: 2px;
+  }
+
+  @container (max-width: 639px) {
+    .spine {
+      --spine-n: 20px;
+    }
+
+    .spine__link {
+      grid-template-columns: var(--spine-cols-narrow);
+      column-gap: 4px;
+    }
+
+    /* The purpose column is gone, so the name takes its space; at 13px with
+       a narrow inset the longest capability id (11 letters) fits beside the
+       gate and failure lanes. */
+    .spine__cap {
+      padding-inline: 2px;
+      font-size: 13px;
+    }
+
+    /* Narrow, a row is one line: the purpose is in the step cards below. */
+    .spine__text {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    /* Narrow, a group's bar keeps its glyph and ids (the fork and join glyphs
+       say which bar it is; the words stay for screen readers), so the ids
+       fit on the bar's one row. Its ids stay at 12px, the floor for figure
+       text, rather than code's smaller relative size. */
+    .spine__bar {
+      gap: var(--space-1);
+      font-size: 12px;
+    }
+
+    .spine__bar code {
+      padding-inline: 1px;
+      font-size: 12px;
+    }
+
+    .spine__bar .spine__bar-word {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .spine .spine__purpose,
+    .spine .spine__gates .spine__more,
+    .spine .spine__gates .spine__diamond {
+      display: none;
+    }
+
+    .spine .spine__gates:has(.spine__more) .spine__count {
+      display: inline;
+    }
+  }
+
+  /* ---------- F-W2 data-flow grid ---------- */
+
+  /* Positioned, so its screen-reader text is clipped by the scrolling wrapper rather than widening the page. */
+  .flow-grid {
+    position: relative;
+    width: auto;
+    border-collapse: collapse;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .flow-grid caption {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .flow-grid th,
+  .flow-grid td {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .flow-grid thead th {
+    width: 26px;
+    min-width: 26px;
+    height: 22px;
+    vertical-align: bottom;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--ink-2);
+    text-align: center;
+  }
+
+  .flow-grid tbody th {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    padding-right: var(--space-2);
+    background: var(--bg-sub);
+    font-weight: 400;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  /* Step names at 13px (the 12px floor for figure text), and each row link 24px tall (WCAG 2.5.8). */
+  .flow-grid tbody th a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+  }
+
+  .flow-grid tbody th code {
+    font-size: 13px;
+  }
+
+  .flow-grid__n {
+    display: inline-block;
+    min-width: 2.5ch;
+    font-family: var(--font-mono);
+    color: var(--ink-2);
+    text-align: right;
+  }
+
+  .flow-grid td {
+    width: 26px;
+    height: 26px;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .flow-grid__cell {
+    display: inline-grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: 24px;
+    height: 24px;
+    border: var(--px) solid var(--line);
+    background: var(--bg);
+    color: var(--ink-2);
+    vertical-align: middle;
+  }
+
+  .flow-grid__cell--empty {
+    border-color: transparent;
+    background: var(--bg-mut);
+  }
+
+  .flow-grid__cell--store {
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+
+  .flow-grid tbody tr:hover th,
+  .flow-grid tbody tr:hover .flow-grid__cell--empty {
+    background: var(--bg);
+  }
+
+  /* Narrow: one line per step, with its store and read cells, each numbered
+     by the step whose output it is, instead of a grid whose columns would sit
+     off to the side. */
+  @container (max-width: 479px) {
+    .flow-grid,
+    .flow-grid tbody {
+      display: block;
+    }
+
+    .flow-grid thead {
+      display: none;
+    }
+
+    .flow-grid tr {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-1);
+      padding: 2px 0;
+      border-bottom: var(--px) solid var(--rule);
+    }
+
+    .flow-grid tbody th {
+      position: static;
+      flex: 0 0 9.5rem;
+      background: none;
+    }
+
+    .flow-grid td {
+      display: none;
+      width: auto;
+    }
+
+    .flow-grid td[data-cell] {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-2);
+    }
+
+    .flow-grid td[data-cell]::after {
+      content: attr(data-col) / '';
+    }
+  }
+
+  /* ---------- F-W3 risk strip ---------- */
+
+  .risk-strip {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .risk-strip__cells {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    max-width: calc(17 * 18px);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .risk-strip__cell {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    margin: 0;
+    width: 16px;
+  }
+
+  .risk-strip__box {
+    display: grid;
+    place-items: end center;
+    box-sizing: border-box;
+    width: 16px;
+    height: 16px;
+    padding-bottom: 2px;
+    border: var(--px) solid var(--line);
+    background: var(--bg);
+  }
+
+  .risk-strip__box[data-risk='low'] {
+    color: var(--risk-low);
+  }
+
+  .risk-strip__box[data-risk='medium'] {
+    color: var(--risk-medium);
+  }
+
+  .risk-strip__box[data-risk='high'] {
+    color: var(--risk-high);
+  }
+
+  .risk-strip__pips {
+    display: grid;
+    gap: 1px;
+  }
+
+  .risk-strip__pips span {
+    width: 8px;
+    height: 2px;
+    background: currentColor;
+  }
+
+  .risk-strip__n {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .risk-strip__cell--top .risk-strip__n {
+    color: var(--ink);
+    font-weight: 700;
+  }
+
+  .risk-strip__badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .risk-strip__badges li {
+    margin: 0;
+    max-width: 100%;
+  }
+
+  .risk-strip__badges .risk-badge {
+    white-space: normal;
+  }
+
+  /* ---------- F-W4 inputs ---------- */
+
+  /* Descriptions are always printed: the inputs table below is collapsed. */
+  .wf-inputs .port .port__desc,
+  .wf-inputs .port:is(:hover, :focus-within) .port__desc {
+    position: static;
+    flex-basis: 100%;
+    width: auto;
+    max-width: none;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    padding: 0 0 0 calc(10px + var(--space-2));
+    border: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  @container (min-width: 640px) {
+    .wf-inputs--two .ports {
+      grid-template-columns: 1fr 1fr;
+      column-gap: var(--space-5);
+    }
+  }
+
+  /* ---------- F-WI1 index strips ---------- */
+
+  .wf-strip {
+    display: grid;
+    gap: 6px;
+    margin-top: var(--space-2);
+  }
+
+  .wf-strip .step-strip {
+    max-width: 12rem;
+  }
+
+  .wf-strip__layers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+}

@@ -59,6 +59,15 @@ LangChain Approach:
 
 **Key Insight**: AutoGPT's "you build your agent by connecting blocks, where each block performs a single action" aligns with explicit capabilities, not parameterized verbs.
 
+```mermaid
+---
+title: AutoGPT blocks
+---
+flowchart TB
+  accDescr: In AutoGPT each block performs one action, and connected blocks form a workflow.
+  b1[Block: one action] --> b2[Block: one action] --> b3[Block: one action]
+```
+
 **Source**: [AutoGPT Architecture](https://agpt.co/blog/introducing-the-autogpt-platform)
 
 ### 1.3 CrewAI
@@ -88,6 +97,18 @@ LangChain Approach:
 - Tools (explicit, typed)
 - State/Memory
 - Orchestration
+
+```mermaid
+---
+title: Tools in the OpenAI Agents SDK
+---
+flowchart TB
+  accDescr: An agent calls three kinds of tool: function tools, made from any Python function; hosted tools, provided by OpenAI; and other agents used as tools, which compose agents hierarchically.
+  agent[Agent loop] --> ft["Function tools: any Python function"]
+  agent --> ht["Hosted tools: provided by OpenAI"]
+  agent --> at["Agents as tools"]
+  at -->|hierarchical| sub[Another agent]
+```
 
 **Source**: [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/)
 
@@ -136,6 +157,17 @@ LangChain Approach:
 - Filter desires → intentions
 - Execute plans
 
+```mermaid
+---
+title: BDI operations
+---
+flowchart TB
+  accDescr: BDI's operations are updating beliefs, generating desires, filtering desires into intentions, and executing plans; intentions are the committed plans being executed.
+  b[Update beliefs]
+  d[Generate desires] -->|filter| i["Intentions: committed plans"]
+  i --> p[Execute plans]
+```
+
 **Mapping to Grounded Agency**:
 
 | BDI Concept | Grounded Agency Equivalent |
@@ -173,6 +205,18 @@ LangChain Approach:
 | Operator comparison | `compare` |
 | Operator application | `act`, `transform` |
 | Impasse handling | `decompose` |
+
+```mermaid
+---
+title: SOAR problem solving
+---
+flowchart TB
+  accDescr: SOAR elaborates the state, proposes candidate operators, compares them, and applies the selected operator; when knowledge is insufficient it reaches an impasse and creates a subgoal to resolve it.
+  e[Elaborate state] --> pr[Propose candidate operators]
+  pr --> c[Compare candidates]
+  c --> a[Apply selected operator]
+  imp[Impasse: knowledge insufficient] -->|creates| sg[Subgoal]
+```
 
 **Assessment**: SOAR provides a useful framing but is too abstract. The "operator" concept is closer to our "capability" but SOAR doesn't enumerate what operators exist—they're problem-specific.
 

@@ -11,7 +11,18 @@
 //   Markdown copy (<page>/index.md next to that page's index.html);
 // - copies: every page has a Markdown copy, every copy has a page, and
 //   llms.txt lists exactly the copies;
-// - sitemap: the sitemap lists exactly the HTML pages, the 404 page aside.
+// - sitemap: the sitemap lists exactly the HTML pages, the 404 page aside;
+// - figures: every numbered figure on a page ("Fig n") has a
+//   "**Figure: {title}.**" block in the page's Markdown copy, and the copy has
+//   no block for a figure the page does not draw (visual spec 6.1);
+// - drawn: every page of a generated template (home, capability, layer,
+//   workflow, domain, edge types, diagnostics, the section indexes, schemas
+//   and the Standard) has at least one numbered figure that is drawn, not
+//   only a table (DRAWN_TEMPLATES, drawnFigure());
+// - legends: no legend or key on a page draws the same glyph (or glyph pair) for two
+//   different entries;
+// - review: no built file outside the review pages (dist/_review/) points at
+//   them, so removing that folder before deploying leaves nothing dangling.
 // Paths are compared with the case they have in dist/, as the host compares
 // them, even on a case-insensitive disk.
 // The heading-id check (rendered ids equal github-slugger run on the source)
@@ -22,16 +33,23 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
+import { REVIEW_DIR } from '../src/lib/review.ts';
+import { stripComments, stripTags } from '../src/lib/strip.ts';
 import { isMain } from './is-main.mjs';
+import { bodyClasses, templateOf } from './page-template.mjs';
 
 export const NOT_FOUND_PAGE = '404.html';
 const COPY = 'index.md';
 
-/** Every file under `dir`, relative, with forward slashes, sorted. */
+/**
+ * Every file under `dir`, relative, with forward slashes, sorted. The review
+ * pages (dist/_review/) are left out: they are not routes and are never deployed.
+ */
 export function walk(dir, base = dir) {
   const out = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
+    if (e.isDirectory() && dir === base && e.name === REVIEW_DIR) continue;
     if (e.isDirectory()) out.push(...walk(p, base));
     else out.push(path.relative(base, p).split(path.sep).join('/'));
   }
@@ -62,8 +80,7 @@ function safeDecode(s) {
 
 /** The opening tags of a page, with script and style bodies and comments removed. */
 function tags(html) {
-  const bare = html
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const bare = stripComments(html)
     .replace(/(<script\b[^>]*>)[\s\S]*?<\/script>/gi, '$1')
     .replace(/(<style\b[^>]*>)[\s\S]*?<\/style>/gi, '$1');
   return bare.match(/<[a-zA-Z][^>]*>/g) ?? [];
@@ -291,12 +308,246 @@ export function checkSitemap(fileList, xml) {
   return problems;
 }
 
+// ------------------------------------------------------------ figures and legends
+
+const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+
+/**
+ * The element whose start tag begins at `start` in `html`: its tag name, the
+ * offset just after its start tag and the offset of its end tag (both
+ * `html.length` when it is never closed).
+ */
+function elementAt(html, start) {
+  const tag = /^<([a-zA-Z][\w-]*)\b[^>]*?(\/?)>/.exec(html.slice(start));
+  if (!tag) return null;
+  const name = tag[1].toLowerCase();
+  const open = start + tag[0].length;
+  if (VOID.has(name) || tag[2] === '/') return { name, open, close: open, end: open };
+  const re = new RegExp(`<${name}\\b[^>]*?(/?)>|</${name}\\s*>`, 'gi');
+  re.lastIndex = open;
+  let depth = 1;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    if (m[0][1] === '/') depth -= 1;
+    else if (m[1] !== '/') depth += 1;
+    if (depth === 0) return { name, open, close: m.index, end: m.index + m[0].length };
+  }
+  return { name, open, close: html.length, end: html.length };
+}
+
+/** The child elements of the element at `start`, as [start, end] offsets. */
+function childElements(html, start) {
+  const el = elementAt(html, start);
+  const out = [];
+  const re = /<([a-zA-Z][\w-]*)\b/g;
+  re.lastIndex = el.open;
+  for (let m = re.exec(html); m && m.index < el.close; m = re.exec(html)) {
+    const c = elementAt(html, m.index);
+    out.push([m.index, c.end]);
+    re.lastIndex = c.end;
+  }
+  return out;
+}
+
+const plainText = (html) => decodeEntities(stripTags(html)).replace(/\s+/g, ' ').trim();
+
+/**
+ * The numbered figures of a page, in order: each `<figure>` whose eyebrow
+ * reads "Fig n", with its name (the text of the element its aria-labelledby
+ * names, or its aria-label).
+ */
+export function pageFigures(html) {
+  const out = [];
+  for (const m of html.matchAll(/<figure\b[^>]*>/g)) {
+    const el = elementAt(html, m.index);
+    const inner = html.slice(el.open, el.close);
+    // The figure's own eyebrow comes before any figure nested in it.
+    const own = inner.split(/<figure\b/)[0];
+    const n = /<p\b[^>]*class="[^"]*eyebrow[^"]*"[^>]*>\s*Fig (\d+)\s*<\/p>/.exec(own);
+    if (!n) continue;
+    const by = /\saria-labelledby="([^"]+)"/.exec(m[0])?.[1];
+    let title = null;
+    if (by) {
+      const at = html.search(new RegExp(`<[a-zA-Z][\\w-]*\\b[^>]*\\sid="${by.split(' ')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+      if (at !== -1) {
+        const t = elementAt(html, at);
+        title = plainText(html.slice(t.open, t.close));
+      }
+    }
+    if (title === null) {
+      const label = /\saria-label="([^"]*)"/.exec(m[0])?.[1];
+      title = label === undefined ? null : decodeEntities(label).trim();
+    }
+    out.push({ n: Number(n[1]), title });
+  }
+  return out;
+}
+
+/**
+ * The titles of the "**Figure: {title}.**" blocks of a Markdown copy, as
+ * plain text (code spans and backslash escapes undone). A block may sit in a
+ * list item or a block quote.
+ */
+export function copyFigureTitles(md) {
+  const text = md.replace(/^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1\2[^\n]*$/gm, '');
+  return [...text.matchAll(/^[ \t>]*\*\*Figure: (.+?)\.\*\*(?= |$)/gm)].map((m) =>
+    m[1].replace(/`+ ?([^`]*?) ?`+/g, '$1').replace(/\\([\\`*_{}\[\]()#+\-.!|<>])/g, '$1').replace(/\s+/g, ' ').trim(),
+  );
+}
+
+/** Each numbered figure of every page has a figure block in its Markdown copy, and each block a figure. */
+export function checkFigureCopies(fileList, read) {
+  const files = new Set(fileList);
+  const problems = [];
+  for (const u of htmlPages(fileList)) {
+    const copy = `${u.slice(1)}${COPY}`;
+    if (!files.has(copy)) continue; // checkCopies reports it
+    const figs = pageFigures(read(`${u.slice(1)}index.html`));
+    const blocks = copyFigureTitles(read(copy));
+    for (const f of figs) if (f.title === null) problems.push(`${u}: Fig ${f.n} has no accessible name`);
+    const left = [...blocks];
+    const unmatched = [];
+    for (const f of figs.filter((x) => x.title !== null)) {
+      const i = left.indexOf(f.title);
+      if (i === -1) unmatched.push(f);
+      else left.splice(i, 1);
+    }
+    for (const f of unmatched) problems.push(`${u}: Fig ${f.n} "${f.title}" has no "**Figure: ${f.title}.**" block in ${u}${COPY}`);
+    for (const b of left) problems.push(`${u}${COPY}: the block "**Figure: ${b}.**" names no figure on the page`);
+  }
+  return problems;
+}
+
+/**
+ * The page templates whose every page needs a drawn figure: the generated
+ * pages and the Standard. Prose, RFC and skill pages draw from their own
+ * sources and are left to the figure-gap sweep (scripts/check-runs.mjs).
+ */
+export const DRAWN_TEMPLATES = [
+  'home',
+  'capability',
+  'capabilities-index',
+  'layer',
+  'workflow',
+  'workflows-index',
+  'domain',
+  'domains-index',
+  'edge-types',
+  'diagnostics',
+  'listing',
+  'rfcs-index',
+  'schemas',
+  'spec',
+];
+
+/** A page's template, from its body's `page--<template>` class. */
+export function pageTemplate(html) {
+  return templateOf(bodyClasses(html));
+}
+
+/** `html` with every element whose tag is `name`, or whose class matches `cls`, cut out. */
+function without(html, { name, cls }) {
+  let out = html;
+  for (;;) {
+    const re = name ? new RegExp(`<${name}\\b`, 'i') : new RegExp(`<[a-zA-Z][\\w-]*\\b[^>]*\\sclass="[^"]*${cls}[^"]*"`);
+    const m = re.exec(out);
+    if (!m) return out;
+    const el = elementAt(out, m.index);
+    out = out.slice(0, m.index) + out.slice(el.end);
+  }
+}
+
+/**
+ * Whether a numbered figure is drawn: its drawing, less any folded
+ * <details> and any legend or key, is not a table, or holds an SVG outside
+ * its tables. A table with glyphs or heat fills in its cells is still a
+ * table: the reader reads it row by row.
+ */
+export function drawnFigure(figureHtml) {
+  const at = figureHtml.search(/<div\b[^>]*class="[^"]*\bfig__drawing\b/);
+  if (at === -1) return false;
+  const d = elementAt(figureHtml, at);
+  let drawing = figureHtml.slice(d.open, d.close);
+  drawing = without(drawing, { name: 'details' });
+  drawing = without(drawing, { cls: '(?:legend|-key|__key)\\b' });
+  if (!/<table\b/i.test(drawing)) return plainText(drawing) !== '' || /<svg\b/i.test(drawing);
+  return /<svg\b/i.test(without(drawing, { name: 'table' }));
+}
+
+/**
+ * Every page of a DRAWN_TEMPLATES template has a drawn numbered figure. A
+ * page whose body names no template, and a DRAWN_TEMPLATES entry no built
+ * page uses, are problems too: either would let a page skip the check.
+ */
+export function checkDrawnFigures(fileList, read, drawnTemplates = DRAWN_TEMPLATES) {
+  const problems = [];
+  const seen = new Set();
+  for (const u of htmlPages(fileList)) {
+    const html = read(`${u.slice(1)}index.html`);
+    const t = pageTemplate(html);
+    if (t === null) {
+      problems.push(`${u}: its body has no page--<template> class, so no check knows its template`);
+      continue;
+    }
+    seen.add(t);
+    if (!drawnTemplates.includes(t)) continue;
+    let numbered = 0;
+    let drawn = 0;
+    for (const m of html.matchAll(/<figure\b[^>]*>/g)) {
+      const el = elementAt(html, m.index);
+      const inner = html.slice(m.index, el.end);
+      if (!/<p\b[^>]*class="[^"]*eyebrow[^"]*"[^>]*>\s*Fig \d+\s*<\/p>/.test(inner.split(/<figure\b/).slice(0, 2).join(''))) continue;
+      numbered += 1;
+      if (drawnFigure(inner)) drawn += 1;
+    }
+    if (drawn === 0) problems.push(`${u} [${t}]: none of its ${numbered} numbered figure(s) is drawn; each is only a table`);
+  }
+  for (const t of drawnTemplates) if (!seen.has(t)) problems.push(`DRAWN_TEMPLATES lists "${t}", which no built page uses`);
+  return problems;
+}
+
+/**
+ * No legend draws one glyph for two entries with different words. A legend
+ * is an element with a class ending in "legend" or "key"; an entry is a child element
+ * with at least one SVG, keyed by the marks of all its SVGs, so two glyph keys
+ * that draw the same grid count as one glyph.
+ */
+export function checkLegends(fileList, read) {
+  const problems = [];
+  for (const f of fileList.filter((x) => x.endsWith('.html'))) {
+    const html = read(f);
+    for (const m of html.matchAll(/<([a-zA-Z][\w-]*)\b[^>]*\sclass="(?:[^"]*\s)?[\w-]*(?:legend|key)(?:\s[^"]*)?"[^>]*>/g)) {
+      const name = /\saria-label="([^"]*)"/.exec(m[0])?.[1] ?? /class="([^"]*)"/.exec(m[0])[1];
+      const words = new Map();
+      for (const [a, b] of childElements(html, m.index)) {
+        const item = html.slice(a, b);
+        const svgs = item.match(/<svg\b[\s\S]*?<\/svg>/g);
+        if (!svgs) continue;
+        const key = svgs.map((s) => s.replace(/^<svg\b[^>]*>/, '').replace(/\s+/g, ' ')).join('|');
+        const label = plainText(item.replace(/<svg\b[\s\S]*?<\/svg>/g, ''));
+        const seen = words.get(key);
+        if (seen === undefined) words.set(key, label);
+        else if (seen !== label) problems.push(`${pageUrl(f)}: the legend "${decodeEntities(name)}" draws the same glyph for "${seen}" and "${label}"`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** Built files outside the review pages that point at them. */
+export function checkReviewLinks(fileList, read) {
+  const re = new RegExp(`(^|["'(/=\\s])/?${REVIEW_DIR}/`);
+  return fileList
+    .filter((f) => /\.(html|md|txt|xml|json|js|css|webmanifest)$/.test(f) && !f.startsWith('pagefind/'))
+    .filter((f) => re.test(read(f)))
+    .map((f) => `${f} points at the review pages (/${REVIEW_DIR}/), which are not deployed`);
+}
+
 function kb(bytes) {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 /** Run every check on a dist directory. */
-export function checkDistDir(distDir) {
+export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {}) {
   const fileList = walk(distDir);
   const read = (f) => readFileSync(path.join(distDir, f), 'utf8');
   const size = (f) => statSync(path.join(distDir, f)).size;
@@ -310,6 +561,10 @@ export function checkDistDir(distDir) {
     'md-links': mdLinks,
     copies: has.has('llms.txt') ? checkCopies(fileList, read('llms.txt')) : [],
     sitemap: has.has('sitemap.xml') ? checkSitemap(fileList, read('sitemap.xml')) : [],
+    figures: checkFigureCopies(fileList, read),
+    drawn: checkDrawnFigures(fileList, read, drawnTemplates),
+    legends: checkLegends(fileList, read),
+    review: checkReviewLinks(fileList, read),
   };
   const sum = (list) => list.reduce((n, f) => n + size(f), 0);
   const htmlFiles = fileList.filter((f) => f.endsWith('.html'));

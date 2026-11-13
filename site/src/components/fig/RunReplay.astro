@@ -1,0 +1,105 @@
+---
+// One runtime conformance fixture drawn as a run (visual spec 3.0): its own
+// workflow as a spine of step rows, each marked by what the fixture's
+// `script` and `end` record (ran, how many times, deferred with its reason,
+// skipped, not reached). A loop back is a return bracket in a lane on the
+// left, from the step whose failure mode fired up to the step it went back
+// to, with a row naming the loop; when the loops run out, an exit row names
+// the on_exhausted handler (or its absence) before the outcome tile with
+// the run's end. Steps are numbered from 1. The fixture is named in
+// REPLAY_FIXTURES; a missing file or a workflow that no longer parses fails
+// the build (run-replay.ts).
+//
+// With motion allowed, the rows replay in order once the figure is in view
+// (spec 1.2: the server-rendered figure is the final state, and a script
+// adds the class that replays it; see the script below and motion.css).
+//
+// Props:
+// - fixture: string, required. A file name in tests/conformance/runtime, without .json.
+// - id: string, required. A ref- id.
+// - n: number, required.
+// - title: string, required.
+import { exhaustedWords, replay, replayCaption, stepWhy } from '../../lib/run-replay';
+import { githubBlobUrl } from '../../lib/repo';
+import DiagnosticTile from './DiagnosticTile.astro';
+import Figure from './Figure.astro';
+import FlowArrow from './FlowArrow.astro';
+import MiniTile from './MiniTile.astro';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+
+interface Props {
+  fixture: string;
+  id: string;
+  n: number;
+  title: string;
+}
+
+const { fixture, id, n, title } = Astro.props;
+const r = replay(fixture);
+const STATUS_WORDS = { ran: 'ran', deferred: 'deferred', skipped: 'skipped', 'not-reached': 'not reached' } as const;
+const loopsAfter = (stepN: number) => r.loops.filter((l) => l.from === stepN);
+const storeOf = (stepN: number) => r.steps[stepN - 1]!.step.store_as;
+// One lane per distinct loop (from, to); a row's part of a lane: the
+// bracket's top at the target, its bottom at the step that looped, and the
+// upright between.
+const lanes = [...new Map(r.loops.map((l) => [`${l.from}-${l.to}`, l])).values()];
+const seg = (stepN: number, l: { from: number; to: number }) =>
+  stepN === l.to && stepN === l.from ? 'self' : stepN === l.to ? 'top' : stepN === l.from ? 'bottom' : stepN > l.to && stepN < l.from ? 'mid' : 'none';
+const exit = exhaustedWords(r);
+let order = 0;
+const next = () => `--i: ${order++}`;
+---
+<Figure id={id} n={n} title={title} caption={replayCaption(r)} kind="run-replay">
+  <p class="replay__source">
+    Fixture <a href={githubBlobUrl(r.fixture.file)}><code>{r.fixture.name}</code></a>, an {r.fixture.attendance} run: {r.fixture.description}
+  </p>
+  <div class="replay-run" data-replay>
+    <ol class:list={['replay', lanes.length > 0 && 'replay--lanes']} aria-label={`Steps of ${r.fixture.name}`}>
+      {r.steps.map((s) => (
+        <>
+          <li class="replay__row" data-status={s.status} data-step={s.n} data-requests={s.requests} data-fired={s.fired} style={next()}>
+            {lanes.length > 0 && <span class="replay__lanes" aria-hidden="true" style={`--lanes: ${lanes.length}`}>{lanes.map((l) => <span class={`replay__lane replay__lane--${seg(s.n, l)}`}></span>)}</span>}
+            <span class="replay__n" aria-hidden="true">{s.n}</span>
+            <MiniTile id={s.step.capability} size={24} link={false} />
+            <span class="replay__name"><span class="visually-hidden">Step {s.n}, </span><code>{s.step.capability}</code>{s.step.store_as && <span class="replay__store"> as <code>{s.step.store_as}</code></span>}</span>
+            <span class="replay__status"><span class="replay__mark" aria-hidden="true"></span>{STATUS_WORDS[s.status]}{s.requests > 1 && ` ${s.requests} times`}</span>
+            {stepWhy(s) && <span class="replay__why">{s.fired > 0 && <PixelGlyph name="caution" />}<span>{stepWhy(s)}</span></span>}
+          </li>
+          {loopsAfter(s.n).map((l) => (
+            <li class="replay__loop" data-from={l.from} data-to={l.to} style={next()}>
+              <span class="replay__loop-text"><PixelGlyph name="undo" /> Loop {l.count}{l.maxLoops !== null && ` of max_loops ${l.maxLoops}`}: back to step {l.to}{storeOf(l.to) && <> (<code>{storeOf(l.to)}</code>)</>}</span>
+            </li>
+          ))}
+        </>
+      ))}
+    </ol>
+    {exit && (
+      <p class="replay__exit" data-handler={r.exhausted!.handler ?? ''} style={next()}>
+        <FlowArrow dir="down" length={16} />
+        <span>{exit}</span>
+      </p>
+    )}
+    <p class="replay__end" data-end={r.end.kind} style={next()}>
+      <span class="replay__end-label">Run ends</span>
+      {r.end.code ? <><span>failed:</span> <DiagnosticTile code={r.end.code} /></> : <><span>{r.end.kind.toLowerCase()}, outcome</span> <code class="replay__outcome">{r.end.outcome}</code></>}
+    </p>
+  </div>
+</Figure>
+<script>
+  // Replay each run once when it scrolls into view, if motion is allowed.
+  // Without this script, or with reduced motion, the figure is its final state.
+  const runs = document.querySelectorAll<HTMLElement>('[data-replay]');
+  if (runs.length > 0 && window.matchMedia('(prefers-reduced-motion: no-preference)').matches && 'IntersectionObserver' in window) {
+    const seen = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          e.target.classList.add('is-replaying');
+          seen.unobserve(e.target);
+        }
+      },
+      { threshold: 0.4 },
+    );
+    runs.forEach((r) => seen.observe(r));
+  }
+</script>

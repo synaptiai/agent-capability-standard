@@ -5,19 +5,31 @@
 // headings.) Whether the older version is still supported, and which
 // appendix lists the changes, come from the current Standard's text; a fact
 // it does not state is left out.
+// A version with a slot map in SLOTS_BY_VERSION gets its site-drawn figures
+// (visual spec 3.9) at those slots: under a heading, after or before a
+// block, or around a block they enrich. Each slot must match, or the build
+// fails. 1.0.0 gets only figures its own text supports; a version with no
+// map shows the source as rendered (with the chapter glyphs of
+// rehype-figure-marks).
 import StatusBadge from '../components/StatusBadge.astro';
+import SpecFigure from '../components/fig/SpecFigure.astro';
+import '../styles/figures-edges-spec.css';
+import '../styles/figures-spec.css';
 import { loadVersions, olderVersionNote } from '../data/versions';
 import { readRepoFile } from '../lib/repo';
 import type { Route } from '../lib/routes';
 import { routeForSource } from '../lib/routes';
+import { cutAtSlots, SLOTS_BY_VERSION } from '../lib/spec-slots';
 import type { PageMeta } from '../plugins/remark-page-meta';
 
 interface Props {
   route: Route;
   page: PageMeta;
+  /** The source's rendered HTML; the figures are placed in it on the current version. */
+  html?: string;
 }
 
-const { route, page } = Astro.props;
+const { route, page, html } = Astro.props;
 const { current, previous } = loadVersions().standard;
 const isCurrent = route.source === current.source;
 const currentUrl = routeForSource(current.source)?.url;
@@ -25,6 +37,14 @@ const self = previous.find((v) => v.source === route.source);
 if (!isCurrent && !self) throw new Error(`SpecPage: ${route.source} is not a tracked Standard version`);
 const note = self ? olderVersionNote(self.version, readRepoFile(current.source)) : null;
 const status = (self ?? current).status;
+
+// The pieces of the rendered HTML between the slot markers, the figures
+// numbered in page order.
+const slots = SLOTS_BY_VERSION[(self ?? current).version];
+if (slots && typeof html !== 'string') throw new Error(`SpecPage: ${route.source} has no rendered HTML for its figures`);
+const pieces = slots ? cutAtSlots(html!, slots, route.source!) : [];
+let fig = 0;
+const numbered = pieces.map((p) => (p.key === undefined ? { ...p, n: 0 } : { ...p, n: ++fig }));
 ---
 <article
   class="doc doc--spec"
@@ -42,6 +62,10 @@ const status = (self ?? current).status;
     </p>
   )}
   <div class="doc__body">
-    <slot />
+    {slots ? (
+      numbered.map((p) => (p.key === undefined ? <Fragment set:html={p.html} /> : <SpecFigure slot={p.key} n={p.n} inner={p.inner} source={route.source!} slots={slots} />))
+    ) : (
+      <slot />
+    )}
   </div>
 </article>

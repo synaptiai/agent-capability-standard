@@ -69,6 +69,17 @@ These clauses are informational and do not contain auditable requirements. Howev
 | 4.3.3 | Does the scope consider stakeholder requirements? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | | |
 | 4.3.4 | Are scope boundaries clearly defined (technology, data, organizational)? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | | |
 
+```mermaid
+---
+title: What the AIMS scope must consider
+---
+flowchart LR
+  accDescr: The AIMS scope must consider the internal and external issues of Clause 4.1 and the stakeholder requirements of Clause 4.2, and define its technology, data and organizational boundaries.
+  iss["Internal and external issues (4.1)"] --> scope["AIMS scope (4.3)"]
+  req["Stakeholder requirements (4.2)"] --> scope
+  scope --> bnd["Technology, data and organizational boundaries"]
+```
+
 ### 4.4 AI Management System
 
 | # | Check | Finding | Evidence | Notes |
@@ -211,6 +222,17 @@ These clauses are informational and do not contain auditable requirements. Howev
 | 8.3.1 | Is the risk treatment plan implemented? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Hooks active, profiles configured, approvals flowing | |
 | 8.3.2 | Are structural controls functioning? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Test: attempt Write without checkpoint (must be blocked) | Critical test |
 | 8.3.3 | Are domain profile controls applied correctly? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | `block_autonomous` enforcement, confidence thresholds | |
+
+```mermaid
+---
+title: From risk assessment to working controls
+---
+flowchart TB
+  accDescr: Risk assessment results, at defined intervals, are used for treatment planning, the risk treatment plan is implemented, and whether the structural controls function is checked by attempting a Write without a checkpoint, which must be blocked.
+  ra["Risk assessment, at defined intervals"] -->|results used for| tp[Treatment planning]
+  tp --> impl["Risk treatment plan implemented: hooks, profiles, approvals"]
+  impl -->|structural controls checked by| test["Test: a Write without a checkpoint must be blocked"]
+```
 
 ### 8.4 AI System Lifecycle
 

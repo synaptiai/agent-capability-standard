@@ -80,9 +80,12 @@ describe('design data', () => {
       { path: 'spec/RFC-0009-x.md', text: '**Status:** Withdrawn\n' },
       { path: 'spec/STANDARD-v9.0.0.md', text: '**Status:** Candidate Standard — accepted by\n' },
       { path: 'docs/guide.md', text: '**Status:** Template — adapt it\n' },
+      { path: 'README.md', text: 'x\n\n**Status:** Candidate Standard v9.0.0 (accepted by RFC-0009)\n' },
+      { path: 'bench.md', text: '**Status**: SDK-integrated | **Last Updated**: 2026-02-03\n' },
     ];
     const values = sourceStatuses(files);
-    expect([...values.keys()]).toEqual(['Normative', 'Withdrawn', 'Candidate Standard']);
+    // Every Status line counts, wherever it is, by its first clause.
+    expect([...values.keys()]).toEqual(['Normative', 'Withdrawn', 'Candidate Standard', 'Template', 'SDK-integrated']);
     expect(checkStatuses(values, STATUS_STYLES)).toEqual([
       'status "Withdrawn" (spec/RFC-0009-x.md) has no badge style in src/lib/status.ts',
     ]);

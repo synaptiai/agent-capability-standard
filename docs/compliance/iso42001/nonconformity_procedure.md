@@ -147,6 +147,16 @@ Each nonconformity shall be documented in an NCR containing:
 
 Root cause analysis shall be performed for all Major and Critical nonconformities. For Minor nonconformities, root cause analysis is recommended but may be simplified.
 
+```mermaid
+---
+title: When root cause analysis is required
+---
+flowchart LR
+  accDescr: Root cause analysis is required for critical and major nonconformities, and recommended, possibly simplified, for minor ones.
+  sev{Severity} -->|Critical or Major| req[Root cause analysis required]
+  sev -->|Minor| rec[Recommended, may be simplified]
+```
+
 **Recommended Techniques:**
 
 | Technique | When to Use | Output |

@@ -307,6 +307,16 @@ Arguments AGAINST:
 2. A workflow pattern (`observe` → `compare` → `persist` improved behavior)
 3. Implicit in memory operations
 
+```mermaid
+---
+title: learn as a workflow pattern
+---
+flowchart TB
+  accDescr: As a workflow pattern, learning is observe, then compare, then persist the improved behavior.
+  observe --> compare
+  compare -->|improved behavior| persist
+```
+
 ### 3.3 The "Wait" Question
 
 **Should there be a `wait` capability for async operations?**

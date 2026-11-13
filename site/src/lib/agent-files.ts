@@ -63,8 +63,11 @@ export async function llmsTxt(): Promise<string> {
  */
 export function fullTextRoutes(): Route[] {
   const older = new Set(loadVersions().standard.previous.map((p) => `/spec/${p.version}/`));
+  // The current Standard first, then the section's other pages (its listing among them) in sidebar order.
+  const spec = ordered(ROUTES.filter((r) => r.section === 'spec' && !older.has(r.url)));
   return [
-    ...ordered(ROUTES.filter((r) => r.section === 'spec' && !older.has(r.url))),
+    ...spec.filter((r) => r.template === 'spec'),
+    ...spec.filter((r) => r.template !== 'spec'),
     ...ordered(ROUTES.filter((r) => r.section === 'capabilities')),
     ...ordered(ROUTES.filter((r) => r.section === 'workflows')),
   ];

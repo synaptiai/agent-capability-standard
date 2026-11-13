@@ -43,6 +43,17 @@ fields without listing it in `workflow_extensions.requires` is rejected
 know. That is deliberate. A consumer built for 1.0 would otherwise run the
 workflow and silently ignore, for example, a wait or an approval.
 
+```mermaid
+---
+title: Extensions are must-understand
+---
+flowchart TB
+  accDescr: A workflow that uses an extension's fields without listing it in workflow_extensions.requires is rejected with V106, and so is one that lists an extension the validator does not know.
+  q1{"Uses an extension's fields without listing it?"} -->|yes| v1[V106: rejected]
+  q1 -->|no| q2{"Lists an extension the validator does not know?"}
+  q2 -->|yes| v2[V106: rejected]
+```
+
 ## Triggers (`triggers@1`)
 
 `triggers` lists the ways a run can start. Each trigger has a `kind`:
@@ -77,6 +88,18 @@ approval steps: an unattended run cannot wait for a person in the session.
 - `overlap` says what happens when a run is still going at the next fire
   time: `skip` it, keep at most one queued run (`buffer_one`), or start
   runs concurrently (`allow_all`).
+
+
+```mermaid
+---
+title: A fire time while a run is still going
+---
+flowchart LR
+  accDescr: When a run is still going at the next fire time, overlap skip skips the new run, buffer_one keeps at most one queued run, and allow_all starts the runs concurrently.
+  fire[Next fire time, a run still going] -->|skip| s1[The new run is skipped]
+  fire -->|buffer_one| s2[At most one run queued]
+  fire -->|allow_all| s3[Runs start concurrently]
+```
 
 ### Events
 
@@ -175,6 +198,19 @@ deploy_with_escalation:
   give the target's required inputs (S304) and nothing it does not declare
   (S303); a `${...}` reference is checked when the step runs (R402).
 
+```mermaid
+---
+title: From a failure to a handler
+---
+flowchart TB
+  accDescr: A failure mode fires on a runtime code or an expression; its recovery loops back to the goto_step up to max_loops, and when the loop runs out, or with action escalate, a handler step runs once and ends the run as escalated.
+  fail["Failure mode fires: on_error code or when expression"] --> loop["Recovery loops back to goto_step, inject_context readable as _recovery"]
+  loop -->|"up to max_loops"| fail
+  loop -->|"loops run out: on_exhausted"| handler["Handler: an invoke step with handler: true, run once"]
+  fail -->|"action: escalate"| handler
+  handler --> ended["Run ends with outcome escalated"]
+```
+
 ## Waiting for an event (`wait@1`)
 
 A `receive` step with `wait` pauses the run until a matching event arrives
@@ -233,6 +269,18 @@ delegates, then waits for that delegate's result (see
   a null key would match every event that lacks it, and such a filter
   would drop every sender.
 
+```mermaid
+---
+title: How a wait ends
+---
+flowchart TB
+  accDescr: A waiting step goes on when a matching event arrives, fails with R401 when its timeout lapses, and fails with R406 when liveness is lost; a checkpoint taken before the wait no longer covers a later step that requires one.
+  wait["receive, synchronize or delegate step with wait"] -->|matching event| data["Event in the step's output, run goes on"]
+  wait -->|timeout lapses| r401[R401]
+  wait -->|liveness lost| r406[R406]
+  data --> cp["Take the checkpoint after the wait (W608)"]
+```
+
 To pause without an event, give the step a `delay` (`wait@1` too): it
 waits that long after its condition and gates, then goes on. Sampling
 twice, a minute apart:
@@ -273,6 +321,20 @@ and what the decision binds to:
   change before the step runs, the approval no longer applies. `recheck`
   re-reads a source just before acting and asks again (`reask`), replans or
   stops when it changed.
+
+
+  ```mermaid
+  ---
+  title: What an approval is bound to
+  ---
+  flowchart TB
+    accDescr: The decision is bound to the SHA-256 digest of the values shown; if they change before the step runs the approval no longer applies, and recheck re-reads a source just before acting and asks again, replans or stops when it changed.
+    shown[Values shown to the approver] -->|SHA-256| dg[Digest]
+    dg --> dec[Decision bound to the digest]
+    dec --> rc{"recheck: source changed just before acting?"}
+    rc -->|no| run[The step runs]
+    rc -->|yes| act["reask, replan or stop"]
+  ```
 - A `standing_mandate` approver names its mandate in `mandate_ref`, for
   pre-approved routine actions. It needs no one present, so it is asked
   even in an unattended run; your host answers `approved`, or
@@ -319,6 +381,18 @@ and what the decision binds to:
   The `mutate` needs its own `when_unattended`: when the mandate covers
   the send, nothing is deferred, and an unattended run reaches the
   `mutate` with no one to approve it.
+
+
+  ```mermaid
+  ---
+  title: The nightly sweep with no mandate for the send
+  ---
+  flowchart TB
+    accDescr: When no mandate covers the send, it is deferred to the queue; the mutate, a later step that acts on the world, waits too and is queued; the read-only retrieve depends on neither and runs; the run ends deferred, listing every deferral.
+    send["send: deferred to the queue"] -->|"a later step that acts on the world waits too"| mutate["mutate: queued too"]
+    retrieve["retrieve: read-only and independent, runs"] --> end1["Run ends deferred, listing every deferral"]
+    mutate --> end1
+  ```
 - A step that must run whether or not an earlier action was deferred,
   such as an escalation to a person, can say so with
   `after_deferral: run`. It is then deferred only if it reads a deferred
@@ -382,6 +456,17 @@ as an item's principal whoever authenticated delivering it, not a sender
 named in the item. So when a peer relays the owner's answer, the principal
 is the peer, and `accept_from: [owner]` drops it.
 
+```mermaid
+---
+title: Who counts as the sender
+---
+flowchart TB
+  accDescr: The principal is whoever authenticated delivering an item, so when a peer relays the owner's answer the principal is the peer, and a step with accept_from owner drops it.
+  owner[Owner's answer] -->|relayed by| peer[Peer agent]
+  peer -->|"delivers, principal: peer"| step["receive with accept_from: [owner]"]
+  step --> dropped["Dropped and counted"]
+```
+
 ## Sender identity (`identity@1`)
 
 A principal says *who* delivered an item; an **identity** also says how the
@@ -415,6 +500,18 @@ with each event a step waits for (`schemas/agent_identity_schema.yaml`):
   known values: a reference that resolves to anything else, including an
   optional input that was left out, fails the step (R402) rather than
   turning the check off.
+
+
+  ```mermaid
+  ---
+  title: Which items a sender check keeps
+  ---
+  flowchart TB
+    accDescr: With sender_check or accept_trust_classes bound, an item whose sender has an identity authenticated the accepted way and of an accepted trust class is kept with sender and sender_identity; any other item is dropped and counted.
+    item[An item arrives] --> q{"Sender has an identity, authenticated the accepted way, of an accepted trust class?"}
+    q -->|yes| keep["Kept, with sender and sender_identity"]
+    q -->|no| drop[Dropped and counted]
+  ```
 - `authenticated_by` is one of `session_id`, `chat_user_id`,
   `code_host_login`, `directory_id`, `api_key`, `signed_token`, or your own
   `x-` value. Trust classes are `owner`, `decision_person`,
@@ -431,6 +528,21 @@ with each event a step waits for (`schemas/agent_identity_schema.yaml`):
   validator warns (W606) when that would leave only a mandate. The mark
   follows references: if your host carries an item's content into a later
   step by other means, the executor cannot see it.
+
+
+  ```mermaid
+  ---
+  title: How the always-ask mark spreads
+  ---
+  flowchart TB
+    accDescr: An item from a listed trust class, or with no identity or trust class, marks every step that reads it directly or through other steps; a marked step that needs approval is asked of a person even when its approval names a standing mandate, or follows when_unattended in an unattended run.
+    item["Item from a listed class, or with no identity or trust class"] -->|read by| s1[A step]
+    s1 -->|read by| s2["A later step: a summary, injected context, an invoke"]
+    s2 --> q{Needs approval?}
+    q -->|yes| att{Attended run?}
+    att -->|yes| person["Asked of a person, even with a standing mandate"]
+    att -->|no| wu[Follows when_unattended]
+  ```
 - On a step that does not wait, your host receives the inputs, applies
   them to what it returns, and must put the `sender_identity` it applied
   them to on each item it returns: the executor marks from it.
@@ -490,6 +602,17 @@ before the run goes on:
 - At run time the step is compliant when no counted verdict blocks, at
   least `min_pass` pass, and at least `min_full` of the passes have scope
   `full`; its output gains a `tally` (with `full_passes`).
+
+```mermaid
+---
+title: A review quorum
+---
+flowchart LR
+  accDescr: Reviewers are delegate steps that run before the quorum; their verdicts go to a blocking constrain step, which lets the run go on only when the quorum is met.
+  ra[Reviewer A: delegate step] -->|verdict| q["Blocking constrain step with quorum"]
+  rb[Reviewer B: delegate step] -->|verdict| q
+  q -->|quorum met| next[Run goes on]
+```
 
 Reviewers can have different rules. Give `forbidden_inputs` a mapping to
 keep one reviewer away from what another may read, for example a verifier
@@ -551,6 +674,18 @@ maps to one party count once. Each reviewer must then be a waiting
 delegate, and `verdicts` must reference only their results. A
 model family counts toward `require_model_families` only when the host
 attests it.
+
+```mermaid
+---
+title: Replacing a reviewer that hangs
+---
+flowchart TB
+  accDescr: When reviewer B goes silent with R406 or runs out of time with R401, its step's retry delegates again, with replaces naming the old delegation; reviewer A is not asked again.
+  b["Reviewer B's waiting delegate step"] -->|"R406 silent or R401 timed out"| retry["retry: delegate again, replaces the old task_id"]
+  retry --> b2[New result for reviewer B]
+  a["Reviewer A's result"] --> verdicts["verdicts list for the constrain step"]
+  b2 --> verdicts
+```
 
 Placing a delegated step on a particular host or device is not part of
 the standard; RFC-0003 records it as an open question.

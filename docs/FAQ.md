@@ -36,6 +36,18 @@ Incremental adoption works. You don't need to adopt everything at once.
 | **Quarter 1** | Achieve L2 conformance | Full type safety |
 | **Quarter 2** | Implement trust model for multi-source workflows | Conflict resolution |
 
+```mermaid
+---
+title: The adoption path
+---
+flowchart TB
+  accDescr: Week 1 runs the validator on existing workflows and finds hidden issues; week 2 adds checkpoints to mutation-heavy workflows and enables rollback; month 1 adds grounding for high-risk capabilities for traceable decisions; quarter 1 reaches L2 conformance for full type safety; and quarter 2 adds the trust model for conflict resolution.
+  w1["Week 1: run the validator. Finds hidden issues"] --> w2["Week 2: add checkpoints. Enables rollback"]
+  w2 --> m1["Month 1: grounding for high-risk capabilities. Traceable decisions"]
+  m1 --> q1["Quarter 1: L2 conformance. Full type safety"]
+  q1 --> q2["Quarter 2: trust model. Conflict resolution"]
+```
+
 ### What if we only need part of it?
 
 The standard is modular. Common partial adoptions:
@@ -58,10 +70,38 @@ Issues #3, #4, and #5 proposed additional capabilities for these layers. After f
 - `coordinate` = `decompose` + `delegate` + `synchronize` + `integrate`
 - `compress` = `recall` + `integrate` + `transform` + `persist`
 
+```mermaid
+---
+title: Proposals that are workflow patterns
+---
+flowchart LR
+  accDescr: listen is a loop of receive, and each other proposal on the left is a composition of the existing capabilities it points to, as the list above says.
+  listen["listen: a loop"] --> receive["receive"]
+  coordinate["coordinate"] --> decompose["decompose"]
+  coordinate --> delegate["delegate"]
+  coordinate --> synchronize["synchronize"]
+  coordinate --> integrate["integrate"]
+  compress["compress"] --> recall["recall"]
+  compress --> integrate
+  compress --> transform["transform"]
+  compress --> persist["persist"]
+```
+
 **Proposals that are parameter variations:**
 - `sample` = `search` with `limit`
 - `scan` = `search` with exhaustive query
 - `broadcast` = `send` with multiple destinations
+
+```mermaid
+---
+title: Proposals that are parameter variations
+---
+flowchart LR
+  accDescr: Each proposal on the left is an existing capability with a parameter set, as the list above says.
+  sample["sample"] -->|with limit| search["search"]
+  scan["scan"] -->|exhaustive query| search
+  broadcast["broadcast"] -->|multiple destinations| send["send"]
+```
 
 **Proposals covered by existing capabilities:**
 - `observe` already exists
@@ -69,6 +109,19 @@ Issues #3, #4, and #5 proposed additional capabilities for these layers. After f
 - `handoff` covered by `delegate` with context
 - `forget` covered by `persist(ttl: 0)` or `mutate(delete)`
 - `index` and `associate` covered by MODEL layer capabilities
+
+```mermaid
+---
+title: Proposals covered by existing capabilities
+---
+flowchart LR
+  accDescr: negotiate is covered by synchronize, handoff by delegate with context, forget by persist with ttl 0 or mutate with delete, and index and associate by the MODEL layer capabilities.
+  negotiate["negotiate"] --> synchronize["synchronize"]
+  handoff["handoff"] --> delegate["delegate(with context)"]
+  forget["forget"] --> persist["persist(ttl: 0)"]
+  forget --> mutate["mutate(delete)"]
+  ia["index, associate"] --> model[MODEL layer capabilities]
+```
 
 The 36-capability model represents genuinely **irreducible cognitive operations**. Workflow patterns belong in `schemas/workflow_catalog.yaml`, not as atomic capabilities.
 
@@ -193,7 +246,7 @@ The analogy captures the design philosophy:
 
 **What the analogy means**: Capabilities are composable primitives. The goal is better workflows (molecules), not more capabilities (atoms).
 
-**What it doesn't mean**: We don't claim physical law derivation or that 35 is fixed forever.
+**What it doesn't mean**: We don't claim physical law derivation or that 36 is fixed forever.
 
 ---
 
@@ -219,6 +272,17 @@ The standard is language-agnostic. The reference validator is written in Rust (`
 - JSON/YAML schemas
 - Capability ontology
 - Workflow definitions
+
+```mermaid
+---
+title: The reference validator
+---
+flowchart TB
+  accDescr: The reference validator implements the specification in Rust under core/ and is exposed to Python as grounded_agency._core; the specification can also be implemented in any other language.
+  spec[Specification] -->|reference validator| rust["Rust, core/"]
+  rust -->|exposed as| py["Python: grounded_agency._core"]
+  spec -.->|any language| other[Other implementations]
+```
 
 ### How do I validate my workflows?
 
@@ -258,6 +322,15 @@ Bindings reference outputs from earlier steps:
     pattern: error_rate_spike
 ```
 
+```mermaid
+---
+title: The binding in the example
+---
+flowchart TB
+  accDescr: observe stores its output as observe_out, and detect reads observe_out.observation as its data.
+  observe -->|"${observe_out.observation} as data"| detect
+```
+
 Typed bindings add explicit type annotations:
 ```yaml
 observations: "${integrate_out.merged.observations: array<object>}"  # quote typed references
@@ -282,6 +355,18 @@ gates:
 4. If verification fails, rollback to the checkpoint
 
 The standard enforces this pattern: `mutate` requires `checkpoint`.
+
+```mermaid
+---
+title: Rollback in four steps
+---
+flowchart TB
+  accDescr: A checkpoint comes before the mutation, the outcome is verified, and a failed verification rolls back to the checkpoint.
+  cp[checkpoint] --> m[mutate]
+  m --> v[verify]
+  v -->|fails| rb[rollback]
+  rb -.->|restores| cp
+```
 
 ---
 
@@ -357,6 +442,19 @@ my_workflow:
 
 `checkpoint` must run before `mutate` (error V102 otherwise); `constrain` is recommended before it (warning W601 otherwise).
 
+```mermaid
+---
+title: The steps of my_workflow
+---
+flowchart TB
+  accDescr: my_workflow observes the target, plans from the observation, checks the plan against the limits, checkpoints and then mutates; checkpoint must come before mutate, and constrain is recommended before it.
+  observe -->|observe_out| plan
+  plan -->|plan_out| constrain
+  constrain --> checkpoint
+  checkpoint -->|"required first, else V102"| mutate
+  constrain -.->|"recommended first, else W601"| mutate
+```
+
 See [TUTORIAL.md](TUTORIAL.md) for a guided walkthrough.
 
 ### How do I extend the validator?
@@ -400,6 +498,17 @@ Trust scores combine:
 - **Field-specific authority**: Sources may be authoritative for specific fields
 
 See `schemas/authority_trust_model.yaml` for configuration.
+
+```mermaid
+---
+title: What a trust score combines
+---
+flowchart TB
+  accDescr: Source authority, recency with its half-life decay, and field-specific authority combine into the trust score.
+  a["Source authority: weights per source"] --> t[Trust score]
+  r["Recency: decay with a half-life"] --> t
+  f[Field-specific authority] --> t
+```
 
 ---
 
@@ -475,6 +584,21 @@ The standard provides an interoperability layer with OASF. Of the 36 capabilitie
 A2A defines how agents communicate with each other (inter-agent transport). This standard defines what agents can *do* (intra-agent capability semantics). They are complementary:
 - **A2A**: "How do agents talk to each other?"
 - **Agent Capability Standard**: "What can each agent do, and how do capabilities compose safely?"
+
+```mermaid
+---
+title: A2A between agents, the standard inside each
+---
+flowchart LR
+  accDescr: A2A carries messages between agents, and the standard describes the capabilities inside each agent and how they compose.
+  subgraph a [Agent A]
+    ca[Capabilities that compose safely]
+  end
+  subgraph b [Agent B]
+    cb[Capabilities that compose safely]
+  end
+  ca ---|A2A| cb
+```
 
 ### What makes this different from other agent frameworks?
 

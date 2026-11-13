@@ -1,0 +1,48 @@
+---
+// F-C12, the skill's inputs by the Standard extension they need (the figure
+// under the Inputs heading, drawn when the inputs fall into two or more
+// groups): one row per extension, its inputs as chips with a filled pin when
+// required. Read from the Inputs table, which stays under the figure.
+//
+// Props:
+// - cap: Capability, required.
+// - groups: InputGroups, required. From inputGroups().
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { inputGroupsCaption, inputGroupsTitle, type InputGroups } from '../../lib/capability-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import PixelBar from './PixelBar.astro';
+
+interface Props {
+  cap: Capability;
+  groups: InputGroups;
+  n: number;
+}
+
+const { cap, groups, n } = Astro.props;
+const max = Math.max(1, ...groups.groups.map((g) => g.inputs.length));
+---
+<Figure id="ref-fig-input-groups" n={n} title={inputGroupsTitle(cap)} caption={inputGroupsCaption(cap, groups)} kind="input-groups">
+  <div class="ofields has-layer" style={`--layer: var(--layer-${cap.layer})`}>
+    {groups.groups.map((g, i) => (
+      <div class="ofields__row" data-count={g.inputs.length}>
+        <p class="ofields__label" id={`ref-igroups-${i}`}>
+          <PixelGlyph name={g.extension === null ? 'check' : 'chapter:scope'} />
+          <span>{g.extension === null ? 'No extension needed' : <>Needs <code>{g.extension}</code></>}</span>
+          <span class="ofields__count">{g.inputs.length}</span>
+        </p>
+        <span class="ofields__bar" aria-hidden="true"><PixelBar value={g.inputs.length} max={max} hideValue /></span>
+        <ul class="ofields__chips" aria-labelledby={`ref-igroups-${i}`}>
+          {g.inputs.map((x) => (
+            <li class="ofields__chip" data-pin={x.required ? 'required' : 'optional'}>
+              <span class="port__pin ofields__pin" aria-hidden="true"></span>
+              <code>{x.name}</code>
+              <span class="fig-sr">, {x.required ? 'required' : 'optional'}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </div>
+</Figure>

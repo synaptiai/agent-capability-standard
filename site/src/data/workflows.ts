@@ -162,6 +162,8 @@ function buildSteps(wfId: string, rawSteps: unknown, ontology: Ontology): Step[]
 }
 
 /** Parse one catalog file. Top-level `x-` keys are vendor data, not workflows (§5.1). */
+/** What a workflow id may be: lowercase letters, digits and underscores. */
+
 export function parseCatalog(source: string, text: string, catalog: 'core' | 'domain', ontology: Ontology): Workflow[] {
   const doc: unknown = parse(text);
   if (!isObj(doc)) throw new Error(`workflows: ${source} is not a mapping`);

@@ -70,6 +70,26 @@ Some capabilities depend on others running first. The ontology's edges say how s
 
 A `precedes` edge only orders capabilities that are both in the workflow; a step in the same `parallel_group` does not count as running before another.
 
+```mermaid
+---
+title: What must come before an action
+---
+flowchart LR
+  accDescr: checkpoint is required before mutate, send and rollback (solid lines, error V102 if missing); constrain is recommended before execute, mutate and send (dotted lines, warning W601 if missing).
+  checkpoint --> mutate & send & rollback
+  constrain -.-> execute & mutate & send
+```
+
+```mermaid
+---
+title: What ground and verify need
+---
+flowchart LR
+  accDescr: One of seven sources is recommended before ground (dotted line, warning W601 if none is present), and execute, mutate and send must come before verify when they are present (solid lines, error V102 otherwise).
+  src["one of observe, detect, predict, attribute, explain, retrieve or search"] -.-> ground
+  execute & mutate & send --> verify
+```
+
 ---
 
 ## Part 2: Create a Simple Workflow (10 min)
@@ -135,6 +155,17 @@ analyze_file:
           type: string
 ```
 
+```mermaid
+---
+title: The three steps and what each stores
+---
+flowchart TB
+  accDescr: observe stores observe_out, which detect reads as its data and stores as anomaly_out, which explain reads to store summary_out.
+  observe -->|observe_out| detect
+  detect -->|anomaly_out| explain
+  explain --> s[summary_out]
+```
+
 ### 2.2 Understand the Structure
 
 | Field | Purpose |
@@ -175,6 +206,17 @@ If you get errors, check:
 - `store_as` is unique for each step
 - Bindings reference existing `store_as` values
 
+```mermaid
+---
+title: Validating the workflow
+---
+flowchart TB
+  accDescr: Running the validator on the file prints VALIDATION PASS; if it reports errors, check the capability names, that each store_as is unique, and that bindings reference existing store_as values.
+  run["validate_workflows.py --catalog my_first_workflow.yaml"] --> ok{Errors?}
+  ok -->|no| pass[VALIDATION PASS]
+  ok -->|yes| fix["Check names, unique store_as, binding references"]
+```
+
 ---
 
 ## Part 3: Add Safety Mechanisms (10 min)
@@ -204,6 +246,16 @@ If you get errors, check:
 | High-value data modifications | Checkpoint + verify + audit for full protection |
 
 The cost of a checkpoint (saving state) is almost always less than the cost of manual recovery from a failed mutation.
+
+```mermaid
+---
+title: A failure at step 7, with and without a checkpoint
+---
+flowchart TB
+  accDescr: When a workflow fails at step 7, without checkpoints the state left by steps 1 to 6 needs manual cleanup; with a checkpoint it rolls back automatically and the state is consistent within seconds.
+  fail[Workflow fails at step 7] -->|without checkpoints| manual["Steps 1-6 already changed state: manual cleanup"]
+  fail -->|with a checkpoint| auto["Automatic rollback to the last checkpoint: consistent within seconds"]
+```
 
 ---
 
@@ -311,6 +363,19 @@ fix_and_verify:
           type: string
 ```
 
+```mermaid
+---
+title: The fix_and_verify workflow
+---
+flowchart TB
+  accDescr: The workflow observes, detects, plans, states the invariants and checkpoints before the mutation, which a gate stops when there is no checkpoint; verify then checks the fix, and when it fails its failure mode rolls back and resumes at the plan step, up to 3 times; audit records the change.
+  observe --> detect --> plan --> constrain --> checkpoint
+  checkpoint -->|"gate: stop if no checkpoint_id"| mutate
+  mutate --> verify
+  verify -.->|"passed == false: rollback, resume at plan, max_loops 3"| plan
+  verify -->|passed| audit
+```
+
 ### 3.2 Key Safety Elements
 
 **Checkpoint before mutation:**
@@ -355,6 +420,17 @@ The validator ensures:
 - All bindings are valid
 
 Add `--strict` to make warnings fail the run too.
+
+```mermaid
+---
+title: The order the validator checks
+---
+flowchart TB
+  accDescr: The validator requires checkpoint before mutate and verify after it, each an error V102 when broken, and recommends constrain before mutate, a warning W601 when missing.
+  checkpoint -->|"before, else V102"| mutate
+  constrain -.->|"before, else W601"| mutate
+  mutate -->|"before, else V102"| verify
+```
 
 ---
 
@@ -408,6 +484,20 @@ steps:
         - ${code_search}
 ```
 
+```mermaid
+---
+title: The parallel group in the example
+---
+flowchart LR
+  accDescr: The log search and the code search run together in the gather_context group, which joins when both are complete, and integrate combines the two results.
+  subgraph gather_context [parallel_group gather_context]
+    logs["search: logs"]
+    code["search: src"]
+  end
+  logs -->|log_search| integrate
+  code -->|"code_search, join: all_complete"| integrate
+```
+
 ### 4.2 Conditional Execution
 
 Skip steps based on conditions:
@@ -422,6 +512,16 @@ Skip steps based on conditions:
     target: ${user_input.target}
     operation:
       apply: "${plan_out.steps: array<object>}"
+```
+
+```mermaid
+---
+title: A conditional step
+---
+flowchart TB
+  accDescr: The mutate step runs only when approval_out.approved is true, and is skipped otherwise.
+  c{"approval_out.approved == true"} -->|true| m[mutate]
+  c -->|"false: skip_if_false"| s[Step skipped]
 ```
 
 ### 4.3 Typed Bindings
@@ -480,6 +580,18 @@ Reference external transform definitions:
 
 **Fix:** Check the `store_as` name. It's `observe_out`, not `insepct_out`. (If the store exists but the path after it is not in the producer's output schema, the error is B201 INVALID_BINDING_PATH.)
 
+```mermaid
+---
+title: B202 or B201
+---
+flowchart TB
+  accDescr: A reference to a store that does not exist is B202; a reference to a store that exists, with a path not in the producer's output schema, is B201.
+  ref["${store.path}"] --> s{Store exists?}
+  s -->|no| b202[B202 unknown store]
+  s -->|yes| p{"Path in the producer's output schema?"}
+  p -->|no| b201[B201 invalid binding path]
+```
+
 ### 5.4 Ambiguous Type (B204)
 
 **Error:**
@@ -513,6 +625,17 @@ Before any mutation:
 - [ ] Add gate to verify checkpoint exists
 - [ ] Add `verify` step after mutation
 - [ ] Add `failure_modes` with recovery
+
+```mermaid
+---
+title: The safety checklist around a mutation
+---
+flowchart TB
+  accDescr: Before a mutation, add a checkpoint step and a gate that checks the checkpoint exists, and add a verify step after the mutation.
+  cp[checkpoint] --> g{"gate: checkpoint exists"}
+  g --> m[Mutation]
+  m --> v[verify]
+```
 
 ### 6.3 Documentation
 
@@ -551,6 +674,19 @@ Build a workflow that:
 4. Applies changes
 5. Verifies the configuration still works
 6. Rolls back if verification fails
+
+```mermaid
+---
+title: Exercise 3
+---
+flowchart TB
+  accDescr: The safe update workflow inspects a configuration file, plans changes, checkpoints, applies the changes, verifies the configuration still works, and rolls back if verification fails.
+  i[Inspect the configuration file] --> p[Plan changes]
+  p --> c[Checkpoint]
+  c --> a[Apply changes]
+  a --> v[Verify it still works]
+  v -->|fails| r[Roll back]
+```
 
 ---
 

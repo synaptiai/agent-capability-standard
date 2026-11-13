@@ -1,0 +1,43 @@
+---
+// F-S3, the layer model (visual spec 3.9): a compact periodic table, one
+// row per ontology layer with the layer's glyph and name as its head, its
+// capabilities as 24px tiles (symbol on each, linked), and its cognitive
+// mapping. The spec's column layout is not used: at 12px, the smallest
+// figure text, the longer layer names do not fit a ninth of the column.
+//
+// Props:
+// - id: string, required. A ref- id.
+// - n: number, required.
+// - title: string, required.
+import { loadOntology } from '../../data/ontology';
+import { layerHref } from '../../lib/generated';
+import { layerModelCaption } from '../../lib/spec-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+
+interface Props {
+  id: string;
+  n: number;
+  title: string;
+}
+
+const { id, n, title } = Astro.props;
+const o = loadOntology();
+---
+<Figure id={id} n={n} title={title} caption={layerModelCaption(o)} kind="layer-model">
+  <ol class="layer-model">
+    {o.layers.map((l) => (
+      <li class="layer-model__col has-layer" style={`--layer: var(--layer-${l.id})`} data-layer={l.id}>
+        <a class="layer-model__head" href={layerHref(l.id)}>
+          <PixelGlyph name={l.id} layer={l.id} scale={3} />
+          <span class="layer-model__name">{l.id}</span>
+        </a>
+        <ul class="layer-model__tiles" aria-label={`${l.id} capabilities`}>
+          {l.capabilities.map((c) => <li><MiniTile id={c} size={24} /></li>)}
+        </ul>
+        <p class="layer-model__mapping">{l.cognitive_mapping}</p>
+      </li>
+    ))}
+  </ol>
+</Figure>

@@ -124,6 +124,17 @@ From the documentation:
 
 **Assessment**: ✅ Our capabilities cover this skill's operations.
 
+```mermaid
+---
+title: The capabilities each analysed skill uses
+---
+flowchart LR
+  accDescr: PDF Processing uses retrieve, transform, detect, verify and act; Excel Analysis uses retrieve, detect, measure, compare, generate and persist; Git Commit Helper uses retrieve, detect, classify and generate.
+  pdf[PDF Processing] --> p1[retrieve] & p2[transform] & p3[detect] & p4[verify] & p5[act]
+  xls[Excel Analysis] --> x1[retrieve] & x2[detect] & x3[measure] & x4[compare] & x5[generate] & x6[persist]
+  git[Git Commit Helper] --> g1[retrieve] & g2[detect] & g3[classify] & g4[generate]
+```
+
 ---
 
 ## 3. Gap Analysis
@@ -146,6 +157,16 @@ Our `act` capability is too vague. Skills documentation emphasizes:
 **Recommendation**: Split `act` into:
 - `execute` — Run code/script and get result (deterministic)
 - `act` — Take action with side effects (non-deterministic)
+
+```mermaid
+---
+title: The split section 3.1 recommends
+---
+flowchart LR
+  accDescr: Section 3.1 recommends splitting act into execute, which runs code or a script and gets a deterministic result, and act, which takes action with side effects.
+  old[act] --> ex["execute: run code, deterministic result"]
+  old --> ac["act: action with side effects"]
+```
 
 ### 3.2 Naming Convention Mismatch
 
@@ -198,6 +219,16 @@ Or keep `act` but document that it's parameterized by action type.
 1. Metadata (always) — ~100 tokens
 2. Instructions (when triggered) — ~5k tokens
 3. Resources (as needed) — unlimited
+
+```mermaid
+---
+title: Progressive disclosure in skills
+---
+flowchart TB
+  accDescr: A skill's metadata always loads, about 100 tokens; its instructions load when the skill is triggered, about 5k tokens; and its resources load as needed.
+  m["1 Metadata: always, ~100 tokens"] -->|triggered| i["2 Instructions: ~5k tokens"]
+  i -->|as needed| r["3 Resources: unlimited"]
+```
 
 **Implication for capabilities**: Our capability definitions should also support progressive disclosure:
 - **Level 1**: Capability name + brief description (in workflow metadata)
@@ -273,6 +304,18 @@ Skills documentation shows common workflow patterns. Let's validate:
 
 **Our capabilities cover this**: ✅ (verify + conditional logic in workflow)
 
+```mermaid
+---
+title: Pattern 2, the feedback loop
+---
+flowchart TB
+  accDescr: Make edits with mutate, validate with verify, fix and validate again while validation fails, and proceed when it passes.
+  e["Make edits: mutate"] --> v{"Validate: verify"}
+  v -->|fails| fix[Fix]
+  fix --> v
+  v -->|passes| go[Proceed]
+```
+
 **Pattern 3: Progressive Disclosure**
 ```
 1. Read main instructions (retrieve)
@@ -317,6 +360,17 @@ Skills documentation shows common workflow patterns. Let's validate:
 - Split `act` → `execute` + `mutate`
 - Add `wait` for async operations
 - Keep `send` for external transmission
+
+```mermaid
+---
+title: The three options
+---
+flowchart TB
+  accDescr: The recommended changes are three alternative options: A keeps 35 capabilities and documents act's implicit modes; B splits act into execute and mutate for 36 and keeps send; C splits act, adds wait and keeps send, for 37.
+  q[One of three options] --> a["A: 35, document act's modes"]
+  q --> b["B: 36, split act, keep send"]
+  q --> c["C: 37, split act, add wait, keep send"]
+```
 
 ### Verdict
 

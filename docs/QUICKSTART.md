@@ -25,6 +25,19 @@ The validator catches issues that would otherwise fail silently:
 
 Fixing these statically saves hours of runtime debugging and prevents data corruption from half-executed workflows.
 
+```mermaid
+---
+title: The six steps
+---
+flowchart TB
+  accDescr: The quickstart goes from setup through validating the reference workflows and running the conformance tests to exploring a workflow, the capability ontology and a domain.
+  s1["Step 1: Clone and Setup"] --> s2["Step 2: Validate the Reference Workflows"]
+  s2 --> s3["Step 3: Run Conformance Tests"]
+  s3 --> s4["Step 4: Explore a Workflow"]
+  s4 --> s5["Step 5: Explore the Capability Ontology"]
+  s5 --> s6["Step 6: Choose Your Domain"]
+```
+
 ---
 
 ## Prerequisites
@@ -46,6 +59,17 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install the package and dev tools (builds the Rust core with maturin)
 pip install -e ".[dev]" -c constraints.txt
+```
+
+```mermaid
+---
+title: Setup
+---
+flowchart TB
+  accDescr: Clone the repository, create and activate a virtual environment, then install the package and dev tools, which builds the Rust core with maturin.
+  clone[Clone the repository] --> venv[Create and activate a virtual environment]
+  venv --> pip["pip install: package and dev tools"]
+  pip -->|maturin| core[Rust core built]
 ```
 
 ## Step 2: Validate the Reference Workflows (2 min)
@@ -86,6 +110,17 @@ PASS: pass_all_36_capabilities
 ...
 
 Conformance PASSED
+```
+
+```mermaid
+---
+title: How the conformance suite runs
+---
+flowchart TB
+  accDescr: run_conformance.py runs the valid and the intentionally invalid fixtures, and EXPECTATIONS.json records whether each should pass and which error and warning codes it must produce.
+  fx["tests/fixtures/: valid and invalid fixtures"] --> run[run_conformance.py]
+  ex["EXPECTATIONS.json: should it pass, which codes"] --> run
+  run --> out["One PASS line per fixture, then Conformance PASSED"]
 ```
 
 The fixtures live in `tests/fixtures/` (40+ of them); `tests/fixtures/EXPECTATIONS.json` records whether each should pass and which error and warning codes it must produce. Each verifies a specific validation behavior, for example:
@@ -156,10 +191,20 @@ debug_code_change:
     purpose: Run targeted verification and return PASS/FAIL.
     store_as: verify_out
     input_bindings:
-      target: "${bug.component}"
-      conditions: ["tests_pass", "symptom_resolved"]
+      target:
+        component: "${bug.component}"
+        execution: "${execute_out}"
+      conditions: ["tests_pass", "symptom_resolved", "public_interfaces_unchanged"]
+  - capability: rollback
+    purpose: If verify FAIL, revert safely.
+    store_as: rollback_out
+    input_bindings:
+      checkpoint_id: "${checkpoint_out.checkpoint_id}"
+    gates:
+    - when: ${verify_out} == null || ${verify_out.passed} == true   # <-- Roll back only on failure
+      action: skip
   - capability: audit
-    purpose: Record what changed and why.
+    purpose: Record what changed and why, and whether it was rolled back.
     store_as: audit_out
     input_bindings:
       event:
@@ -167,14 +212,7 @@ debug_code_change:
         component: "${bug.component}"
         plan: "${plan_out.steps: array<object>}"
         verified: "${verify_out.passed}"
-  - capability: rollback
-    purpose: If verify FAIL, revert safely.
-    store_as: rollback_out
-    input_bindings:
-      checkpoint_id: "${checkpoint_out.checkpoint_id}"
-    gates:
-    - when: ${verify_out.passed} == true   # <-- Roll back only on failure
-      action: skip
+        rolled_back: "${rollback_out.restored}"
   inputs:
     bug:                             # <-- The workflow's input: what to fix
       type: object
@@ -200,6 +238,18 @@ Key observations:
 - **Safety by construction**: a `checkpoint` runs before `execute`; the validator requires one before `mutate`, `send` and `rollback`
 - **Outputs are named**: `store_as` enables later steps to reference outputs
 - **Inputs are bound**: `input_bindings` feed each step the inputs its capability requires, from the workflow's `bug` input or an earlier step's output (`${attribute_out.causes}`)
+
+```mermaid
+---
+title: The steps of debug_code_change
+---
+flowchart TB
+  accDescr: debug_code_change runs observe, search, attribute, constrain, critique, plan, checkpoint, execute, verify, rollback and audit in order; the checkpoint runs before execute, and rollback is skipped when verify passed.
+  observe --> search --> attribute --> constrain --> critique --> plan --> checkpoint
+  checkpoint -->|checkpoint first| execute
+  execute --> verify --> rollback --> audit
+  rollback -.->|"gate: skip when verify passed"| skip[Skipped]
+```
 
 ## Step 5: Explore the Capability Ontology (2 min)
 
@@ -241,6 +291,18 @@ Key observations:
 - **Safety flags**: `mutation: true`, `requires_checkpoint: true`
 - **I/O schemas**: Typed contracts for inputs and outputs
 - **Evidence anchors**: Required in output for grounded agency
+
+```mermaid
+---
+title: The contract of mutate
+---
+flowchart LR
+  accDescr: mutate takes a target, an operation and an optional checkpoint_id, and returns success and evidence anchors, with the previous and new state.
+  req["Required: target, operation"] --> m[mutate]
+  opt["Optional: checkpoint_id"] --> m
+  m --> out["Required: success, evidence_anchors"]
+  m --> st["Also: previous_state, new_state"]
+```
 
 ## Step 6: Choose Your Domain (2 min)
 

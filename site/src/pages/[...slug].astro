@@ -34,13 +34,13 @@ const { title, headTitle, description } = pageHead(route, page);
 ---
 <DocLayout route={route} title={title} headTitle={headTitle} description={description}>
   {route.template === 'spec' && (
-    <SpecPage route={route} page={page}><Content /></SpecPage>
+    <SpecPage route={route} page={page} html={entry.rendered?.html}><Content /></SpecPage>
   )}
   {route.template === 'rfc' && (
     <RfcPage route={route} page={page}><Content /></RfcPage>
   )}
   {route.template === 'skill' && (
-    <SkillPage route={route} page={page} frontmatter={entry.data}><Content /></SkillPage>
+    <SkillPage route={route} page={page} frontmatter={entry.data} html={entry.rendered?.html} />
   )}
   {route.template === 'raw' && <RawPage route={route} page={page} />}
   {route.template === 'prose' && (

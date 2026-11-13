@@ -5,15 +5,18 @@
 import type { Heading, PhrasingContent, RootContent } from 'mdast';
 import { loadCitation } from '../data/citation';
 import { loadCounts } from '../data/counts';
-import { loadOntology } from '../data/ontology';
+import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
 import { loadVersions, olderVersionNote } from '../data/versions';
 import { loadWorkflows, type Step, type Workflow } from '../data/workflows';
 import { anchorsOf, headingText, parseMarkdown, stripFrontmatter } from './anchors';
-import { currentStandard, diagnosticHref, type Inline } from './generated';
+import { currentStandard, diagnosticHref, routeByUrl, type Inline } from './generated';
 import { SITE_ORIGIN } from './links';
 import { GITHUB_BASE, readRepoFile } from './repo';
+import { PAGE_GLYPHS } from '../pixel/glyphs-pages';
+import { chapterKey, principleKey, resolveGlyphKey, slugKey, TOOL_GLYPHS } from '../pixel/keys';
 import { kebab } from './routes';
-import { contractRows, gateRows, stepRole } from './views';
+import { contractRows, diagramSteps, gateRows, stepRole, type StepRole } from './views';
+import { andList } from './words';
 
 /** The one-sentence summary used as the page description and in llms.txt. */
 export function homeDescription(): string {
@@ -38,6 +41,10 @@ export interface Card {
   link: HomeLink;
   /** Spec section label, e.g. "§5.8", for cards about the Standard. */
   section?: string;
+  /** The card's glyph key (visual spec 2.2): a chapter, a count or a tool. */
+  glyph?: string;
+  /** The hero number of a reference-data card, from loadCounts(). */
+  count?: number;
 }
 
 /** A sentence with one link in it; `code` shows the link text as code. */
@@ -132,6 +139,8 @@ export interface Principle {
   /** The principle's body as written in the Standard, for the Markdown copy. */
   markdown: string;
   anchor: string;
+  /** The principle's glyph key, from its heading (visual spec 2.2). */
+  glyph: string;
 }
 
 function phrasing(nodes: PhrasingContent[]): Inline {
@@ -174,7 +183,7 @@ export function principles(): { intro: string; items: Principle[]; sectionUrl: s
       const t = headingText(n as Heading);
       const m = /^(\d+\.\d+)\s+(.+)$/.exec(t);
       if (!m) throw new Error(`home: unexpected heading "${t}" in section 3`);
-      current = { number: m[1]!, title: m[2]!, blocks: [], markdown: '', anchor: anchors.get(t) ?? '' };
+      current = { number: m[1]!, title: m[2]!, blocks: [], markdown: '', anchor: anchors.get(t) ?? '', glyph: principleKey(t) };
       items.push(current);
       continue;
     }
@@ -274,7 +283,7 @@ export function story(): StoryData {
       beat: 1,
       title: 'An agent does a few kinds of thing.',
       text: t(
-        `It perceives, reasons, changes things and checks its work. The standard names ${counts.capabilityCount} of these operations and sorts them into ${counts.layerCount} layers. In the diagram each square stands for a capability, in the column of its layer. The ${used.size} that the model deployment workflow uses are outlined.`,
+        `It perceives, reasons, changes things and checks its work. The standard names ${counts.capabilityCount} of these operations and sorts them into ${counts.layerCount} layers. In the diagram each tile is a capability, with its two-letter symbol, in the column under its layer's glyph. The ${used.size} that the model deployment workflow uses have a dark frame.`,
       ),
     },
     {
@@ -371,19 +380,28 @@ export function coverage(): { standard: Card[]; data: Card[]; tools: Card[] } {
       if (later.length === 0) throw new Error('home: section 5 has no sections after 5.9');
       text = `What a workflow declares to use: ${later.slice(0, -1).join(', ')} and ${later.at(-1)}.`;
     }
-    return { title: h.title, line: text, link: { text: `§${num}`, url: `${std.url}#${h.slug}` }, section: `§${num}` };
+    // A chapter's card takes the chapter glyph. A subsection's card takes its
+    // own topic glyph, so it does not repeat its chapter's card beside it.
+    const chapter = entries.find((x) => x.text.startsWith(`${num.split('.')[0]}. `))!;
+    const topic = `topic:${slugKey(h.title)}`;
+    const glyph = num.includes('.') ? (resolveGlyphKey(topic) === null ? null : topic) : chapterKey(chapter.text);
+    if (glyph === null) {
+      throw new Error(`home: section ${num} of the Standard has no glyph (a subsection needs ${topic} in glyphs-pages.ts; an appendix has none)`);
+    }
+    return { title: h.title, line: text, link: { text: `§${num}`, url: `${std.url}#${h.slug}` }, section: `§${num}`, glyph };
   });
   // The section of the Standard that defines the diagnostic codes, by its heading.
   const diagnosticsSection = entries.map((x) => /^(\d+)\.\s+Diagnostic/.exec(x.text)?.[1]).find(Boolean);
   if (!diagnosticsSection) throw new Error('home: the current Standard has no top-level Diagnostic section');
   const k = loadCounts();
   const data: Card[] = [
-    { title: `Capabilities (${k.capabilityCount})`, line: 'Each with its contract, risk level, edges and skill.', link: { text: 'Capabilities', url: '/capabilities/' } },
-    { title: `Layers (${k.layerCount})`, line: 'The groups the capabilities are sorted into.', link: { text: 'Layers', url: `/layers/${loadOntology().layers[0]!.slug}/` } },
-    { title: `Workflows (${k.workflowCount})`, line: 'Reference and domain workflows, step by step.', link: { text: 'Workflows', url: '/workflows/' } },
-    { title: `Domain profiles (${k.profileCount})`, line: 'Trust weights, risk thresholds and checkpoint rules per field.', link: { text: 'Domains', url: '/domains/' } },
-    { title: `Edge types (${k.edgeTypeCount})`, line: 'The kinds of relation between capabilities.', link: { text: 'Edge types', url: '/spec/edge-types/' } },
-    { title: `Diagnostic codes (${k.diagnosticCount})`, line: 'What each code means and whether it is an error.', link: { text: 'Diagnostics', url: '/spec/diagnostics/' } },
+    { title: 'Capabilities', count: k.capabilityCount, glyph: 'count:capabilities', line: 'Each with its contract, risk level, edges and skill.', link: { text: 'Capabilities', url: '/capabilities/' } },
+    { title: 'Layers', count: k.layerCount, glyph: 'count:layers', line: 'The groups the capabilities are sorted into.', link: { text: 'Layers', url: `/layers/${loadOntology().layers[0]!.slug}/` } },
+    { title: 'Workflows', count: k.workflowCount, glyph: 'count:workflows', line: 'Reference and domain workflows, step by step.', link: { text: 'Workflows', url: '/workflows/' } },
+    { title: 'Domain profiles', count: k.profileCount, glyph: 'count:profiles', line: 'Trust weights, risk thresholds and checkpoint rules per field.', link: { text: 'Domains', url: '/domains/' } },
+    { title: 'Edge types', count: k.edgeTypeCount, glyph: 'count:edges', line: 'The kinds of relation between capabilities.', link: { text: 'Edge types', url: '/spec/edge-types/' } },
+    { title: 'Diagnostic codes', count: k.diagnosticCount, glyph: 'count:diagnostics', line: 'What each code means and whether it is an error.', link: { text: 'Diagnostics', url: '/spec/diagnostics/' } },
+    { title: 'Skills', count: k.skillCount, glyph: 'count:skills', line: 'Skill files for agents: one per capability, and composed skills that combine several.', link: { text: 'Skills', url: '/guides/skills/' } },
   ];
   const tools: Card[] = [
     { title: 'Validator', line: `A Rust core with a Python command-line tool. It reports the diagnostic codes of section ${diagnosticsSection}.`, link: { text: 'Quickstart', url: '/start/quickstart/' } },
@@ -392,6 +410,10 @@ export function coverage(): { standard: Card[]; data: Card[]; tools: Card[] } {
     { title: 'Python SDK adapter', line: 'Adds checkpoint enforcement and evidence tracking to the Claude Agent SDK.', link: { text: 'Claude Agent SDK', url: '/guides/claude-agent-sdk/' } },
     { title: 'Conformance suite', line: 'Fixtures that a validator or executor must pass.', link: { text: 'Conformance', url: '/spec/conformance/' } },
   ];
+  for (const t of tools) {
+    t.glyph = TOOL_GLYPHS[t.title];
+    if (!t.glyph) throw new Error(`home: the tool card "${t.title}" has no glyph in TOOL_GLYPHS`);
+  }
   return { standard, data, tools };
 }
 
@@ -461,6 +483,107 @@ export function getStarted(): { prompt: string; cards: (Card & { extra?: HomeLin
         link: { text: 'Issues on GitHub', url: `${GITHUB_BASE}/issues` },
         extra: { text: 'RFCs', url: '/rfcs/' },
       },
-    ],
+    ].map((card: Card & { extra?: HomeLink }) => ({ ...card, glyph: startGlyph(card) })),
   };
+}
+
+/**
+ * A get-started card's glyph (visual spec 2.2): the glyph of the page its
+ * first site link goes to, or of that page's section when the page has none.
+ * A card with only outside links has none.
+ */
+function startGlyph(card: Card & { extra?: HomeLink }): string {
+  const target = [card.link, card.extra].find((l) => l?.url.startsWith('/'));
+  if (!target) throw new Error(`home: the get-started card "${card.title}" links to no site page, so it has no section glyph`);
+  const url = target.url.split('#')[0]!;
+  return PAGE_GLYPHS[url] ?? `section:${routeByUrl(url).section}`;
+}
+
+// ------------------------------------------------------------ figures
+
+/** Titles of the home page's figures, shared by the page and its copy. */
+export const STORY_FIG_TITLE = `From capabilities to the steps of ${STORY_WORKFLOW}`;
+export const TABLE_FIG_TITLE = 'The periodic table of capabilities';
+export const GALLERY_FIG_TITLE = 'Every workflow, one square per step';
+export const WORKFLOWS_HEADING = 'The workflows';
+export const GALLERY_INTRO = 'The catalogs ship reference workflows and workflows for each domain. Each one is a list of steps. Below, each square is one step, in order, marked with the symbol of the capability it runs or with its safety role.';
+
+/**
+ * The story's other steps with a safety role (stepRole, the rule every step
+ * map and strip uses), which carry their role mark too: in model_deployment,
+ * the constrain steps get the verify mark, as in the gallery's strip.
+ */
+export function storyExtraMarks(): { index: number; capability: string; role: Exclude<StepRole, 'plain'> }[] {
+  const s = story();
+  const shown = new Set([s.checkpointStep.index, s.changeStep.index, s.verifyStep.index, s.rollbackStep.index]);
+  return s.workflow.steps
+    .map((st) => ({ index: st.index, capability: st.capability, role: stepRole(st) }))
+    .filter((x): x is { index: number; capability: string; role: Exclude<StepRole, 'plain'> } => x.role !== 'plain' && !shown.has(x.index));
+}
+
+/** Fig: the story. Its caption names the steps the marks sit on. */
+export function storyCaption(): string {
+  const s = story();
+  const extra = storyExtraMarks();
+  const ROLE_WORDS: Record<string, string> = { checkpoint: 'checkpoint', mutating: 'change', verify: 'check', rollback: 'rollback' };
+  const more =
+    extra.length === 0
+      ? ''
+      : ` ${extra.length === 1 ? 'Step' : 'Steps'} ${andList(extra.map((x) => `${x.index} (${x.capability})`))} also ${extra.length === 1 ? 'carries' : 'carry'} the ${andList([...new Set(extra.map((x) => ROLE_WORDS[x.role]!))])} mark, as on every step map.`;
+  return `The ${s.workflow.id} workflow has ${s.workflow.steps.length} steps: it saves a checkpoint at step ${s.checkpointStep.index}, makes its change at step ${s.changeStep.index}, verifies at step ${s.verifyStep.index} and can roll back at step ${s.rollbackStep.index}.${more}`;
+}
+
+/** Fig: the periodic table. The smallest and largest layers, from the ontology. */
+export function tableCaption(): string {
+  const o = loadOntology();
+  const sizes = o.layers.map((l) => ({ id: l.id, n: capabilitiesOfLayer(o, l.id).length }));
+  const min = Math.min(...sizes.map((x) => x.n));
+  const max = Math.max(...sizes.map((x) => x.n));
+  const at = (n: number) => andList(sizes.filter((x) => x.n === n).map((x) => x.id));
+  return `${o.capabilities.length} capabilities in ${o.layers.length} layers, from ${min} in ${at(min)} to ${max} in ${at(max)}.`;
+}
+
+/** A workflow in the gallery. */
+export interface GalleryItem {
+  workflow: Workflow;
+  steps: number;
+  checkpoints: number;
+  gated: number;
+}
+
+/** A group of the gallery: the reference workflows, then one per domain catalog. */
+export interface GalleryGroup {
+  label: string;
+  glyph: string;
+  items: GalleryItem[];
+}
+
+/**
+ * Fig: the workflow gallery (visual spec 3.11, F-H2), grouped by catalog as
+ * the sidebar groups them: the core catalog first, then each domain.
+ */
+export function gallery(): GalleryGroup[] {
+  const groups: GalleryGroup[] = [];
+  for (const wf of loadWorkflows().all) {
+    const label = wf.catalog === 'core' ? 'Reference workflows' : (wf.domain ?? wf.source);
+    const glyph = wf.catalog === 'core' ? 'section:workflows' : `domain:${(wf.domain ?? '').replace(/-/g, '_')}`;
+    let g = groups.find((x) => x.label === label);
+    if (!g) groups.push((g = { label, glyph, items: [] }));
+    const d = diagramSteps(wf);
+    g.items.push({
+      workflow: wf,
+      steps: wf.steps.length,
+      checkpoints: d.filter((x) => x.role === 'checkpoint').length,
+      gated: wf.steps.filter((x) => (x.gates?.length ?? 0) > 0).length,
+    });
+  }
+  return groups;
+}
+
+export function galleryCaption(): string {
+  const items = gallery().flatMap((g) => g.items);
+  const steps = items.map((i) => i.steps);
+  const withCheckpoint = items.filter((i) => i.checkpoints > 0).length;
+  const high = items.filter((i) => i.workflow.risk === 'high').length;
+  return `${items.length} workflows in ${gallery().length} groups, from ${Math.min(...steps)} to ${Math.max(...steps)} steps; ${withCheckpoint} save a checkpoint and ${high} are high risk.`;
 }

@@ -19,6 +19,18 @@ This document investigates whether the Grounded Agency framework needs new atomi
 
 Add **1 new atomic capability** (`inquire`) and document **2 workflow patterns** (`monitor-and-replan`, `clarify-intent`). The framework grows from 35 to **36 atomic capabilities** while remaining philosophically minimal, gaining the ability to handle dynamic environments and ambiguous goals.
 
+```mermaid
+---
+title: The recommendation in one picture
+---
+flowchart LR
+  accDescr: World change detection and continuous monitoring become workflow patterns using existing capabilities, goal uncertainty handling becomes one new atomic capability, inquire, and re-planning triggers extend detect with the plan-invalidation domain.
+  wc[World change detection] --> wp["Workflow pattern using existing capabilities"]
+  cm[Continuous monitoring] --> wp
+  gu[Goal uncertainty handling] --> inq["One new atomic capability: inquire"]
+  rt[Re-planning triggers] --> det["Extend detect with domain: plan-invalidation"]
+```
+
 ---
 
 ## 1. Problem Statement
@@ -64,6 +76,16 @@ Key insight from [classical planning research](https://cw.fel.cvut.cz/old/_media
 - Detecting plan invalidation should be cheap (continuous monitoring)
 - The response should be proportional (repair small issues, replan for large)
 
+```mermaid
+---
+title: Classical responses to plan invalidation
+---
+flowchart TB
+  accDescr: Execution monitoring compares the expected state with the actual state after each action; a small issue is met with plan repair, which modifies the plan minimally, and a large one with replanning from scratch.
+  mon["Execution monitoring: expected vs actual state"] -->|small issue| rep["Plan repair: minimal change"]
+  mon -->|large issue| rpl["Replanning: a new plan from scratch"]
+```
+
 ### 2.2 Modern LLM Agent Architectures
 
 Research from [The Rise of Agentic AI survey](https://www.mdpi.com/1999-5903/17/9/404) (2025) identifies four major agent reasoning patterns:
@@ -83,6 +105,17 @@ The [ReflAct paper](https://aclanthology.org/2025.emnlp-main.1697/) (EMNLP 2025)
 1. Explicitly grounding decisions in current state
 2. Comparing state against goal at every step
 3. Triggering replanning when divergence exceeds threshold
+
+```mermaid
+---
+title: The ReflAct mechanism
+---
+flowchart TB
+  accDescr: ReflAct grounds each decision in the current state, compares that state with the goal at every step, and triggers replanning when the divergence exceeds a threshold.
+  g[Ground the decision in the current state] --> c[Compare state with goal]
+  c -->|divergence above threshold| r[Trigger replanning]
+  c -->|next step| g
+```
 
 ### 2.3 Agent Framework Analysis
 
@@ -118,6 +151,20 @@ The [Value of Information framework](https://arxiv.org/html/2601.06407) (2026) f
 2. **Question Generation**: Generate targeted clarifying questions
 3. **Intent Inference**: Use context to disambiguate when clarification isn't possible
 4. **Confidence Threshold**: Act only when confidence exceeds threshold
+
+```mermaid
+---
+title: The goal clarification mechanisms
+---
+flowchart TB
+  accDescr: Ambiguity detection classifies whether the request has enough information; if not, the agent generates clarifying questions, or infers the intent from context when it cannot ask; it acts only when its confidence exceeds the threshold.
+  det{"Ambiguity detection: enough information?"} -->|no| q[Generate clarifying questions]
+  det -->|"no, and it cannot ask"| inf[Infer the intent from context]
+  det -->|yes| conf
+  q --> conf{"Confidence above the threshold?"}
+  inf --> conf
+  conf -->|yes| act[Act]
+```
 
 From [Training LLMs to Ask Clarifying Questions](https://openreview.net/forum?id=cwuSAR7EKd):
 
@@ -312,6 +359,17 @@ output_schema:
 
 > **As adopted:** the ontology added `critique` enables `inquire`, but models the second relation as `inquire` enables `receive` (an inquiry's answer arrives through `receive`), not `soft_requires`.
 
+```mermaid
+---
+title: The edges of inquire
+---
+flowchart TB
+  accDescr: critique enables inquire; the proposal had inquire soft-require receive, and the ontology as adopted has inquire enable receive.
+  critique -->|enables| inquire
+  inquire -.->|"proposed: soft_requires"| receive
+  inquire -->|"adopted: enables"| receive
+```
+
 **Why COORDINATE layer?**: `inquire` is fundamentally about agent-user coordination, similar to `delegate` (agent-agent coordination).
 
 ### 4.2 Workflow Pattern: `monitor-and-replan`
@@ -378,6 +436,21 @@ monitor-and-replan:
 
 > **As implemented:** the catalog workflow is `monitor_and_replan` in `schemas/workflow_catalog.yaml`. It uses `*_out` store names, adds a closing `audit` step, and its `plan` step is skipped by the gate `${critique_out.issues} == []`: `critique` runs with `severity_threshold: high` and receives the detected violations, so an empty issue list means no violation of high severity or worse.
 
+```mermaid
+---
+title: monitor-and-replan as proposed here
+---
+flowchart TB
+  accDescr: The proposed pattern observes, builds the state, compares it with the plan's assumptions and detects violations; critique stops the run when there are none, and plan is skipped when the violation is minor.
+  observe --> state
+  state -->|world_state| compare
+  compare -->|comparison| detect
+  detect --> critique
+  critique -.->|"gate: violations.detected == false, stop"| stop[Plan stays valid]
+  critique -->|plan_assessment| plan
+  plan -.->|"gate: minor, skip"| keep[Continue with the current plan]
+```
+
 ### 4.3 Workflow Pattern: `clarify-intent`
 
 Document as a reference workflow:
@@ -432,6 +505,19 @@ clarify-intent:
 ```
 
 > **As implemented:** the catalog workflow `clarify_intent` is `critique → inquire → receive → integrate → audit`, with no `send` step: `inquire` asks the user directly, and `receive` is skipped when no questions were asked (`${clarification_request_out} == null || ${clarification_request_out.questions} == []`).
+
+```mermaid
+---
+title: clarify-intent as proposed here
+---
+flowchart TB
+  accDescr: The proposed pattern critiques the request for ambiguity, asks clarifying questions with inquire unless ambiguity_analysis.confidence is above 0.85, sends them to the user, receives the answer, and integrates it with the original request.
+  critique --> inquire
+  inquire -.->|"gate: confidence above 0.85, skip"| clear[Request clear enough]
+  inquire -->|questions| send
+  send --> receive
+  receive -->|clarification| integrate
+```
 
 ### 4.4 Domain Extensions
 
@@ -575,6 +661,16 @@ COORDINATE (4): delegate, synchronize, invoke, **inquire**  ← NEW
 ```
 
 **Net change**: 35 → 36 (+1 atomic capability)
+
+```mermaid
+---
+title: What changes in the count
+---
+flowchart LR
+  accDescr: COORDINATE grows from three capabilities to four with inquire, and the total from 35 to 36; the other eight layers are unchanged.
+  before["COORDINATE (3): delegate, synchronize, invoke"] -->|"+ inquire"| after["COORDINATE (4): delegate, synchronize, invoke, inquire"]
+  t35[35 capabilities] --> t36[36 capabilities]
+```
 
 ---
 

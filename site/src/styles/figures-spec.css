@@ -1,0 +1,2349 @@
+/*
+ * The Standard's figures from §1 to §5.17 beyond the chapter 4 and 5
+ * exemplars (visual spec 3.9), the run replay (3.0), and the diagnostic
+ * tiles shared with the diagnostics page (3.8). Tokens only, square
+ * corners, 2px lines. Each figure lays itself out by the width of its own
+ * .fig container.
+ */
+@layer components {
+  /* ---------- diagnostic tiles ---------- */
+
+  /* Relative, so its visually hidden text stays inside a scrolling table. */
+  .diag-tile {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-1);
+    border: 2px solid var(--ink-2);
+    background: var(--bg);
+    color: var(--ink);
+    text-decoration: none;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  .diag-tile--warning {
+    border-style: dashed;
+  }
+
+  a.diag-tile:hover,
+  a.diag-tile:focus-visible {
+    box-shadow: var(--shadow-2);
+    transform: translate(-2px, -2px);
+  }
+
+  .diag-tile > .diag-tile__code {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 14px;
+    overflow-wrap: normal;
+  }
+
+  .diag-tile__severity {
+    flex: none;
+  }
+
+  .diag-cell {
+    white-space: nowrap;
+  }
+
+  .diag-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .diag-key__item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .diag-key__swatch {
+    width: 20px;
+    height: 14px;
+    border: 2px solid var(--ink-2);
+  }
+
+  .diag-key__swatch--warning {
+    border-style: dashed;
+  }
+
+  /* ---------- F-S0 requirement keywords ---------- */
+
+  .kw-chart {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .kw-chart__row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px var(--space-3);
+    align-items: center;
+    padding-bottom: var(--space-1);
+    border-bottom: 2px solid var(--rule);
+  }
+
+  .kw-chart__head {
+    border-bottom: 0;
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .kw-chart__head span:first-child {
+    display: none;
+  }
+
+  .kw-chart__chapter {
+    grid-column: 1 / -1;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--ink);
+    font-size: 14px;
+  }
+
+  .kw-chart__bar {
+    min-width: 0;
+  }
+
+  .kw-chart .pixel-bar__track {
+    min-width: 24px;
+  }
+
+  .kw-chart .pixel-bar__value {
+    min-width: 1.5em;
+  }
+
+  @container (min-width: 640px) {
+    .kw-chart__row {
+      grid-template-columns: minmax(200px, 1.4fr) repeat(3, minmax(0, 1fr));
+    }
+
+    .kw-chart__chapter {
+      grid-column: auto;
+    }
+
+    .kw-chart__head span:first-child {
+      display: block;
+    }
+  }
+
+  /* ---------- F-S1 safety ordering ---------- */
+
+  /* Sources on top, targets below, a lane per source and edge type between
+     them; in a narrower frame, two wrapped rows of 48px cells, each target listing
+     its incoming edges as mark and source symbol. */
+  .order-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  .order-key li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .order-key__line {
+    color: var(--ink-2);
+  }
+
+  .order-draw {
+    position: relative;
+    display: none;
+    color: var(--ink);
+  }
+
+  .order-draw > svg {
+    position: absolute;
+    inset: 0;
+  }
+
+  .order-draw__node {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 96px;
+  }
+
+  .order-draw__node code {
+    height: 18px;
+    font-size: 13px;
+    line-height: 18px;
+    background: none;
+    padding: 0;
+  }
+
+  /* Each lane's source, as its two-letter symbol, at the lane's left end. */
+  .order-draw__lane {
+    position: absolute;
+    left: 0;
+    width: 22px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: left;
+  }
+
+  .order-cells__head {
+    margin: 0 0 var(--space-1);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .order-cells__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-3);
+    padding: 0;
+    list-style: none;
+  }
+
+  .order-cell {
+    display: grid;
+    justify-items: center;
+    align-content: start;
+    gap: 2px;
+    width: 48px;
+    margin: 0;
+  }
+
+  .order-cell__mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 14px;
+  }
+
+  /* The drawing is 612px wide (ORDER_GEOM); the frame adds no scroll. */
+  @container (min-width: 620px) {
+    .order-draw {
+      display: block;
+    }
+
+    .order-cells {
+      display: none;
+    }
+  }
+
+  /* ---------- F-S6 safety defaults ---------- */
+
+  .flag-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0 0 var(--space-3);
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .flag-key li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .flag-cell {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 16px;
+    border: 2px solid var(--ink-3);
+    color: var(--bg);
+  }
+
+  .flag-cell--on {
+    border-color: var(--ink);
+    background: var(--ink);
+  }
+
+  /* Needed through a requires edge, not the flag: outlined in ink, the
+     requires mark in ink. */
+  .flag-cell--edge {
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+
+  .flag-cell--inherit {
+    border-style: dashed;
+    border-color: var(--ink-2);
+  }
+
+  .flag-key__pips {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: var(--space-1);
+  }
+
+  /* Risk pips in the risk's own colour (visual spec 1.2), always with the word. */
+  .flag-pips {
+    --pip: 6px;
+  }
+
+  .flag-pips[data-risk='low'] {
+    color: var(--risk-low);
+  }
+
+  .flag-pips[data-risk='medium'] {
+    color: var(--risk-medium);
+  }
+
+  .flag-pips[data-risk='high'] {
+    color: var(--risk-high);
+  }
+
+  /* Wide: 36 rows in table order, a column per flag. */
+  .flag-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1.4fr) 104px repeat(3, minmax(64px, 1fr));
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 1px 0;
+  }
+
+  .flag-row > .flag-cell {
+    justify-self: center;
+  }
+
+  .flag-row--head {
+    padding-bottom: var(--space-1);
+    border-bottom: 2px solid var(--ink-3);
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  .flag-row--head > :nth-child(n + 3) {
+    text-align: center;
+  }
+
+  .flag-rows {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .flag-row--layer:not(:first-child) {
+    margin-top: 4px;
+    padding-top: 5px;
+    border-top: 2px solid var(--rule);
+  }
+
+  .flag-row__cap,
+  .flag-row__risk {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .flag-row__id {
+    font-size: 14px;
+  }
+
+  .flag-row__word {
+    font-size: 13px;
+  }
+
+  /* Narrow: the rows as 4 columns, each a tile with its four marks under it. */
+  @container (max-width: 519px) {
+    .flag-row--head {
+      display: none;
+    }
+
+    .flag-rows {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-rows: repeat(var(--rows), auto);
+      grid-auto-flow: column;
+      gap: var(--space-2) var(--space-1);
+    }
+
+    .flag-row {
+      grid-template-columns: repeat(3, 16px);
+      grid-template-areas:
+        'cap cap cap'
+        'risk risk risk';
+      justify-content: center;
+      gap: 3px 2px;
+      padding: 0;
+    }
+
+    .flag-row--layer:not(:first-child) {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .flag-row__cap {
+      grid-area: cap;
+      justify-self: center;
+    }
+
+    .flag-row__id {
+      display: none;
+    }
+
+    .flag-row__risk {
+      grid-area: risk;
+      gap: var(--space-1);
+      justify-self: center;
+      width: max-content;
+      white-space: nowrap;
+    }
+
+    .flag-row__word {
+      font-size: 12px;
+    }
+
+    .flag-row > .flag-cell {
+      width: 16px;
+      height: 14px;
+    }
+  }
+
+  /* ---------- F-S11 operator precedence ---------- */
+
+  .ladder {
+    display: grid;
+    margin: 0;
+    padding: 0 var(--space-3);
+    border-left: 4px solid var(--ink-2);
+    border-right: 4px solid var(--ink-2);
+    list-style: none;
+  }
+
+  .ladder__rung {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-2) 0;
+    border-bottom: 2px solid var(--ink-3);
+  }
+
+  .ladder__rung:last-child {
+    border-bottom: 0;
+  }
+
+  .ladder__rung--operand {
+    border-top: 2px solid var(--ink-2);
+  }
+
+  .ladder__rule {
+    min-width: 88px;
+    font-weight: 700;
+  }
+
+  .ladder__ops {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ladder__note {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .ladder__scale {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-S12 extensions, F-S13 triggers ---------- */
+
+  .ext-tiles,
+  .trig-tiles {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @container (min-width: 480px) {
+    .ext-tiles,
+    .trig-tiles {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .ext-tile,
+  .trig-tile {
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .ext-tile__id,
+  .trig-tile__kind {
+    font-weight: 700;
+  }
+
+  .ext-tile__secs {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  .trig-tile__att {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 14px;
+  }
+
+  .trig-tile__overlap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 14px;
+  }
+
+  .chip--default {
+    border-width: 4px;
+  }
+
+  .trig-key {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-S14 recovery loop, F-S16 silent source ---------- */
+
+  /* F-S14: one step tile with three branches out of it. On the right, the
+     goto_step loop: a return bracket of 4px rects from the step back up to
+     its target, labelled with the max_loops counter. Below, the two ways
+     out side by side, since they are alternatives, not steps in order. */
+  .rloop {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    max-width: 34rem;
+  }
+
+  .rloop__tile {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid var(--ink-2);
+    background: var(--bg);
+  }
+
+  .rloop__tile--step {
+    border: var(--border);
+    font-weight: 700;
+  }
+
+  .rloop__bracket {
+    position: relative;
+    border-right: 4px solid var(--ink);
+    margin-right: 6px;
+  }
+
+  .rloop__bracket--top::before,
+  .rloop__bracket--bottom::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-top: 4px solid var(--ink);
+  }
+
+  .rloop__bracket--top {
+    align-self: end;
+    height: calc(50% + 2px);
+  }
+
+  .rloop__bracket--top::before {
+    top: 0;
+  }
+
+  .rloop__bracket--bottom {
+    align-self: start;
+    height: calc(50% + 2px);
+  }
+
+  .rloop__bracket--bottom::before {
+    bottom: 0;
+  }
+
+  .rloop__tip {
+    position: absolute;
+    top: -8px;
+    left: 0;
+  }
+
+  @container (max-width: 520px) {
+    .rloop__tile {
+      padding: var(--space-2);
+    }
+  }
+
+  /* Between the target and the step: the normal flow, which may pass other
+     steps, as a dotted line; the loop's label sits against the bracket. */
+  .rloop__flow {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+    width: 0;
+    margin-left: var(--space-5);
+    border-left: 2px dotted var(--ink-3);
+  }
+
+  .rloop__note {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+    padding: var(--space-3) var(--space-2) var(--space-3) var(--space-6);
+    text-align: right;
+  }
+
+  .rloop__bracket--mid {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .rloop__label {
+    font-weight: 700;
+  }
+
+  .rloop__counter {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .rloop__range {
+    color: var(--ink-2);
+  }
+
+  .rloop__cells {
+    display: inline-flex;
+    gap: 2px;
+  }
+
+  .rloop__cell {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--ink);
+  }
+
+  .rloop__cell--more {
+    border-style: dashed;
+    border-color: var(--ink-3);
+  }
+
+  /* The ways out: a stem from the step to a bar, and a drop to each. */
+  .rloop__exits {
+    grid-column: 1 / -1;
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    margin: 0;
+    padding: var(--space-3) 0 0;
+    list-style: none;
+  }
+
+  .rloop__exits::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: calc(50% - 16px);
+    height: var(--space-3);
+    border-left: 4px solid var(--ink);
+  }
+
+  .rloop__exit {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    align-content: start;
+    gap: var(--space-1);
+    margin: 0;
+    text-align: center;
+  }
+
+  /* Half of the bar on each side of the gap meets at the stem. */
+  .rloop__exit::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    border-top: 4px solid var(--ink);
+  }
+
+  .rloop__exit:first-child::before {
+    left: 50%;
+    right: calc(-1 * var(--space-4) / 2);
+  }
+
+  .rloop__exit:last-child::before {
+    left: calc(-1 * var(--space-4) / 2);
+    right: 50%;
+  }
+
+  /* The drop from the bar: a 4px line ending in a chevron, centred on the
+     bar's end above the exit. */
+  .rloop__drop {
+    display: block;
+    height: 24px;
+    margin-top: -2px;
+  }
+
+  .rloop__drop svg {
+    display: block;
+  }
+
+  .rloop__tile--exit {
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .silent__mode {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 2px solid var(--line);
+    background: var(--bg);
+  }
+
+  .silent {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .silent__action {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* ---------- F-S15 a wait on a timeline ---------- */
+
+  .wait-tl {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .wait-tl__modes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .wait-tl__label {
+    margin: 0 0 var(--space-1);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .wait-tl__track {
+    position: relative;
+    height: 20px;
+    margin: 0 8px;
+    border-bottom: 2px solid var(--ink-3);
+  }
+
+  .wait-tl__probe {
+    position: absolute;
+    bottom: 2px;
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    border: 2px solid var(--ink);
+    background: var(--bg);
+  }
+
+  .wait-tl__probe.is-missed {
+    background: var(--ink);
+  }
+
+  .wait-tl__probe.is-after {
+    border-color: var(--rule);
+  }
+
+  .wait-tl__span {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 4px;
+    height: 6px;
+    background: var(--ink-3);
+  }
+
+  .wait-tl__stop {
+    position: absolute;
+    bottom: -6px;
+    width: 4px;
+    height: 28px;
+    margin-left: -2px;
+    background: var(--ink);
+  }
+
+  .wait-tl__axis {
+    position: relative;
+    height: 18px;
+    margin: 0 8px;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .wait-tl__axis span {
+    position: absolute;
+    white-space: nowrap;
+    transform: translateX(-50%);
+  }
+
+  .wait-tl__axis span:first-child {
+    transform: none;
+  }
+
+  .wait-tl__axis span:last-child {
+    transform: translateX(-100%);
+  }
+
+  .wait-tl__ends {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  /* ---------- F-S17 approval ---------- */
+
+  .approval-flow {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .approval-flow__head {
+    margin: 0 0 var(--space-2);
+    font-weight: 700;
+  }
+
+  /* Stage 1: a 2x2 grid of tiles, kind by attendance, that wraps to one
+     column in a narrow frame so the "not asked" answer is never scrolled
+     out of view. */
+  .approval-asked {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+    gap: var(--space-2);
+    max-width: 30rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .approval-asked__tile {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid var(--ink);
+    background: var(--bg);
+  }
+
+  .approval-asked__tile--no {
+    border-style: dashed;
+    border-color: var(--ink-2);
+  }
+
+  .approval-asked__att {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .approval-asked__tile .asked {
+    font-weight: 700;
+  }
+
+  /* Stage 3: one tile per when_unattended plan, with what it leads to. */
+  .approval-plans {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .approval-plans__tile {
+    display: grid;
+    justify-items: center;
+    align-content: start;
+    gap: var(--space-1);
+    margin: 0;
+    padding: var(--space-2);
+    border: 2px solid var(--ink-2);
+    background: var(--bg);
+    text-align: center;
+  }
+
+  .approval-plans__default {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .asked {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .approval-flow__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* ---------- F-S19 what a delegate binds ---------- */
+
+  .deleg {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  /* Inputs on the left with their pins on the right edge, the attested
+     output on the right: side by side when the frame has room, so the input
+     rows do not sit right-aligned in an empty full-width column. */
+  @container (min-width: 600px) {
+    .deleg {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .deleg__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-weight: 700;
+  }
+
+  .deleg__group + .deleg__group {
+    margin-top: var(--space-3);
+  }
+
+  .deleg__ext {
+    margin: 0 0 var(--space-1);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .deleg__ext code {
+    font-size: 12px;
+  }
+
+  /* ---------- F-S20 a quorum tally ---------- */
+
+  .quorum {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .quorum__head {
+    margin: var(--space-2) 0 0;
+    font-weight: 700;
+  }
+
+  .quorum__reviewers,
+  .quorum__vocab,
+  .quorum__needs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .quorum__reviewers li,
+  .quorum__vocab li,
+  .quorum__needs li {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .quorum__needs {
+    display: grid;
+  }
+
+  .quorum__side {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .quorum__slots {
+    display: inline-flex;
+    gap: 4px;
+  }
+
+  .quorum__slots span {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--ink);
+  }
+
+  .quorum__slots--none span {
+    border-style: dashed;
+  }
+
+  /* ---------- F-S21 trust classes ---------- */
+
+  .trust-bars {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .trust-bars__row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px var(--space-3);
+    align-items: center;
+  }
+
+  @container (min-width: 560px) {
+    .trust-bars__row {
+      grid-template-columns: 220px 1fr 170px;
+    }
+  }
+
+  .trust-bars__name {
+    justify-self: start;
+  }
+
+  .trust-bars__marks {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    font-size: 14px;
+  }
+
+  .trust-bars__mark {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* ---------- F-S22 the sender filter ---------- */
+
+  .sender {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .sender__gate {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-1);
+  }
+
+  .sender__item {
+    font-weight: 700;
+  }
+
+  .sender__item code {
+    font-weight: 400;
+  }
+
+  .sender__check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-1) var(--space-3);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .sender__effect,
+  .sender__drop {
+    margin: 0 0 0 var(--space-4);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .sender__drop {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .flow-arrow {
+    display: block;
+    margin: 2px var(--space-2);
+    color: var(--ink-2);
+  }
+
+  .flow-arrow--right {
+    display: inline-block;
+    margin: 0;
+  }
+
+  /* ---------- run replay (F-S14b, F-S16b, F-S18) ---------- */
+
+  .replay__source {
+    margin: 0 0 var(--space-3);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .replay {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* Loops: a lane per loop on the left of the rows, 12px apart, and in it a
+     return bracket from the step that looped (bottom tick) up to the step it
+     went back to (top tick), as the rollback lane of F-W1. The rows are 4px
+     apart and have a 2px border, so an upright reaches 6px past its row. */
+  .replay--lanes {
+    padding-left: calc(var(--lanes, 1) * 12px + 8px);
+  }
+
+  .replay__lanes {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    left: calc(-2px - var(--lanes) * 12px - 8px);
+    width: calc(var(--lanes) * 12px + 8px);
+  }
+
+  .replay__lane {
+    position: absolute;
+    right: 0;
+    border-color: var(--ink);
+    border-style: solid;
+    border-width: 0;
+  }
+
+  .replay__lane:nth-child(1) { left: 2px; }
+  .replay__lane:nth-child(2) { left: 14px; }
+  .replay__lane:nth-child(3) { left: 26px; }
+
+  .replay__lane--top {
+    top: calc(50% - 2px);
+    bottom: -6px;
+    border-top-width: 4px;
+    border-left-width: 4px;
+  }
+
+  .replay__lane--bottom {
+    top: -6px;
+    height: calc(50% + 8px);
+    border-bottom-width: 4px;
+    border-left-width: 4px;
+  }
+
+  .replay__lane--mid {
+    top: -6px;
+    bottom: -6px;
+    right: auto;
+    border-left-width: 4px;
+  }
+
+  .replay__lane--self {
+    top: 25%;
+    bottom: 25%;
+    border-width: 4px 0 4px 4px;
+  }
+
+  .replay__row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 24px 24px 1fr;
+    gap: 2px var(--space-2);
+    align-items: center;
+    padding: var(--space-1) var(--space-2);
+    border: 2px solid var(--line);
+    background: var(--bg);
+  }
+
+  .replay__row[data-status='deferred'] {
+    border-style: dashed;
+  }
+
+  .replay__row[data-status='not-reached'],
+  .replay__row[data-status='skipped'] {
+    background: var(--bg-sub);
+  }
+
+  .replay__n {
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    color: var(--ink-2);
+    text-align: center;
+  }
+
+  .replay__status,
+  .replay__why {
+    grid-column: 3;
+    font-size: 14px;
+  }
+
+  .replay__status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-weight: 700;
+  }
+
+  .replay__why {
+    color: var(--ink-2);
+  }
+
+  @container (min-width: 640px) {
+    .replay__row {
+      grid-template-columns: 24px 24px minmax(200px, 1.3fr) 130px 2fr;
+    }
+
+    .replay__status {
+      grid-column: 4;
+    }
+
+    .replay__why {
+      grid-column: 5;
+    }
+  }
+
+  .replay__mark {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--ink);
+  }
+
+  .replay__row[data-status='ran'] .replay__mark {
+    background: var(--ink);
+  }
+
+  .replay__row[data-status='deferred'] .replay__mark {
+    border-style: dashed;
+  }
+
+  .replay__row[data-status='not-reached'] .replay__mark,
+  .replay__row[data-status='skipped'] .replay__mark {
+    border-color: var(--ink-3);
+  }
+
+  .replay__loop {
+    position: relative;
+    padding: 2px var(--space-2);
+    font-size: 14px;
+  }
+
+  .replay__loop-text {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .replay__why {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .replay__why svg {
+    flex: none;
+    margin-top: 4px;
+  }
+
+  .replay__exit {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0;
+    font-size: 14px;
+  }
+
+  .replay__end {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-3) 0 0;
+    padding: var(--space-2) var(--space-3);
+    border: 4px solid var(--ink);
+    background: var(--bg);
+    font-weight: 700;
+  }
+
+  .replay__end-label {
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+}
+
+@layer components {
+  /* ---------- diagnostic family tiles (F-S26, F-X1 headers) ---------- */
+
+  /* The family's code letter typeset in the display font on a square tile:
+     a different size class from the 9x9 grids, so it never has to keep a
+     mask distance from them, and the letter is the one every code starts with. */
+  .diag-family {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border: 2px solid var(--ink);
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 32px;
+    line-height: 1;
+  }
+
+  .diag-family--small {
+    width: 24px;
+    height: 24px;
+    margin-right: var(--space-2);
+    font-size: 20px;
+    vertical-align: middle;
+  }
+
+  .families {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @container (min-width: 480px) {
+    .families {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .family {
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 0 var(--space-2);
+    align-items: center;
+    padding: var(--space-2);
+    border: 2px solid var(--ink-2);
+    background: var(--bg);
+  }
+
+  .family--warning {
+    border-style: dashed;
+  }
+
+  .family .diag-family {
+    grid-row: span 3;
+  }
+
+  .family__name {
+    font-weight: 700;
+  }
+
+  .family__range,
+  .family__count {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-S23 schema shelf ---------- */
+
+  .shelf {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @container (min-width: 480px) {
+    .shelf {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .shelf__file {
+    display: grid;
+    grid-template-columns: 27px 1fr;
+    gap: 2px var(--space-2);
+    align-items: center;
+    padding: var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .shelf__file .pg {
+    grid-row: span 2;
+  }
+
+  .shelf__purpose {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .ws-group + .ws-group {
+    margin-top: var(--space-3);
+  }
+
+  /* ---------- F-S24b merge thresholds ---------- */
+
+  /* F-S24b: the thresholds as ticks on one line, labels alternating above
+     and below, and under it the bands between them, each named by the
+     action it leads to. */
+  .scale {
+    padding: 0 var(--space-2);
+  }
+
+  .scale__track {
+    position: relative;
+    height: 4px;
+    margin: 44px 0 56px;
+    background: var(--ink-2);
+  }
+
+  .scale__tick {
+    position: absolute;
+    bottom: 0;
+    width: 4px;
+    height: 24px;
+    margin-left: -2px;
+    background: var(--ink);
+  }
+
+  /* Every other threshold hangs below the line, so neighbouring labels never meet. */
+  .scale__tick--low {
+    top: 0;
+    bottom: auto;
+  }
+
+  .scale__label {
+    position: absolute;
+    bottom: 100%;
+    display: flex;
+    gap: var(--space-1);
+    align-items: baseline;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .scale__label--mid {
+    left: 2px;
+    transform: translateX(-50%);
+  }
+
+  .scale__label--end {
+    right: 0;
+  }
+
+  .scale__label--start {
+    left: 0;
+  }
+
+  .scale__tick--low .scale__label {
+    top: 100%;
+    bottom: auto;
+  }
+
+  .scale__label code,
+  .scale__list code {
+    font-size: 13px;
+  }
+
+  .scale__label {
+    width: max-content;
+  }
+
+  .scale__bands {
+    position: relative;
+    height: 28px;
+  }
+
+  .scale__band {
+    position: absolute;
+    top: 0;
+    display: grid;
+    place-items: center;
+    height: 28px;
+    border: 2px solid var(--ink-3);
+    background: var(--bg-mut);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    overflow: hidden;
+  }
+
+  .scale__band + .scale__band {
+    border-left-width: 0;
+  }
+
+  .scale__band--open {
+    border-style: dashed;
+    background: transparent;
+    color: var(--ink-2);
+  }
+
+  .scale__band-name {
+    white-space: nowrap;
+  }
+
+  /* Read by screen readers at every width (the plot is aria-hidden); shown when the bands are too narrow for their names. */
+  .scale__list {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  .scale__list li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .scale__band-n {
+    display: none;
+  }
+
+  .scale__swatch {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    border: 2px solid var(--ink-3);
+    background: var(--bg-mut);
+  }
+
+  .scale__swatch--open {
+    border-style: dashed;
+    background: transparent;
+  }
+
+  /* At 308px the band names do not fit their bands: the list names them, and
+     each label wraps its name at the underscores, value first. */
+  @container (max-width: 479px) {
+    .scale__track {
+      margin: 72px 0 84px;
+    }
+
+    /* One word per line: the names break at their underscores. */
+    .scale__label {
+      flex-direction: column;
+      gap: 0;
+      align-items: center;
+      line-height: 1.2;
+    }
+
+    .scale__label code {
+      display: flex;
+      flex-direction: column;
+      align-items: inherit;
+    }
+
+    .scale__label--end {
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .scale__label--start {
+      align-items: flex-start;
+    }
+
+    .scale__label code {
+      font-size: 12px;
+    }
+
+    .scale__tick--low .scale__label {
+      flex-direction: column-reverse;
+    }
+
+    .scale__band-name {
+      display: none;
+    }
+
+    .scale__band-n {
+      display: inline;
+      font-size: 12px;
+    }
+
+    .scale__list {
+      position: static;
+      display: grid;
+      gap: var(--space-1);
+      width: auto;
+      height: auto;
+      margin-top: var(--space-3);
+      overflow: visible;
+      clip-path: none;
+      white-space: normal;
+    }
+  }
+
+  .scale__ends {
+    display: flex;
+    justify-content: space-between;
+    margin: var(--space-1) 0 0;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-S25 decay ---------- */
+
+  .decay {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-4);
+    color: var(--ink);
+  }
+
+  .decay__plot text {
+    font-family: var(--font-mono);
+  }
+
+  .decay__key {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .decay__key li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .decay__swatch {
+    width: 16px;
+    height: 16px;
+    background: var(--ink);
+  }
+
+  .decay__swatch--floor {
+    border: 2px solid var(--ink);
+    background: repeating-linear-gradient(to bottom, var(--ink-3) 0 2px, transparent 2px 4px);
+  }
+
+  /* ---------- F-S27 heat grid ---------- */
+
+  .heat th,
+  .heat td {
+    padding: 4px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  /* Sections are rows and families columns, so the grid is as wide as six
+     families and fits the column (issue #125 review: 17 section columns ran
+     past the frame). */
+  .heat tbody th {
+    text-align: left;
+    white-space: normal;
+    font-weight: 400;
+  }
+
+  .heat thead th {
+    vertical-align: bottom;
+  }
+
+  .heat td.heat__cell {
+    width: 32px;
+  }
+
+  @media (max-width: 599px) {
+    .heat tbody th {
+      font-size: 13px;
+    }
+
+    .heat td.heat__cell {
+      width: 28px;
+      min-width: 28px;
+      padding: 2px;
+    }
+  }
+
+  .heat thead .heat__fam {
+    display: block;
+  }
+
+  @media (max-width: 599px) {
+    .heat thead .heat__fam {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
+
+  /* F-S27 at full width: families as rows and the 17 sections as columns,
+     the grid visual spec 3.9 gives; a narrower frame shows it transposed,
+     sections as rows. */
+  .heat-grid--wide {
+    display: none;
+  }
+
+  @container (min-width: 640px) {
+    .heat-grid--wide {
+      display: block;
+    }
+
+    .heat-grid--narrow {
+      display: none;
+    }
+  }
+
+  .heat--wide {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .heat--wide .heat__head-col {
+    width: 124px;
+  }
+
+  .heat--wide tbody th {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .heat--wide thead th {
+    padding: 2px 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 400;
+  }
+
+  .heat--wide thead .heat__span {
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink-2);
+    text-align: left;
+  }
+
+  .heat--wide td.heat__cell {
+    width: auto;
+    min-width: 0;
+    padding: 2px 0;
+  }
+
+  .heat__cell {
+    min-width: 28px;
+    height: 28px;
+    border: 2px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 14px;
+  }
+
+  span.heat__cell {
+    display: inline-block;
+    width: 20px;
+    min-width: 0;
+    height: 16px;
+    vertical-align: middle;
+  }
+
+  .heat__cell--1 {
+    border-color: var(--heat-line);
+    background: var(--heat-1);
+    color: var(--on-heat-1);
+  }
+
+  .heat__cell--2 {
+    border-color: var(--heat-line);
+    background: var(--heat-2);
+    color: var(--on-heat-2);
+  }
+
+  .heat__cell--3 {
+    border-color: var(--heat-line);
+    background: var(--heat-3);
+    color: var(--on-heat-3);
+  }
+
+  .heat__cell--4 {
+    border-color: var(--heat-line);
+    background: var(--heat-4);
+    color: var(--on-heat-4);
+  }
+
+  .heat__legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .heat__key {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* ---------- F-S28 levels, F-S30 bumps ---------- */
+
+  .levels,
+  .bumps {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* F-S28: the four levels side by side, equal, none drawn on top of another. */
+  @container (min-width: 600px) {
+    .levels {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  @container (min-width: 640px) {
+    .bumps {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  /* No list-item spacing from the prose styles: the boxes of a row start level. */
+  .levels__col,
+  .bumps__tile {
+    margin: 0;
+    padding: var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .levels__head,
+  .bumps__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-weight: 700;
+  }
+
+  .levels__id,
+  .bumps__id {
+    padding: 0 var(--space-1);
+    border: 2px solid var(--ink);
+    background: var(--ink);
+    color: var(--bg);
+    font-family: var(--font-eyebrow);
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  .levels__count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  .levels__items,
+  .bumps__changes {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0 0 0 var(--space-3);
+    font-size: 14px;
+  }
+
+  .levels__name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* A § reference or code in a bullet, drawn in its place as a chip. */
+  .levels__items .levels__chip {
+    display: inline-block;
+    margin: 2px 0 2px var(--space-1);
+    vertical-align: middle;
+  }
+
+  .bumps__example,
+  .bumps__none {
+    margin: 0 0 var(--space-2);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- F-S29 suite ---------- */
+
+  .suite__label {
+    font-size: 14px;
+  }
+
+  @container (min-width: 560px) {
+    .suite .trust-bars__row {
+      grid-template-columns: 220px 1fr;
+    }
+  }
+
+  /* ---------- F-S31 decision tree ---------- */
+
+  .tree__q {
+    display: inline-block;
+    margin: 0;
+    padding: var(--space-1) var(--space-3);
+    border: var(--border);
+    background: var(--bg);
+    font-weight: 700;
+  }
+
+  .tree__branches {
+    display: grid;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0 var(--space-3);
+    padding: 0 0 0 var(--space-3);
+    border-left: 2px solid var(--ink-3);
+    list-style: none;
+  }
+
+  .tree__branches > li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .tree__out {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: 2px dashed var(--ink-2);
+  }
+
+  .tree__out--required {
+    border: 4px solid var(--ink);
+    font-weight: 700;
+  }
+
+  /* ---------- F-S32 pattern strips ---------- */
+
+  .pattern {
+    display: grid;
+    gap: 4px;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .pattern__step {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 14px;
+  }
+
+  .pattern__reads {
+    color: var(--ink-2);
+  }
+
+  .pattern__reads code + code {
+    margin-left: var(--space-1);
+  }
+}
+
+@layer components {
+  /* A source table a figure wraps keeps its own wrapping and scrolls in its
+     region; the drawing's overflow-wrap: anywhere would break every word. */
+  .fig__drawing .table-wrap {
+    overflow-wrap: normal;
+  }
+
+  /* A table drawn as a figure sits in a narrower frame than the text column,
+     so its cells take less side padding (issue #125 review: tables counted as
+     figures scrolled at 1440 and hid their last column). The data-flow grid
+     sets its own zero padding and is left out. */
+  .fig__drawing .table-wrap table:not(.flow-grid) :is(th, td) {
+    padding-inline: var(--space-2);
+  }
+
+  .edge-type-table__type {
+    width: 38%;
+  }
+
+  .edge-type-table__count,
+  .edge-type-table__props {
+    display: block;
+    margin-top: var(--space-1);
+    font-weight: 400;
+  }
+
+  .edge-type-table__count .pixel-bar {
+    flex-wrap: wrap;
+  }
+
+  .edge-type-table__props {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .diagnostics-table__name {
+    margin: 0 0 var(--space-1);
+  }
+
+  /* At phone width, identifiers in a figure's table cells may break
+     anywhere, so a long code name wraps instead of pushing the description
+     off-screen; a row header's id stays whole. */
+  @media (max-width: 599px) {
+    .fig__drawing .table-wrap td code {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  .edge-type-table__desc,
+  .edge-type-table__sem {
+    margin: 0;
+  }
+
+  .edge-type-table__sem {
+    margin-top: var(--space-1);
+    color: var(--ink-2);
+  }
+
+  .approval-flow > *,
+  .deleg > *,
+  .quorum > * {
+    min-width: 0;
+  }
+}
+
+@layer components {
+  /* An edge-type card standing as its own figure on the edge types page. */
+  .edge-card-fig .edge-card-host {
+    margin: 0;
+  }
+
+  .edge-card-fig .edge-card-host .edge-card {
+    box-shadow: none;
+  }
+}
+
+@layer components {
+  /* ---------- F-X1 the diagnostics code grid ---------- */
+
+  .code-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  @container (min-width: 600px) {
+    .code-grid {
+      grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 2.6fr);
+    }
+  }
+
+  .code-grid__family {
+    min-width: 0;
+    overflow-wrap: normal;
+  }
+
+  @container (min-width: 600px) {
+    .code-grid__head {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  }
+
+  .code-grid__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-weight: 700;
+    line-height: 1.3;
+  }
+
+  .code-grid__range {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  .code-grid__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .code-grid__tiles > li {
+    margin: 0;
+  }
+
+  .diag-tile--grid {
+    flex-direction: column;
+    justify-content: center;
+    gap: 0;
+    width: 56px;
+    height: 48px;
+    padding: 0;
+  }
+
+  .diag-tile--grid > .diag-tile__code {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  .diag-family-section h2 {
+    display: flex;
+    align-items: center;
+  }
+}
+
+@layer components {
+  /* ---------- F-X2 where a family's codes are raised (diagnostics page) ---------- */
+  /* Positioned, so the cells' screen-reader text is clipped by the
+     scrolling wrapper instead of widening the page. */
+  .raised {
+    position: relative;
+    width: auto;
+  }
+
+  .fig__drawing .raised :is(th, td),
+  .raised th,
+  .raised td {
+    padding: 2px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .raised thead th a {
+    font-family: var(--font-mono);
+  }
+
+  /* Section numbers such as 5.10 and 5.11 are wider than a cell: a gap between them. */
+  .fig__drawing .raised thead th,
+  .raised thead th {
+    padding: 2px 4px;
+  }
+
+  .raised tbody th {
+    min-width: 5rem;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .raised__cell {
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--rule);
+  }
+
+  .raised__cell--on {
+    background: var(--indicator);
+    border-color: var(--line);
+  }
+
+  .diag-family-section__lead {
+    color: var(--ink-2);
+  }
+
+  /* Narrow: one line per code, with a chip for each section that names it,
+     instead of a grid whose columns would sit off to the side. */
+  @container (max-width: 479px) {
+    .raised,
+    .raised tbody {
+      display: block;
+    }
+
+    .raised thead {
+      display: none;
+    }
+
+    .raised tr {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-1);
+      padding: var(--space-1) 0;
+      border-bottom: var(--px) solid var(--rule);
+    }
+
+    .raised tbody th {
+      display: block;
+      min-width: 0;
+      margin-right: var(--space-2);
+    }
+
+    .raised__cell {
+      display: none;
+    }
+
+    .fig__drawing .raised .raised__cell--on,
+    .raised .raised__cell--on {
+      display: inline-block;
+      width: auto;
+      height: auto;
+      padding: 0 var(--space-1);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      /* The chip keeps the cell's --indicator fill (= heat step 4), so its
+         label takes the text colour checked against that step. */
+      color: var(--on-heat-4);
+    }
+
+    .raised__cell--on::before {
+      content: '§' attr(data-sec) / '';
+    }
+  }
+}
+
+@layer components {
+  /* A Standard field table shown as a figure: field names stay whole, so a
+     narrow table scrolls inside its wrapper rather than splitting a name. */
+  /* F-S2 and F-S24: a field table as Port columns, grouped by prefix. */
+  .field-port {
+    display: grid;
+    gap: var(--space-2);
+    max-width: 40rem;
+  }
+
+  /* Every row prints its description, so the drawing says all the table
+     says and the table can stay folded. */
+  .field-port .port__desc,
+  .field-port .port:is(:hover, :focus-within) .port__desc {
+    position: static;
+    flex-basis: 100%;
+    width: auto;
+    max-width: none;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .field-port__prefix {
+    margin: 0;
+    font-weight: 700;
+  }
+
+  .fig[data-fig-kind='field-table'] td:first-child code {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+}

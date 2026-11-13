@@ -1,0 +1,38 @@
+---
+// F-C10, the skill's tools against the ontology (the figure under the
+// "Claude Code skill" heading): the skill's allowed-tools in three rows, by
+// what they can do (only read, run commands, change files), beside the
+// ontology's mutation flag for the capability. A read-only capability whose
+// skill can run commands or change files is named in the caption.
+//
+// Props:
+// - cap: Capability, required.
+// - tools: SkillTools, required. From skillTools().
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { skillToolsCaption, skillToolsTitle, TOOL_POWER_WORDS, type SkillTools } from '../../lib/capability-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  cap: Capability;
+  tools: SkillTools;
+  n: number;
+}
+
+const { cap, tools, n } = Astro.props;
+const GLYPH = { read: 'eye', run: 'code', write: 'pencil' } as const;
+---
+<Figure id="ref-fig-skill-tools" n={n} title={skillToolsTitle(cap)} caption={skillToolsCaption(cap, tools)} kind="skill-tools">
+  <div class="stools">
+    <p class="stools__flag"><PixelGlyph name={tools.mutation ? 'pencil' : 'eye'} /><span>Ontology: <code>mutation: {String(tools.mutation)}</code>, {tools.mutation ? 'changes state' : 'read-only'}</span></p>
+    <ul class="stools__rows">
+      {tools.groups.map((g) => (
+        <li class:list={['stools__row', g.tools.length === 0 && 'stools__row--empty']} data-power={g.power}>
+          <span class="stools__label"><PixelGlyph name={GLYPH[g.power]} />{TOOL_POWER_WORDS[g.power]}</span>
+          <span class="stools__tools">{g.tools.length === 0 ? <span class="stools__none">none</span> : g.tools.map((t) => <code class="pmap__chip">{t}</code>)}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+</Figure>

@@ -1,0 +1,34 @@
+---
+// F-D7, the compliance panel (visual spec 3.5), drawn only when the profile
+// has `compliance`: one <dl> row per key with a status glyph (stamp for
+// required, note for advisory only, check for recommended) and the word. A
+// `*_days` number shows the days; the caption gives the years.
+//
+// Props:
+// - profile: the profile mapping; renders nothing without compliance.
+// - n, id: the figure number and its ref- id.
+import Figure from './Figure.astro';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import { complianceCaption, complianceRows } from '../../lib/domain-figures';
+
+interface Props {
+  profile: Record<string, unknown>;
+  n: number;
+  id: string;
+}
+
+const { profile, n, id } = Astro.props;
+const rows = complianceRows(profile);
+---
+{rows && rows.length > 0 && (
+  <Figure id={id} n={n} title="Compliance markers" caption={complianceCaption(rows)} kind="compliance">
+    <dl class="compliance-panel">
+      {rows.map((r) => (
+        <div class="compliance-panel__row" data-key={r.key}>
+          <dt><code>{r.key}</code></dt>
+          <dd>{r.glyph ? <PixelGlyph name={r.glyph} /> : <span class="compliance-panel__noglyph" aria-hidden="true"></span>}<span>{r.value}</span></dd>
+        </div>
+      ))}
+    </dl>
+  </Figure>
+)}

@@ -13,6 +13,16 @@ enters through the timestamps you pass. So the same catalog, inputs,
 responses and times always produce the same actions, the same trace and
 the same snapshot, and a run can be saved and resumed anywhere.
 
+```mermaid
+---
+title: The executor and your host
+---
+flowchart LR
+  accDescr: The executor does no I/O; it tells your host the next action, your host does it and reports back a response, and the executor decides the next action from it.
+  exec[Executor in the Rust core] -->|action| host[Your host]
+  host -->|response| exec
+```
+
 The contract is [STANDARD-v1.1.0 §5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl).
 The executor's source is in `core/src/exec/`, and Python reaches it as
 `grounded_agency._core.Run`.
@@ -56,6 +66,18 @@ raised, with the error diagnostics in `.diagnostics`. Warnings do not block
 a run. Inputs or an `actor_identity` that do not fit the workflow, or are not
 JSON data, also raise `RunStartError` (with no diagnostics).
 
+```mermaid
+---
+title: When a run starts
+---
+flowchart TB
+  accDescr: A run starts only when the catalog validates, warnings aside, and the inputs and actor_identity fit the workflow and are JSON data; a catalog with errors raises RunStartError with its diagnostics, and unfit inputs raise RunStartError with none.
+  cat{Catalog validates?} -->|yes| inp{"Inputs fit, JSON data?"}
+  cat -->|no| e1["RunStartError with diagnostics"]
+  inp -->|yes| run[The run starts]
+  inp -->|no| e2["RunStartError, no diagnostics"]
+```
+
 ## Actions and responses
 
 | Action | Your host | Respond with |
@@ -78,6 +100,17 @@ fails that step (R402); the step's retries and failure modes then apply.
 that capability at all. Give `Host` a `CheckpointTracker` and checkpoints
 are recorded in it.
 
+```mermaid
+---
+title: What the runner does with a host method's result
+---
+flowchart LR
+  accDescr: A response is submitted to the run; None means nothing yet, so the runner waits poll_interval_ms or until the deadline and asks again.
+  m[Host method] -->|response| sub[Submitted to the run]
+  m -->|None| wait["Wait, then ask again"]
+  wait --> m
+```
+
 Values you hand the run must be I-JSON: integers within ±2^53 and at most
 100 levels deep. Anything else is refused, so that snapshots and approval
 digests represent every value exactly.
@@ -96,6 +129,19 @@ ontology contract requires, or the step fails (R402).
   to a failure mode that fires; an `end` whose expression errors does not
   fire). An expression that errors (R405) is fail-safe: a gate fires, a
   condition is false, and a failure mode does not fire.
+
+  ```mermaid
+  ---
+  title: What each gate action does
+  ---
+  flowchart LR
+    accDescr: A gate that fires with stop fails the step with R403, skip skips the step, rollback rolls back and then fails with R403, warn adds a trace event, and end ends the run successfully.
+    gate[A gate fires] --> r403["stop: R403"]
+    gate --> skip["skip: the step is skipped"]
+    gate --> rb["rollback: roll back, then R403"]
+    gate --> trace["warn: a trace event"]
+    gate --> ended["end: the run ends successfully"]
+  ```
 - **Checkpoints.** One checkpoint authorises one step that requires one,
   and is used only once the step is approved and about to run. When none
   is valid, the executor asks for a new one (`CreateCheckpoint`). A
@@ -127,6 +173,17 @@ ontology contract requires, or the step fails (R402).
   inputs that does not wait is your host's to filter: put the sender's
   `sender_identity` on each item you return, since an item without one
   counts as always-ask when `always_ask_trust_classes` is bound.
+
+  ```mermaid
+  ---
+  title: Approval in an unattended run
+  ---
+  flowchart TB
+    accDescr: An unattended run asks only a standing mandate; when there is none, or it answers unavailable, the run follows when_unattended, which fails with F502 by default, skips the step, or defers it to a queue.
+    ask[Step requires approval, run unattended] --> mandate{"Standing mandate approves?"}
+    mandate -->|approved| run[Step runs]
+    mandate -->|"none, or unavailable"| wu["when_unattended: fail (F502, default), skip, or defer_to_queue"]
+  ```
 - **Delays.** A step with `delay` (`wait@1`) sleeps that long after its
   condition and before-gates, before its approval and execution; when it wakes,
   earlier checkpoints no longer count, as after a wait.
@@ -157,6 +214,19 @@ ontology contract requires, or the step fails (R402).
   whose delegations replace none of the old run's. It can also escalate to a handler (the run ends `escalated`), or end the run
   with the step's code — R402 when `when` fired on a step that did not fail
   ([STANDARD §5.12](../../spec/STANDARD-v1.1.0.md#512-recovery-and-escalation)).
+
+  ```mermaid
+  ---
+  title: When a failure mode applies
+  ---
+  flowchart TB
+    accDescr: The first failure mode that matches the error code or whose when is true applies; its action runs first, then it loops back with recovery context up to max_loops, escalates to a handler, or ends the run with the step's code.
+    fm["First matching failure mode: on_error code or when true"] --> act["Its action first: rollback or pause_and_checkpoint"]
+    act -->|"loop back, up to max_loops"| loop["Earlier step, with _recovery context"]
+    act -->|escalate| handler["Handler; run ends escalated"]
+    act -->|end| code["Run ends with the step's code"]
+    loop -->|"loops run out"| ex["on_exhausted, or R404"]
+  ```
 - **Invocations.** An `invoke` step runs its workflow as a nested run, at
   most four deep, with `input_bindings.input` as its inputs; inputs the
   workflow does not declare, or a missing required one, fail the step
@@ -217,6 +287,19 @@ times (default 100,000, about 28 hours at the default 1 s
 `RunIncomplete` is raised with the live run in `.run`, so you can snapshot
 it or drive it on. `HostResponseError` is a `RunIncomplete`.
 
+```mermaid
+---
+title: Driving a run by hand
+---
+flowchart TB
+  accDescr: start returns the run without driving it; next returns the pending action until it is answered, your code acts and submit answers it; to carry a run across processes or days it is saved as a signed snapshot and restored with the same key, and restore refuses a tampered one.
+  st["runner.start()"] --> nx["run.next(): the pending action"]
+  nx --> act[Your code acts]
+  act --> sb["run.submit(): the response"]
+  sb --> nx
+  sb -.->|across processes or days| snap["run.snapshot(key), then runner.restore(): refuses a tampered one"]
+```
+
 ## Conformance
 
 `tests/conformance/runtime/*.json` are scripted runs. Each one has a
@@ -234,3 +317,16 @@ that loops, an escalation and unattended deferral, end to end. Fixtures
 an adopter wrote themselves (`gap*`) are the exception: edit them in
 `tests/conformance/contrib/`, where they are kept as sent; the generator
 checks their keys and copies them in.
+
+
+```mermaid
+---
+title: Where the runtime fixtures come from and what runs them
+---
+flowchart TB
+  accDescr: scripts/gen_runtime_fixtures.py generates the runtime fixtures and copies in the contributed gap fixtures after checking their keys; cargo test replays each fixture with a snapshot and restore before every step, and tests/test_runner.py runs them through Python.
+  contrib["tests/conformance/contrib/ (gap fixtures, kept as sent)"] -->|keys checked, copied in| gen
+  gen["scripts/gen_runtime_fixtures.py"] --> fx["tests/conformance/runtime/*.json"]
+  fx --> cargo["cargo test --test runtime: snapshot and restore before every step"]
+  fx --> py["tests/test_runner.py: through Python"]
+```

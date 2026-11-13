@@ -1,0 +1,56 @@
+---
+// F-E1, an edge type as a card (visual spec 3.7), shared by the edge types
+// page and the Standard's F-S4: the type's mark at 3x and its id, a real
+// example (the first edge of that type in ontology order) drawn as two 32px
+// MiniTiles joined in the type's line style (2.4), badges for transitive and
+// symmetric, and the edge count (distinct pairs for a symmetric type).
+//
+// Props:
+// - info: EdgeTypeInfo, required. From loadOntology().edgeTypes.
+// - heading: 'p' | 'h3', default 'p'. With 'h3', `id` is required and must start with `ref-`.
+// - id: string, optional.
+import type { EdgeTypeInfo } from '../../data/ontology';
+import { edgeRects, glyphRects } from '../../pixel/lines';
+import { EDGE_LABELS, edgeTypeCount } from '../../lib/views';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import MiniTile from './MiniTile.astro';
+import Rects from './Rects.astro';
+
+interface Props {
+  info: EdgeTypeInfo;
+  heading?: 'p' | 'h3';
+  id?: string;
+}
+
+const { info, heading = 'p', id } = Astro.props;
+if (heading === 'h3' && !id?.startsWith('ref-')) throw new Error(`EdgeTypeCard ${info.id}: an h3 title needs a ref- id`);
+const example = info.edges[0];
+if (!example) throw new Error(`EdgeTypeCard: the ontology has no ${info.id} edge to draw`);
+const count = edgeTypeCount(info);
+// "Comes before, when both are present" reads "checkpoint comes before mutate, when both are present".
+const [phrase, ...rest] = EDGE_LABELS[info.id].out.toLowerCase().split(', ');
+const tail = rest.length > 0 ? `, ${rest.join(', ')}` : '';
+const name = `${info.id}: ${example.from} ${phrase} ${example.to}${tail}`;
+// The connector: 64px wide, centred on the 32px tiles.
+const W = 64;
+const H = 32;
+const line = edgeRects(info.id, 6, H / 2, W - 6, H / 2);
+const mid = info.id === 'conflicts_with' ? glyphRects('mark:conflicts_with', line.mid[0] - 7, line.mid[1] - 7, 2) : [];
+const Title = heading;
+---
+<div class="edge-card" role="group" aria-label={name} data-edge-type={info.id}>
+  <Title class="edge-card__title" id={id}><PixelGlyph name={`mark:${info.id}`} scale={3} /><code>{info.id}</code></Title>
+  <div class="edge-card__example">
+    <MiniTile id={example.from} />
+    <svg class="edge-card__line" viewBox={`0 0 ${W} ${H}`} width={W} height={H} shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+      <Rects rects={[...line.rects, ...mid]} />
+    </svg>
+    <MiniTile id={example.to} />
+  </div>
+  <p class="edge-card__reading"><code>{example.from}</code> {phrase} <code>{example.to}</code>{tail}</p>
+  <ul class="edge-card__facts">
+    <li class:list={['edge-card__badge', info.transitive ? 'edge-card__badge--on' : 'edge-card__badge--off']}><PixelGlyph name={info.transitive ? 'check' : 'close'} />Transitive</li>
+    <li class:list={['edge-card__badge', info.symmetric ? 'edge-card__badge--on' : 'edge-card__badge--off']}><PixelGlyph name={info.symmetric ? 'check' : 'close'} />Symmetric</li>
+    <li class="edge-card__count"><span class="edge-card__number">{count}</span> {info.symmetric ? (count === 1 ? 'pair' : 'pairs') : count === 1 ? 'edge' : 'edges'}</li>
+  </ul>
+</div>

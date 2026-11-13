@@ -4,6 +4,7 @@
 import type { Definition, Heading, Image, Link, Root } from 'mdast';
 import { visit } from 'unist-util-visit';
 import { parseMarkdown, stripFrontmatter } from '../lib/anchors';
+import { mermaidTwinEdits } from '../lib/mermaid/twin';
 import { SITE_ORIGIN, repoResolver } from '../lib/links';
 import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
 import { ROUTES } from '../lib/routes';
@@ -40,6 +41,15 @@ export function code(text: string): string {
   return `${ticks}${pad}${text}${pad}${ticks}`;
 }
 
+/**
+ * A figure's text equivalent in a Markdown copy (visual spec 6.1): the
+ * figure's title and its caption sentence, then the table or list that holds
+ * the same data. Pass the same caption the page's <figcaption> shows.
+ */
+export function figure(title: string, caption: string, body: string): string {
+  return `**Figure: ${title.replace(/\.$/, '')}.** ${caption}\n\n${body.replace(/\n+$/, '')}`;
+}
+
 export function table(headers: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.join(' | ')} |`;
   return [line(headers), line(headers.map(() => '---')), ...rows.map(line)].join('\n');
@@ -69,7 +79,7 @@ export function blocks(...parts: (string | null | undefined | false)[]): string 
   return `${parts.filter((p): p is string => typeof p === 'string' && p.trim() !== '').map((p) => p.trim()).join('\n\n')}\n`;
 }
 
-interface Edit {
+export interface Edit {
   start: number;
   end: number;
   text: string;
@@ -82,6 +92,8 @@ export interface CopyOptions {
   sourceNote?: boolean;
   /** Title for an H1 to add when the source has none. */
   title?: string;
+  /** More insertions into the source, from its parse (the prose pages' figure blocks). */
+  extraEdits?: (tree: Root) => Edit[];
 }
 
 /**
@@ -124,6 +136,10 @@ export function markdownCopy(repoPath: string, text: string, options: CopyOption
     }
     edits.push({ start: from + at, end: from + at + n.url.length, text: r.url });
   });
+
+  // Each mermaid fence stays, followed by its text version.
+  edits.push(...mermaidTwinEdits(tree, body));
+  if (options.extraEdits) edits.push(...options.extraEdits(tree));
 
   if (problems.length > 0) throw new Error(`twins: links in ${repoPath} did not resolve:\n  ${problems.join('\n  ')}`);
 

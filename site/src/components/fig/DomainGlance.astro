@@ -1,0 +1,62 @@
+---
+// What a domain profile sets, under its H3 in the domains index's
+// "Choosing a Domain" (visual spec 3.6, placed beside the README's own "Key
+// profile settings"): the outcome at low, medium and high risk (the F-D2
+// rule), the capabilities that never run on their own as tiles, the number
+// of checkpoint triggers by level, and the workflows the profile names.
+// Every value comes from the profile; the README's list stays as written.
+//
+// Props:
+// - profile: DomainProfile, required.
+// - n: number, required. The figure's number on the page.
+// - id: string, required. A `ref-` id.
+import '../../styles/figures-domain-usage.css';
+import type { DomainProfile } from '../../data/profiles';
+import { LEVEL_PIPS, OUTCOME_GLYPH, OUTCOME_WORD } from '../../lib/domain-figures';
+import { glance, glanceCaption, glanceTitle } from '../../lib/domain-index';
+import { domainHref } from '../../lib/generated';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+
+interface Props {
+  profile: DomainProfile;
+  n: number;
+  id: string;
+}
+
+const { profile, n, id } = Astro.props;
+const g = glance(profile);
+---
+<Figure id={id} n={n} title={glanceTitle(g)} caption={glanceCaption(g)} kind="domain-glance" class="glance">
+  {g.ladder && (
+    <ul class="glance__ladder" aria-label="Outcome at each risk level">
+      {g.ladder.rows.map((r) => {
+        const glyph = OUTCOME_GLYPH[r.outcome];
+        return (
+          <li class:list={['glance__cell', `glance__cell--${r.outcome}`]} data-outcome={r.outcome}>
+            <span class="glance__level">
+              <span class="risk-pips" data-level={LEVEL_PIPS[r.level]} aria-hidden="true">{Array.from({ length: LEVEL_PIPS[r.level] }, () => <span class="risk-pips__pip"></span>)}</span>
+              {r.level}
+            </span>
+            <span class="glance__outcome">{glyph && <PixelGlyph name={glyph} scale={2} />}{OUTCOME_WORD[r.outcome]}</span>
+          </li>
+        );
+      })}
+    </ul>
+  )}
+  <dl class="glance__facts">
+    {g.ladder && g.ladder.blocked.length > 0 && (
+      <div>
+        <dt><PixelGlyph name="approve:blocked" /> Never on its own</dt>
+        <dd>
+          <ul class="glance__tiles">
+            {g.ladder.blocked.map((c) => <li><MiniTile id={c} size={24} relation="never runs on its own" /></li>)}
+          </ul>
+        </dd>
+      </div>
+    )}
+    <div><dt><PixelGlyph name="flag" /> Checkpoint triggers</dt><dd>{g.triggers === 0 ? 'none' : `${g.triggers}: ${g.triggerLevels}`}</dd></div>
+    <div><dt>Workflows</dt><dd><a href={domainHref(g.key)}>{g.defined > 0 ? `${g.defined} in a catalog` : ''}{g.defined > 0 && g.proposed > 0 ? ', ' : ''}{g.proposed > 0 ? `${g.proposed} proposed` : ''}</a></dd></div>
+  </dl>
+</Figure>

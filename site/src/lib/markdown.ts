@@ -1,22 +1,35 @@
 // The Markdown pipeline, in one place so astro.config.mjs and the tests run the
 // same chain. Order matters:
 // - remark: links are rewritten first, so the page-meta block keeps rewritten
-//   links; the HTML allowlist sees the raw HTML nodes.
+//   links; the HTML allowlist sees the raw HTML nodes; mermaid fences become
+//   figures last, before Shiki would highlight them as code.
 // - Astro runs Shiki after remark and before the rehype plugins listed here.
 // - rehype: rehypeHeadingIds runs first so the autolink plugin and everything
 //   after it see the ids (Astro's own later pass keeps ids already set).
-//   Keywords and callouts come next, and tables are wrapped last.
+//   Keywords and callouts come next, then the figure marks (chapter glyphs,
+//   the edge summary table), then the prose figures (box diagrams, pattern
+//   chains, table marks; prose, RFC and skill pages only), then tables are
+//   wrapped and task lists marked.
+//   The capability-skill step (numbered procedure steps, collapsed examples)
+//   runs last, on the finished tree of each capability skill.
 // SmartyPants is off so heading ids match GitHub's (it would turn "--" into an
 // en dash before the ids are made).
 import { rehypeHeadingIds, type ShikiConfig, type UnifiedProcessorOptions } from '@astrojs/markdown-remark';
 import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypeCallouts from '../plugins/rehype-callouts';
+import rehypeCapabilitySkill from '../plugins/rehype-capability-skill';
+import rehypeFigureMarks from '../plugins/rehype-figure-marks';
 import rehypeKeywords from '../plugins/rehype-keywords';
+import rehypeProseFigures from '../plugins/rehype-prose-figures';
+import rehypeSpecSlots from '../plugins/rehype-spec-slots';
+import { SLOTS_BY_VERSION } from './spec-slots';
 import rehypeTables from '../plugins/rehype-tables';
 import rehypeTaskLists from '../plugins/rehype-task-lists';
 import remarkHtmlAllowlist from '../plugins/remark-html-allowlist';
+import remarkMermaid from '../plugins/remark-mermaid';
 import remarkPageMeta from '../plugins/remark-page-meta';
 import remarkRepoLinks from '../plugins/remark-repo-links';
+import { loadVersions } from '../data/versions';
 import { ROUTES, routeForSource } from './routes';
 
 /**
@@ -57,7 +70,7 @@ export const SHIKI_CONFIG: ShikiConfig = {
 
 export const PROCESSOR_OPTIONS: UnifiedProcessorOptions = {
   smartypants: false,
-  remarkPlugins: [remarkRepoLinks, remarkPageMeta, remarkHtmlAllowlist],
+  remarkPlugins: [remarkRepoLinks, remarkPageMeta, remarkHtmlAllowlist, remarkMermaid],
   rehypePlugins: [
     rehypeHeadingIds,
     [
@@ -66,7 +79,28 @@ export const PROCESSOR_OPTIONS: UnifiedProcessorOptions = {
     ],
     [rehypeKeywords, { sources: KEYWORD_SOURCES }],
     rehypeCallouts,
+    [
+      rehypeFigureMarks,
+      {
+        standards: new Set(ROUTES.filter((r) => r.template === 'spec' && r.source !== null).map((r) => r.source!)),
+        current: loadVersions().standard.current.source,
+        edgeTypes: 'spec/EDGE_TYPES.md',
+      },
+    ],
+    [
+      rehypeSpecSlots,
+      {
+        current: loadVersions().standard.current.source,
+        slots: new Map(
+          [loadVersions().standard.current, ...loadVersions().standard.previous]
+            .filter((v) => SLOTS_BY_VERSION[v.version])
+            .map((v) => [v.source, SLOTS_BY_VERSION[v.version]!]),
+        ),
+      },
+    ],
+    rehypeProseFigures,
     rehypeTables,
     rehypeTaskLists,
+    rehypeCapabilitySkill,
   ],
 };

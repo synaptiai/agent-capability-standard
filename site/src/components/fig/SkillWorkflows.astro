@@ -1,0 +1,45 @@
+---
+// The composed skills and the catalog workflow each one runs, as step
+// strips (visual spec 3.0 StepStrip, with capability symbols). A skill that
+// runs no catalog workflow says so in words. Rows come from COMPOSED_SKILLS
+// and the workflow catalogs.
+//
+// Props:
+// - id: string, required. A ref- id for the figure.
+// - n: number, required. The figure number.
+import { loadWorkflows } from '../../data/workflows';
+import { COMPOSED_SKILLS } from '../../data/skills';
+import { pageHref, workflowHref } from '../../lib/generated';
+import { SKILLS_FIG_TITLE, skillsCaption } from '../../lib/index-figures';
+import Figure from './Figure.astro';
+import StepStrip from './StepStrip.astro';
+
+interface Props {
+  id: string;
+  n: number;
+}
+
+const { id, n } = Astro.props;
+const wfs = loadWorkflows();
+const rows = Object.keys(COMPOSED_SKILLS)
+  .sort()
+  .map((dir) => {
+    const wfId = COMPOSED_SKILLS[dir] ?? null;
+    const wf = wfId === null ? null : wfs.byId.get(wfId);
+    if (wf === undefined) throw new Error(`SkillWorkflows: ${dir} runs ${wfId}, which no catalog defines`);
+    return { dir, wf, steps: wf ? wf.steps.length : null };
+  });
+---
+<Figure id={id} n={n} title={SKILLS_FIG_TITLE} caption={skillsCaption(rows)} kind="skill-workflows" class="skill-workflows">
+  <ul class="skill-workflows__list">
+    {rows.map((r) => (
+      <li class="skill-workflows__row">
+        <p class="skill-workflows__head">
+          <a href={pageHref(`/guides/skills/${r.dir}/`)}>{r.dir}</a>
+          {r.wf ? <span>runs <a href={workflowHref(r.wf.id)}><code>{r.wf.id}</code></a>, {r.steps} steps</span> : <span>runs no catalog workflow</span>}
+        </p>
+        {r.wf && <StepStrip wf={r.wf} size={20} symbols />}
+      </li>
+    ))}
+  </ul>
+</Figure>

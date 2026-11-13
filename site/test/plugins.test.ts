@@ -71,6 +71,14 @@ describe('remark-page-meta', () => {
     expect(page.description!.length).toBeLessThanOrEqual(203);
   });
 
+  it('skips a labelled note ("**Documentation:** ...") when choosing a description (README.md)', async () => {
+    // README.md's first paragraph after the badges is a "**Documentation:**" note
+    // saying where to read the site; its card on /start/ read "Documentation: acs...".
+    expect(readRepoFile('README.md')).toMatch(/^\*\*Documentation:\*\* /m);
+    const { page } = await pageOf('README.md');
+    expect(page.description).not.toMatch(/^Documentation:/);
+  });
+
   it('takes a SKILL.md title and description from its frontmatter', async () => {
     const text = readRepoFile('skills/debug-workflow/SKILL.md');
     const name = /^name: (.+)$/m.exec(text)![1];
@@ -104,6 +112,22 @@ describe('shortDescription', () => {
   it('cuts at a sentence end when there is one past character 40', () => {
     const text = `${'A sentence that is long enough to count. '.repeat(3)}${'more words '.repeat(30)}`;
     expect(shortDescription(text)).toBe('A sentence that is long enough to count. '.repeat(3).trim());
+  });
+
+  it('cuts a list joined with "; " after its last whole item', () => {
+    // The Standard's description: "This standard specifies:" and its §1 list.
+    const text = 'This standard specifies: A canonical capability ontology for agent systems; A workflow DSL for composing capabilities with safety and recovery semantics; A condition expression language for gates';
+    expect(shortDescription(text, 160)).toBe('This standard specifies: A canonical capability ontology for agent systems; A workflow DSL for composing capabilities with safety and recovery semantics...');
+  });
+
+  it('does not end a sentence at the full stop of "Art." or "e.g."', () => {
+    // docs/compliance/eu-ai-act/annex_iv_technical_documentation.md opens
+    // "... requirements of EU AI Act Art. 11 and Annex IV ...".
+    const text = `This document fulfills the technical documentation requirements of EU AI Act Art. 11 and Annex IV, for example the system description, e.g. its intended purpose, and ${'more words '.repeat(20)}`;
+    const d = shortDescription(text, 160);
+    expect(d).not.toMatch(/Art\.$/);
+    expect(d).not.toMatch(/e\.g\.$/);
+    expect(d.endsWith('...')).toBe(true);
   });
 });
 
@@ -210,14 +234,14 @@ describe('rehype-callouts', () => {
     const inSource = readRepoFile(source).split('\n').filter((l) => l.startsWith('> **Note:**')).length;
     expect(inSource).toBeGreaterThan(1);
     const { html } = await pageOf(source);
-    expect(html.match(/<div class="callout callout--note" role="note"><p class="callout__label">Note<\/p>/g)).toHaveLength(inSource);
+    expect(html.match(/<div class="callout callout--note" role="note"><p class="callout__label"><svg[^>]*data-glyph="note"[^>]*>[\s\S]*?<\/svg> Note<\/p>/g)).toHaveLength(inSource);
     expect(html).not.toContain('<strong>Note:</strong>');
   });
 
   it('accepts the GitHub alert form and leaves plain quotes alone', async () => {
     const text = `${readRepoFile('docs/FAQ.md')}\n\n> [!WARNING]\n> Careful.\n\n> Just a quote.\n`;
     const { html } = await pageOf('docs/FAQ.md', text);
-    expect(html).toMatch(/<div class="callout callout--warning" role="note"><p class="callout__label">Warning<\/p>\s*<p>Careful\.<\/p>/);
+    expect(html).toMatch(/<div class="callout callout--warning" role="note"><p class="callout__label"><svg[^>]*aria-hidden="true"[^>]*data-glyph="warning"[^>]*>[\s\S]*?<\/svg> Warning<\/p>\s*<p>Careful\.<\/p>/);
     expect(html).toMatch(/<blockquote>\s*<p>Just a quote\.<\/p>/);
   });
 });
@@ -290,6 +314,38 @@ describe('rehype-tables', () => {
     const text = `${readRepoFile('docs/FAQ.md')}\n\n## Odd *table* here\n\n| a | b |\n|---|---|\n| 1 | 2 |\n`;
     const { html } = await pageOf('docs/FAQ.md', text);
     expect(html).toContain('<div class="table-wrap" role="region" tabindex="0" aria-label="Table: Odd table here"><table>');
+  });
+});
+
+describe('rehype-tables long code', () => {
+  it('lets a long path in a cell break after "/", "." and "_", and keeps a short one whole', async () => {
+    // 39 characters with slashes, dots and underscores; and a 6-character id with an underscore.
+    const text = `${readRepoFile('docs/FAQ.md')}\n\n## Paths\n\n| Where | What |\n|---|---|\n| \`grounded_agency/state/evidence_store.py\` | \`run_id\` |\n`;
+    const { html } = await pageOf('docs/FAQ.md', text);
+    expect(html).toContain('<code class="break-code">grounded_<wbr>agency/<wbr>state/<wbr>evidence_<wbr>store.<wbr>py</code>');
+    expect(html).toContain("<td><code>run_id</code></td>");
+  });
+});
+
+describe('remark-page-meta status badges', () => {
+  it("draws the first clause of a compliance document's Status as a badge with its glyph, and keeps the rest", async () => {
+    const source = 'docs/compliance/eu-ai-act/post_market_monitoring.md';
+    // The source line (line 6): "**Status:** Reference implementation — Defines ..."
+    expect(readRepoFile(source)).toMatch(/^\*\*Status:\*\* Reference implementation — /m);
+    const { html } = await pageOf(source);
+    expect(html).toMatch(/<dt>Status<\/dt><dd><span class="status-badge status-badge--implementation" data-status="Reference implementation"><svg[^>]*data-glyph="status:implementation"[^>]*>.*?<\/svg>Reference implementation<\/span> — Defines/);
+  });
+
+  it('draws a Status line in the body as a badge too (benchmarks/README.md)', async () => {
+    const source = 'benchmarks/README.md';
+    expect(readRepoFile(source)).toMatch(/^\*\*Status\*\*: SDK-integrated \| /m);
+    const { html } = await pageOf(source);
+    expect(html).toMatch(/<strong>Status<\/strong>: <span class="status-badge status-badge--integrated" data-status="SDK-integrated"><svg[^>]*>.*?<\/svg>SDK-integrated<\/span> \| /);
+  });
+
+  it('leaves the RFC and Standard header rows as text, since their page head shows the badge', async () => {
+    const { html } = await pageOf('spec/RFC-0002-agent-reliability-profile.md');
+    expect(html).toContain('<dt>Status</dt><dd>Draft</dd>');
   });
 });
 

@@ -81,3 +81,18 @@ the older version silently.
 **Rule.** `requires-python` and the CI matrix may lag the project's real
 support policy. Before spending work on an old interpreter, confirm the
 supported versions with the user.
+
+## Judge a visual deliverable against its references, not only its checks
+
+**What happened.** The documentation site shipped with every functional
+check green: links, contrast, accessibility, tests, rendering at three
+widths. The user found it text heavy, with too few diagrams, icons and
+pixel art. The request had named two reference sites for the look, but no
+step compared the built pages with them; review agents checked function and
+correctness only.
+
+**Rule.** For anything people look at, add a review step that compares the
+built pages with the references the user named: how often a visual appears,
+what kinds, how much space. Show the user a few exemplar pages before
+building the rest. Passing checks say the page works, not that it meets the
+brief.

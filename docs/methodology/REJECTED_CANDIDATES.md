@@ -41,6 +41,16 @@ These were considered but are actually compositions of atomic capabilities.
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
+
+```mermaid
+---
+title: mitigate as a composition
+---
+flowchart TB
+  accDescr: mitigate decomposes into measure, plan, constrain, checkpoint and mutate, in that order.
+  measure --> plan --> constrain --> checkpoint --> mutate
+```
+
 ```yaml
 mitigate:
   steps:
@@ -67,6 +77,16 @@ mitigate:
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
+
+```mermaid
+---
+title: improve as a composition
+---
+flowchart TB
+  accDescr: improve decomposes into critique, plan, checkpoint, mutate and verify, in that order.
+  critique --> plan --> checkpoint --> mutate --> verify
+```
+
 ```yaml
 improve:
   steps:
@@ -93,6 +113,16 @@ improve:
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
+
+```mermaid
+---
+title: optimize as a composition
+---
+flowchart LR
+  accDescr: optimize runs discover and then compare, and the compare step loops until the result is optimal or max_iterations is reached.
+  discover --> compare["compare(loop until optimal or max_iterations)"]
+```
+
 ```yaml
 optimize:
   steps:
@@ -114,6 +144,16 @@ optimize:
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
+
+```mermaid
+---
+title: digital-twin as a composition
+---
+flowchart TB
+  accDescr: A digital twin decomposes into state, transition, simulate and integrate, in that order.
+  state --> transition --> simulate --> integrate
+```
+
 ```yaml
 digital_twin:
   steps:
@@ -138,6 +178,16 @@ digital_twin:
 **Rejection Reason**: COMPOSITION
 
 **Decomposition**:
+
+```mermaid
+---
+title: generalize as a composition
+---
+flowchart TB
+  accDescr: generalize decomposes into discover, which finds the patterns, and then generate, which expresses them as a rule or model.
+  discover -->|patterns| generate
+```
+
 ```yaml
 generalize:
   steps:
@@ -185,6 +235,16 @@ Evaluation is comparison with an implicit baseline (criteria). When you "evaluat
 
 **Resolution**: Use `compare(target, criteria)` for evaluation.
 
+```mermaid
+---
+title: Redundant candidates 2.1 and 2.2
+---
+flowchart LR
+  accDescr: validate is merged into verify, and evaluate into compare.
+  validate_c[validate] -->|merged into| verify
+  evaluate_c[evaluate] -->|merged into| compare
+```
+
 ---
 
 ### 2.3 `decide` (→ merge with `compare`)
@@ -212,6 +272,16 @@ A decision is the output of comparison. You compare options to decide.
 **Analysis**: Prioritization is comparison by importance criteria.
 
 **Resolution**: Use `compare(items, criteria: importance)`.
+
+```mermaid
+---
+title: Redundant candidates 2.3 and 2.4
+---
+flowchart LR
+  accDescr: decide and prioritize are merged into compare.
+  decide_c[decide] -->|merged into| compare
+  prioritize_c[prioritize] -->|merged into| compare
+```
 
 ---
 
@@ -248,6 +318,17 @@ A decision is the output of comparison. You compare options to decide.
 **Analysis**: Translation is text generation with language transform.
 
 **Resolution**: Use `generate(modality: text, transform: translate, target_language: X)`.
+
+```mermaid
+---
+title: Redundant candidates 2.5 to 2.7
+---
+flowchart LR
+  accDescr: schedule is merged into plan, and summarize and translate into generate.
+  schedule_c[schedule] --> plan
+  summarize_c[summarize] --> generate
+  translate_c[translate] --> generate
+```
 
 ---
 
@@ -296,6 +377,18 @@ A decision is the output of comparison. You compare options to decide.
 **Analysis**: Diffing is comparing with structured output.
 
 **Resolution**: Use `compare(state_a, state_b, output_format: diff)`.
+
+```mermaid
+---
+title: Redundant candidates 2.8 to 2.11
+---
+flowchart LR
+  accDescr: provenance is merged into ground, map-relationships into discover and diff-world-state into compare, and uncertainty-model becomes the confidence every capability outputs.
+  provenance_c[provenance] --> ground
+  maprel[map-relationships] --> discover
+  diffws[diff-world-state] --> compare
+  unc[uncertainty-model] --> conf["confidence in every output"]
+```
 
 ---
 
@@ -388,6 +481,18 @@ These were considered but have unclear semantics.
 
 **Resolution**: Use specific capabilities: `transform`, or `detect`, `classify` and `measure` for analysis.
 
+```mermaid
+---
+title: What to use instead of process
+---
+flowchart LR
+  accDescr: Instead of process, use transform, or detect, classify and measure for analysis.
+  proc[process] --> transform
+  proc --> detect
+  proc --> classify
+  proc --> measure
+```
+
 ---
 
 ### 4.2 `handle`
@@ -423,6 +528,22 @@ These were considered but have unclear semantics.
 **Analysis**: "Understanding" is an outcome of multiple operations (detect, classify, measure, state), not a single operation.
 
 **Resolution**: Use specific capabilities that produce understanding as output.
+
+```mermaid
+---
+title: What analyze and understand could mean
+---
+flowchart LR
+  accDescr: analyze could mean detect, classify, measure or compare, and understand is an outcome of detect, classify, measure and state.
+  an[analyze] --> detect
+  an --> classify
+  an --> measure
+  an --> compare
+  un[understand] --> detect
+  un --> classify
+  un --> measure
+  un --> state
+```
 
 ---
 
@@ -475,6 +596,21 @@ These were considered but are implementation details.
 **Analysis**: This is an implementation of `execute` or `generate` depending on purpose.
 
 **Resolution**: Use `execute(tool: shell, command: ...)`.
+
+```mermaid
+---
+title: Which capability each tool implements
+---
+flowchart LR
+  accDescr: query-postgres and read-file implement retrieve; call-api implements retrieve, send or mutate; run-shell implements execute or generate.
+  pg[query-postgres] --> retrieve
+  rf[read-file] --> retrieve
+  api[call-api] --> retrieve
+  api --> send
+  api --> mutate
+  sh[run-shell] --> execute
+  sh --> generate
+```
 
 ---
 

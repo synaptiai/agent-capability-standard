@@ -1,9 +1,9 @@
 ---
-// One page per workflow in the core and domain catalogs: goal, inputs, the
-// step diagram (each step's role, purpose, effective safety flags per
-// Standard §5.2.1, branches and failure handling), then each step's bindings,
-// gates and other fields, and the workflow's other sections. Every heading the
-// page adds has a `ref-` id.
+// One page per workflow in the core and domain catalogs: goal, the step map,
+// inputs, the steps (each a closed card with the step's role, purpose,
+// effective safety flags per Standard §5.2.1, branches, failure handling,
+// bindings and other fields), risk, the data flow between steps, and the
+// workflow's other sections. Every heading the page adds has a `ref-` id.
 import ContractTable from '../../components/ContractTable.astro';
 import FlagBadge from '../../components/FlagBadge.astro';
 import RiskBadge from '../../components/RiskBadge.astro';
@@ -14,7 +14,6 @@ import { loadWorkflows } from '../../data/workflows';
 import DocLayout from '../../layouts/DocLayout.astro';
 import {
   capabilityHref,
-  diagnosticHref,
   domainHref,
   pageHref,
   refSlugger,
@@ -28,12 +27,15 @@ import type { Route } from '../../lib/routes';
 import {
   capabilitiesUsed,
   composedSkillsFor,
-  gateRows,
-  producerSteps,
   profilesListing,
   schemaRows,
 } from '../../lib/views';
-import TableWrap from '../../components/TableWrap.astro';
+import DataFlowGrid from '../../components/fig/DataFlowGrid.astro';
+import Figure from '../../components/fig/Figure.astro';
+import Port from '../../components/fig/Port.astro';
+import RiskStrip from '../../components/fig/RiskStrip.astro';
+import WorkflowSpine from '../../components/fig/WorkflowSpine.astro';
+import { inputsCaption, riskSummary, stepList } from '../../lib/workflow-figures';
 
 export function getStaticPaths() {
   const { all } = loadWorkflows();
@@ -53,15 +55,21 @@ const { route, workflowId } = Astro.props;
 const wf = loadWorkflows().byId.get(workflowId)!;
 const ontology = loadOntology();
 const id = refSlugger();
-const stepId = (n: number) => `ref-step-${n}`;
-const detailsId = (n: number) => `ref-step-${n}-details`;
 const profiles = profilesListing(wf.id);
 const skills = composedSkillsFor(wf.id);
-const flagsHref = specSectionHref('5.2.1');
-const gatesHref = specSectionHref('5.6');
 const checkpoints = wf.steps.filter((s) => s.capability === 'checkpoint').length;
-const changing = wf.steps.filter((s) => s.effective.mutation).length;
+const changing = wf.steps.filter((s) => s.effective.mutation).map((s) => s.index);
 const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
+const inputRows = schemaRows(wf.inputs);
+// Figures are numbered in page order: the step map, the inputs (when there
+// are any), the risk, then the data flow.
+const riskAgrees = riskSummary(wf).agree;
+// Page order: step map, inputs, steps, data flow, then risk (the order of
+// visual spec 3.3: F-W2 before F-W3). The risk figure is numbered only when
+// the risks differ; otherwise the section is one sentence.
+const flowN = inputRows.length > 0 ? 3 : 2;
+const figN = { spine: 1, inputs: 2, flow: flowN, risk: flowN + 1 };
+const topInputs = inputRows.filter((r) => r.depth === 0).length;
 ---
 <DocLayout route={route} title={wf.id} description={wf.goal}>
   <article class="doc doc--workflow" data-workflow={wf.id} data-catalog={wf.catalog} data-pagefind-body>
@@ -84,7 +92,7 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
         )}
         <div><dt>Steps</dt><dd>{wf.steps.length}</dd></div>
         <div><dt>Checkpoint steps</dt><dd>{checkpoints}</dd></div>
-        <div><dt>Steps that change state</dt><dd>{changing}</dd></div>
+        <div><dt>Steps that change state</dt><dd>{changing.length}{changing.length > 0 && ` (${stepList(changing)})`}</dd></div>
         <div><dt>Source</dt><dd><a href={githubBlobUrl(wf.source)}><code>{wf.source}</code></a></dd></div>
         {wf.profile && (
           <div><dt>Profile</dt><dd><a href={repoPathHref(wf.profile, wf.source)}><code>{wf.profile}</code></a></dd></div>
@@ -94,9 +102,27 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
 
     {wf.description && <p class="workflow-description">{wf.description}</p>}
 
+    <WorkflowSpine wf={wf} n={figN.spine} id="ref-fig-step-map" />
+
     <section class="workflow-inputs">
       <h2 id={id('Inputs')}>Inputs</h2>
-      <ContractTable rows={schemaRows(wf.inputs)} caption={`Inputs of ${wf.id}`} from={wf.source} />
+      {inputRows.length === 0 ? (
+        <ContractTable rows={inputRows} caption={`Inputs of ${wf.id}`} from={wf.source} />
+      ) : (
+        <>
+          <Figure id="ref-fig-inputs" n={figN.inputs} title={`Inputs of ${wf.id}`} caption={inputsCaption(wf)} kind="workflow-inputs" class={topInputs > 4 ? 'wf-inputs wf-inputs--two' : 'wf-inputs'}>
+            <ul class="ports ports--out">
+              {inputRows.map((r) => (
+                <Port name={r.path} type={r.type} required={r.required} description={r.description} depth={r.depth > 0 ? 1 : 0} />
+              ))}
+            </ul>
+          </Figure>
+          <details class="workflow-details">
+            <summary>Inputs as a table, with constraints</summary>
+            <ContractTable rows={inputRows} caption={`Inputs of ${wf.id}`} from={wf.source} />
+          </details>
+        </>
+      )}
     </section>
 
     <section class="workflow-steps">
@@ -104,99 +130,32 @@ const validateCmd = `python tools/validate_workflows.py --catalog ${wf.source}`;
       <WorkflowDiagram workflow={wf} />
     </section>
 
-    <section class="workflow-step-details">
-      <h2 id={id('Bindings and details')}>Bindings and details</h2>
-      {wf.steps.map((step) => {
-        const gates = gateRows(step);
-        const reads = producerSteps(wf, step);
-        const e = step.effective;
-        return (
-          <section class="workflow-step" data-step={step.index} data-capability={step.capability}>
-            <h3 id={detailsId(step.index)}><a href={`#${stepId(step.index)}`}>Step {step.index}</a>: <code>{step.capability}</code></h3>
-            <dl class="workflow-step__facts">
-              {e.downgrades.length > 0 && (
-                <div>
-                  <dt><a href={flagsHref}>Ignored declarations</a></dt>
-                  <dd>
-                    The step declares {e.downgrades.join(', ')} weaker than the ontology. The ontology's values apply, and a
-                    validator reports <a href={diagnosticHref('W602')}><code>W602</code></a>.
-                  </dd>
-                </div>
-              )}
-              {step.store_as && <div><dt>Stores</dt><dd><code>{step.store_as}</code></dd></div>}
-              {reads.length > 0 && (
-                <div>
-                  <dt>Uses output of</dt>
-                  <dd>
-                    {reads.map((r, i) => (
-                      <>{i > 0 && ', '}<a href={`#${stepId(r.index)}`}>step {r.index}</a> (<code>{r.name}</code>)</>
-                    ))}
-                  </dd>
-                </div>
-              )}
-              {step.condition !== undefined && step.condition !== null && (
-                <div><dt>Runs when</dt><dd><code>{String(step.condition)}</code>{step.skip_if_false === true && ' (skipped when false)'}</dd></div>
-              )}
-              {step.parallel_group && <div><dt>Parallel group</dt><dd><code>{step.parallel_group}</code></dd></div>}
-              {step.workflow_id && (
-                <div><dt>Runs workflow</dt><dd><a href={workflowHref(step.workflow_id)}><code>{step.workflow_id}</code></a></dd></div>
-              )}
-              {step.mapping_ref && (
-                <div><dt>Mapping</dt><dd><a href={repoPathHref(step.mapping_ref, wf.source)}><code>{step.mapping_ref}</code></a></dd></div>
-              )}
-              {step.timeout !== undefined && step.timeout !== null && <div><dt>Timeout</dt><dd><code>{String(step.timeout)}</code></dd></div>}
-              {step.retry !== undefined && step.retry !== null && <div><dt>Retry</dt><dd><code>{JSON.stringify(step.retry)}</code></dd></div>}
-            </dl>
-            {Object.keys(step.input_bindings).length > 0 && (
-              <>
-                <p class="workflow-step__label">Input bindings</p>
-                <YamlBlock value={step.input_bindings} />
-              </>
-            )}
-            {gates.length > 0 && (
-              <TableWrap label={`Gates of step ${step.index}`}>
-                <table class="gate-table">
-                  <caption><a href={gatesHref}>Gates</a> of step {step.index}</caption>
-                  <thead><tr><th scope="col">When</th><th scope="col">Action</th><th scope="col">Message</th></tr></thead>
-                  <tbody>
-                    {gates.map((g) => (
-                      <tr>
-                        <td><code>{g.when}</code>{g.phase && <> ({g.phase} the step)</>}</td>
-                        <td><code>{g.action}</code></td>
-                        <td>{g.message}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </TableWrap>
-            )}
-            {Object.keys(step.extra).length > 0 && (
-              <>
-                <p class="workflow-step__label">Other step fields</p>
-                <YamlBlock value={step.extra} />
-              </>
-            )}
-          </section>
-        );
-      })}
+    <section class="workflow-data-flow">
+      <h2 id={id('Data flow')}>Data flow</h2>
+      <DataFlowGrid wf={wf} n={figN.flow} id="ref-fig-data-flow" />
+      {wf.data_flow !== undefined && (
+        <details class="workflow-details">
+          <summary>Data flow as written in the catalog</summary>
+          <YamlBlock value={wf.data_flow} />
+        </details>
+      )}
+    </section>
+
+    <section class="workflow-risk">
+      <h2 id={id('Risk')}>Risk</h2>
+      {riskAgrees ? <p class="workflow-risk__sentence">{riskSummary(wf).sentence}</p> : <RiskStrip wf={wf} n={figN.risk} id="ref-fig-risk" />}
+      {wf.risk_propagation !== undefined && (
+        <details class="workflow-details">
+          <summary>Risk propagation as written in the catalog</summary>
+          <YamlBlock value={wf.risk_propagation} />
+        </details>
+      )}
     </section>
 
     {wf.success.length > 0 && (
       <section class="workflow-success">
         <h2 id={id('Success criteria')}>Success criteria</h2>
         <ul>{wf.success.map((s) => <li>{s}</li>)}</ul>
-      </section>
-    )}
-    {wf.data_flow !== undefined && (
-      <section class="workflow-data-flow">
-        <h2 id={id('Data flow')}>Data flow</h2>
-        <YamlBlock value={wf.data_flow} />
-      </section>
-    )}
-    {wf.risk_propagation !== undefined && (
-      <section class="workflow-risk-propagation">
-        <h2 id={id('Risk propagation')}>Risk propagation</h2>
-        <YamlBlock value={wf.risk_propagation} />
       </section>
     )}
     {wf.workflow_extensions !== undefined && (

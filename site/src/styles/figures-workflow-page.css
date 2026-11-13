@@ -1,0 +1,204 @@
+/*
+ * The workflow page around its figures (visual spec 3.3 and 4.1): the step
+ * cards as closed <details> on the rail, with a summary that reads as one row
+ * of the step map, and the capabilities-used chips. Square corners, 2px
+ * lines, tokens only.
+ */
+/* Declared here too, so the layers keep their order when this sheet loads first. */
+@layer reset, tokens, base, components, utilities;
+
+@layer components {
+  /* The key and the open-every-step button share one row when there is
+     room; the button wraps under the key on a narrow column. */
+  .wf-intro {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-4);
+    margin: 0 0 var(--space-4);
+  }
+
+  .wf-intro .wf-key {
+    flex: 1 1 24rem;
+    margin: 0;
+  }
+
+  .wf-toggle {
+    flex: none;
+    margin: 0;
+  }
+
+  :root:not(.js) .wf-toggle {
+    display: none;
+  }
+
+  .wf-toggle .btn--quiet {
+    min-height: 32px;
+    border: var(--px) solid var(--control);
+  }
+
+  /* Closed cards sit close together; the rail runs through the gaps. */
+  .wf .wf-step {
+    padding-bottom: var(--space-1);
+  }
+
+  .wf .wf-step__card {
+    margin: 0;
+    padding: 0;
+  }
+
+  .wf .wf-parallel {
+    padding-bottom: var(--space-1);
+    margin-bottom: var(--space-1) !important;
+  }
+
+  /* The summary reads as one row of the step map: the capability, its layer
+     and the purpose run on in one line where they fit, and the risk sits
+     at the right. */
+  .wf-step__summary {
+    display: block;
+    position: relative;
+    padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-3) + 14px);
+    line-height: 24px;
+    list-style: none;
+  }
+
+  .wf-step__summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* The open/closed mark: a 2px chevron drawn with borders, square ends. */
+  .wf-step__summary::before {
+    content: '';
+    position: absolute;
+    left: var(--space-3);
+    top: 12px;
+    width: 6px;
+    height: 6px;
+    border-right: var(--px) solid var(--ink-2);
+    border-bottom: var(--px) solid var(--ink-2);
+    transform: rotate(-45deg);
+  }
+
+  .wf-step__card[open] > .wf-step__summary::before {
+    transform: rotate(45deg);
+    top: 9px;
+  }
+
+  .wf-step__summary:hover {
+    background: var(--bg);
+  }
+
+  .wf-step__summary .wf-step__head {
+    display: inline;
+    margin: 0 var(--space-2) 0 0;
+  }
+
+  .wf-step__summary .wf-step__head > * {
+    margin-right: var(--space-2);
+    vertical-align: middle;
+  }
+
+  .wf-step__summary .wf-step__head > code {
+    font-weight: 700;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  /* On a phone the card is too narrow for the risk to float beside the
+     name, so it leads the row instead and the name never breaks. */
+  @media (max-width: 599px) {
+    .wf-step__summary .risk-badge {
+      float: none;
+      margin: 0 var(--space-2) 0 0;
+      vertical-align: middle;
+    }
+  }
+
+  .wf-step__domain {
+    font-weight: 400;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .wf-step__summary .risk-badge {
+    float: right;
+    margin: 1px 0 0 var(--space-2);
+  }
+
+  .wf-step__purpose {
+    color: var(--ink);
+  }
+
+  .wf-step__body {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    border-top: 1px solid var(--rule);
+  }
+
+  .wf-step__body > :last-child {
+    margin-bottom: 0;
+  }
+
+  .wf-step__body .code-block {
+    margin: 0 0 var(--space-2);
+    font-size: 13px;
+  }
+
+  .wf-step__label {
+    margin: var(--space-2) 0 var(--space-1);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  .wf-step__failures {
+    padding-left: 1.2em;
+  }
+
+  .wf-step__facts {
+    margin: 0 0 var(--space-2);
+  }
+
+  .wf-step__facts dd {
+    overflow-wrap: anywhere;
+  }
+
+  /* One column on a phone. The extra class outranks the shared facts-list
+     rule in components.css, which can load after this sheet. */
+  @media (max-width: 599px) {
+    .wf-step__body .wf-step__facts {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .wf-step__facts dd {
+      margin-bottom: var(--space-1);
+    }
+  }
+
+  /* Capabilities used: one wrapping row of chips, not one per line. */
+  .capability-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .capability-chips li {
+    margin: 0;
+  }
+}
+
+@layer components {
+  /* In a step card's summary the layer is its glyph only (the name is read
+     out), so the purpose fits on the capability's line more often. */
+  .layer-badge--compact {
+    gap: 0;
+    padding: 2px;
+  }
+}

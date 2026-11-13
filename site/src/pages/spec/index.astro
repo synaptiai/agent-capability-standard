@@ -1,0 +1,8 @@
+---
+import { LISTING_INTROS } from '../../lib/listing';
+import { routeByUrl } from '../../lib/generated';
+import ListingPage from '../../templates/ListingPage.astro';
+
+const route = routeByUrl('/spec/');
+---
+<ListingPage route={route} intro={LISTING_INTROS['/spec/']!} />

@@ -1,0 +1,46 @@
+---
+// One lane beside a step spine (visual spec 3.0): an 8px-wide strip of an
+// SVG holding brackets that span rows (checkpoint to the steps that rely on
+// it, rollback back to its checkpoint) and glyphs on single rows (gate
+// diamonds, fork and join). Draw a lane only when at least one row uses it:
+// compute x with laneOffsets() from src/pixel/lines.ts, which leaves unused
+// lanes out. Render inside the spine's <svg>.
+//
+// Props:
+// - x: number, required. Left edge of the lane, from laneOffsets().
+// - rowHeight: number, required. Height of one spine row in px (28 in F-W1).
+// - top: number, default 0. y of the first row.
+// - spans: { from: number; to: number; glyph?: string }[], default []. Row
+//   indices (0-based) joined by a bracket; `glyph` is drawn at 1x beside the
+//   bracket's first row (e.g. 'flag' for a checkpoint, 'undo' for a rollback).
+// - marks: { row: number; glyph: string }[], default []. A glyph centred on a row.
+//   Lanes are 8px and the glyph 7px, so glyphs in two adjacent lanes sit
+//   1px apart; offset their rows or put the role glyph on the tile instead.
+// - side: 'left' | 'right', default 'right'. Which way the bracket ticks point.
+// - ink: Ink, default 'ink-2'.
+import { bracket, glyphRects, LANE_W, type Ink } from '../../pixel/lines';
+import Rects from './Rects.astro';
+
+interface Props {
+  x: number;
+  rowHeight: number;
+  top?: number;
+  spans?: { from: number; to: number; glyph?: string }[];
+  marks?: { row: number; glyph: string }[];
+  side?: 'left' | 'right';
+  ink?: Ink;
+}
+
+const { x, rowHeight, top = 0, spans = [], marks = [], side = 'right', ink = 'ink-2' } = Astro.props;
+const mid = (row: number) => top + row * rowHeight + rowHeight / 2;
+const cx = x + LANE_W / 2;
+const rects = [
+  ...spans.flatMap((s) => {
+    if (s.to < s.from) throw new Error(`Lane: span ends (${s.to}) before it starts (${s.from})`);
+    return bracket(cx, mid(s.from), mid(s.to), side, ink, LANE_W / 2);
+  }),
+  ...spans.filter((s) => s.glyph).flatMap((s) => glyphRects(s.glyph!, cx - 3, mid(s.from) - rowHeight / 2 - 1, 1)),
+  ...marks.flatMap((m) => glyphRects(m.glyph, cx - 3, mid(m.row) - 3, 1)),
+];
+---
+<Rects rects={rects} class="lane" />

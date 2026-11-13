@@ -1,16 +1,17 @@
 // Lookup and SVG output for the grids in glyphs.ts.
 import { parseGrid, toRects, type Grid, type Paint, type Rect } from './grid';
-import { LAYER_GLYPHS, MARK, UI_GLYPHS } from './glyphs';
+import { MARK } from './glyphs';
+import { ALL_GRIDS, resolveGlyphKey } from './keys';
 
-const GRIDS: ReadonlyMap<string, Grid> = new Map(
-  [...Object.entries(LAYER_GLYPHS), ...Object.entries(UI_GLYPHS)].map(([name, rows]) => [name, parseGrid(name, rows)]),
-);
+const GRIDS: ReadonlyMap<string, Grid> = new Map(Object.entries(ALL_GRIDS).map(([name, rows]) => [name, parseGrid(name, rows)]));
 
-/** Every glyph name: the layer ids, then the UI glyphs. */
+/** Every drawn grid's name: the layer ids, the inline glyphs, then the concept glyphs. */
 export const GLYPH_NAMES: readonly string[] = [...GRIDS.keys()];
 
+/** The grid for a glyph key, following GLYPH_ALIASES (so `gate:stop` draws `stop`). */
 export function glyph(name: string): Grid {
-  const g = GRIDS.get(name);
+  const key = resolveGlyphKey(name);
+  const g = key === null ? undefined : GRIDS.get(key);
   if (!g) throw new Error(`pixel: no glyph named ${name}`);
   return g;
 }

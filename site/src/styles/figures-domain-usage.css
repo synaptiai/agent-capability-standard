@@ -1,0 +1,254 @@
+/*
+ * Domain page figures drawn from the README's own blocks: the "Capability
+ * Usage" examples against the evidence policy, and the capability tiles of
+ * a proposed workflow's card. Square corners, 2px lines, tokens only.
+ */
+/* Pages import this sheet, and it can load before the layout's tokens.css, so
+   the layer order is declared here too (the same order as tokens.css). */
+@layer reset, tokens, base, components, utilities;
+
+@layer components {
+  .usage__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    margin: 0 0 var(--space-3);
+  }
+
+  .usage__cap {
+    font-weight: 700;
+  }
+
+  .usage__domain,
+  .usage__cite {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .usage__cite {
+    margin-left: auto;
+    color: var(--ink);
+  }
+
+  .usage__rows {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-2) var(--space-3);
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .usage__rows > div {
+    display: contents;
+  }
+
+  .usage__rows dt {
+    font-weight: 700;
+    color: var(--ink-2);
+  }
+
+  .usage__rows dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  @container (max-width: 480px) {
+    .usage__rows {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: var(--space-1);
+    }
+
+    .usage__rows dd {
+      margin-bottom: var(--space-1);
+    }
+
+    .usage__cite {
+      margin-left: 0;
+    }
+  }
+
+  .usage__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .usage__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0 var(--space-1);
+    border: var(--px) solid var(--line);
+    background: var(--bg);
+  }
+
+  .usage__chip--no {
+    border-style: dashed;
+    background: var(--bg-sub);
+    color: var(--ink-2);
+  }
+
+  .usage__chip code {
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  /* A proposed workflow's card when the guide lists its capabilities. */
+  .fig.wf-card--listed {
+    border-style: dashed;
+  }
+
+  /* The badge above the tiles: one row would make the drawing too short to
+     count as a figure (64px) on the figure-gap check. */
+  .wf-card--listed .wf-card__body {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@layer components {
+  /* ---------- domains index: what each profile sets ---------- */
+
+  .glance__ladder {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    padding: 0;
+    list-style: none;
+  }
+
+  .glance__cell {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+    font-size: 14px;
+  }
+
+  .glance__cell--gap {
+    border-style: dashed;
+  }
+
+  .glance__level,
+  .glance__outcome {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .glance__level {
+    color: var(--ink-2);
+  }
+
+  .glance__outcome {
+    font-weight: 700;
+  }
+
+  .glance__facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-5);
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .glance__facts > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .param__rows {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .param__rows > div {
+    display: contents;
+  }
+
+  .glance__facts dt,
+  .param__rows dt {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-weight: 700;
+    color: var(--ink-2);
+  }
+
+  .glance__facts dd,
+  .param__rows dd {
+    margin: 0;
+    min-width: 0;
+  }
+
+  @container (max-width: 480px) {
+    .param__rows {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: var(--space-1);
+    }
+
+    .param__rows dd {
+      margin-bottom: var(--space-2);
+    }
+  }
+
+  .glance__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .glance__tiles li {
+    display: flex;
+    margin: 0;
+  }
+
+  /* ---------- domains index: a capability's domain parameter ---------- */
+
+  .param__cap {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-3);
+    font-weight: 700;
+  }
+
+  .param__count {
+    padding-left: var(--space-1);
+    border-left: 1px solid var(--rule);
+    color: var(--ink-2);
+    font-size: 13px;
+  }
+
+  .param__key {
+    margin: var(--space-3) 0 0;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+}

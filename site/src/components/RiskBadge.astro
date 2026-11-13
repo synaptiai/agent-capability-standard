@@ -6,7 +6,7 @@ import type { Risk } from '../data/ontology';
 interface Props {
   risk: Risk;
   href?: string;
-  /** Text before the level, e.g. "Risk". */
+  /** Text before the level, e.g. "Risk"; empty where a column header already says it. */
   label?: string;
 }
 
@@ -16,5 +16,5 @@ const Tag = href ? 'a' : 'span';
 ---
 <Tag class:list={['risk-badge', `risk-badge--${risk}`]} href={href} data-risk={risk}>
   <span class="risk-pips" data-level={pips} aria-hidden="true">{Array.from({ length: pips }, () => <span class="risk-pips__pip"></span>)}</span>
-  {label}: {risk}
+  {label ? `${label}: ${risk}` : risk}
 </Tag>

@@ -86,3 +86,25 @@ export function anchorsOf(repoPath: string, read: (p: string) => string): Anchor
   }
   return a;
 }
+
+/** 1-based line numbers of a parsed tree that lie in a fenced or indented code block. */
+export function codeLineNumbers(root: Root): Set<number> {
+  const out = new Set<number>();
+  visit(root, 'code', (c) => {
+    const pos = (c as { position?: { start: { line: number }; end: { line: number } } }).position!;
+    for (let l = pos.start.line; l <= pos.end.line; l++) out.add(l);
+  });
+  return out;
+}
+
+/**
+ * Per line of `text` (0-based, frontmatter included), whether it lies in a
+ * fenced or indented code block, for the parsers that read a file line by
+ * line: a heading test must skip these lines.
+ */
+export function codeLines(text: string): boolean[] {
+  const lines = text.split('\n');
+  const offset = lines.length - stripFrontmatter(text).split('\n').length;
+  const code = codeLineNumbers(parseMarkdown(text));
+  return lines.map((_, i) => i >= offset && code.has(i - offset + 1));
+}

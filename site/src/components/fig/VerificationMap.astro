@@ -1,0 +1,56 @@
+---
+// F-C11, the skill's verification checks against its fields (the figure
+// under the Verification heading): one row per checkbox item, with the
+// skill's inputs (outlined chips) and output fields (chips on the layer
+// tint) its text names as whole words, as F-C7 does for the procedure. A
+// check that names no field says so across both cells. The figure holds
+// every check's words, so the page folds the checklist under it.
+//
+// Props:
+// - cap: Capability, required.
+// - map: CheckMap, required. From verificationMap().
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { verificationMapCaption, verificationMapTitle, type CheckMap } from '../../lib/capability-figures';
+import Figure from './Figure.astro';
+
+interface Props {
+  cap: Capability;
+  map: CheckMap;
+  n: number;
+}
+
+const { cap, map, n } = Astro.props;
+---
+<Figure id="ref-fig-verification" n={n} title={verificationMapTitle(cap)} caption={verificationMapCaption(cap, map)} kind="verification-map">
+  <div class="pmap has-layer" style={`--layer: var(--layer-${cap.layer})`}>
+    <p class="pmap__head" aria-hidden="true">
+      <span>Check</span>
+      <span>Inputs it uses by name</span>
+      <span>Output fields it uses by name</span>
+    </p>
+    <ol class="pmap__steps" aria-label={`The ${map.checks.length} verification checks, with the field names each uses`}>
+      {map.checks.map((s) => (
+        <li class="pmap__step" data-step={s.n} data-names={s.reads.length + s.writes.length}>
+          <span class="pmap__title pmap__title--check"><span class="pmap__n" aria-hidden="true">{s.n}</span><span>{s.text}</span></span>
+          {s.reads.length + s.writes.length === 0 ? (
+            <span class="pmap__none">names no input or output field</span>
+          ) : (
+            <>
+            <span class="pmap__cell pmap__cell--in">
+              <span class="pmap__label" aria-hidden="true">In</span>
+              <span class="fig-sr">; inputs it uses by name: {s.reads.length === 0 ? 'none' : s.reads.join(', ')}</span>
+              {s.reads.map((f) => <code class="pmap__chip pmap__chip--in" aria-hidden="true">{f}</code>)}
+            </span>
+            <span class="pmap__cell pmap__cell--out">
+              <span class="pmap__label" aria-hidden="true">Out</span>
+              <span class="fig-sr">; output fields it uses by name: {s.writes.length === 0 ? 'none' : s.writes.join(', ')}</span>
+              {s.writes.map((f) => <code class="pmap__chip pmap__chip--out" aria-hidden="true">{f}</code>)}
+            </span>
+            </>
+          )}
+        </li>
+      ))}
+    </ol>
+  </div>
+</Figure>

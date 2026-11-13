@@ -1,0 +1,36 @@
+---
+// A horizontal amount bar (visual spec 3.0): --indicator on a --bg-mut
+// track, 12px tall, square ends, the value printed to its right in --ink-2,
+// never inside the bar. One hue, because it encodes an amount. Bars that are
+// compared share one `max`. Gridlines are drawn in --rule.
+//
+// Props:
+// - value: number, required. Not below `min` or above `max`.
+// - max: number, required. The scale's top, shared by the bars compared.
+// - min: number, default 0.
+// - digits: number, default 0. Decimal places of the printed value.
+// - label: string, optional. Printed instead of the number (e.g. "0.85 of 1").
+// - ticks: number[], default []. Values that get a gridline across the track.
+// - hideValue: boolean, default false. When the value is printed elsewhere in the row.
+interface Props {
+  value: number;
+  max: number;
+  min?: number;
+  digits?: number;
+  label?: string;
+  ticks?: number[];
+  hideValue?: boolean;
+}
+
+const { value, max, min = 0, digits = 0, label, ticks = [], hideValue = false } = Astro.props;
+if (!(max > min)) throw new Error(`PixelBar: max (${max}) must be above min (${min})`);
+if (value < min || value > max) throw new Error(`PixelBar: ${value} is outside ${min} to ${max}`);
+const pct = (v: number) => `${(((v - min) / (max - min)) * 100).toFixed(3)}%`;
+---
+<span class="pixel-bar" data-value={value}>
+  <span class="pixel-bar__track" aria-hidden="true">
+    {ticks.map((t) => <span class="pixel-bar__tick" style={`left: ${pct(t)}`}></span>)}
+    <span class="pixel-bar__fill" style={`width: ${pct(value)}`}></span>
+  </span>
+  {!hideValue && <span class="pixel-bar__value">{label ?? value.toFixed(digits)}</span>}
+</span>

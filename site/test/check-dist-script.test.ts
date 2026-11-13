@@ -5,14 +5,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkDistDir, internalTarget, linkValues, markdownLinkValues } from '../scripts/check-dist.mjs';
+import { checkDistDir, drawnFigure, internalTarget, linkValues, markdownLinkValues } from '../scripts/check-dist.mjs';
 
 const O = 'https://acs.synapti.ai';
 
 type Files = Record<string, string>;
 
 function page(body: string): string {
-  return `<!doctype html><html><head><link rel="stylesheet" href="/_astro/site.css"><script type="module" src="/_astro/app.js"></script></head><body>${body}</body></html>`;
+  return `<!doctype html><html><head><link rel="stylesheet" href="/_astro/site.css"><script type="module" src="/_astro/app.js"></script></head><body class="page page--prose">${body}</body></html>`;
 }
 
 /** A clean two-page site: home and /guide/, each with its copy, plus 404, sitemap, llms.txt and Pagefind. */
@@ -49,14 +49,15 @@ function build(files: Files): string {
   return dir;
 }
 
-function problems(files: Files): string[] {
-  const { problems: p } = checkDistDir(build(files));
+/** The problems check-dist finds; `drawn` are the templates whose pages need a drawn figure (none in the clean site). */
+function problems(files: Files, drawn: readonly string[] = []): string[] {
+  const { problems: p } = checkDistDir(build(files), { drawnTemplates: drawn });
   return Object.entries(p).flatMap(([check, list]) => list.map((l) => `[${check}] ${l}`));
 }
 
 describe('check-dist.mjs', () => {
   it('passes the clean fixture and counts its pages', () => {
-    const r = checkDistDir(build(cleanSite()));
+    const r = checkDistDir(build(cleanSite()), { drawnTemplates: [] });
     expect(Object.values(r.problems).flat()).toEqual([]);
     expect(r.stats.pages).toBe(2);
     expect(r.stats.copies).toBe(2);
@@ -162,6 +163,122 @@ describe('check-dist.mjs', () => {
     const s = cleanSite();
     delete s['pagefind/pagefind.js'];
     expect(problems(s)).toEqual(['[files] pagefind/pagefind.js is missing from dist']);
+  });
+
+  // Visual spec 6.1: each numbered figure has a "**Figure: {title}.**" block in the page's Markdown copy.
+  const fig = (id: string, n: number, title: string) =>
+    `<figure class="fig" id="${id}" aria-labelledby="${id}-title"><p class="fig__eyebrow" aria-hidden="true">Fig ${n}</p><p class="fig__title" id="${id}-title">${title}</p><div></div><figcaption class="fig__caption">c</figcaption></figure>`;
+
+  it('passes a figure whose block is in the copy, in a list item, with its code span undone', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', `</h1>${fig('ref-a', 1, 'Steps of <code>x</code> &amp; y')}`);
+    s['guide/index.md'] = '# Guide\n\n- item\n\n  **Figure: Steps of `x` & y.** c\n';
+    expect(problems(s)).toEqual([]);
+  });
+
+  it('fails a numbered figure with no block, and a block with no figure', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', `</h1>${fig('ref-a', 1, 'Edge properties')}`);
+    s['index.md'] = '# Home\n\n**Figure: Old chart.** gone\n';
+    expect(problems(s)).toEqual([
+      '[figures] /guide/: Fig 1 "Edge properties" has no "**Figure: Edge properties.**" block in /guide/index.md',
+      '[figures] /index.md: the block "**Figure: Old chart.**" names no figure on the page',
+    ]);
+  });
+
+  it('names a box diagram by its aria-label, and does not count a block written inside a code fence', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace(
+      '</h1>',
+      '</h1><figure class="fig fig-ascii" aria-label="Diagram: Setup"><p class="fig__eyebrow" aria-hidden="true">Fig 1</p><pre>┌─┐</pre></figure>',
+    );
+    s['guide/index.md'] = '# Guide\n\n```md\n**Figure: Diagram: Setup.** x\n```\n';
+    expect(problems(s)).toEqual(['[figures] /guide/: Fig 1 "Diagram: Setup" has no "**Figure: Diagram: Setup.**" block in /guide/index.md']);
+  });
+
+  it('leaves out a figure whose eyebrow is not a number (a folded text version)', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', '</h1><figure class="fig fig-ascii" aria-label="Diagram: Setup"><p class="fig__eyebrow">Text version</p></figure>');
+    expect(problems(s)).toEqual([]);
+  });
+
+  // A legend entry is keyed by the marks it draws, so two glyph names for one grid are one glyph.
+  const glyph = (rects: string, key: string) => `<svg class="pg" viewBox="0 0 7 7" data-glyph="${key}" aria-hidden="true">${rects}</svg>`;
+  const UNDO = '<rect x="0" y="2" width="7" height="1"></rect>';
+  const MARK = '<rect x="3" y="3" width="1" height="1"></rect>';
+
+  it('fails a legend that draws one glyph for two different entries', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace(
+      '</h1>',
+      `</h1><ul class="spine-legend" aria-label="Key"><li>${glyph(UNDO, 'role:rollback')}<span>step rolls back</span></li><li>${glyph(UNDO, 'fail:rollback')}<span>on failure, roll back</span></li></ul>`,
+    );
+    expect(problems(s)).toEqual(['[legends] /guide/: the legend "Key" draws the same glyph for "step rolls back" and "on failure, roll back"']);
+  });
+
+  it('treats an element whose class ends in "key" as a legend too', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace(
+      '</h1>',
+      `</h1><dl class="diag-key"><div>${glyph(UNDO, 'a')}<dt>error</dt></div><div>${glyph(UNDO, 'b')}<dt>warning</dt></div></dl>`,
+    );
+    expect(problems(s)).toEqual(['[legends] /guide/: the legend "diag-key" draws the same glyph for "error" and "warning"']);
+  });
+
+  it('passes a legend whose entries differ by a lane mark before the same glyph', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace(
+      '</h1>',
+      `</h1><ul class="spine-legend" aria-label="Key"><li>${glyph(UNDO, 'role:rollback')}<span>step rolls back</span></li><li>${glyph(MARK, 'close')}${glyph(UNDO, 'fail:rollback')}<span>on failure, roll back</span></li></ul>`,
+    );
+    expect(problems(s)).toEqual([]);
+  });
+
+  it('fails a built file that links to the review pages, which the deploy removes', () => {
+    const s = cleanSite();
+    s['guide/index.html'] = s['guide/index.html']!.replace('</h1>', '</h1><a href="/_review/glyphs/">Glyphs</a>');
+    s['_review/glyphs/index.html'] = page('<h1 id="g">Glyph sheet</h1>');
+    const p = problems(s);
+    expect(p).toContain('[review] guide/index.html points at the review pages (/_review/), which are not deployed');
+  });
+});
+
+describe('drawn figures', () => {
+  const fig = (n: number, drawing: string) =>
+    `<figure class="fig" aria-labelledby="f${n}-t"><p class="fig__eyebrow" aria-hidden="true">Fig ${n}</p><p class="fig__title" id="f${n}-t">F${n}</p><div class="fig__drawing">${drawing}</div><figcaption class="fig__caption">c</figcaption></figure>`;
+  const svg = '<svg viewBox="0 0 1 1"><rect width="1" height="1"/></svg>';
+  const table = (cell: string) => `<div class="table-wrap"><table><tbody><tr><td>${cell}</td></tr></tbody></table></div>`;
+
+  it('counts an SVG drawing, or HTML marks with no table, as drawn', () => {
+    expect(drawnFigure(fig(1, svg))).toBe(true);
+    expect(drawnFigure(fig(1, '<ul class="bar-list"><li><span class="pixel-bar__fill" style="width: 40%"></span>4 min</li></ul>'))).toBe(true);
+    expect(drawnFigure(fig(1, `${svg}${table('x')}`))).toBe(true);
+  });
+
+  it('does not count a table, even with glyphs in its cells, a legend beside it or a drawing folded under it', () => {
+    expect(drawnFigure(fig(1, table('x')))).toBe(false);
+    expect(drawnFigure(fig(1, table(`${svg} yes`)))).toBe(false);
+    expect(drawnFigure(fig(1, `${table('3')}<p class="heat-legend">${svg} 1 to 3</p>`))).toBe(false);
+    expect(drawnFigure(fig(1, `${table('3')}<details><summary>s</summary>${svg}</details>`))).toBe(false);
+  });
+
+  it('fails a generated page whose numbered figures are all tables, and leaves prose pages alone', () => {
+    const files = cleanSite();
+    files['guide/index.html'] = files['guide/index.html']!.replace('page--prose', 'page--listing page--with-sidebar').replace('</body>', `${fig(1, table('x'))}</body>`);
+    files['guide/index.md'] = '# Guide\n\n**Figure: F1.** c\n';
+    expect(problems(files, ['listing'])).toEqual(['[drawn] /guide/ [listing]: none of its 1 numbered figure(s) is drawn; each is only a table']);
+    files['guide/index.html'] = files['guide/index.html']!.replace('page--listing', 'page--prose');
+    expect(problems(files)).toEqual([]);
+    files['guide/index.html'] = files['guide/index.html']!.replace('page--prose', 'page--listing').replace('</body>', `${fig(2, svg)}</body>`);
+    files['guide/index.md'] += '\n**Figure: F2.** c\n';
+    expect(problems(files, ['listing'])).toEqual([]);
+  });
+
+  it('fails a page whose body names no template, and a drawn template no built page uses', () => {
+    const files = cleanSite();
+    files['guide/index.html'] = files['guide/index.html']!.replace('<body class="page page--prose">', '<body class="page page--with-sidebar">');
+    expect(problems(files)).toEqual(['[drawn] /guide/: its body has no page--<template> class, so no check knows its template']);
+    expect(problems(cleanSite(), ['listing'])).toEqual(['[drawn] DRAWN_TEMPLATES lists "listing", which no built page uses']);
   });
 });
 

@@ -4,7 +4,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const STYLES = ['tokens.css', 'base.css', 'components.css', 'motion.css'].map((f) => ({
+// Every stylesheet in src/styles, so a figure sheet added by a page branch
+// (figures-*.css, kept apart from figures.css so branches merge cleanly) is
+// held to the same rules as the rest.
+const STYLES = readdirSync('src/styles')
+  .filter((f) => f.endsWith('.css'))
+  .sort()
+  .map((f) => ({
   file: f,
   css: readFileSync(`src/styles/${f}`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''),
 }));
@@ -35,6 +41,33 @@ describe('typography', () => {
       '.prev-next__title',
       '.capability-tile__symbol',
       '.wf-step__number',
+      // Visual spec 3.0 and 1.2 (issue #125): the small periodic tile and the
+      // highlighted step of a step strip show the same two-letter tile symbol
+      // as the periodic table, and hero numbers on icon and edge-type cards
+      // are in the display font.
+      '.mini-tile__symbol',
+      '.step-strip__step--hit',
+      '.icon-card__number',
+      '.edge-card__number',
+      // Visual spec 1.2 and 3.6: the minimum confidence on each domains-index
+      // profile card is that card's hero number.
+      '.profile-card__number',
+      // Visual spec 3.11 (issue #125): the home page's get-started steps are
+      // numbered with pixel step badges in the display font.
+      '.home-step__number',
+      // Issue #125 visual review: a domain page's hero counts (trust
+      // sources, workflows and so on) are hero numbers, like the domains
+      // index card number above.
+      '.domain-hero__facts dd',
+      // Visual spec 2.2 and 3.8 (issue #125 rollout): a diagnostic family is
+      // drawn as its code letter typeset on a square tile, not as a 5x7
+      // grid, because six 5x7 capitals cannot keep the 14-cell mask distance
+      // from the 9x9 concept glyphs. The letter is a hero character of its
+      // tile, like a tile symbol.
+      '.diag-family',
+      // Visual spec 3.8 (F-X1): each tile of the diagnostics code grid shows
+      // its code in the display font at 24px, as a periodic tile shows its symbol.
+      '.diag-tile--grid > .diag-tile__code',
     ]);
     const display = rules()
       .filter((r) => /font-family:\s*var\(--font-display\)/.test(r.body))
@@ -140,11 +173,11 @@ describe('definitions', () => {
     expect(unused).toEqual([]);
   });
 
-  it('uses every class components.css defines on a single class selector', () => {
-    const css = STYLES.find((s) => s.file === 'components.css')!.css;
+  it.each(STYLES.map((s) => s.file).filter((f) => f === 'components.css' || f.startsWith('figures')))('uses every class %s defines on a single class selector', (file) => {
+    const css = STYLES.find((s) => s.file === file)!.css;
     const markup = listFiles('src').filter((f) => /\.(astro|ts)$/.test(f)).map((f) => readFileSync(f, 'utf8')).join('\n');
     const lone = rules()
-      .filter((r) => r.file === 'components.css')
+      .filter((r) => r.file === file)
       .flatMap((r) => r.selectors)
       .filter((s) => /^\.[a-z][\w-]*$/.test(s))
       .map((s) => s.slice(1));
@@ -172,8 +205,12 @@ describe('dimmed text', () => {
   });
 
   it('dims story steps other than the current one with --ink-3, a checked text colour', () => {
+    // Visual spec 1.2: the story's default render is its final frame, so
+    // steps are dimmed only while the reader scrolls inside it
+    // (data-playing), never as soon as the script loads (data-live).
     const all = rules();
-    expect(all.some((r) => r.selectors.includes('.story[data-live] .story__step') && /color:\s*var\(--ink-3\)/.test(r.body))).toBe(true);
+    expect(all.some((r) => r.selectors.includes('.story[data-playing] .story__step') && /color:\s*var\(--ink-3\)/.test(r.body))).toBe(true);
+    expect(all.some((r) => r.selectors.includes('.story[data-live] .story__step') && /color:/.test(r.body))).toBe(false);
   });
 });
 

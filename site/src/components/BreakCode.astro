@@ -1,0 +1,16 @@
+---
+// Inline code that wraps between the parts of an identifier or expression
+// rather than inside a word: a line break may come after ".", "_", "{" or
+// a space (a <wbr> after each), and only a part longer than the line breaks
+// inside itself. For long store names and gate expressions at phone width.
+//
+// Props:
+// - text: string, required.
+interface Props {
+  text: string;
+}
+
+const { text } = Astro.props;
+const parts = text.split(/(?<=[._{])/);
+---
+<code class="break-code">{parts.map((p, i) => <>{i > 0 && <wbr />}{p}</>)}</code>

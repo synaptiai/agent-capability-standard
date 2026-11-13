@@ -13,6 +13,12 @@ import { renderRepoFile } from './pipeline';
 
 const sources = ROUTES.flatMap((r) => (r.source === null ? [] : [r.source]));
 
+// The two comparisons below parse every source's Markdown again (about 170
+// files, many with long tables and diagram fences), which takes several
+// seconds and failed vitest's 5-second default at 045c0cc already. The work
+// grows with the documentation, not with a fault, so they get a fixed budget.
+const PARSE_ALL_TIMEOUT = 60_000;
+
 const rendered = new Map<string, string>();
 const failures: string[] = [];
 
@@ -50,7 +56,7 @@ describe('every Markdown source through the build pipeline', () => {
     }
     expect(mismatches).toEqual([]);
     expect(compared).toBeGreaterThan(1000);
-  });
+  }, PARSE_ALL_TIMEOUT);
 
   it('gives the link resolver the same heading anchors the pages render', () => {
     // src/lib/anchors.ts decides which #fragments a link may use; it must
@@ -63,7 +69,7 @@ describe('every Markdown source through the build pipeline', () => {
       if (diff) mismatches.push(`${s}: ${diff}`);
     }
     expect(mismatches).toEqual([]);
-  });
+  }, PARSE_ALL_TIMEOUT);
 
   it('keeps the spec ids people already link to', () => {
     const spec = rendered.get('spec/STANDARD-v1.1.0.md') ?? '';

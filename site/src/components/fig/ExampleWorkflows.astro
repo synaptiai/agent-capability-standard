@@ -1,0 +1,38 @@
+---
+// F-C13, the catalog workflows the skill's examples run (the figure under
+// the Examples heading, when an example's fence names a catalog workflow):
+// one step strip per workflow, with the examples that name it.
+//
+// Props:
+// - cap: Capability, required.
+// - rows: { id, examples }[], required. From exampleWorkflows().
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { loadWorkflows } from '../../data/workflows';
+import { exampleWorkflowsCaption } from '../../lib/capability-figures';
+import { workflowHref } from '../../lib/generated';
+import Figure from './Figure.astro';
+import StepStrip from './StepStrip.astro';
+
+interface Props {
+  cap: Capability;
+  rows: { id: string; examples: number[] }[];
+  n: number;
+}
+
+const { cap, rows, n } = Astro.props;
+const byId = loadWorkflows().byId;
+---
+<Figure id="ref-fig-example-workflows" n={n} title={`The catalog workflows the examples of the ${cap.id} skill run`} caption={exampleWorkflowsCaption(cap, rows)} kind="example-workflows">
+  <ul class="xwf">
+    {rows.map((r) => {
+      const wf = byId.get(r.id)!;
+      return (
+        <li class="xwf__row">
+          <p class="xwf__name"><a href={workflowHref(r.id)}><code>{r.id}</code></a> <span class="xwf__meta">{wf.steps.length} steps; example {r.examples.join(', ')}</span></p>
+          <StepStrip wf={wf} size={16} symbols />
+        </li>
+      );
+    })}
+  </ul>
+</Figure>

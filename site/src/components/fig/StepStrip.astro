@@ -1,0 +1,76 @@
+---
+// A workflow as a row of small squares, one per step in order (visual spec
+// 3.0). Plain steps are --ink-3 outlines: neutral, because a small square is
+// too small to carry a layer glyph or symbol. Role steps (checkpoint,
+// mutating, verify, rollback) are filled --ink with their role glyph cut out,
+// at 1x in a 10px square and at 2x (14px) from 16px up; 20px leaves room
+// round the 2x glyph, so the four roles can be told apart. A step with gates
+// has a 2px notch under it. At size 16 or 20, `highlight` fills the steps
+// that run that capability with its layer tint and two-letter symbol (F-C4),
+// which meets the identity rule through the symbol. The strip wraps when its
+// container is narrow.
+//
+// Props:
+// - wf: Workflow, required.
+// - size: 10 | 16 | 20, default 10.
+// - highlight: string, optional. A capability id; needs size 16 or 20.
+// - href: string, optional. Makes the strip one link with the strip's name.
+// - label: string, optional. Replaces the computed accessible name.
+// - symbols: boolean, optional; needs size 16 or 20. Draws each plain step
+//   as its capability's two-letter symbol on its layer tint, so a gallery of
+//   strips shows what each workflow does, not only its length. With
+//   `highlight`, the highlighted capability's steps also get an ink ring
+//   (step-strip__step--here), so they stand out from the other symbols.
+import type { Workflow } from '../../data/workflows';
+import { loadOntology } from '../../data/ontology';
+import { capabilitySymbol, diagramSteps } from '../../lib/views';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+
+interface Props {
+  wf: Workflow;
+  size?: 10 | 16 | 20;
+  highlight?: string;
+  href?: string;
+  label?: string;
+  symbols?: boolean;
+}
+
+const { wf, size = 10, highlight, href, label, symbols = false } = Astro.props;
+if (size !== 10 && size !== 16 && size !== 20) throw new Error(`StepStrip ${wf.id}: size must be 10, 16 or 20, got ${size}`);
+if (symbols && size === 10) throw new Error(`StepStrip ${wf.id}: symbols needs size 16 or 20`);
+if (highlight && size === 10) throw new Error(`StepStrip ${wf.id}: highlight needs size 16 or 20, where the symbol fits`);
+const steps = diagramSteps(wf);
+const layerOf = (id: string) => loadOntology().capabilities.find((c) => c.id === id)?.layer;
+const used = highlight ? steps.filter((d) => d.step.capability === highlight).map((d) => d.step.index) : [];
+const checkpoints = steps.filter((d) => d.role === 'checkpoint').map((d) => d.step.index);
+const list = (ns: number[]) => (ns.length === 1 ? `step ${ns[0]}` : `steps ${ns.slice(0, -1).join(', ')} and ${ns.at(-1)}`);
+const name =
+  label ??
+  [
+    `${wf.id}: ${steps.length} ${steps.length === 1 ? 'step' : 'steps'}`,
+    ...(checkpoints.length > 0 ? [`checkpoint at ${list(checkpoints)}`] : []),
+    ...(highlight ? [used.length > 0 ? `uses ${highlight} at ${list(used)}` : `does not use ${highlight}`] : []),
+  ].join(', ');
+const Tag = href ? 'a' : 'span';
+---
+<Tag
+  class:list={['step-strip', `step-strip--${size}`, highlight && symbols && 'step-strip--rings']}
+  href={href}
+  role={href ? undefined : 'img'}
+  aria-label={name}
+  data-workflow={wf.id}
+  data-steps={steps.length}
+>{steps.map((d) => {
+  const here = highlight !== undefined && d.step.capability === highlight;
+  const hit = here || (symbols && d.role === 'plain');
+  const role = d.role !== 'plain' && !hit ? d.role : null;
+  const gated = (d.step.gates?.length ?? 0) > 0;
+  return (
+    <span
+      class:list={['step-strip__step', hit ? 'step-strip__step--hit has-layer' : role ? 'step-strip__step--role' : 'step-strip__step--plain', here && symbols && 'step-strip__step--here', gated && 'step-strip__step--gate']}
+      style={hit ? `--layer: var(--layer-${layerOf(d.step.capability)})` : undefined}
+      aria-hidden="true"
+      data-role={d.role}
+    >{hit ? capabilitySymbol(d.step.capability) : role ? <PixelGlyph name={`role:${role}`} scale={size === 10 ? 1 : 2} /> : null}</span>
+  );
+})}</Tag>

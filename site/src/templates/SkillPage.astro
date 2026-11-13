@@ -1,21 +1,51 @@
 ---
 // A composed skill. SKILL.md files have no H1, so the page heading is the
-// frontmatter `name` (the name the skill is invoked by), followed by its
-// description and the frontmatter fields a reader needs to run it.
-import { refSlugger } from '../lib/generated';
+// frontmatter `name` (the name the skill is invoked by). The hero band
+// (visual spec 3.10.13) shows the composed-skill glyph, the heading and the
+// description, then the frontmatter fields a reader needs to run it, with
+// the allowed tools as chips. A skill that runs a catalog workflow also shows
+// that workflow's steps as a strip linked to the workflow's page.
+// Under the skill's own H2s the page draws figures from data
+// (src/lib/skill-figures.ts): the workflow's step map, data flow and risk
+// for a skill that runs one, and otherwise figures from the skill's own
+// procedure, examples and contract. SKILL.md files carry no diagrams, since
+// agents load them into context. The figures are numbered in page order,
+// together with any the Markdown pipeline drew in the skill's text.
+import DataFlowGrid from '../components/fig/DataFlowGrid.astro';
+import ProcedureMap from '../components/fig/ProcedureMap.astro';
+import RiskStrip from '../components/fig/RiskStrip.astro';
+import SkillCheckSteps from '../components/fig/SkillCheckSteps.astro';
+import SkillExampleMatches from '../components/fig/SkillExampleMatches.astro';
+import SkillGuards from '../components/fig/SkillGuards.astro';
+import SkillScorecard from '../components/fig/SkillScorecard.astro';
+import StepStrip from '../components/fig/StepStrip.astro';
+import WorkflowSpine from '../components/fig/WorkflowSpine.astro';
+import { splitAtH2s } from '../lib/capability-figures';
+import { readRepoFile } from '../lib/repo';
+import { composedSkillFigures, type SkillFigure } from '../lib/skill-figures';
+import PageHero from '../components/PageHero.astro';
+import { COMPOSED_SKILLS } from '../data/skills';
+import { loadWorkflows } from '../data/workflows';
+import { refSlugger, workflowHref } from '../lib/generated';
 import type { Route } from '../lib/routes';
 import type { PageMeta } from '../plugins/remark-page-meta';
+import '../styles/figures-prose.css';
+// The folded output fence and examples of rehype-capability-skill.
+import '../styles/figures-capability.css';
+import '../styles/figures-capability-skill.css';
+import '../styles/figures-skill.css';
 
 interface Props {
   route: Route;
   page: PageMeta;
   frontmatter: Record<string, unknown>;
+  /** The skill's rendered HTML, which the page splits at its H2s to place the figures. */
+  html?: string;
 }
 
-const { route, page, frontmatter } = Astro.props;
+const { route, page, frontmatter, html } = Astro.props;
 const FIELDS: [string, string][] = [
   ['argument-hint', 'Arguments'],
-  ['allowed-tools', 'Allowed tools'],
   ['agent', 'Agent'],
   ['context', 'Context'],
 ];
@@ -23,24 +53,78 @@ const facts = FIELDS.flatMap(([key, label]) => {
   const v = frontmatter[key];
   return typeof v === 'string' && v.trim() !== '' ? [{ label, value: v }] : [];
 });
+const toolsRaw = frontmatter['allowed-tools'];
+const tools = typeof toolsRaw === 'string' ? toolsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
 const dir = route.source?.split('/')[1];
+const wfId = dir ? (COMPOSED_SKILLS[dir] ?? null) : null;
+const wf = wfId ? loadWorkflows().byId.get(wfId) : undefined;
+if (wfId && !wf) throw new Error(`SkillPage: ${route.source} runs ${wfId}, which no catalog defines`);
 const id = refSlugger();
 const title = page.title ?? route.title;
+
+// The body split at its H2s, each part followed by the figures for it, every
+// figure numbered in page order. Figures the Markdown pipeline drew in the
+// text keep their place and get their number in the same sequence.
+if (typeof html !== 'string') throw new Error(`SkillPage: ${route.source} has no rendered HTML`);
+const split = splitAtH2s(html);
+const figs = dir ? composedSkillFigures(dir, readRepoFile(route.source!), route.source!) : {};
+let figN = 0;
+const renumber = (s: string) => s.replace(/(<p class="(?:fig__eyebrow|fig-mermaid__eyebrow)"[^>]*>)Fig \d+(<\/p>)/g, (_m, a: string, b: string) => `${a}Fig ${++figN}${b}`);
+const lead = renumber(split.lead);
+const parts = split.parts.map((part) => {
+  const head = renumber(part.head);
+  const placed = (figs[part.id] ?? []).map((f: SkillFigure) => ({ f, n: f.kind === 'sentence' ? 0 : ++figN }));
+  return { id: part.id, head, placed, body: renumber(part.body) };
+});
+const unplaced = Object.keys(figs).filter((k) => !split.parts.some((p) => p.id === k));
+if (unplaced.length > 0) throw new Error(`SkillPage: ${route.source} has no H2 with id ${unplaced.join(', ')} for its figures`);
+const stepPage = wf ? workflowHref(wf.id) : '';
 ---
 <article class="doc doc--skill" data-skill={dir} data-pagefind-body>
-  <header class="skill-header">
-    <h1 id={id(title)}>{title}</h1>
-    {page.description && <p class="lead">{page.description}</p>}
-    {facts.length > 0 && (
-      <dl class="skill-meta">
-        {facts.map((f) => (
-          <div>
-            <dt>{f.label}</dt>
-            <dd><code>{f.value}</code></dd>
-          </div>
-        ))}
-      </dl>
-    )}
-  </header>
-  <slot />
+  <PageHero glyph="skill:composed" eyebrow="Composed skill" section={route.section} class="skill-header">
+      <h1 id={id(title)}>{title}</h1>
+      {page.description && <p class="lead">{page.description}</p>}
+      {(facts.length > 0 || tools.length > 0) && (
+        <dl class="skill-meta">
+          {tools.length > 0 && (
+            <div>
+              <dt>Allowed tools</dt>
+              <dd><ul class="skill-tools">{tools.map((t) => <li><code>{t}</code></li>)}</ul></dd>
+            </div>
+          )}
+          {facts.map((f) => (
+            <div>
+              <dt>{f.label}</dt>
+              <dd><code>{f.value}</code></dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {wf && (
+        <p class="skill-runs">
+          <span>Runs <a href={workflowHref(wf.id)}><code>{wf.id}</code></a></span>
+          <StepStrip wf={wf} size={20} symbols />
+        </p>
+      )}
+  </PageHero>
+  <Fragment set:html={lead} />
+  {parts.map((part) => (
+    <>
+      <Fragment set:html={part.head} />
+      {part.placed.map(({ f, n }) => (
+        <>
+          {f.kind === 'spine' && <WorkflowSpine wf={f.wf} n={n} id="ref-fig-step-map" stepPage={stepPage} />}
+          {f.kind === 'flow' && <DataFlowGrid wf={f.wf} n={n} id="ref-fig-data-flow" stepPage={stepPage} />}
+          {f.kind === 'risk' && <RiskStrip wf={f.wf} n={n} id="ref-fig-risk" />}
+          {f.kind === 'sentence' && <p>{f.text}</p>}
+          {f.kind === 'procedure' && <ProcedureMap cap={{ id: dir! }} map={f.map} n={n} />}
+          {f.kind === 'examples' && <SkillExampleMatches dir={dir!} matches={f.matches} n={n} />}
+          {f.kind === 'scorecard' && <SkillScorecard card={f.card} n={n} />}
+          {f.kind === 'guards' && <SkillGuards wf={f.wf} steps={f.steps} n={n} />}
+          {f.kind === 'checks' && <SkillCheckSteps wf={f.wf} checks={f.checks} n={n} />}
+        </>
+      ))}
+      <Fragment set:html={part.body} />
+    </>
+  ))}
 </article>

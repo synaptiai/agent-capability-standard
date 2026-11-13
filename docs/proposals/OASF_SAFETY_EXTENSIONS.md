@@ -21,6 +21,18 @@ The four proposed extensions are:
 
 These extensions are designed to be backward-compatible with the existing OASF skill taxonomy. They do not replace any current skills; rather, they add safety infrastructure that strengthens every existing OASF category.
 
+```mermaid
+---
+title: The four proposed extensions
+---
+flowchart LR
+  accDescr: Evidence anchoring, the checkpoint and rollback primitives, and pre-execution constraints add safety infrastructure to every existing OASF category without replacing any skill.
+  ev["Evidence anchoring: traceable evidence on every output"] --> all[Every existing OASF category]
+  cp["Checkpoint: state saved before high-risk operations"] --> all
+  rb["Rollback: recovery when an operation fails"] --> all
+  con["Pre-execution constraints: policies enforced first"] --> all
+```
+
 ---
 
 ## 2. Motivation
@@ -36,6 +48,17 @@ This design creates three classes of risk:
 **Irreversible mutations.** An agent can execute high-risk operations -- deploying infrastructure (Category 12), modifying data pipelines (Category 9), or invoking external APIs (Category 14) -- without any requirement to preserve state beforehand. If a deployment fails halfway through, or an API call triggers unintended consequences, there is no standardized recovery path. Each implementation must build its own recovery mechanism, leading to inconsistent and often absent safety nets.
 
 **Unauditable decisions.** When an agent orchestrates multi-step workflows (Category 10) or makes governance decisions (Category 13), there is no structural requirement to record the evidence chain that led to each decision. Post-hoc auditing becomes impossible when the reasoning trail was never captured.
+
+```mermaid
+---
+title: Three risks of optional safety
+---
+flowchart LR
+  accDescr: Treating safety as optional skills in Categories 8 and 13 leaves three classes of risk: ungrounded claims, as from a RAG pipeline in Category 6; irreversible mutations, in Categories 9, 12 and 14; and unauditable decisions, in Categories 10 and 13.
+  opt["Safety as optional skills, Categories 8 and 13"] --> r1["Ungrounded claims: RAG output, Category 6"]
+  opt --> r2["Irreversible mutations: Categories 9, 12, 14"]
+  opt --> r3["Unauditable decisions: Categories 10, 13"]
+```
 
 ### 2.2 The Principle: Safety Must Be Structural
 
@@ -417,6 +440,18 @@ steps:
           event: "Schema migration completed successfully"
 ```
 
+```mermaid
+---
+title: The atomic data pipeline update
+---
+flowchart TB
+  accDescr: The pipeline is checkpointed, the schema migration runs and data quality is assessed; a score under 0.95 rolls back to the checkpoint, and otherwise the success is audited.
+  cp["160101 checkpoint: pipeline/etl-main"] --> mig["090201 schema migration"]
+  mig --> q["090301 data quality assessment"]
+  q -->|"score < 0.95"| rb["160102 rollback to the checkpoint"]
+  q -->|"score ≥ 0.95"| audit["130401 audit: migration completed"]
+```
+
 #### Error Handling
 
 If a rollback operation fails:
@@ -424,6 +459,17 @@ If a rollback operation fails:
 2. Retry is permitted up to a maximum of 2 attempts with exponential backoff
 3. If all retries fail, the system MUST alert a human operator with the checkpoint ID and failure details
 4. A failed rollback MUST NOT trigger another checkpoint (to avoid infinite loops)
+
+```mermaid
+---
+title: When a rollback fails
+---
+flowchart TB
+  accDescr: A failed rollback is logged with the checkpoint ID and partial restoration status and retried at most twice with exponential backoff, and when every retry fails a human operator is alerted with the checkpoint ID and the failure details.
+  fail[Rollback fails] --> log["Log the failure: checkpoint ID, partial restoration status"]
+  log --> retry["Retry, at most 2 attempts, exponential backoff"]
+  retry -->|all retries fail| human["Alert a human operator with the checkpoint ID and failure details"]
+```
 
 ---
 
@@ -436,6 +482,16 @@ OASF has governance and compliance skills (Category 13), but these are invoked a
 #### Proposed Solution
 
 Introduce a `constrain` skill that checks a set of policy conditions before allowing a subsequent operation to proceed. If any constraint is violated, the operation is blocked and the violation is recorded.
+
+```mermaid
+---
+title: What constrain does before an operation
+---
+flowchart LR
+  accDescr: constrain checks the policy conditions before the operation; when all hold the operation proceeds, and when one is violated the operation is blocked and the violation recorded.
+  con[constrain checks the policy conditions] -->|all hold| go[The operation proceeds]
+  con -->|one is violated| block[Blocked, and the violation is recorded]
+```
 
 #### Schema Divergences from Base Ontology
 
@@ -600,6 +656,23 @@ steps:
       destination: "eu-west-1"
 ```
 
+
+```mermaid
+---
+title: The policy-checked export
+---
+flowchart TB
+  accDescr: The constrain step checks the export against three constraints, PII data residency and manager approval, which block on violation, and audit logging, which only warns; the export runs only when the check is compliant.
+  c["constrain, skill 160103"] --> r1["Data residency: block, critical"]
+  c --> r2["Manager approval: block, high"]
+  c --> r3["Export logging: warn, medium"]
+  r1 --> q{Compliant?}
+  r2 --> q
+  r3 --> q
+  q -->|yes| ex["Export, skill 090201"]
+  q -->|no| no[The export does not run]
+```
+
 > **Note:** The expression syntax used in `condition` fields (variable interpolation `${}`, comparison operators, method calls like `.startsWith()`, `.includes()`, logical operators `AND`/`OR`) is intentionally left implementation-defined. Conforming implementations SHOULD use an established expression language such as [Google CEL](https://github.com/google/cel-spec), [JSONPath](https://datatracker.ietf.org/doc/rfc9535/), or [Rego](https://www.openpolicyagent.org/docs/latest/policy-language/). The examples in this proposal use a pseudocode syntax for readability.
 
 ---
@@ -715,6 +788,18 @@ These extensions are designed to be fully backward compatible:
 | Checkpoint-before-high-risk rule | Opt-in | Enforced only when workflow validation is enabled |
 
 Implementations can adopt these extensions incrementally. A framework that only adds evidence anchors -- without checkpoints or constraints -- still gains traceability benefits. Full adoption provides the complete safety guarantee.
+
+
+```mermaid
+---
+title: Adopting the extensions in steps
+---
+flowchart LR
+  accDescr: A framework that adds only evidence anchors gains traceability; adding checkpoints and constraints as well, full adoption, gives the complete safety guarantee.
+  ea[Evidence anchors only] -->|gains| tr[Traceability]
+  ea -->|"add checkpoints and constraints"| full[Full adoption]
+  full -->|gives| sg[The complete safety guarantee]
+```
 
 ---
 
@@ -859,6 +944,18 @@ steps:
         input:
           checkpoint_id: "${cp.output.checkpoint_id}"
           reason: "Post-deployment health check failed"
+```
+
+```mermaid
+---
+title: The safe model deployment
+---
+flowchart TB
+  accDescr: The deployment policies are checked first; only when they pass is a checkpoint taken, then the model is deployed and its health checked, and a failed health check rolls back to the checkpoint.
+  con["1 constrain: maintenance window, SRE approval"] -->|compliant| cp["2 checkpoint the production namespace"]
+  cp --> dep["3 deploy model-serving-v2.3.1"]
+  dep --> health["4 performance monitoring: error rate, latency"]
+  health -->|"passed == false"| rb["5 rollback to the checkpoint"]
 ```
 
 ### 5.3 Category 16 Skills Summary

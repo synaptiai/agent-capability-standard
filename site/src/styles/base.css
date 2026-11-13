@@ -211,11 +211,57 @@
     color: inherit;
   }
 
-  /* Code in a table cell stays on one line; the table scrolls instead. */
+  /* A plain-text fence inside a list item is a quoted sentence or a short
+     pipeline (a disclaimer to copy; "a → b → c" on the capability mapping
+     page), not a drawing: it wraps at spaces instead of being cut off at the
+     edge of the column, and keeps its own line breaks and indents. Fences at
+     the top level keep their lines, since that is where text drawings and
+     trees live. */
+  li > pre[data-language='plaintext'] code {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+  }
+
+  /* A task list (GitHub "- [ ]" items) shows its checkbox, not a bullet as well. */
+  ul.contains-task-list {
+    list-style: none;
+    padding-left: var(--space-1);
+  }
+
+  /* The checkbox is a checklist mark, not a control: a square pixel box in
+     --ink-2, so it does not read as a greyed-out, disabled input. */
+  .task-list-item > input[type='checkbox'] {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin: 0 var(--space-2) 0 0;
+    vertical-align: -2px;
+    border: var(--px) solid var(--ink-2);
+    border-radius: 0;
+    background: var(--bg);
+    opacity: 1;
+  }
+
+  .task-list-item > input[type='checkbox']:checked {
+    background: var(--ink);
+  }
+
+  /* BreakCode: break at its <wbr>s first, inside a part only when it must. */
+  :not(pre) > code.break-code {
+    overflow-wrap: break-word;
+  }
+
+  /* Code in a table cell stays on one line; the table scrolls instead. A
+     long path or expression (break-code, from rehype-tables) breaks after
+     its "/", "." and "_". */
   :is(td, th) > code,
   :is(td, th) > a > code {
     overflow-wrap: normal;
     white-space: nowrap;
+  }
+
+  :is(td, th) code.break-code {
+    white-space: normal;
   }
 
   /* Inline code in a heading (capability pages) keeps the display size and has no box. */

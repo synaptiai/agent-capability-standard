@@ -1,0 +1,78 @@
+---
+// F-W2, which step reads which stored output (visual spec 3.3). A real
+// table: one row per step, one column per stored output (named by the step
+// that stores it). The step's own output is a cell with an --ink border and
+// the `flow:store` glyph; an output it reads is a cell with a --line border
+// and the `flow:read` glyph in --ink-2. Glyphs are drawn at 2x, so they can be told apart;
+// no cell is a filled square, which on the same page means a required input.
+// In a narrow figure (under 480px) each row becomes a line: the step, then
+// its store and read cells, each with the number of the step whose output
+// it is (figures-workflow.css), so no column is hidden off to the side.
+// Every cell also carries its meaning as text, so the glyphs are never the
+// only signal.
+//
+// Props:
+// - wf: Workflow, required.
+// - n: number, required. The figure's number on the page.
+// - id: string, required. A `ref-` id for the figure.
+// - stepPage: string, optional. The URL of the page that holds the step
+//   cards (a composed skill's page links to its workflow's page); by
+//   default the links point at cards on the same page.
+import '../../styles/figures-workflow.css';
+import type { Workflow } from '../../data/workflows';
+import { dataFlowGrid } from '../../lib/workflow-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import TableWrap from '../TableWrap.astro';
+import Figure from './Figure.astro';
+
+interface Props {
+  wf: Workflow;
+  n: number;
+  id: string;
+  stepPage?: string;
+}
+
+const { wf, n, id, stepPage = '' } = Astro.props;
+const grid = dataFlowGrid(wf);
+const stepId = (k: number) => `ref-step-${k}`;
+---
+<Figure id={id} n={n} title={grid.title} caption={grid.caption} kind="workflow-data-flow">
+  <TableWrap label={grid.title}>
+    <table class="flow-grid" data-reads={grid.reads}>
+      <caption>{grid.title}</caption>
+      <thead>
+        <tr>
+          <td></td>
+          {grid.columns.map((c) => (
+            <th scope="col" title={c.name}>
+              {c.index}<span class="fig-sr">: output of step {c.index}, {c.name}</span>
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {grid.rows.map((r) => (
+          <tr data-step={r.index}>
+            <th scope="row"><a href={`${stepPage}#${stepId(r.index)}`}><span class="flow-grid__n">{r.index}</span> <code>{r.capability}</code></a></th>
+            {r.cells.map((c, j) => (
+              <td data-cell={c ?? undefined} data-col={grid.columns[j]!.index}>
+                {c === null ? (
+                  <span class="flow-grid__cell flow-grid__cell--empty" aria-hidden="true"></span>
+                ) : (
+                  <span class:list={['flow-grid__cell', `flow-grid__cell--${c}`]}>
+                    <PixelGlyph name={c === 'store' ? 'flow:store' : 'flow:read'} scale={2} />
+                    <span class="fig-sr">{c === 'store' ? 'stores' : 'reads'}</span>
+                  </span>
+                )}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </TableWrap>
+  <ul class="spine-legend" aria-label="Key">
+    <li><span class="flow-grid__cell flow-grid__cell--store" aria-hidden="true"><PixelGlyph name="flow:store" scale={2} /></span><span>the step stores this output</span></li>
+    <li><span class="flow-grid__cell flow-grid__cell--read" aria-hidden="true"><PixelGlyph name="flow:read" scale={2} /></span><span>the step reads it</span></li>
+  </ul>
+</Figure>

@@ -6,6 +6,12 @@
 //   rectangular, at the size its kind needs;
 // - every status value the sources use, and every RFC status
 //   spec/GOVERNANCE.md allows, has a badge style in src/lib/status.ts;
+// - every glyph key the figures look up from data has a grid (visual spec
+//   2.2, 2.3): each H2 of each Standard (appendices aside), each domain
+//   profile, each trust-source type, each design principle of the current
+//   Standard, each gate and failure action of the catalog schema, and each
+//   ontology edge type; every reuse alias points at a grid;
+// - no figure component types a hex colour;
 // - no count is typed by hand into the site source: a number (in digits, in
 //   words up to forty, or as a JSX expression such as {36}) before a noun the
 //   data counts (capabilities, layers, workflows, profiles, edges, domains,
@@ -18,10 +24,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { ruleDeclarations } from './check-contrast.mjs';
-import { LAYER_GLYPHS, LETTERS, MARK, UI_GLYPHS } from '../src/pixel/glyphs.ts';
+import { CONCEPT_GLYPHS, GLYPH_ALIASES, LAYER_GLYPHS, LETTERS, MARK, UI_GLYPHS } from '../src/pixel/glyphs.ts';
+import { ALL_GRIDS, chapterKey, principleKey, resolveGlyphKey } from '../src/pixel/keys.ts';
 import { parseGrid } from '../src/pixel/grid.ts';
+import { codeLines } from '../src/lib/anchors.ts';
 import { governanceStatuses } from '../src/lib/governance.ts';
-import { STATUS_STYLES } from '../src/lib/status.ts';
+import { PROPOSED_WORKFLOW_STATUS, STATUS_STYLES, statusClause } from '../src/lib/status.ts';
 import { isMain } from './is-main.mjs';
 
 const SITE = fileURLToPath(new URL('..', import.meta.url));
@@ -71,27 +79,107 @@ export function checkGrids(sets) {
   return problems;
 }
 
+/**
+ * `text` with the lines of its code blocks blanked (the line count is kept),
+ * so a "## " line inside a fence is not read as a heading. The blocks are the
+ * ones the figure code skips: codeLines in anchors.ts, parsed by remark.
+ */
+export function withoutFences(text) {
+  const code = codeLines(text);
+  return text
+    .split('\n')
+    .map((l, i) => (code[i] ? '' : l))
+    .join('\n');
+}
+
+/**
+ * Glyph keys the figures need, read from the sources, each with where it came
+ * from. `standards` are the Standard files as { path, text }, the current one
+ * first; `profiles` are { stem, doc } of the domain profiles.
+ */
+export function neededGlyphKeys({ standards, profiles, catalogSchema, edgeTypes }) {
+  const out = [];
+  standards = standards.map((s) => ({ ...s, text: withoutFences(s.text) }));
+  for (const { path: p, text } of standards) {
+    for (const m of text.matchAll(/^## (.+)$/gm)) {
+      const key = chapterKey(m[1]);
+      if (key) out.push({ key, from: `${p}: "## ${m[1].trim()}"` });
+    }
+  }
+  const current = standards[0];
+  if (current) {
+    const start = current.text.search(/^## 3\. /m);
+    const end = current.text.slice(start + 1).search(/^## /m);
+    const section = current.text.slice(start, end === -1 ? undefined : start + 1 + end);
+    for (const m of section.matchAll(/^### (.+)$/gm)) out.push({ key: principleKey(m[1]), from: `${current.path}: "### ${m[1].trim()}"` });
+  }
+  for (const { stem, doc } of profiles) {
+    out.push({ key: `domain:${stem}`, from: `schemas/profiles/${stem}.yaml` });
+    for (const src of Array.isArray(doc?.domain_sources) ? doc.domain_sources : []) {
+      if (src && typeof src.type === 'string') out.push({ key: `source:${src.type}`, from: `schemas/profiles/${stem}.yaml domain_sources` });
+    }
+  }
+  const defs = catalogSchema?.$defs ?? {};
+  for (const a of defs.gate?.properties?.action?.enum ?? []) out.push({ key: `gate:${a}`, from: 'workflow_catalog.schema.json gate action' });
+  for (const a of defs.failure_mode?.properties?.action?.enum ?? []) out.push({ key: `fail:${a}`, from: 'workflow_catalog.schema.json failure action' });
+  for (const t of edgeTypes) out.push({ key: `mark:${t}`, from: 'capability_ontology.yaml edge types' });
+  return out;
+}
+
+/** Problems with glyph keys: a needed key with no grid, an alias with no target, an alias that shadows a grid. */
+export function checkGlyphKeys(needed, aliases = GLYPH_ALIASES, grids = ALL_GRIDS) {
+  const problems = [];
+  const seen = new Set();
+  for (const { key, from } of needed) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (resolveGlyphKey(key) === null) problems.push(`glyph ${key} (${from}) has no grid in src/pixel/glyphs.ts`);
+  }
+  for (const [key, target] of Object.entries(aliases)) {
+    if (key in grids) problems.push(`glyph alias ${key} is also a grid`);
+    if (resolveGlyphKey(target) === null) problems.push(`glyph alias ${key} points at ${target}, which has no grid`);
+  }
+  return problems;
+}
+
+/** Hex colours typed into figure components, which must paint with tokens. */
+export function findHexColours(files) {
+  const problems = [];
+  for (const { path: p, text } of files) {
+    text.split('\n').forEach((line, i) => {
+      for (const m of line.matchAll(/#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b(?![-\w])/g)) problems.push(`${p}:${i + 1}: "${m[0]}" is a hex colour; use a token`);
+    });
+  }
+  return problems;
+}
+
 export { governanceStatuses };
 
 /**
  * Status values the site shows a badge for, from the sources:
  * - every `**Document Status**:` value;
- * - the `**Status:**` value of each RFC and proposal;
- * - the first clause of each Standard's `**Status:**` line.
+ * - the first clause of every `**Status:**` (or `**Status**:`) line, as
+ *   statusClause() reads it: an RFC's whole value, the Standard's
+ *   "Candidate Standard", a compliance document's "Template".
  */
 export function sourceStatuses(files) {
   const out = new Map();
   const add = (value, where) => {
-    if (!out.has(value)) out.set(value, where);
+    if (value && !out.has(value)) out.set(value, where);
   };
   for (const { path: p, text } of files) {
     for (const m of text.matchAll(/^\*\*Document Status\*\*:\s*(.+)$/gm)) add(m[1].trim(), p);
-    const status = /^\*\*Status:\*\*\s*(.+)$/m.exec(text)?.[1];
-    if (!status) continue;
-    if (/^spec\/RFC-\d{4}-/.test(p) || p.startsWith('docs/proposals/')) add(status.trim(), p);
-    if (/^spec\/STANDARD-v\d+\.\d+\.\d+\.md$/.test(p)) add(status.split(/\s+[—–-]\s+|;/)[0].trim(), p); // as versions.ts reads it
+    for (const m of text.matchAll(/^\*\*Status(?::\*\*|\*\*:)\s*(.+)$/gm)) add(statusClause(m[1]), p);
   }
   return out;
+}
+
+/**
+ * The status glyph each status value in use needs: `status:<style>` for its
+ * badge style. Values with no style are left to checkStatuses().
+ */
+export function statusGlyphKeys(values, styles) {
+  return [...values].filter(([v]) => v in styles).map(([v, where]) => ({ key: `status:${styles[v]}`, from: `status "${v}" (${where})` }));
 }
 
 export function checkStatuses(values, styles) {
@@ -152,10 +240,28 @@ function main() {
     ...checkGrids([
       { label: 'layer glyph', grids: LAYER_GLYPHS, size: [9, 9] },
       { label: 'UI glyph', grids: UI_GLYPHS, size: Object.assign([7, 7], { allow: ['pip'] }) },
+      { label: 'concept glyph', grids: CONCEPT_GLYPHS, size: [9, 9] },
       { label: 'mark', grids: { mark: MARK }, size: [12, 12] },
       { label: 'letter', grids: LETTERS, size: [5, 7] },
     ]),
   ];
+
+  const standardPaths = execFileSync('git', ['ls-files', 'spec/STANDARD-v*.md'], { cwd: REPO, encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  const profileStems = readdirSync(path.join(REPO, 'schemas/profiles'))
+    .filter((f) => f.endsWith('.yaml') && f !== 'profile_schema.yaml')
+    .map((f) => f.slice(0, -'.yaml'.length));
+  const needed = neededGlyphKeys({
+    standards: standardPaths.map((p) => ({ path: p, text: read(p) })),
+    profiles: profileStems.map((stem) => ({ stem, doc: parse(read(`schemas/profiles/${stem}.yaml`)) })),
+    catalogSchema: JSON.parse(read('schemas/workflow_catalog.schema.json')),
+    edgeTypes: Object.keys(ontology.edge_types ?? {}),
+  });
+  problems.push(...checkGlyphKeys(needed));
+  const components = sourceFiles(path.join(SITE, 'src/components/fig')).map((p) => ({ path: path.relative(SITE, p), text: readFileSync(p, 'utf8') }));
+  problems.push(...findHexColours(components));
 
   const tracked = execFileSync('git', ['ls-files', '*.md'], { cwd: REPO, encoding: 'utf8' })
     .split('\n')
@@ -163,6 +269,8 @@ function main() {
   const statuses = sourceStatuses(tracked.map((p) => ({ path: p, text: read(p) })));
   for (const s of governanceStatuses(read('spec/GOVERNANCE.md'))) if (!statuses.has(s)) statuses.set(s, 'spec/GOVERNANCE.md');
   problems.push(...checkStatuses(statuses, STATUS_STYLES));
+  statuses.set(PROPOSED_WORKFLOW_STATUS, 'src/lib/status.ts');
+  problems.push(...checkGlyphKeys(statusGlyphKeys(statuses, STATUS_STYLES), {}));
 
   const files = sourceFiles(path.join(SITE, 'src')).map((p) => ({ path: path.relative(SITE, p), text: readFileSync(p, 'utf8') }));
   problems.push(...findHandTypedCounts(files, [layers.length, capabilityCount]));
@@ -171,7 +279,8 @@ function main() {
   if (problems.length > 0) process.exit(1);
   console.log(
     `check-design-data: ${layers.length} layers have light and dark tokens and a glyph; ` +
-      `${Object.keys(LAYER_GLYPHS).length + Object.keys(UI_GLYPHS).length + Object.keys(LETTERS).length + 1} grids parse; ` +
+      `${Object.keys(ALL_GRIDS).length + Object.keys(LETTERS).length + 1} grids parse; ` +
+      `${new Set(needed.map((n) => n.key)).size} glyph keys from the data have a grid; ` +
       `${statuses.size} status values have a style; no hand-typed counts in ${files.length} source files`,
   );
 }

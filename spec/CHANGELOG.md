@@ -27,6 +27,20 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   §5.12), `wait@1` (§5.13), `approval@1` (§5.14), `delegation@1` (§5.15),
   `quorum@1` (§5.16) and `identity@1` (§5.17). A validator must refuse a declared extension it does
   not check (V106).
+
+```mermaid
+---
+title: Using an orchestration extension
+---
+flowchart TB
+  accDescr: An extension field used without declaring the extension in workflow_extensions.requires is V106, and a validator must refuse, with V106, a declared extension it does not check.
+  use[Extension field used] --> decl{"Declared in workflow_extensions.requires?"}
+  decl -->|no| v1[V106]
+  decl -->|yes| chk{"Does the validator check it?"}
+  chk -->|no| v2[V106: refused]
+  chk -->|yes| ok[Checked]
+```
+
 - **Runtime conformance fixtures (§10.3)**: scripted runs of the reference
   executor covering gates, conditions, checkpoints, approvals, deferral,
   waits, retries, failure modes, recovery, escalation, invocation, quorums
@@ -65,6 +79,17 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   vendor extensions. `inputs` is optional (§5.1).
 - **Version declaration (§11.5):** `spec_version` or the file header; missing
   → W605, unsupported → V109.
+
+```mermaid
+---
+title: Version declaration
+---
+flowchart TB
+  accDescr: A workflow declares its version with spec_version or the file header; a missing declaration is W605 and an unsupported version V109.
+  d{"spec_version or file header"} -->|missing| w605[W605]
+  d -->|unsupported| v109[V109]
+```
+
 - **B205** means "annotation names no type"; an annotation that contradicts
   the schema is B203 (§9.3).
 - **Step fields 1.0 left unchecked (Appendix C).** `store_as` must be an
@@ -85,6 +110,19 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   silent reviewer is replaced alone; a delegation not accepted is R402. A
   verdict in a reviewer step's `result` counts only for that reviewer. `quorum.verdicts` (§5.16) may be a list
   of references, one per reviewer step.
+
+```mermaid
+---
+title: A delegate that waits for its result
+---
+flowchart TB
+  accDescr: A delegate step delegates and then waits for the result matching its task_id, with one timeout bounding both phases; a retry delegates again naming the delegation it replaces, and a delegation not accepted is R402.
+  del[delegate] -->|not accepted| r402[R402]
+  del -->|"accepted; one timeout for both phases"| wait["Wait for the result with the same task_id"]
+  wait -->|retry| again["Delegate again, naming it in replaces"]
+  again --> wait
+```
+
 - **Read-only reviewers (§5.15, §5.16):** `delegate` input `read_only`,
   attested in `effective.read_only`; `quorum.require_read_only` requires it
   of every reviewer (F504 statically, and uncounted verdicts at run time).
@@ -103,6 +141,20 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   the inputs needs `identity@1` (V106); a literal that is not a list is
   B203, a list of unknown values S303, and a reference resolving to either
   is R402.
+
+```mermaid
+---
+title: Sender identity on received items
+---
+flowchart TB
+  accDescr: The host reports an agent_identity with each event a wait receives; sender_check and accept_trust_classes drop other items, always_ask_trust_classes marks items, and a marked step that requires approval is asked of a person.
+  ev["Event with the host's agent_identity"] --> f{"sender_check, accept_trust_classes"}
+  f -->|other items| drop[Dropped]
+  f -->|kept, with sender_identity| m{"always_ask_trust_classes"}
+  m -->|"of those classes, or with no trust class: marked"| mark["Mark follows the data"]
+  mark --> ask["A step that requires approval is asked of a person"]
+```
+
 - **Membership (§5.8):** `x in y`, as in CEL: an element of a list by `==`,
   or a key of a map (a non-string key is in no map); any other right
   operand is an evaluation error. It is a comparison operator, so it does
@@ -138,6 +190,19 @@ and reported five gaps; these close them.
   deadline is still R401. **Migration:** a failure mode that handled lost
   liveness through `on_error: R401` must add R406. A failure mode that
   fires only on R406 where no wait has `liveness` is W609.
+
+```mermaid
+---
+title: Lost liveness and an expired wait
+---
+flowchart TB
+  accDescr: A wait whose source loses liveness before the deadline fails with R406, which a recovery loop can catch to re-check the source; a wait that expires, or loses liveness after the deadline, fails with R401, which can be escalated.
+  w[Wait] -->|"liveness lost before the deadline"| r406[R406 LIVENESS_LOST]
+  r406 -->|recovery loop| w
+  w -->|"deadline passed"| r401[R401 timeout]
+  r401 --> esc[Escalate]
+```
+
 - **Per-reviewer independence and full sweeps (§5.16).**
   `quorum.forbidden_inputs` takes a mapping of reviewers to their own
   lists as well as one list for all, so a verifier can see earlier rounds
@@ -156,6 +221,17 @@ and reported five gaps; these close them.
   lists the run's deferrals. Before, a mandate was never asked unattended
   and a deferral ended the whole run.
 
+```mermaid
+---
+title: What defer_to_queue defers
+---
+flowchart TB
+  accDescr: defer_to_queue defers the step and every later step that depends on it; steps that only read, reason or record still run, and the run ends deferred, with every terminal action listing the deferrals.
+  d[defer_to_queue on a step] --> dep["Later steps that read its output, act or wait on the world, or follow it by precedes: deferred"]
+  d --> rest["Steps that only read, reason or record: run"]
+  dep & rest --> end_d["Run ends deferred; terminal actions list the deferrals"]
+```
+
 ### Changed — from the orchestrator fixtures (#114)
 Running the issue author's nine workflows as scripted fixtures showed four
 gaps on the standard's side (RFC-0003, amendments):
@@ -164,6 +240,18 @@ gaps on the standard's side (RFC-0003, amendments):
   invoked workflow it ends that run only. An after-gate `end` yields to a
   failure mode that fires; an `end` whose expression errors does not fire;
   it is S303 in a `parallel_group`, as is `delay`.
+
+```mermaid
+---
+title: Gate action end
+---
+flowchart TB
+  accDescr: A gate with action end ends the run successfully, no later step runs, and the terminal action records ended with the step and message; in an invoked workflow it ends only that run.
+  g{"Gate fires: action end"} --> e["Run ends successfully"]
+  e --> rec["Terminal action records ended: step, message"]
+  g -.->|in an invoked workflow| child[Only that run ends]
+```
+
 - **Step `delay` (§5.13, `wait@1`):** a positive duration to wait before
   the step's approval, checkpoint and execution; it invalidates earlier
   checkpoints like a wait (W608) and counts as acting after a deferral.
@@ -199,6 +287,20 @@ gaps on the standard's side (RFC-0003, amendments):
   verdict per attested principal, read from that reviewer's result,
   fail-closed. A quorum's model
   families count only as attested, no longer as requested.
+
+```mermaid
+---
+title: Results a waiting delegate keeps under identity@1
+---
+flowchart TB
+  accDescr: With identity@1, effective.identity attests who took a delegation; a malformed or contradicting identity is R402, and a waiting delegate keeps only results from the attested principal and drops the rest with the reason delegate_identity.
+  del[Delegation taken] --> id{"effective.identity"}
+  id -->|"malformed or contradicting"| r402[R402]
+  id -->|attested principal| wait[Waiting delegate]
+  wait -->|result from that principal| keep[Kept]
+  wait -->|result from anyone else| drop["Dropped: delegate_identity"]
+```
+
 - **W608 through `invoke` (§5.13):** an `invoke` of a catalog workflow
   that can wait counts as a wait, since the run it invokes invalidates the
   caller's checkpoints.
@@ -233,6 +335,19 @@ gaps on the standard's side (RFC-0003, amendments):
   transitively, from one with an unattended trigger runs unattended, so its
   approval steps warn as its caller's would. `x-` vendor entries are never
   run, so they make nothing unattended.
+
+```mermaid
+---
+title: W606 through invoke
+---
+flowchart TB
+  accDescr: A workflow invoked, directly or transitively, from one with an unattended trigger runs unattended, so its approval steps warn W606 as its caller's would.
+  trig[Workflow with an unattended trigger] -->|invoke| a[Invoked workflow: unattended]
+  a -->|invoke| b[Transitively invoked: unattended]
+  a --> w["Approval steps warn W606"]
+  b --> w
+```
+
 - **Smaller rules made explicit, each S303:** a literal empty
   `accept_from` (§5.15); a `synchronize` wait whose `agents` repeat one
   (§5.13); an `invoke` that names different targets in `workflow_id` and
@@ -246,6 +361,17 @@ gaps on the standard's side (RFC-0003, amendments):
 - **Replacing a silent delegate (§5.13):** a recovery loop whose target is
   the waiting delegate or an earlier step makes the delegate's next call
   name the delegation it replaces.
+
+```mermaid
+---
+title: Replacing a silent delegate
+---
+flowchart TB
+  accDescr: When a recovery loop targets the waiting delegate or an earlier step, the delegate's next call names the delegation it replaces.
+  silent[Waiting delegate is silent] --> loop["Recovery loop to the delegate or an earlier step"]
+  loop --> next["Next delegate call names the replaced delegation"]
+```
+
 - **The §12.5 Recovery Loop pattern** shows its loop target reading the
   injected `${_recovery.failure_evidence}`.
 - **Quorum verdict `scope` (§5.16):** a value other than `full` or
@@ -298,6 +424,20 @@ list them.
   distinct from the capability-I/O namespace of §4.1, so an event's `anchors`
   is not a capability's `evidence_anchors`. Clarification only — no field
   changed shape. (#107)
+
+```mermaid
+---
+title: The names section 6.2 and 6.3 now use
+---
+flowchart LR
+  accDescr: Section 6.2's observation fields id, raw_payload, canonical_payload and evidence_anchors are now the canonical event's event_id, raw, canonical and anchors, and section 6.3's snapshot identity moves from the top level to meta.
+  a[id] --> a2[event_id]
+  b[raw_payload] --> b2[raw]
+  c[canonical_payload] --> c2[canonical]
+  d[evidence_anchors] --> d2[anchors]
+  e[Snapshot identity at the top level] --> e2[Under meta]
+```
+
 - **Three fields the spec marks MUST are now `required` in the schemas.**
   `event.provenance` (§6.2), and `world_state.meta.version_id` and
   `meta.lineage` (§6.3), were declared but optional. Per §11.4 adding a required

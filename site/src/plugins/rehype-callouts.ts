@@ -3,26 +3,31 @@
 // GitHub's alert form `> [!NOTE]`. The labels are Note, Tip, Important, Warning
 // and Caution. The result is
 //   <div class="callout callout--note" role="note">
-//     <p class="callout__label">Note</p> ...the rest of the quote...
+//     <p class="callout__label"><svg …/> Note</p> ...the rest of the quote...
 //   </div>
+// The label carries the same 7x7 glyph as the generated callouts
+// (CALLOUT_GLYPHS, visual spec 3.10.3), decorative beside the word.
 // Any other blockquote is left as it is.
 import type { Element, ElementContent, Root } from 'hast';
 import { visit } from 'unist-util-visit';
+import { glyphElement } from '../pixel/hast';
+import { hastText, isEl } from './hast';
 
 export const CALLOUT_TYPES = ['note', 'tip', 'important', 'warning', 'caution'] as const;
 export type CalloutType = (typeof CALLOUT_TYPES)[number];
 
+/** The glyph of each callout type, shared with the generated callouts (Callout.astro). */
+export const CALLOUT_GLYPHS: Readonly<Record<CalloutType | 'requirement', string>> = {
+  note: 'note',
+  tip: 'check',
+  important: 'note',
+  warning: 'warning',
+  caution: 'caution',
+  requirement: 'mark:required',
+};
+
 const LABEL = /^(note|tip|important|warning|caution)\s*(:?)$/i;
 const ALERT = /^\[!(note|tip|important|warning|caution)\]\s*/i;
-
-function toString(n: ElementContent): string {
-  if (n.type === 'text') return n.value;
-  return n.type === 'element' ? n.children.map(toString).join('') : '';
-}
-
-function isElement(n: ElementContent | undefined, tag?: string): n is Element {
-  return n?.type === 'element' && (tag === undefined || n.tagName === tag);
-}
 
 function isBlank(n: ElementContent): boolean {
   return n.type === 'text' && n.value.trim() === '';
@@ -32,8 +37,8 @@ function isBlank(n: ElementContent): boolean {
 function takeLabel(p: Element): CalloutType | null {
   const kids = p.children;
   const first = kids[0];
-  if (isElement(first, 'strong')) {
-    const m = LABEL.exec(toString(first).trim());
+  if (isEl(first, 'strong')) {
+    const m = LABEL.exec(hastText(first).trim());
     if (!m) return null;
     const after = kids[1];
     if (m[2] === '') {
@@ -51,7 +56,7 @@ function takeLabel(p: Element): CalloutType | null {
     first.value = first.value.slice(m[0].length);
     if (first.value === '') kids.shift();
     const br = kids[0];
-    if (isElement(br, 'br')) kids.shift();
+    if (isEl(br, 'br')) kids.shift();
     return m[1]!.toLowerCase() as CalloutType;
   }
   return null;
@@ -62,7 +67,7 @@ export default function rehypeCallouts() {
     visit(tree, 'element', (node: Element) => {
       if (node.tagName !== 'blockquote') return;
       const p = node.children.find((c) => !isBlank(c));
-      if (!isElement(p, 'p')) return;
+      if (!isEl(p, 'p')) return;
       const type = takeLabel(p);
       if (type === null) return;
       if (p.children.every(isBlank)) node.children.splice(node.children.indexOf(p), 1);
@@ -73,7 +78,7 @@ export default function rehypeCallouts() {
         type: 'element',
         tagName: 'p',
         properties: { className: ['callout__label'] },
-        children: [{ type: 'text', value: label }],
+        children: [glyphElement(CALLOUT_GLYPHS[type]), { type: 'text', value: ` ${label}` }],
       });
     });
   };

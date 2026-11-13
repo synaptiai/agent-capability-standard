@@ -83,6 +83,18 @@ For each FAIL/PARTIAL:
 - add an artifact: policy config, constraint, gate, hook, fixture, benchmark scenario, or doc section
 - re-run the PVC report
 
+```mermaid
+---
+title: The PVC loop
+---
+flowchart TB
+  accDescr: Choose the target, copy the report template, create the report, score each test, and for every FAIL or PARTIAL pick a remediation pattern, add an artifact and re-run the report.
+  s0[Choose the target] --> s05[Copy the report template] --> s1[Create the PVC report] --> s2[Score each test]
+  s2 --> q{Any FAIL or PARTIAL?}
+  q -->|yes| fix["Pick a remediation pattern, add an artifact"]
+  fix -->|re-run the report| s2
+```
+
 ---
 
 ## Core output: “Perspective Conformance”
@@ -93,11 +105,39 @@ You can optionally track maturity by coverage:
 - **PVC-L3 (Enforced)**: invariants are mechanically enforced (validator/gates/hooks)
 - **PVC-L4 (Measured)**: benchmarks/tabletops/red-teams prove properties in practice
 
+
+```mermaid
+---
+title: The four conformance levels
+---
+flowchart LR
+  accDescr: Perspective conformance rises from L1 narrative, where risks and stakeholders are named, to L2 procedural, L3 enforced and L4 measured, where benchmarks, tabletops and red teams prove the properties.
+  l1["L1 Narrative: risks named"] --> l2["L2 Procedural: paths defined"] --> l3["L3 Enforced: invariants enforced"] --> l4["L4 Measured: properties proven"]
+```
+
 ---
 
 ## Tests (questions + acceptance criteria)
 
 Each test is written to be “auditable”: it asks for explicit artifacts and measurable outcomes.
+
+
+```mermaid
+---
+title: The nine test groups
+---
+flowchart LR
+  accDescr: The 15 tests fall into nine groups: human factors, governance, economics, security, control loops, formal assurance, data governance, ethics and ecosystem.
+  pvc[PVC tests] --> a["A) Human factors: HF-101, HF-102, HF-103"]
+  pvc --> b["B) Governance: ORG-201, GOV-202"]
+  pvc --> c["C) Economics: ECON-301, ECON-302"]
+  pvc --> d["D) Security: SEC-401, SEC-402"]
+  pvc --> e["E) Control loops: CTRL-501"]
+  pvc --> f["F) Formal assurance: ASSUR-601, ASSUR-602"]
+  pvc --> g["G) Data governance: DG-701"]
+  pvc --> h["H) Ethics: ETH-801"]
+  pvc --> i["I) Ecosystem: ECO-901"]
+```
 
 ### A) Human Factors & Operator Cognition (HF)
 
@@ -137,6 +177,18 @@ Each test is written to be “auditable”: it asks for explicit artifacts and m
 **Remediation patterns**
 - Add `constrain` policy for override authorization + record format.
 - Add workflow gate: “if manual override, require audit + checkpoint.”
+
+
+```mermaid
+---
+title: The override gate HF-102 suggests
+---
+flowchart LR
+  accDescr: A manual override passes a gate that requires an audit record and a checkpoint before it proceeds, so it cannot silently disable the checkpoint and rollback requirements.
+  ov[Manual override] --> gate{"Audit record and checkpoint?"}
+  gate -->|yes| go[The override proceeds]
+  gate -->|no| hold[Blocked]
+```
 
 #### HF-103 — Explanation Fidelity (Anti-Confabulation)
 **Intent**: Explanations correspond to actual evidence and decisions.
@@ -252,6 +304,18 @@ Each test is written to be “auditable”: it asks for explicit artifacts and m
 **Remediation patterns**
 - Add a “tainted input” gate: require verification before acting on untrusted content.
 
+
+```mermaid
+---
+title: The tainted input gate SEC-402 suggests
+---
+flowchart LR
+  accDescr: Untrusted retrieved content is treated as data, not instructions, and must pass verification before the workflow acts on it.
+  in[Untrusted content] -->|treated as data| v{Verified?}
+  v -->|yes| act[Act on it]
+  v -->|no| stop[Do not act]
+```
+
 ---
 
 ### E) Control Theory & Feedback Loops (CTRL)
@@ -287,6 +351,18 @@ Each test is written to be “auditable”: it asks for explicit artifacts and m
 **Remediation patterns**
 - Add a “safety case” section per workflow or per risk tier with links to tests.
 
+
+```mermaid
+---
+title: A safety case for one claim
+---
+flowchart LR
+  accDescr: Each safety claim, such as no mutation without a checkpoint, needs its enforcement points in the validator, hook or SDK adapter, a test or fixture, and audit evidence.
+  claim["Claim: no mutation without checkpoint"] --> enf["Enforcement: validator, hook, SDK adapter"]
+  claim --> test[A test or fixture]
+  claim --> ev[Audit evidence]
+```
+
 #### ASSUR-602 — Runtime Monitors for Invariants
 **Intent**: Detect invariant violations in the wild and respond.
 
@@ -300,6 +376,16 @@ Each test is written to be “auditable”: it asks for explicit artifacts and m
 
 **Remediation patterns**
 - Add a minimal invariant monitor (log-based or metrics-based) and a runbook.
+
+
+```mermaid
+---
+title: A runtime invariant monitor
+---
+flowchart LR
+  accDescr: A monitor rule detects a violated critical invariant at run time, with an alert and an escalation path.
+  viol[Invariant violated at run time] --> mon[Monitor rule] --> alert[Alert and escalation path]
+```
 
 ---
 

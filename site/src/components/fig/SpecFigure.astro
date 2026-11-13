@@ -1,0 +1,806 @@
+---
+// One site-drawn figure of the current Standard (visual spec 3.9), chosen by
+// its slot key in SPEC_SLOTS. Each is named "{title}, from §{n}" and draws
+// from the Standard's own section (a table, fence, list or sentence), the
+// ontology, the schemas or a runtime conformance fixture, checking the two
+// against each other where both say the same thing. A `wrap` slot passes the
+// block it wraps as `inner`, and the figure shows it enriched in place.
+//
+// Props:
+// - slot: string, required. A key of SPEC_SLOTS.
+// - n: number, required. The figure's number on the page.
+// - inner: string | null, required. The wrapped block's HTML, or null.
+// - source: string, required. The Standard's repo path.
+// - slots: SpecSlot[], optional. The page's slot map (SPEC_SLOTS_100 on 1.0.0).
+import {
+  annotationGrammar,
+  bindingExamples,
+  edgeTypesCaption,
+  failureBranches,
+  failureCaption,
+  gateBranches,
+  gateCaption,
+  rootRule,
+  safetyCritical,
+  safetyCriticalCaption,
+  stepFieldRows,
+} from '../../lib/spec-figures';
+import { SPEC_SLOTS, type SpecSlot } from '../../lib/spec-slots';
+import * as D from '../../lib/spec-dsl-figures';
+import { REPLAY_FIXTURES } from '../../lib/run-replay';
+import { loadCatalogEnums, loadWorldStateSchema } from '../../data/spec-sources';
+import { edgeRects } from '../../pixel/lines';
+import { refSlugger } from '../../lib/generated';
+import { capabilitySymbol } from '../../lib/views';
+import { anchorsOf } from '../../lib/anchors';
+import { codeLines } from '../../lib/md-sections';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import PixelBar from './PixelBar.astro';
+import Rects from './Rects.astro';
+import DiagnosticTile from './DiagnosticTile.astro';
+import FlowArrow from './FlowArrow.astro';
+import RunReplay from './RunReplay.astro';
+import SafetyDefaults from './SafetyDefaults.astro';
+import TableWrap from '../TableWrap.astro';
+import * as T from '../../lib/spec-tail-figures';
+import { heatRanges, heatStep } from '../../lib/edge-figures';
+import { loadIdentityPolicy } from '../../data/spec-sources';
+import { githubBlobUrl, githubTreeUrl } from '../../lib/repo';
+import { chevron, edgeStyle, glyphRects, run, type FigRect } from '../../pixel/lines';
+import StepStrip from './StepStrip.astro';
+import { loadCatalogSchema } from '../../data/catalog-schema';
+import { loadOntology } from '../../data/ontology';
+import { readRepoFile } from '../../lib/repo';
+import ActionBranches from './ActionBranches.astro';
+import AnnotationTypes from './AnnotationTypes.astro';
+import EdgeTypeCard from './EdgeTypeCard.astro';
+import Figure from './Figure.astro';
+import LayerModel from './LayerModel.astro';
+import MiniTile from './MiniTile.astro';
+import Port from './Port.astro';
+import ReferenceAnatomy from './ReferenceAnatomy.astro';
+import SafetyPanel from './SafetyPanel.astro';
+import StepAnatomy from './StepAnatomy.astro';
+
+interface Props {
+  slot: string;
+  n: number;
+  inner: string | null;
+  source: string;
+  /** The page's slot map; the current Standard's by default. */
+  slots?: readonly SpecSlot[];
+}
+
+const { slot, n, inner, source, slots = SPEC_SLOTS } = Astro.props;
+const def = slots.find((s) => s.key === slot);
+if (!def) throw new Error(`SpecFigure: no slot ${slot}`);
+const text = readRepoFile(source);
+const where = source;
+// "{figure title}, from §{n}" (visual spec 3.9).
+const titled = (name: string) => `${name}, from §${def.section.trim()}`;
+const idOf = (name: string) => refSlugger()(`Figure: ${name}`);
+const o = loadOntology();
+const schema = loadCatalogSchema();
+const KNOWN = ['layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
+const OLDER = ['categories', ...Object.keys(T.TABLE_FIGURES)];
+const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
+const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
+if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
+const REPLAY_TITLES: Record<string, string> = {
+  'recovery-replay': 'A recovery that runs out',
+  'wait-replay': 'A wait that loses its source',
+  'deferral-replay': 'What a deferral reaches',
+};
+// A link to a numbered section of this page's own Standard (1.0.0's links stay on 1.0.0).
+const sectionLink = (sec: string) => {
+  const e = anchorsOf(source, readRepoFile).entries.find((x) => x.text.startsWith(`${sec} `) || x.text.startsWith(`${sec}. `));
+  if (!e) throw new Error(`SpecFigure: ${source} has no section ${sec}`);
+  return `#${e.slug}`;
+};
+const sectionTitle = (sec: string) => {
+  const code = codeLines(text);
+  const re = new RegExp(`^#{2,4} ${sec.replace(/\./g, '\\.')}\\.? (.+)$`);
+  const lines = text.split('\n');
+  const i = lines.findIndex((l, k) => !code[k] && re.test(l));
+  return i === -1 ? '' : re.exec(lines[i]!)![1]!.trim();
+};
+const chapters = slot === 'requirements' ? D.chapterKeywords(text) : [];
+const kwMax = Math.max(1, ...chapters.flatMap((c) => Object.values(c.counts)));
+const order = slot === 'safety-order' ? D.safetyOrder(o) : [];
+if (slot === 'safety-order') D.checkSafetyOrder(text, where, order);
+const orderLayout = slot === 'safety-order' ? D.safetyOrderLayout(order, o) : null;
+// F-S1 in rects: each lane in its edge type's 2.4 style, the drops from the
+// source and to each target, the chevrons on the targets' port bars, and the
+// lane's source symbol and mark in the gutter.
+const orderRects: (FigRect & { opacity?: number })[] = orderLayout
+  ? [
+      ...orderLayout.ports.flatMap((p) => run(p.from, orderLayout.portY, p.to, orderLayout.portY, 'ink-3', 2)),
+      ...orderLayout.lanes.flatMap((l) => {
+        const st = edgeStyle(l.type);
+        const cell = st.weight === 4 ? 4 : 2;
+        const right = Math.max(l.sx, ...l.tx) + st.weight / 2;
+        return [
+          ...glyphRects(`mark:${l.type}`, 26, l.y - 7, 2),
+          ...run(44, l.y, right, l.y, st.ink, st.weight, st.pattern),
+          ...run(l.sx, orderLayout.sourceTop + 32, l.sx, l.y, st.ink, st.weight, st.pattern),
+          ...l.tx.flatMap((x) => [...run(x, l.y, x, orderLayout.portY - 1 - cell, st.ink, st.weight, st.pattern), ...chevron(x, orderLayout.portY - 1 - cell / 2, 'down', st.ink, cell)]),
+        ];
+      }),
+    ]
+  : [];
+const ladder = slot === 'precedence' ? D.precedenceLadder(text, where) : [];
+const exts = slot === 'extensions' ? D.extensionTiles(text, where) : [];
+const trig = slot === 'triggers' ? D.triggerTiles(text, where) : null;
+const rec = slot === 'recovery-loop' ? D.recoveryRows(text, where) : [];
+const loopRange = slot === 'recovery-loop' ? D.maxLoopsRange(text, where) : null;
+const wait = slot === 'wait-timeline' ? D.waitTimeline(text, where) : null;
+const silent = slot === 'silent-source' ? D.silentSource(text, where) : null;
+const plans = slot === 'approval' ? D.approvalPlans(text, where) : [];
+const asked = slot === 'approval' ? D.approverAsked(text, where) : [];
+const deleg = slot === 'delegate' ? D.delegateGroups(text, where) : null;
+const quorum = slot === 'quorum' ? D.quorumExample(text, where) : null;
+const trust = slot === 'trust-classes' ? D.trustClassBars(text, where) : [];
+const sender = slot === 'sender-filter' ? D.senderFilter(text, where) : [];
+const shelf = slot === 'schema-shelf' ? T.schemaShelf(text, where) : [];
+const policy = slot === 'merge-thresholds' ? loadIdentityPolicy() : null;
+const mergeBands = policy ? T.mergeBands(policy) : [];
+const decay = slot === 'decay' ? T.decayColumns(text, where) : null;
+const families = slot === 'families' ? T.diagnosticFamilies(text, where) : [];
+const heat = slot === 'code-heat' ? T.codeHeat(text, where) : null;
+const levels = slot === 'levels' ? T.conformanceLevels(text, where) : [];
+const suite = slot === 'suite' ? T.conformanceSuite(text, where) : [];
+const bumps = slot === 'bumps' ? T.versionBumps(text, where) : [];
+const tree = slot === 'checkpoint-tree' ? T.decisionTree(text, where) : null;
+const pattern = slot.startsWith('pattern-') ? T.patternStrips(text, where)[Number(slot.slice(8))] : null;
+if (slot.startsWith('pattern-') && !pattern) throw new Error(`SpecFigure: §12.5 has no pattern fence for ${slot}`);
+// F-S25: 9 columns of 20px with 8px gaps after a 36px axis; 100px is a decay factor of 1.
+const DECAY_H = 100;
+const even = (v: number) => 2 * Math.round(v / 2);
+const W_DECAY = 36 + 9 * 28 - 8;
+const floorY = decay ? DECAY_H - even(decay.minTrust * DECAY_H) : 0;
+const decayRects: FigRect[] = decay
+  ? [
+      { x: 32, y: 0, w: 2, h: DECAY_H + 2, ink: 'ink-3' },
+      { x: 32, y: DECAY_H, w: W_DECAY - 32, h: 2, ink: 'ink-3' },
+      ...decay.columns.flatMap((c, i): FigRect[] => {
+        const h = even(c.value * DECAY_H);
+        const x = 36 + i * 28;
+        const top = DECAY_H - h;
+        if (!c.floored) return [{ x, y: top, w: 20, h, ink: 'ink' }];
+        // Held up by the floor: an outline with 2px stripes every 4px (the = shade).
+        return [
+          { x, y: top, w: 20, h: 2, ink: 'ink' },
+          { x, y: top, w: 2, h, ink: 'ink' },
+          { x: x + 18, y: top, w: 2, h, ink: 'ink' },
+          ...Array.from({ length: Math.floor((h - 2) / 4) }, (_, k): FigRect => ({ x: x + 2, y: top + 4 + k * 4, w: 16, h: 2, ink: 'ink-3' })),
+        ];
+      }),
+      ...run(36, floorY - 4, W_DECAY, floorY - 4, 'ink-2', 2, 'dashed').map((r) => ({ ...r, y: floorY - 4 })),
+    ]
+  : [];
+const codesSec = slot.startsWith('codes-') ? T.sectionCodes(text, slot.slice(6), where) : null;
+const tableFig = T.TABLE_FIGURES[slot] ?? null;
+const categories = slot === 'categories' ? T.categoryCounts(text, where) : [];
+const isOutcome = (n: T.TreeNode) => n.branches.length === 0;
+const pct = (v: number, max: number) => `${((v / max) * 100).toFixed(3)}%`;
+const grammar = slot === 'annotations' ? annotationGrammar(text, where) : null;
+const failures = slot === 'failures' ? failureBranches(text, where, schema) : [];
+---
+{slot === 'layers' && <LayerModel id={idOf('layer model')} n={n} title={titled('Layer model')} />}
+{slot === 'edges' && (
+  <Figure id={idOf('edge types')} n={n} title={titled('Edge types')} caption={edgeTypesCaption(o)} kind="edge-types">
+    <ul class="edge-card-grid">
+      {o.edgeTypes.map((t) => <li><EdgeTypeCard info={t} /></li>)}
+    </ul>
+  </Figure>
+)}
+{slot === 'safety' && (
+  <Figure id={idOf('safety-critical capabilities')} n={n} title={titled('Safety-critical capabilities')} caption={safetyCriticalCaption(o)} kind="safety-critical">
+    <ul class="safety-grid">
+      {safetyCritical(o).map((c) => (
+        <li class="safety-grid__item">
+          <p class="safety-grid__name"><MiniTile id={c.id} size={32} /><code>{c.id}</code></p>
+          <SafetyPanel cap={c} compact />
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'step' && (() => {
+  // A field the §5.2 tables do not list links to the section the Standard
+  // names beside it ("`delay` (§5.13)" in the §5.9 extensions table).
+  const rows = stepFieldRows(text, where);
+  const links = new Map<string, string>();
+  for (const name of loadCatalogSchema().stepSlots.map((s) => s.name).filter((x) => !rows.has(x))) {
+    const m = new RegExp('`' + name + '`[^|\\n]*?\\(§(\\d+(?:\\.\\d+)*)\\)').exec(text);
+    if (m) links.set(name, sectionLink(m[1]!));
+  }
+  return <StepAnatomy id={idOf('step anatomy')} n={n} title={titled('Step anatomy')} rows={rows} links={links} />;
+})()}
+{slot === 'reference' && (
+  <ReferenceAnatomy id={idOf('anatomy of a reference')} n={n} title={titled('Anatomy of a reference')} examples={bindingExamples(text, where)} rule={rootRule(text, where)} />
+)}
+{slot === 'annotations' && grammar && (
+  <AnnotationTypes id={idOf('annotation types')} n={n} title={titled('Annotation types')} names={grammar.names} subtype={grammar.subtype} />
+)}
+{slot === 'gates' && (
+  <ActionBranches
+    id={idOf('gate outcomes')}
+    n={n}
+    title={titled('Gate outcomes')}
+    caption={gateCaption(schema)}
+    kind="gate"
+    points={gateBranches(schema).map((b) => ({
+      label: `when holds, ${b.phase} the step`,
+      at: b.phase === 'after' ? 'after' : 'before',
+      branches: b.actions.map((a) => ({ action: a })),
+    }))}
+  />
+)}
+{slot === 'failures' && (
+  <ActionBranches
+    id={idOf('failure actions')}
+    n={n}
+    title={titled('Failure actions')}
+    caption={failureCaption(failures)}
+    kind="fail"
+    points={[{ label: 'the step failed, or a failure mode\'s when holds', at: 'after', branches: failures }]}
+  />
+)}
+
+{slot === 'requirements' && (
+  <Figure id={idOf('where the requirements are')} n={n} title={titled('Where the requirements are')} caption={D.keywordsCaption(chapters)} kind="requirements">
+    <ul class="kw-chart">
+      <li class="kw-chart__row kw-chart__head" aria-hidden="true"><span>Chapter</span>{D.KEYWORD_GROUPS.map((g) => <span>{g.label}</span>)}</li>
+      {chapters.map((c) => (
+        <li class="kw-chart__row" data-chapter={c.n}>
+          <a class="kw-chart__chapter" href={sectionLink(String(c.n))}><PixelGlyph name={c.glyph} scale={2} /><span>{c.n}. {c.title}</span></a>
+          {D.KEYWORD_GROUPS.map((g) => (
+            <span class="kw-chart__bar" data-keyword={g.id}><span class="visually-hidden">{g.label}</span><PixelBar value={c.counts[g.id]} max={kwMax} /></span>
+          ))}
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'safety-order' && orderLayout && (
+  <Figure id={idOf('safety ordering')} n={n} title={titled('Safety ordering')} caption={D.safetyOrderCaption(order)} kind="safety-order">
+    <ul class="order-key" aria-label="Edge types">
+      {[...new Set(orderLayout.lanes.map((l) => l.type))].map((t) => (
+        <li><PixelGlyph name={`mark:${t}`} /><svg class="order-key__line" viewBox="0 0 40 12" width="40" height="12" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={edgeRects(t, 2, 6, 38, 6).rects} /></svg><code>{t}</code></li>
+      ))}
+    </ul>
+    <div class="order-draw" aria-hidden="true" style={`width: ${orderLayout.width}px; height: ${orderLayout.height}px`}>
+      <svg viewBox={`0 0 ${orderLayout.width} ${orderLayout.height}`} width={orderLayout.width} height={orderLayout.height} shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={orderRects} /></svg>
+      {orderLayout.lanes.map((l) => <span class="order-draw__lane" style={`top: ${l.y - 9}px`} data-lane-source={l.source}>{capabilitySymbol(l.source)}</span>)}
+      {orderLayout.sources.map((x) => (
+        <span class="order-draw__node" style={`left: ${x.x - 48}px; top: 0`} data-source={x.id}><code>{x.id}</code><MiniTile id={x.id} size={32} link={false} /></span>
+      ))}
+      {orderLayout.targets.map((x) => (
+        <span class="order-draw__node order-draw__node--target" style={`left: ${x.x - 48}px; top: ${orderLayout.targetTop}px`} data-target={x.id}><MiniTile id={x.id} size={32} link={false} /><code>{x.id}</code></span>
+      ))}
+    </div>
+    <div class="order-cells" aria-hidden="true">
+      <p class="order-cells__head">From</p>
+      <ul class="order-cells__row">
+        {order.map((g) => (
+          <li class="order-cell" data-source={g.source}>
+            <MiniTile id={g.source} size={32} link={false} />
+            {g.edges.map((e) => <span class="order-cell__mark"><PixelGlyph name={`mark:${e.type}`} />{e.targets.length}</span>)}
+          </li>
+        ))}
+      </ul>
+      <p class="order-cells__head">To</p>
+      <ul class="order-cells__row">
+        {orderLayout.targets.map((t) => (
+          <li class="order-cell" data-target={t.id}>
+            <MiniTile id={t.id} size={32} link={false} />
+            {t.incoming.map((i) => <span class="order-cell__mark"><PixelGlyph name={`mark:${i.type}`} />{capabilitySymbol(i.source)}</span>)}
+          </li>
+        ))}
+      </ul>
+    </div>
+    <ul class="visually-hidden">
+      {order.flatMap((g) => g.edges.map((e) => <li>{g.source} {e.type} {e.targets.join(', ')}</li>))}
+    </ul>
+  </Figure>
+)}
+{slot === 'safety-defaults' && <SafetyDefaults id={idOf('safety defaults by capability')} n={n} title={titled('Safety defaults by capability')} />}
+{slot === 'precedence' && (
+  <Figure id={idOf('operator precedence')} n={n} title={titled('Operator precedence')} caption={D.precedenceCaption(ladder)} kind="precedence">
+    <ol class="ladder">
+      {ladder.map((r, i) => (
+        <li class:list={['ladder__rung', i === ladder.length - 1 && 'ladder__rung--operand']} data-rule={r.rule}>
+          <code class="ladder__rule">{r.rule}</code>
+          <ul class="ladder__ops" aria-label={i === ladder.length - 1 ? 'operands' : 'operators'}>
+            {r.operators.map((op) => <li class="chip"><code>{op}</code></li>)}
+          </ul>
+          {r.note && <span class="ladder__note">{r.note}: does not chain</span>}
+        </li>
+      ))}
+    </ol>
+    <p class="ladder__scale"><span>Top: binds loosest</span><span>Bottom: binds tightest</span></p>
+  </Figure>
+)}
+{slot === 'static-checks' && inner && (
+  <Figure id={idOf('static checks')} n={n} title={titled('Static checks and their codes')} caption={D.staticChecksCaption(text, where)} kind="static-checks">
+    <Fragment set:html={inner} />
+    <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
+  </Figure>
+)}
+{slot === 'extensions' && (
+  <Figure id={idOf('extensions and what they unlock')} n={n} title={titled('Extensions and what they unlock')} caption={D.extensionsCaption(exts)} kind="extensions">
+    <ul class="ext-tiles">
+      {exts.map((e) => (
+        <li class="ext-tile" data-extension={e.id}>
+          <code class="ext-tile__id">{e.id}</code>
+          <ul class="ext-tile__secs">
+            {e.sections.map((sec) => <li><a href={sectionLink(sec)}>§{sec} {sectionTitle(sec)}</a></li>)}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'triggers' && trig && (
+  <Figure id={idOf('how runs start')} n={n} title={titled('How runs start')} caption={D.triggersCaption(trig.tiles)} kind="triggers">
+    <ul class="trig-tiles">
+      {trig.tiles.map((t) => (
+        <li class="trig-tile" data-kind={t.kind} data-attendance={t.attendance}>
+          <code class="trig-tile__kind">{t.kind}</code>
+          <span class="trig-tile__att">{t.attendance === 'attended' || t.attendance === 'unattended' ? <span class:list={['flag-cell', t.attendance === 'attended' ? 'flag-cell--on' : 'flag-cell--off']} aria-hidden="true">{t.attendance === 'attended' && <PixelGlyph name="source:human" scale={1} />}</span> : <span class="flag-cell flag-cell--inherit" aria-hidden="true"></span>}{t.attendance === "the invoker's" ? "the invoker's attendance" : t.attendance}</span>
+          {t.kind === 'schedule' && (
+            <span class="trig-tile__overlap">overlap:{' '}{trig.overlap.map((v) => <span class:list={['chip', 'chip--inner', v === trig.overlapDefault && 'chip--default']}><code>{v}</code>{v === trig.overlapDefault && ' (default)'}</span>)}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+    <p class="trig-key"><span class="flag-cell flag-cell--on" aria-hidden="true"><PixelGlyph name="source:human" scale={1} /></span>someone is there to approve <span class="flag-cell flag-cell--off" aria-hidden="true"></span>no one is <span class="flag-cell flag-cell--inherit" aria-hidden="true"></span>as the run that invoked it</p>
+  </Figure>
+)}
+{slot === 'recovery-loop' && loopRange && (() => {
+  // One step tile with three branches out of it: the goto_step loop back up
+  // to its target (a return bracket carrying the max_loops counter), and
+  // the two ways out, drawn side by side because they are alternatives.
+  const { loop, exits } = D.recoveryBranches(text, where);
+  // The table's cells come as plain text; a field name (snake_case) is set as code.
+  const inline = (s: string) => s.split(/\b([a-z]+_[a-z_]+)\b/).map((part, i) => (i % 2 === 1 ? <code>{part.split(/(?<=_)/).map((p, k) => (k > 0 ? <><wbr />{p}</> : p))}</code> : part));
+  return (
+    <Figure id={idOf('recovery loop')} n={n} title={titled('Recovery loop')} caption={D.recoveryCaption(rec)} kind="recovery-loop">
+      <div class="rloop">
+        <p class="rloop__tile rloop__tile--target"><code>goto_step</code> target</p>
+        <span class="rloop__bracket rloop__bracket--top" aria-hidden="true"><svg class="rloop__tip" viewBox="0 0 12 20" width="12" height="20" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={chevron(2, 10, 'left', 'ink', 4)} /></svg></span>
+        <span class="rloop__flow" aria-hidden="true"></span>
+        <p class="rloop__note" data-branch="0">
+          <span class="rloop__label">{inline(loop.label)}</span>
+          <span class="rloop__counter"><span class="rloop__cells" aria-hidden="true">{Array.from({ length: loopRange.def }, () => <span class="rloop__cell"></span>)}<span class="rloop__cell rloop__cell--more"></span></span><code>max_loops</code> {loopRange.def}<span class="rloop__range">({loopRange.min}–{loopRange.max})</span></span>
+        </p>
+        <span class="rloop__bracket rloop__bracket--mid" aria-hidden="true"></span>
+        <p class="rloop__tile rloop__tile--step"><PixelGlyph name="flow:run" /> Failure mode fires</p>
+        <span class="rloop__bracket rloop__bracket--bottom" aria-hidden="true"></span>
+        <ul class="rloop__exits">
+          {exits.map((r, i) => (
+            <li class="rloop__exit" data-branch={i + 1}>
+              <span class="rloop__drop" aria-hidden="true"><svg viewBox="0 0 20 24" width="20" height="24" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={[{ x: 8, y: 0, w: 4, h: 14, ink: 'ink' }, ...chevron(10, 22, 'down', 'ink', 4)]} /></svg></span>
+              <span class="rloop__label">{inline(r.label)}</span>
+              <p class="rloop__tile rloop__tile--exit">{inline(r.to)}{r.codes.map((c) => <> <DiagnosticTile code={c} /></>)}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Figure>
+  );
+})()}
+{slot === 'wait-timeline' && wait && (
+  <Figure id={idOf('a wait on a timeline')} n={n} title={titled('A wait on a timeline')} caption={D.waitCaption(wait)} kind="wait-timeline">
+    <div class="wait-tl">
+      <p class="wait-tl__modes">liveness.mode:{' '}{wait.modes.map((m) => <span class:list={['chip', 'chip--inner', m === wait.mode && 'chip--default']}><code>{m}</code>{m === wait.mode && ' (this example)'}</span>)}</p>
+      <div class="wait-tl__lane" data-lane="silent">
+        <p class="wait-tl__label">Source silent from the start: a probe every {wait.interval}</p>
+        <div class="wait-tl__track" aria-hidden="true">
+          {Array.from({ length: Math.floor(wait.timeoutMin / wait.intervalMin) }, (_, k) => (k + 1) * wait.intervalMin).map((t) => (
+            <span class:list={['wait-tl__probe', t <= wait.lostAt ? 'is-missed' : 'is-after']} style={`left: ${pct(t, wait.timeoutMin)}`}></span>
+          ))}
+          <span class="wait-tl__stop" style={`left: ${pct(wait.lostAt, wait.timeoutMin)}`}></span>
+        </div>
+      </div>
+      <div class="wait-tl__lane" data-lane="timeout">
+        <p class="wait-tl__label">No event and no lost liveness: the timeout</p>
+        <div class="wait-tl__track" aria-hidden="true"><span class="wait-tl__span"></span><span class="wait-tl__stop" style="left: 100%"></span></div>
+      </div>
+      <p class="wait-tl__axis" aria-hidden="true">{[0, 0.25, 0.5, 0.75, 1].map((f) => <span style={`left: ${pct(f, 1)}`}>{D.fmtMinutes(f * wait.timeoutMin)}</span>)}</p>
+      <ul class="wait-tl__ends">
+        <li>At {D.fmtMinutes(wait.lostAt)}, after {wait.threshold} missed probes: <DiagnosticTile code="R406" /></li>
+        <li>At {wait.timeout}, the timeout: <DiagnosticTile code="R401" /></li>
+      </ul>
+    </div>
+  </Figure>
+)}
+{slot === 'silent-source' && silent && (
+  <Figure id={idOf('recovering a silent source')} n={n} title={titled('Recovering a silent source')} caption={D.silentCaption(silent)} kind="silent-source">
+    <ul class="silent">
+      {silent.modes.map((m) => (
+        <li class="silent__mode" data-code={m.code}>
+          <DiagnosticTile code={m.code} />
+          <FlowArrow dir="right" length={16} />
+          <span class="silent__action"><PixelGlyph name={`fail:${m.action}`} /><code>{m.action}</code></span>
+          <FlowArrow dir="right" length={16} />
+          {m.goto === silent.wait ? (
+            <span class="silent__to">back to the wait <code>{m.goto}</code>{m.maxLoops !== null && `, up to ${m.maxLoops} ${m.maxLoops === 1 ? 'time' : 'times'}`}{m.onExhausted && <>, then the handler <code>{m.onExhausted}</code></>}</span>
+          ) : (
+            <span class="silent__to">the handler <code>{m.goto}</code>, once</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'approval' && (
+  <Figure id={idOf('who decides and what then')} n={n} title={titled('Who decides, and what then')} caption={D.approvalCaption(plans)} kind="approval">
+    <div class="approval-flow">
+      <div class="approval-flow__part">
+        <p class="approval-flow__head">1. Is the approver asked?</p>
+        <ul class="approval-asked" aria-label="Whether each kind of approver is asked, by run attendance">
+          {asked.flatMap((a) =>
+            loadCatalogEnums().attendance.map((att) => {
+              const yes = att === 'unattended' ? a.unattended : a.attended;
+              return (
+                <li class:list={['approval-asked__tile', !yes && 'approval-asked__tile--no']} data-kind={a.kind} data-attendance={att}>
+                  <code>{a.kind}</code>
+                  <span class="approval-asked__att">{att} run</span>
+                  <span class="asked"><PixelGlyph name={yes ? 'check' : 'close'} />{yes ? 'asked' : 'not asked'}</span>
+                </li>
+              );
+            }),
+          )}
+        </ul>
+      </div>
+      <div class="approval-flow__part">
+        <p class="approval-flow__head">2. The decision an action record holds</p>
+        <ul class="approval-flow__chips">{loadWorldStateSchema().approvalDecisions.map((d) => <li class="chip"><code>{d}</code></li>)}</ul>
+      </div>
+      <div class="approval-flow__part">
+        <p class="approval-flow__head">3. Unattended, with no approval: <code>when_unattended</code></p>
+        <ul class="approval-plans">
+          {plans.map((p) => (
+            <li class="approval-plans__tile" data-plan={p.plan}>
+              <span><code>{p.plan.split(/(?<=_)/).map((x, k) => (k > 0 ? <><wbr />{x}</> : x))}</code>{p.isDefault && <span class="approval-plans__default"> (default)</span>}</span>
+              <FlowArrow dir="down" length={12} />
+              <span class="approval-plans__result">{/^[A-Z]\d{3}$/.test(p.result) ? <DiagnosticTile code={p.result} /> : D.firstClause(p.result)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </Figure>
+)}
+{slot in REPLAY_FIXTURES && <RunReplay fixture={REPLAY_FIXTURES[slot]!} id={idOf(REPLAY_TITLES[slot]!)} n={n} title={titled(REPLAY_TITLES[slot]!)} />}
+{slot === 'delegate' && deleg && (
+  <Figure id={idOf('what a delegate binds')} n={n} title={titled('What a delegate binds')} caption={D.delegateCaption(deleg)} kind="delegate">
+    <div class="deleg">
+      <div class="deleg__side">
+        <p class="deleg__head"><MiniTile id="delegate" size={24} /> Inputs</p>
+        {deleg.inputs.map((g) => (
+          <div class="deleg__group" data-extension={g.extension ?? 'base'}>
+            <p class="deleg__ext">{g.extension ? <>needs <code>{g.extension}</code></> : 'base'}</p>
+            <ul class="ports">{g.rows.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} />)}</ul>
+          </div>
+        ))}
+      </div>
+      <div class="deleg__side">
+        <p class="deleg__head">Output the host attests</p>
+        <ul class="ports ports--out">{deleg.outputs.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} depth={r.depth === 0 ? 0 : 1} />)}</ul>
+      </div>
+    </div>
+  </Figure>
+)}
+{slot === 'quorum' && quorum && (
+  <Figure id={idOf('a quorum tally')} n={n} title={titled('A quorum tally')} caption={D.quorumCaption(quorum)} kind="quorum">
+    <div class="quorum">
+      <p class="quorum__head">Reviewers</p>
+      <ul class="quorum__reviewers">{quorum.reviewers.map((r) => <li><MiniTile id="delegate" size={24} link={false} /><code>{r}</code></li>)}</ul>
+      <p class="quorum__head">Verdict values</p>
+      <ul class="quorum__vocab">
+        <li data-side="pass"><span class="quorum__side"><PixelGlyph name="check" />pass</span>{quorum.pass.map((v) => <code class="chip chip--inner">{v}</code>)}</li>
+        <li data-side="blocking"><span class="quorum__side"><PixelGlyph name="close" />blocking</span>{quorum.blocking.map((v) => <code class="chip chip--inner">{v}</code>)}</li>
+        <li data-side="other"><span class="quorum__side">neither</span>{quorum.other.map((v) => <code class="chip chip--inner">{v}</code>)}</li>
+      </ul>
+      <p class="quorum__head">To pass</p>
+      <ul class="quorum__needs">
+        <li><span class="quorum__slots" aria-hidden="true">{Array.from({ length: quorum.minPass }, () => <span></span>)}</span><code>min_pass: {quorum.minPass}</code> passing verdicts</li>
+        {quorum.minFull !== null && <li><span class="quorum__slots" aria-hidden="true">{Array.from({ length: quorum.minFull }, () => <span></span>)}</span><code>min_full: {quorum.minFull}</code> of them with scope full</li>}
+        <li><span class="quorum__slots quorum__slots--none" aria-hidden="true"><span></span></span>no blocking verdict</li>
+        {quorum.freshContext && <li class="quorum__badge"><PixelGlyph name="check" />every reviewer binds <code>fresh_context: true</code></li>}
+        {quorum.families.length > 0 && <li class="quorum__badge"><PixelGlyph name="check" />model families covered: {quorum.families.map((f) => <code class="chip chip--inner">{f}</code>)}</li>}
+      </ul>
+    </div>
+  </Figure>
+)}
+{slot === 'trust-classes' && (
+  <Figure id={idOf('trust classes')} n={n} title={titled('Trust classes')} caption={D.trustCaption(trust)} kind="trust-classes">
+    <ul class="trust-bars">
+      {trust.map((b) => (
+        <li class="trust-bars__row" data-class={b.cls}>
+          <code class="trust-bars__name">{b.cls}</code>
+          <PixelBar value={b.weight} max={1} digits={2} />
+          <span class="trust-bars__marks">
+            {b.accepted && <span class="trust-bars__mark"><PixelGlyph name="check" />accepted</span>}
+            {b.alwaysAsk && <span class="trust-bars__mark"><PixelGlyph name="approve:review" />always ask</span>}
+          </span>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'sender-filter' && (
+  <Figure id={idOf('the sender filter')} n={n} title={titled('The sender filter')} caption={D.senderCaption(sender)} kind="sender-filter">
+    <ol class="sender">
+      <li class="sender__item">An item arrives from a sender</li>
+      {sender.map((g) => (
+        <li class="sender__gate" data-input={g.input}>
+          <FlowArrow />
+          <p class="sender__check"><PixelGlyph name="diamond" /><code>{g.input}</code></p>
+          <p class="sender__effect">{g.effect}</p>
+          {g.drops && <p class="sender__drop"><PixelGlyph name="close" />otherwise dropped and counted</p>}
+        </li>
+      ))}
+      <li class="sender__item"><FlowArrow /><span>The item is kept, carrying <code>sender</code> and <code>sender_identity</code></span></li>
+    </ol>
+  </Figure>
+)}
+{slot === 'quorum-fields' && inner && (
+  <Figure id={idOf('quorum fields and their codes')} n={n} title={titled('Quorum fields and the codes they raise')} caption={D.quorumFieldsCaption(D.quorumFieldCodes(text, where))} kind="quorum-fields">
+    <Fragment set:html={inner} />
+    <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
+  </Figure>
+)}
+
+{slot === 'schema-shelf' && (
+  <Figure id={idOf('schema shelf')} n={n} title={titled('Schema shelf')} caption={T.shelfCaption(shelf)} kind="schema-shelf">
+    <ul class="shelf">
+      {shelf.map((f) => (
+        <li class="shelf__file"><PixelGlyph name="chapter:canonical-schemas" scale={3} /><a href={githubBlobUrl(f.source)}><code>{f.name}</code></a><span class="shelf__purpose">{f.purpose}</span></li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'merge-thresholds' && policy && (
+  <Figure id={idOf('merge thresholds')} n={n} title={titled('Merge thresholds')} caption={T.thresholdsCaption()} kind="merge-thresholds">
+    <div class="scale">
+      <div class="scale__plot" aria-hidden="true">
+        <div class="scale__track">
+          {policy.thresholds.map((t, i) => {
+            const at = (t.value - policy.range[0]) / (policy.range[1] - policy.range[0]);
+            return (
+              <span class:list={['scale__tick', i % 2 === 1 && 'scale__tick--low']} style={`left: ${pct(at, 1)}`} data-threshold={t.name}>
+                <span class:list={['scale__label', at > 0.8 ? 'scale__label--end' : at < 0.2 ? 'scale__label--start' : 'scale__label--mid']}>
+                  <code>{t.name.split('_').map((w, k, all) => <span class="scale__seg">{w}{k < all.length - 1 && '_'}</span>)}</code>
+                  <span class="scale__value">{t.value}</span>
+                </span>
+              </span>
+            );
+          })}
+        </div>
+        <div class="scale__bands">
+          {mergeBands.map((band, i) => (
+            <span class:list={['scale__band', band.action === null && 'scale__band--open']} style={`left: ${pct(band.from - policy.range[0], policy.range[1] - policy.range[0])}; width: ${pct(band.to - band.from, policy.range[1] - policy.range[0])}`} data-action={band.action ?? ''}>
+              <span class="scale__band-name">{band.action ?? 'no action'}</span>
+              <span class="scale__band-n">{mergeBands.length - i}</span>
+            </span>
+          ))}
+        </div>
+        <p class="scale__ends"><span>{policy.range[0]}</span><span>{policy.range[1]}</span></p>
+      </div>
+      <ul class="scale__list">
+        {[...mergeBands].reverse().map((band, i) => (
+          <li data-action={band.action ?? ''}><span class:list={['scale__swatch', band.action === null && 'scale__swatch--open']} aria-hidden="true">{i + 1}</span><span>{band.from} to {band.to}: {band.action === null ? 'no threshold names an action' : <><code>{band.action}</code> ({T.THRESHOLD_ACTIONS[band.threshold!]!.side === 'above' ? 'at or above' : 'below'} <code>{band.threshold}</code>)</>}</span></li>
+        ))}
+      </ul>
+    </div>
+  </Figure>
+)}
+{slot === 'decay' && decay && (
+  <Figure id={idOf('decay with a floor')} n={n} title={titled('Decay with a floor: reference configuration')} caption={T.decayCaption(decay)} kind="decay">
+    <div class="decay">
+      <svg class="decay__plot" viewBox={`-8 0 ${W_DECAY + 8} ${DECAY_H + 34}`} width={W_DECAY + 8} height={DECAY_H + 34} shape-rendering="crispEdges" role="img" aria-labelledby={`${idOf('decay with a floor')}-title`}>
+        <Rects rects={decayRects} />
+        <text x="28" y="10" text-anchor="end" font-size="12" fill="currentColor">1</text>
+        <text x="28" y={floorY - 1} text-anchor="end" font-size="12" fill="currentColor">{decay.minTrust}</text>
+        {decay.columns.filter((c) => Number.isInteger(c.halfLives)).map((c) => (
+          <>
+            <text x={36 + c.halfLives * 2 * 28 + 10} y={DECAY_H + 15} text-anchor="middle" font-size="12" fill="currentColor">{c.halfLives}</text>
+            <text x={36 + c.halfLives * 2 * 28 + 10} y={DECAY_H + 30} text-anchor="middle" font-size="12" fill="currentColor">{c.days}d</text>
+          </>
+        ))}
+      </svg>
+      <ul class="decay__key">
+        <li><span class="decay__swatch" aria-hidden="true"></span>0.5 ** (age / half_life)</li>
+        <li><span class="decay__swatch decay__swatch--floor" aria-hidden="true"></span>held at the min_trust floor ({decay.minTrust})</li>
+        <li>x axis: age in half-lives (top) and days (bottom)</li>
+      </ul>
+    </div>
+  </Figure>
+)}
+{slot === 'families' && (
+  <Figure id={idOf('diagnostic families')} n={n} title={titled('Diagnostic families')} caption={T.familiesCaption(families)} kind="diagnostic-families">
+    <ul class="families">
+      {families.map((f) => (
+        <li class:list={['family', `family--${f.severity}`]} data-family={f.prefix}>
+          <span class="diag-family" aria-hidden="true">{f.prefix}</span>
+          <span class="family__name">{f.name}</span>
+          <span class="family__range"><code>{f.range}</code>, {f.severity}</span>
+          <span class="family__count">{f.codes.length} codes</span>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'code-heat' && heat && (
+  <Figure id={idOf('where codes are raised')} n={n} title={titled('Where codes are raised')} caption={T.heatCaption(heat)} kind="code-heat">
+    {/* Wide: one row per family, one column per §5 section. Narrow: the same grid transposed. */}
+    <div class="heat-grid heat-grid--wide">
+      <TableWrap label="Diagnostic codes each section of chapter 5 names, by family">
+        <table class="heat heat--wide">
+          <colgroup><col class="heat__head-col" />{heat.sections.map(() => <col />)}</colgroup>
+          <thead>
+            <tr><td></td><th scope="colgroup" colspan={heat.sections.length} class="heat__span">Section of chapter 5</th></tr>
+            <tr>
+              <th scope="col"><span class="visually-hidden">Family</span></th>
+              {heat.sections.map((s) => <th scope="col" title={`§${s.n} ${s.title}`}><a href={sectionLink(s.n)}><span class="visually-hidden">§5.</span>{s.n.slice(2)}<span class="visually-hidden"> {s.title}</span></a></th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {heat.families.map((f, i) => (
+              <tr data-family={f.prefix}>
+                <th scope="row"><span class="diag-family diag-family--small" aria-hidden="true">{f.prefix}</span> {f.name}</th>
+                {heat.sections.map((_, j) => {
+                  const c = heat.counts[i]![j]!;
+                  return <td class:list={['heat__cell', c > 0 && `heat__cell--${heatStep(c, heat.max)}`]} data-count={c}>{c > 0 ? c : ''}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+    </div>
+    <div class="heat-grid heat-grid--narrow">
+      <TableWrap label="Diagnostic codes each section of chapter 5 names, by section">
+        <table class="heat">
+          <thead><tr><th scope="col">Section</th>{heat.families.map((f) => <th scope="col" data-family={f.prefix}><span class="diag-family diag-family--small" aria-hidden="true">{f.prefix}</span><span class="heat__fam">{f.name}</span></th>)}</tr></thead>
+          <tbody>
+            {heat.sections.map((s, j) => (
+              <tr>
+                <th scope="row" title={`§${s.n} ${s.title}`}><a href={sectionLink(s.n)}>§{s.n}<span class="visually-hidden"> {s.title}</span></a></th>
+                {heat.families.map((_, i) => {
+                  const c = heat.counts[i]![j]!;
+                  return <td class:list={['heat__cell', c > 0 && `heat__cell--${heatStep(c, heat.max)}`]} data-count={c}>{c > 0 ? c : ''}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+    </div>
+    <p class="heat__legend">Codes named:{heatRanges(heat.max).map((r) => <span class="heat__key"><span class:list={['heat__cell', `heat__cell--${r.step}`]} aria-hidden="true"></span>{r.from === r.to ? r.from : `${r.from} to ${r.to}`}</span>)}<span class="heat__key"><span class="heat__cell" aria-hidden="true"></span>none</span></p>
+  </Figure>
+)}
+{slot === 'levels' && (
+  <Figure id={idOf('what each level checks')} n={n} title={titled('What each level checks')} caption={T.levelsCaption(levels)} kind="conformance-levels">
+    <ul class="levels">
+      {levels.map((c) => (
+        <li class="levels__col" data-level={c.level}>
+          <p class="levels__head"><span class="levels__id">{c.level}</span><span class="levels__name">{c.name}</span><span class="levels__count" aria-label={`${c.items.length} requirements`}>{c.items.length}</span></p>
+          <ul class="levels__items">
+            {c.items.map((it) => (
+              <li>{it.parts.map((p) =>
+                p.kind === 'text' ? p.value : p.kind === 'section' ? <a class="chip chip--inner levels__chip" href={sectionLink(p.value)}>§{p.value}</a> : <span class="levels__chip"><DiagnosticTile code={p.value} /></span>,
+              )}</li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'suite' && (
+  <Figure id={idOf('the conformance suite')} n={n} title={titled('The conformance suite')} caption={T.suiteCaption(suite)} kind="conformance-suite">
+    <ul class="trust-bars suite">
+      {suite.map((p) => (
+        <li class="trust-bars__row"><a class="suite__label" href={githubTreeUrl(p.dir)}>{p.label}</a><PixelBar value={p.count} max={Math.max(...suite.map((x) => x.count))} /></li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'bumps' && (
+  <Figure id={idOf('which change bumps which number')} n={n} title={titled('Which change bumps which number')} caption={T.bumpsCaption(bumps)} kind="version-bumps">
+    <ul class="bumps">
+      {bumps.map((b) => (
+        <li class="bumps__tile" data-bump={b.bump}>
+          <p class="bumps__head"><span class="bumps__id">{b.bump}</span>{b.change}</p>
+          <p class="bumps__example">{b.example}</p>
+          {b.changes.length > 0 ? (
+            <ul class="bumps__changes">{b.changes.map((c) => <li>{c}</li>)}</ul>
+          ) : (
+            <p class="bumps__none">No schema change in §11.4</p>
+          )}
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'checkpoint-tree' && tree && (
+  <Figure id={idOf('checkpoint decision tree')} n={n} title={titled('Checkpoint decision tree')} caption={T.treeCaption(tree)} kind="checkpoint-tree">
+    <div class="tree">
+      <p class="tree__q">{tree.text}</p>
+      <ul class="tree__branches">
+        {tree.branches.map((b) => (
+          <li>
+            <span class="chip chip--inner tree__a">{b.answer}</span>
+            {isOutcome(b.node) ? (
+              <span class:list={['tree__out', /REQUIRED/.test(b.node.text) && 'tree__out--required']}>{/REQUIRED/.test(b.node.text) && <PixelGlyph name="role:checkpoint" />}{b.node.text}</span>
+            ) : (
+              <>
+                <p class="tree__q">{b.node.text}</p>
+                <ul class="tree__branches">
+                  {b.node.branches.map((c) => (
+                    <li>
+                      <span class="chip chip--inner tree__a">{c.answer}</span>
+                      <span class:list={['tree__out', /REQUIRED/.test(c.node.text) && 'tree__out--required']}>{/REQUIRED/.test(c.node.text) && <PixelGlyph name="role:checkpoint" />}{c.node.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+    {inner && <details class="fig-details"><summary>Text version</summary><Fragment set:html={inner} /></details>}
+  </Figure>
+)}
+{pattern && (
+  <Figure id={idOf(`pattern ${pattern.name}`)} n={n} title={titled(`Pattern: ${pattern.name}`)} caption={T.patternCaption(pattern)} kind="pattern-strip">
+    <StepStrip wf={pattern.wf} size={20} symbols label={`${pattern.name}: ${pattern.wf.steps.map((s) => s.capability).join(', ')}`} />
+    <ol class="pattern">
+      {pattern.wf.steps.map((s) => (
+        <li class="pattern__step">
+          <span class="replay__n" aria-hidden="true">{s.index}</span>
+          <MiniTile id={s.capability} size={24} />
+          <code>{s.capability}</code>
+          {s.store_as && <span class="pattern__store">as <code>{s.store_as}</code></span>}
+          {s.consumes.length > 0 && <span class="pattern__reads">reads {s.consumes.map((c) => <code>{c}</code>)}</span>}
+        </li>
+      ))}
+    </ol>
+  </Figure>
+)}
+{codesSec && inner && (
+  <Figure id={idOf(`${codesSec.heading} codes`)} n={n} title={titled(`${codesSec.heading} by code`)} caption={T.sectionCodesCaption(codesSec)} kind="code-table">
+    <Fragment set:html={inner} />
+  </Figure>
+)}
+{tableFig && inner && (
+  <Figure id={idOf(tableFig.name)} n={n} title={titled(tableFig.name)} caption={T.tableFigureCaption(slot, text, where)} kind="field-table">
+    <div class="field-port">
+      {T.fieldGroups(T.fieldRows(text, tableFig.section, where)).map((g) => (
+        <div class="field-port__group" data-prefix={g.prefix ?? undefined}>
+          {g.prefix && <p class="field-port__prefix"><code>{g.prefix}.</code></p>}
+          <ul class="ports ports--out">{g.rows.map((r) => <Port name={r.name} type={r.type} required={r.required} description={r.description} depth={g.prefix ? 1 : 0} />)}</ul>
+        </div>
+      ))}
+    </div>
+    <details class="fig-details">
+      <summary>Text version: the table in the source</summary>
+      <Fragment set:html={inner} />
+    </details>
+  </Figure>
+)}
+{slot === 'categories' && (
+  <Figure id={idOf('error categories')} n={n} title={titled('Error categories')} caption={T.categoryCaption(categories)} kind="error-categories">
+    <ul class="trust-bars">
+      {categories.map((c) => (
+        <li class="trust-bars__row" data-family={c.prefix}><span class="trust-bars__name"><span class="diag-family diag-family--small" aria-hidden="true">{c.prefix}</span>{c.name} <code>{c.range}</code></span><PixelBar value={c.count} max={Math.max(...categories.map((x) => x.count))} /></li>
+      ))}
+    </ul>
+  </Figure>
+)}

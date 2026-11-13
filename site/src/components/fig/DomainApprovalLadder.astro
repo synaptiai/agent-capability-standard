@@ -1,0 +1,78 @@
+---
+// F-D2, the approval ladder (visual spec 3.5): what happens to a step at low,
+// medium and high risk under the profile's risk_thresholds, then the
+// capabilities that never run on their own (block_autonomous). The ladder is
+// a real table of one row: each risk level is a column head with its risk
+// glyph and pips, and each cell gives the outcome glyph and word. A level no
+// threshold covers is a hatched "Not covered" cell. The three cells are drawn
+// even when they agree (healthcare), because the level labels and the
+// blocked box carry the comparison with the other profiles.
+//
+// Props:
+// - profile: the profile mapping, required; renders nothing without risk_thresholds.
+// - n, id: the figure number and its ref- id.
+import Figure from './Figure.astro';
+import TableWrap from '../TableWrap.astro';
+import MiniTile from './MiniTile.astro';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import { loadOntology } from '../../data/ontology';
+import { approvalLadder, ladderCaption, LEVEL_PIPS, OUTCOME_GLYPH, OUTCOME_TEXT, OUTCOME_WORD } from '../../lib/domain-figures';
+
+interface Props {
+  profile: Record<string, unknown>;
+  n: number;
+  id: string;
+}
+
+const { profile, n, id } = Astro.props;
+const ladder = approvalLadder(profile);
+const known = new Set(loadOntology().capabilities.map((c) => c.id));
+const blockedId = `${id}-blocked`;
+---
+{ladder && (
+  <Figure id={id} n={n} title="What happens at each risk level" caption={ladderCaption(ladder)} kind="approval-ladder">
+    <TableWrap label="What happens at each risk level">
+      <table class="ladder">
+        <caption class="fig-sr">What happens at each risk level</caption>
+        <thead>
+          <tr>
+            {ladder.rows.map((r) => (
+              <th scope="col" class={`ladder__level ladder__level--${r.level}`} data-risk={r.level}>
+                <PixelGlyph name={`risk:${r.level}`} />
+                <span class="risk-pips" data-level={LEVEL_PIPS[r.level]} aria-hidden="true">{Array.from({ length: LEVEL_PIPS[r.level] }, () => <span class="risk-pips__pip"></span>)}</span>
+                <span>{r.level}</span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            {ladder.rows.map((r) => {
+              const g = OUTCOME_GLYPH[r.outcome];
+              return (
+                <td class:list={['ladder__cell', `ladder__cell--${r.outcome}`]} data-outcome={r.outcome}>
+                  {g && <PixelGlyph name={g} scale={3} />}
+                  <span class="ladder__word">{OUTCOME_WORD[r.outcome]}</span>
+                  <span class="ladder__text">{OUTCOME_TEXT[r.outcome]}</span>
+                </td>
+              );
+            })}
+          </tr>
+        </tbody>
+      </table>
+    </TableWrap>
+    {ladder.blocked.length > 0 && (
+      <div class="ladder-blocked">
+        <p class="ladder-blocked__title" id={blockedId}><PixelGlyph name="approve:blocked" /> Never autonomous</p>
+        <ul class="ladder-blocked__list" aria-labelledby={blockedId}>
+          {ladder.blocked.map((c) => (
+            <li data-capability={c}>
+              {known.has(c) ? <MiniTile id={c} size={24} relation="never runs on its own" /> : null}
+              <code>{c}</code>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+  </Figure>
+)}

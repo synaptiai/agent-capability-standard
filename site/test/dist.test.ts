@@ -9,10 +9,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadCounts } from '../src/data/counts';
+import { loadVersions } from '../src/data/versions';
 import { RESERVED_WORKFLOW_SLUGS } from '../src/data/workflows';
 import { checkDistDir } from '../scripts/check-dist.mjs';
 import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
 import { ROUTES, type Route } from '../src/lib/routes';
+import { EXEMPT_RUNS, pageMatches } from '../src/lib/runs';
 import {
   allCatalogSteps,
   claudeLayerTable,
@@ -21,6 +23,7 @@ import {
   profileFiles,
   profileWorkflowIds,
   repoText,
+  sectionLines,
   standardCheckpointCapabilities,
   standardFileVersions,
   symmetricEdgeTypes,
@@ -116,8 +119,9 @@ describe('built site', () => {
     // Expected: the §4.4 table of the newest Standard, by line scan (mutate, send and rollback).
     const want = standardCheckpointCapabilities(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`)).sort();
     expect(want).toContain('rollback');
+    // The capability page shows the flag as the safety panel's "Needs checkpoint" cell (visual spec F-C3).
     const badged = pageDirs('capabilities').filter((c) =>
-      readFileSync(path.join(dist, 'capabilities', c, 'index.html'), 'utf8').includes('>Checkpoint required<'),
+      /data-safety="checkpoint" data-on="true"/.test(readFileSync(path.join(dist, 'capabilities', c, 'index.html'), 'utf8')),
     );
     expect(badged).toEqual(want);
     const overview = readFileSync(path.join(dist, 'capabilities', 'index.html'), 'utf8');
@@ -125,17 +129,80 @@ describe('built site', () => {
     expect(tiles.sort()).toEqual(want);
   });
 
-  it('states the auto-approve threshold as a sentence, including none', () => {
-    // Expected: each profile's `auto_approve:` line, by line scan; the page for a profile is /domains/<file name with - for _>/.
-    const values = profileFiles().map((f) => ({
-      page: f.replace(/\.yaml$/, '').replaceAll('_', '-'),
-      level: /^ {2}auto_approve: (\w+)/m.exec(repoText(`schemas/profiles/${f}`))?.[1],
-    }));
-    expect(values.map((v) => v.level)).toContain('none');
-    for (const { page, level } of values) {
+  it('draws the approval ladder with the outcome the spec rule gives at each risk level, including auto_approve none', () => {
+    // Expected: each profile's threshold lines, by line scan, through the F-D2 rule as visual spec 3.5 words
+    // it (low < medium < high < critical; human if require_human <= L, else review if require_review <= L,
+    // else auto if auto_approve is not none and L <= auto_approve, else not covered). The page for a
+    // profile is /domains/<file name with - for _>/. This replaced a check of the old "Approved
+    // automatically" sentence, which the ladder figure took over (issue #125).
+    const order = ['low', 'medium', 'high', 'critical'];
+    const values = profileFiles().map((f) => {
+      const text = repoText(`schemas/profiles/${f}`);
+      const v = (k: string) => new RegExp(`^ {2}${k}: (\\w+)`, 'm').exec(text)?.[1];
+      return { page: f.replace(/\.yaml$/, '').replaceAll('_', '-'), auto: v('auto_approve'), review: v('require_review'), human: v('require_human') };
+    });
+    expect(values.map((v) => v.auto)).toContain('none');
+    for (const { page, auto, review, human } of values) {
+      const want = ['low', 'medium', 'high'].map((l) => {
+        const L = order.indexOf(l);
+        if (human && order.indexOf(human) <= L) return 'human';
+        if (review && order.indexOf(review) <= L) return 'review';
+        if (auto && auto !== 'none' && L <= order.indexOf(auto)) return 'auto';
+        return 'gap';
+      });
       const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
-      const dd = /<dt>Approved automatically<\/dt>\s*<dd>(.*?)<\/dd>/.exec(html)?.[1]?.replace(/<[^>]+>/g, '');
-      expect(dd, page).toBe(level === 'none' ? 'Nothing' : `${level} risk`);
+      const table = /<table class="ladder"[\s\S]*?<\/table>/.exec(html)?.[0] ?? '';
+      // One outcome at all three levels is a sentence, not a figure (visual spec 1.1 rule 5).
+      if (new Set(want).size === 1) expect(table, page).toBe('');
+      else expect([...table.matchAll(/data-outcome="(\w+)"/g)].map((m) => m[1]), page).toEqual(want);
+    }
+  });
+
+  it('gives each generated capability and layer figure a matching figure block in the Markdown copy', () => {
+    // Visual spec 6.1 and 6.3: the copy holds "**Figure: {title}.** {caption}" with the same words as the
+    // page's figure title and figcaption, so the two outputs of one build are compared.
+    const decode = (t: string) => t.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const ids = ['ref-fig-relationships', 'ref-fig-contract', 'ref-fig-usage', 'ref-fig-layer-edges', 'ref-fig-layer-steps'];
+    let seen = 0;
+    for (const dir of ['capabilities', 'layers']) {
+      for (const d of pageDirs(dir)) {
+        const html = readFileSync(path.join(dist, dir, d, 'index.html'), 'utf8');
+        const md = readFileSync(path.join(dist, dir, d, 'index.md'), 'utf8');
+        for (const id of ids) {
+          const fig = new RegExp(`<figure[^>]*id="${id}"[\\s\\S]*?</figure>`).exec(html)?.[0];
+          if (!fig) continue;
+          const title = decode(new RegExp(`id="${id}-title"[^>]*>([^<]*)<`).exec(fig)![1]!);
+          const caption = decode(/<figcaption[^>]*>([^<]*)<\/figcaption>/.exec(fig)![1]!);
+          expect(md, `${dir}/${d} ${id}`).toContain(`**Figure: ${title}.** ${caption}`);
+          seen++;
+        }
+      }
+    }
+    expect(seen).toBeGreaterThan(pageDirs('capabilities').length);
+  });
+
+  it('draws one F-C1 tile per neighbour and one edge mark per relationship on every capability page', () => {
+    // Expected: the line-scanned edge triples; a symmetric type counts once per pair (visual spec 6.3).
+    const sym = new Set(symmetricEdgeTypes());
+    const rel = new Map<string, Set<string>>();
+    const add = (id: string, key: string) => rel.set(id, (rel.get(id) ?? new Set()).add(key));
+    for (const t of ontologyEdgeTriples()) {
+      if (sym.has(t.type)) {
+        add(t.from, `${t.to} ${t.type}`);
+        add(t.to, `${t.from} ${t.type}`);
+      } else {
+        add(t.from, `${t.to} ${t.type} out`);
+        add(t.to, `${t.from} ${t.type} in`);
+      }
+    }
+    expect(rel.get('mutate')?.size).toBeGreaterThan(0);
+    for (const c of pageDirs('capabilities')) {
+      const html = readFileSync(path.join(dist, 'capabilities', c, 'index.html'), 'utf8');
+      const id = /<article [^>]*data-capability="([a-z_]+)"/.exec(html)![1]!;
+      const want = rel.get(id) ?? new Set();
+      const fig = /<figure[^>]*id="ref-fig-relationships"[\s\S]*?<\/figure>/.exec(html)?.[0] ?? '';
+      expect((fig.match(/class="nbhd__cell"/g) ?? []).length, id).toBe(new Set([...want].map((k) => k.split(' ')[0])).size);
+      expect((fig.match(/class="pg nbhd__mark"/g) ?? []).length, id).toBe(want.size);
     }
   });
 
@@ -185,19 +252,63 @@ describe('built site', () => {
     expect(html).toContain('href="/community/governance/#decision-making"');
   });
 
-  it('puts the profile values after the README title and lead and before the README sections (design notes, ia-home 6.6)', () => {
-    // Expected: each domain README's first `# ` and `## ` lines, slugged by hand (lower case, spaces to hyphens).
-    const slug = (line: string) => line.replace(/^#+ /, '').toLowerCase().replace(/ /g, '-');
+  it('keeps the README heading order and draws the profile figures under its Domain Profile heading (visual spec 3.5)', () => {
+    // Expected: each domain README's `# `, `## ` and `### ` lines, slugged by hand (lower case, spaces to
+    // hyphens, dropping other punctuation), in file order. The figures replaced the README's own profile
+    // text, which moved into a <details> under them with its H3s as H4s (issue #125).
+    const slug = (line: string) => line.replace(/^#+ /, '').toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/ /g, '-');
     for (const d of pageDirs('domains')) {
-      const lines = repoText(`docs/domains/${d}/README.md`).split('\n');
+      const lines = repoText(`docs/domains/${d}/README.md`).split('\n').filter((l) => !/^```/.test(l));
+      const html = readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8');
+      const ids = [...html.matchAll(/<h[1-6][^>]*\sid="([^"]+)"/g)].map((m) => m[1]!);
       const h1 = slug(lines.find((l) => l.startsWith('# '))!);
-      const h2 = slug(lines.find((l) => l.startsWith('## '))!);
-      const ids = [...readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8').matchAll(/<h[1-6][^>]*\sid="([^"]+)"/g)].map((m) => m[1]);
-      const at = (id: string) => ids.indexOf(id);
-      expect(at(h1), `${d} ${h1}`).toBe(0);
-      expect(at('ref-profile-values'), d).toBeGreaterThan(at(h1));
-      expect(at('ref-workflows-in-this-profile'), d).toBeGreaterThan(at('ref-profile-values'));
-      expect(at(h2), `${d} ${h2}`).toBeGreaterThan(at('ref-workflows-in-this-profile'));
+      expect(ids.indexOf(h1), `${d} ${h1}`).toBe(0);
+      const profile = html.indexOf('id="domain-profile"');
+      const details = html.indexOf('<details class="domain-guide"');
+      expect(profile, d).toBeGreaterThan(0);
+      for (const kind of ['trust-weights', 'approval-ladder', 'checkpoint-policy', 'evidence-policy']) {
+        const at = html.indexOf(`data-fig-kind="${kind}"`);
+        // The ladder and the checkpoint policy are sentences when every level or trigger has one value.
+        if (at === -1 && (kind === 'approval-ladder' || kind === 'checkpoint-policy')) continue;
+        expect(at, `${d} ${kind}`).toBeGreaterThan(profile);
+        expect(at, `${d} ${kind}`).toBeLessThan(details);
+      }
+      expect(html.indexOf('id="trust-weights"'), d).toBeGreaterThan(details);
+      expect(/<h4 id="trust-weights"/.test(html), d).toBe(true);
+    }
+  });
+
+  it('puts each workflow card directly under the README heading of its workflow (visual spec 3.5, F-D6)', () => {
+    // Expected: the ids each profile lists, by line scan; each README H3 under "Available Workflows" with
+    // its number removed, lower case, other characters as `_`.
+    for (const f of profileFiles()) {
+      const page = f.replace(/\.yaml$/, '').replaceAll('_', '-');
+      const html = readFileSync(path.join(dist, 'domains', page, 'index.html'), 'utf8');
+      const ids = profileWorkflowIds(repoText(`schemas/profiles/${f}`));
+      expect(ids.length, f).toBeGreaterThan(0);
+      for (const id of ids) {
+        const card = html.search(new RegExp(`<div class="wf-card[^"]*" data-workflow="${id}"`));
+        expect(card, `${page} ${id}`).toBeGreaterThan(0);
+        const before = html.slice(0, card);
+        const lastH3 = [...before.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].at(-1)!;
+        const title = lastH3[1]!.replace(/<[^>]*>/g, '').replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        expect(title, `${page} ${id}`).toBe(id);
+        expect(before.slice(lastH3.index! + lastH3[0].length).replace(/<figure[\s\S]*$/, ''), `${page} ${id}`).not.toMatch(/<(p|ul|ol|pre|table)[\s>]/);
+      }
+    }
+  });
+
+  it('gives each domain profile figure a Figure block in the Markdown copy with the same caption', () => {
+    for (const d of pageDirs('domains')) {
+      const html = readFileSync(path.join(dist, 'domains', d, 'index.html'), 'utf8');
+      const md = readFileSync(path.join(dist, 'domains', d, 'index.md'), 'utf8');
+      // Every figure counts, the workflow cards included: each card's steps are a "Steps of" block in the
+      // copy (visual spec 6.1), not only a line in the workflow list.
+      const figs = [...html.matchAll(/<figure [^>]*data-fig-kind="(\w[\w-]*)"[\s\S]*?<figcaption class="fig__caption">([\s\S]*?)<\/figcaption>/g)]
+        .map((m) => m[2]!.replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+      expect(figs.length, d).toBeGreaterThan(3);
+      expect((md.match(/^\*\*Figure: /gm) ?? []).length, d).toBe(figs.length);
+      for (const c of figs) expect(md, `${d}: ${c}`).toContain(c);
     }
   });
 
@@ -213,6 +324,19 @@ describe('design system on the built site', () => {
   it('runs the theme script as the first child of <head> on every page', () => {
     for (const f of pages()) {
       expect(/^<!DOCTYPE html><html lang="en"><head><script>[^<]*localStorage\.getItem\('acs-theme'\)/i.test(html(f)), f).toBe(true);
+    }
+  });
+
+  it('declares the cascade layer order in the first stylesheet of every page', () => {
+    // Expected: base.css's order, reset < tokens < base < components <
+    // utilities. A layer is ranked by where it is first named, so a page whose
+    // first stylesheet opens with `@layer components{` ranks components below
+    // base, and the header and nav lose their component styles.
+    for (const f of pages()) {
+      const href = /<link rel="stylesheet" href="([^"]+)"/.exec(html(f))?.[1];
+      expect(href, f).toBeDefined();
+      const css = readFileSync(path.join(dist, href!), 'utf8');
+      expect(/^@layer reset[{,]/.test(css), `${f}: ${href} opens with ${css.slice(0, 40)}`).toBe(true);
     }
   });
 
@@ -300,6 +424,94 @@ describe('design system on the built site', () => {
   });
 });
 
+// Issue #125 rollout: the Standard's, the edge types page's and the
+// diagnostics page's figures. Expected values come from scans of the
+// ontology, the Standard and the built HTML, never from the figure code.
+describe('Standard, edge types and diagnostics figures on the built site', () => {
+  const page = (rel: string) => readFileSync(path.join(dist, rel), 'utf8');
+  const figures = (h: string) => [...h.matchAll(/<figure\b([^>]*)>([\s\S]*?)<\/figure>/g)].map((m) => ({ attrs: m[1]!, body: m[2]! }));
+  const SPEC_PAGES = ['spec/1.1.0/index.html', 'spec/1.0.0/index.html', 'spec/edge-types/index.html', 'spec/diagnostics/index.html'];
+
+  it('draws where codes are raised with a row per family and a column per §5 section, and its transpose for narrow frames (F-S27)', () => {
+    const std = repoText('spec/STANDARD-v1.1.0.md');
+    const sections = std.split('\n').filter((l) => /^### 5\.\d+ /.test(l)).length;
+    const families = sectionLines(std, /^### 9\.1 /).filter((l) => /^\| [A-Z]/.test(l) && !/^\| Category/.test(l)).length;
+    const fig = figures(page('spec/1.1.0/index.html')).find((x) => x.attrs.includes('data-fig-kind="code-heat"'))!;
+    const wide = /<table class="heat heat--wide">([\s\S]*?)<\/table>/.exec(fig.body)![1]!;
+    const rows = [...wide.matchAll(/<tr data-family=/g)].length;
+    expect(rows).toBe(families);
+    const firstRow = /<tr data-family=[^>]*>([\s\S]*?)<\/tr>/.exec(wide)![1]!;
+    expect([...firstRow.matchAll(/<td class="heat__cell/g)].length).toBe(sections);
+    const narrow = /<div class="heat-grid heat-grid--narrow">[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/.exec(fig.body)![1]!;
+    expect([...narrow.matchAll(/<tr>/g)].length).toBe(sections);
+  });
+
+  it('names every figure by its title and gives it a caption, with no slot marker left behind', () => {
+    for (const f of SPEC_PAGES) {
+      const h = page(f);
+      expect(h, f).not.toContain('data-fig-slot');
+      const figs = figures(h).filter((x) => /class="fig\b/.test(x.attrs));
+      expect(figs.length, f).toBeGreaterThan(0);
+      for (const x of figs) {
+        const label = /aria-labelledby="([^"]+)"/.exec(x.attrs)?.[1];
+        expect(label, `${f}: ${x.attrs}`).toBeDefined();
+        const title = new RegExp(`id="${label}"[^>]*>([^<]+)<`).exec(x.body)?.[1]?.trim();
+        expect(title, `${f}: ${label}`).toBeTruthy();
+        expect(x.body, `${f}: ${label}`).toMatch(/<figcaption class="fig__caption">[^<]+<\/figcaption>/);
+      }
+    }
+  });
+
+  it('hides each figure svg or names it as an image, and never puts a link inside an image', () => {
+    // The F-E2 matrix names its image with aria-label; the rest point at their figure's title.
+    for (const f of SPEC_PAGES) {
+      for (const x of figures(page(f))) {
+        for (const svg of x.body.matchAll(/<svg\b([^>]*)>([\s\S]*?)<\/svg>/g)) {
+          const a = svg[1]!;
+          const ok = /aria-hidden="true"/.test(a) || (/role="img"/.test(a) && /aria-label(ledby)?="[^"]+"/.test(a));
+          expect(ok, `${f}: <svg${a.slice(0, 80)}>`).toBe(true);
+          if (/role="img"/.test(a)) expect(svg[2]).not.toContain('<a ');
+        }
+      }
+    }
+  });
+
+  it('draws one edge-type card figure per edge type of the ontology, each the first edge of its type', () => {
+    const h = page('spec/edge-types/index.html');
+    const triples = ontologyEdgeTriples();
+    const types = [...new Set(triples.map((t) => t.type))];
+    const cards = figures(h).filter((x) => /data-fig-kind="edge-type-card"/.test(x.attrs));
+    expect(cards).toHaveLength(types.length);
+    for (const t of types) {
+      const first = triples.find((x) => x.type === t)!;
+      const card = cards.find((c) => c.body.includes(`data-edge-type="${t}"`));
+      expect(card, t).toBeDefined();
+      expect(card!.body).toContain(`data-capability="${first.from}"`);
+      expect(card!.body).toContain(`data-capability="${first.to}"`);
+    }
+    // The summary table and the declared-edges table are figures too.
+    expect(figures(h).filter((x) => /data-fig-kind="edge-(summary|type-table)"/.test(x.attrs))).toHaveLength(2);
+  });
+
+  it('draws one code-grid tile per diagnostic code, each linking to its own row', () => {
+    const h = page('spec/diagnostics/index.html');
+    const grid = figures(h).find((x) => /data-fig-kind="code-grid"/.test(x.attrs))!;
+    const tiles = [...grid.body.matchAll(/<a\b[^>]*>/g)].map((m) => m[0]).filter((a) => /class="diag-tile/.test(a)).map((a) => /href="#([a-z]\d{3})"/.exec(a)?.[1] ?? '');
+    const scanned = Object.values(diagnosticRowsPerSection(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`))).reduce((a, b) => a + b, 0);
+    expect(tiles).toHaveLength(scanned);
+    for (const t of tiles) expect(h).toContain(`<tr id="${t}"`);
+  });
+
+  it('turns every code of the current Standard\'s §9.2 to §9.7 tables into a tile linking to the diagnostics page', () => {
+    const v = standardFileVersions()[0]!;
+    const h = page(`spec/${v}/index.html`);
+    const want = Object.values(diagnosticRowsPerSection(repoText(`spec/STANDARD-v${v}.md`))).reduce((a, b) => a + b, 0);
+    const tables = figures(h).filter((x) => /data-fig-kind="code-table"/.test(x.attrs));
+    const tiles = tables.flatMap((x) => [...x.body.matchAll(/<a\b[^>]*>/g)].map((m) => m[0]).filter((a) => /class="diag-tile/.test(a) && /href="\/spec\/diagnostics\/#[a-z]\d{3}"/.test(a)));
+    expect(tiles).toHaveLength(want);
+  });
+});
+
 describe('dist checks on a fixture', () => {
   it('reports headings with no id, on any page', () => {
     expect(bareHeadings('/p/', '<h1>T</h1><h2 class="x">A</h2><h2 id="b">B</h2>')).toBe('/p/: 2 heading(s) without an id');
@@ -358,9 +570,15 @@ describe('dist checks on a fixture', () => {
 describe('agent files', () => {
   const ORIGIN = 'https://acs.synapti.ai';
 
-  /** Directories (as URL paths like /a/b/) that hold a file with this name, by a walk of dist. */
+  /**
+   * Directories (as URL paths like /a/b/) that hold a file with this name, by
+   * a walk of dist. The review pages under dist/_review/ (the glyph sheet and
+   * the figure parts) are not published pages, so the walk leaves them out;
+   * the last test of this block checks they are built and kept out.
+   */
   function dirsWith(file: string, dir = '', out: string[] = []): string[] {
     for (const e of readdirSync(path.join(dist, dir), { withFileTypes: true })) {
+      if (e.isDirectory() && dir === '' && e.name === '_review') continue;
       if (e.isDirectory()) dirsWith(file, path.posix.join(dir, e.name), out);
       else if (e.name === file) out.push(dir === '' ? '/' : `/${dir}/`);
     }
@@ -463,6 +681,22 @@ describe('agent files', () => {
     expect(html).not.toContain('data-pagefind-weight');
   });
 
+  it('frames the home page figures with a name and a caption, and writes each into the Markdown copy (visual spec 6.1)', () => {
+    const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
+    const md = readFileSync(path.join(dist, 'index.md'), 'utf8');
+    const figs = [...html.matchAll(/<figure class="fig[^"]*"[^>]*aria-labelledby="([^"]+)"[\s\S]*?<figcaption class="fig__caption">([^<]+)<\/figcaption>/g)];
+    expect(figs.length).toBe(3);
+    for (const [, label, caption] of figs) {
+      const title = new RegExp(`id="${label}">([^<]+)<`).exec(html)![1]!;
+      expect(md).toContain(`**Figure: ${title.replace(/&amp;/g, '&')}.** ${caption!.replace(/&amp;/g, '&')}`);
+    }
+    // One gallery strip per catalog workflow, as many squares as steps.
+    const strips = [...html.matchAll(/<span role="img" aria-label="[^"]*" data-workflow="([^"]+)" data-steps="(\d+)" class="step-strip step-strip--20">/g)];
+    expect(strips.map((m) => [m[1], Number(m[2])])).toEqual([...allCatalogSteps()].map(([id, c]) => [id, c.length]));
+    // The story renders its final frame: no beat is hidden in the HTML.
+    expect(html).not.toMatch(/data-beat="\d"[^>]*class="[^"]*is-off/);
+  });
+
   it('gives the home page and its Markdown copy the same H2 headings and section sentences', () => {
     const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
     const md = readFileSync(path.join(dist, 'index.md'), 'utf8');
@@ -553,10 +787,13 @@ describe('agent files', () => {
   });
 
   it('copies a Markdown page from its source, changing only link targets and adding a Source line', () => {
-    // Pairs from the design notes' URL scheme: source file -> page.
+    // Pairs from the design notes' URL scheme: source file -> page. Pages
+    // with no mermaid fence: a fence gains its text version after it in the
+    // copy, which test/mermaid.test.ts checks. (The glossary was the prose
+    // sample until it gained diagrams; the code of conduct has none.)
     const version = standardFileVersions()[0]!;
     const pairs: [string, string][] = [
-      ['docs/QUICKSTART.md', 'start/quickstart'],
+      ['CODE_OF_CONDUCT.md', 'community/code-of-conduct'],
       ['spec/GOVERNANCE.md', 'community/governance'],
       [`spec/STANDARD-v${version}.md`, `spec/${version}`],
     ];
@@ -568,7 +805,13 @@ describe('agent files', () => {
         .trim();
     for (const [source, page] of pairs) {
       const src = repoText(source);
-      const copy = readFileSync(path.join(dist, page, 'index.md'), 'utf8');
+      // The current Standard's copy ends with the text equivalents of its
+      // site-drawn figures (visual spec 3.9 and 6.1, "Figures on this page"),
+      // which are not in the source; the rest must match it.
+      const full = readFileSync(path.join(dist, page, 'index.md'), 'utf8');
+      const appended = full.indexOf('\n## Figures on this page\n');
+      if (source.startsWith('spec/STANDARD-')) expect(appended, source).toBeGreaterThan(-1);
+      const copy = appended === -1 ? full : full.slice(0, appended + 1);
       expect(copy, source).toContain(`Source: [${source}](`);
       expect(headingLines(copy), source).toEqual(headingLines(src));
       expect(strip(copy), source).toBe(strip(src));
@@ -580,8 +823,45 @@ describe('check-dist.mjs on the built site', () => {
   it('finds no problem once Pagefind has run, and counts one page per route', () => {
     execFileSync('npx', ['pagefind', '--site', dist], { cwd: process.cwd(), stdio: 'pipe' });
     const { problems, stats } = checkDistDir(dist);
-    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [] });
+    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [], figures: [], drawn: [], legends: [], review: [] });
     expect(stats.pages).toBe(ROUTES.length);
     expect(stats.copies).toBe(ROUTES.length);
   }, 120_000);
+});
+
+describe('review pages', () => {
+  it('builds the glyph sheet and the figure parts, and keeps them out of the sitemap and llms.txt', () => {
+    expect(existsSync(path.join(dist, '_review/glyphs/index.html'))).toBe(true);
+    expect(existsSync(path.join(dist, '_review/parts/index.html'))).toBe(true);
+    expect(readFileSync(path.join(dist, 'sitemap.xml'), 'utf8')).not.toContain('/_review/');
+    expect(readFileSync(path.join(dist, 'llms.txt'), 'utf8')).not.toContain('/_review/');
+  });
+
+  it('removes the review pages in the deploy job before publishing', () => {
+    const yml = readFileSync('../.github/workflows/site.yml', 'utf8');
+    const deploy = yml.slice(yml.indexOf('\n  deploy:'));
+    expect(deploy.indexOf('dist/_review')).toBeGreaterThan(-1);
+    expect(deploy.indexOf('dist/_review')).toBeLessThan(deploy.indexOf('pages deploy dist'));
+  });
+});
+
+// Visual spec 3.12: every exempt run names a heading that exists. A page
+// entry needs its heading on that page; a template entry on at least one
+// page of the template. (scripts/check-runs.mjs fails on the same thing in
+// the browser; this catches it without one.)
+describe('exempt runs', () => {
+  it('name headings that exist on their pages', () => {
+    const problems: string[] = [];
+    for (const e of EXEMPT_RUNS) {
+      const pages = ROUTES.filter((r) => pageMatches(e.page, r.url, r.template, `/spec/${loadVersions().standard.current.version}/`));
+      if (pages.length === 0) {
+        problems.push(`${e.page}: no page`);
+        continue;
+      }
+      if (e.anchor === '*') continue;
+      const has = pages.filter((r) => readFileSync(path.join(dist, pageFile(r.url)), 'utf8').includes(`id="${e.anchor}"`));
+      if (e.page.startsWith('template:') ? has.length === 0 : has.length < pages.length) problems.push(`${e.page}#${e.anchor}`);
+    }
+    expect(problems).toEqual([]);
+  });
 });

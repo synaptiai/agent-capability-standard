@@ -12,6 +12,17 @@ This benchmark suite empirically validates the three core claims of Grounded Age
 
 Each scenario compares a **baseline implementation** (naive/common approach) against a **Grounded Agency implementation** using real SDK components (`CapabilityRegistry`, `CheckpointTracker`, `EvidenceStore`).
 
+```mermaid
+---
+title: What each scenario compares
+---
+flowchart LR
+  accDescr: Each scenario compares a baseline implementation, the naive or common approach, with a Grounded Agency implementation that uses real SDK components, CapabilityRegistry, CheckpointTracker and EvidenceStore.
+  s[Scenario] --> b["Baseline: naive or common approach"]
+  s --> ga[Grounded Agency implementation]
+  ga --> sdk["Real SDK components: CapabilityRegistry, CheckpointTracker, EvidenceStore"]
+```
+
 ## Quick Start
 
 ```bash
@@ -133,6 +144,20 @@ python benchmarks/runner.py --report --format json --output results/metrics.json
 
 ### Adding a New Scenario
 
+```mermaid
+---
+title: Adding a scenario
+---
+flowchart TB
+  accDescr: A new scenario module in scenarios/ subclasses BenchmarkScenario and defines setup, which prepares the fixtures, run_baseline and run_ga, which execute each approach and return metrics, and compare, which takes both results and returns the improvement. The scenario is then registered in scenarios/__init__.py and documented in this README.
+  subgraph mod["1. scenarios/new_scenario.py"]
+    setup[setup]
+    rb[run_baseline] --> cmp["compare: improvement"]
+    rg[run_ga] --> cmp
+  end
+  cmp --> reg["2. Register in scenarios/__init__.py"] --> doc[3. Document in this README]
+```
+
 1. Create scenario module in `scenarios/`:
 
 ```python
@@ -162,8 +187,7 @@ class NewScenario(BenchmarkScenario):
 ```
 
 2. Register in `scenarios/__init__.py`
-3. Add corresponding baseline to `baselines/`
-4. Document in this README
+3. Document in this README
 
 ## Interpretation Guidelines
 
@@ -189,6 +213,16 @@ python benchmarks/runner.py --scenario conflicting_sources
 - **0% baseline recovery** is expected (no checkpoint = no recovery)
 - **100% GA recovery** demonstrates checkpoint/rollback pattern via `CheckpointTracker`
 
+```mermaid
+---
+title: Why the two recovery rates differ
+---
+flowchart LR
+  accDescr: When a mutation fails, the baseline has no checkpoint, so it cannot recover and 0% recovery is expected; the Grounded Agency path has a checkpoint from CheckpointTracker and rolls back to it, so 100% recovery is expected.
+  fail[A mutation fails] --> b["Baseline: no checkpoint"] --> nr["No recovery: 0% expected"]
+  fail --> ga["GA: checkpoint via CheckpointTracker"] --> rb[Rollback] --> r["Recovered: 100% expected"]
+```
+
 ### Scenario 3 (Decision Audit)
 
 - **Faithfulness < 50%** indicates confabulation
@@ -204,6 +238,18 @@ python benchmarks/runner.py --scenario conflicting_sources
 - **Prevented failures** = workflows blocked before execution
 - Dependency graph loaded from `CapabilityRegistry` (real `requires` edges)
 - Self-correcting: ontology changes automatically propagate
+
+```mermaid
+---
+title: When scenarios 4 and 5 catch an error
+---
+flowchart LR
+  accDescr: For a workflow with a type error, the baseline crashes at runtime and Grounded Agency detects the error at design time; for a workflow with a missing dependency, the baseline fails at runtime and Grounded Agency blocks the workflow before it executes, using the requires edges CapabilityRegistry loads.
+  te[Type error] --> crash["Baseline: runtime crash"]
+  te --> design["GA: detected at design time"]
+  gap[Missing dependency] --> fail["Baseline: runtime failure"]
+  gap --> block["GA: blocked before execution, by requires edges"]
+```
 
 ## Known Limitations
 

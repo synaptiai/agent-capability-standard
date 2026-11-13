@@ -1,0 +1,33 @@
+---
+// The page hero band (visual spec 3.10.1 and 3.11): a glyph at 4x in a tile,
+// an eyebrow, then the slot: the page's H1 and whatever the page puts beside
+// it (a status badge, a lead, facts). The `after` slot follows the text
+// column inside the band (the RFC lifecycle track). A glyph aid, not an
+// information figure. Prose, RFC and skill pages use it with their section's
+// glyph, and every section index page with its section's glyph.
+//
+// Props:
+// - glyph: string, required. A glyph key (for example `section:workflows`).
+// - eyebrow: string, required. The word above the title.
+// - section: string, optional. Set as data-section.
+// - class: string, optional. Extra classes on the band.
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+import '../styles/figures-prose.css';
+
+interface Props {
+  glyph: string;
+  eyebrow: string;
+  section?: string;
+  class?: string;
+}
+
+const { glyph, eyebrow, section, class: className } = Astro.props;
+---
+<header class:list={['page-hero', className]} data-section={section}>
+  <span class="page-hero__tile" aria-hidden="true"><PixelGlyph name={glyph} scale={4} /></span>
+  <div class="page-hero__text">
+    <p class="eyebrow page-hero__eyebrow">{eyebrow}</p>
+    <slot />
+  </div>
+  <slot name="after" />
+</header>

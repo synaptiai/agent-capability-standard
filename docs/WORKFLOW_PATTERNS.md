@@ -10,21 +10,17 @@
 
 The 36 atomic capabilities are **primitives**. Real agent behaviors emerge by **composing** these primitives into workflow patterns. This document catalogs common patterns that can be implemented as Skills.
 
-```
-┌─────────────────────────────────────────────────┐
-│  SKILLS (packaged workflows)                    │
-│  pdf-processing, data-analysis, code-review     │
-└─────────────────────────────────────────────────┘
-                    ↓ implement
-┌─────────────────────────────────────────────────┐
-│  WORKFLOW PATTERNS (reusable compositions)      │
-│  analyze, mitigate, optimize, validate          │
-└─────────────────────────────────────────────────┘
-                    ↓ compose from
-┌─────────────────────────────────────────────────┐
-│  ATOMIC CAPABILITIES (36 primitives)            │
-│  detect, classify, plan, verify, execute...     │
-└─────────────────────────────────────────────────┘
+```mermaid
+---
+title: From capabilities to skills
+---
+flowchart TB
+  accDescr: Skills implement workflow patterns, and workflow patterns are composed from the atomic capabilities.
+  skills["Skills (packaged workflows): pdf-processing, data-analysis, code-review"]
+  patterns["Workflow patterns (reusable compositions): analyze, mitigate, optimize, validate"]
+  atoms["Atomic capabilities (primitives): detect, classify, plan, verify, execute"]
+  skills -->|implement| patterns
+  patterns -->|compose from| atoms
 ```
 
 ---
@@ -66,6 +62,19 @@ analyze:
     4. measure(data, metrics) → values
     5. compare(values, baseline) → assessment
     6. explain(assessment) → report
+```
+
+```mermaid
+---
+title: Analyze pattern flow
+---
+flowchart TB
+  accDescr: The steps run in the numbered order, and the arrows follow the data: the retrieved data goes two ways, to detect and then classify, and to measure and then compare against a baseline, and explain reports the assessment.
+  retrieve["retrieve(target)"] -->|data| detect["detect(data, patterns)"]
+  detect -->|occurrences| classify["classify(occurrences)"]
+  retrieve -->|data| measure["measure(data, metrics)"]
+  measure -->|values| compare["compare(values, baseline)"]
+  compare -->|assessment| explain["explain(assessment)"]
 ```
 
 **Example uses**:
@@ -140,6 +149,18 @@ strategize:
     5. plan(phases) → strategy
 ```
 
+```mermaid
+---
+title: Strategize pattern flow
+---
+flowchart TB
+  accDescr: Each step hands its result to the next, from the observed state through predicted outcomes and the best approach to phases and the strategy.
+  observe["observe(environment)"] -->|current_state| predict["predict(scenarios)"]
+  predict -->|outcomes| compare["compare(outcomes, criteria)"]
+  compare -->|best_approach| decompose["decompose(best_approach)"]
+  decompose -->|phases| plan["plan(phases)"]
+```
+
 ### 2.2 Prioritize Pattern
 
 **Purpose**: Order items by importance.
@@ -182,6 +203,19 @@ schedule:
     5. constrain(draft_schedule, resources) → schedule
 ```
 
+```mermaid
+---
+title: Schedule pattern flow
+---
+flowchart TB
+  accDescr: The task list feeds both a duration estimate and a dependency search, plan combines the tasks with both into a draft, and constrain fits the draft to the resources.
+  retrieve["retrieve(tasks)"] -->|task_list| measure["measure(tasks, duration)"]
+  retrieve -->|task_list| detect["detect(tasks, dependencies)"]
+  measure -->|estimates| plan["plan(tasks, estimates, deps)"]
+  detect -->|deps| plan
+  plan -->|draft_schedule| constrain["constrain(draft_schedule, resources)"]
+```
+
 ---
 
 ## 3. Execution Patterns
@@ -208,6 +242,21 @@ process:
     6. else: rollback(recovery_point)
 ```
 
+```mermaid
+---
+title: Process pattern flow
+---
+flowchart TB
+  accDescr: A checkpoint is saved before the data is transformed; a valid result is persisted, and an invalid one is rolled back to the checkpoint's recovery point.
+  retrieve["retrieve(input)"] -->|data| checkpoint["checkpoint(data)"]
+  checkpoint --> transform["transform(data, steps)"]
+  transform -->|result| verify{"verify(result, criteria)"}
+  verify -->|valid| persist["persist(result)"]
+  verify -->|not valid| rollback["rollback(recovery_point)"]
+  checkpoint -.->|recovery_point| rollback
+```
+
+
 ### 3.2 Migrate Pattern
 
 **Purpose**: Move data/state from one system to another.
@@ -231,6 +280,21 @@ migrate:
     5. mutate(target, converted) → result
     6. verify(result, expectations) → success?
     7. if !success: rollback(recovery_point)
+```
+
+```mermaid
+---
+title: Migrate pattern flow
+---
+flowchart TB
+  accDescr: The data is converted and checked against the schema before a checkpoint is saved and the target is written; if the result is not a success, rollback restores the recovery point.
+  retrieve["retrieve(source)"] -->|data| transform["transform(data, target_format)"]
+  transform -->|converted| check{"verify(converted, schema)"}
+  check -->|valid| checkpoint["checkpoint(target_state)"]
+  checkpoint --> mutate["mutate(target, converted)"]
+  mutate -->|result| confirm{"verify(result, expectations)"}
+  confirm -->|not success| rollback["rollback(recovery_point)"]
+  checkpoint -.->|recovery_point| rollback
 ```
 
 ### 3.3 Execute-Verify-Retry Pattern
@@ -258,6 +322,24 @@ execute_verify_retry:
     7. explain(outcome) → report
 ```
 
+```mermaid
+---
+title: Execute-verify-retry loop
+---
+flowchart TB
+  accDescr: Each attempt saves a checkpoint, executes and verifies; a failed check rolls back and plans the next attempt, and explain reports the outcome on success or once the attempts run out.
+  subgraph attempt [Up to max_attempts tries]
+    checkpoint["checkpoint(state)"] -->|recovery| execute["execute(operation)"]
+    execute -->|result| verify{"verify(result, criteria)"}
+    verify -->|not valid| rollback["rollback(recovery)"]
+    rollback --> replan["plan(failure, adjustments)"]
+    replan -->|retry_plan| checkpoint
+  end
+  verify -->|valid: success| explain["explain(outcome)"]
+  replan -->|attempts used up| explain
+```
+
+
 ---
 
 ## 4. Validation Patterns
@@ -282,6 +364,17 @@ validate:
     4. explain(issues) → report
 ```
 
+```mermaid
+---
+title: Validate pattern flow
+---
+flowchart TB
+  accDescr: The subject is checked against the criteria, the results are searched for violations, and explain reports the issues found.
+  retrieve["retrieve(subject)"] -->|data| verify["verify(data, criteria)"]
+  verify -->|results| detect["detect(results, violations)"]
+  detect -->|issues| explain["explain(issues)"]
+```
+
 ### 4.2 Test Pattern
 
 **Purpose**: Execute tests and report results.
@@ -303,6 +396,21 @@ test:
        b. compare(actual, test.expected) → result
     3. measure(results, coverage) → metrics
     4. generate(results, metrics) → report
+```
+
+```mermaid
+---
+title: Test pattern flow
+---
+flowchart TB
+  accDescr: Each test is executed and its actual result compared with the expected one; the results are measured for coverage and generate writes the report.
+  retrieve["retrieve(test_suite)"]
+  subgraph each [For each test]
+    execute["execute(test.code)"] -->|actual| compare["compare(actual, test.expected)"]
+  end
+  retrieve -->|tests| execute
+  compare -->|results| measure["measure(results, coverage)"]
+  measure -->|metrics| generate["generate(results, metrics)"]
 ```
 
 ### 4.3 Review Pattern
@@ -357,6 +465,23 @@ optimize:
          b. mutate(state, best) → new_state
          c. verify(new_state) → improved?
          d. if !improved: rollback()
+```
+
+```mermaid
+---
+title: Optimize pattern loop
+---
+flowchart TB
+  accDescr: Each round scores candidate changes against the objective; when the best beats the current state it is applied after a checkpoint and verified, and rolled back if it did not improve.
+  subgraph round [Loop until converged]
+    observe["observe(state)"] -->|current| discover["discover(current, possibilities)"]
+    discover -->|candidates| measure["measure(candidates, objective)"]
+    measure -->|scores| compare["compare(scores)"]
+    compare -->|best beats current| checkpoint["checkpoint(state)"]
+    checkpoint --> mutate["mutate(state, best)"]
+    mutate -->|new_state| verify{"verify(new_state)"}
+    verify -->|not improved| rollback["rollback()"]
+  end
 ```
 
 ### 5.2 Refine Pattern
@@ -434,6 +559,21 @@ orchestrate:
     4. integrate(results) → final
 ```
 
+```mermaid
+---
+title: Orchestrate pattern flow
+---
+flowchart TB
+  accDescr: The task is split into subtasks, each subtask is delegated to an agent, synchronize waits for every task, and integrate merges their results.
+  decompose["decompose(task)"]
+  subgraph each [For each subtask]
+    delegate["delegate(subtask, agent)"]
+  end
+  decompose -->|subtasks| delegate
+  delegate -->|task_ids| synchronize["synchronize(task_ids)"]
+  synchronize -->|results| integrate["integrate(results)"]
+```
+
 ### 6.2 Handoff Pattern
 
 **Purpose**: Transfer work between agents.
@@ -479,6 +619,25 @@ consensus:
     6. synchronize(agents, final_proposal) → consensus
 ```
 
+```mermaid
+---
+title: Consensus loop
+---
+flowchart TB
+  accDescr: The proposal is sent to the agents and their votes compared; while agreement is below the threshold a revised proposal goes out again, and at consensus synchronize shares the final proposal.
+  generate["generate(options)"]
+  subgraph round [Loop until consensus]
+    send["send(proposal, agents)"] -->|distributed| receive["receive(votes)"]
+    receive -->|responses| compare["compare(responses)"]
+    compare -->|agreement_level| check{Below threshold?}
+    check -->|yes| revise["generate(revised_proposal)"]
+  end
+  generate -->|proposal| send
+  revise -->|proposal| send
+  check -->|consensus| sync["synchronize(agents, final_proposal)"]
+```
+
+
 ---
 
 ## 7. Compound Patterns
@@ -498,6 +657,18 @@ research:
     3. profile(findings) → structured
     4. ground(structured, sources) → grounded
     5. explain(grounded) → synthesis
+```
+
+```mermaid
+---
+title: Research pattern flow
+---
+flowchart TB
+  accDescr: Research runs two other patterns, analyze and profile, between a search for sources and a grounded explanation; the double-edged boxes are patterns, not capabilities.
+  search["search(topic)"] -->|sources| analyze[["analyze pattern"]]
+  analyze -->|findings| profile[["profile pattern"]]
+  profile -->|structured| ground["ground(structured, sources)"]
+  ground -->|grounded| explain["explain(grounded)"]
 ```
 
 ### 7.2 Build Pattern
@@ -520,6 +691,23 @@ build:
     5. test(product) → final_results
 ```
 
+```mermaid
+---
+title: Build pattern flow
+---
+flowchart TB
+  accDescr: Plan turns the requirements into a design and decompose splits it into components; each component is generated and tested, and refined when it fails, then the artifacts are integrated and the product is tested.
+  plan["plan(requirements)"] -->|design| decompose["decompose(design)"]
+  subgraph each [For each component]
+    generate["generate(component_spec)"] -->|artifact| test["test(artifact)"]
+    test -->|not passed| refine["refine(artifact)"]
+  end
+  decompose -->|components| generate
+  test -->|passed| integrate["integrate(artifacts)"]
+  refine -->|artifact| integrate
+  integrate -->|product| final["test(product)"]
+```
+
 ### 7.3 Monitor Pattern
 
 **Purpose**: Continuous observation with alerting.
@@ -539,6 +727,22 @@ monitor:
             mitigate(alerts) → response
          c. audit(alerts, response) → logged
       4. persist(state) → history
+```
+
+```mermaid
+---
+title: Monitor pattern loop
+---
+flowchart TB
+  accDescr: The loop observes the system and checks the state for alert conditions; alerts are classified, critical ones are mitigated, and every alert is audited; the state is persisted to history on each pass.
+  observe["observe(system)"] -->|state| detect["detect(state, alert_conditions)"]
+  detect -->|alerts| classify["classify(alerts)"]
+  classify -->|critical| mitigate["mitigate(alerts)"]
+  classify -->|not critical| audit["audit(alerts, response)"]
+  mitigate -->|response| audit
+  detect -->|no alerts| persist["persist(state)"]
+  audit -->|logged| persist
+  persist -->|history, loop again| observe
 ```
 
 ---
@@ -569,6 +773,25 @@ enables (informational):
   decompose → delegate
 ```
 
+```mermaid
+---
+title: What requires demands
+---
+flowchart LR
+  accDescr: A checkpoint step must run before every mutate, send and rollback step, or the workflow fails with V102.
+  checkpoint ==>|must run first| mutate & send & rollback
+```
+
+```mermaid
+---
+title: What soft_requires asks for
+---
+flowchart LR
+  accDescr: A constrain step should run before execute, mutate and send steps; without it the workflow still validates, with warning W601.
+  constrain -.->|should run first| execute & mutate & send
+```
+
+
 ### 2. Safety Requirements
 
 High-risk patterns must include safety capabilities:
@@ -578,6 +801,16 @@ High-risk patterns must include safety capabilities:
 | Low | verify |
 | Medium | checkpoint, verify |
 | High | checkpoint, verify, rollback, audit |
+
+```mermaid
+---
+title: Safety capabilities by pattern risk
+---
+flowchart LR
+  accDescr: A low-risk pattern needs verify; a medium-risk one adds checkpoint, and a high-risk one adds rollback and audit as well.
+  low["Low: verify"] -->|adds checkpoint| medium["Medium: checkpoint, verify"]
+  medium -->|adds rollback, audit| high["High: checkpoint, verify, rollback, audit"]
+```
 
 ### 3. Evidence Requirements
 
@@ -591,6 +824,19 @@ Every capability output includes:
 Pattern outputs should aggregate:
   - All evidence from component capabilities
   - Lowest confidence from chain
+```
+
+```mermaid
+---
+title: A pattern's evidence chain
+---
+flowchart LR
+  accDescr: Every capability output in the chain carries its evidence anchors and a confidence; the pattern output takes all of the anchors and the lowest of the confidences.
+  c1["Capability 1: anchors, confidence"] --> out["Pattern output"]
+  c2["Capability 2: anchors, confidence"] --> out
+  cn["Capability N: anchors, confidence"] --> out
+  out --> ev["All the evidence anchors"]
+  out --> lo["The lowest confidence"]
 ```
 
 ---

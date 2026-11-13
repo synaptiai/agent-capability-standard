@@ -1,0 +1,594 @@
+// Data for the Standard's figures in chapters 6 to 12 (visual spec 3.9):
+// the schema shelf (F-S23), world-state fields (F-S24), merge thresholds
+// (F-S24b), decay with a floor (F-S25), the diagnostic families (F-S26),
+// where codes are raised (F-S27), what each conformance level checks
+// (F-S28), the conformance suite (F-S29), which change bumps which number
+// (F-S30), the checkpoint decision tree (F-S31) and the pattern strips
+// (F-S32). Each reads the Standard's own section and the files it names,
+// and throws when the two disagree. Captions are written here, so the page
+// and its Markdown copy match.
+import type { List, ListItem, Paragraph } from 'mdast';
+import { toString } from 'mdast-util-to-string';
+import { slug } from 'github-slugger';
+import { parse } from 'yaml';
+import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
+import { loadOntology } from '../data/ontology';
+import { loadIdentityPolicy, loadTrustModel, RUNTIME_FIXTURE_DIR, type IdentityPolicy } from '../data/spec-sources';
+import { parseCatalog, type Workflow } from '../data/workflows';
+import { readRepoFile, trackedUnder } from './repo';
+import { blockText, codeLines, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
+import { schemaListing } from './views';
+import { andList, plural } from './words';
+
+
+// ---------------------------------------------- F-S23 the schema shelf
+
+export function schemaShelf(text: string, where: string): { name: string; purpose: string; source: string }[] {
+  const t = sectionTable(text, '6.1 ', 0, where);
+  const rows = tableRows(t).slice(1);
+  const codes = tableCodes(t).slice(1);
+  const listing = new Map(schemaListing(text).map((e) => [e.name, e]));
+  return rows.map((r, i) => {
+    const name = codes[i]![0]?.[0] ?? r[0]!;
+    const e = listing.get(name);
+    if (!e) throw new Error(`${where}: §6.1 names ${name}, which the schema listing does not have`);
+    return { name, purpose: r[1]!, source: e.source };
+  });
+}
+
+export function shelfCaption(files: { name: string }[]): string {
+  return `The ${plural(files.length, 'schema file', 'schema files')} every implementation must provide; each links to the file in the repository.`;
+}
+
+// ---------------------------------------------- F-S24 world-state fields
+
+export interface FieldRow {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+}
+
+/** A §6.x field table ("Field | Type | Required | Description") as rows. */
+export function fieldRows(text: string, section: string, where: string): FieldRow[] {
+  const t = sectionTable(text, section, 0, where);
+  const rows = tableRows(t);
+  const head = rows[0]!.join('|');
+  if (head !== 'Field|Type|Required|Description') throw new Error(`${where}: §${section.trim()}'s table is not "Field | Type | Required | Description"`);
+  return rows.slice(1).map((r) => {
+    if (r[2] !== 'Yes' && r[2] !== 'No') throw new Error(`${where}: §${section.trim()} row ${r[0]} has Required "${r[2]}", not Yes or No`);
+    return { name: r[0]!, type: r[1]!, required: r[2] === 'Yes', description: r[3]! };
+  });
+}
+
+/** Rows grouped by their dotted prefix ("meta." first), in table order. */
+export function fieldGroups(rows: FieldRow[]): { prefix: string | null; rows: FieldRow[] }[] {
+  const out: { prefix: string | null; rows: FieldRow[] }[] = [];
+  for (const r of rows) {
+    const prefix = r.name.includes('.') ? r.name.slice(0, r.name.indexOf('.')) : null;
+    const g = out.find((x) => x.prefix === prefix);
+    if (g) g.rows.push(r);
+    else out.push({ prefix, rows: [r] });
+  }
+  return out;
+}
+
+export function fieldGroupsCaption(rows: FieldRow[], what: string): string {
+  const req = rows.filter((r) => r.required).length;
+  const groups = fieldGroups(rows).filter((g) => g.prefix);
+  return `${what} has ${plural(rows.length, 'field', 'fields')}, ${req} required${groups.length > 0 ? `; ${andList(groups.map((g) => `${plural(g.rows.length, 'sits', 'sit')} under ${g.prefix}`))}` : ''}.`;
+}
+
+// ---------------------------------------------- field tables shown as figures
+
+/**
+ * Field tables the page draws as a `Port` column (F-S2 for §4.1, F-S24 for
+ * §6.3): one row per field, required filled and optional outlined, with its
+ * type glyph and type string, grouped by dotted prefix. The figure wraps
+ * the source table and keeps it, folded, under the drawing, so the page
+ * does not show the same fields twice. `what` starts the caption.
+ */
+export const TABLE_FIGURES: Readonly<Record<string, { section: string; name: string; what: string }>> = {
+  'table-4.1': { section: '4.1 ', name: 'Capability fields', what: 'A capability' },
+  'table-6.3': { section: '6.3 ', name: 'World-state fields', what: 'A world state snapshot' },
+};
+
+/** The caption of a field-table figure. */
+export function tableFigureCaption(key: string, text: string, where: string): string {
+  const t = TABLE_FIGURES[key];
+  if (!t) throw new Error(`${where}: no table figure ${key}`);
+  return fieldGroupsCaption(fieldRows(text, t.section, where), t.what);
+}
+
+// ---------------------------------------------- F-S24b merge thresholds
+
+/**
+ * What each threshold of identity_resolution_policy.yaml leads to: the
+ * output action its name gives, and which side of it that action applies.
+ * The file names the actions (`output.action`: merge|suggest|ignore|
+ * split_review) and says a split review follows when confidence "drops
+ * below force_split_review"; a merge threshold applies at or above its value,
+ * and no_merge below it. A threshold the file adds or renames, or an action
+ * it drops, fails the build here.
+ */
+export const THRESHOLD_ACTIONS: Readonly<Record<string, { action: string; side: 'above' | 'below' }>> = {
+  auto_merge: { action: 'merge', side: 'above' },
+  suggest_merge: { action: 'suggest', side: 'above' },
+  no_merge: { action: 'ignore', side: 'below' },
+  force_split_review: { action: 'split_review', side: 'below' },
+};
+
+export interface MergeBand {
+  from: number;
+  to: number;
+  /** The action the band leads to, or null where no threshold names one. */
+  action: string | null;
+  /** The threshold that gives the action. */
+  threshold: string | null;
+}
+
+/**
+ * The bands between the thresholds, lowest first. A band takes the action of
+ * the "above" threshold at its lower edge, or else of the "below" threshold
+ * at its upper edge; a band neither reaches has no action.
+ */
+export function mergeBands(p: IdentityPolicy = loadIdentityPolicy()): MergeBand[] {
+  const where = 'identity_resolution_policy.yaml';
+  const names = p.thresholds.map((t) => t.name);
+  const known = Object.keys(THRESHOLD_ACTIONS);
+  if (names.slice().sort().join() !== known.slice().sort().join()) throw new Error(`${where}: thresholds are ${names.join(', ')}; the merge thresholds figure knows ${known.join(', ')}`);
+  for (const [n, a] of Object.entries(THRESHOLD_ACTIONS)) if (!p.actions.includes(a.action)) throw new Error(`${where}: output.action has no ${a.action}, which ${n} leads to`);
+  const asc = [...p.thresholds].sort((a, b) => a.value - b.value);
+  const edges = [p.range[0], ...asc.map((t) => t.value), p.range[1]];
+  const at = (v: number) => asc.find((t) => t.value === v);
+  return edges.slice(1).map((to, i) => {
+    const from = edges[i]!;
+    const lower = at(from);
+    const upper = at(to);
+    const t = lower && THRESHOLD_ACTIONS[lower.name]!.side === 'above' ? lower : upper && THRESHOLD_ACTIONS[upper.name]!.side === 'below' ? upper : null;
+    return { from, to, action: t ? THRESHOLD_ACTIONS[t.name]!.action : null, threshold: t?.name ?? null };
+  });
+}
+
+/** A band in words: "merge from 0.9 to 1", "ignore from 0.4 to 0.6". */
+export function bandWords(b: MergeBand): string {
+  return `${b.action ?? 'no action'} from ${b.from} to ${b.to}`;
+}
+
+export function thresholdsCaption(): string {
+  const p = loadIdentityPolicy();
+  const bands = mergeBands(p);
+  const named = [...bands].reverse().filter((b) => b.action !== null);
+  const open = bands.filter((b) => b.action === null);
+  return `${plural(p.thresholds.length, 'threshold', 'thresholds')} of identity_resolution_policy.yaml cut the ${p.range[0]} to ${p.range[1]} alias-confidence scale into ${bands.length} bands, named by the action each leads to: ${andList(named.map(bandWords))}${open.length > 0 ? `; no threshold names an action ${andList(open.map((b) => `from ${b.from} to ${b.to}`))}` : ''}.`;
+}
+
+// ---------------------------------------------- F-S25 decay with a floor
+
+export interface DecayColumn {
+  /** Age in half-lives. */
+  halfLives: number;
+  days: number;
+  value: number;
+  floored: boolean;
+}
+
+/**
+ * Columns every half a half-life from 0 to 4 half-lives, each the decay
+ * factor max(0.5 ** k, min_trust). Throws unless §8.1 still states the
+ * half-life formula and min_trust as a floor on the decay factor.
+ */
+export function decayColumns(text: string, where: string): { columns: DecayColumn[]; minTrust: number; halfLife: string } {
+  const prose = sectionParagraphs(text, '8.1 ', where).join(' ').replace(/\s+/g, ' ');
+  if (!prose.includes('0.5 ** (age / half_life)')) throw new Error(`${where}: §8.1 no longer states 0.5 ** (age / half_life)`);
+  if (!/min_trust, when present, is a floor on the decay factor/.test(prose)) throw new Error(`${where}: §8.1 no longer makes min_trust a floor on the decay factor`);
+  const m = loadTrustModel();
+  const columns = Array.from({ length: 9 }, (_, i) => {
+    const k = i / 2;
+    const raw = 0.5 ** k;
+    return { halfLives: k, days: k * m.halfLifeDays, value: Math.max(raw, m.minTrust), floored: raw < m.minTrust };
+  });
+  return { columns, minTrust: m.minTrust, halfLife: m.halfLife };
+}
+
+export function decayCaption(d: { columns: DecayColumn[]; minTrust: number; halfLife: string }): string {
+  const first = d.columns.find((c) => c.value <= d.minTrust)!;
+  return `With the reference half_life of ${d.halfLife} (${first.days / first.halfLives} days) the decay factor halves every half-life and reaches the min_trust floor of ${d.minTrust} at ${first.halfLives} half-lives (${first.days} days); older observations keep that weight.`;
+}
+
+// ---------------------------------------------- F-S26 diagnostic families
+
+export interface Family {
+  prefix: string;
+  name: string;
+  range: string;
+  severity: string;
+  codes: Diagnostic[];
+}
+
+/** §9.1's families in table order, each with its codes from the loader. */
+export function diagnosticFamilies(text: string, where: string): Family[] {
+  const rows = tableRows(sectionTable(text, '9.1 ', 0, where)).slice(1);
+  const all = loadDiagnostics();
+  return rows.map((r) => {
+    const m = /^([A-Z])\dxx$/.exec(r[1]!);
+    if (!m) throw new Error(`${where}: §9.1 range "${r[1]}" is not a letter, a digit and xx`);
+    const codes = all.filter((d) => d.code.startsWith(m[1]!) && d.code[1] === r[1]![1]);
+    if (codes.length === 0) throw new Error(`${where}: §9.1 family ${r[0]} has no codes in §9.2 to §9.7`);
+    return { prefix: m[1]!, name: r[0]!, range: r[1]!, severity: r[2]!, codes };
+  });
+}
+
+export function familiesCaption(f: Family[]): string {
+  const total = f.reduce((a, x) => a + x.codes.length, 0);
+  const big = [...f].sort((a, b) => b.codes.length - a.codes.length)[0]!;
+  const errors = f.filter((x) => x.severity === 'error').reduce((a, x) => a + x.codes.length, 0);
+  return `${plural(total, 'code', 'codes')} in ${plural(f.length, 'family', 'families')}: ${errors} errors and ${total - errors} warnings; ${big.name} is the largest family, with ${big.codes.length}.`;
+}
+
+/** The codes of one §9.2 to §9.7 table, from the loader, checked against the table's own rows. */
+export function sectionCodes(text: string, section: string, where: string): { heading: string; codes: Diagnostic[] } {
+  const rows = tableRows(sectionTable(text, `${section} `, 0, where)).slice(1).map((r) => r[0]!);
+  const codes = loadDiagnostics().filter((d) => d.section === section);
+  if (rows.join() !== codes.map((d) => d.code).join()) throw new Error(`${where}: §${section}'s table lists ${rows.join(', ')}, the diagnostics loader ${codes.map((d) => d.code).join(', ')}`);
+  return { heading: codes[0]!.category, codes };
+}
+
+export function sectionCodesCaption(s: { heading: string; codes: Diagnostic[] }): string {
+  const errors = s.codes.filter((d) => d.severity === 'error').length;
+  const sev = errors === s.codes.length ? 'all errors, drawn with a solid border' : errors === 0 ? 'all warnings, drawn with a dashed border' : `${errors} errors and ${s.codes.length - errors} warnings`;
+  return `${plural(s.codes.length, 'code', 'codes')} of ${s.heading.toLowerCase()}, ${sev}; each tile links to the code's entry on the diagnostics page.`;
+}
+
+/** F-X1, the diagnostics page's code grid. */
+export function codeGridCaption(f: Family[]): string {
+  const sizes = [...f].sort((a, b) => b.codes.length - a.codes.length);
+  return `${sizes[0]!.name} is the largest family, with ${sizes[0]!.codes.length} codes, and ${sizes.at(-1)!.name} the smallest, with ${sizes.at(-1)!.codes.length}; each tile links to its row below.`;
+}
+
+export function familyTableCaption(f: Family): string {
+  // The family's table has no Category or Severity column, so both must be one value for the family.
+  const cats = [...new Set(f.codes.map((d) => d.category))];
+  if (cats.length !== 1 || f.codes.some((d) => d.severity !== f.severity)) {
+    throw new Error(`diagnostics: family ${f.prefix} mixes categories (${cats.join(', ')}) or severities; restore those columns`);
+  }
+  return `${plural(f.codes.length, 'code', 'codes')} in ${f.range}, category ${cats[0]}, every one ${f.severity === 'error' ? 'an error' : 'a warning'}; the last column names the section of the Standard that defines each code.`;
+}
+
+/**
+ * A Standard's own error categories (its §9.1 table) with the number of codes
+ * its §9.x tables list for each, read from the text alone (for 1.0.0, whose
+ * codes the diagnostics loader does not hold).
+ */
+export function categoryCounts(text: string, where: string): { name: string; range: string; prefix: string; count: number }[] {
+  const rows = tableRows(sectionTable(text, '9.1 ', 0, where)).slice(1);
+  const codes = [...text.matchAll(/^\| ([A-Z]\d{3}) \|/gm)].map((m) => m[1]!);
+  return rows.map((r) => {
+    const m = /^([A-Z]\d)xx$/.exec(r[1]!);
+    if (!m) throw new Error(`${where}: §9.1 range "${r[1]}" is not a letter, a digit and xx`);
+    const count = new Set(codes.filter((c) => c.startsWith(m[1]!))).size;
+    if (count === 0) throw new Error(`${where}: §9.1 category ${r[0]} has no code in a §9 table`);
+    return { name: r[0]!, range: r[1]!, prefix: m[1]![0]!, count };
+  });
+}
+
+export function categoryCaption(c: { name: string; count: number }[]): string {
+  const max = Math.max(...c.map((x) => x.count));
+  const top = c.filter((x) => x.count === max).map((x) => x.name);
+  return `${plural(c.reduce((a, x) => a + x.count, 0), 'code', 'codes')} in ${plural(c.length, 'category', 'categories')}; ${andList(top)} ${top.length === 1 ? 'has' : 'have'} the most, ${max}${top.length === 1 ? '' : ' each'}.`;
+}
+
+// ---------------------------------------------- F-S27 where codes are raised
+
+/** The §5.1 to §5.17 sections: number and the text up to the next §5.x heading (subsections included). */
+function chapter5Sections(text: string): { n: string; title: string; body: string }[] {
+  const lines = text.split('\n');
+  const code = codeLines(text);
+  const out: { n: string; title: string; body: string }[] = [];
+  let cur: { n: string; title: string; body: string } | null = null;
+  let in5 = false;
+  for (const [i, l] of lines.entries()) {
+    if (code[i]) {
+      if (in5 && cur) cur.body += `${l}\n`;
+      continue;
+    }
+    const h2 = /^## (\d+)\./.exec(l);
+    if (h2) {
+      in5 = h2[1] === '5';
+      cur = null;
+      continue;
+    }
+    const h3 = /^### (5\.\d+) (.+)$/.exec(l);
+    if (in5 && h3) {
+      cur = { n: h3[1]!, title: h3[2]!.trim(), body: '' };
+      out.push(cur);
+      continue;
+    }
+    if (in5 && cur) cur.body += `${l}\n`;
+  }
+  return out;
+}
+
+export interface CodeHeat {
+  families: { prefix: string; name: string }[];
+  sections: { n: string; title: string }[];
+  /** counts[family][section]: distinct codes of the family the section names. */
+  counts: number[][];
+  max: number;
+}
+
+export function codeHeat(text: string, where: string): CodeHeat {
+  const fams = diagnosticFamilies(text, where);
+  const secs = chapter5Sections(text);
+  if (secs.length === 0) throw new Error(`${where}: no §5.x sections to count codes in`);
+  const named = (body: string) => new Set([...body.matchAll(/\b([A-Z]\d{3})\b/g)].map((m) => m[1]!));
+  const counts = fams.map((f) => secs.map((s) => [...named(s.body)].filter((c) => f.codes.some((d) => d.code === c)).length));
+  return {
+    families: fams.map((f) => ({ prefix: f.prefix, name: f.name })),
+    sections: secs.map((s) => ({ n: s.n, title: s.title })),
+    counts,
+    max: Math.max(1, ...counts.flat()),
+  };
+}
+
+export function heatCaption(h: CodeHeat): string {
+  const per = h.sections.map((s, j) => ({ s, n: h.counts.reduce((a, row) => a + row[j]!, 0) }));
+  const top = [...per].sort((a, b) => b.n - a.n)[0]!;
+  const fam = h.families.map((f, i) => ({ f, n: h.counts[i]!.filter((c) => c > 0).length })).sort((a, b) => b.n - a.n)[0]!;
+  return `§${top.s.n} ${top.s.title} names the most codes (${top.n}); ${fam.f.name} codes are named in the most sections of chapter 5 (${fam.n} of ${h.sections.length}).`;
+}
+
+// ---------------------------------------------- F-S28 conformance levels
+
+/** A piece of a §10.2 bullet: plain text, or a § reference or diagnostic code drawn as a chip. */
+export type LevelPart = { kind: 'text' | 'section' | 'code'; value: string };
+
+export interface LevelColumn {
+  level: string;
+  name: string;
+  items: { text: string; sections: string[]; codes: string[]; parts: LevelPart[] }[];
+}
+
+const REF = String.raw`§\d+(?:\.\d+)*|\b[A-Z]\d{3}\b`;
+
+/**
+ * A bullet cut into text and chips: a bracketed list of references, such as
+ * "(§5.1, §5.2)" or "(B202, B201)", becomes one chip per reference in its
+ * place, without the brackets; a reference elsewhere in the text stays a chip
+ * too. Joining the parts' values with the brackets put back gives the text.
+ */
+export function levelParts(text: string): LevelPart[] {
+  const out: LevelPart[] = [];
+  const group = new RegExp(String.raw`\s?\(((?:${REF})(?:,\s*(?:${REF}))*)\)|(${REF})`, 'g');
+  let last = 0;
+  for (const m of text.matchAll(group)) {
+    if (m.index! > last) out.push({ kind: 'text', value: text.slice(last, m.index) });
+    const refs = m[1] ? m[1].split(/,\s*/) : [m[2]!];
+    for (const r of refs) out.push(r.startsWith('§') ? { kind: 'section', value: r.slice(1) } : { kind: 'code', value: r });
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) out.push({ kind: 'text', value: text.slice(last) });
+  return out;
+}
+
+/** §10.2's lists: a "**Ln (Name)**" paragraph and the list after it. */
+export function conformanceLevels(text: string, where: string): LevelColumn[] {
+  const blocks = sectionBlocks(text, '10.2 ', where);
+  const out: LevelColumn[] = [];
+  blocks.forEach((b, i) => {
+    if (b.type !== 'paragraph') return;
+    const m = /^(L\d) \((.+)\)$/.exec(toString(b as Paragraph).trim());
+    if (!m) return;
+    const next = blocks[i + 1];
+    if (next?.type !== 'list') throw new Error(`${where}: §10.2's ${m[1]} has no list after it`);
+    const items = (next as List).children.map((li: ListItem) => {
+      const t = blockText(li).replace(/\s+/g, ' ').trim();
+      return { text: t, sections: [...t.matchAll(/§(\d+(?:\.\d+)*)/g)].map((x) => x[1]!), codes: [...t.matchAll(/\b([A-Z]\d{3})\b/g)].map((x) => x[1]!), parts: levelParts(t) };
+    });
+    out.push({ level: m[1]!, name: m[2]!, items });
+  });
+  const table = tableRows(sectionTable(text, '10.1 ', 0, where)).slice(1).map((r) => r[0]!);
+  if (table.join() !== out.map((c) => c.level).join()) throw new Error(`${where}: §10.1 lists ${table.join(', ')}, §10.2 ${out.map((c) => c.level).join(', ')}`);
+  return out;
+}
+
+export function levelsCaption(cols: LevelColumn[]): string {
+  return `${andList(cols.map((c) => `${c.level} lists ${c.items.length}`))} requirements; §10.2 states each level's list on its own.`;
+}
+
+// ---------------------------------------------- F-S29 the conformance suite
+
+export interface SuitePart {
+  label: string;
+  count: number;
+  dir: string;
+}
+
+export function conformanceSuite(text: string, where: string): SuitePart[] {
+  const prose = sectionBlocks(text, '10.3 ', where).map((b) => toString(b)).join(' ');
+  for (const k of ['Positive fixtures', 'Negative fixtures', 'Patch fixtures', 'Expression fixtures', 'Runtime fixtures']) {
+    if (!prose.includes(k)) throw new Error(`${where}: §10.3 no longer names ${k}`);
+  }
+  const fixtures = trackedUnder('tests/fixtures').map((p) => p.slice('tests/fixtures/'.length)).filter((p) => !p.includes('/'));
+  const count = (prefix: string) => fixtures.filter((f) => f.startsWith(prefix)).length;
+  const exprCases = ['eval', 'check'].reduce((a, f) => {
+    const doc = JSON.parse(readRepoFile(`tests/conformance/expressions/${f}.json`)) as { cases?: unknown[] };
+    if (!Array.isArray(doc.cases)) throw new Error(`tests/conformance/expressions/${f}.json has no cases list`);
+    return a + doc.cases.length;
+  }, 0);
+  const runtime = trackedUnder(RUNTIME_FIXTURE_DIR, '.json').length;
+  return [
+    { label: 'Positive fixtures (pass_)', count: count('pass_'), dir: 'tests/fixtures' },
+    { label: 'Negative fixtures (fail_)', count: count('fail_'), dir: 'tests/fixtures' },
+    { label: 'Patch fixtures (patch_)', count: count('patch_'), dir: 'tests/fixtures' },
+    { label: 'Expression cases', count: exprCases, dir: 'tests/conformance/expressions' },
+    { label: 'Runtime fixtures', count: runtime, dir: RUNTIME_FIXTURE_DIR },
+  ];
+}
+
+export function suiteCaption(parts: SuitePart[]): string {
+  const top = [...parts].sort((a, b) => b.count - a.count)[0]!;
+  const name = (p: SuitePart) => {
+    const words = p.label.replace(/ \(.+\)$/, '').toLowerCase();
+    return p.count === 1 ? words.replace(/s$/, '') : words;
+  };
+  return `The repository's conformance suite: ${andList(parts.map((p) => `${p.count} ${name(p)}`))}; ${name(top)} are the largest part.`;
+}
+
+// ---------------------------------------------- F-S30 which change bumps which number
+
+export function versionBumps(text: string, where: string): { bump: string; change: string; example: string; changes: string[] }[] {
+  const semver = tableRows(sectionTable(text, '11.1 ', 0, where)).slice(1);
+  const evo = tableRows(sectionTable(text, '11.4 ', 0, where)).slice(1);
+  const by: Record<string, string> = { Breaking: 'MAJOR', Compatible: 'MINOR' };
+  for (const r of evo) if (!(r[1]! in by)) throw new Error(`${where}: §11.4 row "${r[0]}" is "${r[1]}", neither Breaking nor Compatible`);
+  return semver.map((r) => ({ change: r[0]!, bump: r[1]!, example: r[2]!, changes: evo.filter((e) => by[e[1]!] === r[1]).map((e) => e[0]!) }));
+}
+
+export function bumpsCaption(b: { bump: string; changes: string[] }[]): string {
+  return `Of the ${plural(b.reduce((a, x) => a + x.changes.length, 0), 'schema change', 'schema changes')} §11.4 lists, ${andList(b.filter((x) => x.changes.length > 0).map((x) => `${x.changes.length} need a ${x.bump} release`))}.`;
+}
+
+// ---------------------------------------------- F-S31 checkpoint decision tree
+
+export interface TreeNode {
+  /** The question, or the outcome at a leaf. */
+  text: string;
+  /** Branches: the answer and the node it leads to. */
+  branches: { answer: string; node: TreeNode }[];
+}
+
+/** §12.1's decision tree fence: the root question, then `├──`/`└──` lines of "answer → next". */
+export function decisionTree(text: string, where: string): TreeNode {
+  const lines = sectionFence(text, '12.1 ', 0, where).value.split('\n').filter((l) => l.trim() !== '');
+  const root: TreeNode = { text: lines[0]!.trim(), branches: [] };
+  const stack: { depth: number; node: TreeNode }[] = [{ depth: -1, node: root }];
+  for (const l of lines.slice(1)) {
+    const m = /^([│ ]*)[├└]── (.+)$/.exec(l);
+    if (!m) throw new Error(`${where}: §12.1 tree line "${l}" is not a ├── or └── branch`);
+    const depth = m[1]!.length / 4;
+    // The figure draws a question and one level of follow-up questions.
+    if (depth > 1) throw new Error(`${where}: §12.1's tree is deeper than two questions; the figure draws two`);
+    const arrow = m[2]!.split(' → ');
+    if (arrow.length !== 2) throw new Error(`${where}: §12.1 tree branch "${m[2]}" has no →`);
+    while (stack.at(-1)!.depth >= depth) stack.pop();
+    const node: TreeNode = { text: arrow[1]!.trim(), branches: [] };
+    stack.at(-1)!.node.branches.push({ answer: arrow[0]!.trim(), node });
+    stack.push({ depth, node });
+  }
+  return root;
+}
+
+export function treeCaption(t: TreeNode): string {
+  const leaves: string[] = [];
+  const walk = (n: TreeNode) => (n.branches.length === 0 ? leaves.push(n.text) : n.branches.forEach((b) => walk(b.node)));
+  walk(t);
+  const questions = (n: TreeNode): number => (n.branches.length === 0 ? 0 : 1 + n.branches.reduce((a, b) => a + questions(b.node), 0));
+  return `${plural(questions(t), 'question leads', 'questions lead')} to ${plural(leaves.length, 'outcome', 'outcomes')}: ${andList(leaves.map((x) => x.toLowerCase()))}.`;
+}
+
+// ---------------------------------------------- F-S32 pattern strips
+
+export interface PatternStrip {
+  name: string;
+  wf: Workflow;
+}
+
+/** A fence's steps read line by line: each `- capability:` starts a step; its store_as and its references are kept. */
+export function stepsByLine(fence: string): { capability: string; store_as?: string; input_bindings: Record<string, string> }[] {
+  const out: { capability: string; store_as?: string; input_bindings: Record<string, string> }[] = [];
+  for (const line of fence.split('\n')) {
+    const cap = /^- capability:\s*(\S+)/.exec(line);
+    if (cap) {
+      out.push({ capability: cap[1]!, input_bindings: {} });
+      continue;
+    }
+    const cur = out.at(-1);
+    if (!cur) continue;
+    const store = /^\s+store_as:\s*(\S+)/.exec(line);
+    if (store) cur.store_as = store[1]!;
+    for (const m of line.matchAll(/\$\{[^}]+\}/g)) cur.input_bindings[`ref${Object.keys(cur.input_bindings).length}`] = m[0];
+  }
+  return out;
+}
+
+/** The Standard files whose §12.5 fences are not valid YAML and are read line by line. */
+export const LINE_READ_PATTERN_SOURCES: ReadonlySet<string> = new Set(['spec/STANDARD-v1.0.0.md']);
+
+/** Each §12.5 fence with `capability:` steps, as a workflow, named by the bold "Pattern: …" before it. */
+export function patternStrips(text: string, where: string): PatternStrip[] {
+  const blocks = sectionBlocks(text, '12.5 ', where);
+  const out: PatternStrip[] = [];
+  let name: string | null = null;
+  for (const b of blocks) {
+    if (b.type === 'paragraph') {
+      const m = /^Pattern: (.+)$/.exec(toString(b).trim());
+      if (m) name = m[1]!;
+      continue;
+    }
+    if (b.type !== 'code') continue;
+    if (!name) throw new Error(`${where}: a §12.5 fence has no "Pattern:" name before it`);
+    let steps: unknown;
+    try {
+      steps = parse(b.value);
+    } catch (e) {
+      // 1.0.0 writes an unquoted [${a}, ${b}], which is not valid YAML: its
+      // steps are read line by line, keeping what the strip draws. Any other
+      // Standard's fence must parse.
+      if (!LINE_READ_PATTERN_SOURCES.has(where)) throw new Error(`${where}: §12.5's ${name} fence is not valid YAML: ${(e as Error).message}`);
+      steps = stepsByLine(b.value);
+    }
+    if (!Array.isArray(steps)) throw new Error(`${where}: §12.5's ${name} fence is not a list of steps`);
+    // The pattern's name is not a workflow id; the strip is keyed by its slug.
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const wf = parseCatalog(where, JSON.stringify({ [id]: { goal: name, risk: 'low', steps } }), 'core', loadOntology())[0]!;
+    out.push({ name, wf });
+    name = null;
+  }
+  return out;
+}
+
+export function patternCaption(p: PatternStrip): string {
+  const reads = p.wf.steps.filter((s) => s.consumes.length > 0).length;
+  return `${p.name}: ${plural(p.wf.steps.length, 'step', 'steps')} in order, ${reads} of them reading an earlier step's output.`;
+}
+
+// ---------------------------------------------- F-X2 where a family's codes are raised
+
+export interface FamilyRaised {
+  /** The §5.x sections that name at least one code of the family, in order. */
+  sections: { n: string; title: string; anchor: string }[];
+  /** Per code of the family: the section numbers that name it. */
+  rows: { code: string; anchor: string; severity: string; in: string[] }[];
+}
+
+/**
+ * Which sections of chapter 5 (the workflow DSL) name each code of a family:
+ * the rules a code enforces, read from where the Standard mentions it.
+ */
+export function familyRaised(text: string, f: Family): FamilyRaised {
+  const secs = chapter5Sections(text);
+  const named = secs.map((s) => new Set([...s.body.matchAll(/\b([A-Z]\d{3})\b/g)].map((m) => m[1]!)));
+  const rows = f.codes.map((d) => ({ code: d.code, anchor: d.anchor, severity: d.severity, in: secs.filter((_, j) => named[j]!.has(d.code)).map((s) => s.n) }));
+  const used = new Set(rows.flatMap((r) => r.in));
+  return { sections: secs.filter((s) => used.has(s.n)).map((s) => ({ n: s.n, title: s.title, anchor: slug(`${s.n} ${s.title}`) })), rows };
+}
+
+export function familyRaisedTitle(f: Family): string {
+  return `Where the workflow rules of §5 raise the ${f.range} codes`;
+}
+
+export function familyRaisedCaption(f: Family, r: FamilyRaised): string {
+  const none = r.rows.filter((x) => x.in.length === 0).map((x) => x.code);
+  const per = r.sections.map((s) => ({ s, n: r.rows.filter((x) => x.in.includes(s.n)).length })).sort((a, b) => b.n - a.n);
+  const top = per[0];
+  const lead = top
+    ? `${plural(r.rows.length - none.length, 'code', 'codes')} of ${r.rows.length} ${r.rows.length - none.length === 1 ? 'is' : 'are'} named in ${plural(r.sections.length, 'section', 'sections')} of chapter 5; §${top.s.n} ${top.s.title} names the most (${top.n})`
+    : `No section of chapter 5 names a ${f.range} code`;
+  return `${lead}${none.length > 0 && top ? `; ${andList(none)} ${none.length === 1 ? 'is' : 'are'} named only outside chapter 5` : ''}.`;
+}
+
+/** True when the family's codes are named in at least two sections of chapter 5, so the grid shows more than one column. */
+export function familyRaisedIsFigure(r: FamilyRaised): boolean {
+  return r.sections.length >= 2 && r.rows.some((x) => x.in.length > 0);
+}

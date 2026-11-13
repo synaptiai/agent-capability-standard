@@ -1,0 +1,228 @@
+---
+// The shared figure parts on real data (visual spec 3.0), a review page built
+// at /_review/parts/ and never deployed. It shows each part once so the page
+// builders, axe and the 360px check can see them before any page uses them.
+import Figure from '../components/fig/Figure.astro';
+import EdgeTypeCard from '../components/fig/EdgeTypeCard.astro';
+import IconCard from '../components/fig/IconCard.astro';
+import Lane from '../components/fig/Lane.astro';
+import MiniTile from '../components/fig/MiniTile.astro';
+import PixelBar from '../components/fig/PixelBar.astro';
+import Port from '../components/fig/Port.astro';
+import SafetyPanel from '../components/fig/SafetyPanel.astro';
+import StepStrip from '../components/fig/StepStrip.astro';
+import { loadCounts } from '../data/counts';
+import { loadOntology } from '../data/ontology';
+import { loadProfiles } from '../data/profiles';
+import { capabilityUsage, loadWorkflows } from '../data/workflows';
+import DocLayout from '../layouts/DocLayout.astro';
+import { refSlugger, workflowHref } from '../lib/generated';
+import { coverage } from '../lib/home';
+import type { Route } from '../lib/routes';
+import { contractRows, diagramSteps, sortedTrustWeights } from '../lib/views';
+import { laneOffsets } from '../pixel/lines';
+import { TOOL_GLYPHS } from '../pixel/keys';
+import { plural } from '../lib/words';
+
+const route: Route = { source: null, url: '/_review/parts/', section: 'home', order: 0, template: 'not-found', title: 'Figure parts' };
+const id = refSlugger();
+const o = loadOntology();
+const cap = (c: string) => o.capabilities.find((x) => x.id === c)!;
+const wfs = loadWorkflows().all;
+
+// MiniTile: the first capability of each layer.
+const firsts = o.layers.map((l) => l.capabilities[0]!);
+
+// Port: mutate's contract.
+const mutate = cap('mutate');
+const ins = contractRows(mutate.input_schema as Record<string, unknown>);
+const outs = contractRows(mutate.output_schema as Record<string, unknown>);
+
+// StepStrip: where mutate runs, and the first workflows of the catalog.
+const uses = capabilityUsage('mutate');
+const gallery = wfs.slice(0, 6);
+
+// PixelBar: a profile's trust weights on a shared 0 to 1 scale.
+const profile = loadProfiles().find((p) => p.key === 'healthcare') ?? loadProfiles()[0]!;
+const weights = sortedTrustWeights(profile.profile).slice(0, 5);
+
+// Lane: a short spine for the workflow that has a checkpoint bracket.
+const spineWf = wfs.find((w) => diagramSteps(w).some((d) => d.role === 'rollback'))!;
+const spine = diagramSteps(spineWf);
+const ROW = 28;
+const cpRow = spine.findIndex((d) => d.role === 'checkpoint');
+const relying = spine.filter((d) => d.checkpointStep !== null).map((d) => spine.findIndex((x) => x === d));
+const lastRelying = Math.max(...relying.filter((r) => spine[r]!.role !== 'rollback'));
+const rbRow = spine.findIndex((d) => d.role === 'rollback');
+const gateRowsIdx = spine.map((d, i) => ((d.step.gates?.length ?? 0) > 0 ? i : -1)).filter((i) => i >= 0);
+const lanes = laneOffsets([
+  { id: 'checkpoint', used: cpRow >= 0 },
+  { id: 'rollback', used: rbRow >= 0 },
+  { id: 'gate', used: gateRowsIdx.length > 0 },
+]);
+const laneW = 8 * lanes.size + 4;
+
+// IconCard: the home page's tool cards, and counts as hero numbers.
+const tools = coverage().tools;
+const k = loadCounts();
+const counted = [
+  { glyph: 'count:capabilities', title: 'Capabilities', n: k.capabilityCount },
+  { glyph: 'count:layers', title: 'Layers', n: k.layerCount },
+  { glyph: 'count:edges', title: 'Edges', n: k.edgeCount },
+];
+const list = (ns: number[]) => `${ns.length === 1 ? 'step' : 'steps'} ${ns.join(', ')}`;
+---
+<DocLayout route={route} title="Figure parts" noindex toc={false}>
+  <article class="doc parts-sheet">
+    <h1 id={id('Figure parts')}>Figure parts</h1>
+    <p class="lead">Each shared figure part once, on data from the repository. A review page; it is not published.</p>
+
+    <h2 id={id('Small tiles')}>Small tiles</h2>
+    <Figure id="ref-fig-tiles" n={1} title="The first capability of each layer" caption={`${firsts.length} tiles at 24, 32 and 48 pixels; each shows its symbol, and at 32 pixels and up its layer glyph.`}>
+      <div class="parts-row">{firsts.map((c) => <MiniTile id={c} size={24} />)}</div>
+      <div class="parts-row">{firsts.map((c) => <MiniTile id={c} size={32} />)}</div>
+      <div class="parts-row">{firsts.map((c, i) => <MiniTile id={c} size={48} current={i === 0} />)}</div>
+    </Figure>
+
+    <h2 id={id('Ports')}>Ports</h2>
+    <Figure id="ref-fig-ports" n={2} title={`Contract of mutate: ${ins.length} inputs, ${outs.length} outputs`} caption={`${ins.filter((r) => r.required).length} of the ${ins.length} inputs are required (filled pins); optional pins are outlined.`}>
+      <div class="parts-columns">
+        <ul class="ports">{ins.map((r) => <Port name={r.path} type={r.type} required={r.required} description={r.description} depth={r.depth > 0 ? 1 : 0} />)}</ul>
+        <ul class="ports ports--out">{outs.map((r) => <Port name={r.path} type={r.type} required={r.required} description={r.description} depth={r.depth > 0 ? 1 : 0} mark={r.path === 'evidence_anchors' ? 'principle:grounded-claims' : undefined} markLabel={r.path === 'evidence_anchors' ? 'grounded claim' : undefined} />)}</ul>
+      </div>
+    </Figure>
+
+    <h2 id={id('Step strips')}>Step strips</h2>
+    <Figure id="ref-fig-usage" n={3} title="mutate in workflows" caption={`${plural(uses.length, 'workflow runs', 'workflows run')} mutate; its steps are filled with its symbol.`}>
+      <ul class="parts-list">
+        {uses.map((u) => {
+          const wf = wfs.find((w) => w.id === u.workflowId)!;
+          return <li><a href={workflowHref(wf.id)}><code>{wf.id}</code></a> <StepStrip wf={wf} size={16} highlight="mutate" /> <span class="parts-note">{list(u.steps)}</span></li>;
+        })}
+      </ul>
+    </Figure>
+    <Figure id="ref-fig-gallery" n={4} title="Workflow strips" caption={`The first ${gallery.length} workflows of the catalogs, one square per step; filled squares are checkpoint, change, verify and rollback steps, and a bar under a square marks a gate.`}>
+      <ul class="parts-list">
+        {gallery.map((wf) => <li><StepStrip wf={wf} href={workflowHref(wf.id)} /> <code>{wf.id}</code></li>)}
+      </ul>
+    </Figure>
+
+    <h2 id={id('Lanes')}>Lanes</h2>
+    <Figure id="ref-fig-lanes" n={5} title={`Lanes beside the steps of ${spineWf.id}`} caption={`The checkpoint at step ${cpRow + 1} covers the steps to step ${lastRelying + 1}; the rollback at step ${rbRow + 1} returns to it; ${gateRowsIdx.length} steps have gates.`}>
+      <div class="parts-spine">
+        <svg viewBox={`0 0 ${laneW} ${spine.length * ROW}`} width={laneW} height={spine.length * ROW} shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+          {lanes.has('checkpoint') && <Lane x={lanes.get('checkpoint')!} rowHeight={ROW} spans={[{ from: cpRow, to: lastRelying, glyph: 'flag' }]} />}
+          {lanes.has('rollback') && <Lane x={lanes.get('rollback')!} rowHeight={ROW} spans={[{ from: cpRow, to: rbRow, glyph: 'undo' }]} />}
+          {lanes.has('gate') && <Lane x={lanes.get('gate')!} rowHeight={ROW} marks={gateRowsIdx.map((r) => ({ row: r, glyph: 'diamond' }))} />}
+        </svg>
+        <ol class="parts-spine__rows">
+          {spine.map((d) => <li><span class="parts-spine__n">{d.step.index}</span><MiniTile id={d.step.capability} size={24} /> <code>{d.step.capability}</code></li>)}
+        </ol>
+      </div>
+    </Figure>
+
+    <h2 id={id('Bars')}>Bars</h2>
+    <Figure id="ref-fig-bars" n={6} title={`Highest trust weights in ${profile.key}`} caption={`The ${weights.length} highest of the profile's trust weights on a scale from 0 to 1.`}>
+      <ul class="parts-list parts-bars">
+        {weights.map((w) => <li><code>{w.source}</code><PixelBar value={w.weight} max={1} digits={2} ticks={[0.25, 0.5, 0.75]} /></li>)}
+      </ul>
+    </Figure>
+
+    <h2 id={id('Safety panels')}>Safety panels</h2>
+    <div class="parts-columns">
+      <SafetyPanel cap={mutate} />
+      <SafetyPanel cap={cap('rollback')} />
+    </div>
+
+    <h2 id={id('Edge type cards')}>Edge type cards</h2>
+    <div class="parts-cards">{o.edgeTypes.map((t) => <EdgeTypeCard info={t} />)}</div>
+
+    <h2 id={id('Icon cards')}>Icon cards</h2>
+    <ul class="icon-cards">
+      {counted.map((c) => <IconCard glyph={c.glyph} title={c.title} number={c.n} />)}
+    </ul>
+    <ul class="icon-cards">
+      {tools.map((t) => <IconCard glyph={TOOL_GLYPHS[t.title]!} title={t.title} href={t.link.url}>{t.line}</IconCard>)}
+    </ul>
+  </article>
+</DocLayout>
+
+<style>
+  .parts-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: var(--space-2);
+  }
+
+  .parts-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+    gap: var(--space-4);
+  }
+
+  .parts-list {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .parts-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .parts-bars li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+
+  @container (min-width: 480px) {
+    .parts-bars li {
+      grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+      gap: var(--space-2);
+    }
+  }
+
+  .parts-note {
+    color: var(--ink-2);
+  }
+
+  .parts-spine {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .parts-spine__rows {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .parts-spine__rows li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 28px;
+    margin: 0;
+  }
+
+  .parts-spine__n {
+    width: 2ch;
+    color: var(--ink-3);
+    font-family: var(--font-mono);
+    text-align: right;
+  }
+
+  .parts-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr));
+    gap: var(--space-4);
+  }
+</style>

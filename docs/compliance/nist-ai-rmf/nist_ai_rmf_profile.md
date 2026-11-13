@@ -100,6 +100,18 @@ Each NIST category is assessed using:
 | **Partial** | Framework provides structural support; deployer must configure or extend |
 | **Gap** | Framework does not address this requirement; deployer must implement independently |
 
+```mermaid
+---
+title: How coverage is decided
+---
+flowchart TB
+  accDescr: A requirement the framework enforces structurally is Full; one it supports but the deployer must configure or extend is Partial; one it does not address, which the deployer implements alone, is a Gap.
+  q1{Does the framework enforce it structurally?} -->|yes| full["Full: no deployer action"]
+  q1 -->|no| q2{Does it give structural support?}
+  q2 -->|yes| part["Partial: the deployer configures or extends"]
+  q2 -->|no| gap["Gap: the deployer implements it"]
+```
+
 ---
 
 ## 4. GOVERN Function
@@ -425,6 +437,16 @@ The target profile achieves:
 | Build automated external feedback collection | G-07 (ME-4) | MEASURE → Tier 3+ | Feedback collection pipeline integrated with stakeholder channels |
 | Develop predictive risk indicators from confidence trends | — (advanced) | MEASURE → Tier 3+ | Trend analysis on EvidenceStore confidence data |
 | Enable continuous profile adaptation from operational data | — (advanced) | MAP → Tier 4 | Automated domain profile tuning based on operational metrics |
+
+```mermaid
+---
+title: Which gaps each phase closes
+---
+flowchart TB
+  accDescr: Phase 1, months 0 to 3, closes G-01 and G-09; Phase 2, months 3 to 6, closes G-02 to G-06 and G-10; Phase 3, months 6 to 12, closes G-07 and G-08.
+  p1["Phase 1, foundation, 0-3 months: G-01, G-09"] --> p2["Phase 2, core improvements, 3-6 months: G-02, G-03, G-04, G-05, G-06, G-10"]
+  p2 --> p3["Phase 3, adaptive maturity, 6-12 months: G-07, G-08"]
+```
 
 ### 9.4 Roadmap Visualization
 

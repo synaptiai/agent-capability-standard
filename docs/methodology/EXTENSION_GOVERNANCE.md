@@ -34,6 +34,20 @@ New capabilities may be added when:
 
 A proposed capability MUST satisfy ALL of the following:
 
+```mermaid
+---
+title: The six criteria, all required
+---
+flowchart LR
+  accDescr: A proposed capability must meet all six criteria: non-composability, atomicity, a distinct contract, layer fit, workflow usage and domain generality.
+  p["Proposed capability, must meet all six"] --> c1[2.1 Non-composability]
+  p --> c2[2.2 Atomicity]
+  p --> c3[2.3 Distinct contract]
+  p --> c4[2.4 Layer fit]
+  p --> c5[2.5 Workflow usage]
+  p --> c6[2.6 Domain generality]
+```
+
 ### 2.1 Non-Composability
 
 **The capability cannot be expressed as a composition of existing capabilities.**
@@ -91,6 +105,19 @@ Evidence required:
 ---
 
 ## 3. Proposal Process
+
+```mermaid
+---
+title: From proposal to decision
+---
+flowchart TB
+  accDescr: A proposal starts as an issue, becomes an RFC if it gains support, goes through at least 14 days of review, and the maintainers accept, reject or defer it; an accepted capability is then implemented.
+  issue["1 Issue: [Capability Proposal] name"] -->|gains support| rfc["2 RFC: spec/RFC-XXXX-name.md"]
+  rfc --> review["3 Review: at least 14 days"]
+  review --> decision{"4 Maintainers decide"}
+  decision -->|accept| impl["5 Implementation: ontology, skill, docs, workflows, validator"]
+  decision -->|"reject or defer"| rej["Not added, with reasons, or deferred for more evidence"]
+```
 
 ### Step 1: Issue
 
@@ -153,6 +180,19 @@ To manage ontology evolution, we use tiers:
 - Must graduate to Extended or be removed
 - Currently: 0 capabilities
 
+```mermaid
+---
+title: The three tiers today
+---
+flowchart TB
+  accDescr: Core holds 36 capabilities, validated with a stable API and full documentation; Extended holds none, all having moved to Core in v1.0.0; Experimental holds none and has no stability guarantees; an Experimental capability graduates to Extended, and an Extended one to Core.
+  core["Core: 36 capabilities. Validated, stable API, full documentation"]
+  ext["Extended: 0 capabilities. All migrated to Core in v1.0.0"]
+  exp["Experimental: 0 capabilities. No stability guarantees"]
+  exp -.->|graduates| ext
+  ext -.->|graduates| core
+```
+
 ### Graduation Criteria
 
 **Experimental → Extended**:
@@ -164,6 +204,17 @@ To manage ontology evolution, we use tiers:
 - [ ] At least 3 reference workflows
 - [ ] 6-month stability period
 - [ ] No breaking changes during period
+
+```mermaid
+---
+title: How a capability moves between tiers
+---
+flowchart LR
+  accDescr: A new proposal is Experimental; it graduates to Extended with the six criteria, one reference workflow and 30 days of stability, and to Core with three reference workflows and six months without breaking changes; an Experimental capability that does not graduate is removed.
+  exp[Experimental] -->|"6 criteria, 1 workflow, 30 days"| ext[Extended]
+  ext -->|"3 workflows, 6 months, no breaking change"| core[Core]
+  exp -.->|does not graduate| removed[Removed]
+```
 
 ---
 
@@ -180,6 +231,17 @@ Capabilities may be deprecated if:
 2. Emit warnings in validator
 3. Remove from new workflow templates
 4. After 6 months, remove from ontology
+
+```mermaid
+---
+title: Deprecation
+---
+flowchart LR
+  accDescr: A deprecated capability is marked deprecated, the validator warns, new templates stop using it, and after 6 months it is removed from the ontology.
+  mark["deprecated: true"] --> warn[Validator warns]
+  warn --> tmpl[Off new templates]
+  tmpl -->|after 6 months| gone[Removed from the ontology]
+```
 
 ---
 
@@ -219,6 +281,17 @@ Capabilities may be deprecated if:
 
 **Decision**: Rejected (implement as `retrieve` with GraphQL adapter)
 
+```mermaid
+---
+title: The three example proposals
+---
+flowchart LR
+  accDescr: cluster meets every criterion and is accepted; search-and-replace is a composition of search and transform and is rejected in favour of that composition; query-graphql is retrieve with GraphQL parameters and is rejected in favour of retrieve with a GraphQL adapter.
+  cl["cluster: all six criteria met"] --> acc[Accepted]
+  sr["search-and-replace: composable, not atomic"] --> rej1["Rejected: search + transform"]
+  qg["query-graphql: composable, not domain general"] --> rej2["Rejected: retrieve + GraphQL adapter"]
+```
+
 ---
 
 ## 7. Counter-Proposal: Workflow Pattern
@@ -245,6 +318,16 @@ search_and_replace:
 ```
 
 If it works as a pattern, don't propose it as a capability.
+
+```mermaid
+---
+title: search_and_replace as a pattern
+---
+flowchart TB
+  accDescr: The pattern searches for old_function_name and stores matches, which transform reads to produce the replaced text.
+  search -->|matches| transform
+  transform --> out[replaced_text]
+```
 
 ---
 

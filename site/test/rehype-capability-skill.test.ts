@@ -1,0 +1,192 @@
+// The capability skill step (rehype-capability-skill), run through the build
+// pipeline on a hand-written SKILL.md. The fixture is rendered at the path of
+// a capability skill (mutate) and at the path of a composed skill
+// (debug-workflow), which gets only the folds. Expected values are
+// read off the fixture below.
+import { describe, expect, it } from 'vitest';
+import { loadOntology } from '../src/data/ontology';
+import { renderRepoFile } from './pipeline';
+
+const FIXTURE = [
+  '---',
+  'name: fixture',
+  '---',
+  '',
+  '## Inputs',
+  '',
+  '| Parameter | Required | Type |',
+  '|---|---|---|',
+  '| `target` | Yes | string |',
+  '| `content` | Yes | string |',
+  '| `mode` | No | string |',
+  '',
+  '## Procedure',
+  '',
+  '1. **First**: a',
+  '2. **Second**: b',
+  '',
+  '## Output Contract',
+  '',
+  'Return:',
+  '',
+  '```yaml',
+  'success: boolean',
+  '```',
+  '',
+  '### Field Definitions',
+  '',
+  '| Field | Type |',
+  '|---|---|',
+  '| `success` | boolean |',
+  '| `new_state` | object |',
+  '| `rollback_command` | string |',
+  '| `previous_state.hash` | string |',
+  '',
+  '## Examples',
+  '',
+  'Lead-in.',
+  '',
+  '### Example 1: Happy Path',
+  '',
+  'one',
+  '',
+  '---',
+  '',
+  '### Example 2: Mutation Failure',
+  '',
+  'two',
+  '',
+  '## Safety Constraints',
+  '',
+  '- `mutation`: true',
+  '',
+  '## Composition Patterns',
+  '',
+  'after',
+  '',
+].join('\n');
+
+const render = async (path: string) => (await renderRepoFile(path, FIXTURE)).code;
+
+describe('rehype-capability-skill', () => {
+  it('numbers the procedure: its ordered list gets the skill-steps class', async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    expect(html).toMatch(/<ol class="skill-steps">/);
+  });
+
+  it('folds the first fence of Output Contract into a details, and leaves the Field Definitions table open', async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    const section = html.slice(html.indexOf('id="output-contract"'), html.indexOf('id="examples"'));
+    expect(section).toMatch(/<details class="fig-details skill-fence"><summary>The output as the skill writes it, in YAML<\/summary><pre[^>]*data-language="yaml"/);
+    expect(section).toContain('<p>Return:</p>');
+    expect(section).toMatch(/<table/);
+    expect(section.indexOf('</details>')).toBeLessThan(section.indexOf('<table'));
+  });
+
+  it('marks the Inputs table Required column with check and cross glyphs', async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    const section = html.slice(html.indexOf('id="inputs"'), html.indexOf('id="procedure"'));
+    const marks = [...section.matchAll(/class="pg skill-req skill-req--(yes|no)"/g)].map((m) => m[1]);
+    expect(marks).toEqual(['yes', 'yes', 'no']);
+    // The glyphs repeat the Yes and No, so the table is not an information figure (issue #125 review).
+    expect(section).toMatch(/<table[^>]*data-enriched="3"/);
+    expect(section).not.toContain('data-info-figure');
+  });
+
+  it("marks each Field Definitions row with mutate's output contract, a dotted path by its whole path", async () => {
+    // mutate's output contract (ontology): success, rollback_command and new_state
+    // are top-level fields; previous_state.hash is looked up one level in.
+    const html = await render('skills/mutate/SKILL.md');
+    const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
+    expect(section).toContain('<th>In the output contract</th>');
+    expect(section).toMatch(/<table[^>]*data-info-figure="enriched-table"/);
+    const cellsIn = [...section.matchAll(/<td class="skill-contract-cell">([\s\S]*?)<\/td>/g)].map((m) => m[1]!);
+    expect(cellsIn).toHaveLength(4);
+    type S = { properties: Record<string, S>; required?: string[] };
+    const out = loadOntology().byId.get('mutate')!.output_schema as unknown as S;
+    const want = (s: S | undefined, name: string) => (!s || !(name in s.properties) ? "no, the skill's own" : (s.required ?? []).includes(name) ? 'required' : 'optional');
+    ['success', 'new_state', 'rollback_command'].forEach((name, i) => expect(cellsIn[i]).toContain(want(out, name)));
+    const prev = out.properties.previous_state;
+    expect(cellsIn[3]).toContain(want(prev?.properties ? prev : undefined, 'hash'));
+  });
+
+  it('marks each field of a row that names two, and leaves a placeholder path empty', async () => {
+    const two = FIXTURE.replace('| `previous_state.hash` | string |', '| `success` / `own_field` | boolean / string |\n| `result.<store_as>` | object |');
+    const html = (await renderRepoFile('skills/mutate/SKILL.md', two)).code;
+    const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
+    const cellsIn = [...section.matchAll(/<td class="skill-contract-cell">([\s\S]*?)<\/td>/g)].map((m) => m[1]!);
+    expect(cellsIn).toHaveLength(5);
+    // success is required by mutate's contract (ontology); own_field is in no contract.
+    const out = loadOntology().byId.get('mutate')!.output_schema as { required?: string[] };
+    expect(out.required).toContain('success');
+    expect(cellsIn[3]).toMatch(/<code>success<\/code>:.*required.*<code>own_field<\/code>:.*no, the skill's own/s);
+    expect(cellsIn[4]).toBe('');
+  });
+
+  it("adds the output contract's required and optional marks to Field Definitions when the skill's fields all match it", async () => {
+    // invoke's skill names every field of its output contract, so F-C6 is a sentence and the table carries the contract.
+    const html = (await renderRepoFile('skills/invoke/SKILL.md')).code;
+    const section = html.slice(html.indexOf('id="field-definitions"'), html.indexOf('id="examples"'));
+    expect(section).toContain('<th>In the output contract</th>');
+    expect(section).toMatch(/<table[^>]*data-info-figure="enriched-table"/);
+    const out = loadOntology().byId.get('invoke')!.output_schema as { properties: Record<string, unknown>; required?: string[] };
+    const rows = [...section.matchAll(/<tr>\s*<td><code>([a-z_]+)<\/code><\/td>[\s\S]*?<td class="skill-contract-cell">([\s\S]*?)<\/td><\/tr>/g)].map((m) => [m[1], /required/.test(m[2]!) ? 'required' : /optional/.test(m[2]!) ? 'optional' : '']);
+    expect(rows.length).toBeGreaterThanOrEqual(3);
+    for (const [name, mark] of rows) expect([name, mark]).toEqual([name, name! in out.properties ? ((out.required ?? []).includes(name!) ? 'required' : 'optional') : '']);
+  });
+
+  it('makes each example a details, the first open and the rest closed (visual spec 3.1), whose summary keeps the H3 and its id, with no anchor link', async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    const details = [...html.matchAll(/<details class="skill-example"( open)?>/g)];
+    expect(details).toHaveLength(2);
+    expect(details.map((d) => d[1] !== undefined)).toEqual([true, false]);
+    expect(html).toMatch(/<summary class="skill-example__summary">[^]*?<h3 id="example-1-happy-path">Example 1: Happy Path<\/h3><\/summary>/);
+    const summaries = [...html.matchAll(/<summary class="skill-example__summary">([^]*?)<\/summary>/g)].map((m) => m[1]!);
+    expect(summaries.some((s) => s.includes('heading-anchor'))).toBe(false);
+    // The lead-in paragraph stays outside the examples.
+    expect(html).toMatch(/<p>Lead-in.<\/p>\s*<details class="skill-example" open>/);
+  });
+
+  it('folds a long Output fence of the open first example under its own summary, and leaves a short one', async () => {
+    // 101 lines of output (one over the limit of 100) in example 1, and a
+    // copy where example 1's output is 3 lines.
+    const long = Array.from({ length: 101 }, (_, i) => `k${i}: ${i}`).join('\n');
+    const withOutput = (body: string) => FIXTURE.replace('one\n', `**Input:**\n\n\`\`\`yaml\na: 1\n\`\`\`\n\n**Output:**\n\n\`\`\`yaml\n${body}\n\`\`\`\n`);
+    const html = (await renderRepoFile('skills/mutate/SKILL.md', withOutput(long))).code;
+    const first = html.slice(html.indexOf('<details class="skill-example" open>'), html.indexOf('<details class="skill-example">'));
+    expect(first).toMatch(/<details class="fig-details skill-fence" data-long-output="101"><summary>Show the whole output, 101 lines of YAML<\/summary><pre/);
+    // The input fence stays open.
+    expect(first.match(/<pre/g)).toHaveLength(2);
+    expect(first.match(/data-long-output/g)).toHaveLength(1);
+    const short = (await renderRepoFile('skills/mutate/SKILL.md', withOutput('k: 1\nl: 2\nm: 3'))).code;
+    expect(short).not.toContain('data-long-output');
+  });
+
+  it("drops the thematic break that ended an example in the Markdown, and keeps the example's text", async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    const first = html.slice(html.indexOf('<details class="skill-example" open>'), html.indexOf('</details>', html.indexOf('<details class="skill-example" open>')));
+    expect(first).toContain('<p>one</p>');
+    expect(first).not.toContain('<hr');
+  });
+
+  it('gives a "Failure" example the caution glyph and the others the code glyph', async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    const summaries = [...html.matchAll(/<summary class="skill-example__summary">([^]*?)<\/summary>/g)].map((m) => m[1]!);
+    expect(summaries[0]).toMatch(/data-glyph="code"/);
+    expect(summaries[1]).toMatch(/data-glyph="caution"/);
+  });
+
+  it('puts Safety Constraints in a panel and leaves the next section alone', async () => {
+    const html = await render('skills/mutate/SKILL.md');
+    expect(html).toMatch(/<div class="skill-safety">[^]*<div class="skill-safety__body"><ul>[^]*<code>mutation<\/code>/);
+    expect(html).toMatch(/<h2 id="composition-patterns">[^]*<p>after<\/p>/);
+  });
+
+  it('folds a composed skill\'s output fence and examples, and leaves the rest as written', async () => {
+    const html = await render('skills/debug-workflow/SKILL.md');
+    expect(html).toMatch(/<details class="fig-details skill-fence"><summary>The output as the skill writes it, in YAML<\/summary>/);
+    expect([...html.matchAll(/<details class="skill-example">/g)]).toHaveLength(2);
+    expect(html).toMatch(/<h3 id="example-1-happy-path">/);
+    expect(html).not.toMatch(/skill-steps|skill-safety|skill-req|skill-contract/);
+  });
+});

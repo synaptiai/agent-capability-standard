@@ -1,0 +1,152 @@
+/*
+ * Mermaid figures (src/plugins/remark-mermaid.ts). The SVG is made of rects
+ * with these classes and no colours of its own, so the theme tokens colour it
+ * in light and dark:
+ * - boxes: --bg fill, --line outline (the border colour of every panel);
+ * - groups: --bg-mut fill, --ink-3 outline, --ink-2 label;
+ * - links and arrowheads: --ink-2, thick links --ink;
+ * - labels: --ink on boxes, on a --bg patch over a link;
+ * - a box that names a capability: --layer outline and a symbol chip on --tint.
+ * The drawing is a fixed size in px: labels are 14px, or 12px in the phone
+ * layout (the font-size attribute on the svg; the CSS sets no size). When the authored
+ * layout is wider than a phone, the figure also carries a top-to-bottom
+ * layout, and a container query shows the wide one once its box is at least
+ * the width named by the fit class (src/lib/mermaid/render.ts FIT_STEPS).
+ */
+@layer components {
+  .fig-mermaid {
+    margin: var(--space-5) 0;
+    padding: var(--space-2);
+    background: var(--bg-sub);
+    border: var(--border);
+    box-shadow: var(--shadow-1);
+  }
+
+  @media (min-width: 600px) {
+    .fig-mermaid {
+      padding: var(--space-5);
+    }
+  }
+
+  .fig-mermaid__eyebrow {
+    margin: 0;
+    font-family: var(--font-eyebrow);
+    font-size: 14px;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .fig-mermaid__title {
+    margin: var(--space-2) 0 var(--space-4);
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .fig-mermaid__draw {
+    container: mermaid / inline-size;
+    display: grid;
+    justify-items: center;
+  }
+
+  .fig-mermaid__svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    color: var(--ink);
+    overflow: visible;
+  }
+
+  .fig-mermaid__svg--wide {
+    display: none;
+  }
+
+  .fig-mermaid__draw:not([class*="--fit-"]) .fig-mermaid__svg--wide {
+    display: block;
+  }
+
+  @container mermaid (min-width: 350px) {
+    .fig-mermaid__draw--fit-350 .fig-mermaid__svg--wide { display: block; }
+    .fig-mermaid__draw--fit-350 .fig-mermaid__svg--narrow { display: none; }
+  }
+
+  @container mermaid (min-width: 400px) {
+    .fig-mermaid__draw--fit-400 .fig-mermaid__svg--wide { display: block; }
+    .fig-mermaid__draw--fit-400 .fig-mermaid__svg--narrow { display: none; }
+  }
+
+  @container mermaid (min-width: 450px) {
+    .fig-mermaid__draw--fit-450 .fig-mermaid__svg--wide { display: block; }
+    .fig-mermaid__draw--fit-450 .fig-mermaid__svg--narrow { display: none; }
+  }
+
+  @container mermaid (min-width: 500px) {
+    .fig-mermaid__draw--fit-500 .fig-mermaid__svg--wide { display: block; }
+    .fig-mermaid__draw--fit-500 .fig-mermaid__svg--narrow { display: none; }
+  }
+
+  @container mermaid (min-width: 550px) {
+    .fig-mermaid__draw--fit-550 .fig-mermaid__svg--wide { display: block; }
+    .fig-mermaid__draw--fit-550 .fig-mermaid__svg--narrow { display: none; }
+  }
+
+  @container mermaid (min-width: 600px) {
+    .fig-mermaid__draw--fit-600 .fig-mermaid__svg--wide { display: block; }
+    .fig-mermaid__draw--fit-600 .fig-mermaid__svg--narrow { display: none; }
+  }
+
+  @container mermaid (min-width: 650px) {
+    .fig-mermaid__draw--fit-650 .fig-mermaid__svg--wide { display: block; }
+    .fig-mermaid__draw--fit-650 .fig-mermaid__svg--narrow { display: none; }
+  }
+
+  @container mermaid (min-width: 700px) {
+    .fig-mermaid__draw--fit-700 .fig-mermaid__svg--wide { display: block; }
+    .fig-mermaid__draw--fit-700 .fig-mermaid__svg--narrow { display: none; }
+  }
+
+  .fig-mermaid__svg text {
+    font-family: var(--font-mono);
+    fill: currentColor;
+  }
+
+  .fig-mermaid__svg .mmd-fill { fill: var(--bg); }
+  .fig-mermaid__svg .mmd-line { fill: var(--line); }
+  .fig-mermaid__svg .mmd-group-fill { fill: var(--bg-mut); }
+  .fig-mermaid__svg .mmd-group-line { fill: var(--ink-3); }
+  .fig-mermaid__svg .mmd-group-label { fill: var(--ink-2); font-weight: 700; }
+  .fig-mermaid__svg .mmd-stroke { fill: var(--ink-2); }
+  .fig-mermaid__svg .mmd-edge--thick .mmd-stroke { fill: var(--ink); }
+  .fig-mermaid__svg .mmd-label-bg { fill: var(--bg); }
+  .fig-mermaid__svg .mmd-edge-label .mmd-label { fill: var(--ink-2); }
+
+  /*
+   * A box that names a capability: the outline in its layer colour and a
+   * chip with the two-letter symbol on the layer tint, as a periodic tile.
+   * The symbol and the label carry identity; the colour is never alone.
+   */
+  .fig-mermaid__svg .mmd-node--cap .mmd-line { fill: var(--layer); }
+  .fig-mermaid__svg .mmd-chip-line { fill: var(--layer); }
+  .fig-mermaid__svg .mmd-chip-fill { fill: var(--tint); }
+  .fig-mermaid__svg .mmd-chip-label { fill: var(--ink); font-weight: 700; }
+
+  .fig-mermaid__caption {
+    margin-top: var(--space-4);
+    color: var(--ink-2);
+  }
+
+  .fig-mermaid__text {
+    margin-top: var(--space-2);
+  }
+
+  .fig-mermaid__text summary {
+    cursor: pointer;
+    color: var(--link);
+    width: fit-content;
+  }
+
+  .fig-mermaid__text ul {
+    margin: var(--space-2) 0 0;
+  }
+}

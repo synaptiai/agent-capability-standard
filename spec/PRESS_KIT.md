@@ -30,6 +30,18 @@ Most agent systems fail in production because:
 
 This standard fixes that by making reliability *structural*.
 
+```mermaid
+---
+title: The four failures and what each lacks
+---
+flowchart LR
+  accDescr: Agent systems fail in production because composition has no contracts, state has no provenance, conflict resolution has no trust model and safety has no checkpoints or rollback.
+  c[Implicit composition] -->|lacks| c2[Contracts]
+  s[Ungrounded state] -->|lacks| s2[Provenance]
+  t[Undefined conflict resolution] -->|lacks| t2[A trust model]
+  r[Retrofitted safety] -->|lacks| r2[Checkpoints and rollback]
+```
+
 ## Key Innovations
 
 - **Atomic capability ontology** with explicit dependencies and I/O schemas
@@ -64,6 +76,17 @@ This standard fixes that by making reliability *structural*.
 | **Validation** | Runtime only | Schema validation | Static + runtime (L1–L4 conformance) |
 | **Provenance** | Rare | Not in scope | Required (grounded claims) |
 | **Relationship** | Can implement this standard | Complementary (transport layer) | Defines capability semantics |
+
+
+```mermaid
+---
+title: How the three relate
+---
+flowchart LR
+  accDescr: Frameworks such as LangChain and AutoGPT can implement the standard, MCP complements it as the transport layer, and the standard defines the capability semantics.
+  fw["LangChain, AutoGPT: frameworks"] -->|can implement| acs["Agent Capability Standard: capability semantics"]
+  mcp["MCP: transport layer"] ---|complementary| acs
+```
 
 ## Social Media Templates
 

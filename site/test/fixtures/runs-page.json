@@ -1,0 +1,23 @@
+{
+  "comment": "The geometry of runs-page.html, worked out by hand from its fixed heights: the body starts under the 100px header; the 50x30 drawing is too small to count; #notes runs to the next h2 (#after), past its h3; #code exempts its first open details whole (6500..7650: a 50px summary, two 500px fences and a 100px lead-in), because its fences together are 1000px, over 900px; the closed details before it is passed over and adds only its 50px summary (its 1200px fence is not shown); #gone is not on the page; #short's open details holds 300px of code, under 900px, so nothing there is exempt.",
+  "entries": [
+    { "page": "template:fixture", "anchor": "notes", "category": "a", "run": "Notes" },
+    { "page": "template:fixture", "anchor": "code", "category": "b", "extent": "open-first-example", "run": "Code" },
+    { "page": "template:fixture", "anchor": "gone", "category": "c", "run": "Gone" },
+    { "page": "template:fixture", "anchor": "short", "category": "b", "extent": "open-first-example", "run": "Short" }
+  ],
+  "template": "fixture",
+  "geometry": {
+    "body": { "top": 100, "bottom": 8450 },
+    "figures": [
+      { "top": 1100, "bottom": 1400 },
+      { "top": 6200, "bottom": 6300 }
+    ],
+    "exempt": [
+      { "key": "0", "label": "#notes (a)", "top": 1400, "bottom": 4050 },
+      { "key": "1", "label": "#code (b)", "top": 6500, "bottom": 7650 }
+    ]
+  },
+  "small": [{ "top": 4100, "bottom": 4300 }],
+  "missing": ["2"]
+}

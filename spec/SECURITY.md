@@ -23,6 +23,26 @@ The action capabilities (`execute`, `mutate`, `send`) are constrained by ontolog
 - `plan` (ordering, `precedes`): When a workflow has a plan, it must come before `execute` and `mutate`
 - `verify` (ordering, `precedes`): A verification must come after the action it checks
 
+```mermaid
+---
+title: What must come before an action
+---
+flowchart LR
+  accDescr: checkpoint is required before mutate and send (solid lines, requires), and constrain should run before execute, mutate and send (dotted lines, soft_requires).
+  checkpoint --> mutate & send
+  constrain -.-> execute & mutate & send
+```
+
+```mermaid
+---
+title: The ordering edges around an action
+---
+flowchart LR
+  accDescr: A plan, when present, comes before execute and mutate, and verify comes after the action it checks; both are precedes edges.
+  plan -->|precedes| execute & mutate
+  execute & mutate & send -->|precedes| verify
+```
+
 ### 1.3 Claims Must Be Grounded
 
 All outputs SHOULD include:
@@ -38,6 +58,18 @@ Hard constraints prevent catastrophic entity conflation:
 - Never merge entities with conflicting unique identifiers
 - Never merge across incompatible entity types
 - Always record merge/split operations in lineage
+
+```mermaid
+---
+title: The hard constraints on a merge
+---
+flowchart TB
+  accDescr: A candidate merge is never made when the unique identifiers conflict or the entity types are incompatible; otherwise the merge is made and recorded in lineage.
+  c[Candidate merge] --> q{"Conflicting unique identifiers, or incompatible entity types?"}
+  q -->|yes| no[Never merged]
+  q -->|no| m[Merge]
+  m --> lin[Recorded in lineage]
+```
 
 ---
 
@@ -98,6 +130,18 @@ Hard constraints prevent catastrophic entity conflation:
 - Retention policies bound state growth
 - Anomaly detection capabilities
 
+```mermaid
+---
+title: World state versions against silent drift
+---
+flowchart LR
+  accDescr: Each world state version links to its parent, and compare detects the changes between two versions.
+  v1[World state version] -->|parent link| v0[Parent version]
+  v1 --> cmp[compare]
+  v0 --> cmp
+  cmp --> ch[Changes between versions]
+```
+
 #### 2.2.5 Schema Spoofing
 
 **Scenario**: Attacker provides data that passes schema validation but has malicious semantics.
@@ -127,6 +171,17 @@ Hard constraints prevent catastrophic entity conflation:
 - Gate can block if `${checkpoint_out.checkpoint_id} == null`
 - Hook (pretooluse_require_checkpoint) enforces at runtime
 
+```mermaid
+---
+title: Three guards against checkpoint bypass
+---
+flowchart LR
+  accDescr: A mutate, send or rollback step without an earlier checkpoint is rejected statically by the validator with V102, can be blocked by a gate when checkpoint_id is null, and is blocked at runtime by the pretooluse_require_checkpoint hook.
+  step["mutate, send or rollback with no checkpoint"] --> val["Validator: V102"]
+  step --> gate["Gate: no checkpoint_id"]
+  step --> hook["Runtime hook: require checkpoint"]
+```
+
 #### 2.2.8 Recovery Loop Exhaustion
 
 **Scenario**: Workflow enters infinite recovery loop.
@@ -135,6 +190,16 @@ Hard constraints prevent catastrophic entity conflation:
 - max_loops limit on recovery
 - Timeout on steps
 - R404 error when recovery exhausted
+
+```mermaid
+---
+title: When recovery runs out
+---
+flowchart TB
+  accDescr: A recovery loop repeats up to its max_loops limit, and R404 is raised when recovery is exhausted.
+  rec[Recovery loop] -->|"up to max_loops"| rec
+  rec -->|exhausted| r404[R404 error]
+```
 
 ---
 
@@ -194,6 +259,19 @@ Deployments SHOULD:
 ---
 
 ## 5. Security Hooks
+
+```mermaid
+---
+title: Where the hooks run
+---
+flowchart TB
+  accDescr: Before a tool runs, pretooluse_require_checkpoint blocks a mutation without a checkpoint; after it runs, posttooluse_log_tool adds to the audit trail.
+  call[Tool call] --> hook[pretooluse_require_checkpoint]
+  hook --> pre{"A mutation without a checkpoint?"}
+  pre -->|yes| block[Mutation blocked]
+  pre -->|no| run[Tool runs]
+  run --> post["posttooluse_log_tool: audit trail"]
+```
 
 ### 5.1 Pre-Tool Use Hooks
 

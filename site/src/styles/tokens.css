@@ -49,6 +49,14 @@
     --layer-REMEMBER: #4d7c0f;
     --layer-COORDINATE: #1d4ed8;
     --tint-amount: 12%;
+    /* The fill of a "yes" cell in a safety panel: the layer mixed toward --bg.
+       In dark a stronger mix of the warm layers reads as brown, so the fill
+       stays faint there and the cell takes a layer-coloured border and bar. */
+    --safety-on-amount: 12%;
+    /* How much of the layer colour the "yes" cell's border and 4px top bar
+       take: none in light (a --line border, no bar, as approved), all of it
+       in dark, where the faint fill alone does not mark the cell. */
+    --safety-on-edge: 0%;
 
     /* Risk (red and gold are used for nothing else) */
     --risk-low: #3f5168;
@@ -56,6 +64,22 @@
     --risk-high: #b91c1c;
     --on-risk-high: #ffffff;
     --ok: #12733a;
+
+    /* Heat steps for counts (visual spec 1.2): --indicator mixed toward --bg at
+       50, 65, 80 and 100%. A heat cell always prints its count and has a 2px
+       --line border. Count text: --ink on steps 1 to 3, --bg on step 4. */
+    --heat-1: #81b4d0;
+    --heat-2: #5b9ec2;
+    --heat-3: #3587b4;
+    --heat-4: #0369a1;
+    --on-heat-1: var(--ink);
+    --on-heat-2: var(--ink);
+    --on-heat-3: var(--ink);
+    --on-heat-4: var(--bg);
+    /* The 2px border of a heat cell and a legend swatch. It must stand 3:1
+       against every step: --line does in light; in dark --line is as light
+       as the steps, so the border is the page colour there. */
+    --heat-line: var(--line);
 
     /* Requirement keywords share the risk colours */
     --kw-must: var(--risk-high);
@@ -107,6 +131,7 @@
     /* Motion */
     --step-hover: 120ms steps(2, end);
     --step-marker: 80ms steps(2, end);
+    --step-replay: 280ms steps(1, end);
 
     /* Shiki's css-variables theme reads these names */
     --astro-code-foreground: var(--code-foreground);
@@ -151,11 +176,28 @@
       --layer-REMEMBER: #bef264;
       --layer-COORDINATE: #6f9cff;
       --tint-amount: 20%;
+      --safety-on-amount: 8%;
+      --safety-on-edge: 100%;
       --risk-low: #b4c0d0;
       --risk-medium: #facc15;
       --risk-high: #f87171;
       --on-risk-high: #0b111e;
       --ok: #86efac;
+      /* Count text: --ink on heat step 1, --bg on steps 2 to 4. In dark the
+         steps are --indicator mixed toward --bg at 47, 64, 82 and 100%, not
+         50, 65, 80: the first three were hard to tell apart, and these
+         spread them as far as the contrast pairs allow (step 1 must keep 3:1
+         against the panel, step 2 4.5:1 for its --bg count). Adjacent
+         OKLab distance 10.5 to 10.8, was 9.0 to 11.6; --ordinal passes. */
+      --heat-1: #416c86;
+      --heat-2: #548dac;
+      --heat-3: #68b0d4;
+      --heat-4: #7dd3fc;
+      --on-heat-1: var(--ink);
+      --on-heat-2: var(--bg);
+      --on-heat-3: var(--bg);
+      --on-heat-4: var(--bg);
+      --heat-line: var(--bg);
       --callout-amount: 10%;
       --code-foreground: #eef2f8;
       --code-background: #0f1726;
@@ -199,11 +241,28 @@
     --layer-REMEMBER: #bef264;
     --layer-COORDINATE: #6f9cff;
     --tint-amount: 20%;
+    --safety-on-amount: 8%;
+    --safety-on-edge: 100%;
     --risk-low: #b4c0d0;
     --risk-medium: #facc15;
     --risk-high: #f87171;
     --on-risk-high: #0b111e;
     --ok: #86efac;
+    /* Count text: --ink on heat step 1, --bg on steps 2 to 4. In dark the
+       steps are --indicator mixed toward --bg at 47, 64, 82 and 100%, not
+       50, 65, 80: the first three were hard to tell apart, and these
+       spread them as far as the contrast pairs allow (step 1 must keep 3:1
+       against the panel, step 2 4.5:1 for its --bg count). Adjacent
+       OKLab distance 10.5 to 10.8, was 9.0 to 11.6; --ordinal passes. */
+    --heat-1: #416c86;
+    --heat-2: #548dac;
+    --heat-3: #68b0d4;
+    --heat-4: #7dd3fc;
+    --on-heat-1: var(--ink);
+    --on-heat-2: var(--bg);
+    --on-heat-3: var(--bg);
+    --on-heat-4: var(--bg);
+    --heat-line: var(--bg);
     --callout-amount: 10%;
     --code-foreground: #eef2f8;
     --code-background: #0f1726;

@@ -9,6 +9,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { githubHeadingIds, REF_ID_PREFIX, renderedHeadingIds } from './check-slugs';
 import { readRepoFile } from './repo';
+import { REVIEW_DIR } from './review';
 import { MARKDOWN_TEMPLATES, ROUTES, type Route } from './routes';
 
 export { REF_ID_PREFIX };
@@ -18,10 +19,12 @@ export function pageFile(url: string): string {
   return path.posix.join(url.replace(/^\//, ''), 'index.html');
 }
 
+/** HTML files under dir, the review pages (dist/_review/, not routes) aside. */
 function htmlFiles(dir: string, base = dir): string[] {
   const out: string[] = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
+    if (e.isDirectory() && dir === base && e.name === REVIEW_DIR) continue;
     if (e.isDirectory()) out.push(...htmlFiles(p, base));
     else if (e.name.endsWith('.html')) out.push(path.relative(base, p).split(path.sep).join('/'));
   }

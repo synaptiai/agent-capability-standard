@@ -62,6 +62,18 @@ For regulatory submission:
 4. Use **EUAIA-QMS-001** as a checklist to verify your QMS coverage
 5. Use **EUAIA-TEC-001** as the basis for your Annex IV submission
 
+```mermaid
+---
+title: The deployer's path through the suite
+---
+flowchart TB
+  accDescr: A deployer starts with the risk classification, follows the notified body assessment only when the deployment is high-risk, completes the bracketed fields, checks QMS coverage against the QMS document and bases the Annex IV submission on the technical documentation.
+  cls["EUAIA-CLS-001: determine the risk classification"] -->|high-risk| ntb["EUAIA-NTB-001: determine the assessment route"]
+  cls -->|not high-risk| fill
+  ntb --> fill[Complete the bracketed fields]
+  fill --> qms["EUAIA-QMS-001: check QMS coverage"] --> tec["EUAIA-TEC-001: base the Annex IV submission on it"]
+```
+
 ### For Auditors and Assessors
 
 1. Start with **EUAIA-TEC-001** for the comprehensive technical overview

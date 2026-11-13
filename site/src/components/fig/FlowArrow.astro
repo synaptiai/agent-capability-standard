@@ -1,0 +1,26 @@
+---
+// A short pixel arrow between two stacked parts of a figure (a 2px line and
+// a 3-step chevron, visual spec 1.2). Decorative: the parts it joins carry
+// the order in their text.
+//
+// Props:
+// - dir: 'down' | 'right', default 'down'.
+// - length: number, default 20. The arrow's length in px, a multiple of 2.
+import { chevron, run } from '../../pixel/lines';
+import Rects from './Rects.astro';
+
+interface Props {
+  dir?: 'down' | 'right';
+  length?: number;
+}
+
+const { dir = 'down', length = 20 } = Astro.props;
+if (length % 2 !== 0 || length < 12) throw new Error(`FlowArrow: length must be an even number from 12, got ${length}`);
+const across = 12;
+const [w, h] = dir === 'down' ? [across, length] : [length, across];
+const rects =
+  dir === 'down'
+    ? [...run(across / 2, 0, across / 2, length - 2, 'ink-2'), ...chevron(across / 2, length - 1, 'down', 'ink-2')]
+    : [...run(0, across / 2, length - 2, across / 2, 'ink-2'), ...chevron(length - 1, across / 2, 'right', 'ink-2')];
+---
+<svg class:list={['flow-arrow', `flow-arrow--${dir}`]} viewBox={`0 0 ${w} ${h}`} width={w} height={h} shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={rects} /></svg>

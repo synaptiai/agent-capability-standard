@@ -20,6 +20,17 @@ Traditional AI capability frameworks treat each modality as a separate skill cat
 
 Grounded Agency takes a different approach. We observe that **the cognitive operation is the same regardless of modality**. Detecting a pattern in text, detecting an object in an image, and detecting an anomaly in an audio stream all perform the same fundamental operation: find occurrences of a pattern in data. What changes is the *domain*, not the *verb*.
 
+```mermaid
+---
+title: One verb, three modalities
+---
+flowchart LR
+  accDescr: Detecting a pattern in text, an object in an image and an anomaly in audio are one operation, detect, finding occurrences of a pattern in data; only the domain changes.
+  t[A pattern in text] --> detect
+  i[An object in an image] --> detect
+  a[An anomaly in an audio stream] --> detect
+```
+
 This insight drives our domain parameterization model:
 
 ```
@@ -60,6 +71,16 @@ error:
   code: unsupported_domain
   domain: "haptic.pressure"
   message: "No processing pipeline available for domain 'haptic.pressure'"
+```
+
+```mermaid
+---
+title: A domain the implementation does not support
+---
+flowchart TB
+  accDescr: When the implementation has no processing pipeline for the step's domain value, it returns an unsupported_domain error naming the domain, so the gap is found rather than failing silently.
+  step["Step with domain: haptic.pressure"] --> has{"Pipeline for this domain?"}
+  has -->|no| err["Error unsupported_domain, naming the domain"]
 ```
 
 This allows workflow authors to detect modality gaps at design time rather than encountering silent failures at runtime.
@@ -119,6 +140,18 @@ The `observe` and `receive` capabilities accept any data type and do not use mod
 ## 3. Examples
 
 ### 3.1 Text Modality Examples
+
+```mermaid
+---
+title: The text examples at a glance
+---
+flowchart LR
+  accDescr: The three text examples use detect with domain text.entity, classify with domain text.sentiment, and transform from text.en to text.pt-BR.
+  m[Text input]
+  m --> c0["detect(text.entity)"]
+  m --> c1["classify(text.sentiment)"]
+  m --> c2["transform(text.en to text.pt-BR)"]
+```
 
 **Example 1: Named Entity Recognition**
 
@@ -195,6 +228,18 @@ confidence: 0.88
 ```
 
 ### 3.2 Image Modality Examples
+
+```mermaid
+---
+title: The image examples at a glance
+---
+flowchart LR
+  accDescr: The three image examples use detect with domain image.object, measure with domain image.quality, and generate with domain image in svg format.
+  m[Image input]
+  m --> c0["detect(image.object)"]
+  m --> c1["measure(image.quality)"]
+  m --> c2["generate(image, svg)"]
+```
 
 **Example 1: Object Detection in Images**
 
@@ -302,6 +347,17 @@ confidence: 0.95
       speaker_diarization: true
 ```
 
+```mermaid
+---
+title: Speech detection, then transcription
+---
+flowchart TB
+  accDescr: detect with domain audio.speech finds speech segments in the retrieved audio, and transform turns those segments from audio.speech into text.transcript.
+  r["retrieve_out.data"] --> d["detect, domain: audio.speech"]
+  d -->|speech_segments_out.matches| t["transform: audio.speech to text.transcript"]
+  t --> o[transcript_out]
+```
+
 Output for detect step:
 ```yaml
 detected: true
@@ -364,6 +420,18 @@ confidence: 0.84
 ```
 
 ### 3.4 Video Modality Examples
+
+```mermaid
+---
+title: The video examples at a glance
+---
+flowchart LR
+  accDescr: The three video examples use detect with domain video.action, measure with domain video.stability, and classify with domain video.activity.
+  m[Video input]
+  m --> c0["detect(video.action)"]
+  m --> c1["measure(video.stability)"]
+  m --> c2["classify(video.activity)"]
+```
 
 **Example 1: Action Detection in Video**
 
@@ -457,6 +525,17 @@ evidence_anchors:
 confidence: 0.89
 ```
 
+```mermaid
+---
+title: The cross-modal consistency check
+---
+flowchart LR
+  accDescr: The product text and its images go into detect with domain multimodal.inconsistency, which returns the mismatches with a text span anchor and a bounding box anchor for each.
+  text[Product listing text] --> d["detect, domain: multimodal.inconsistency"]
+  img[Product images] --> d
+  d --> m["mismatch_out: matches, text_span and bounding_box anchors"]
+```
+
 **Example 2: Multi-Modal Search**
 
 ```yaml
@@ -497,6 +576,17 @@ confidence: 0.89
     constraints:
       voice: "neutral"
       speed: 1.0
+```
+
+```mermaid
+---
+title: Caption, then narration
+---
+flowchart TB
+  accDescr: transform turns an image into a text caption, and generate with domain audio turns the caption into audio narration.
+  img[Retrieved image] --> t["transform: image.jpg to text.caption"]
+  t -->|caption_out.output| g["generate, domain: audio"]
+  g --> n["narration_out (wav)"]
 ```
 
 ---
@@ -591,6 +681,17 @@ evidence_anchor:
 
 A claim that a product listing is inconsistent requires evidence from both text and image:
 
+```mermaid
+---
+title: A composite anchor holds one anchor per modality
+---
+flowchart TB
+  accDescr: A cross-modal claim carries a composite anchor whose nested anchors reference the text span and the image bounding box that it rests on.
+  claim["Claim: the listing is inconsistent"] --> comp["Composite anchor, kind: composite"]
+  comp -->|nested_anchors| ts["text_span: listing_001.txt, characters 45-60"]
+  comp -->|nested_anchors| bb["bounding_box: product_001.jpg, 100,200,400,300"]
+```
+
 ```yaml
 evidence_anchors:
   - ref: "multimodal:listing_001:text+image"
@@ -655,6 +756,16 @@ For more information on OASF:
 - OASF Skill Categories: [https://schema.oasf.outshift.com/skill_categories](https://schema.oasf.outshift.com/skill_categories) (as of OASF v0.8.0, January 2026)
 - Full comparison: [docs/research/analysis/OASF_comparison.md](../research/analysis/OASF_comparison.md)
 
+```mermaid
+---
+title: Grounded Agency against OASF on modality
+---
+flowchart LR
+  accDescr: OASF lists modality skills as separate entries in modality categories; Grounded Agency parameterizes the same atomic capabilities with the same expressiveness, and every modality invocation inherits evidence anchors, confidence scores and, where applicable, checkpoint requirements.
+  oasf["OASF: a skill per modality, in Computer Vision, Audio and Multi-modal categories"] -->|same expressiveness| ga["Grounded Agency: atomic capabilities with a domain parameter"]
+  ga --> safe["Inherited: evidence anchors, confidence scores, checkpoint requirements where applicable"]
+```
+
 ---
 
 ## Appendix A: Domain Parameter Naming Conventions
@@ -689,6 +800,28 @@ When no specialization is needed, the modality alone suffices:
 ## Appendix B: Complete Workflow -- Multi-Modal Content Moderation
 
 This appendix demonstrates a full workflow that uses domain parameters across multiple modalities.
+
+```mermaid
+---
+title: The content moderation workflow
+---
+flowchart TB
+  accDescr: The workflow retrieves the submission, detects speech in the audio, classifies text and images in one parallel group, transcribes the speech, looks for cross-modal evasion, integrates the signals, decides, explains and audits.
+  retrieve["1 retrieve the submission"] --> det["2 detect speech in the audio"]
+  subgraph modality_analysis [parallel_group modality_analysis]
+    ct["3 classify the text"]
+    ci["4 classify the images"]
+  end
+  det --> ct
+  det --> ci
+  ct --> tr["5 transform speech to text"]
+  ci --> tr
+  tr --> ev["6 detect cross-modal evasion"]
+  ev --> integ["7 integrate all signals"]
+  integ --> verdict["8 classify, domain: moderation.decision"]
+  verdict --> explain["9 explain the decision"]
+  explain --> audit["10 audit the decision"]
+```
 
 ```yaml
 # Standard version: 1.1.0

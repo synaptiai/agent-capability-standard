@@ -1,0 +1,50 @@
+---
+// F-E5, the 1.1.0 changes to the ontology's edges (visual spec 3.7): one row
+// per changed edge, its capabilities as 24px tiles, then the 1.0.0 type's
+// mark (the word "new" for a new edge), an arrow, and the 1.1.0 type's mark (a cross
+// for a removed edge), and under them the table's reason for the change.
+// Every 1.1.0 type is checked against the ontology when the table is parsed.
+// The table under the figure, folded into a <details> by the page since the
+// figure now says all it says, is its text equivalent.
+//
+// Props:
+// - id: string, required. A ref- id.
+// - n: number, required. The figure number.
+import { changesCaption, edgeChanges } from '../../lib/edge-figures';
+import { chevron } from '../../pixel/lines';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+import Rects from './Rects.astro';
+
+interface Props {
+  id: string;
+  n: number;
+}
+
+const { id, n } = Astro.props;
+const rows = edgeChanges();
+const arrow = [{ x: 0, y: 6, w: 14, h: 2, ink: 'current' as const }, ...chevron(18, 7, 'right', 'current')];
+---
+<Figure id={id} n={n} title="What changed in 1.1.0" caption={changesCaption(rows)} kind="edge-changes">
+  <ul class="edge-changes">
+    {rows.map((r) => (
+      <li class="edge-changes__row" data-from={r.from} data-to={r.to}>
+        <span class="edge-changes__pair">
+          <MiniTile id={r.from} size={24} /><code aria-hidden="true">{r.from}</code><span class="edge-changes__to" aria-hidden="true">→</span><MiniTile id={r.to} size={24} /><code aria-hidden="true">{r.to}</code>
+        </span>
+        <span class="edge-changes__types">
+          <span class="edge-changes__type">
+            {r.before ? <><PixelGlyph name={`mark:${r.before}`} /><code>{r.before}</code></> : <span class="edge-changes__none">new</span>}
+          </span>
+          <svg class="edge-changes__arrow" viewBox="0 0 20 14" width="20" height="14" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><Rects rects={arrow} /></svg>
+          <span class="fig-sr"> becomes </span>
+          <span class="edge-changes__type">
+            {r.after ? <><PixelGlyph name={`mark:${r.after}`} /><code>{r.after}</code></> : <><PixelGlyph name="close" /><span>removed</span></>}
+          </span>
+        </span>
+        <span class="edge-changes__why">{r.why}</span>
+      </li>
+    ))}
+  </ul>
+</Figure>

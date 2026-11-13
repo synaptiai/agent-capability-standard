@@ -52,6 +52,19 @@ We present **Grounded Agency**, a capability ontology and workflow framework tha
 
 5. **Workflow DSL & Validator** (§7): A domain-specific language for composing capabilities with input bindings, parallel groups, gates, and recovery loops, plus a design-time validator that performs type inference and suggests coercions.
 
+```mermaid
+---
+title: The five contributions
+---
+flowchart LR
+  accDescr: Grounded Agency contributes a capability ontology, a world state schema, a trust model, identity resolution, and a workflow DSL with a validator, described in sections 3 to 7.
+  ga[Grounded Agency] --> ont["Capability ontology (§3): 36 capabilities in 9 layers"]
+  ga --> ws["World state schema (§4): entities, state, provenance, typed uncertainty"]
+  ga --> trust["Trust model (§5): source weights, temporal decay"]
+  ga --> id["Identity resolution (§6): 8-feature scoring, merge and split"]
+  ga --> dsl["Workflow DSL and validator (§7): bindings, gates, recovery, type inference"]
+```
+
 We evaluate the framework on 5 reference workflows (§8), demonstrating that the design-time validator catches 100% of seeded type errors. The complete framework is released as open source.
 
 ---
@@ -84,6 +97,17 @@ The digital twin concept originated in manufacturing [13] and has expanded to en
 Knowledge graphs [16] provide a complementary approach, representing entities and relationships as typed edges. Google's Knowledge Vault [17] demonstrated extraction at scale, while Wikidata [18] showed the value of community-maintained structured knowledge. Commercial platforms like Azure Digital Twins [32] and AWS IoT TwinMaker provide managed infrastructure for digital twin deployment, though they lack the formal provenance and uncertainty semantics we introduce.
 
 Grounded Agency's world state schema combines elements of both: entities and relationships (from knowledge graphs) with time-indexed state variables and transition rules (from digital twins), unified by a provenance model that grounds every claim in evidence.
+
+```mermaid
+---
+title: Where the world state schema comes from
+---
+flowchart TB
+  accDescr: The world state schema takes entities and relationships from knowledge graphs and time-indexed state variables and transition rules from digital twins, and a provenance model grounds every claim in evidence.
+  kg[Knowledge graphs] -->|entities and relationships| ws[World state schema]
+  dt[Digital twins] -->|"time-indexed state variables, transition rules"| ws
+  prov[Provenance model] -->|grounds every claim in evidence| ws
+```
 
 ### 2.4 Type Systems for Workflows
 
@@ -164,6 +188,7 @@ edges:
   - {from: verify, to: constrain, type: alternative_to}
 ```
 
+
 Key design decisions:
 
 1. **100% Schema Coverage**: All 36 capabilities have both `input_schema` and `output_schema`, enabling static type checking.
@@ -191,6 +216,15 @@ The ontology defines **99 dependency edges** across **7 edge types**:
 - **conflicts_with** (4 edges, 2 symmetric pairs): Mutual exclusivity of concurrent execution; the two capabilities may not share a `parallel_group`, though they may run in sequence (a rollback after a mutation is the normal recovery pattern).
 
 - **requires** (3 edges): Hard prerequisite. Every `mutate`, `send` and `rollback` step needs a `checkpoint` step running before it.
+
+```mermaid
+---
+title: The three requires edges
+---
+flowchart LR
+  accDescr: Every mutate, send and rollback step needs a checkpoint step running before it.
+  checkpoint ==>|must run before| mutate & send & rollback
+```
 
 A step runs before another when it comes earlier in the step list and is not in the same `parallel_group`. This graph enables the validator to check that workflows satisfy all hard prerequisites, respect temporal ordering, and never place conflicting capabilities in the same parallel group. See [spec/EDGE_TYPES.md](../spec/EDGE_TYPES.md) for full edge type documentation.
 
@@ -223,6 +257,17 @@ Each DIS '23 verb was expanded along three axes:
 2. **Operational requirements**: Added `state`, `checkpoint`, `rollback`, etc.
 3. **Evidence grounding**: Added `ground`, `verify`, `audit`
 
+```mermaid
+---
+title: Three ways each DIS '23 verb was extended
+---
+flowchart LR
+  accDescr: Each DIS '23 verb was expanded by domain specialization, by adding operational capabilities, and by adding evidence grounding capabilities.
+  verbs["DIS '23 verbs: Detect, Identify, Estimate, Forecast, Compare, Discover, Generate, Act"] --> dom["Domain specialization: detect-entity, detect-anomaly, detect-drift"]
+  verbs --> ops["Operational requirements: state, checkpoint, rollback"]
+  verbs --> ev["Evidence grounding: ground, verify, audit"]
+```
+
 #### 3.4.3 Atomicity Criteria
 
 A capability is included only if it:
@@ -245,6 +290,15 @@ The derivation process yielded 36 atomic capabilities across 9 cognitive layers:
 - 4 Coordinate (multi-agent and user interaction)
 
 The key insight is **domain parameterization**: instead of 99 domain-specific capabilities (detect-anomaly, detect-entity, etc.), we use 36 atomic verbs with domain parameters (detect with domain: anomaly). This preserves expressiveness while maintaining a minimal ontology.
+
+```mermaid
+---
+title: Domain parameterization
+---
+flowchart LR
+  accDescr: Instead of a capability per domain, such as detect-anomaly and detect-entity, one atomic verb takes a domain parameter, which brings 99 capabilities down to 36.
+  old["99 domain-specific capabilities: detect-anomaly, detect-entity, …"] -->|domain parameter| new["36 atomic verbs: detect with domain: anomaly"]
+```
 
 For full derivation details, see [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
 
@@ -307,6 +361,16 @@ In this notation:
 
 **Mixed uncertainty** combines both components. Most real-world measurements involve both measurement error (epistemic) and natural variation (aleatoric).
 
+```mermaid
+---
+title: The three uncertainty types
+---
+flowchart TB
+  accDescr: Uncertainty is epistemic, a knowledge gap that more evidence reduces; aleatoric, inherent randomness that more data does not reduce; or mixed, which combines both.
+  epi["Epistemic(c, n): knowledge gap, reducible with more evidence"] -->|combined in| mix["Mixed(c, D): both components"]
+  ale["Aleatoric(c, [l, h]): inherent randomness, irreducible"] -->|combined in| mix
+```
+
 ### 4.4 Provenance Records
 
 Every entity, relationship, and state variable carries provenance:
@@ -351,6 +415,16 @@ transition_rules:
         - "restore prior status"
 ```
 
+```mermaid
+---
+title: The example transition rule
+---
+flowchart LR
+  accDescr: An anomaly_detected event whose message contains 500, with an error rate over 0.01, sets the payments API to degraded and raises the alert level; the rollback restores the prior status.
+  prior[Prior status] -->|"anomaly_detected, message contains 500, error_rate_5m > 0.01"| degraded["degraded, alert_level high"]
+  degraded -.->|rollback| prior
+```
+
 ---
 
 ## 5. Trust-Aware Conflict Resolution
@@ -389,6 +463,20 @@ score(claim) = trust(source) × confidence × recency(t)
 ```
 
 Tie-breakers apply in order: (1) prefer authoritative source for the specific field, (2) prefer higher confidence, (3) escalate to human.
+
+```mermaid
+---
+title: Choosing between conflicting claims
+---
+flowchart TB
+  accDescr: The claim with the highest score wins; a tie goes to the authoritative source for the field, then to higher confidence, then to a human.
+  claims[Conflicting claims] --> score["score(claim) = trust(source) × confidence × recency(t)"]
+  score -->|highest score| win[Winning claim]
+  score -->|tie| t1["1. Prefer the authoritative source for the field"]
+  t1 -->|still tied| t2[2. Prefer higher confidence]
+  t2 -->|still tied| t3[3. Escalate to a human]
+```
+
 
 ### 5.4 Field-Specific Authority
 
@@ -450,6 +538,7 @@ Based on confidence score:
 - **0.75–0.90**: Suggest merge (human review)
 - **0.60–0.75**: No action
 - **< 0.40**: Force split review
+
 
 **Hard constraints** prevent catastrophic merges:
 
@@ -534,6 +623,18 @@ failure_modes:
       max_loops: 3
 ```
 
+```mermaid
+---
+title: The recovery loop in the example above
+---
+flowchart TB
+  accDescr: When the verify step's result has passed == false, the step rolls back and the run goes back to the step that stores plan_out, carrying the failure evidence, at most 3 times.
+  plan["Step that stores plan_out"] --> verify[verify step]
+  verify -->|"passed == false"| rollback[Action: rollback]
+  rollback -->|"goto_step: plan_out, with failure_evidence, at most 3 loops"| plan
+```
+
+
 ### 7.4 Design-Time Type Validator
 
 The reference validator (the Rust core in `core/`, compiled into `grounded_agency._core` and run by `tools/validate_workflows.py`) performs these checks:
@@ -555,6 +656,18 @@ Type ::= string | number | boolean | object | array<T> | nullable<T> | map<K, V>
 ```
 
 When type mismatch occurs, the validator looks up the coercion registry and suggests inserting a transform step with the appropriate mapping.
+
+```mermaid
+---
+title: What the validator does with a binding's type
+---
+flowchart TB
+  accDescr: The validator checks that a producer's output type fits the consumer's input type; on a mismatch it looks up the coercion registry and suggests inserting a transform step with the matching mapping.
+  bind[A step's input binding] --> fit{"Producer output type ⊆ consumer input type?"}
+  fit -->|yes| ok[Binding type-checks]
+  fit -->|no| reg[Look up the coercion registry]
+  reg --> sug[Suggest a transform step with the mapping]
+```
 
 ### 7.5 Coercion Registry
 
@@ -639,6 +752,18 @@ We seeded 50 errors across the workflow catalog:
 
 The validator detected **100% of seeded errors** (50/50). For the 10 type mismatches, it suggested coercions from the registry for 8 (80%), with the remaining 2 requiring custom transform mappings.
 
+```mermaid
+---
+title: What happened to the 50 seeded errors
+---
+flowchart TB
+  accDescr: The validator detected all 50 seeded errors; for 8 of the 10 type mismatches it suggested a coercion from the registry, and the other 2 needed custom transform mappings.
+  seeded[50 seeded errors] -->|all 50 detected| det[Validator errors]
+  det -->|10 type mismatches| tm[Type mismatches]
+  tm -->|8| coerce[Coercion suggested from the registry]
+  tm -->|2| custom[Custom transform mapping needed]
+```
+
 ### 8.4 Comparison with Existing Frameworks
 
 | Framework | Uncertainty | Evidence | Reversible | Trust | Types | Identity | World Model |
@@ -694,6 +819,17 @@ This transparency is critical for deploying agents in high-stakes domains (healt
 
 **Learned trust weights**: Use reinforcement learning from conflict resolution feedback to calibrate source authority. Historical logs of which source "won" conflicts—and whether downstream verification succeeded—provide training signal.
 
+
+```mermaid
+---
+title: Where learned trust weights would come from
+---
+flowchart TB
+  accDescr: Historical logs of which source won each conflict, and whether downstream verification then succeeded, would give the training signal that reinforcement learning uses to calibrate source authority.
+  logs["Logs: which source won, did verification succeed"] -->|training signal| rl[Reinforcement learning]
+  rl -->|calibrates| auth[Source authority weights]
+```
+
 **Multi-agent protocols**: Extend the COORDINATE layer with formal protocols for delegation, negotiation, and consensus. This would enable principled composition of multiple Grounded Agency instances with explicit trust boundaries.
 
 **Capability synthesis**: Generate capability implementations from natural language specifications using code generation models.
@@ -717,6 +853,17 @@ The framework provides **structural safety** against certain failure modes but d
 
 The framework assumes a trusted implementation environment and focuses on preventing *accidental* failures (composition errors, type mismatches, missing checkpoints) rather than *adversarial* attacks. Defense against adversarial scenarios requires complementary measures: code review, access controls, and input sanitization.
 
+```mermaid
+---
+title: What structural safety covers
+---
+flowchart TB
+  accDescr: The framework's structural safety prevents accidental failures; adversarial attacks need complementary measures such as code review, access controls and input sanitization.
+  ss[Structural safety] -->|prevents| acc["Accidental failures: composition errors, type mismatches, missing checkpoints"]
+  ss -.->|does not cover| adv["Adversarial attacks: malicious implementations, evidence forgery, trust weight manipulation, prompt injection"]
+  comp["Complementary measures: code review, access controls, input sanitization"] -->|defend against| adv
+```
+
 ---
 
 ## 10. Conclusion
@@ -728,6 +875,17 @@ Our framework makes three design bets. First, that **grounding every claim in ev
 The 36-capability ontology with 99 dependency edges provides the compositional vocabulary. The world state schema with provenance records and typed uncertainty provides the representational foundation. The trust model with temporal decay and field-specific authority provides the conflict resolution mechanism. The design-time validator with type inference and coercion suggestions catches errors before they reach production.
 
 The framework enforces three invariants we believe are essential for trustworthy agentic AI: **grounding** (every claim has evidence), **uncertainty** (confidence is typed and explicit), and **reversibility** (every mutation can be undone). These are not conventions to be followed but structural properties enforced by the ontology's dependency edges and the validator's type system.
+
+```mermaid
+---
+title: The three invariants and what enforces them
+---
+flowchart LR
+  accDescr: Grounding, uncertainty and reversibility are structural properties, enforced by the ontology's dependency edges and the validator's type system.
+  g["Grounding: every claim has evidence"] --> enf["Enforced by the ontology's dependency edges and the validator's type system"]
+  u["Uncertainty: confidence is typed and explicit"] --> enf
+  r["Reversibility: every mutation can be undone"] --> enf
+```
 
 We release the complete framework as open source to establish a foundation for agents that earn trust through transparency rather than demanding it through capability. Appendix D provides concrete adoption guidance for practitioners.
 
@@ -895,6 +1053,22 @@ Ensure: Errors E, Suggestions S
 24: return E, S
 ```
 
+```mermaid
+---
+title: Algorithm 1 for each step
+---
+flowchart TB
+  accDescr: For each step the validator checks the capability, its prerequisites and each binding's type, recording an error for each failure and a suggested transform when the coercion registry has one, then stores the step's output schema and moves to the next step.
+  c1["Check: capability is in the ontology"] -.->|no| e1[Error: unknown capability]
+  c1 --> c2["Check: each requires target has executed"]
+  c2 -.->|no| e2[Error: missing prerequisite]
+  c2 --> c3["Check: each binding's inferred type is compatible"]
+  c3 -.->|no| e3[Error: type mismatch]
+  e3 -.->|pair in the registry| sug[Suggest a transform]
+  c3 --> store["Store the output schema under store_as"]
+  store -->|next step| c1
+```
+
 ---
 
 ## Appendix D: Practitioner Adoption Guide
@@ -953,6 +1127,17 @@ This appendix bridges academic concepts to practical application. If you're eval
 - Achieve L3 conformance (full type safety)
 - Implement trust model for multi-source workflows
 - Progress to L4 with patch suggestions
+
+```mermaid
+---
+title: The adoption path
+---
+flowchart TB
+  accDescr: Adoption goes in four phases, from validation only, through a safety layer and grounding, to full conformance.
+  p1["Phase 1, week 1: validation only, in CI with no runtime change"] --> p2["Phase 2, weeks 2–4: safety layer, checkpoints, rollback, audit logging"]
+  p2 --> p3["Phase 3, month 2: grounding, evidence anchors, provenance"]
+  p3 --> p4["Phase 4, quarter 2: full conformance, L3 then L4, trust model"]
+```
 
 ### D.4 Common Objections
 

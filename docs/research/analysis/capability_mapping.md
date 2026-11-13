@@ -128,6 +128,17 @@ Workflow failures (~25%) occur at component boundaries where data contracts are 
   agent_output → verify(schema) → if invalid: transform(to_schema) or rollback
   ```
 
+```mermaid
+---
+title: Mitigation for CrewAI #1823
+---
+flowchart TB
+  accDescr: Verify the agent output against the schema; if it is invalid, transform it to the schema or roll back.
+  a[agent_output] --> b["verify(schema)"]
+  b -->|"invalid: either"| c["transform(to_schema)"]
+  b -->|"invalid: or"| d[rollback]
+```
+
 ---
 
 ## Category 3: Coordination/Execution Failures
@@ -158,6 +169,17 @@ Coordination failures (~20%) involve multiple agents or async operations not pro
     verify(response.approved) → if timeout: rollback
   ```
 
+```mermaid
+---
+title: Mitigation for Clawdbot #2402
+---
+flowchart TB
+  accDescr: Send the approval request, receive the response with a timeout, verify that it approves, and roll back on a timeout.
+  a["send(approval_request)"] --> b["receive(response, timeout)"]
+  b --> c["verify(response.approved)"]
+  b -->|timeout| d[rollback]
+```
+
 #### LangChain #34357: Graph cycles cause infinite recursion
 - **Symptoms**: Stack overflow, infinite loop
 - **Root Cause**: No cycle detection
@@ -170,6 +192,18 @@ Coordination failures (~20%) involve multiple agents or async operations not pro
   graph → detect(cycles) → if cycles: reject →
     execute(with constrain(max_depth)) → verify(terminated)
   ```
+
+```mermaid
+---
+title: Mitigation for LangChain #34357
+---
+flowchart TB
+  accDescr: Detect cycles in the graph and reject it if there are any; otherwise execute with a maximum depth and verify that it terminated.
+  a[graph] --> b["detect(cycles)"]
+  b -->|cycles| r[reject]
+  b -->|none| c["execute, with constrain(max_depth)"]
+  c --> d["verify(terminated)"]
+```
 
 #### AutoGen #2724: Nested agent calls exceed recursion limit
 - **Symptoms**: RecursionError
@@ -225,6 +259,18 @@ Grounding failures (~10%) occur when agents make claims without evidence.
   tool_call → execute → verify(result.success) →
     ground(success_claim, result) → if failed: handle_error
   ```
+
+```mermaid
+---
+title: Mitigation for LangChain #34604
+---
+flowchart TB
+  accDescr: After the tool call executes, verify the result's success, ground the success claim in the result, and handle the error if it failed.
+  a[tool_call] --> b[execute]
+  b --> c["verify(result.success)"]
+  c --> d["ground(success_claim, result)"]
+  c -->|failed| e[handle_error]
+```
 
 ---
 

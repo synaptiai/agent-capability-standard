@@ -4,6 +4,7 @@
 // is handled here, so a new template fails the build until it has a copy.
 import { loadOntology } from '../data/ontology';
 import { loadProfiles } from '../data/profiles';
+import { loadVersions } from '../data/versions';
 import { loadWorkflows } from '../data/workflows';
 import { sourceMeta } from '../lib/listing';
 import { readRepoFile } from '../lib/repo';
@@ -12,7 +13,18 @@ import { capabilitiesIndexTwin, capabilityTwin, layerTwin } from './capabilities
 import { domainsIndexTwin, domainTwin } from './domains';
 import { homeTwin } from './home';
 import { listingTwin } from './listing';
-import { markdownCopy } from './md';
+import { blocks, markdownCopy } from './md';
+import { specFigureBlocks } from './edges-spec';
+import { specOlderBlocks } from './spec-figures';
+import { SLOTS_BY_VERSION } from '../lib/spec-slots';
+import { proseFigureBlocks } from './prose';
+import { proseFigureEdits } from './prose-blocks';
+import { releaseFigureEdits } from './release-blocks';
+import { skillFigureEdits } from './skills';
+import { COMPOSED_SKILLS } from '../data/skills';
+import type { Root } from 'mdast';
+import { PROSE_TEMPLATES } from '../plugins/rehype-prose-figures';
+import { OVERVIEW_SOURCE, PERIODIC_ANCHOR } from '../lib/prose-figures';
 import { citationTwin, diagnosticsTwin, edgeTypesTwin, rfcsIndexTwin, schemasTwin } from './reference';
 import type { Twin } from './types';
 import { workflowsIndexTwin, workflowTwin } from './workflows';
@@ -41,7 +53,30 @@ async function buildTwin(route: Route): Promise<Twin> {
       const source = route.source!;
       const meta = await sourceMeta(route);
       const title = route.template === 'spec' ? route.title : meta.title;
-      return { title, description: meta.description, markdown: markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title }) };
+      // Prose, RFC and skill pages draw figures from their own fences; each gets its block before the fence.
+      // A composed skill's page also draws figures from data under its H2s; each gets its block there.
+      const skillDir = route.template === 'skill' ? source.split('/')[1] : undefined;
+      const skillEdits = skillDir !== undefined && skillDir in COMPOSED_SKILLS ? skillFigureEdits(skillDir, source) : undefined;
+      const extraEdits = PROSE_TEMPLATES.has(route.template)
+        ? (tree: Root) => [
+            ...proseFigureEdits(tree, { foldBoxAfter: source === OVERVIEW_SOURCE ? PERIODIC_ANCHOR : undefined }),
+            ...(skillEdits ? skillEdits(tree) : []),
+            ...(source === 'CHANGELOG.md' ? releaseFigureEdits(tree, readRepoFile(source)) : []),
+          ]
+        : undefined;
+      const copy = markdownCopy(source, readRepoFile(source), { sourceNote: true, title: meta.title, extraEdits });
+      // The Standard's site-drawn figures add their text equivalents (visual spec 3.9),
+      // and so do the prose and RFC figures whose words are not in the source (3.10).
+      const older = loadVersions().standard.previous.find((v) => v.source === source);
+      const figures =
+        route.template !== 'spec'
+          ? await proseFigureBlocks(route)
+          : source === loadVersions().standard.current.source
+            ? specFigureBlocks()
+            : older && SLOTS_BY_VERSION[older.version]
+              ? specOlderBlocks(source, SLOTS_BY_VERSION[older.version]!)
+              : [];
+      return { title, description: meta.description, markdown: figures.length > 0 ? blocks(copy, ...figures) : copy };
     }
     case 'home':
       return homeTwin();

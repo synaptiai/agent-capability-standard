@@ -43,6 +43,15 @@ The Agent Capability Standard provides structural reliability:
 - **Add safety**: Implement checkpoints for high-risk mutations (1 week)
 - **Expand**: Progress to full conformance as value is demonstrated (1 quarter)
 
+```mermaid
+---
+title: The recommended adoption path
+---
+flowchart LR
+  accDescr: Start by running the validator on existing workflows in about a day, add checkpoints for high-risk mutations in about a week, and progress to full conformance over a quarter as the value shows.
+  s1["Start small: validate existing workflows, 1 day"] --> s2["Add safety: checkpoints for high-risk mutations, 1 week"] --> s3["Expand: full conformance, 1 quarter"]
+```
+
 The standard is framework-agnostic and modular. Adopt what you need; expand as complexity grows.
 
 ---
@@ -95,6 +104,18 @@ We implement this approach through the Agent Capability Standard, which provides
 3. World state schemas with uncertainty and provenance
 4. A trust model with authority ranking and time decay
 5. A validator that enforces contracts at definition time
+
+```mermaid
+---
+title: Each failure pattern and what answers it
+---
+flowchart LR
+  accDescr: Implicit composition is answered by explicit contracts, ungrounded state by grounded claims, undefined conflict resolution by trust-aware fusion, and retrofitted safety by safety by construction.
+  f1[Implicit composition] --> a1[Explicit contracts between capabilities]
+  f2[Ungrounded state] --> a2[Grounded claims with provenance]
+  f3[Undefined conflict resolution] --> a3[Trust-aware fusion]
+  f4[Retrofitted safety] --> a4[Safety by construction]
+```
 
 ---
 
@@ -179,6 +200,20 @@ This organization provides several benefits:
 - **Dependency ordering**: PERCEIVE typically precedes UNDERSTAND and MODEL, which precede REASON, which precedes EXECUTE
 - **Safety integration**: VERIFY capabilities such as `checkpoint` can be required before EXECUTE capabilities
 
+```mermaid
+---
+title: The usual order of the layers
+---
+flowchart TB
+  accDescr: PERCEIVE typically comes before UNDERSTAND and MODEL, which come before REASON, which comes before EXECUTE; a VERIFY capability such as checkpoint can be required before EXECUTE.
+  p[PERCEIVE] --> u[UNDERSTAND]
+  p --> m[MODEL]
+  u --> r[REASON]
+  m --> r
+  r --> e[EXECUTE]
+  v["VERIFY, such as checkpoint"] ==>|can be required before| e
+```
+
 ### 3.3 Key Capability Families
 
 **Detection and Classification** (UNDERSTAND layer)
@@ -191,6 +226,18 @@ Capabilities like `plan`, `decompose`, `critique`, and `explain` produce structu
 The `mutate` capability is the primary state-change point. It requires:
 - A `checkpoint` from the VERIFY layer
 - Optionally, `verify` to confirm the outcome
+
+```mermaid
+---
+title: How a state change is guarded
+---
+flowchart TB
+  accDescr: plan produces a plan object that execute or mutate can implement; mutate requires a checkpoint and can be followed by verify to confirm the outcome.
+  plan -->|plan object| execute
+  plan -->|plan object| mutate
+  checkpoint ==>|required| mutate
+  mutate -.->|optional| verify
+```
 
 **Safety Primitives** (VERIFY layer)
 - `checkpoint`: Save state for potential rollback
@@ -220,6 +267,16 @@ We distinguish hard and soft dependencies:
 
 This distinction allows flexibility while ensuring critical safety properties.
 
+```mermaid
+---
+title: Hard and soft dependencies
+---
+flowchart LR
+  accDescr: checkpoint is a hard prerequisite of mutate, send and rollback, an error V102 when missing; constrain is a soft prerequisite of execute, mutate and send, a warning W601 when missing.
+  checkpoint ==>|"requires, V102"| hard["mutate, send, rollback"]
+  constrain -.->|"soft_requires, W601"| soft["execute, mutate, send"]
+```
+
 ### 3.5 Derivation Methodology
 
 The 36 capabilities were derived through first-principles analysis of cognitive architectures. This section summarizes the methodology; full documentation is available in [docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md](../docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md).
@@ -248,6 +305,18 @@ Rather than creating separate capabilities for each domain (detect-anomaly, dete
 ```
 
 This preserves expressiveness while maintaining a minimal, learnable ontology.
+
+
+```mermaid
+---
+title: From domain variants to a domain parameter
+---
+flowchart LR
+  accDescr: The domain-specific variants detect-anomaly, detect-entity and detect-drift of the 99-capability model become one atomic verb, detect, with a domain parameter.
+  a[detect-anomaly] --> d["detect, with domain: anomaly, entity or drift"]
+  e[detect-entity] --> d
+  r[detect-drift] --> d
+```
 
 #### Atomicity Validation
 
@@ -325,6 +394,17 @@ The validator checks:
 2. The field path is valid in the producer's output schema
 3. The type is compatible with the consumer's input schema
 
+```mermaid
+---
+title: What the validator checks for each binding
+---
+flowchart TB
+  accDescr: For a binding the validator checks that the referenced store_as exists in a prior step, that the field path is valid in the producer's output schema, and that the type fits the consumer's input schema.
+  ref["A binding ${step_out.field.path}"] --> c1[The store_as exists in a prior step]
+  ref --> c2["The field path is valid in the producer's output schema"]
+  ref --> c3["The type is compatible with the consumer's input schema"]
+```
+
 Typed annotations are required when type inference is ambiguous (union types, missing metadata, open schemas).
 
 ### 4.4 Gates and Conditions
@@ -339,6 +419,18 @@ gates:
 ```
 
 A gate's `action` is `stop`, `rollback`, `skip` or `warn`, and `message` is optional. A gate runs before its step by default; `phase: after` runs it after the step, which a gate that reads its own step's output needs. Gate `when` clauses, step `condition`s and failure-mode `when` clauses share one expression grammar ([STANDARD v1.1.0 §5.8](STANDARD-v1.1.0.md#58-condition-expressions)): references, JSON literals, comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`), membership (`in`) and boolean `&&`, `||`, `!`, checked statically for syntax and types.
+
+```mermaid
+---
+title: When a gate runs
+---
+flowchart LR
+  accDescr: A gate runs before its step by default; with phase after it runs after the step, which a gate that reads its own step's output needs; its action is stop, rollback, skip or warn.
+  before["Gate, by default"] --> step[Step]
+  step --> after["Gate with phase: after"]
+  before -.->|when true| act["stop, rollback, skip or warn"]
+  after -.->|when true| act
+```
 
 Conditions enable step-level branching:
 
@@ -370,6 +462,17 @@ failure_modes:
 
 This creates a recovery loop: if verification fails, roll back and try re-planning with the failure evidence, up to 3 times.
 
+```mermaid
+---
+title: The recovery loop
+---
+flowchart LR
+  accDescr: When verification fails the step rolls back and goes back to the plan step with the failure evidence, at most 3 times.
+  plan[Plan step] --> verify[Verify step]
+  verify -->|"passed == false"| rollback[Roll back]
+  rollback -->|"failure evidence, at most 3 loops"| plan
+```
+
 ### 4.6 Parallel Execution
 
 Steps can execute concurrently:
@@ -391,6 +494,20 @@ Steps can execute concurrently:
 - capability: integrate
   input_bindings:
     sources: ["${search_out}", "${retrieve_out}"]
+```
+
+```mermaid
+---
+title: The parallel group in the example
+---
+flowchart LR
+  accDescr: search and retrieve run together in the gather group, which joins when all are complete, and integrate takes both outputs.
+  subgraph gather ["parallel_group gather, join: all_complete"]
+    search
+    retrieve
+  end
+  search -->|search_out| integrate
+  retrieve -->|retrieve_out| integrate
 ```
 
 ---
@@ -486,6 +603,19 @@ Safety is enforced through:
 **Hooks**: Shell scripts that intercept and potentially block actions
 **Audit**: All actions are recorded for accountability
 
+```mermaid
+---
+title: Where each safety mechanism acts
+---
+flowchart TB
+  accDescr: Static validation checks prerequisites before execution, gates can halt unsafe execution at runtime, hooks can block an action, and audit records every action.
+  wf[Workflow] -->|"static validation: prerequisites checked"| run[Execution]
+  run --> action[Each action]
+  gates[Gates] -.->|can halt| run
+  hooks[Hooks] -.->|can block| action
+  action -->|recorded| audit[Audit]
+```
+
 ---
 
 ## 7. The Validator
@@ -498,6 +628,16 @@ The validator operates at four conformance levels:
 **L2 (Schema)**: $ref resolution and type inference
 **L3 (Contracts)**: Binding types vs. consumer schemas
 **L4 (Patches)**: Coercion registry and patch suggestions
+
+
+```mermaid
+---
+title: The four validation levels
+---
+flowchart LR
+  accDescr: Validation rises from L1, capability existence and prerequisites, through L2 reference resolution and type inference and L3 binding types against consumer schemas, to L4 coercions and patch suggestions.
+  l1["L1 Basic: existence, prerequisites"] --> l2["L2 Schema: refs, type inference"] --> l3["L3 Contracts: binding types"] --> l4["L4 Patches: coercions, patches"]
+```
 
 ### 7.2 Error Model
 
@@ -549,6 +689,18 @@ We evaluate the validator by:
 - **Negative fixtures**: Invalid workflows that must fail with specific error codes
 - **Patch fixtures**: Invalid workflows with expected patch suggestions
 
+
+```mermaid
+---
+title: The three kinds of fixture
+---
+flowchart LR
+  accDescr: Positive fixtures are valid workflows that must pass, negative fixtures are invalid workflows that must fail with specific error codes, and patch fixtures are invalid workflows with expected patch suggestions.
+  pos[Positive fixture: valid] -->|must| pass[Pass]
+  neg[Negative fixture: invalid] -->|must| fail[Fail with a specific code]
+  pat[Patch fixture: invalid] -->|must| patch[Yield the expected patch]
+```
+
 ### 8.2 Trust Model Evaluation
 
 To evaluate conflict resolution:
@@ -587,6 +739,21 @@ A digital twin maintains a model of a real-world system. The `digital_twin_sync_
 7. Executes and verifies
 8. Records audit trail
 
+```mermaid
+---
+title: The digital_twin_sync_loop workflow in brief
+---
+flowchart TB
+  accDescr: The workflow receives signals, normalizes and integrates them, detects drift, plans, checkpoints, executes and verifies, and records an audit trail.
+  a["Receive signals"] --> b[Transform to canonical format]
+  b --> c[Integrate with the world state]
+  c --> d[Detect drift and anomalies]
+  d --> e[Plan corrective actions]
+  e --> f[Checkpoint before mutation]
+  f --> g[Execute and verify]
+  g --> h[Record the audit trail]
+```
+
 ### 9.2 Production Incident Triage
 
 The `debug_code_change` workflow:
@@ -600,6 +767,18 @@ The `debug_code_change` workflow:
 7. Checkpoints
 8. Applies and verifies
 9. Rolls back if needed
+
+
+```mermaid
+---
+title: The incident triage workflow
+---
+flowchart TB
+  accDescr: The debug_code_change workflow inspects the failing behavior, searches for related patterns, maps dependencies, models expected behavior, critiques causes, plans a minimal fix, checkpoints, applies and verifies the fix, and rolls back if needed.
+  i[Inspect failing behavior] --> s[Search related patterns] --> m[Map dependencies] --> e[Model expected behavior]
+  e --> c[Critique causes] --> p[Plan a minimal fix] --> k[Checkpoint] --> a[Apply and verify]
+  a -.->|if needed| r[Roll back]
+```
 
 ### 9.3 Capability Gap Analysis
 

@@ -44,6 +44,21 @@ This project follows a formal RFC process for changes. See [`spec/GOVERNANCE.md`
      ```
 6. Submit a pull request
 
+
+```mermaid
+---
+title: Proposing a change
+---
+flowchart TB
+  accDescr: A change starts as an RFC issue with its motivation, alternatives, compatibility analysis and test considerations, then a draft in a feature branch, an optional local conformance run, workflow validation, a PVC report for significant changes, and a pull request.
+  rfc[Open an RFC issue] --> br[Draft in a feature branch]
+  br --> conf["Run conformance tests, optional"]
+  conf --> val[Validate workflows]
+  val -.->|significant changes| pvc[Add a PVC report]
+  val --> pr[Submit a pull request]
+  pvc --> pr
+```
+
 ### Adding Skills
 
 New skills must:
@@ -76,6 +91,17 @@ cd site && npm ci && npm run check && npm test && npm run build
 ## Perspective Validation Checklist (PVC)
 
 When a change touches critical paths (`schemas/`, `hooks/`, `skills/`, `grounded_agency/`, `tools/`, `spec/`), include a **PVC report**:
+
+
+```mermaid
+---
+title: When a PVC report is needed
+---
+flowchart TB
+  accDescr: A change that touches a critical path, schemas, hooks, skills, grounded_agency, tools or spec, includes a PVC report, which can be validated locally with validate_pvc.py.
+  ch["Change touches schemas, hooks, skills, grounded_agency, tools or spec"] --> pvc[Include a PVC report]
+  pvc -.->|can be validated locally| v[validate_pvc.py]
+```
 
 - Guide: `skills/perspective-validation/CHECKLIST.md`
 - Reports: `docs/reviews/pvc/`

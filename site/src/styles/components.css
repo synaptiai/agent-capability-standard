@@ -20,6 +20,15 @@
     background: currentColor;
   }
 
+  /* A sidebar group with no layer glyph leads with the eyebrow's dash. */
+  .sidebar__dash {
+    display: inline-block;
+    flex: none;
+    width: 12px;
+    height: var(--px);
+    background: var(--indicator);
+  }
+
   .eyebrow {
     display: inline-flex;
     align-items: center;
@@ -32,10 +41,13 @@
     color: var(--ink-3);
   }
 
+  /* The eyebrow leads with a short 2px dash, not a filled square: a square
+     before a capitalised label is another site's eyebrow (visual spec 1.3,
+     originality; issue #125 review). */
   .eyebrow::before {
     content: '';
-    width: var(--pip);
-    height: var(--pip);
+    width: 12px;
+    height: var(--px);
     background: var(--indicator);
     flex: none;
   }
@@ -733,10 +745,12 @@
 
   /* ---------- callouts ---------- */
 
+  /* A panel with a 6px bar in the callout colour (visual spec 3.10.3). */
   .callout {
     --c: var(--link);
     background: color-mix(in srgb, var(--c) var(--callout-amount), var(--bg));
-    border-left: 4px solid var(--c);
+    border-left: 6px solid var(--c);
+    box-shadow: var(--shadow-1);
     padding: var(--space-3) var(--space-4);
     margin: var(--space-5) 0;
     color: var(--ink);
@@ -774,11 +788,12 @@
     text-transform: uppercase;
   }
 
-  /* Markdown callouts have no glyph in their label; they get a pip. */
+  /* A label without a glyph gets the eyebrow's dash; every callout type has
+     a glyph today (CALLOUT_GLYPHS), so this is a fallback. */
   .callout__label:not(:has(svg))::before {
     content: '';
-    width: var(--pip);
-    height: var(--pip);
+    width: 12px;
+    height: var(--px);
     background: currentColor;
     flex: none;
   }
@@ -897,6 +912,30 @@
     color: var(--on-accent);
   }
 
+  .status-badge--template {
+    --c: var(--ink-2);
+    background: transparent;
+  }
+
+  .status-badge--implementation {
+    --c: var(--link);
+  }
+
+  .status-badge--ready {
+    --c: var(--ok);
+    background: transparent;
+  }
+
+  .status-badge--guide {
+    --c: var(--link);
+    background: transparent;
+  }
+
+  .status-badge--integrated {
+    --c: var(--ink);
+    background: transparent;
+  }
+
   .status-badge--proposed {
     --c: var(--ink-2);
     background: transparent;
@@ -941,58 +980,6 @@
 
   /* ---------- cards and listings ---------- */
 
-  .section-index__cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
-    gap: var(--space-4);
-    list-style: none;
-    padding: 0;
-  }
-
-  .section-index__card {
-    position: relative;
-    margin: 0 !important;
-    padding: var(--space-4);
-    border: var(--border);
-    background: var(--bg-sub);
-    box-shadow: var(--shadow-1);
-  }
-
-  .section-index__card > a:first-child {
-    font-weight: 700;
-    font-size: 18px;
-    line-height: 1.25;
-    color: var(--ink);
-    text-decoration: none;
-  }
-
-  /* A card whose first link is the card: the whole card is the target. */
-  .section-index__card > a:first-child::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-  }
-
-  .section-index__card:has(> a:first-child:hover) {
-    transform: translate(-1px, -1px);
-    box-shadow: var(--shadow-2);
-  }
-
-  .section-index__card:has(> a:first-child:focus-visible) {
-    outline: var(--px) solid var(--ink);
-    outline-offset: 2px;
-  }
-
-  .section-index__card > a:first-child:focus-visible {
-    outline: none;
-  }
-
-  .section-index__card p {
-    margin: var(--space-2) 0 0;
-    font-size: 15px;
-    color: var(--ink-2);
-  }
-
   .capability-card {
     padding: var(--space-4);
     border: var(--border);
@@ -1020,25 +1007,32 @@
   }
 
   /* Description lists of facts (skill, layer, workflow, profile values). */
-  :is(.page-meta, .citation-facts, .workflow-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) {
+  :is(.page-meta, .citation-facts, .wf-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list) {
     display: grid;
     grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr);
     gap: var(--space-1) var(--space-4);
     font-size: 15px;
   }
 
-  :is(.page-meta, .citation-facts, .workflow-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) > div {
+  :is(.page-meta, .citation-facts, .wf-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list) > div {
     display: contents;
   }
 
-  :is(.page-meta, .citation-facts, .workflow-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) dt {
+  :is(.page-meta, .citation-facts, .wf-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list) dt {
     font-weight: 700;
     color: var(--ink-2);
   }
 
-  :is(.page-meta, .citation-facts, .workflow-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list, .domain-card__facts) dd {
+  :is(.page-meta, .citation-facts, .wf-step__facts, .skill-meta, .layer-meta, .workflow-meta, .value-list) dd {
     margin: 0;
     min-width: 0;
+  }
+
+  /* A status badge in a fact list may wrap inside itself, so a long status
+     ("Reference implementation") fits the value column at 360px. */
+  .page-meta .status-badge {
+    max-width: 100%;
+    white-space: normal;
   }
 
   .value-list .value-list {
@@ -1260,6 +1254,20 @@
     white-space: nowrap;
   }
 
+  /* Three tiles to a row in a phone-width table: a tighter side padding and
+     12px ids, so the longest id ("synchronize", 11 characters) shows whole
+     instead of ending in an ellipsis. */
+  @container (max-width: 479px) {
+    .capability-tile {
+      padding-inline: 6px;
+    }
+
+    .capability-tile__id {
+      font-size: 12px;
+      letter-spacing: -0.02em;
+    }
+  }
+
   /* ---------- workflow diagram ---------- */
 
   .wf {
@@ -1354,6 +1362,23 @@
     margin-bottom: var(--space-2);
   }
 
+  /* The key above the rail: a small dashed card, then what it means. */
+  .wf-key {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+    color: var(--ink-2);
+  }
+
+  .wf-key__swatch {
+    flex: none;
+    width: 24px;
+    height: 16px;
+    border: var(--px) dashed var(--ink-3);
+    background: var(--bg-sub);
+  }
+
   /* A step with gates or a condition is a side branch: one lane in, a dashed elbow. */
   .wf-step[data-branch='true'] {
     margin-left: 2rem !important;
@@ -1378,9 +1403,7 @@
     border-style: dashed;
   }
 
-  .wf-step__branch,
-  .wf-step__subflow,
-  .wf-step__checkpoint {
+  .wf-step__branch {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1398,14 +1421,6 @@
 
   .wf-step__gates {
     padding-left: 1.2em;
-  }
-
-  .wf-step__failures summary {
-    font-weight: 700;
-  }
-
-  .wf-step__details-link {
-    font-size: 14px;
   }
 
   .wf-parallel {
@@ -1683,65 +1698,8 @@
     margin-top: 0;
   }
 
-  .home-principles__list {
-    display: grid;
-    gap: var(--space-4);
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-    padding: 0;
-    list-style: none;
-    counter-reset: principle;
-  }
-
-  .home-principles__list > li {
-    counter-increment: principle;
-    margin: 0;
-    padding: var(--space-4);
-    border: var(--border);
-    background: var(--bg);
-  }
-
-  .home-principles__list h3 {
-    margin-top: 0;
-  }
-
-  .home-principles__list h3::before {
-    content: counter(principle) '. ';
-  }
-
-  .home-principles__list p:last-child,
-  .home-principles__list ul:last-child {
-    margin-bottom: 0;
-  }
-
   .home-why p {
     max-width: 46rem;
-  }
-
-  .home-cards {
-    display: grid;
-    gap: var(--space-4);
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
-    padding: 0;
-    margin: 0 0 var(--space-5);
-    list-style: none;
-  }
-
-  .home-card {
-    margin: 0;
-    padding: var(--space-4);
-    border: var(--border);
-    background: var(--bg);
-  }
-
-  .home-card__title {
-    margin: var(--space-2) 0 var(--space-1);
-    font-weight: 700;
-  }
-
-  .home-card__line {
-    margin: 0;
-    color: var(--ink-2);
-    font-size: 15px;
   }
 
   .home-faq__item {
@@ -1838,15 +1796,20 @@
     }
   }
 
-  /* Steps other than the current one are dimmed with --ink-3, which
-     check-contrast holds to 4.5:1 on every surface, not with opacity. */
+  /* With the story script, the steps are spaced out for scrolling. While
+     the reader scrolls inside the story (data-playing), steps other than the
+     current one are dimmed with --ink-3, which check-contrast holds to 4.5:1
+     on every surface, not with opacity. */
   .story[data-live] .story__step {
     min-height: 45vh;
-    color: var(--ink-3);
     transition: color var(--step-hover);
   }
 
-  .story[data-live] .story__step h3 {
+  .story[data-playing] .story__step {
+    color: var(--ink-3);
+  }
+
+  .story[data-playing] .story__step h3 {
     color: inherit;
   }
 
@@ -1856,7 +1819,7 @@
     }
   }
 
-  .story[data-live] .story__step.is-current {
+  .story[data-playing] .story__step.is-current {
     color: var(--ink);
   }
 
@@ -1868,65 +1831,88 @@
     opacity: 0;
   }
 
+  /* A capability tile: a layer-coloured border round its tint, the symbol
+     in --ink (as .mini-tile); a used one has a 2px ink frame round that. */
   .story__cap {
     fill: var(--layer);
   }
 
+  .story__face {
+    fill: var(--tint);
+  }
+
   .story__used {
-    fill: none;
-    stroke: var(--ink);
-    stroke-width: 2;
+    fill: var(--ink);
+  }
+
+  .story__symbol {
+    fill: var(--ink);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    text-anchor: middle;
+  }
+
+  /* Frames are a filled rect under an inset one, so every edge is a 2px
+     rect on even pixels (visual spec 1.2), not a centred stroke. */
+  .story__edge {
+    fill: var(--line);
   }
 
   .story__block {
     fill: var(--bg);
-    stroke: var(--line);
-    stroke-width: 2;
   }
 
   .story__on {
     fill: color-mix(in srgb, var(--layer) 22%, var(--bg));
-    stroke: var(--line);
-    stroke-width: 2;
   }
 
   .story__stripe {
     fill: var(--layer);
   }
 
-  .story__port,
-  .story__mark {
+  .story__port {
     fill: var(--ink);
   }
 
+  /* The role glyphs and connector lines paint with currentColor. */
+  .story__mark {
+    color: var(--ink);
+  }
+
+  /* Sizes are set on the elements in viewBox units (see HomeStory). */
   .story__label {
     fill: var(--ink);
     font-family: var(--font-mono);
-    font-size: 10px;
   }
 
-  .story__store {
-    fill: var(--ink-3);
-    font-family: var(--font-mono);
-    font-size: 8px;
-    text-anchor: end;
-  }
-
-  /* Narrow: the story script shows one part of the diagram at a time in a
-     box of the rail's shape, the labels are larger, and the stored names,
-     which would be too small to read, are left out. */
+  /* Narrow, with the story script: the diagram keeps one box, of the rail's
+     shape, the whole time, so neither the box nor the steps under it move
+     while the reader scrolls. Inside it the script shows one part of the
+     diagram at a time, and the whole diagram (scaled to fit) before and
+     after the story. Labels and tile symbols are set at 14 viewBox units,
+     so the rail drawn at about 0.87x on a 360px screen still shows them at
+     12px or more. */
   @media (max-width: 959px) {
     .story[data-live] .story__svg {
       aspect-ratio: var(--rail-aspect);
       max-height: 45vh;
     }
 
-    .story__label {
-      font-size: 13px;
+    .story__label,
+    .story__symbol {
+      font-size: 14px;
+    }
+  }
+
+  /* On paper nothing scrolls: the steps close up and the diagram sits in
+     the flow, so no tall empty panel is printed beside the text. */
+  @media print {
+    .story[data-live] .story__step {
+      min-height: 0;
     }
 
-    .story__store {
-      display: none;
+    .story__canvas {
+      position: static;
     }
   }
 }

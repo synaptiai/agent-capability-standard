@@ -1,0 +1,42 @@
+---
+// F-C3, the safety panel of a capability (visual spec 3.1), shared by the
+// capability page and the Standard's §4.4: six cells (risk, changes state,
+// needs checkpoint, needs approval, overridable, blocked from autonomy). An
+// "on" cell has the layer tint and --ink text; an "off" cell has the page
+// fill, a faded glyph and the word "No", so on and off never rest on colour.
+// The risk cell adds 1 to 3 pips. Two columns when narrow (a header column),
+// three when its container is 340px or wider.
+//
+// Props:
+// - cap: Capability, required.
+// - compact: boolean, default false. Drops the cells' minimum height, for
+//   panels shown side by side (the Standard's §4.4); the content is the same.
+// - id: string, optional. Id of the <dl>, for aria-describedby from elsewhere.
+import type { Capability } from '../../data/ontology';
+import { safetyRows } from '../../lib/views';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+
+interface Props {
+  cap: Capability;
+  compact?: boolean;
+  id?: string;
+}
+
+const { cap, compact = false, id } = Astro.props;
+const rows = safetyRows(cap);
+const pips = { low: 1, medium: 2, high: 3 }[cap.risk];
+---
+<div class:list={['safety-panel', compact && 'safety-panel--compact', 'has-layer']} style={`--layer: var(--layer-${cap.layer})`}>
+  <dl class="safety-panel__grid" id={id} aria-label={`Safety of ${cap.id}`}>
+    {rows.map((r) => (
+      <div class:list={['safety-cell', r.on ? 'safety-cell--on' : 'safety-cell--off']} data-safety={r.key} data-on={r.on ? 'true' : 'false'}>
+        <dt>{r.term}</dt>
+        <dd>
+          <PixelGlyph name={r.glyph} />
+          {r.key === 'risk' && <span class="risk-pips" data-level={pips} aria-hidden="true">{Array.from({ length: pips }, () => <span class="risk-pips__pip"></span>)}</span>}
+          <span>{r.value}</span>
+        </dd>
+      </div>
+    ))}
+  </dl>
+</div>

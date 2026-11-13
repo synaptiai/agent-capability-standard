@@ -86,6 +86,17 @@ This document fulfills ISO/IEC 42001 Clause 7.2 (Competence) and Clause 7.3 (Awa
 | **Advanced** | Can apply knowledge independently in standard situations | Demonstrated competence in assessments + independent practice |
 | **Expert** | Can apply knowledge in complex/novel situations and train others | Assessment + independent practice + mentoring record |
 
+```mermaid
+---
+title: The four proficiency levels
+---
+flowchart TB
+  accDescr: Proficiency rises from awareness, understanding the concept, to intermediate, applying it with guidance, to advanced, applying it independently, to expert, handling complex or novel situations and training others; each level asks for more evidence.
+  aw["Awareness: understands the concept; awareness training"] --> in["Intermediate: applies it with guidance; training and supervised practice"]
+  in --> ad["Advanced: applies it independently; assessments and independent practice"]
+  ad --> ex["Expert: handles novel situations, trains others; adds a mentoring record"]
+```
+
 ## 3. Awareness Requirements (Clause 7.3)
 
 All persons working under the organization's control shall be aware of:

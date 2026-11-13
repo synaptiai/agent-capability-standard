@@ -1,53 +1,91 @@
 ---
 // The workflows overview: every workflow of the core and domain catalogs, with
-// its goal, risk, catalog and step count.
+// its goal, risk and step count, the domain workflows under one row per domain. Above each table is its part of the
+// family map (F-WI2, visual spec 3.4): the reference workflows with the ones
+// that run others drawn as a family, and the domain workflows by domain with
+// the ones a profile proposes.
 import RiskBadge from '../../components/RiskBadge.astro';
 import { loadWorkflows } from '../../data/workflows';
+import PageHero from '../../components/PageHero.astro';
+import { sectionHero } from '../../lib/prose-page';
 import DocLayout from '../../layouts/DocLayout.astro';
 import { domainHref, pageHref, refSlugger, routeByUrl, specSectionHref, workflowHref } from '../../lib/generated';
 import { githubBlobUrl } from '../../lib/repo';
 import TableWrap from '../../components/TableWrap.astro';
+import StepStrip from '../../components/fig/StepStrip.astro';
+import { indexStripLabel, layersUsed } from '../../lib/workflow-figures';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import WorkflowFamilyMap from '../../components/fig/WorkflowFamilyMap.astro';
+import '../../styles/figures-workflow.css';
 
 const route = routeByUrl('/workflows/');
 const wfs = loadWorkflows();
 const id = refSlugger();
 const description = `The ${wfs.all.length} workflows of the reference and domain catalogs: ${wfs.core.length} reference workflows and ${wfs.domain.length} domain workflows.`;
 const groups = [
-  { label: 'Reference workflows', items: wfs.core },
-  { label: 'Domain workflows', items: wfs.domain },
-];
+  { label: 'Reference workflows', part: 'reference', items: wfs.core },
+  { label: 'Domain workflows', part: 'domain', items: wfs.domain },
+] as const;
+// Domain workflows are listed under one header row per domain, in the order
+// the catalogs give them; reference workflows have no domain and one body.
+const tableGroups = (items: readonly (typeof wfs.all)[number][]) => {
+  const out: { domain: string | null; items: (typeof wfs.all)[number][] }[] = [];
+  for (const w of items) {
+    const d = w.domain ?? null;
+    if (out.at(-1)?.domain !== d) out.push({ domain: d, items: [] });
+    out.at(-1)!.items.push(w);
+  }
+  return out;
+};
+const coreSources = [...new Set(wfs.core.map((w) => w.source))];
 ---
 <DocLayout route={route} title="Workflows" description={description}>
   <article class="doc doc--workflows" data-pagefind-body>
-    <h1 id={id('Workflows')}>Workflows</h1>
-    <p class="lead">
-      A workflow composes capabilities into ordered steps with typed bindings, gates and failure modes
-      (<a href={specSectionHref('5')}>Standard §5</a>). The catalogs define {wfs.all.length} workflows:
-      {' '}{wfs.core.length} reference workflows and {wfs.domain.length} domain workflows. See also
-      {' '}<a href={pageHref('/workflows/patterns/')}>composition patterns</a>.
-    </p>
-    {groups.map((g) => (
+    <PageHero glyph={sectionHero(route.section).glyph} eyebrow="Section" section={route.section}>
+      <h1 id={id('Workflows')}>Workflows</h1>
+      <p class="lead">
+        A workflow composes capabilities into ordered steps with typed bindings, gates and failure modes
+        (<a href={specSectionHref('5')}>Standard §5</a>). The catalogs define {wfs.all.length} workflows:
+        {' '}{wfs.core.length} reference workflows and {wfs.domain.length} domain workflows. See also
+        {' '}<a href={pageHref('/workflows/patterns/')}>composition patterns</a>.
+      </p>
+    </PageHero>
+    {groups.map((g, i) => (
       <section class="workflow-group">
         <h2 id={id(g.label)}>{g.label}</h2>
+        <WorkflowFamilyMap part={g.part} n={i + 1} id={id(`Figure ${g.label}`)} />
+        {g.part === 'reference' && (
+          <p>Defined in {coreSources.map((src, k) => <>{k > 0 && ', '}<a href={githubBlobUrl(src)}><code>{src}</code></a></>)}.</p>
+        )}
         <TableWrap label={`${g.label} (${g.items.length})`}>
           <table class="workflow-table">
             <caption>{g.label} ({g.items.length})</caption>
             <thead>
-              <tr><th scope="col">Workflow</th><th scope="col">Goal</th><th scope="col">Risk</th><th scope="col">Catalog</th><th scope="col">Steps</th></tr>
+              <tr><th scope="col">Workflow</th><th scope="col" class="workflow-table__goal-col">Goal</th><th scope="col" class="workflow-table__side">Risk</th><th scope="col" class="workflow-table__side">Steps</th></tr>
             </thead>
-            <tbody>
-              {g.items.map((w) => (
-                <tr data-workflow={w.id} data-risk={w.risk} data-catalog={w.catalog}>
-                  <th scope="row"><a href={workflowHref(w.id)}><code>{w.id}</code></a></th>
-                  <td>{w.goal}</td>
-                  <td><RiskBadge risk={w.risk} /></td>
-                  <td>
-                    {w.domain ? <a href={domainHref(w.domain)}>{w.domain}</a> : <a href={githubBlobUrl(w.source)}><code>{w.source}</code></a>}
-                  </td>
-                  <td>{w.steps.length}</td>
-                </tr>
-              ))}
-            </tbody>
+            {tableGroups(g.items).map((tg) => (
+              <tbody>
+                {tg.domain && (
+                  <tr class="workflow-table__group"><th scope="colgroup" colspan="4">Domain: <a href={domainHref(tg.domain)}>{tg.domain}</a></th></tr>
+                )}
+                {tg.items.map((w) => (
+                  <tr data-workflow={w.id} data-risk={w.risk} data-catalog={w.catalog}>
+                    <th scope="row">
+                      <a href={workflowHref(w.id)}><code>{w.id}</code></a>
+                      <span class="wf-strip">
+                        <StepStrip wf={w} label={indexStripLabel(w)} />
+                        <span class="wf-strip__layers" aria-hidden="true">{layersUsed(w).map((l) => <PixelGlyph name={l} layer={l} />)}</span>
+                      </span>
+                      <span class="workflow-table__goal">{w.goal}</span>
+                      <span class="workflow-table__meta"><RiskBadge risk={w.risk} /> {w.steps.length} steps</span>
+                    </th>
+                    <td class="workflow-table__goal-col">{w.goal}</td>
+                    <td class="workflow-table__side"><RiskBadge risk={w.risk} label="" /></td>
+                    <td class="workflow-table__side">{w.steps.length}</td>
+                  </tr>
+                ))}
+              </tbody>
+            ))}
           </table>
         </TableWrap>
       </section>

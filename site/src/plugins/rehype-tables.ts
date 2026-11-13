@@ -9,6 +9,12 @@
 // regions apart. The table itself keeps its
 // table display, so its semantics are not lost. Generated pages use the
 // TableWrap component, which writes the same wrapper.
+//
+// Code in a cell stays on one line (base.css), except a long path or
+// expression (LONG_CELL_CODE characters or more, with a "/", "." or "_" in
+// it): it gets the break-code class and a <wbr> after each of those, as the
+// BreakCode component does, so a desktop table does not scroll for one long
+// file path.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
 import { SKIP, visit } from 'unist-util-visit';
 
@@ -43,6 +49,23 @@ function isWrap(n: Root | Element | undefined): boolean {
   return Array.isArray(cls) && cls.includes('table-wrap');
 }
 
+/** Length from which code in a table cell may break between its parts. */
+export const LONG_CELL_CODE = 24;
+
+/** Gives long code in a cell the break-code class and a <wbr> after each "/", "." and "_". */
+export function breakLongCellCode(cell: Element): void {
+  visit(cell, 'element', (n: Element) => {
+    if (n.tagName !== 'code') return;
+    const t = n.children.length === 1 && n.children[0]!.type === 'text' ? n.children[0]!.value : null;
+    if (t === null || t.length < LONG_CELL_CODE || !/[/._]/.test(t)) return SKIP;
+    const parts = t.split(/(?<=[/._])/);
+    const cls = Array.isArray(n.properties?.className) ? (n.properties.className as string[]) : [];
+    n.properties = { ...n.properties, className: [...cls, 'break-code'] };
+    n.children = parts.flatMap((p, i): ElementContent[] => (i > 0 ? [{ type: 'element', tagName: 'wbr', properties: {}, children: [] }, { type: 'text', value: p }] : [{ type: 'text', value: p }]));
+    return SKIP;
+  });
+}
+
 export default function rehypeTables() {
   return (tree: Root): void => {
     let heading: string | null = null;
@@ -53,6 +76,12 @@ export default function rehypeTables() {
         return SKIP;
       }
       if (node.tagName !== 'table' || parent === undefined || index === undefined) return;
+      visit(node, 'element', (c: Element) => {
+        if (c.tagName === 'td' || c.tagName === 'th') {
+          breakLongCellCode(c);
+          return SKIP;
+        }
+      });
       if (isWrap(parent)) return SKIP;
       const caption = node.children.find((c): c is Element => c.type === 'element' && c.tagName === 'caption');
       parent.children[index] = {

@@ -179,6 +179,24 @@ export function pairs(tokens) {
   for (const e of ['--line', '--control', '--indicator', '--ink']) {
     for (const s of ['--bg', '--bg-sub', '--bg-mut']) add('edge', `${e} on ${s}`, `var(${e})`, `var(${s})`);
   }
+  // Heat cells (visual spec 1.2, 6.2): the printed count on each step, the
+  // cell's --heat-line border against the step it frames, and the cell's
+  // edge against the figure panel, which passes when the fill or its border
+  // reaches 3:1 against --bg-sub (a light step can be fainter than 3:1
+  // against the panel, as with the accent fill).
+  for (const h of Object.keys(tokens).filter((k) => /^--heat-\d$/.test(k))) {
+    add('text', `--on-${h.slice(2)} count on ${h}`, `var(--on-${h.slice(2)})`, `var(${h})`);
+    add('edge', `--heat-line border on ${h}`, 'var(--heat-line)', `var(${h})`);
+    out.push({
+      kind: 'edge',
+      label: `${h} cell edge on --bg-sub (the fill itself or its --heat-line border)`,
+      anyOf: [
+        { fg: `var(${h})`, bg: 'var(--bg-sub)' },
+        { fg: 'var(--heat-line)', bg: 'var(--bg-sub)' },
+      ],
+    });
+  }
+  out.push(...figurePairs(tokens, layers));
   out.push({
     kind: 'edge',
     label: 'accent fill edge on --bg (the fill itself or its --line border)',
@@ -189,6 +207,61 @@ export function pairs(tokens) {
   });
   return out;
 }
+
+/**
+ * Colours the figures use (visual spec 6.2), beyond the site-wide pairs
+ * above. Figure panels are --bg-sub; cells, chips and boxes inside them are
+ * --bg, --bg-sub or --bg-mut.
+ */
+function figurePairs(tokens, layers) {
+  const out = [];
+  const add = (kind, label, fg, bg) => out.push({ kind, label, fg, bg });
+  const panels = ['--bg-sub', '--bg-mut'];
+  // Risk words, pips and policy bars in figures (safety panel, spine risk
+  // lane, approval ladder, checkpoint strip), and the ok colour.
+  for (const r of ['--risk-low', '--risk-medium', '--risk-high', '--ok']) for (const s of panels) add('text', `figure: ${r} on ${s}`, `var(${r})`, `var(${s})`);
+  for (const l of layers) {
+    const c = `var(--layer-${l})`;
+    // Secondary text in tiles and chips on the layer tint (F-C3, MiniTile, Mermaid chips).
+    add('text', `figure: --ink-2 on ${l} tint`, 'var(--ink-2)', tint(c));
+    // The layer glyph and the current bar of the layer-bars figure on a --bg-mut track.
+    add('edge', `figure: ${l} glyph or bar on --bg-mut`, c, 'var(--bg-mut)');
+    // A "yes" cell of a safety panel: --ink text on its fill, and its border
+    // (layer-coloured in dark, --line in light) against the fill.
+    const on = tint(c, 'var(--safety-on-amount)');
+    add('text', `figure: --ink on ${l} safety "yes" cell`, 'var(--ink)', on);
+    add('text', `figure: --ink-2 on ${l} safety "yes" cell`, 'var(--ink-2)', on);
+    add('edge', `figure: ${l} safety "yes" border on its fill`, `color-mix(in srgb, ${c} var(--safety-on-edge), var(--line))`, on);
+    // The home story's marked steps: --ink labels on the layer mixed 22% into
+    // --bg (.story__on in components.css).
+    add('text', `figure: --ink on ${l} home-story step`, 'var(--ink)', tint(c, '22%'));
+  }
+  // Recessive bars (the other layers in the layer-bars figure) on their track,
+  // and the --indicator bar of PixelBar on its track (also in the site pairs).
+  add('edge', 'figure: --ink-3 bar on --bg-mut track', 'var(--ink-3)', 'var(--bg-mut)');
+  add('edge', 'figure: --indicator bar on --bg-mut track', 'var(--indicator)', 'var(--bg-mut)');
+  // Toolbar toggles and chips: --ink-2 on --accent-soft and dashed --ink-2 slots.
+  add('text', 'figure: --ink-2 on --accent-soft', 'var(--ink-2)', 'var(--accent-soft)');
+  // Mermaid figures: box outline on the panel, group outline on its group
+  // fill and on the panel, and links on both.
+  add('edge', 'figure: Mermaid box outline --line on --bg-sub', 'var(--line)', 'var(--bg-sub)');
+  add('edge', 'figure: Mermaid box outline --line on its --bg fill', 'var(--line)', 'var(--bg)');
+  add('edge', 'figure: Mermaid group outline --ink-3 on --bg-mut', 'var(--ink-3)', 'var(--bg-mut)');
+  add('edge', 'figure: Mermaid link --ink-2 on --bg-mut', 'var(--ink-2)', 'var(--bg-mut)');
+  add('text', 'figure: Mermaid group label --ink-2 on --bg-mut', 'var(--ink-2)', 'var(--bg-mut)');
+  return out;
+}
+
+/**
+ * Figure colours that are not checked, with the reason (visual spec 6.2).
+ * test/contrast.test.ts fails on a colour token a figure stylesheet uses that
+ * is neither in a pair nor here.
+ */
+export const FIGURE_COLOUR_EXCEPTIONS = {
+  '--rule': 'decorative: grid-paper dots, dividers, PixelBar ticks and empty matrix cells; never the only edge of anything',
+  '--shadow': 'decorative: the hard offset shadow under panels',
+  'glyph at 35%': 'decorative: the faded glyph of an "off" safety cell; the word "No" states the state',
+};
 
 /** Ratio of a pair, the best ratio of an anyOf pair. */
 export function pairRatio(pair, tokens) {

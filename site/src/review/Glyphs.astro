@@ -1,0 +1,179 @@
+---
+// The glyph sheet (visual spec 5.2), a review page built at
+// /_review/glyphs/ and never deployed: every grid at 1x, 2x and 3x in the
+// light and the dark theme side by side, with its key; similar shapes next to
+// each other; the closest pairs by mask distance; and the reuse aliases.
+import tokensCss from '../styles/tokens.css?raw';
+import { parseTokens, resolveColor } from '../../scripts/check-contrast.mjs';
+import DocLayout from '../layouts/DocLayout.astro';
+import { refSlugger } from '../lib/generated';
+import type { Route } from '../lib/routes';
+import { MIN_DISTANCE } from '../pixel/grid';
+import { ALL_GRIDS } from '../pixel/keys';
+import PixelGlyph from '../pixel/PixelGlyph.astro';
+import { aliasRows, closestPairs, familyOrder, silhouetteOrder } from './sheet';
+
+const route: Route = { source: null, url: '/_review/glyphs/', section: 'home', order: 0, template: 'not-found', title: 'Glyph sheet' };
+const id = refSlugger();
+const order = silhouetteOrder();
+const families = familyOrder();
+const pairs = closestPairs(20);
+const aliases = aliasRows();
+const sizes = { inline: order.filter((g) => g.size === 7).length, concept: order.filter((g) => g.size === 9).length };
+
+// Each swatch carries its theme's --ink and --bg, read from tokens.css, so a
+// light and a dark copy of a glyph can sit side by side on one page.
+const tokens = parseTokens(tokensCss);
+const hex = (theme: 'light' | 'dark', name: string) =>
+  `#${resolveColor(`var(${name})`, tokens[theme]).map((c: number) => Math.round(c).toString(16).padStart(2, '0')).join('')}`;
+const swatch = (theme: 'light' | 'dark') =>
+  `--sw-ink: ${hex(theme, '--ink')}; --sw-bg: ${hex(theme, '--bg')}`;
+const THEMES = ['light', 'dark'] as const;
+const SCALES = [1, 2, 3];
+---
+<DocLayout route={route} title="Glyph sheet" noindex toc={false}>
+  <article class="doc glyph-sheet">
+    <h1 id={id('Glyph sheet')}>Glyph sheet</h1>
+    <p class="lead">
+      Every pixel glyph the site draws: {sizes.inline} inline grids (7 by 7) and {sizes.concept} concept and layer grids (9 by 9), each at 1x, 2x and 3x, in the light theme and the dark theme. Glyphs are ordered so that each one sits beside the shape most like it. A review page; it is not published.
+    </p>
+
+    <h2 id={id('Closest pairs')}>Closest pairs</h2>
+    <p>
+      The {pairs.length} pairs nearest to their limit. Distance is the number of cells two glyphs disagree on (higher is more distinct). The limits: two inline glyphs at least {MIN_DISTANCE.inline}, two concept glyphs at least {MIN_DISTANCE.concept}, an inline glyph against a concept glyph at least {MIN_DISTANCE.mixed}. The test suite fails any pair under its limit.
+    </p>
+    <ol class="glyph-pairs">
+      {pairs.map((p) => (
+        <li class="glyph-pair" data-distance={p.distance}>
+          <span class="glyph-pair__glyphs">
+            <PixelGlyph name={p.a} scale={3} />
+            <PixelGlyph name={p.b} scale={3} />
+          </span>
+          <span class="glyph-pair__keys"><code>{p.a}</code> <code>{p.b}</code></span>
+          <span class="glyph-pair__distance">{p.distance} cells apart, limit {p.min}</span>
+        </li>
+      ))}
+    </ol>
+
+    <h2 id={id('All glyphs')}>All glyphs</h2>
+    <p>Grouped by the outline each glyph is built on, so shapes that could be confused sit together; within a group each glyph sits beside the one most like it. Left of each card is the light theme, right the dark theme; each shows 1x, 2x and 3x.</p>
+    {families.map((f) => (
+      <section class="glyph-family" aria-labelledby={`family-${f.title.toLowerCase().replace(/[^a-z]+/g, '-')}`}>
+        <h3 id={`family-${f.title.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{f.title} <span class="glyph-family__count">({f.glyphs.length})</span></h3>
+        <ul class="glyph-grid">
+          {f.glyphs.map((g) => (
+            <li class="glyph-card" data-glyph-key={g.key} data-size={g.size}>
+              <span class="glyph-card__themes">
+                {THEMES.map((t) => (
+                  <span class="glyph-card__swatch" style={swatch(t)} data-theme-swatch={t}>
+                    {SCALES.map((s) => <PixelGlyph name={g.key} scale={s} />)}
+                  </span>
+                ))}
+              </span>
+              <code class="glyph-card__key">{g.key}</code>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
+
+    <h2 id={id('Reused glyphs')}>Reused glyphs</h2>
+    <p>These concepts draw with a glyph that already has the same meaning, so no two grids are copies of each other.</p>
+    <ul class="glyph-aliases">
+      {aliases.map((a) => (
+        <li><PixelGlyph name={a.grid} scale={2} /> <code>{a.key}</code> uses <code>{a.grid}</code></li>
+      ))}
+    </ul>
+    <p class="glyph-sheet__total">{Object.keys(ALL_GRIDS).length} grids, {aliases.length} reused keys.</p>
+  </article>
+</DocLayout>
+
+<style>
+  .glyph-pairs {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr));
+    gap: var(--space-3);
+    padding: 0;
+    list-style: none;
+  }
+
+  .glyph-pair {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: var(--space-3);
+    border: var(--border);
+    background: var(--bg-sub);
+  }
+
+  .glyph-pair__glyphs {
+    display: flex;
+    gap: var(--space-4);
+  }
+
+  .glyph-pair__keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    overflow-wrap: anywhere;
+  }
+
+  .glyph-pair__distance {
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .glyph-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(10rem, 100%), 1fr));
+    gap: var(--space-2);
+    padding: 0;
+    list-style: none;
+  }
+
+  .glyph-family__count {
+    color: var(--ink-2);
+    font-weight: 400;
+  }
+
+  .glyph-card {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    min-width: 0;
+  }
+
+  .glyph-card__themes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: var(--border);
+  }
+
+  .glyph-card__swatch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 4px;
+    padding: 6px;
+    background: var(--sw-bg);
+    color: var(--sw-ink);
+  }
+
+  .glyph-card__key {
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .glyph-aliases {
+    columns: 16rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .glyph-aliases li {
+    display: block;
+    margin: 0 0 var(--space-1);
+    break-inside: avoid;
+    overflow-wrap: anywhere;
+  }
+</style>

@@ -3,23 +3,38 @@
 // design-system section 12): an <ol class="wf"> of step cards, each with a
 // role (checkpoint, mutating, verify, rollback or plain) taken from its
 // capability and effective safety flags. Consecutive steps in one parallel
-// group sit in one box.
+// group sit in one box. A key above the rail says what a dashed, indented
+// card (a step with gates or a condition) means, and lists those steps.
+// Each card is closed; a button (shown only with JavaScript) opens or closes
+// them all, and following a link to a step opens its card.
 import type { Workflow } from '../data/workflows';
 import { diagramRuns, diagramSteps } from '../lib/views';
 import PixelGlyph from '../pixel/PixelGlyph.astro';
 import WorkflowStep from './WorkflowStep.astro';
+import '../styles/figures-workflow-page.css';
 
 interface Props {
   workflow: Workflow;
 }
 
 const { workflow } = Astro.props;
-const runs = diagramRuns(diagramSteps(workflow));
+const steps = diagramSteps(workflow);
+const runs = diagramRuns(steps);
+const branches = steps.filter((d) => d.branch).map((d) => d.step.index);
 ---
+<div class="wf-intro">
+  {branches.length > 0 && (
+    <p class="wf-key">
+      <span class="wf-key__swatch" aria-hidden="true"></span>
+      {`A dashed card set in from the rail is a step with gates or a condition, so it may be skipped or end the run: ${branches.length === 1 ? 'step' : 'steps'} ${branches.length === 1 ? branches[0] : `${branches.slice(0, -1).join(', ')} and ${branches.at(-1)}`}.`}
+    </p>
+  )}
+  <p class="wf-toggle"><button type="button" class="btn btn--quiet" data-wf-toggle data-open="false">Open every step</button></p>
+</div>
 <ol class="wf" aria-label={`Steps of ${workflow.id}`} data-workflow={workflow.id}>
   {runs.map((run) =>
     run.group === null ? (
-      run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} />)
+      run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} open={d === steps[0]} />)
     ) : (
       <li class="wf-parallel" data-group={run.group}>
         <p class="wf-parallel__label">
@@ -27,9 +42,39 @@ const runs = diagramRuns(diagramSteps(workflow));
           {run.join !== undefined && run.join !== null && <>, join: <code>{typeof run.join === 'string' ? run.join : JSON.stringify(run.join)}</code></>}
         </p>
         <ol class="wf wf--parallel">
-          {run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} />)}
+          {run.steps.map((d) => <WorkflowStep workflow={workflow} d={d} open={d === steps[0]} />)}
         </ol>
       </li>
     ),
   )}
 </ol>
+
+<script>
+  // Open the card of the step a link points at (the step map, the data-flow
+  // grid and the cards' own links all point at #ref-step-n).
+  const openTarget = () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id.startsWith('ref-step-')) return;
+    const target = document.getElementById(id);
+    const card = target?.querySelector<HTMLDetailsElement>(':scope > details.wf-step__card') ?? target?.closest('details');
+    if (card && !card.open) {
+      card.open = true;
+      target?.scrollIntoView();
+    }
+  };
+  openTarget();
+  window.addEventListener('hashchange', openTarget);
+  document.addEventListener('click', (ev) => {
+    const a = (ev.target as Element | null)?.closest?.('a[href^="#ref-step-"]');
+    if (a && a.getAttribute('href') === location.hash) openTarget();
+  });
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-wf-toggle]')) {
+    const list = button.closest('.wf-intro')?.nextElementSibling;
+    button.addEventListener('click', () => {
+      const open = button.dataset.open !== 'true';
+      for (const d of list?.querySelectorAll<HTMLDetailsElement>('details.wf-step__card') ?? []) d.open = open;
+      button.dataset.open = String(open);
+      button.textContent = open ? 'Close every step' : 'Open every step';
+    });
+  }
+</script>

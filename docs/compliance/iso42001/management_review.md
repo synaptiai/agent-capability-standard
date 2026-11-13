@@ -41,6 +41,18 @@ Internal audits shall be conducted per the internal audit checklist (see `intern
 | **Reporting** | Findings classified as nonconformity (major/minor) or observation |
 | **Follow-up** | Corrective actions tracked per Clause 10 procedure |
 
+```mermaid
+---
+title: From internal audit to follow-up
+---
+flowchart TB
+  accDescr: An internal audit, at least annually, classifies each finding as a major or minor nonconformity or as an observation, and corrective actions for nonconformities are tracked under the Clause 10 procedure.
+  audit["Internal audit, at least annually"] --> f{Finding}
+  f -->|major or minor| nc[Nonconformity]
+  f --> obs[Observation]
+  nc --> ca["Corrective action, tracked per Clause 10"]
+```
+
 ## 3. Management Review Process (Clause 9.3)
 
 ### 3.1 Review Cadence

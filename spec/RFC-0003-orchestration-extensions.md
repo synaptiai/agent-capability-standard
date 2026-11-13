@@ -98,6 +98,17 @@ of declaration and ontology, and a weaker declaration is W602 and has no
 effect. `mutation_overridable` lets `audit` (append-only, low risk, no
 checkpoint or approval) declare `mutation: false`.
 
+```mermaid
+---
+title: The effective safety flag
+---
+flowchart LR
+  accDescr: An omitted flag inherits from the ontology; a declared flag that is stricter than the ontology takes effect, and a weaker one is warning W602 and has no effect.
+  d{"The step's flag"} -->|omitted| inh[Inherits the ontology value]
+  d -->|"declared, stricter"| str[The declaration takes effect]
+  d -->|"declared, weaker"| w["W602, no effect: the ontology value holds"]
+```
+
 ### 4) Diagnostics have fixed severities
 
 V/B/S/R/F codes are errors and the new W6xx codes are warnings; strict mode
@@ -140,6 +151,16 @@ before|after`.
 The validator and a sans-IO executor live in a Rust crate compiled into the
 Python package; `tools/validate_workflows.py` and the Python
 `WorkflowEngine` both call it, so they cannot disagree.
+
+```mermaid
+---
+title: One core behind both entry points
+---
+flowchart TB
+  accDescr: The validator and the sans-IO executor live in one Rust crate compiled into the Python package, and both tools/validate_workflows.py and the Python WorkflowEngine call it.
+  cli[The CLI validator] --> core["Rust core in the Python package: validator, sans-IO executor"]
+  eng[WorkflowEngine] --> core
+```
 
 ## Backward compatibility
 
@@ -276,6 +297,20 @@ more gaps on the standard's side, closed in the candidate:
   the act-after and ordered-after rules, as a handler is; reading a
   deferred output still defers it (§5.14). The rules themselves stay: the
   author opts out per step, where running ahead is safe.
+
+
+```mermaid
+---
+title: What a deferral holds back
+---
+flowchart LR
+  accDescr: A deferred step holds back the steps that read its output, the steps that may act on the world and the steps the ontology orders after it; a step marked after_deferral run is exempt from the last two, but reading a deferred output still defers it.
+  def[A deferred step] --> r[Steps that read its output]
+  def --> w[Steps that may act on the world]
+  def --> o[Steps the ontology orders after it]
+  w -.-> ex["With after_deferral: run, these two run"]
+  o -.-> ex
+```
 
 ## Open questions
 

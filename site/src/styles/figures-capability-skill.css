@@ -1,0 +1,396 @@
+/*
+ * Figures the capability page adds inside the skill's prose: where the
+ * capability may run in a step list (F-C5, under Safety Constraints) and the
+ * skill's output fields against the contract (F-C6, under Output Contract),
+ * plus the folded output fence and the two-column procedure. Kept apart from
+ * figures-capability.css so the rollout's branches merge cleanly. Each
+ * figure lays itself out by the width of its own .fig container.
+ *
+ * Pages import this file, and a page's styles can load before the layout's
+ * tokens.css, so the layer order is declared here too (the same order).
+ */
+@layer reset, tokens, base, components, utilities;
+
+@layer components {
+  /* ---------- F-C5: where the capability may run ---------- */
+
+  .seq {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .seq__row {
+    margin: 0;
+  }
+
+  .seq__down {
+    display: block;
+    margin: var(--space-1) 0 var(--space-1) 12px;
+  }
+
+  .seq__label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .seq__note {
+    display: inline-block;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: var(--px) solid var(--ink);
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  .seq__row--approval .seq__label {
+    margin-bottom: var(--space-1);
+  }
+
+  .seq__items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .seq__item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .seq__rules {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink-2);
+  }
+
+  .seq__rule {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+  }
+
+  .seq__rule code {
+    font-size: 12px;
+    background: none;
+    padding: 0;
+  }
+
+  .seq__level {
+    font-family: var(--font-eyebrow);
+    color: var(--ink);
+  }
+
+  .seq__self {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    box-sizing: border-box;
+    min-height: 64px;
+    padding: 6px var(--space-4) 6px 6px;
+    border: var(--px) solid var(--layer);
+    background: var(--bg);
+  }
+
+  .seq__self-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .seq__self-text code {
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .seq__key {
+    margin: var(--space-3) 0 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- chip rows: F-C12, the inputs by the extension they need ---------- */
+
+  .ofields {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .ofields__row {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .ofields__label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .ofields__count {
+    font-family: var(--font-mono);
+    font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  .ofields__bar {
+    display: block;
+    max-width: 24rem;
+  }
+
+  .ofields__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ofields__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 2px var(--space-2);
+    border: var(--px) solid var(--ink-3);
+    background: var(--bg);
+  }
+
+  .ofields__chip code {
+    background: none;
+    padding: 0;
+    font-size: 14px;
+  }
+
+  .ofields__chip[data-pin='required'] .ofields__pin {
+    background: var(--ink);
+  }
+
+  /* ---------- F-C7: the fields each procedure step names ---------- */
+
+  .pmap {
+    container-type: inline-size;
+  }
+
+  .pmap__head,
+  .pmap__step {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 2fr);
+    gap: var(--space-2) var(--space-3);
+    align-items: start;
+  }
+
+  .pmap__head {
+    margin: 0 0 var(--space-2);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .pmap__steps {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .pmap__step {
+    margin: 0;
+    padding: var(--space-2) 0;
+    border-top: var(--px) solid var(--line);
+  }
+
+  .pmap__title {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    min-width: 0;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .pmap__n {
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    background: var(--ink);
+    color: var(--bg);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .pmap__cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .pmap__label {
+    display: none;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .pmap__none {
+    grid-column: 2 / -1;
+    align-self: center;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .pmap__chip {
+    padding: 0 var(--space-1);
+    border: var(--px) solid var(--ink-3);
+    background: var(--bg);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .pmap__chip--out {
+    border-color: var(--layer);
+    background: var(--bg-mut);
+  }
+
+  /* Narrow: each step stacks its title over its two cells, each labelled. */
+  @container (max-width: 520px) {
+    .pmap__head {
+      display: none;
+    }
+
+    .pmap__step {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .pmap__none {
+      grid-column: auto;
+    }
+
+    .pmap__cell:has(.pmap__chip) .pmap__label {
+      display: inline;
+      min-width: 3ch;
+    }
+
+    .pmap__cell:not(:has(.pmap__chip)) {
+      display: none;
+    }
+  }
+
+  /* ---------- F-C1: a hovered or focused tile marks its edge types in the legend ---------- */
+
+  .fig:has(.nbhd__cell[data-types~='requires']:is(:hover, :focus-within)) .nbhd-legend li[data-type='requires'],
+  .fig:has(.nbhd__cell[data-types~='soft_requires']:is(:hover, :focus-within)) .nbhd-legend li[data-type='soft_requires'],
+  .fig:has(.nbhd__cell[data-types~='enables']:is(:hover, :focus-within)) .nbhd-legend li[data-type='enables'],
+  .fig:has(.nbhd__cell[data-types~='precedes']:is(:hover, :focus-within)) .nbhd-legend li[data-type='precedes'],
+  .fig:has(.nbhd__cell[data-types~='conflicts_with']:is(:hover, :focus-within)) .nbhd-legend li[data-type='conflicts_with'],
+  .fig:has(.nbhd__cell[data-types~='alternative_to']:is(:hover, :focus-within)) .nbhd-legend li[data-type='alternative_to'],
+  .fig:has(.nbhd__cell[data-types~='specializes']:is(:hover, :focus-within)) .nbhd-legend li[data-type='specializes'] {
+    box-shadow: inset 0 -4px 0 var(--ink);
+  }
+
+  /* ---------- the folded output fence ---------- */
+
+  /* The Inputs table's Required column: a check on Yes, a cross on No. */
+  .skill-req {
+    vertical-align: -2px;
+  }
+
+  .skill-req--yes {
+    color: var(--ok);
+  }
+
+  .skill-req--no {
+    color: var(--ink-3);
+  }
+
+  .skill-fence {
+    margin: var(--space-3) 0;
+  }
+
+  /* The Field Definitions table's contract column: the port pin, filled when
+     the output contract requires the field and outlined when it is optional;
+     a cross when the field is the skill's own. */
+  .skill-contract {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--ink);
+    vertical-align: 0;
+  }
+
+  .skill-contract--required {
+    background: var(--ink);
+  }
+
+  .skill-contract-own {
+    vertical-align: -2px;
+    color: var(--ink-3);
+  }
+
+  /* A row naming two fields gets one mark per field, each on its own line. */
+  .skill-contract-part {
+    display: block;
+  }
+
+  .skill-contract-part > code {
+    margin-right: var(--space-1);
+  }
+
+  /* ---------- the procedure in two columns when the column is wide ---------- */
+
+  .capability-skill {
+    container-type: inline-size;
+  }
+
+  .skill-steps > li > p {
+    margin: 0;
+  }
+
+  .skill-steps > li > ul {
+    margin: var(--space-1) 0 0;
+  }
+
+  .skill-steps > li > ul > li {
+    margin: 0;
+  }
+
+  /* Wide: two balanced columns, read down the first and then the second.
+     Columns, not a grid: a grid row is as tall as its longest step, which
+     left a tall gap beside every long step. */
+  @container (min-width: 640px) {
+    .skill-steps {
+      columns: 2;
+      column-gap: var(--space-5);
+    }
+
+    .skill-steps > li {
+      break-inside: avoid;
+      padding-bottom: var(--space-4);
+    }
+
+    .skill-steps > li + li {
+      margin-top: 0;
+    }
+  }
+}

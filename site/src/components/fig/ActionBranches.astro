@@ -1,0 +1,62 @@
+---
+// F-S9 and F-S10 (visual spec 3.9): what a gate or a failure mode can do.
+// A spine of the step and its decision points (the diamond glyph) with one
+// branch per value of the schema's action enum, each with its glyph:
+// - gates: a decision before the step and one after it, the after branches
+//   leaving out what the schema forbids there (an after-gate cannot skip);
+// - failures: one decision after the step, each branch with its effect
+//   before recovery from the §5.12 table.
+//
+// Props:
+// - id: string, required. A ref- id.
+// - n: number, required.
+// - title: string, required.
+// - caption: string, required.
+// - kind: 'gate' | 'fail', required.
+// - points: { label: string; at: 'before' | 'after'; branches: { action: string; effect?: string }[] }[], required.
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+
+interface Branch {
+  action: string;
+  effect?: string;
+}
+interface Point {
+  label: string;
+  at: 'before' | 'after';
+  branches: Branch[];
+}
+interface Props {
+  id: string;
+  n: number;
+  title: string;
+  caption: string;
+  kind: 'gate' | 'fail';
+  points: Point[];
+}
+
+const { id, n, title, caption, kind, points } = Astro.props;
+const before = points.filter((p) => p.at === 'before');
+const after = points.filter((p) => p.at === 'after');
+---
+<Figure id={id} n={n} title={title} caption={caption} kind={`${kind}-branches`}>
+  <div class="branches" data-kind={kind}>
+    {[...before.map((p) => ({ p })), { step: true as const }, ...after.map((p) => ({ p }))].map((item) =>
+      'step' in item ? (
+        <p class="branches__step"><PixelGlyph name="flow:run" /><span>The step runs</span></p>
+      ) : (
+        <div class="branches__point" data-at={item.p.at}>
+          <p class="branches__decision"><PixelGlyph name="diamond" /><span>{item.p.label}</span></p>
+          <ul class="branches__list" aria-label={item.p.label}>
+            {item.p.branches.map((b) => (
+              <li class="branches__branch" data-action={b.action}>
+                <span class="branches__action"><PixelGlyph name={`${kind}:${b.action}`} /><code>{b.action}</code></span>
+                {b.effect && <span class="branches__effect">{b.effect}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ),
+    )}
+  </div>
+</Figure>

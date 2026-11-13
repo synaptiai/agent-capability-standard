@@ -1,0 +1,74 @@
+---
+// The chain the capability page draws under the skill's "Composition
+// Patterns" heading (visual spec 3.1): three labelled groups of small
+// periodic tiles, each with its id under it, in the order the section names
+// them: the capabilities it commonly follows, then this capability (the
+// 4px-bordered tile), then the ones it commonly precedes. Chevrons sit only
+// between the groups: the section lists the tiles in a group as
+// alternatives, not as an order among themselves. The ids come from the
+// section's own lists; words that are not capability ids are skipped. Under
+// each listed tile: the ontology edge between the pair (its mark and type)
+// and how many times the pair runs as neighbouring steps, in that order, in
+// the catalog workflows (chainChecks), which the list does not say. The
+// caption says how to read an edge phrase. Drawn
+// only when it has two or more tiles.
+//
+// Props:
+// - cap: Capability, required.
+// - chain: CompositionChain, required. From compositionChain().
+// - n: number, required. The figure number on the page.
+import type { Capability } from '../../data/ontology';
+import { chainCaption, chainChecks, type CompositionChain } from '../../lib/capability-figures';
+import { capabilitySymbol } from '../../lib/views';
+import PixelGlyph from '../../pixel/PixelGlyph.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+
+interface Props {
+  cap: Capability;
+  chain: CompositionChain;
+  n: number;
+}
+
+const { cap, chain, n } = Astro.props;
+const checks = chainChecks(cap, chain);
+// Each edge reads as a phrase with this capability's symbol: "requires Mt"
+// under checkpoint is "checkpoint requires mutate"; "Mt precedes" under
+// verify is "mutate precedes verify".
+const sym = capabilitySymbol(cap.id);
+const check = (side: string, id: string) => checks.find((c) => c.side === side && c.id === id);
+const groups = [
+  { key: 'follows', label: 'Commonly follows', ids: chain.follows, relation: `commonly before ${cap.id}` },
+  { key: 'self', label: 'This capability', ids: [cap.id], relation: 'this capability' },
+  { key: 'precedes', label: 'Commonly precedes', ids: chain.precedes, relation: `commonly after ${cap.id}` },
+].filter((g) => g.ids.length > 0);
+---
+<Figure id="ref-fig-composition" n={n} title={`The neighbours the skill lists for ${cap.id}, checked against the ontology and the catalogs`} caption={chainCaption(cap, chain, checks)} kind="composition">
+  <div class="chain" role="list" aria-label={`Capabilities in the order this section names them, with ${cap.id} in place`}>
+    {groups.map((g, k) => (
+      <div class:list={['chain__group', `chain__group--${g.key}`]} role="listitem">
+        {k > 0 && <PixelGlyph name="chevron-right" class="chain__arrow" />}
+        <div class="chain__set">
+          <p class="chain__label" aria-hidden="true">{g.label}</p>
+          <ul class="chain__tiles">
+            {g.ids.map((id) => (
+              <li class:list={['chain__item', g.key === 'self' && 'chain__item--self']}>
+                <MiniTile id={id} size={32} relation={g.relation} current={g.key === 'self'} link={g.key !== 'self'} />
+                <code class="chain__id" aria-hidden="true">{id}</code>
+                {g.key !== 'self' && (() => {
+                  const c = check(g.key, id)!;
+                  return (
+                    <span class="chain__check">
+                      {c.edges.length > 0 ? c.edges.map((e) => <span class="chain__edge"><PixelGlyph name={`mark:${e.type}`} /><span>{e.dir === 'into' ? `${sym} ${e.type}` : `${e.type} ${sym}`}</span></span>) : <span class="chain__edge chain__edge--none">no edge</span>}
+                      <span class="chain__count">{c.adjacent === 0 ? 'not next to it in a workflow' : `next to it ${c.adjacent}×`}</span>
+                    </span>
+                  );
+                })()}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    ))}
+  </div>
+</Figure>

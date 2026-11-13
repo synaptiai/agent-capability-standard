@@ -1,0 +1,61 @@
+---
+// F-E3, an example chain of spec/EDGE_TYPES.md drawn as tiles (visual spec
+// 3.7): each parsed `a --type--> b` line is a row of 32px MiniTiles joined in
+// the type's line style; the tree form is drawn top to bottom, the parent on
+// top. Rows turn vertical in a container narrower than 480px. The fence
+// under the figure is its text equivalent. A key under the tiles names the
+// capability behind each symbol (the tiles' accessible names already do).
+// The frame is as wide as the chain and its key (fig--fit), not the column,
+// so a three-tile chain does not sit in a wide empty panel.
+//
+// Props:
+// - id: string, required. A ref- id for the figure.
+// - n: number, required. The figure number.
+// - heading: string, required. The H3 text; the fence is found under it.
+import { cellReading, chainCaption, chainKey, exampleChains } from '../../lib/edge-figures';
+import EdgeConnector from './EdgeConnector.astro';
+import Figure from './Figure.astro';
+import MiniTile from './MiniTile.astro';
+
+interface Props {
+  id: string;
+  n: number;
+  heading: string;
+}
+
+const { id, n, heading } = Astro.props;
+const chains = exampleChains(heading);
+const caption = chainCaption(chains);
+// Words for a tile's accessible name: how it joins the next tile.
+const relation = (from: string, edges: { a: string; b: string; type: string; from: string; to: string }[]) =>
+  edges
+    .filter((e) => e.a === from || e.b === from)
+    .map((e) => cellReading({ from: e.from, to: e.to, types: [e.type as never] }))
+    .join('; ');
+---
+<Figure id={id} n={n} title={heading} caption={caption} kind="edge-chain" class="fig--fit">
+  <div class="edge-chains">
+    {chains.map((c) => (
+      <ol class:list={['edge-chain', c.form === 'tree' ? 'edge-chain--tree' : 'edge-chain--row']} data-form={c.form}>
+        {c.nodes.map((node, i) => (
+          <li class="edge-chain__item">
+            {i > 0 && (
+              <span class="edge-chain__link">
+                {c.form === 'tree' ? (
+                  <EdgeConnector type={c.edges[i - 1]!.type} dir="up" />
+                ) : (
+                  <>
+                    <span class="edge-chain__h"><EdgeConnector type={c.edges[i - 1]!.type} dir="right" /></span>
+                    <span class="edge-chain__v"><EdgeConnector type={c.edges[i - 1]!.type} dir="down" /></span>
+                  </>
+                )}
+              </span>
+            )}
+            <MiniTile id={node} relation={relation(node, c.edges)} />
+          </li>
+        ))}
+      </ol>
+    ))}
+    <p class="edge-chain__key" aria-hidden="true">{chainKey(chains).map((k) => <span><b>{k.symbol}</b> {k.id}</span>)}</p>
+  </div>
+</Figure>

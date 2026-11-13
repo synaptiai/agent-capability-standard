@@ -46,6 +46,17 @@ for wf, errs in res.items():
 sys.exit(rc)
 ```
 
+```mermaid
+---
+title: The method
+---
+flowchart LR
+  accDescr: Each reproduction catalog is run through the validator and the engine as they were at 9e2f65b, and through the fixed validator, where both tools call one Rust core.
+  cat[Reproduction catalog] --> v["Validator at 9e2f65b"]
+  cat --> e["Engine at 9e2f65b, through engine_check.py"]
+  cat --> core["After the fix: both tools call one Rust core"]
+```
+
 ### Summary
 
 | # | Case | Validator @9e2f65b | Engine @9e2f65b | Right per v1.0.0 | After the fix |
@@ -93,6 +104,17 @@ first appears at step 3`. That is the D2c case, which the 9e2f65b validator acce
 It also prints W602/W612/W601/W603/W609/W610/W611 warnings. (The catalog on the
 branch has since been fixed and passes with no warnings.)
 
+```mermaid
+---
+title: The engine's 56 errors on the shipped catalog
+---
+flowchart LR
+  accDescr: Of the engine's 56 errors on the 9e2f65b catalog, 36 are V102 from precedes, 15 are F504 from audit mutation false, two send downgrades and one conflict reported twice, and 5 are B203 from any annotations.
+  all["Engine at 9e2f65b: 56 errors"] --> v102["36 V102: precedes, D2, D2b, D2c"]
+  all --> f504["15 F504: 11 audit (D3), 2 send downgrades (D3, D4), 1 conflict twice (D5)"]
+  all --> b203["5 B203: any annotations (D1)"]
+```
+
 ### The three cases from #114
 
 ### D1. Typed annotation on a field the ontology types as `any`
@@ -115,6 +137,17 @@ field satisfies both tools.
 **On the shipped catalog:** all 5 of the engine's B203 errors on the 9e2f65b
 `workflow_catalog.yaml` are this case: `retrieve_out.data` and `generate_out.content` (twice) in
 `rag_pipeline`, `generate_out.content` in `security_assessment`, and `execute_out.result` in `model_deployment`.
+
+```mermaid
+---
+title: D1 catalog and verdicts
+---
+flowchart TB
+  accDescr: retrieve's data is bound into explain with the annotation object; at 9e2f65b the validator passes and the engine reports B203, and after the fix it passes.
+  retrieve -->|"${r.data: object}"| explain
+  explain -.->|verdicts| res
+  res["Validator: pass. Engine: B203. After the fix: pass"]
+```
 
 Catalog `r01_any_annotated.yaml`:
 
@@ -180,6 +213,16 @@ ordering only when both are present.
 **On the shipped catalog:** most of the engine's 36 V102 errors on the 9e2f65b
 `workflow_catalog.yaml` are this case.
 
+```mermaid
+---
+title: D2 catalog and verdicts
+---
+flowchart TB
+  accDescr: The workflow has a detect step and no observe; at 9e2f65b the validator passes and the engine reports V102, and after the fix it passes.
+  detect["detect, with no observe in the workflow"]
+  detect -.->|verdicts| res["Validator: pass. Engine: V102. After the fix: pass"]
+```
+
 Catalog `r03_precedes_absent.yaml`:
 
 ```yaml
@@ -232,6 +275,17 @@ temporal ordering"; EDGE_TYPES.md §4).
 **On the shipped catalog:** this case is in `workflow_catalog.yaml` at 9e2f65b.
 `model_deployment` has `verify` at step 0 and `execute` at step 3. The validator passes it,
 and the current branch reports V102 on it (see the shipped-catalog section below).
+
+```mermaid
+---
+title: D2c catalog and verdicts
+---
+flowchart TB
+  accDescr: detect runs before observe, the reverse of the precedes edge; at 9e2f65b the validator passes and the engine reports V102, and after the fix it is V102.
+  detect --> observe
+  observe -.->|verdicts| res
+  res["Validator: pass. Engine: V102. After the fix: V102"]
+```
 
 Catalog `r04_precedes_reversed.yaml`:
 
@@ -293,6 +347,16 @@ mutation "Varies") pull in opposite directions. The engine's reading is the safe
 but it fails every shipped workflow: 11 audit steps in `workflow_catalog.yaml` declare
 `mutation: false`. On the current branch this passes because the ontology now marks audit
 `mutation_overridable: true` (v1.1.0 §4.1, §4.4, §5.2.1).
+
+```mermaid
+---
+title: D3 catalog and verdicts
+---
+flowchart TB
+  accDescr: The workflow has one audit step that declares mutation false; at 9e2f65b the validator passes and the engine reports F504, with V102, and after the fix it passes because audit is mutation_overridable.
+  a["audit, mutation: false"]
+  a -.->|verdicts| res["Validator: pass. Engine: F504, with V102. After the fix: pass, mutation_overridable"]
+```
 
 Catalog `r05_audit_mutation_false.yaml`:
 
@@ -473,6 +537,17 @@ executes **and** sends.
 
 **Which is right (v1.0.0):** the validator, as for D2.
 
+```mermaid
+---
+title: D2b catalog and verdicts
+---
+flowchart TB
+  accDescr: checkpoint, constrain, plan, mutate and verify run in order; at 9e2f65b the validator passes and the engine reports V102 twice, and after the fix it passes.
+  checkpoint --> constrain --> plan --> mutate --> verify
+  verify -.->|verdicts| res
+  res["Validator: pass. Engine: V102 twice. After the fix: pass"]
+```
+
 Catalog `r03b_precedes_any_of_sources.yaml`:
 
 ```yaml
@@ -596,6 +671,18 @@ step goes unreported by both tools (see "Candidates that agree").
 value itself an error. The current branch reports W602 for both flags, applies the ontology
 value, and passes.
 
+```mermaid
+---
+title: D4 catalog and verdicts
+---
+flowchart TB
+  accDescr: checkpoint, constrain and plan come before a mutate step that declares requires_checkpoint false; at 9e2f65b the validator passes and the engine reports F504, and after the fix it passes with W602.
+  checkpoint --> constrain --> plan
+  plan --> m["mutate, requires_checkpoint: false"]
+  m -.->|verdicts| res
+  res["Validator: pass. Engine: F504. After the fix: pass with W602"]
+```
+
 Catalog `r07_requires_checkpoint_false.yaml`:
 
 ```yaml
@@ -666,6 +753,17 @@ containing both." The double report is an engine bug.
 **On the shipped catalog:** the engine fails `digital_twin_sync_loop` (mutate +
 rollback). The current branch changed the rule: v1.1.0 §4.3 limits it to sharing a
 `parallel_group` (F504), so this sequential catalog passes.
+
+```mermaid
+---
+title: D5 catalog and verdicts
+---
+flowchart TB
+  accDescr: checkpoint, persist and rollback run in sequence; at 9e2f65b the validator passes and the engine reports F504 twice, and after the fix it passes.
+  checkpoint --> persist --> rollback
+  rollback -.->|verdicts| res
+  res["Validator: pass. Engine: F504 twice. After the fix: pass"]
+```
 
 Catalog `r09_conflicts_sequential.yaml`:
 
@@ -782,6 +880,17 @@ VALIDATION FAIL:
 
 **Which is right (v1.0.0):** the validator (§5.5 item 2; §9.3 B201).
 
+```mermaid
+---
+title: D7 catalog and verdicts
+---
+flowchart TB
+  accDescr: explain binds a field observe does not output; at 9e2f65b the validator reports B201 and the engine passes, and after the fix it is B201.
+  observe -->|"${o.no_such_field}"| explain
+  explain -.->|verdicts| res
+  res["Validator: B201. Engine: pass. After the fix: B201"]
+```
+
 Catalog `r11_bad_path.yaml`:
 
 ```yaml
@@ -896,6 +1005,17 @@ so any annotation outside the validator's small grammar is never checked.
 
 **Which is right (v1.0.0):** the engine (§5.4 rule 2; §3.5 "Type mismatches MUST be detected
 at validation time"). The current branch reports B203.
+
+```mermaid
+---
+title: D9 catalog and verdicts
+---
+flowchart TB
+  accDescr: observe's object output is bound into explain with the annotation integer; at 9e2f65b the validator passes and the engine reports B203, and after the fix it is B203.
+  observe -->|"${o.observation: integer}"| explain
+  explain -.->|verdicts| res
+  res["Validator: pass. Engine: B203. After the fix: B203"]
+```
 
 Catalog `r13_annotation_outside_grammar.yaml`:
 
@@ -1119,6 +1239,18 @@ VALIDATION PASS
 **Which is right (v1.0.0):** the validator. §10.2 L3 says "Validates gate and condition
 expressions", and §5.5 item 1 requires an existing producer.
 
+```mermaid
+---
+title: D13 catalog and verdicts
+---
+flowchart TB
+  accDescr: observe has a condition and a gate that reference stores that do not exist; at 9e2f65b the validator reports B202 twice and the engine passes, and after the fix it is B202 twice.
+  c["condition: ${nosuch.flag} == true"] -.-> observe
+  g["gate when: ${missing.value} == null"] -.-> observe
+  observe -.->|verdicts| res
+  res["Validator: B202 twice. Engine: pass. After the fix: B202 twice"]
+```
+
 Catalog `r17_gate_condition_ref.yaml`:
 
 ```yaml
@@ -1228,6 +1360,17 @@ VALIDATION FAIL:
 **Cause:** the engine has no consumer-side check.
 
 **Which is right (v1.0.0):** the validator (§5.5 item 3; §10.2 L3).
+
+```mermaid
+---
+title: D15 catalog and verdicts
+---
+flowchart TB
+  accDescr: observe's object output is bound into retrieve's string target; at 9e2f65b the validator reports B203 and the engine passes, and after the fix it is B203.
+  observe -->|"${o.observation} as target"| retrieve
+  retrieve -.->|verdicts| res
+  res["Validator: B203. Engine: pass. After the fix: B203"]
+```
 
 Catalog `r19_consumer_mismatch.yaml`:
 
@@ -1548,6 +1691,17 @@ does not read these fields: `WorkflowStep` drops them.
 
 **Which is right (v1.0.0):** the validator (§9.4 S301).
 
+```mermaid
+---
+title: D20 catalog and verdicts
+---
+flowchart TB
+  accDescr: transform names a mapping_ref and an output_conforms_to file that do not exist; at 9e2f65b the validator reports S301 twice and the engine passes, and after the fix it is S301 twice.
+  retrieve --> t["transform, mapping_ref and output_conforms_to name missing files"]
+  t -.->|verdicts| res
+  res["Validator: S301 twice. Engine: pass. After the fix: S301 twice"]
+```
+
 Catalog `r24_mapping_ref_missing.yaml`:
 
 ```yaml
@@ -1607,6 +1761,17 @@ reports only V101.
 
 **Which is right (v1.0.0):** both are defensible. The current branch follows the
 validator: V101 + B202.
+
+```mermaid
+---
+title: D21 catalog and verdicts
+---
+flowchart TB
+  accDescr: An unknown capability, frobnicate, is referenced later by explain; at 9e2f65b the validator reports V101 and B202 and the engine V101, and after the fix it is V101 and B202.
+  f["frobnicate: not in the ontology"] -->|"${f.result: object}"| explain
+  explain -.->|verdicts| res
+  res["Validator: V101 + B202. Engine: V101. After the fix: V101 + B202"]
+```
 
 Catalog `r25_unknown_capability.yaml`:
 

@@ -32,6 +32,18 @@ Every diagnostic has a fixed severity: errors make a workflow invalid,
 warnings (W6xx) do not, unless the validator runs in strict mode
 (`--strict`).
 
+```mermaid
+---
+title: What a diagnostic does to a workflow
+---
+flowchart TB
+  accDescr: An error makes the workflow invalid; a W6xx warning does not, unless the validator runs with --strict.
+  d[Diagnostic] -->|error| inv[Workflow invalid]
+  d -->|warning W6xx| strict{"--strict?"}
+  strict -->|yes| inv
+  strict -->|no| ok[Workflow still valid]
+```
+
 **Reference implementation:** L4 (`tools/validate_workflows.py`, backed by
 the Rust core in `core/`).
 
@@ -68,6 +80,19 @@ the Rust core in `core/`).
   `domain_*` ones run reference domain workflows. Twenty (`gap*`) are an
   adopter's own scripted runs, kept as contributed in
   `tests/conformance/contrib/` and copied by the generator.
+
+```mermaid
+---
+title: How a workflow fixture is checked
+---
+flowchart TB
+  accDescr: The error and warning codes a fixture emits are compared with the expected_error_codes and expected_warning_codes EXPECTATIONS.json lists for it; the fixture passes only when they are exactly equal.
+  fx["Fixture: pass_* or fail_*"] --> codes[Emitted error and warning codes]
+  ex["EXPECTATIONS.json: expected_error_codes, expected_warning_codes"] --> eq{"Exactly equal?"}
+  codes --> eq
+  eq -->|yes| pass[Fixture passes]
+  eq -->|no| fail[Fixture fails]
+```
 
 Running the suite:
 

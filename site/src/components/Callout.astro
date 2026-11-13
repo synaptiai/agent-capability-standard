@@ -3,6 +3,7 @@
 // use: a label row (glyph and word) and the content. Types follow the
 // design: note, tip, important, warning, caution and requirement.
 import PixelGlyph from '../pixel/PixelGlyph.astro';
+import { CALLOUT_GLYPHS } from '../plugins/rehype-callouts';
 
 type Kind = 'note' | 'tip' | 'important' | 'warning' | 'caution' | 'requirement';
 
@@ -12,14 +13,7 @@ interface Props {
   label?: string;
 }
 
-const GLYPH: Record<Kind, string> = {
-  note: 'note',
-  tip: 'check',
-  important: 'note',
-  warning: 'warning',
-  caution: 'caution',
-  requirement: 'stamp',
-};
+const GLYPH: Record<Kind, string> = CALLOUT_GLYPHS;
 const { type, label } = Astro.props;
 const word = label ?? type.charAt(0).toUpperCase() + type.slice(1);
 ---

@@ -186,6 +186,13 @@ describe('workflows', () => {
     expect(out[0]!.steps[1]!.consumes).toEqual(['a']);
   });
 
+  it('accepts any workflow name the Standard allows (§5.1 names no pattern)', () => {
+    // The workflow page escapes the id where it writes it into CSS.
+    for (const id of ['Bad', 'a-b', 'a"]{}', 'a b']) {
+      expect(parseCatalog('t.yaml', `"${id.replace(/"/g, '\\"')}":\n  goal: g\n  risk: low\n  steps:\n  - capability: plan\n`, 'core', loadOntology()).map((w) => w.id), id).toEqual([id]);
+    }
+  });
+
   it('rejects an unknown capability', () => {
     const text = 'w:\n  goal: g\n  risk: low\n  steps:\n  - capability: teleport\n';
     expect(() => parseCatalog('t.yaml', text, 'core', loadOntology())).toThrow(/unknown capability teleport/);
