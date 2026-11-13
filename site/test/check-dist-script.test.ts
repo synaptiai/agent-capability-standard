@@ -12,7 +12,7 @@ const O = 'https://acs.synapti.ai';
 type Files = Record<string, string>;
 
 function page(body: string): string {
-  return `<!doctype html><html><head><link rel="stylesheet" href="/_astro/site.css"><script type="module" src="/_astro/app.js"></script></head><body>${body}</body></html>`;
+  return `<!doctype html><html><head><link rel="stylesheet" href="/_astro/site.css"><script type="module" src="/_astro/app.js"></script></head><body class="page page--prose">${body}</body></html>`;
 }
 
 /** A clean two-page site: home and /guide/, each with its copy, plus 404, sitemap, llms.txt and Pagefind. */
@@ -49,14 +49,15 @@ function build(files: Files): string {
   return dir;
 }
 
-function problems(files: Files): string[] {
-  const { problems: p } = checkDistDir(build(files));
+/** The problems check-dist finds; `drawn` are the templates whose pages need a drawn figure (none in the clean site). */
+function problems(files: Files, drawn: readonly string[] = []): string[] {
+  const { problems: p } = checkDistDir(build(files), { drawnTemplates: drawn });
   return Object.entries(p).flatMap(([check, list]) => list.map((l) => `[${check}] ${l}`));
 }
 
 describe('check-dist.mjs', () => {
   it('passes the clean fixture and counts its pages', () => {
-    const r = checkDistDir(build(cleanSite()));
+    const r = checkDistDir(build(cleanSite()), { drawnTemplates: [] });
     expect(Object.values(r.problems).flat()).toEqual([]);
     expect(r.stats.pages).toBe(2);
     expect(r.stats.copies).toBe(2);
@@ -263,14 +264,21 @@ describe('drawn figures', () => {
 
   it('fails a generated page whose numbered figures are all tables, and leaves prose pages alone', () => {
     const files = cleanSite();
-    files['guide/index.html'] = files['guide/index.html']!.replace('<body>', '<body class="page page--listing page--with-sidebar">').replace('</body>', `${fig(1, table('x'))}</body>`);
+    files['guide/index.html'] = files['guide/index.html']!.replace('page--prose', 'page--listing page--with-sidebar').replace('</body>', `${fig(1, table('x'))}</body>`);
     files['guide/index.md'] = '# Guide\n\n**Figure: F1.** c\n';
-    expect(problems(files)).toEqual(['[drawn] /guide/ [listing]: none of its 1 numbered figure(s) is drawn; each is only a table']);
+    expect(problems(files, ['listing'])).toEqual(['[drawn] /guide/ [listing]: none of its 1 numbered figure(s) is drawn; each is only a table']);
     files['guide/index.html'] = files['guide/index.html']!.replace('page--listing', 'page--prose');
     expect(problems(files)).toEqual([]);
     files['guide/index.html'] = files['guide/index.html']!.replace('page--prose', 'page--listing').replace('</body>', `${fig(2, svg)}</body>`);
     files['guide/index.md'] += '\n**Figure: F2.** c\n';
-    expect(problems(files)).toEqual([]);
+    expect(problems(files, ['listing'])).toEqual([]);
+  });
+
+  it('fails a page whose body names no template, and a drawn template no built page uses', () => {
+    const files = cleanSite();
+    files['guide/index.html'] = files['guide/index.html']!.replace('<body class="page page--prose">', '<body class="page page--with-sidebar">');
+    expect(problems(files)).toEqual(['[drawn] /guide/: its body has no page--<template> class, so no check knows its template']);
+    expect(problems(cleanSite(), ['listing'])).toEqual(['[drawn] DRAWN_TEMPLATES lists "listing", which no built page uses']);
   });
 });
 

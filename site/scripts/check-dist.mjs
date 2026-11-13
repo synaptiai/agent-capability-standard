@@ -473,13 +473,23 @@ export function drawnFigure(figureHtml) {
   return /<svg\b/i.test(without(drawing, { name: 'table' }));
 }
 
-/** Every page of a DRAWN_TEMPLATES template has a drawn numbered figure. */
-export function checkDrawnFigures(fileList, read) {
+/**
+ * Every page of a DRAWN_TEMPLATES template has a drawn numbered figure. A
+ * page whose body names no template, and a DRAWN_TEMPLATES entry no built
+ * page uses, are problems too: either would let a page skip the check.
+ */
+export function checkDrawnFigures(fileList, read, drawnTemplates = DRAWN_TEMPLATES) {
   const problems = [];
+  const seen = new Set();
   for (const u of htmlPages(fileList)) {
     const html = read(`${u.slice(1)}index.html`);
     const t = pageTemplate(html);
-    if (!DRAWN_TEMPLATES.includes(t)) continue;
+    if (t === null) {
+      problems.push(`${u}: its body has no page--<template> class, so no check knows its template`);
+      continue;
+    }
+    seen.add(t);
+    if (!drawnTemplates.includes(t)) continue;
     let numbered = 0;
     let drawn = 0;
     for (const m of html.matchAll(/<figure\b[^>]*>/g)) {
@@ -491,6 +501,7 @@ export function checkDrawnFigures(fileList, read) {
     }
     if (drawn === 0) problems.push(`${u} [${t}]: none of its ${numbered} numbered figure(s) is drawn; each is only a table`);
   }
+  for (const t of drawnTemplates) if (!seen.has(t)) problems.push(`DRAWN_TEMPLATES lists "${t}", which no built page uses`);
   return problems;
 }
 
@@ -536,7 +547,7 @@ function kb(bytes) {
 }
 
 /** Run every check on a dist directory. */
-export function checkDistDir(distDir) {
+export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {}) {
   const fileList = walk(distDir);
   const read = (f) => readFileSync(path.join(distDir, f), 'utf8');
   const size = (f) => statSync(path.join(distDir, f)).size;
@@ -551,7 +562,7 @@ export function checkDistDir(distDir) {
     copies: has.has('llms.txt') ? checkCopies(fileList, read('llms.txt')) : [],
     sitemap: has.has('sitemap.xml') ? checkSitemap(fileList, read('sitemap.xml')) : [],
     figures: checkFigureCopies(fileList, read),
-    drawn: checkDrawnFigures(fileList, read),
+    drawn: checkDrawnFigures(fileList, read, drawnTemplates),
     legends: checkLegends(fileList, read),
     review: checkReviewLinks(fileList, read),
   };
