@@ -67,7 +67,7 @@ export function pageLinks(pagePath: string): string {
   ].join(', ');
 }
 
-function markdownResponse(request: Request, url: URL, body: string, pagePath: string, cfg: WorkerConfig, vary: string | null): Response {
+function markdownResponse(request: Request, url: URL, copy: Response, pagePath: string, cfg: WorkerConfig, vary: string | null): Response {
   const headers: Record<string, string> = {
     'Content-Type': 'text/markdown; charset=utf-8',
     'Cache-Control': 'public, max-age=0, must-revalidate',
@@ -76,7 +76,7 @@ function markdownResponse(request: Request, url: URL, body: string, pagePath: st
     ...robotsHeaders(url),
   };
   if (vary) headers.Vary = vary;
-  return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers });
+  return new Response(request.method === 'HEAD' ? null : copy.body, { status: 200, headers });
 }
 
 export function notFoundMarkdown(path: string, cfg: WorkerConfig): string {
@@ -141,47 +141,56 @@ async function notFound(request: Request, url: URL, original: Response, cfg: Wor
 
 export function createHandler(cfg: WorkerConfig) {
   return async function handle(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    if (path === MCP_PATH) return handleMcp(request, env, cfg);
-    if (path === `${MCP_PATH}/server-card` || path === '/.well-known/mcp/server-card.json') return serverCardResponse(request, url, cfg);
-    if (request.method !== 'GET' && request.method !== 'HEAD') return env.ASSETS.fetch(request);
-
-    const accept = request.headers.get('Accept');
-    const agent = isMarkdownAgent(request.headers.get('User-Agent'));
-    const wantsMarkdown = agent || prefersMarkdown(accept);
-    // A browser names text/html in Accept; curl, HTTP libraries and most agents send */* or nothing.
-    const markdown404 = wantsMarkdown || !namesHtml(accept);
-
-    // A Markdown copy, asked for directly.
-    if (path.endsWith('/index.md')) {
-      const res = await asset(env, url, path);
-      if (res.status === 200) return markdownResponse(request, url, await res.text(), path.slice(0, -'index.md'.length), cfg, null);
-      return notFound(request, url, res, cfg, markdown404);
+    try {
+      return await route(request, env, cfg);
+    } catch {
+      // Fail open: if anything here breaks, the static files are still served as they are.
+      return env.ASSETS.fetch(request);
     }
-    // <page>.md -> <page>/index.md, when no file has that name.
-    if (path.endsWith('.md') && path.length > '/.md'.length) {
-      const direct = await env.ASSETS.fetch(request);
-      if (direct.status !== 404) return direct;
-      const pagePath = `${path.slice(0, -'.md'.length)}/`;
-      const res = await asset(env, url, `${pagePath}index.md`);
-      if (res.status === 200) return markdownResponse(request, url, await res.text(), pagePath, cfg, null);
-      return notFound(request, url, direct, cfg, true);
-    }
-
-    const page = isPagePath(path);
-    if (page && wantsMarkdown) {
-      const pagePath = withSlash(path);
-      const res = await asset(env, url, `${pagePath}index.md`);
-      if (res.status === 200) return markdownResponse(request, url, await res.text(), pagePath, cfg, 'Accept, User-Agent');
-    }
-
-    const res = await env.ASSETS.fetch(request);
-    if (res.status === 404) return notFound(request, url, res, cfg, markdown404);
-    if (!page || res.status !== 200 || !(res.headers.get('Content-Type') ?? '').startsWith('text/html')) return res;
-    const out = new Response(res.body, res);
-    out.headers.append('Vary', 'Accept, User-Agent');
-    if (path.endsWith('/')) out.headers.append('Link', pageLinks(path));
-    return out;
   };
+}
+
+async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  if (path === MCP_PATH) return handleMcp(request, env, cfg);
+  if (path === `${MCP_PATH}/server-card` || path === '/.well-known/mcp/server-card.json') return serverCardResponse(request, url, cfg);
+  if (request.method !== 'GET' && request.method !== 'HEAD') return env.ASSETS.fetch(request);
+
+  const accept = request.headers.get('Accept');
+  const agent = isMarkdownAgent(request.headers.get('User-Agent'));
+  const wantsMarkdown = agent || prefersMarkdown(accept);
+  // A browser names text/html in Accept; curl, HTTP libraries and most agents send */* or nothing.
+  const markdown404 = wantsMarkdown || !namesHtml(accept);
+
+  // A Markdown copy, asked for directly.
+  if (path.endsWith('/index.md')) {
+    const res = await asset(env, url, path);
+    if (res.status === 200) return markdownResponse(request, url, res, path.slice(0, -'index.md'.length), cfg, null);
+    return notFound(request, url, res, cfg, markdown404);
+  }
+  // <page>.md -> <page>/index.md, when no file has that name.
+  if (path.endsWith('.md') && path.length > '/.md'.length) {
+    const direct = await env.ASSETS.fetch(request);
+    if (direct.status !== 404) return direct;
+    const pagePath = `${path.slice(0, -'.md'.length)}/`;
+    const res = await asset(env, url, `${pagePath}index.md`);
+    if (res.status === 200) return markdownResponse(request, url, res, pagePath, cfg, null);
+    return notFound(request, url, direct, cfg, true);
+  }
+
+  const page = isPagePath(path);
+  if (page && wantsMarkdown) {
+    const pagePath = withSlash(path);
+    const res = await asset(env, url, `${pagePath}index.md`);
+    if (res.status === 200) return markdownResponse(request, url, res, pagePath, cfg, 'Accept, User-Agent');
+  }
+
+  const res = await env.ASSETS.fetch(request);
+  if (res.status === 404) return notFound(request, url, res, cfg, markdown404);
+  if (!page || res.status !== 200 || !(res.headers.get('Content-Type') ?? '').startsWith('text/html')) return res;
+  const out = new Response(res.body, res);
+  out.headers.append('Vary', 'Accept, User-Agent');
+  if (path.endsWith('/')) out.headers.append('Link', pageLinks(path));
+  return out;
 }

@@ -216,6 +216,22 @@ describe('pages and their Markdown copies', () => {
     expect(await res.text()).toBe('');
   });
 
+  it('falls back to the static file when its own work fails', async () => {
+    const env = fakeEnv();
+    let first = true;
+    const inner = env.ASSETS.fetch.bind(env.ASSETS);
+    env.ASSETS.fetch = async (input) => {
+      if (first) {
+        first = false;
+        throw new Error('asset read failed');
+      }
+      return inner(input);
+    };
+    const res = await handle(new Request(`${BASE}/`, { headers: { Accept: 'text/markdown' } }), env);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(FILES['/index.html']!.body);
+  });
+
   it('marks responses on a pages.dev host noindex', async () => {
     const res = await handle(new Request('https://abc.acs-docs.pages.dev/', { headers: { Accept: 'text/markdown' } }), fakeEnv());
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
