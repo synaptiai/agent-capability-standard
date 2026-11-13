@@ -290,7 +290,7 @@ describe('not found', () => {
     expect(res.status).toBe(404);
     expect(res.headers.get('Content-Type')).toBe('application/problem+json');
     expect(await res.json()).toEqual({
-      type: 'https://acs.synapti.ai/developers/#errors',
+      type: 'https://acs.synapti.ai/developers/#ref-errors',
       title: 'Not Found',
       status: 404,
       detail: 'There is no resource at /api/v1/capabilities/nothing.json. /api/v1/index.json lists the resources, and https://acs.synapti.ai/openapi.json describes them.',

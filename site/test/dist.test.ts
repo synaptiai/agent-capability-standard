@@ -31,6 +31,7 @@ import {
   symmetricEdgeTypes,
 } from './independent';
 import { validate } from './json-schema-lite';
+import { PROBLEM_TYPE_NOT_FOUND } from '../src/worker/site';
 
 let work = '';
 let dist = '';
@@ -927,6 +928,12 @@ describe('data API on the built site', () => {
       });
     expect(dev.headings).toEqual(scanned);
     expect(dev.title).toBe('Agent Capability Standard API and agent access');
+  });
+
+  it('points the problem type of an API 404 at a heading the developers page has', () => {
+    const u = new URL(PROBLEM_TYPE_NOT_FOUND);
+    const html = readFileSync(path.join(dist, u.pathname.slice(1), 'index.html'), 'utf8');
+    expect(html).toContain(`id="${u.hash.slice(1)}"`);
   });
 
   it('serves the api-catalog as a file, not a page, and redirects the API base to its index', () => {

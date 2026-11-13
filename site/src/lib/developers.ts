@@ -160,7 +160,8 @@ export function markdownExamples(): Example[] {
   const at = (p: string) => `${SITE_ORIGIN}${p}`;
   return [
     { what: 'The Markdown copy of a page: its URL followed by index.md.', command: `curl -s ${at('/start/quickstart/index.md')}` },
-    { what: 'The list of every copy.', command: `curl -s ${at('/llms.txt')}` },
+    { what: 'The same copy, asked for by its media type.', command: `curl -s -H 'Accept: text/markdown' ${at('/start/quickstart/')}` },
+    { what: 'The index of the copies, by section.', command: `curl -s ${at('/llms.txt')}` },
   ];
 }
 
@@ -188,8 +189,9 @@ export function catalogLine(): string {
 
 export const MARKDOWN_LINES: readonly string[] = [
   'Every page has a Markdown copy at its URL followed by index.md; the home page\'s is /index.md. Each HTML page links to it with <link rel="alternate" type="text/markdown">.',
-  'Links in a copy point at the other pages\' copies, so an agent can follow them without reading HTML. Figures are given as tables or lists with the same data.',
-  `llms.txt lists every copy by section. llms-full.txt holds the current Standard, every capability page and every workflow page in one file. The sitemap is at /sitemap.xml.`,
+  'The same copy is served at the page\'s URL with .md in place of the final slash (/capabilities/mutate.md), and at the page\'s own URL to a request whose Accept header prefers text/markdown. A page that does not exist answers 404 in Markdown to a client that is not a browser.',
+  'Each copy opens with front matter (title, description, canonical and last_updated), then the page with a top-level heading. Links in a copy point at the other pages\' copies, so an agent can follow them without reading HTML. Figures are given as tables or lists with the same data.',
+  `llms.txt lists the main pages of each section and links one llms.txt per section, which lists every copy. llms-full.txt holds the current Standard, every capability page and every workflow page in one file. The sitemap is at /sitemap.xml.`,
 ];
 
 export const MCP_LEAD =

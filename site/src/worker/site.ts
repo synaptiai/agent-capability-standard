@@ -41,7 +41,7 @@ export function isMarkdownAgent(userAgent: string | null): boolean {
   return userAgent !== null && AGENT_RE.test(userAgent);
 }
 
-export const PROBLEM_TYPE_NOT_FOUND = 'https://acs.synapti.ai/developers/#errors';
+export const PROBLEM_TYPE_NOT_FOUND = 'https://acs.synapti.ai/developers/#ref-errors';
 
 /** A path that names a page rather than a file: it ends in "/", or its last segment has no extension. */
 export function isPagePath(path: string): boolean {

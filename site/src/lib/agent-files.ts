@@ -10,6 +10,8 @@ import { SITE_ORIGIN } from './links';
 import { ROUTES, SECTIONS, type Route, type Section } from './routes';
 import { GITHUB_BASE, githubBlobUrl, readRepoFile } from './repo';
 import { pageLastModified } from './page-dates';
+import { MCP_TOOLS } from './api';
+import { WEBMCP_TOOLS } from './developers';
 import {
   AGENT_SKILLS_INDEX_PATH,
   AGENTS_MD_PATH,
@@ -115,8 +117,8 @@ export function agentLinks(): string[] {
   return [
     `- [Guide for agents](${o}${AGENTS_MD_PATH}): how to read this site as Markdown, query its data and use its skills.`,
     `- [Data API](${o}${OPENAPI_PATH}): the OpenAPI 3.1 description of a read-only JSON API under ${o}/api/v1/ (GET only, no key); start at [the API index](${o}${API_INDEX_PATH}).`,
-    `- [MCP server card](${o}${MCP_SERVER_CARD_PATH}): a read-only MCP server that searches and reads the standard, at \`${o}${MCP_PATH}\` (Streamable HTTP; send JSON-RPC with POST).`,
-    `- [Developers](${o}${DEVELOPERS_PATH}index.md): the API, the MCP server and the Markdown copies on one page.`,
+    `- [MCP server card](${o}${MCP_SERVER_CARD_PATH}): a read-only MCP server that searches and reads the standard, at \`${o}${MCP_PATH}\` (Streamable HTTP; send JSON-RPC with POST). Its tools: ${MCP_TOOLS.map((t) => `\`${t.name}\``).join(', ')}.`,
+    `- [Developers](${o}${DEVELOPERS_PATH}index.md): the API, the MCP server, the Markdown copies and the in-page WebMCP tools (${WEBMCP_TOOLS.map((t) => `\`${t}\``).join(', ')}) on one page.`,
     `- [Agent skills index](${o}${AGENT_SKILLS_INDEX_PATH}): every skill of the Claude Code plugin as a SKILL.md file, with its SHA-256 digest.`,
     `- [Resource catalog](${o}${ARD_PATH}): the agent resources above in Agentic Resource Discovery form (also at ${o}${AI_CATALOG_PATH}).`,
     `- [AGENTS.md](${githubBlobUrl('AGENTS.md')}): instructions for coding agents that work on the repository.`,
@@ -132,7 +134,7 @@ export async function llmsTxt(): Promise<string> {
     '',
     versionsLine(),
     '',
-    `Every page of ${SITE_ORIGIN} has a Markdown copy at its URL followed by index.md; the home page's is [${SITE_ORIGIN}/index.md](${mdUrl('/')}). Below, each section lists its main pages and links its own llms.txt, which lists every page of the section.`,
+    `Every page of ${SITE_ORIGIN} has a Markdown copy at its URL followed by index.md; the home page's is [${SITE_ORIGIN}/index.md](${mdUrl('/')}). The same copy is served at the page's URL with .md in place of the final slash, and to a request whose Accept header prefers text/markdown. Below, each section lists its main pages and links its own llms.txt, which lists every page of the section.`,
     '',
     whenToUse(),
     '',
@@ -189,6 +191,7 @@ export function agentsMd(): string {
     '## Read the pages as Markdown',
     '',
     `- Every page has a Markdown copy at its URL followed by \`index.md\`: the capabilities overview at ${o}/capabilities/ has its copy at ${example}. Each HTML page names its copy in a \`<link rel="alternate" type="text/markdown">\` element.`,
+    `- The same copy is served at the page's URL with \`.md\` in place of the final slash (${o}/capabilities/mutate.md), and at the page's own URL to a request whose \`Accept\` header prefers \`text/markdown\`. A page that does not exist answers 404 in Markdown to a client that is not a browser.`,
     '- Each copy opens with YAML front matter: `title`, `description`, `canonical` (the HTML page) and `last_updated` (the date of the last commit to the files the page is built from), then the page as Markdown with a top-level heading.',
     '- A figure on a page appears in its copy as a paragraph that starts with **Figure:**, followed by a table or a list with the same data.',
     `- [llms.txt](${o}${LLMS_TXT_PATH}) lists the main pages of each section and links one llms.txt per section, which lists every page. [llms-full.txt](${o}${LLMS_FULL_PATH}) holds the current Standard, every capability page and every workflow page in one file.`,
