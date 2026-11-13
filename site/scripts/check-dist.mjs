@@ -34,6 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
 import { REVIEW_DIR } from '../src/lib/review.ts';
+import { stripComments, stripTags } from '../src/lib/strip.ts';
 import { isMain } from './is-main.mjs';
 import { bodyClasses, templateOf } from './page-template.mjs';
 
@@ -79,8 +80,7 @@ function safeDecode(s) {
 
 /** The opening tags of a page, with script and style bodies and comments removed. */
 function tags(html) {
-  const bare = html
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const bare = stripComments(html)
     .replace(/(<script\b[^>]*>)[\s\S]*?<\/script>/gi, '$1')
     .replace(/(<style\b[^>]*>)[\s\S]*?<\/style>/gi, '$1');
   return bare.match(/<[a-zA-Z][^>]*>/g) ?? [];
@@ -348,7 +348,7 @@ function childElements(html, start) {
   return out;
 }
 
-const plainText = (html) => decodeEntities(html.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+const plainText = (html) => decodeEntities(stripTags(html)).replace(/\s+/g, ' ').trim();
 
 /**
  * The numbered figures of a page, in order: each `<figure>` whose eyebrow

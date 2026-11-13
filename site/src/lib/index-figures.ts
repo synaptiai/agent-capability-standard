@@ -10,6 +10,7 @@ import { statusStyle } from './status';
 import type { SchemaEntry } from './views';
 import { currentStandardText } from './spec-figures';
 import { diagnosticFamilies } from './spec-tail-figures';
+import { stripComments, stripTags } from './strip';
 import { andList, plural } from './words';
 
 // ------------------------------------------------------------ F-R1
@@ -326,9 +327,7 @@ export const WORDS_PER_MINUTE = 200;
  */
 export function pageSize(text: string): { words: number; codeBlocks: number } {
   let codeBlocks = 0;
-  const prose = text
-    .replace(/^---\n[\s\S]*?\n---\n/, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const prose = stripComments(text.replace(/^---\n[\s\S]*?\n---\n/, ''))
     .replace(/^( {0,3})(`{3,}|~{3,})([^\n]*)\n[\s\S]*?^\1\2[ \t]*$/gm, (f: string, _i, _t, info: string) => {
       const drawing = f.split('\n').filter((l) => /[\u2500-\u257f]/.test(l)).length >= 2;
       if (!/^\s*mermaid\b/.test(info) && !drawing) codeBlocks += 1;
@@ -337,9 +336,9 @@ export function pageSize(text: string): { words: number; codeBlocks: number } {
     // A link counts as its text; a destination, an image and an HTML tag are not words.
     .replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, '')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]+>/g, ' ');
-  return { words: (prose.match(/[A-Za-z0-9][\w'’.-]*/g) ?? []).length, codeBlocks };
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+  const words = stripTags(prose, ' ');
+  return { words: (words.match(/[A-Za-z0-9][\w'’.-]*/g) ?? []).length, codeBlocks };
 }
 
 /** The start pages' reading times, at WORDS_PER_MINUTE, with their code blocks. */

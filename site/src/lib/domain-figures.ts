@@ -7,6 +7,7 @@ import { resolveGlyphKey } from '../pixel/keys';
 import { elementEnd } from './inject';
 import { diagramSteps, sortedTrustWeights } from './views';
 import { andList, plural } from './words';
+import { stripTags } from './strip';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -345,7 +346,7 @@ export function splitReadme(rest: string, workflowIds: readonly string[]): Readm
   if (w) {
     const body = html.slice(w.start, w.end);
     for (const m of body.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)) {
-      const id = headingWorkflowId(m[1]!.replace(/<[^>]*>/g, ''));
+      const id = headingWorkflowId(stripTags(m[1]!));
       if (!workflowIds.includes(id) || placed.has(id)) continue;
       const end = w.start + m.index! + m[0].length;
       segments.push({ html: html.slice(cursor, end), after: id });

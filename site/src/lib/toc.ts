@@ -1,6 +1,7 @@
 // The "On this page" entries of a rendered page: its h2 and h3 headings, in
 // order, read from the page body HTML. Works the same for Markdown pages and
 // generated pages, which have no heading list of their own.
+import { stripTags } from './strip';
 
 export interface TocEntry {
   depth: 2 | 3;
@@ -28,7 +29,7 @@ export function tocEntries(html: string): TocEntry[] {
   for (const m of html.matchAll(/<h([23])\b([^>]*)>([\s\S]*?)<\/h\1>/g)) {
     const id = /\sid="([^"]+)"/.exec(m[2]!)?.[1];
     if (!id) continue;
-    const text = decodeEntities(m[3]!.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+    const text = decodeEntities(stripTags(m[3]!)).replace(/\s+/g, ' ').trim();
     if (text) out.push({ depth: Number(m[1]) as 2 | 3, id, text });
   }
   return out;

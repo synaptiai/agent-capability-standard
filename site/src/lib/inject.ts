@@ -6,6 +6,7 @@
 // a figure without notice.
 
 import { decodeEntities } from './toc';
+import { stripTags } from './strip';
 
 export interface HtmlHeading {
   level: number;
@@ -24,7 +25,7 @@ export function htmlHeadings(html: string): HtmlHeading[] {
   return [...html.matchAll(HEADING)].map((m) => ({
     level: Number(m[1]),
     id: /\bid="([^"]*)"/.exec(m[2]!)?.[1] ?? '',
-    text: decodeEntities(m[3]!.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim(),
+    text: decodeEntities(stripTags(m[3]!)).replace(/\s+/g, ' ').trim(),
     end: m.index + m[0].length,
   }));
 }
