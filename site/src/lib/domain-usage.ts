@@ -150,6 +150,11 @@ export function proposedCaption(ids: readonly string[]): string {
 /** The README H2 the profile's compliance panel goes under when the README has it (its GitHub id). */
 export const COMPLIANCE_ANCHOR = 'regulatory-compliance';
 
+/** The headings of the usage examples whose figure no piece places (`placed`: each piece's `after`). */
+export function unplacedUsage(usage: readonly UsageExample[], placed: readonly (string | null)[]): string[] {
+  return usage.filter((u) => !placed.includes(`usage:${u.heading}`)).map((u) => u.heading);
+}
+
 /**
  * Rendered README HTML cut after each heading `pick` names, so a figure can
  * follow the heading. Pieces keep document order; `after` is what `pick`

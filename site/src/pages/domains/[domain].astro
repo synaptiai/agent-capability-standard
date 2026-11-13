@@ -20,7 +20,7 @@ import EvidencePolicy from '../../components/fig/DomainEvidencePolicy.astro';
 import TrustWeights from '../../components/fig/DomainTrustWeights.astro';
 import WorkflowCard from '../../components/fig/DomainWorkflowCard.astro';
 import DomainUsage from '../../components/fig/DomainUsage.astro';
-import { capabilityUsage, COMPLIANCE_ANCHOR, cutAfter, listedCapabilities, type UsageExample } from '../../lib/domain-usage';
+import { capabilityUsage, COMPLIANCE_ANCHOR, cutAfter, listedCapabilities, unplacedUsage, type UsageExample } from '../../lib/domain-usage';
 import { readRepoFile } from '../../lib/repo';
 import { loadWorkflows } from '../../data/workflows';
 import { loadProfiles } from '../../data/profiles';
@@ -94,6 +94,11 @@ const cardDraws = (wid: string | null) => wid !== null && (defined.has(wid) || l
 const complianceInReadme = compliance !== null && parts !== null && parts.segments.some((sg) => sg.html.includes(`id="${COMPLIANCE_ANCHOR}"`));
 const pickHeading = (h: { level: number; id: string; text: string }) =>
   h.level === 3 && usageByHeading.has(h.text) ? `usage:${h.text}` : complianceInReadme && h.level === 2 && h.id === COMPLIANCE_ANCHOR ? 'compliance' : null;
+// The README cut after each heading a figure follows; every usage example's
+// figure must find its heading (a heading the matcher misreads would drop it).
+const pieces = parts ? parts.segments.map((seg, i) => cutAfter(i > 0 && cardDraws(parts!.segments[i - 1]!.after) ? foldCapabilityList(seg.html) : seg.html, pickHeading)) : [];
+const usageUnplaced = unplacedUsage(usage, pieces.flat().map((piece) => piece.after));
+if (usageUnplaced.length > 0) throw new Error(`domains: ${d.key}: no rendered H3 for the Capability Usage example(s) ${usageUnplaced.map((h) => `"${h}"`).join(', ')}`);
 const unplaced = parts ? parts.unplaced : d.workflows.map((w) => w.id);
 if (parts && unplaced.length > 0) console.warn(`domains: ${d.key}: no README heading for ${unplaced.join(', ')}; their cards go at the end`);
 const title = page?.title ?? `${d.key} domain`;
@@ -208,7 +213,7 @@ const facts = [
 
     {parts && parts.segments.map((seg, i) => (
       <>
-        {cutAfter(i > 0 && cardDraws(parts!.segments[i - 1]!.after) ? foldCapabilityList(seg.html) : seg.html, pickHeading).map((piece) => (
+        {pieces[i]!.map((piece) => (
           <>
             <div class="doc__body" set:html={piece.html} />
             {piece.after?.startsWith('usage:') && (

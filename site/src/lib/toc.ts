@@ -10,9 +10,14 @@ export interface TocEntry {
 
 const ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
+/**
+ * HTML text with its character references decoded in one pass: named ones,
+ * and numeric ones in decimal or hex (the build writes "&#x26;" for "&" and
+ * "&#x3C;" for "<"). "&amp;#x26;" stays the literal text "&#x26;".
+ */
 export function decodeEntities(s: string): string {
-  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (m, e: string) => {
-    if (e.startsWith('#x')) return String.fromCodePoint(parseInt(e.slice(2), 16));
+  return s.replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (m, e: string) => {
+    if (e[1] === 'x' || e[1] === 'X') return String.fromCodePoint(parseInt(e.slice(2), 16));
     if (e.startsWith('#')) return String.fromCodePoint(Number(e.slice(1)));
     return ENTITIES[e] ?? m;
   });

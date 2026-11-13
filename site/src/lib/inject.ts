@@ -5,6 +5,8 @@
 // heading, or the build fails, so an edit to the source cannot move or drop
 // a figure without notice.
 
+import { decodeEntities } from './toc';
+
 export interface HtmlHeading {
   level: number;
   id: string;
@@ -16,15 +18,13 @@ export interface HtmlHeading {
 
 const HEADING = /<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/g;
 
-const decode = (s: string) =>
-  s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&amp;/g, '&');
 
 /** Every heading of an HTML string, in order. Text inside aria-hidden svg (chapter glyphs) is empty, so it is skipped by removing tags. */
 export function htmlHeadings(html: string): HtmlHeading[] {
   return [...html.matchAll(HEADING)].map((m) => ({
     level: Number(m[1]),
     id: /\bid="([^"]*)"/.exec(m[2]!)?.[1] ?? '',
-    text: decode(m[3]!.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim(),
+    text: decodeEntities(m[3]!.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim(),
     end: m.index + m[0].length,
   }));
 }

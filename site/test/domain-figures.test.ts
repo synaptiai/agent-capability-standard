@@ -19,6 +19,9 @@ import {
   trustAxis,
 } from '../src/lib/domain-figures';
 import { profileFiles, profileWorkflowIds, repoText } from './independent';
+import { renderRepoFile } from './pipeline';
+import { capabilityUsage, cutAfter, unplacedUsage } from '../src/lib/domain-usage';
+import { htmlHeadings } from '../src/lib/inject';
 
 /** The indented `key: value` lines under a top-level block of a profile file. */
 function block(text: string, name: string): [string, string][] {
@@ -197,5 +200,25 @@ describe('README capability lists under a workflow card', () => {
       '<p><strong>Goal:</strong> g</p>\n<details class="domain-guide"><summary>Capabilities used, with what each step does</summary><ul>\n<li><code>a</code> — x</li>\n</ul></details>\n<p>After</p>',
     );
     expect(foldCapabilityList('<p>No list</p>')).toBe('<p>No list</p>');
+  });
+});
+
+describe('usage figures under headings with "&" or "<"', () => {
+  it('decodes the numeric references the build writes, once', () => {
+    const html = '<h3 id="a">Search &#x26; Rank a &#x3C; b</h3><h3 id="b">Literal &amp;#x26;</h3><h3 id="c">Dec &#38; &lt;</h3>';
+    expect(htmlHeadings(html).map((h) => h.text)).toEqual(['Search & Rank a < b', 'Literal &#x26;', 'Dec & <']);
+  });
+
+  it('places the figure of a usage example whose H3 has "&" and "<" in the rendered README', async () => {
+    const readme = ['# Domain', '', '## Capability Usage', '', '### Search & Rank a < b', '', '```yaml', 'detect:', '  input:', '    image: x', '  output:', '    detections: []', '```', ''].join('\n');
+    const usage = capabilityUsage(readme, 'fixture');
+    expect(usage.map((u) => u.heading)).toEqual(['Search & Rank a < b']);
+    const { code: html } = await renderRepoFile('docs/domains/vision/README.md', readme);
+    // The build writes "&" and "<" in a heading as numeric references.
+    expect(html).toMatch(/Search &#x26; Rank a &#x3C; b/);
+    const byHeading = new Set(usage.map((u) => u.heading));
+    const pieces = cutAfter(html, (h) => (h.level === 3 && byHeading.has(h.text) ? `usage:${h.text}` : null));
+    expect(unplacedUsage(usage, pieces.map((p) => p.after))).toEqual([]);
+    expect(unplacedUsage(usage, [null])).toEqual(['Search & Rank a < b']);
   });
 });
