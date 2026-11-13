@@ -4,13 +4,17 @@
 // - links: every internal href and src (root-relative, relative, or an
 //   absolute URL on the site's own origin), every <meta> content that is a URL
 //   on the site's origin (og:image), and every Markdown link in the Markdown
-//   copies and llms-full.txt names a file in dist/, a page directory with an
+//   copies, the llms.txt files, llms-full.txt, agents.md and llms.md names a
+//   file in dist/ (or a path agent-contract.ts lists as served elsewhere), a page directory with an
 //   index.html, or a _redirects source; every #fragment on an HTML target
 //   names an id (or a name) on that page;
 // - md-links: no internal link ends in .md, other than a link to a page's
-//   Markdown copy (<page>/index.md next to that page's index.html);
-// - copies: every page has a Markdown copy, every copy has a page, and
-//   llms.txt lists exactly the copies;
+//   Markdown copy (<page>/index.md next to that page's index.html) or to
+//   /agents.md or /llms.md;
+// - copies: every page has a Markdown copy, every copy has a page, and the
+//   llms.txt files (the root one and one per section) list exactly the
+//   copies, each section's once, in its own file (the root may name a copy
+//   in its prose and in its list);
 // - sitemap: the sitemap lists exactly the HTML pages, the 404 page aside;
 // - figures: every numbered figure on a page ("Fig n") has a
 //   "**Figure: {title}.**" block in the page's Markdown copy, and the copy has
@@ -32,6 +36,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FUNCTION_PATHS, LLMS_TXT_PATH, PENDING_PATHS, ROOT_MARKDOWN, SECTION_LLMS } from '../src/lib/agent-contract.ts';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
 import { REVIEW_DIR } from '../src/lib/review.ts';
 import { stripComments, stripTags } from '../src/lib/strip.ts';
@@ -194,9 +199,30 @@ export function isCopyLink(urlPath, files) {
   return files.has(`${urlPath.slice(1, -COPY.length)}index.html`);
 }
 
+/** True for a section's llms.txt: `<section>/llms.txt`. */
+export function isSectionLlms(f) {
+  return new RegExp(`^[^/]+/${SECTION_LLMS.replace('.', '\\.')}$`).test(f);
+}
+
 /** True for a Markdown file whose links the link check reads. */
 function isMarkdownWithLinks(f) {
-  return f === COPY || f.endsWith(`/${COPY}`) || f === 'llms-full.txt';
+  return (
+    f === COPY ||
+    f.endsWith(`/${COPY}`) ||
+    f === 'llms-full.txt' ||
+    f === LLMS_TXT_PATH.slice(1) ||
+    isSectionLlms(f) ||
+    ROOT_MARKDOWN.includes(`/${f}`)
+  );
+}
+
+/**
+ * True for a link the build of this part of the site cannot resolve on its
+ * own: a path served by a function, or one another part of the build
+ * produces (agent-contract.ts), while no file in dist serves it.
+ */
+export function isAcceptedMissing(urlPath) {
+  return FUNCTION_PATHS.includes(urlPath) || PENDING_PATHS.includes(urlPath);
 }
 
 /**
@@ -222,13 +248,13 @@ export function checkLinks(fileList, read, redirects = new Set()) {
       const t = internalTarget(value, from);
       if (t === null) continue;
       checked += 1;
-      if (/\.md$/i.test(t.path) && !isCopyLink(t.path, files)) {
+      if (/\.md$/i.test(t.path) && !isCopyLink(t.path, files) && !ROOT_MARKDOWN.includes(t.path) && !isAcceptedMissing(t.path)) {
         mdLinks.add(`${from}: links to ${value}, a .md file that is not a page's Markdown copy`);
         continue;
       }
       const target = servedFile(t.path, files);
       if (target === null) {
-        if (!redirects.has(t.path)) links.add(`${from}: ${value} does not resolve to a file in dist`);
+        if (!redirects.has(t.path) && !isAcceptedMissing(t.path)) links.add(`${from}: ${value} does not resolve to a file in dist`);
         continue;
       }
       if (t.fragment !== null && t.fragment !== '' && target.endsWith('.html') && !idsOf(target).has(t.fragment)) {
@@ -256,7 +282,7 @@ export function sitemapPaths(xml, origin = SITE_ORIGIN) {
   return { paths, foreign };
 }
 
-/** URL paths of the Markdown copies llms.txt links to. Links elsewhere are returned in `other`. */
+/** URL paths of the Markdown copies an llms.txt links to. Links elsewhere are returned in `other`. */
 export function llmsTxtCopies(text, origin = SITE_ORIGIN) {
   const copies = [];
   const other = [];
@@ -278,8 +304,15 @@ function duplicates(list) {
   return [...new Set(list.filter((x) => (seen.has(x) ? true : (seen.add(x), false))))];
 }
 
-/** Every page has a Markdown copy, every copy has a page, and llms.txt lists exactly the copies. */
-export function checkCopies(fileList, llmsTxt) {
+/**
+ * Every page has a Markdown copy and every copy has a page. The llms.txt
+ * files list the copies: each section's llms.txt (`<section>/llms.txt`)
+ * lists its copies once, no copy is in two of them, the root llms.txt links
+ * every section's file, and together the files list every copy and nothing
+ * that is not one. (Whether the root's other links resolve is the link
+ * check's business.)
+ */
+export function checkCopies(fileList, read) {
   const problems = [];
   const files = new Set(fileList);
   const pages = htmlPages(fileList).filter((u) => u.endsWith('/'));
@@ -288,11 +321,22 @@ export function checkCopies(fileList, llmsTxt) {
   for (const u of pages) if (!files.has(`${u.slice(1)}${COPY}`)) problems.push(`${u}: no Markdown copy at ${u}${COPY}`);
   const copies = fileList.filter((f) => f === COPY || f.endsWith(`/${COPY}`)).map((f) => `/${f}`);
   for (const c of copies) if (!files.has(`${c.slice(1, -COPY.length)}index.html`)) problems.push(`${c}: a Markdown copy with no page`);
-  const listed = llmsTxtCopies(llmsTxt);
-  for (const c of setDiff(copies, listed.copies)) problems.push(`llms.txt does not list ${c}`);
-  for (const c of setDiff(listed.copies, copies)) problems.push(`llms.txt lists ${c}, which is not in dist`);
-  for (const c of duplicates(listed.copies)) problems.push(`llms.txt lists ${c} more than once`);
-  for (const u of listed.other) problems.push(`llms.txt links to ${u}, which is not a Markdown copy on the site`);
+  const root = llmsTxtCopies(read(LLMS_TXT_PATH.slice(1)));
+  const sections = fileList.filter(isSectionLlms);
+  const owner = new Map();
+  for (const f of sections) {
+    const listed = llmsTxtCopies(read(f));
+    for (const c of duplicates(listed.copies)) problems.push(`${f} lists ${c} more than once`);
+    for (const c of new Set(listed.copies)) {
+      if (owner.has(c)) problems.push(`${c} is listed by both ${owner.get(c)} and ${f}`);
+      else owner.set(c, f);
+    }
+    if (!root.other.includes(`${SITE_ORIGIN}/${f}`)) problems.push(`llms.txt does not link ${f}`);
+  }
+  // A copy another part of the build makes may be missing from this build.
+  const listed = [...owner.keys(), ...root.copies.filter((c) => copies.includes(c) || !isAcceptedMissing(c))];
+  for (const c of setDiff(copies, listed)) problems.push(`no llms.txt lists ${c}`);
+  for (const c of setDiff(listed, copies)) problems.push(`an llms.txt lists ${c}, which is not in dist`);
   return problems;
 }
 
@@ -559,7 +603,7 @@ export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {})
     files: missing.map((f) => `${f} is missing from dist`),
     links,
     'md-links': mdLinks,
-    copies: has.has('llms.txt') ? checkCopies(fileList, read('llms.txt')) : [],
+    copies: has.has('llms.txt') ? checkCopies(fileList, read) : [],
     sitemap: has.has('sitemap.xml') ? checkSitemap(fileList, read('sitemap.xml')) : [],
     figures: checkFigureCopies(fileList, read),
     drawn: checkDrawnFigures(fileList, read, drawnTemplates),
@@ -576,6 +620,7 @@ export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {})
     copyBytes: sum(copies),
     copies: copies.length,
     llmsBytes: has.has('llms.txt') ? size('llms.txt') : 0,
+    sectionLlms: fileList.filter(isSectionLlms).length,
     llmsFullBytes: has.has('llms-full.txt') ? size('llms-full.txt') : 0,
     totalBytes: sum(fileList),
     files: fileList.length,
@@ -586,7 +631,7 @@ export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {})
 export function formatStats(s) {
   return [
     `pages: ${s.pages} HTML pages (404 aside), ${kb(s.htmlBytes)} of HTML in all`,
-    `Markdown copies: ${s.copies}, ${kb(s.copyBytes)}; llms.txt ${kb(s.llmsBytes)}; llms-full.txt ${kb(s.llmsFullBytes)}`,
+    `Markdown copies: ${s.copies}, ${kb(s.copyBytes)}; llms.txt ${kb(s.llmsBytes)} and ${s.sectionLlms} section llms.txt files; llms-full.txt ${kb(s.llmsFullBytes)}`,
     `links: ${s.checkedLinks} internal links checked`,
     `dist: ${s.files} files, ${kb(s.totalBytes)}`,
   ];

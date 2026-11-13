@@ -610,14 +610,29 @@ describe('agent files', () => {
     expect(existsSync(path.join(dist, '404', 'index.md'))).toBe(false);
   });
 
-  it('lists exactly the Markdown copies in llms.txt, each once', () => {
+  it('lists every Markdown copy in exactly one section llms.txt, each linked from a root llms.txt under 30,000 characters', () => {
     const text = readFileSync(path.join(dist, 'llms.txt'), 'utf8');
     expect(text.startsWith('# Agent Capability Standard\n')).toBe(true);
     expect(text).toMatch(/^> /m);
-    const listed = [...text.matchAll(/^- \[[^\]]+\]\(([^)]+)\)/gm)].map((m) => m[1]!);
-    const want = dirsWith('index.md').map((d) => `${ORIGIN}${d}index.md`).sort();
+    expect(text).toMatch(/^## When to use this standard$/m);
+    expect(text.length).toBeLessThan(30_000);
+    // The section files: <dir>/llms.txt one level down, found by a walk of dist.
+    const sections = dirsWith('llms.txt').filter((d) => d !== '/');
+    expect(sections.length).toBeGreaterThan(0);
+    const listed: string[] = [];
+    for (const d of sections) {
+      expect(text, d).toContain(`(${ORIGIN}${d}llms.txt)`);
+      const sec = readFileSync(path.join(dist, d, 'llms.txt'), 'utf8');
+      expect(sec.startsWith('# '), d).toBe(true);
+      listed.push(...[...sec.matchAll(/^- \[[^\]]+\]\(([^)]+)\)/gm)].map((m) => m[1]!));
+    }
+    // The home page is in no section; the root lists its copy.
+    expect(text).toContain(`(${ORIGIN}/index.md)`);
+    const want = dirsWith('index.md')
+      .filter((d) => d !== '/')
+      .map((d) => `${ORIGIN}${d}index.md`)
+      .sort();
     expect([...listed].sort()).toEqual(want);
-    expect(new Set(listed).size).toBe(listed.length);
   });
 
   it('puts the current Standard first in llms-full.txt, then the rest of the Specification, Capabilities and Workflows sections', () => {
@@ -808,7 +823,8 @@ describe('agent files', () => {
       // The current Standard's copy ends with the text equivalents of its
       // site-drawn figures (visual spec 3.9 and 6.1, "Figures on this page"),
       // which are not in the source; the rest must match it.
-      const full = readFileSync(path.join(dist, page, 'index.md'), 'utf8');
+      // The served copy opens with front matter, which the source does not have.
+      const full = readFileSync(path.join(dist, page, 'index.md'), 'utf8').replace(/^---\n[\s\S]*?\n---\n\n/, '');
       const appended = full.indexOf('\n## Figures on this page\n');
       if (source.startsWith('spec/STANDARD-')) expect(appended, source).toBeGreaterThan(-1);
       const copy = appended === -1 ? full : full.slice(0, appended + 1);

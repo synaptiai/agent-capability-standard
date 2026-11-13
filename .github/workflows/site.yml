@@ -37,9 +37,13 @@ jobs:
       run:
         working-directory: site
     steps:
-      # The default shallow clone is enough: the site reads the commit SHA and
-      # `git ls-files`, not the history.
+      # The full history: the sitemap's lastmod dates and the last_updated
+      # field of the Markdown copies are the dates of the last commits to each
+      # page's files (site/src/lib/page-dates.ts), and the build fails on a
+      # shallow clone rather than date every page by the one commit it has.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -85,6 +89,9 @@ jobs:
           name: site-dist
           path: site/dist
           if-no-files-found: error
+          # dist/.well-known/ (the resource catalogs and the agent skills)
+          # is a hidden directory, which the action leaves out by default.
+          include-hidden-files: true
 
   deploy:
     name: Deploy to Cloudflare Pages
