@@ -78,14 +78,18 @@ export function pagePart(markdown: string, opts: { section?: string; offset?: nu
       for (let k = j - 1; k >= 0; k--) if (heads[k]!.level < h.level) { parent = k; break; }
       paths.push([...(parent === -1 ? [] : paths[parent]!), h.text]);
     });
-    // "Inputs" names a heading; "Claude Code skill > Inputs" names it under a parent.
-    const want = opts.section.split('>').map((x) => x.trim()).filter((x) => x.length > 0);
-    const hits = heads
-      .map((_, j) => j)
-      .filter((j) => {
-        const p = paths[j]!;
-        return want.length > 0 && want.length <= p.length && want.every((w, k) => same(w, p[p.length - want.length + k]!));
-      });
+    // "Inputs" names a heading; "Claude Code skill > Inputs" names it under a
+    // parent. The whole text is tried as one heading first, so a heading
+    // that contains ">" ("A map<K,V> annotation") is still found.
+    const matching = (want: string[]) =>
+      heads
+        .map((_, j) => j)
+        .filter((j) => {
+          const p = paths[j]!;
+          return want.length > 0 && want.length <= p.length && want.every((w, k) => same(w, p[p.length - want.length + k]!));
+        });
+    const whole = matching([opts.section.trim()]);
+    const hits = whole.length > 0 ? whole : matching(opts.section.split(/\s+>\s+/).map((x) => x.trim()).filter((x) => x.length > 0));
     if (hits.length === 0) {
       return { ok: false, message: `The page has no section headed "${opts.section}".`, headings: heads.map((h) => h.text) };
     }

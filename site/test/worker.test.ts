@@ -13,7 +13,7 @@ import { scorePage } from '../src/worker/tools';
 import { pagePart } from '../src/worker/page-text';
 import type { PageEntry } from '../src/worker/data';
 import { HEADER_RULES } from '../src/worker/static-rules';
-import { pageSearchTerms, TERMS_PER_PAGE } from '../src/worker/terms';
+import { pageSearchTerms, searchTerms, stem, TERMS_PER_PAGE } from '../src/worker/terms';
 import { validate } from './json-schema-lite';
 import { REPO_ROOT } from '../src/lib/repo';
 
@@ -782,7 +782,8 @@ describe('page search terms (built into pages.json)', () => {
     expect(ta).not.toContain('teleport');
     expect(ta).not.toContain('standard'); // on every page: sets nothing apart
     expect(ta.length).toBeLessThanOrEqual(TERMS_PER_PAGE + 1);
-    expect(b!.split(' ')).toContain('capabilit');
+    // "capabilities": -ies becomes -y, then the final -y becomes -i.
+    expect(b!.split(' ')).toContain('capabiliti');
   });
 });
 
@@ -1072,5 +1073,34 @@ describe('MCP origins and versions', () => {
     expect(res.status).toBe(400);
     expect(body.error?.code).toBe(-32022);
     expect(body.error?.data?.requested).toBe('2024-13-01');
+  });
+});
+
+describe('review of the review fixes', () => {
+  it('stems a plural in -ies and its singular in -y alike', () => {
+    for (const [a, b] of [['verifies', 'verify'], ['policies', 'policy'], ['capabilities', 'capability'], ['verified', 'verify'], ['verifying', 'verify'], ['queries', 'query']]) {
+      expect(stem(a!), `${a} / ${b}`).toBe(stem(b!));
+    }
+    // Short words keep their y: "key", "any".
+    expect(stem('key')).toBe('key');
+  });
+
+  it('a plural query finds a page titled with the singular', () => {
+    const p = { path: '/capabilities/verify/', markdownPath: '/capabilities/verify/index.md', title: 'verify', description: '', section: 'capabilities', headings: [], terms: [] };
+    expect(scorePage(p, searchTerms('verifies'), 'verifies', undefined).matched).toBe(1);
+  });
+
+  it('reads a heading that contains ">" by its full text', () => {
+    const md = '# R\n\n## D11. A map<K,V> annotation hides the reference\n\ntext\n\n## D12. Next\n\nmore\n';
+    const part = pagePart(md, { section: 'D11. A map<K,V> annotation hides the reference' });
+    expect(part.ok && part.markdown).toBe('## D11. A map<K,V> annotation hides the reference\n\ntext\n\n');
+  });
+
+  it('gives an id with a stopword its bonus when the query names its other words', () => {
+    const p = { path: '/workflows/monitor-and-replan/', markdownPath: '/x', title: 'Other title', description: '', section: 'workflows', headings: [], terms: [] };
+    const rec = { id: 'monitor_and_replan', description: '', path: p.path };
+    const terms = searchTerms('monitor and replan');
+    // Without the id: path 3 per term; with it, 10/2 more per term: 2 * (3 + 5) = 16.
+    expect(scorePage(p, terms, 'monitor and replan', rec).score).toBeCloseTo(16, 1);
   });
 });

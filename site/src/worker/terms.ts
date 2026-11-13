@@ -14,12 +14,20 @@ export const STOPWORDS = new Set(
   'a an and are as at be before by can do does for from how i in into is it its of on or should that the then this to what when where which who why with'.split(' '),
 );
 
-/** A crude stem, so "mutation", "mutates" and "mutate" meet at "mutat". */
+/**
+ * A crude stem, so "mutation", "mutates" and "mutate" meet at "mutat", and
+ * "verifies", "verified", "verifying" and "verify" meet at "verifi": "-ies"
+ * becomes "-y", and a final "-y" becomes "-i".
+ */
 export function stem(word: string): string {
+  let w = word;
   for (const suffix of ['ations', 'ation', 'ions', 'ion', 'ing', 'ies', 'ed', 'es', 's', 'e']) {
-    if (word.endsWith(suffix) && word.length - suffix.length >= 4) return word.slice(0, -suffix.length);
+    if (w.endsWith(suffix) && w.length - suffix.length >= 4) {
+      w = suffix === 'ies' ? `${w.slice(0, -3)}y` : w.slice(0, -suffix.length);
+      break;
+    }
   }
-  return word;
+  return w.endsWith('y') && w.length >= 5 ? `${w.slice(0, -1)}i` : w;
 }
 
 /** The search terms of a query: its words without stopwords (all of them when every word is one), stemmed. */

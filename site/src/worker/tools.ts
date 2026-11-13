@@ -6,7 +6,7 @@ import type { PageEntry, RecordEntry, SiteData } from './data';
 import { sitePath, unwrap } from './data';
 import type { WorkerConfig } from './env';
 import { PAGE_CHUNK, pagePart, sectionNames } from './page-text';
-import { isCode, searchTerms, stem, words } from './terms';
+import { isCode, searchTerms, stem, STOPWORDS, words } from './terms';
 
 type Json = Record<string, unknown>;
 
@@ -266,7 +266,8 @@ export function scorePage(
   const headWords = stems(heads);
   const sectionWords = stems(page.section);
   // An id such as debug_code_change is several words; it counts when the query has all of them.
-  const idWords = record ? [...stems(record.id)] : [];
+  // Stopwords are left out, as searchTerms leaves them out of the query ("monitor_and_replan").
+  const idWords = record ? [...new Set(words(record.id).filter((w) => !STOPWORDS.has(w)).map(stem))] : [];
   const idMatched = idWords.length > 0 && idWords.every((w) => terms.includes(w));
   let score = 0;
   let matched = 0;
