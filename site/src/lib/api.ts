@@ -21,7 +21,7 @@ export { API_BASE, API_CATALOG_PATH, API_CATALOG_PROFILE, API_VERSION, DEVELOPER
 export const MCP_URL = `${SITE_ORIGIN}/mcp`;
 /** The MCP server's tools, by name, as the worker defines them. */
 export const MCP_TOOLS: readonly { name: string; does: string }[] = [
-  { name: 'search_standard', does: 'Searches every page of the site by title, description and headings, and returns the matching pages with their URLs.' },
+  { name: 'search_standard', does: 'Searches every page of the site, and the names and descriptions of the capabilities, and returns ranked matches with their URLs and, for a capability or a workflow, the id to read it by.' },
   { name: 'read_capability', does: 'Returns a capability: its layer, risk, safety flags, input and output schemas and edges.' },
   { name: 'read_workflow', does: 'Returns a workflow with its steps, bindings and effective safety flags.' },
   { name: 'read_page', does: 'Returns the Markdown copy of one page of the site.' },
