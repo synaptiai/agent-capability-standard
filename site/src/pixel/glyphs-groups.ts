@@ -35,4 +35,6 @@ export const LISTING_GROUP_GLYPHS: Readonly<Record<string, string>> = {
   Proposals: 'section:rfcs',
   'Previous versions': 'chapter:versioning-and-compatibility',
   'Reference workflows': 'section:workflows',
+  // The about, contact and privacy pages: notes about the site itself.
+  'This site': 'note',
 };

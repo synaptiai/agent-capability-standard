@@ -19,6 +19,8 @@ import Sidebar from '../components/Sidebar.astro';
 import Toc from '../components/Toc.astro';
 import { loadVersions } from '../data/versions';
 import { SITEMAP_PATH } from '../lib/agent-files';
+import { AGENTS_MD_PATH, AI_CATALOG_PATH, ARD_PATH } from '../lib/agent-contract';
+import { homeJsonLd } from '../lib/structured-data';
 import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
 import { SECTIONS, type Route } from '../lib/routes';
 import { tocEntries } from '../lib/toc';
@@ -79,12 +81,16 @@ const olderStandard = loadVersions().standard.previous.find((p) => route.url ===
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32" />
     {hasMarkdownCopy && <link rel="alternate" type="text/markdown" href={`${route.url}index.md`} />}
+    {route.template === 'home' && <link rel="ard" type="application/json" href={ARD_PATH} />}
+    {route.template === 'home' && <link rel="ai-catalog" type="application/json" href={AI_CATALOG_PATH} />}
+    <meta property="og:type" content={route.template === 'home' || route.template === 'not-found' ? 'website' : 'article'} />
     <meta property="og:title" content={pageTitle} />
     {description && <meta property="og:description" content={description} />}
     <meta property="og:image" content={ogImage} />
     <meta name="twitter:card" content="summary_large_image" />
     {FONT_PRELOADS.map((href) => <link rel="preload" href={href} as="font" type="font/woff2" crossorigin />)}
     <style is:inline set:html={FONT_FACE_CSS}></style>
+    {route.template === 'home' && <script type="application/ld+json" is:inline set:html={homeJsonLd()} />}
   </head>
   <body class:list={['page', `page--${route.template}`, hasSidebar ? 'page--with-sidebar' : 'page--no-sidebar']} data-section={route.section}>
     <a class="skip-link" href="#content">Skip to content</a>
@@ -118,10 +124,19 @@ const olderStandard = loadVersions().standard.previous.find((p) => route.url ===
         <ul>
           <li><a href="/llms.txt" type="text/plain">llms.txt</a></li>
           <li><a href="/llms-full.txt" type="text/plain">llms-full.txt</a></li>
+          <li><a href={AGENTS_MD_PATH} type="text/markdown">Guide for agents</a></li>
           <li><a href="/developers/">API and agent access</a></li>
           <li><a href="/openapi.json" type="application/json">OpenAPI</a></li>
           {hasMarkdownCopy && <li><a href={`${route.url}index.md`} type="text/markdown">Markdown of this page</a></li>}
           <li><a href={SITEMAP_PATH}>Sitemap</a></li>
+        </ul>
+      </nav>
+      <nav class="site-footer__agents" aria-label="This site">
+        <p class="site-footer__heading">This site</p>
+        <ul>
+          <li><a href="/about/">About</a></li>
+          <li><a href="/contact/">Contact</a></li>
+          <li><a href="/privacy/">Privacy</a></li>
         </ul>
       </nav>
       {sourceUrl && (

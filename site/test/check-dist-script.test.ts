@@ -15,7 +15,11 @@ function page(body: string): string {
   return `<!doctype html><html><head><link rel="stylesheet" href="/_astro/site.css"><script type="module" src="/_astro/app.js"></script></head><body class="page page--prose">${body}</body></html>`;
 }
 
-/** A clean two-page site: home and /guide/, each with its copy, plus 404, sitemap, llms.txt and Pagefind. */
+/**
+ * A clean two-page site: home and /guide/, each with its copy, plus 404,
+ * sitemap, Pagefind, a root llms.txt that lists the home copy and links the
+ * guide section's llms.txt, which lists the guide's copy.
+ */
 function cleanSite(): Files {
   return {
     'index.html': page('<h1 id="home">Home</h1><a href="/guide/#setup">Setup</a><a href="/index.md">Copy</a><a href="https://github.com/x/y/blob/main/README.md">GitHub</a>'),
@@ -28,7 +32,8 @@ function cleanSite(): Files {
     '_redirects': '/spec/ /guide/ 302\n',
     'pagefind/pagefind.js': '',
     'llms-full.txt': '# all\n',
-    'llms.txt': `# Site\n\n## Pages\n\n- [Home](${O}/index.md)\n- [Guide](${O}/guide/index.md): how to start\n`,
+    'llms.txt': `# Site\n\n## Pages\n\n- [Home](${O}/index.md)\n- [All guide pages](${O}/guide/llms.txt)\n`,
+    'guide/llms.txt': `# Guide\n\n- [Guide](${O}/guide/index.md): how to start\n`,
     'sitemap.xml': `<?xml version="1.0"?><urlset><url><loc>${O}/</loc></url><url><loc>${O}/guide/</loc></url></urlset>`,
     ...apiFiles(),
   };
@@ -133,17 +138,36 @@ describe('check-dist.mjs', () => {
     const s = cleanSite();
     delete s['guide/index.md'];
     expect(problems(s)).toEqual([
+      `[links] /guide/llms.txt: ${O}/guide/index.md does not resolve to a file in dist`,
       '[copies] /guide/: no Markdown copy at /guide/index.md',
-      '[copies] llms.txt lists /guide/index.md, which is not in dist',
+      '[copies] an llms.txt lists /guide/index.md, which is not in dist',
     ]);
   });
 
-  it('fails a copy that llms.txt leaves out, and one it lists twice', () => {
+  it('fails a copy that no llms.txt lists and a section file the root does not link, but lets the root name a copy twice', () => {
     const s = cleanSite();
     s['llms.txt'] = `# Site\n\n- [Home](${O}/index.md)\n- [Home again](${O}/index.md)\n`;
+    s['guide/llms.txt'] = '# Guide\n';
     expect(problems(s)).toEqual([
-      '[copies] llms.txt does not list /guide/index.md',
-      '[copies] llms.txt lists /index.md more than once',
+      '[copies] llms.txt does not link guide/llms.txt',
+      '[copies] no llms.txt lists /guide/index.md',
+    ]);
+  });
+
+  it('fails a copy that two section files list', () => {
+    const s = cleanSite();
+    s['llms.txt'] += `- [More](${O}/more/llms.txt)\n`;
+    s['more/llms.txt'] = `# More\n\n- [Guide](${O}/guide/index.md)\n- [Guide](${O}/guide/index.md)\n`;
+    expect(problems(s)).toEqual(['[copies] more/llms.txt lists /guide/index.md more than once', '[copies] /guide/index.md is listed by both guide/llms.txt and more/llms.txt']);
+  });
+
+  it('accepts a link to a path another part of the build serves, and to /agents.md, but not to another missing file', () => {
+    const s = cleanSite();
+    s['llms.txt'] += `- [MCP](${O}/.well-known/mcp/server-card.json)\n- [API](${O}/openapi.json)\n- [Developers](${O}/developers/index.md)\n- [Agents](${O}/agents.md)\n- [Other](${O}/other.json)\n`;
+    s['agents.md'] = `# Agents\n\n[Home](${O}/index.md) and [missing](${O}/gone/)\n`;
+    expect(problems(s)).toEqual([
+      `[links] /agents.md: ${O}/gone/ does not resolve to a file in dist`,
+      `[links] /llms.txt: ${O}/other.json does not resolve to a file in dist`,
     ]);
   });
 
