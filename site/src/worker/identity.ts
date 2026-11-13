@@ -39,7 +39,7 @@ export function instructions(cfg: WorkerConfig): string {
   return [
     `This server gives read-only access to the Agent Capability Standard (current Standard version ${cfg.standardVersion}): its capability ontology, its reference workflows and every page of the documentation site at ${cfg.origin}/.`,
     'Start with search_standard to find the pages, capabilities and workflows that match a question.',
-    'Then call read_capability with a capability id (for example "mutate") for its contract, risk and edges; read_workflow with a workflow id for its steps; or read_page with a page path from the search results for the full Markdown text of that page.',
+    'Then call read_capability with a capability id (for example "mutate") for its contract, risk and edges; read_workflow with a workflow id for its steps; or read_page with a page path from the search results for the Markdown text of that page. read_page returns a long page in parts (pass nextOffset as offset) or one section by its heading.',
     'Every tool only reads published files. Nothing here changes any state, and no tool needs authentication.',
   ].join(' ');
 }

@@ -4,6 +4,7 @@
 import type { PageEntry, RecordEntry, SiteData } from './data';
 import { sitePath, unwrap } from './data';
 import type { WorkerConfig } from './env';
+import { PAGE_CHUNK, pagePart, sectionNames } from './page-text';
 import { isCode, searchTerms, stem, words } from './terms';
 
 type Json = Record<string, unknown>;
@@ -53,7 +54,7 @@ export const TOOLS = [
     name: 'read_page',
     title: 'Read a documentation page',
     description:
-      'Return the full Markdown text of one page of the documentation site, given its path from search_standard results (for example "/capabilities/mutate/" or "/spec/1.1.0/"). Use it for prose: the Standard, guides, RFCs, layer and domain pages.',
+      `Return the Markdown text of one page of the documentation site, given its path from search_standard results (for example "/capabilities/mutate/" or "/spec/1.1.0/"). Use it for prose: the Standard, guides, RFCs, layer and domain pages. One call returns at most ${PAGE_CHUNK.toLocaleString('en')} characters, cut at a line end; when a page is longer, the result gives nextOffset to pass as offset for the next part, and the page's section headings. Pass section to read one section by its heading instead.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -62,6 +63,18 @@ export const TOOLS = [
           minLength: 1,
           maxLength: 300,
           description: 'The page path, such as "/guides/getting-started/", or the page URL on the documentation site.',
+        },
+        section: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description: 'A heading of the page, such as "Safety" (any level from ##, case ignored): return only that section, up to the next heading of its level.',
+        },
+        offset: {
+          type: 'integer',
+          minimum: 0,
+          default: 0,
+          description: 'Where to start, in characters, in the page (or in the section): the nextOffset of the previous result.',
         },
       },
       required: ['path'],
@@ -74,9 +87,14 @@ export const TOOLS = [
         title: { type: 'string', description: 'The page title.' },
         url: { type: 'string', description: 'The HTML page.' },
         markdownUrl: { type: 'string', description: 'The Markdown copy the text was read from.' },
-        markdown: { type: 'string', description: 'The full Markdown text of the page.' },
+        section: { type: 'string', description: 'The section asked for, when one was.' },
+        markdown: { type: 'string', description: 'The Markdown text: the page or the section, from offset, at most one part long.' },
+        offset: { type: 'integer', description: 'Where this part starts, in characters.' },
+        nextOffset: { type: ['integer', 'null'], description: 'The offset of the next part, or null when this part reaches the end.' },
+        totalLength: { type: 'integer', description: 'The length in characters of the whole page, or of the section.' },
+        sections: { type: 'array', items: { type: 'string' }, description: 'The page\'s ## headings, which section accepts; given when the text did not fit in one part.' },
       },
-      required: ['path', 'title', 'url', 'markdownUrl', 'markdown'],
+      required: ['path', 'title', 'url', 'markdownUrl', 'markdown', 'offset', 'nextOffset', 'totalLength'],
       additionalProperties: false,
     },
     annotations: { title: 'Read a documentation page', ...ANNOTATIONS },
@@ -368,8 +386,13 @@ export function normalizePagePath(input: string, origin: string): string | null 
 }
 
 async function readPage(a: Json, data: SiteData, cfg: WorkerConfig): Promise<ToolResult> {
-  onlyKeys(a, ['path'], 'read_page');
+  onlyKeys(a, ['path', 'section', 'offset'], 'read_page');
   const raw = requiredString(a, 'path', 'read_page', { max: 300 });
+  const section = a.section === undefined ? undefined : requiredString(a, 'section', 'read_page', { max: 200 });
+  if (a.offset !== undefined && (typeof a.offset !== 'number' || !Number.isInteger(a.offset) || a.offset < 0)) {
+    throw new InvalidParams('read_page: "offset" must be an integer of 0 or more');
+  }
+  const offset = (a.offset as number | undefined) ?? 0;
   const path = normalizePagePath(raw, cfg.origin);
   if (path === null) throw new InvalidParams(`read_page: "${raw}" is not a page path on ${cfg.origin}`);
   const pages = await data.pages();
@@ -378,7 +401,21 @@ async function readPage(a: Json, data: SiteData, cfg: WorkerConfig): Promise<Too
   if (!page) return failed(`There is no page at ${path}. Use a path from search_standard results, such as "/capabilities/mutate/".`);
   const markdown = await data.text(page.markdownPath);
   if (markdown === null) return failed(`The Markdown copy of ${path} (${page.markdownPath}) could not be read.`);
-  return ok({ path, title: page.title, url: `${cfg.origin}${path}`, markdownUrl: `${cfg.origin}${page.markdownPath}`, markdown });
+  const part = pagePart(markdown, { section, offset });
+  if (!part.ok) return failed(part.headings.length > 0 ? `${part.message} Its headings: ${part.headings.join(', ')}.` : part.message);
+  const cut = part.offset > 0 || part.nextOffset !== null;
+  return ok({
+    path,
+    title: page.title,
+    url: `${cfg.origin}${path}`,
+    markdownUrl: `${cfg.origin}${page.markdownPath}`,
+    ...(section !== undefined ? { section } : {}),
+    markdown: part.markdown,
+    offset: part.offset,
+    nextOffset: part.nextOffset,
+    totalLength: part.totalLength,
+    ...(cut && section === undefined ? { sections: sectionNames(markdown) } : {}),
+  });
 }
 
 /** Run a tool. Throws InvalidParams for arguments that do not fit its inputSchema. */

@@ -10,6 +10,7 @@ import { parseAccept, prefersMarkdown } from '../src/worker/accept';
 import type { Env, WorkerConfig } from '../src/worker/env';
 import { createHandler } from '../src/worker/site';
 import { pageSearchTerms, TERMS_PER_PAGE } from '../src/worker/terms';
+import { validate } from './json-schema-lite';
 import { REPO_ROOT } from '../src/lib/repo';
 
 const PLUGIN_VERSION = (JSON.parse(readFileSync(path.join(REPO_ROOT, '.claude-plugin/plugin.json'), 'utf8')) as { version: string }).version;
@@ -19,6 +20,12 @@ const BASE = 'https://acs.synapti.ai';
 const HOME_MD = '# Agent Capability Standard\n\nHome page copy.\n';
 const MUTATE_MD = '# mutate\n\nChange persistent state\n';
 const GUIDE_MD = '# Getting started\n\nInstall the plugin.\n';
+// A long page: 30 lines of 1,000 characters (30,030 with newlines) under
+// "## Alpha", then "## Beta" with a subsection, a fenced "## Not a heading",
+// and "## Gamma". Section texts are written out in the tests.
+const LINE = 'x'.repeat(1000);
+const BETA = '## Beta\n\nBeta text.\n\n### Beta detail\n\n```md\n## Not a heading\n```\n\n';
+const LONG_MD = `# Long page\n\n## Alpha\n\n${`${LINE}\n`.repeat(30)}\n${BETA}## Gamma\n\nEnd.\n`;
 const NOT_FOUND_HTML = '<!DOCTYPE html><html lang="en"><title>Page not found</title><h1>Page not found</h1></html>';
 
 const PAGES_JSON = {
@@ -34,6 +41,7 @@ const PAGES_JSON = {
       section: 'capabilities',
       headings: [{ level: 2, text: 'Safety' }],
     },
+    { url: `${BASE}/long/`, markdown_url: `${BASE}/long/index.md`, title: 'Long page', description: null, section: 'guides', headings: [] },
     {
       url: `${BASE}/guides/getting-started/`,
       markdown_url: `${BASE}/guides/getting-started/index.md`,
@@ -69,6 +77,7 @@ const FILES: Record<string, FakeFile> = {
   '/guides/getting-started/index.md': { body: GUIDE_MD, type: 'text/markdown; charset=utf-8' },
   '/_astro/site.css': { body: 'body{}', type: 'text/css' },
   '/llms.txt': { body: '# Agent Capability Standard\n', type: 'text/plain; charset=utf-8' },
+  '/long/index.md': { body: LONG_MD, type: 'text/markdown; charset=utf-8' },
   '/spec/1.1.0/index.md': { body: '# The Standard\n', type: 'text/markdown; charset=utf-8' },
   '/api/v1/pages.json': { body: JSON.stringify(PAGES_JSON), type: 'application/json' },
   '/api/v1/capabilities.json': { body: JSON.stringify({ count: 1, capabilities: [MUTATE_RECORD] }), type: 'application/json' },
@@ -529,6 +538,22 @@ describe('MCP server: tools', () => {
     expect(new Set(tools.map((t) => t.description)).size).toBe(4);
   });
 
+  it('returns structuredContent that fits each tool\'s outputSchema', async () => {
+    const tools = Object.fromEntries(((await rpc('tools/list')).body.result!.tools as any[]).map((t) => [t.name, t]));
+    const calls: [string, Record<string, unknown>][] = [
+      ['search_standard', { query: 'checkpoint install' }],
+      ['read_capability', { id: 'mutate' }],
+      ['read_workflow', { id: 'debug_code_change' }],
+      ['read_page', { path: '/capabilities/mutate/' }],
+      ['read_page', { path: '/long/' }],
+      ['read_page', { path: '/long/', section: 'Beta' }],
+    ];
+    for (const [name, args] of calls) {
+      const sc = (await callTool(name, args)).body.result!.structuredContent;
+      expect(validate(tools[name].outputSchema, tools[name].outputSchema, sc), `${name} ${JSON.stringify(args)}`).toEqual([]);
+    }
+  });
+
   it('adds resultType and cache hints to a modern tools/list', async () => {
     const { body } = await rpc('tools/list', {}, { modern: true });
     expect(body.result).toMatchObject({ resultType: 'complete', cacheScope: 'public' });
@@ -627,8 +652,34 @@ describe('MCP server: tools', () => {
         url: 'https://acs.synapti.ai/capabilities/mutate/',
         markdownUrl: 'https://acs.synapti.ai/capabilities/mutate/index.md',
         markdown: MUTATE_MD,
+        offset: 0,
+        nextOffset: null,
+        totalLength: MUTATE_MD.length,
       });
     }
+  });
+
+  it('read_page returns a long page in parts of at most 25,000 characters, cut at line ends, with its sections', async () => {
+    const first = (await callTool('read_page', { path: '/long/' })).body.result!.structuredContent;
+    // "# Long page\n\n## Alpha\n\n" is 23 characters; then 1,001-character lines.
+    // 23 + 24 * 1,001 = 24,047 fits in 25,000; one more line does not.
+    expect(first.markdown.length).toBe(24_047);
+    expect(first).toMatchObject({ offset: 0, nextOffset: 24_047, totalLength: LONG_MD.length, sections: ['Alpha', 'Beta', 'Gamma'] });
+    const second = (await callTool('read_page', { path: '/long/', offset: first.nextOffset })).body.result!.structuredContent;
+    expect(second.nextOffset).toBeNull();
+    expect(first.markdown + second.markdown).toBe(LONG_MD);
+  });
+
+  it('read_page returns one section by its heading, up to the next heading of its level, skipping fenced code', async () => {
+    const { body } = await callTool('read_page', { path: '/long/', section: 'beta' });
+    expect(body.result!.structuredContent).toMatchObject({ section: 'beta', markdown: BETA, offset: 0, nextOffset: null, totalLength: BETA.length });
+  });
+
+  it('read_page reports a section the page does not have, with the ones it has', async () => {
+    const { body } = await callTool('read_page', { path: '/long/', section: 'Delta' });
+    expect(body.result!.isError).toBe(true);
+    expect(body.result!.content[0].text).toContain('Alpha, Beta, Beta detail, Gamma');
+    expect((await callTool('read_page', { path: '/long/', offset: -1 })).body.error!.code).toBe(-32602);
   });
 
   it('read_page reads only pages the index lists', async () => {

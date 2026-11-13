@@ -14,6 +14,7 @@ import { SITE_ORIGIN } from './origin';
 import { COMMIT_SHA, GITHUB_BASE } from './repo';
 import { kebab, ROUTES } from './routes';
 
+import { PAGE_CHUNK } from '../worker/page-text';
 import { OPENAPI_MEDIA_TYPE } from './agent-contract';
 import { API_BASE, API_CATALOG_PATH, API_VERSION, DEVELOPERS_URL, OPENAPI_PATH } from './api-paths';
 
@@ -25,7 +26,7 @@ export const MCP_TOOLS: readonly { name: string; does: string }[] = [
   { name: 'search_standard', does: 'Searches the titles, descriptions and headings of the pages, the capability and workflow ids, and each page\'s search terms (its most distinctive words and every diagnostic code it names). Returns ranked matches with their URLs and, for a capability or a workflow, the id to read it by.' },
   { name: 'read_capability', does: 'Returns a capability: its layer, risk, safety flags, input and output schemas and edges.' },
   { name: 'read_workflow', does: 'Returns a workflow with its steps, bindings and effective safety flags.' },
-  { name: 'read_page', does: 'Returns the Markdown copy of one page of the site.' },
+  { name: 'read_page', does: `Returns the Markdown copy of one page of the site, in parts of at most ${PAGE_CHUNK.toLocaleString('en')} characters, or one section of it by its heading.` },
 ];
 
 type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
