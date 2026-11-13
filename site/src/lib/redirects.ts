@@ -7,8 +7,19 @@ import { API_BASE } from './api-paths';
 
 export const REDIRECTS_FILE = '_redirects';
 
-export function redirectsFile(): string {
+/** Every redirect, from path to target, all 302. The worker applies the same table (src/worker/static-rules.ts). */
+export function redirectRules(): Record<string, string> {
   const v = loadVersions().standard.current.version;
-  const api = `${API_BASE} ${API_BASE}/index.json 302\n${API_BASE}/ ${API_BASE}/index.json 302\n`;
-  return `/spec /spec/${v}/ 302\n/spec/ /spec/${v}/ 302\n${api}`;
+  return {
+    '/spec': `/spec/${v}/`,
+    '/spec/': `/spec/${v}/`,
+    [API_BASE]: `${API_BASE}/index.json`,
+    [`${API_BASE}/`]: `${API_BASE}/index.json`,
+  };
+}
+
+export function redirectsFile(): string {
+  return Object.entries(redirectRules())
+    .map(([from, to]) => `${from} ${to} 302\n`)
+    .join('');
 }

@@ -18,11 +18,8 @@
 // counts against the Workers plan (100,000 a day on the Free plan).
 //
 // Cloudflare's documentation says _headers and _redirects are not applied to
-// responses a worker generates. The worker reads every file through
-// env.ASSETS.fetch, and under `wrangler pages dev` (4.160.0) those responses
-// do carry the _headers rules and the /spec/ redirect; that was checked
-// locally, not on the production project. The worker sets the headers of the
-// responses it builds itself.
+// responses a worker returns, so the worker applies the same rules itself
+// (static-rules.ts).
 
 import type { Env, WorkerConfig } from './env';
 import { createHandler } from './site';

@@ -9,6 +9,7 @@ import { build } from 'rolldown';
 import { loadVersions } from '../data/versions';
 import type { WorkerConfig } from '../worker/env';
 import { SITE_ORIGIN } from './origin';
+import { redirectRules } from './redirects';
 
 export const WORKER_FILE = '_worker.js';
 export const ROUTES_FILE = '_routes.json';
@@ -37,7 +38,7 @@ export function routesJson(): string {
 
 export function workerConfig(): WorkerConfig {
   const v = loadVersions();
-  return { version: v.plugin, standardVersion: v.standard.current.version, origin: SITE_ORIGIN };
+  return { version: v.plugin, standardVersion: v.standard.current.version, origin: SITE_ORIGIN, redirects: redirectRules() };
 }
 
 /** Bundle the worker into `distDir` and write its routes file. Returns the bundle's size in bytes. */

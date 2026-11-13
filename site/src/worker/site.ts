@@ -11,6 +11,8 @@
 // - /mcp is the docs MCP server (mcp.ts); its server card is at
 //   /mcp/server-card and /.well-known/mcp/server-card.json.
 // - A path with repeated slashes redirects to the same path with single ones.
+// - The rules of public/_headers and public/_redirects are applied here too
+//   (static-rules.ts says why).
 // Every other request goes to the static files unchanged.
 
 import { OPENAPI_MEDIA_TYPE } from '../lib/agent-contract';
@@ -18,6 +20,7 @@ import { namesHtml, prefersMarkdown } from './accept';
 import type { Env, WorkerConfig } from './env';
 import { MCP_PATH, SERVER_CARD_TYPE, serverCard } from './identity';
 import { CORS_HEADERS, handleMcp, mcpInternalError } from './mcp';
+import { isPagesDevHost, redirectTarget, withStaticRules } from './static-rules';
 
 /**
  * User agents that get the Markdown copy of a page even when they ask for
@@ -59,7 +62,7 @@ function withSlash(path: string): string {
 
 function robotsHeaders(url: URL): Record<string, string> {
   // The pages.dev copies stay out of search engines (public/_headers does the same for static files).
-  return url.hostname.endsWith('.pages.dev') ? { 'X-Robots-Tag': 'noindex' } : {};
+  return isPagesDevHost(url.hostname) ? { 'X-Robots-Tag': 'noindex' } : {};
 }
 
 /** Link header value for an HTML page. */
@@ -159,7 +162,7 @@ async function notFound(request: Request, url: URL, original: Response, cfg: Wor
       headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept, User-Agent', ...robotsHeaders(url) },
     });
   }
-  const res = new Response(original.body, original);
+  const res = withStaticRules(url, new Response(original.body, original));
   res.headers.append('Vary', 'Accept, User-Agent');
   return res;
 }
@@ -170,7 +173,7 @@ export function createHandler(cfg: WorkerConfig) {
       return await route(request, env, cfg);
     } catch {
       // Fail open: if anything here breaks, the static files are still served as they are.
-      return env.ASSETS.fetch(request);
+      return withStaticRules(new URL(request.url), await env.ASSETS.fetch(request));
     }
   };
 }
@@ -185,6 +188,10 @@ async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Res
     const status = request.method === 'GET' || request.method === 'HEAD' ? 301 : 308;
     return new Response(null, { status, headers: { Location: `${path.replace(/\/{2,}/g, '/')}${url.search}`, ...robotsHeaders(url) } });
   }
+  const redirect = redirectTarget(cfg.redirects, path);
+  if (redirect !== null) {
+    return new Response(null, { status: 302, headers: { Location: `${redirect}${url.search}`, ...robotsHeaders(url) } });
+  }
   if (path === MCP_PATH) {
     // The MCP endpoint is not a file: if handling it fails, the client gets a
     // JSON-RPC error, never the static 404 that failing open would give.
@@ -195,7 +202,7 @@ async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Res
     }
   }
   if (path === `${MCP_PATH}/server-card` || path === '/.well-known/mcp/server-card.json') return serverCardResponse(request, url, cfg);
-  if (request.method !== 'GET' && request.method !== 'HEAD') return env.ASSETS.fetch(request);
+  if (request.method !== 'GET' && request.method !== 'HEAD') return withStaticRules(url, await env.ASSETS.fetch(request));
 
   const accept = request.headers.get('Accept');
   const agent = isMarkdownAgent(request.headers.get('User-Agent'));
@@ -212,7 +219,7 @@ async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Res
   // <page>.md -> <page>/index.md, when no file has that name.
   if (path.endsWith('.md') && path.length > '/.md'.length) {
     const direct = await env.ASSETS.fetch(request);
-    if (direct.status !== 404) return direct;
+    if (direct.status !== 404) return withStaticRules(url, direct);
     const pagePath = `${path.slice(0, -'.md'.length)}/`;
     const res = await asset(env, request, url, `${pagePath}index.md`);
     if (found(res)) return markdownResponse(request, url, res, pagePath, cfg, null);
@@ -228,8 +235,8 @@ async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Res
 
   const res = await env.ASSETS.fetch(request);
   if (res.status === 404) return notFound(request, url, res, cfg, markdown404);
-  if (!page || res.status !== 200 || !(res.headers.get('Content-Type') ?? '').startsWith('text/html')) return res;
-  const out = new Response(res.body, res);
+  if (!page || res.status !== 200 || !(res.headers.get('Content-Type') ?? '').startsWith('text/html')) return withStaticRules(url, res);
+  const out = withStaticRules(url, new Response(res.body, res));
   out.headers.append('Vary', 'Accept, User-Agent');
   if (path.endsWith('/')) out.headers.append('Link', pageLinks(path));
   return out;

@@ -19,4 +19,6 @@ export interface WorkerConfig {
   standardVersion: string;
   /** Production origin, used for canonical links and absolute URLs. */
   origin: string;
+  /** The 302 redirects of public/_redirects, from path to target (src/lib/redirects.ts). */
+  redirects: Readonly<Record<string, string>>;
 }

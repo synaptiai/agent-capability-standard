@@ -9,12 +9,18 @@ import { describe, expect, it } from 'vitest';
 import { parseAccept, prefersMarkdown } from '../src/worker/accept';
 import type { Env, WorkerConfig } from '../src/worker/env';
 import { createHandler } from '../src/worker/site';
+import { HEADER_RULES } from '../src/worker/static-rules';
 import { pageSearchTerms, TERMS_PER_PAGE } from '../src/worker/terms';
 import { validate } from './json-schema-lite';
 import { REPO_ROOT } from '../src/lib/repo';
 
 const PLUGIN_VERSION = (JSON.parse(readFileSync(path.join(REPO_ROOT, '.claude-plugin/plugin.json'), 'utf8')) as { version: string }).version;
-const CFG: WorkerConfig = { version: PLUGIN_VERSION, standardVersion: '1.1.0', origin: 'https://acs.synapti.ai' };
+const CFG: WorkerConfig = {
+  version: PLUGIN_VERSION,
+  standardVersion: '1.1.0',
+  origin: 'https://acs.synapti.ai',
+  redirects: { '/spec/': '/spec/1.1.0/', '/api/v1/': '/api/v1/index.json' },
+};
 const BASE = 'https://acs.synapti.ai';
 
 const HOME_MD = '# Agent Capability Standard\n\nHome page copy.\n';
@@ -328,7 +334,7 @@ describe('not found', () => {
   it('passes an existing API file through', async () => {
     const res = await get('/api/v1/capabilities/mutate.json');
     expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toBe('application/json');
+    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
   });
 });
 
@@ -818,5 +824,76 @@ describe('MCP server card', () => {
     expect(card.icons[0].src).toBe('https://acs.synapti.ai/favicon.svg');
     expect(card.remotes).toEqual([{ type: 'streamable-http', url: 'https://acs.synapti.ai/mcp', supportedProtocolVersions: ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26'] }]);
     expect(card.tools).toBeUndefined();
+  });
+});
+
+describe('static-file rules applied by the worker', () => {
+  // An asset server that applies no _headers or _redirects rules: what
+  // Cloudflare's documentation says a worker's responses get.
+  function bareEnv(files: Record<string, string>): Env {
+    return {
+      ASSETS: {
+        async fetch(input: Request | string | URL) {
+          const req = input instanceof Request ? input : new Request(input);
+          const p = new URL(req.url).pathname;
+          const body = files[p.endsWith('/') ? `${p}index.html` : p];
+          if (body === undefined) return new Response('<h1>404</h1>', { status: 404, headers: { 'Content-Type': 'text/html' } });
+          const type = p.endsWith('/') ? 'text/html; charset=utf-8' : 'application/octet-stream';
+          return new Response(body, { status: 200, headers: { 'Content-Type': type } });
+        },
+      },
+    };
+  }
+  const bare = bareEnv({
+    '/api/v1/capabilities.json': '{}',
+    '/openapi.json': '{}',
+    '/.well-known/api-catalog': '{}',
+    '/capabilities/mutate/index.html': '<h1>mutate</h1>',
+  });
+
+  it('redirects /spec/ and /api/v1/ with 302, keeping the query', async () => {
+    const spec = await handle(new Request(`${BASE}/spec/?x=1`), bare);
+    expect(spec.status).toBe(302);
+    expect(spec.headers.get('Location')).toBe('/spec/1.1.0/?x=1');
+    const api = await handle(new Request(`${BASE}/api/v1/`), bare);
+    expect(api.status).toBe(302);
+    expect(api.headers.get('Location')).toBe('/api/v1/index.json');
+  });
+
+  it('serves the API, the OpenAPI file and the API catalog with their types, open to any origin', async () => {
+    for (const [p, type] of [
+      ['/api/v1/capabilities.json', 'application/json; charset=utf-8'],
+      ['/openapi.json', 'application/json; charset=utf-8'],
+      ['/.well-known/api-catalog', 'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"'],
+    ] as const) {
+      const res = await handle(new Request(`${BASE}${p}`), bare);
+      expect(res.status, p).toBe(200);
+      expect(res.headers.get('Content-Type'), p).toBe(type);
+      expect(res.headers.get('Access-Control-Allow-Origin'), p).toBe('*');
+    }
+  });
+
+  it('marks an HTML page on a pages.dev host noindex, and not on the production host', async () => {
+    const dev = await handle(new Request('https://abc.acs-docs.pages.dev/capabilities/mutate/', { headers: { Accept: BROWSER_ACCEPT } }), bare);
+    expect(dev.status).toBe(200);
+    expect(dev.headers.get('X-Robots-Tag')).toBe('noindex');
+    const prod = await handle(new Request(`${BASE}/capabilities/mutate/`, { headers: { Accept: BROWSER_ACCEPT } }), bare);
+    expect(prod.headers.get('X-Robots-Tag')).toBeNull();
+  });
+
+  it('applies the same path rules as public/_headers', () => {
+    // Parse public/_headers: a line starting with "/" opens a rule, indented
+    // "Name: value" lines are its headers. Host rules (https://...) are the
+    // pages.dev noindex, checked above.
+    const text = readFileSync(path.join(REPO_ROOT, 'site/public/_headers'), 'utf8');
+    const rules: { pattern: string; headers: Record<string, string> }[] = [];
+    for (const line of text.split('\n')) {
+      if (line.startsWith('/')) rules.push({ pattern: line.trim(), headers: {} });
+      else if (/^\s+\S/.test(line) && !line.trim().startsWith('#') && rules.length > 0 && !/^https?:/.test(line)) {
+        const i = line.indexOf(':');
+        rules[rules.length - 1]!.headers[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+      } else if (/^https?:/.test(line)) rules.push({ pattern: '(host)', headers: {} });
+    }
+    expect(HEADER_RULES.map((r) => ({ pattern: r.pattern, headers: { ...r.headers } }))).toEqual(rules.filter((r) => r.pattern !== '(host)'));
   });
 });
