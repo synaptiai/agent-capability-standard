@@ -4,11 +4,13 @@
 // against counts.ts, never literal numbers), and the diagnostics rows also
 // from a line scan of the Standard.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadCounts } from '../src/data/counts';
+import { loadOntology } from '../src/data/ontology';
 import { loadVersions } from '../src/data/versions';
 import { RESERVED_WORKFLOW_SLUGS } from '../src/data/workflows';
 import { checkDistDir } from '../scripts/check-dist.mjs';
@@ -952,5 +954,92 @@ describe('data API on the built site', () => {
     expect(rows.map((r) => r[2])).toEqual(Object.keys(doc.paths));
     expect(rows.map((r) => r[3])).toEqual(Object.values(doc.paths as Record<string, any>).map((i) => i.get.operationId));
     for (const r of rows) expect(existsSync(path.join(dist, r[1]!.slice(1))), r[1]).toBe(true);
+  });
+});
+
+describe('Cloudflare Pages worker in the build output', () => {
+  /** A stand-in for the Pages asset server over the built files. */
+  function distAssets() {
+    return {
+      async fetch(input: Request | string | URL) {
+        const req = input instanceof Request ? input : new Request(input);
+        const p = decodeURIComponent(new URL(req.url).pathname);
+        const file = path.join(dist, p.endsWith('/') ? `${p}index.html` : p);
+        if (!file.startsWith(dist) || !existsSync(file) || !statSync(file).isFile()) {
+          return new Response(readFileSync(path.join(dist, '404.html')), { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        }
+        const type = file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'application/octet-stream';
+        return new Response(readFileSync(file), { status: 200, headers: { 'Content-Type': type } });
+      },
+    };
+  }
+
+  async function loadWorker(): Promise<{ fetch(r: Request, env: unknown): Promise<Response> }> {
+    return ((await import(pathToFileURL(path.join(dist, '_worker.js')).href)) as { default: { fetch(r: Request, env: unknown): Promise<Response> } }).default;
+  }
+
+  it('writes _worker.js as one self-contained module and _routes.json beside it', () => {
+    const code = readFileSync(path.join(dist, '_worker.js'), 'utf8');
+    expect(code).not.toMatch(/^\s*import\s/m);
+    expect(code).not.toContain('node:');
+    const routes = JSON.parse(readFileSync(path.join(dist, '_routes.json'), 'utf8')) as { version: number; include: string[]; exclude: string[] };
+    expect(routes.version).toBe(1);
+    expect(routes.include).toEqual(['/*']);
+    expect(routes.include.length + routes.exclude.length).toBeLessThanOrEqual(100);
+  });
+
+  it('keeps only files the worker never needs out of it: every exclude rule matches a built file and no page, copy, API file or MCP path', () => {
+    const routes = JSON.parse(readFileSync(path.join(dist, '_routes.json'), 'utf8')) as { exclude: string[] };
+    const files = checkDistFiles();
+    const toRe = (rule: string) => new RegExp(`^${rule.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+    for (const rule of routes.exclude) {
+      const re = toRe(rule);
+      // Pagefind writes /pagefind/ after `astro build`, in `npm run build`; this build skips it.
+      if (rule !== '/pagefind/*') expect(files.some((f) => re.test(f)), `${rule} matches no built file`).toBe(true);
+      const kept = files.filter((f) => re.test(f) && (f.endsWith('/index.html') || f.endsWith('/index.md') || f === '/index.md'));
+      expect(kept, rule).toEqual([]);
+      for (const p of ['/', '/api/v1/pages.json', '/mcp', '/mcp/server-card', '/.well-known/mcp/server-card.json', '/capabilities/mutate.md']) expect(re.test(p), `${rule} excludes ${p}`).toBe(false);
+    }
+  });
+
+  /** Every built file as a URL path. */
+  function checkDistFiles(): string[] {
+    const out: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else out.push(`/${path.relative(dist, p).split(path.sep).join('/')}`);
+      }
+    };
+    walk(dist);
+    return out;
+  }
+
+  it('serves <page>.md from the built Markdown copy', async () => {
+    const worker = await loadWorker();
+    const id = loadOntology().capabilities[0]!.id;
+    const res = await worker.fetch(new Request(`https://acs.synapti.ai/capabilities/${id}.md`), { ASSETS: distAssets() });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+    expect(await res.text()).toBe(readFileSync(path.join(dist, 'capabilities', id, 'index.md'), 'utf8'));
+  });
+
+  it('builds in the plugin version and the current Standard version', async () => {
+    const worker = await loadWorker();
+    const v = loadVersions();
+    const card = (await (await worker.fetch(new Request('https://acs.synapti.ai/mcp/server-card'), { ASSETS: distAssets() })).json()) as { version: string };
+    expect(card.version).toBe(v.plugin);
+    const res = await worker.fetch(
+      new Request('https://acs.synapti.ai/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/list' }),
+      }),
+      { ASSETS: distAssets() },
+    );
+    const uris = ((await res.json()) as { result: { resources: { uri: string }[] } }).result.resources.map((r) => r.uri);
+    expect(uris).toContain(`https://acs.synapti.ai/spec/${v.standard.current.version}/index.md`);
+    expect(existsSync(path.join(dist, 'spec', v.standard.current.version, 'index.md'))).toBe(true);
   });
 });
