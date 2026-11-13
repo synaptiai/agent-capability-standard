@@ -19,16 +19,19 @@ import { CORS_HEADERS, handleMcp } from './mcp';
 
 /**
  * User agents that get the Markdown copy of a page even when they ask for
- * HTML: the model-training crawlers (GPTBot, ClaudeBot), Perplexity's
- * answer-engine crawler (PerplexityBot), and the fetchers that act for one
- * person's request (ChatGPT-User, Claude-User, Perplexity-User). The copy has
- * the same text and links as the page, and a Link rel="canonical" header
- * names the HTML page as the address to cite.
+ * HTML: the model-training crawlers (GPTBot, ClaudeBot), the fetchers that
+ * act for one person's request (ChatGPT-User, Claude-User, Perplexity-User),
+ * and PerplexityBot. The copy has the same text and links as the page, and a
+ * Link rel="canonical" header names the HTML page as the address to cite.
+ *
+ * PerplexityBot is Perplexity's search-index crawler, so by the reason below
+ * it would get HTML; it is in this list because the agent-readiness check
+ * this work answers names it with GPTBot and ClaudeBot. Removing it is a
+ * one-word change.
  *
  * The search-index crawlers OAI-SearchBot and Claude-SearchBot keep getting
  * HTML, as do Googlebot and Bingbot: a search result is built from the
  * page's title, description and structured data, which only the HTML has.
- * All of them read the same pages either way (robots.txt allows them all).
  */
 export const MARKDOWN_AGENTS = ['GPTBot', 'ClaudeBot', 'PerplexityBot', 'ChatGPT-User', 'Claude-User', 'Perplexity-User'] as const;
 
@@ -67,16 +70,21 @@ export function pageLinks(pagePath: string): string {
   ].join(', ');
 }
 
+/**
+ * The Markdown copy as the answer to `request`: the static file's own headers
+ * (ETag, Last-Modified, Cache-Control, CORS) with the Markdown type, a
+ * canonical link to the page and, for a negotiated URL, Vary. A 304 from the
+ * static file stays a 304.
+ */
 function markdownResponse(request: Request, url: URL, copy: Response, pagePath: string, cfg: WorkerConfig, vary: string | null): Response {
-  const headers: Record<string, string> = {
-    'Content-Type': 'text/markdown; charset=utf-8',
-    'Cache-Control': 'public, max-age=0, must-revalidate',
-    'X-Content-Type-Options': 'nosniff',
-    Link: `<${cfg.origin}${pagePath}>; rel="canonical"`,
-    ...robotsHeaders(url),
-  };
-  if (vary) headers.Vary = vary;
-  return new Response(request.method === 'HEAD' ? null : copy.body, { status: 200, headers });
+  const headers = new Headers(copy.headers);
+  headers.set('Content-Type', 'text/markdown; charset=utf-8');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Link', `<${cfg.origin}${pagePath}>; rel="canonical"`);
+  if (vary) headers.append('Vary', vary);
+  for (const [k, v] of Object.entries(robotsHeaders(url))) headers.set(k, v);
+  const body = request.method === 'HEAD' || copy.status === 304 ? null : copy.body;
+  return new Response(body, { status: copy.status, headers });
 }
 
 export function notFoundMarkdown(path: string, cfg: WorkerConfig): string {
@@ -114,9 +122,19 @@ function serverCardResponse(request: Request, url: URL, cfg: WorkerConfig): Resp
   });
 }
 
-/** The static file at `path`, read with GET whatever the request's method. */
-function asset(env: Env, url: URL, path: string): Promise<Response> {
-  return env.ASSETS.fetch(new Request(new URL(path, url), { method: 'GET' }));
+/** The static file at `path`, read with GET, with the request's conditional headers so a fresh cached copy gets a 304. */
+function asset(env: Env, request: Request, url: URL, path: string): Promise<Response> {
+  const headers = new Headers();
+  for (const h of ['If-None-Match', 'If-Modified-Since']) {
+    const v = request.headers.get(h);
+    if (v !== null) headers.set(h, v);
+  }
+  return env.ASSETS.fetch(new Request(new URL(path, url), { method: 'GET', headers }));
+}
+
+/** Whether a static-file answer is the copy itself (200) or a "not modified" for it (304). */
+function found(res: Response): boolean {
+  return res.status === 200 || res.status === 304;
 }
 
 async function notFound(request: Request, url: URL, original: Response, cfg: WorkerConfig, markdown: boolean): Promise<Response> {
@@ -165,8 +183,8 @@ async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Res
 
   // A Markdown copy, asked for directly.
   if (path.endsWith('/index.md')) {
-    const res = await asset(env, url, path);
-    if (res.status === 200) return markdownResponse(request, url, res, path.slice(0, -'index.md'.length), cfg, null);
+    const res = await asset(env, request, url, path);
+    if (found(res)) return markdownResponse(request, url, res, path.slice(0, -'index.md'.length), cfg, null);
     return notFound(request, url, res, cfg, markdown404);
   }
   // <page>.md -> <page>/index.md, when no file has that name.
@@ -174,16 +192,16 @@ async function route(request: Request, env: Env, cfg: WorkerConfig): Promise<Res
     const direct = await env.ASSETS.fetch(request);
     if (direct.status !== 404) return direct;
     const pagePath = `${path.slice(0, -'.md'.length)}/`;
-    const res = await asset(env, url, `${pagePath}index.md`);
-    if (res.status === 200) return markdownResponse(request, url, res, pagePath, cfg, null);
+    const res = await asset(env, request, url, `${pagePath}index.md`);
+    if (found(res)) return markdownResponse(request, url, res, pagePath, cfg, null);
     return notFound(request, url, direct, cfg, true);
   }
 
   const page = isPagePath(path);
   if (page && wantsMarkdown) {
     const pagePath = withSlash(path);
-    const res = await asset(env, url, `${pagePath}index.md`);
-    if (res.status === 200) return markdownResponse(request, url, res, pagePath, cfg, 'Accept, User-Agent');
+    const res = await asset(env, request, url, `${pagePath}index.md`);
+    if (found(res)) return markdownResponse(request, url, res, pagePath, cfg, 'Accept, User-Agent');
   }
 
   const res = await env.ASSETS.fetch(request);

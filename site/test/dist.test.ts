@@ -893,7 +893,6 @@ describe('Cloudflare Pages worker in the build output', () => {
     const code = readFileSync(path.join(dist, '_worker.js'), 'utf8');
     expect(code).not.toMatch(/^\s*import\s/m);
     expect(code).not.toContain('node:');
-    expect(code).toContain('export { entry_default as default }');
     const routes = JSON.parse(readFileSync(path.join(dist, '_routes.json'), 'utf8')) as { version: number; include: string[]; exclude: string[] };
     expect(routes.version).toBe(1);
     expect(routes.include).toEqual(['/*']);

@@ -89,7 +89,10 @@ function fakeEnv(files: Record<string, FakeFile> = FILES): Env & { calls: string
         const f = files[p.endsWith('/') ? `${p}index.html` : p];
         const body = (b: string) => (req.method === 'HEAD' ? null : b);
         if (!f) return new Response(body(NOT_FOUND_HTML), { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-        return new Response(body(f.body), { status: 200, headers: { 'Content-Type': f.type } });
+        // Like Pages: an ETag per file, CORS open, and a 304 for a matching If-None-Match.
+        const headers = { 'Content-Type': f.type, ETag: `"etag-${p}"`, 'Access-Control-Allow-Origin': '*' };
+        if (req.headers.get('If-None-Match') === headers.ETag) return new Response(null, { status: 304, headers });
+        return new Response(body(f.body), { status: 200, headers });
       },
     },
   };
@@ -172,6 +175,27 @@ describe('pages and their Markdown copies', () => {
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('Link')).toBe('<https://acs.synapti.ai/guides/getting-started/>; rel="canonical"');
     expect(await res.text()).toBe(GUIDE_MD);
+  });
+
+  it('keeps the static file\'s ETag and CORS header on a Markdown answer', async () => {
+    for (const [p, headers] of [
+      ['/capabilities/mutate/index.md', {}],
+      ['/capabilities/mutate.md', {}],
+      ['/capabilities/mutate/', { Accept: 'text/markdown' }],
+    ] as const) {
+      const res = await get(p, headers);
+      expect(res.headers.get('ETag'), p).toBe('"etag-/capabilities/mutate/index.md"');
+      expect(res.headers.get('Access-Control-Allow-Origin'), p).toBe('*');
+    }
+  });
+
+  it('answers a conditional request for a fresh Markdown copy with 304', async () => {
+    const res = await get('/capabilities/mutate/', { Accept: 'text/markdown', 'If-None-Match': '"etag-/capabilities/mutate/index.md"' });
+    expect(res.status).toBe(304);
+    expect(res.headers.get('Vary')).toContain('Accept');
+    expect(await res.text()).toBe('');
+    const stale = await get('/capabilities/mutate/', { Accept: 'text/markdown', 'If-None-Match': '"other"' });
+    expect(stale.status).toBe(200);
   });
 
   it('negotiates a page path given without its trailing slash', async () => {
