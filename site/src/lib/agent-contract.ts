@@ -34,6 +34,15 @@ export const OPENAPI_MEDIA_TYPE = 'application/json';
 /** The media type of llms.txt, as public/_headers serves it. */
 export const LLMS_TXT_MEDIA_TYPE = 'text/plain';
 
+/**
+ * The id patterns of the read_capability and read_workflow tools, for the MCP
+ * server and the WebMCP tools alike. A capability id is lower case words
+ * joined by hyphens; a workflow id is its catalog key, lower case words
+ * joined by underscores.
+ */
+export const CAPABILITY_ID = '^[a-z][a-z0-9-]{0,63}$';
+export const WORKFLOW_ID = '^[a-z][a-z0-9_-]{0,127}$';
+
 /** Paths that a link may name and the Pages function serves, never a file. */
 export const FUNCTION_PATHS: readonly string[] = [MCP_SERVER_CARD_PATH];
 

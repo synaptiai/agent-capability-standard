@@ -1092,6 +1092,6 @@ describe('WebMCP tools on the built site', () => {
     const nav = js.indexOf('navigator.modelContext.registerTool(');
     expect(doc).toBeGreaterThan(-1);
     expect(nav).toBeGreaterThan(doc);
-    for (const name of ['search_docs', 'read_capability', 'read_workflow', 'read_page_markdown']) expect(js, name).toMatch(new RegExp(`name:["'\`]${name}["'\`]`));
+    for (const name of ['search_standard', 'read_capability', 'read_workflow', 'read_page']) expect(js, name).toMatch(new RegExp(`name:["'\`]${name}["'\`]`));
   });
 });

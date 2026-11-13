@@ -21,6 +21,8 @@
 // carry readOnlyHint and none carries consequentialHint. None carries
 // untrustedContentHint: the text they return is the site's own content, built
 // from the repository, not text written by visitors.
+import { PAGE_CHUNK, pagePart, sectionNames } from '../worker/page-text';
+import { CAPABILITY_ID, WORKFLOW_ID } from './agent-contract';
 import { isRealMatch, wordsAt } from './search-match';
 
 export interface ToolAnnotations {
@@ -83,13 +85,10 @@ export interface ToolDeps {
   loadPagefind: () => Promise<PagefindApi | null>;
 }
 
-export const SEARCH_LIMIT_DEFAULT = 5;
-export const SEARCH_LIMIT_MAX = 20;
+export const SEARCH_LIMIT_DEFAULT = 8;
+export const SEARCH_LIMIT_MAX = 25;
 
-/** A capability id: lower case, words joined by hyphens. */
-export const CAPABILITY_ID = '^[a-z][a-z0-9-]{0,63}$';
-/** A workflow id: the catalog key, lower case words joined by underscores. */
-export const WORKFLOW_ID = '^[a-z][a-z0-9_-]{0,127}$';
+export { CAPABILITY_ID, WORKFLOW_ID };
 
 /** The paths of the data API (the site's static JSON under /api/v1/). */
 export const capabilityPath = (id: string) => `/api/v1/capabilities/${id}.json`;
@@ -147,11 +146,15 @@ export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
   const readOnly: ToolAnnotations = { readOnlyHint: true };
   const abs = (p: string) => new URL(p, deps.origin).href;
 
-  const searchDocs: ModelContextTool = {
-    name: 'search_docs',
-    title: 'Search the documentation',
+  // The names, arguments and id patterns are those of the MCP server's tools
+  // (src/worker/tools.ts). One difference: this search_standard runs the
+  // site's full-text index (Pagefind), which the page has loaded; the MCP
+  // server's runs over /api/v1/pages.json.
+  const searchStandard: ModelContextTool = {
+    name: 'search_standard',
+    title: 'Search the Standard',
     description:
-      'Full-text search over every page of the Agent Capability Standard site (the Standard, capabilities, layers, workflows, domain profiles, guides). Returns each matching page with its title, section, URL, the URL of its Markdown copy and a short excerpt. Use read_page_markdown on a result to read the page.',
+      'Full-text search over every page of the Agent Capability Standard site (the Standard, capabilities, layers, workflows, domain profiles, guides). Returns each matching page with its title, section, URL, the URL of its Markdown copy and a short excerpt. Use read_page on a result to read the page.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -247,15 +250,16 @@ export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
     },
   };
 
-  const readPageMarkdown: ModelContextTool = {
-    name: 'read_page_markdown',
+  const readPage: ModelContextTool = {
+    name: 'read_page',
     title: 'Read a page as Markdown',
-    description:
-      'Returns the Markdown copy of a page of this site, the same text as the rendered page without navigation. Give the page\'s path, such as "/capabilities/detect/" or "/spec/", or a URL from search_docs.',
+    description: `Returns the Markdown copy of a page of this site, the same text as the rendered page without navigation. Give the page's path, such as "/capabilities/detect/" or "/spec/", or a URL from search_standard. A long page comes in parts of at most ${PAGE_CHUNK.toLocaleString('en')} characters: the end of each part says the offset of the next. Pass section to read one section by its heading.`,
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', minLength: 1, description: 'The page path on this site, such as "/workflows/", or its full URL.' },
+        section: { type: 'string', minLength: 1, maxLength: 200, description: 'A heading of the page, such as "Safety" (case ignored): return only that section.' },
+        offset: { type: 'integer', minimum: 0, default: 0, description: 'Where to start, in characters: the offset the previous part ends with.' },
       },
       required: ['path'],
       additionalProperties: false,
@@ -263,10 +267,20 @@ export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
     annotations: readOnly,
     async execute(input, options) {
       const path = stringArg(input, 'path');
+      const section = input?.section === undefined ? undefined : stringArg(input, 'section');
+      const rawOffset = input?.offset;
+      if (rawOffset !== undefined && (!Number.isInteger(rawOffset) || (rawOffset as number) < 0)) throw new Error('"offset" must be an integer of 0 or more.');
       const md = markdownPath(path, deps.origin);
-      return fetchText(deps, md, `No page at "${path}". Use search_docs to find one, or read ${abs('/llms.txt')}.`, options?.signal);
+      const text = await fetchText(deps, md, `No page at "${path}". Use search_standard to find one, or read ${abs('/llms.txt')}.`, options?.signal);
+      const part = pagePart(text, { section, offset: rawOffset as number | undefined });
+      if (!part.ok) throw new Error(part.headings.length > 0 ? `${part.message} Its headings: ${part.headings.join(', ')}.` : part.message);
+      if (part.offset === 0 && part.nextOffset === null) return part.markdown;
+      const note = [`[Characters ${part.offset} to ${part.offset + part.markdown.length} of ${part.totalLength}.`];
+      if (part.nextOffset !== null) note.push(`Call read_page with offset ${part.nextOffset}${section ? ` and the same section` : ''} for the next part.`);
+      if (!section) note.push(`Sections: ${sectionNames(text).join('; ')}.`);
+      return `${part.markdown}\n\n${note.join(' ')}]`;
     },
   };
 
-  return [searchDocs, readCapability, readWorkflow, readPageMarkdown];
+  return [searchStandard, readCapability, readWorkflow, readPage];
 }

@@ -1,6 +1,7 @@
 // The four read-only tools of the docs MCP server, their schemas and what
 // they do. Each reads the site's own published files through SiteData.
 
+import { CAPABILITY_ID, WORKFLOW_ID } from '../lib/agent-contract';
 import type { PageEntry, RecordEntry, SiteData } from './data';
 import { sitePath, unwrap } from './data';
 import type { WorkerConfig } from './env';
@@ -20,7 +21,6 @@ export class InvalidParams extends Error {}
 
 const ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 
-const ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$';
 
 export const TOOLS = [
   {
@@ -31,7 +31,7 @@ export const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', pattern: ID_PATTERN, description: 'The capability id, lower case, as search_standard returns it, e.g. "mutate".' },
+        id: { type: 'string', pattern: CAPABILITY_ID, description: 'The capability id, lower case, as search_standard returns it, e.g. "mutate".' },
       },
       required: ['id'],
       additionalProperties: false,
@@ -107,7 +107,7 @@ export const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', pattern: ID_PATTERN, description: 'The workflow id as the catalog names it, as search_standard returns it.' },
+        id: { type: 'string', pattern: WORKFLOW_ID, description: 'The workflow id as the catalog names it, as search_standard returns it, e.g. "debug_code_change".' },
       },
       required: ['id'],
       additionalProperties: false,
@@ -200,7 +200,8 @@ function requiredString(a: Json, key: string, tool: string, { max, pattern }: { 
   return v;
 }
 
-const ID_RE = new RegExp(ID_PATTERN);
+const CAPABILITY_RE = new RegExp(CAPABILITY_ID);
+const WORKFLOW_RE = new RegExp(WORKFLOW_ID);
 
 // ------------------------------------------------------------ results
 
@@ -342,7 +343,7 @@ async function searchStandard(a: Json, data: SiteData, cfg: WorkerConfig): Promi
 
 async function readCapability(a: Json, data: SiteData, cfg: WorkerConfig): Promise<ToolResult> {
   onlyKeys(a, ['id'], 'read_capability');
-  const id = requiredString(a, 'id', 'read_capability', { max: 128, pattern: ID_RE });
+  const id = requiredString(a, 'id', 'read_capability', { max: 64, pattern: CAPABILITY_RE });
   const apiPath = `/api/v1/capabilities/${id}.json`;
   const record = unwrap(await data.json(apiPath), 'capability');
   if (record === null) {
@@ -355,7 +356,7 @@ async function readCapability(a: Json, data: SiteData, cfg: WorkerConfig): Promi
 
 async function readWorkflow(a: Json, data: SiteData, cfg: WorkerConfig): Promise<ToolResult> {
   onlyKeys(a, ['id'], 'read_workflow');
-  const id = requiredString(a, 'id', 'read_workflow', { max: 128, pattern: ID_RE });
+  const id = requiredString(a, 'id', 'read_workflow', { max: 128, pattern: WORKFLOW_RE });
   const apiPath = `/api/v1/workflows/${id}.json`;
   const record = unwrap(await data.json(apiPath), 'workflow');
   if (record === null) {

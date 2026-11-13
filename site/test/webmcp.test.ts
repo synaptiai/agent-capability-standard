@@ -18,6 +18,7 @@ import {
   type PagefindApi,
   type PagefindResultData,
 } from '../src/lib/webmcp';
+import { TOOLS } from '../src/worker/tools';
 
 const ORIGIN = 'https://acs.synapti.ai';
 const fixture = (name: string) => readFileSync(path.join(__dirname, 'fixtures', 'webmcp', name), 'utf8');
@@ -27,6 +28,8 @@ const FILES: Record<string, string> = {
   [`${ORIGIN}/api/v1/capabilities/checkpoint.json`]: fixture('capability-checkpoint.json'),
   [`${ORIGIN}/api/v1/workflows/debug_code_change.json`]: fixture('workflow-debug_code_change.json'),
   [`${ORIGIN}/capabilities/detect/index.md`]: fixture('page-capabilities-detect.txt'),
+  // 30 lines of 1,000 characters under "## Alpha", then "## Beta".
+  [`${ORIGIN}/long/index.md`]: `# Long\n\n## Alpha\n\n${`${'y'.repeat(1000)}\n`.repeat(30)}\n## Beta\n\nBeta text.\n`,
 };
 
 function setup(opts: { pagefind?: PagefindApi | null } = {}) {
@@ -65,7 +68,7 @@ function setup(opts: { pagefind?: PagefindApi | null } = {}) {
 
 describe('WebMCP tool registration', () => {
   it('registers the four read-only tools by name', () => {
-    expect(setup().registered.map((t) => t.name)).toEqual(['search_docs', 'read_capability', 'read_workflow', 'read_page_markdown']);
+    expect(setup().registered.map((t) => t.name)).toEqual(['search_standard', 'read_capability', 'read_workflow', 'read_page']);
   });
 
   it('gives every tool a name the draft accepts, verb-led in snake_case', () => {
@@ -102,7 +105,7 @@ describe('WebMCP tool registration', () => {
       expect(JSON.parse(JSON.stringify(s))).toEqual(s);
     }
     const required = Object.fromEntries(setup().registered.map((t) => [t.name, t.inputSchema.required]));
-    expect(required).toEqual({ search_docs: ['query'], read_capability: ['id'], read_workflow: ['id'], read_page_markdown: ['path'] });
+    expect(required).toEqual({ search_standard: ['query'], read_capability: ['id'], read_workflow: ['id'], read_page: ['path'] });
   });
 
   it('marks every tool read-only and none consequential or untrusted', () => {
@@ -127,19 +130,32 @@ describe('WebMCP tool results', () => {
     expect(fetched).toEqual([`${ORIGIN}/api/v1/workflows/debug_code_change.json`]);
   });
 
-  it('read_page_markdown reads the Markdown copy for each way of naming the page', async () => {
+  it('read_page reads the Markdown copy for each way of naming the page', async () => {
     const { tool } = setup();
     const md = fixture('page-capabilities-detect.txt');
     for (const p of ['/capabilities/detect/', '/capabilities/detect', `${ORIGIN}/capabilities/detect/`, '/capabilities/detect/index.md', '/capabilities/detect.md', '/capabilities/detect/#intent']) {
-      expect(await tool('read_page_markdown').execute({ path: p }), p).toBe(md);
+      expect(await tool('read_page').execute({ path: p }), p).toBe(md);
     }
+  });
+
+  it('read_page returns a long page in parts of at most 25,000 characters, each ending with where the next starts', async () => {
+    const { tool } = setup();
+    const first = await tool('read_page').execute({ path: '/long/' });
+    // "# Long\n\n## Alpha\n\n" is 18 characters; 18 + 24 * 1,001 = 24,042 fits in 25,000.
+    // The whole text: 18 + 30 * 1,001 + "\n## Beta\n\nBeta text.\n" (21) = 30,069.
+    expect(first).toContain('[Characters 0 to 24042 of 30069. Call read_page with offset 24042 for the next part. Sections: Alpha; Beta.]');
+    const second = await tool('read_page').execute({ path: '/long/', offset: 24042 });
+    expect(second.startsWith('y'.repeat(1000))).toBe(true);
+    expect(second).toContain('[Characters 24042 to 30069 of 30069.');
+    expect(await tool('read_page').execute({ path: '/long/', section: 'beta' })).toBe('## Beta\n\nBeta text.\n');
+    await expect(tool('read_page').execute({ path: '/long/', section: 'Gamma' })).rejects.toThrow('Its headings: Alpha, Beta.');
   });
 
   it('says what is missing, and where the list is, for an unknown id or page', async () => {
     const { tool } = setup();
     await expect(tool('read_capability').execute({ id: 'teleport' })).rejects.toThrow(/No capability "teleport".*\/api\/v1\/capabilities\.json/);
     await expect(tool('read_workflow').execute({ id: 'no_such_flow' })).rejects.toThrow(/No workflow "no_such_flow".*\/api\/v1\/workflows\.json/);
-    await expect(tool('read_page_markdown').execute({ path: '/nowhere/' })).rejects.toThrow(/No page at "\/nowhere\/".*search_docs/);
+    await expect(tool('read_page').execute({ path: '/nowhere/' })).rejects.toThrow(/No page at "\/nowhere\/".*search_standard/);
   });
 
   it('refuses input outside the schema without fetching anything', async () => {
@@ -147,15 +163,15 @@ describe('WebMCP tool results', () => {
     await expect(tool('read_capability').execute({ id: '../../secret' })).rejects.toThrow(/not a capability id/);
     await expect(tool('read_capability').execute({})).rejects.toThrow(/"id" must be a non-empty string/);
     await expect(tool('read_workflow').execute({ id: 'Debug Code' })).rejects.toThrow(/not a workflow id/);
-    await expect(tool('read_page_markdown').execute({ path: 'https://example.com/capabilities/' })).rejects.toThrow(/not on this site/);
-    await expect(tool('search_docs').execute({ query: '  ' })).rejects.toThrow(/"query" must be a non-empty string/);
-    await expect(tool('search_docs').execute({ query: 'x', limit: 2.5 })).rejects.toThrow(/"limit" must be an integer/);
+    await expect(tool('read_page').execute({ path: 'https://example.com/capabilities/' })).rejects.toThrow(/not on this site/);
+    await expect(tool('search_standard').execute({ query: '  ' })).rejects.toThrow(/"query" must be a non-empty string/);
+    await expect(tool('search_standard').execute({ query: 'x', limit: 2.5 })).rejects.toThrow(/"limit" must be an integer/);
     expect(fetched).toEqual([]);
   });
 
-  it('search_docs lists real matches with page and Markdown URLs, dropping loose ones', async () => {
+  it('search_standard lists real matches with page and Markdown URLs, dropping loose ones', async () => {
     const { tool, searched } = setup();
-    const out = await tool('search_docs').execute({ query: 'checkpoint' });
+    const out = await tool('search_standard').execute({ query: 'checkpoint' });
     expect(searched).toEqual(['checkpoint']);
     // The glossary result matched only a lone "c" and is left out.
     expect(out).toBe(
@@ -180,15 +196,15 @@ describe('WebMCP tool results', () => {
     );
   });
 
-  it('search_docs returns no more than limit results', async () => {
-    const out = await setup().tool('search_docs').execute({ query: 'checkpoint', limit: 1 });
+  it('search_standard returns no more than limit results', async () => {
+    const out = await setup().tool('search_standard').execute({ query: 'checkpoint', limit: 1 });
     expect(out.match(/^\d+\. /gm)).toEqual(['1. ']);
     expect(out).toContain('1. Checkpoint (Capabilities)');
   });
 
-  it('search_docs says so when nothing matches or the index cannot load', async () => {
-    expect(await setup().tool('search_docs').execute({ query: 'zzzqqq' })).toBe('No pages match "zzzqqq".');
-    await expect(setup({ pagefind: null }).tool('search_docs').execute({ query: 'checkpoint' })).rejects.toThrow(/search index could not load/);
+  it('search_standard says so when nothing matches or the index cannot load', async () => {
+    expect(await setup().tool('search_standard').execute({ query: 'zzzqqq' })).toBe('No pages match "zzzqqq".');
+    await expect(setup({ pagefind: null }).tool('search_standard').execute({ query: 'checkpoint' })).rejects.toThrow(/search index could not load/);
   });
 });
 
@@ -203,5 +219,33 @@ describe('WebMCP helpers', () => {
 
   it('turns a Pagefind excerpt into plain text', () => {
     expect(excerptText('a <mark>b</mark> &amp;&lt;c&gt; &quot;d&quot; &#39;e&#39;')).toBe('a b &<c> "d" \'e\'');
+  });
+});
+
+describe('one set of tool names and id patterns for the MCP server and WebMCP', () => {
+  // An agent that meets both (the MCP server at /mcp and the tools a page
+  // registers) should find the same tool under the same name, taking the
+  // same arguments (review of c24b7af).
+  const web = () => webMcpTools({ origin: ORIGIN, fetch: async () => ({ ok: false, status: 404, text: async () => '' }), loadPagefind: async () => null });
+
+  it('uses the MCP server\'s tool names', () => {
+    expect(web().map((t) => t.name).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  });
+
+  it('gives each tool the same argument names, and the id arguments the same patterns', () => {
+    for (const t of web()) {
+      const m = TOOLS.find((x) => x.name === t.name)!;
+      expect(Object.keys(t.inputSchema.properties).sort(), t.name).toEqual(Object.keys(m.inputSchema.properties).sort());
+      for (const k of ['id']) {
+        const a = (t.inputSchema.properties as Record<string, any>)[k];
+        if (a) expect(a.pattern, `${t.name}.${k}`).toBe((m.inputSchema.properties as Record<string, any>)[k].pattern);
+      }
+    }
+  });
+
+  it('takes no upper-case id: every capability and workflow id is lower case', () => {
+    const cap = new RegExp(TOOLS.find((t) => t.name === 'read_capability')!.inputSchema.properties.id.pattern);
+    expect(cap.test('mutate')).toBe(true);
+    expect(cap.test('MUTATE')).toBe(false);
   });
 });

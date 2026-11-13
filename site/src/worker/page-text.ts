@@ -1,7 +1,8 @@
 // Reading part of a page's Markdown copy: one section by its heading, and at
 // most PAGE_CHUNK characters per call, so a long page (the Standard is over
 // 100,000 characters) never fills a client's limit on tool output. The MCP
-// server's read_page tool uses it. No imports, so any bundle can load it.
+// server's read_page tool and the in-page WebMCP read_page tool both use it.
+// No imports: the worker bundle and the browser script both load this file.
 
 /** The most characters one read returns. */
 export const PAGE_CHUNK = 25_000;
