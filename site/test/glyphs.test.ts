@@ -210,6 +210,16 @@ describe('glyph keys from the data', () => {
     ]);
   });
 
+  it('finds 3-, 4-, 6- and 8-digit hex colours, and not a longer anchor', () => {
+    const text = ['fill="#abc"', 'fill="#abcd"', 'fill="#a1b2c3"', 'fill="#a1b2c3d4"', '<a href="#face-up">', '<a href="#ref-fig-1">'].join('\n');
+    expect(findHexColours([{ path: 'a.astro', text }])).toEqual([
+      'a.astro:1: "#abc" is a hex colour; use a token',
+      'a.astro:2: "#abcd" is a hex colour; use a token',
+      'a.astro:3: "#a1b2c3" is a hex colour; use a token',
+      'a.astro:4: "#a1b2c3d4" is a hex colour; use a token',
+    ]);
+  });
+
   it('names no figure component colour by hex', () => {
     const dir = 'src/components/fig';
     const files = readdirSync(dir).map((f) => ({ path: `${dir}/${f}`, text: readFileSync(`${dir}/${f}`, 'utf8') }));

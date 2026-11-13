@@ -14,6 +14,7 @@ import {
   exampleFieldsSame,
   exampleFieldsCaption,
   exampleWorkflows,
+  exampleWorkflowsCaption,
   verificationMap,
   contractRowId,
   contractSummary,
@@ -208,6 +209,10 @@ describe('Markdown headings inside code fences (issue #125 review)', () => {
       { id: 'wf_b', examples: [1] },
       { id: 'wf_a', examples: [2] },
     ]);
+  });
+
+  it('exampleWorkflowsCaption throws rather than print Infinity for no workflow', () => {
+    expect(() => exampleWorkflowsCaption(cap('retrieve'), [])).toThrow('retrieve: the examples name no catalog workflow');
   });
 
   it('codeLines flags the lines of fenced and indented code, frontmatter counted', () => {

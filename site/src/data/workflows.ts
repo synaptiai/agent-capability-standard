@@ -162,6 +162,9 @@ function buildSteps(wfId: string, rawSteps: unknown, ontology: Ontology): Step[]
 }
 
 /** Parse one catalog file. Top-level `x-` keys are vendor data, not workflows (§5.1). */
+/** What a workflow id may be: lowercase letters, digits and underscores. */
+export const WORKFLOW_ID = /^[a-z0-9_]+$/;
+
 export function parseCatalog(source: string, text: string, catalog: 'core' | 'domain', ontology: Ontology): Workflow[] {
   const doc: unknown = parse(text);
   if (!isObj(doc)) throw new Error(`workflows: ${source} is not a mapping`);
@@ -169,6 +172,8 @@ export function parseCatalog(source: string, text: string, catalog: 'core' | 'do
   const out: Workflow[] = [];
   for (const [id, w] of Object.entries(doc)) {
     if (id.startsWith('x-')) continue;
+    // The id is written into CSS selectors and element attributes (WorkflowSpine).
+    if (!WORKFLOW_ID.test(id)) throw new Error(`workflows: ${source}: workflow id "${id}" is not lowercase letters, digits and underscores`);
     if (!isObj(w)) throw new Error(`workflows: ${source}: ${id} is not a mapping`);
     if (typeof w.goal !== 'string') throw new Error(`workflows: ${id}.goal is missing`);
     if (w.risk !== 'low' && w.risk !== 'medium' && w.risk !== 'high') {

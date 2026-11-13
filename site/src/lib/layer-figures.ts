@@ -85,12 +85,14 @@ export function stepsTitle(layerId: string, rows: LayerSteps[]): string {
 /** F-L4's caption. */
 export function stepsCaption(layerId: string, rows: LayerSteps[]): string {
   const total = rows.reduce((k, r) => k + r.steps, 0);
-  const rank = rows.findIndex((r) => r.layer === layerId) + 1;
-  const mine = rows[rank - 1]?.steps ?? 0;
+  const mine = rows.find((r) => r.layer === layerId)?.steps ?? 0;
+  // Ranked by the layers with more steps; layers with as many share the rank.
+  const rank = rows.filter((r) => r.steps > mine).length + 1;
+  const joint = rows.filter((r) => r.steps === mine).length > 1 ? 'joint ' : '';
   const pct = total === 0 ? 0 : Math.round((mine / total) * 100);
   // A share that rounds to 0 but is not 0 prints as "<1%".
   const share = pct === 0 && mine > 0 ? '<1' : String(pct);
-  return `${mine} of the ${total} steps in all workflows run ${layerId} capabilities (${share}%), ${rank === 1 ? 'the most' : `the ${ordinal(rank)} most`} of the ${rows.length} layers.`;
+  return `${mine} of the ${total} steps in all workflows run ${layerId} capabilities (${share}%), the ${joint}${rank === 1 ? 'most' : `${ordinal(rank)} most`} of the ${rows.length} layers.`;
 }
 
 function ordinal(n: number): string {

@@ -71,24 +71,49 @@ export function cutAfterHeadings<K>(html: string, anchors: readonly Anchor<K>[],
 }
 
 /**
+ * The end (just after its closing tag) of the `tag` element that opens at
+ * `start`, found by counting the `tag` elements nested in it. Throws when the
+ * element is not closed.
+ */
+export function elementEnd(html: string, start: number, tag: string, where: string): number {
+  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'gi');
+  re.lastIndex = start;
+  let depth = 0;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) return m.index + m[0].length;
+  }
+  throw new Error(`${where}: the <${tag}> at ${start} is not closed`);
+}
+
+/**
+ * The element that opens at the first match of `open` (a regex for its
+ * opening tag, of element `tag`), wrapped in a <details class="fig-details">
+ * under `summary`. Throws `<where>: no <what> to fold` when there is none:
+ * a caller folds a block it knows is there.
+ */
+export function foldFirst(html: string, open: RegExp, tag: string, summary: string, what: string, where: string, inner: (block: string) => string = (b) => b): string {
+  const m = open.exec(html);
+  if (!m) throw new Error(`${where}: no ${what} to fold`);
+  const end = elementEnd(html, m.index, tag, where);
+  const esc = summary.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${inner(html.slice(m.index, end))}</details>${html.slice(end)}`;
+}
+
+/**
  * The first table (in its .table-wrap) of `html`, folded into a <details>
  * with `summary`, for a source table whose figure, placed just before it,
- * already shows everything it says. html with no table is returned as is.
+ * already shows everything it says.
  */
-export function foldFirstTable(html: string, summary: string): string {
-  const m = /<div class="table-wrap"[^>]*>[\s\S]*?<\/table><\/div>/.exec(html);
-  if (!m) return html;
-  const esc = summary.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${m[0]}</details>${html.slice(m.index + m[0].length)}`;
+export function foldFirstTable(html: string, summary: string, where: string): string {
+  return foldFirst(html, /<div class="table-wrap"[^>]*>/, 'div', summary, 'table', where);
 }
 
 /**
  * The first task list of rendered HTML folded into a <details> under
  * `summary`: a checklist that a figure above it already shows item by item.
+ * A list nested in an item stays inside.
  */
-export function foldFirstTaskList(html: string, summary: string): string {
-  const m = /<ul class="contains-task-list">[\s\S]*?<\/ul>/.exec(html);
-  if (!m) return html;
-  const esc = summary.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${m[0]}</details>${html.slice(m.index + m[0].length)}`;
+export function foldFirstTaskList(html: string, summary: string, where: string): string {
+  return foldFirst(html, /<ul class="contains-task-list">/, 'ul', summary, 'task list', where);
 }

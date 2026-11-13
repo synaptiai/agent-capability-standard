@@ -186,6 +186,14 @@ describe('workflows', () => {
     expect(out[0]!.steps[1]!.consumes).toEqual(['a']);
   });
 
+  it('rejects a workflow id that is not lowercase letters, digits and underscores', () => {
+    // The id is written into a CSS selector on the workflow page.
+    for (const id of ['Bad', 'a-b', 'a"]{}', 'a b']) {
+      expect(() => parseCatalog('t.yaml', `"${id.replace(/"/g, '\\"')}":\n  goal: g\n  risk: low\n  steps:\n  - capability: plan\n`, 'core', loadOntology()), id).toThrow(/is not lowercase letters, digits and underscores/);
+    }
+    expect(parseCatalog('t.yaml', 'ok_2:\n  goal: g\n  risk: low\n  steps:\n  - capability: plan\n', 'core', loadOntology()).map((w) => w.id)).toEqual(['ok_2']);
+  });
+
   it('rejects an unknown capability', () => {
     const text = 'w:\n  goal: g\n  risk: low\n  steps:\n  - capability: teleport\n';
     expect(() => parseCatalog('t.yaml', text, 'core', loadOntology())).toThrow(/unknown capability teleport/);

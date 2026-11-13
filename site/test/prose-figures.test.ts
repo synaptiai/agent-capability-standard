@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { loadOasfMapping } from '../src/data/oasf';
 import { foldFirstBox } from '../src/lib/prose-figures';
+import { foldFirstTable, foldFirstTaskList } from '../src/lib/inject';
 import { isNumberedRfc, lifecycleSentence, rfcLifecycle, splitH1 } from '../src/lib/prose-page';
 import { readRepoFile } from '../src/lib/repo';
 import {
@@ -44,12 +45,12 @@ describe('box diagrams', () => {
     expect(isBoxDiagram('plain text\nmore text')).toBe(false);
   });
 
-  it('folds the first framed drawing into a details element, and leaves html without one alone', () => {
+  it('folds the first framed drawing into a details element, and throws on html without one', () => {
     const html = '<p>a</p><figure class="fig fig-ascii" aria-label="Diagram: x"><pre>┌┐</pre></figure><p>b</p>';
-    expect(foldFirstBox(html, 'Text version')).toBe(
+    expect(foldFirstBox(html, 'Text version', 'fixture')).toBe(
       '<p>a</p><details class="fig-details"><summary>Text version</summary><figure class="fig fig-ascii" aria-label="Diagram: x"><pre>┌┐</pre></figure></details><p>b</p>',
     );
-    expect(foldFirstBox('<p>none</p>', 'x')).toBe('<p>none</p>');
+    expect(() => foldFirstBox('<p>none</p>', 'x', 'README.md')).toThrow('README.md: no box diagram to fold');
   });
 });
 
@@ -215,5 +216,26 @@ describe('RFC pages', () => {
   it('takes the first h1 out of rendered html for the hero', () => {
     expect(splitH1('<p>a</p><h1 id="t">Title <a>#</a></h1><p>b</p>')).toEqual({ h1: '<h1 id="t">Title <a>#</a></h1>', rest: '<p>a</p><p>b</p>' });
     expect(splitH1('<p>x</p>')).toEqual({ h1: null, rest: '<p>x</p>' });
+  });
+});
+
+describe('folding a source block under its figure', () => {
+  it('folds a whole task list, nested list included, and what follows stays outside', () => {
+    const html = '<p>a</p><ul class="contains-task-list"><li><input type="checkbox" disabled> one<ul><li>sub</li></ul></li><li><input type="checkbox" disabled> two</li></ul><p>b</p>';
+    expect(foldFirstTaskList(html, 'Text version', 'fixture')).toBe(
+      '<p>a</p><details class="fig-details"><summary>Text version</summary><ul class="contains-task-list"><li><input type="checkbox" disabled> one<ul><li>sub</li></ul></li><li><input type="checkbox" disabled> two</li></ul></details><p>b</p>',
+    );
+  });
+
+  it('folds the first table in its wrapper', () => {
+    const html = '<div class="table-wrap" tabindex="0"><table><tr><td>1</td></tr></table></div><p>b</p>';
+    expect(foldFirstTable(html, 'S & T', 'fixture')).toBe(
+      '<details class="fig-details"><summary>S &amp; T</summary><div class="table-wrap" tabindex="0"><table><tr><td>1</td></tr></table></div></details><p>b</p>',
+    );
+  });
+
+  it('throws when there is no block to fold', () => {
+    expect(() => foldFirstTaskList('<ul><li>plain</li></ul>', 's', 'skills/x/SKILL.md')).toThrow('skills/x/SKILL.md: no task list to fold');
+    expect(() => foldFirstTable('<p>none</p>', 's', 'edge types')).toThrow('edge types: no table to fold');
   });
 });

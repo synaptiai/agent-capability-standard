@@ -129,6 +129,32 @@ export interface Scorecard {
 }
 
 /**
+ * The check families of a CHECKLIST.md ("### A) Name (CODE)") with the checks
+ * under each ("#### ID — Title"), in order. Once the families start, every
+ * H3 up to the next H2 must be one: a heading in another form would hide its
+ * checks from the figure, so it throws.
+ */
+export function checklistFamilies(text: string, checklist: string): ScoreFamily[] {
+  const families: ScoreFamily[] = [];
+  let inFamilies = false;
+  for (const node of parseMarkdown(text).children) {
+    if (node.type !== 'heading') continue;
+    const t = headingText(node).trim();
+    if (node.depth <= 2) inFamilies = false;
+    const fam = node.depth === 3 ? /^([A-Z])\)\s+(.+?)\s+\(([^)]+)\)$/.exec(t) : null;
+    if (fam) {
+      families.push({ letter: fam[1]!, name: fam[2]!, code: fam[3]!, checks: [] });
+      inFamilies = true;
+      continue;
+    }
+    if (node.depth === 3 && inFamilies) throw new Error(`${checklist}: "### ${t}" sits among the check families but is not "X) Name (CODE)"`);
+    const check = node.depth === 4 ? /^([A-Z]+-\d+)\s+—\s+(.+)$/.exec(t) : null;
+    if (check && families.length > 0) families.at(-1)!.checks.push({ id: check[1]!, title: check[2]! });
+  }
+  return families;
+}
+
+/**
  * The checks the Output Contract's `scorecard` rates, grouped by the
  * checklist family they sit under in the skill's CHECKLIST.md ("### A) Name
  * (CODE)" over "#### ID — Title"), and the ratings the contract allows. Null
@@ -138,11 +164,14 @@ export interface Scorecard {
 export function scorecard(dir: string, skillText: string, where: string): Scorecard | null {
   const checklist = `skills/${dir}/CHECKLIST.md`;
   if (!TRACKED_FILES.has(checklist)) return null;
+  if (sectionByTitle(skillText, 'Output Contract', 2, where) === null) return null;
+  // A missing fence or invalid YAML is an error in the skill, not "no scorecard".
+  const fence = sectionFence(skillText, 'Output Contract', 0, where);
   let contract: Record<string, unknown> | null;
   try {
-    contract = parse(sectionFence(skillText, 'Output Contract', 0, where).value) as Record<string, unknown> | null;
-  } catch {
-    return null;
+    contract = parse(fence.value) as Record<string, unknown> | null;
+  } catch (e) {
+    throw new Error(`${where}: the Output Contract fence is not valid YAML: ${(e as Error).message}`);
   }
   const card = contract?.scorecard;
   if (typeof card !== 'object' || card === null || Array.isArray(card)) return null;
@@ -150,18 +179,7 @@ export function scorecard(dir: string, skillText: string, where: string): Scorec
   const ratingSets = Object.values(card).map((v) => String(v).split('|').map((s) => s.trim()));
   const ratings = ratingSets[0]!;
   if (ratingSets.some((r) => r.join('|') !== ratings.join('|'))) throw new Error(`${where}: the scorecard's checks allow different ratings`);
-  const families: ScoreFamily[] = [];
-  for (const node of parseMarkdown(readRepoFile(checklist)).children) {
-    if (node.type !== 'heading') continue;
-    const t = headingText(node).trim();
-    const fam = node.depth === 3 ? /^([A-Z])\)\s+(.+?)\s+\(([^)]+)\)$/.exec(t) : null;
-    if (fam) {
-      families.push({ letter: fam[1]!, name: fam[2]!, code: fam[3]!, checks: [] });
-      continue;
-    }
-    const check = node.depth === 4 ? /^([A-Z]+-\d+)\s+—\s+(.+)$/.exec(t) : null;
-    if (check && families.length > 0) families.at(-1)!.checks.push({ id: check[1]!, title: check[2]! });
-  }
+  const families = checklistFamilies(readRepoFile(checklist), checklist);
   const listed = families.flatMap((f) => f.checks.map((c) => c.id));
   const missing = ids.filter((id) => !listed.includes(id));
   const extra = listed.filter((id) => !ids.includes(id));

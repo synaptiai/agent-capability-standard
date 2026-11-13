@@ -347,3 +347,14 @@ describe('Standard figures built to visual spec 3.9 (round 4)', () => {
     expect(r.steps.filter((_, i) => i !== failing).every((s) => s.fired === 0)).toBe(true);
   });
 });
+
+describe('§12.5 pattern strips', () => {
+  // 1.0.0 writes an unquoted [${a}, ${b}], which is not valid YAML.
+  const text = ['## 12. Patterns', '', '### 12.5 Composition Patterns', '', '**Pattern: Safe Mutation**', '', '```yaml', '- capability: plan', '  store_as: p', '- capability: verify', '  input_bindings: [${p}, ${q}]', '```', ''].join('\n');
+
+  it('reads an invalid fence line by line only for the Standard known to need it', () => {
+    const strips = T.patternStrips(text, 'spec/STANDARD-v1.0.0.md');
+    expect(strips.map((s) => [s.name, s.wf.id, s.wf.steps.map((x) => x.capability)])).toEqual([['Safe Mutation', 'safe_mutation', ['plan', 'verify']]]);
+    expect(() => T.patternStrips(text, 'spec/STANDARD-v1.1.0.md')).toThrow(/^spec\/STANDARD-v1\.1\.0\.md: §12\.5's Safe Mutation fence is not valid YAML: /);
+  });
+});

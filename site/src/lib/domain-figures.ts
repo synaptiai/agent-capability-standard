@@ -4,6 +4,7 @@
 import type { DomainProfile } from '../data/profiles';
 import type { Workflow } from '../data/workflows';
 import { resolveGlyphKey } from '../pixel/keys';
+import { elementEnd } from './inject';
 import { diagramSteps, sortedTrustWeights } from './views';
 import { andList, plural } from './words';
 
@@ -360,15 +361,19 @@ export function splitReadme(rest: string, workflowIds: readonly string[]): Readm
  * A README's "**Capabilities used:**" list under a workflow heading, folded
  * into a <details>: the workflow card above it already draws the same steps
  * as tiles, so the list (which adds a few words per step) is kept but closed.
- * Only the first such list in `html` is folded; html without one is returned
- * unchanged.
+ * Only the first such list in `html` is folded, nested lists inside it
+ * included; throws when there is none.
  */
-export function foldCapabilityList(html: string): string {
-  const m = /<p><strong>Capabilities used:?<\/strong><\/p>\s*(<ul>[\s\S]*?<\/ul>)/.exec(html);
-  if (!m) return html;
-  const folded = `<details class="domain-guide"><summary>Capabilities used, with what each step does</summary>${m[1]}</details>`;
-  return html.slice(0, m.index) + folded + html.slice(m.index + m[0].length);
+export function foldCapabilityList(html: string, where: string): string {
+  const m = CAPABILITY_LIST.exec(html);
+  if (!m) throw new Error(`${where}: no "Capabilities used" list to fold`);
+  const ul = m.index + m[0].length - '<ul>'.length;
+  const end = elementEnd(html, ul, 'ul', where);
+  const folded = `<details class="domain-guide"><summary>Capabilities used, with what each step does</summary>${html.slice(ul, end)}</details>`;
+  return html.slice(0, m.index) + folded + html.slice(end);
 }
+
+const CAPABILITY_LIST = /<p><strong>Capabilities used:?<\/strong><\/p>\s*<ul>/;
 
 // ------------------------------------------- domains index (visual spec 3.6)
 

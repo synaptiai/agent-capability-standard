@@ -3,6 +3,7 @@
 // shows the figure and keeps the block in a <details>. The match is by heading
 // text, and cutAfterHeadings fails the build when the heading is gone.
 import type { Ontology } from '../data/ontology';
+import { foldFirst } from './inject';
 
 /** The overview page's source. */
 export const OVERVIEW_SOURCE = 'README.md';
@@ -20,15 +21,13 @@ export function periodicCaption(o: Ontology): string {
 
 /**
  * The first box-diagram figure of `html` (rehype-prose-figures frames them as
- * figure.fig-ascii), folded into a <details> with `summary`. html with no box
- * diagram is returned unchanged.
+ * figure.fig-ascii), folded into a <details> with `summary`. Throws when
+ * there is none.
  */
-export function foldFirstBox(html: string, summary: string): string {
-  const m = /<figure class="fig fig-ascii"[\s\S]*?<\/figure>/.exec(html);
-  if (!m) return html;
-  const esc = summary.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+export function foldFirstBox(html: string, summary: string, where: string): string {
   // The folded box is the text version of the figure drawn in its place,
   // which takes its number, so the box loses its "Fig n" eyebrow.
-  const box = m[0].replace(/(<p class="fig__eyebrow"[^>]*>)Fig \d+(<\/p>)/, '$1Text version$2');
-  return `${html.slice(0, m.index)}<details class="fig-details"><summary>${esc}</summary>${box}</details>${html.slice(m.index + m[0].length)}`;
+  return foldFirst(html, /<figure class="fig fig-ascii"/, 'figure', summary, 'box diagram', where, (box) =>
+    box.replace(/(<p class="fig__eyebrow"[^>]*>)Fig \d+(<\/p>)/, '$1Text version$2'),
+  );
 }

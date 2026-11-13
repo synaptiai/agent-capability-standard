@@ -40,12 +40,15 @@ export interface UsageExample {
  * One example per H3 of the README's "Capability Usage" section whose first
  * fence is YAML with a single top-level key that is an ontology capability.
  * Anything else is skipped with a build warning, so a prose edit cannot
- * break the build. A README with no such section gives [].
+ * break the build. A README with no such section gives [], with a warning.
  */
 export function capabilityUsage(readmeText: string, where: string): UsageExample[] {
   const nodes = parseMarkdown(readmeText).children;
   const h2 = nodes.findIndex((n) => n.type === 'heading' && n.depth === 2 && headingText(n).trim() === USAGE_HEADING);
-  if (h2 === -1) return [];
+  if (h2 === -1) {
+    console.warn(`${where}: no "## ${USAGE_HEADING}" section; no usage figures`);
+    return [];
+  }
   const known = new Set(loadOntology().capabilities.map((c) => c.id));
   const body = section(nodes, h2);
   const out: UsageExample[] = [];
@@ -54,16 +57,18 @@ export function capabilityUsage(readmeText: string, where: string): UsageExample
     const heading = headingText(n).trim();
     const fence = section(body, i).find((b): b is Code => b.type === 'code');
     let value: unknown;
+    let yamlError = '';
     try {
       value = fence && /^ya?ml$/.test(fence.lang ?? '') ? parse(fence.value) : null;
-    } catch {
+    } catch (e) {
       value = null;
+      yamlError = ` (its YAML does not parse: ${(e as Error).message.split('\n')[0]})`;
     }
     const keys = isObj(value) ? Object.keys(value) : [];
     const capability = keys[0];
     const spec = capability ? (value as Obj)[capability] : null;
     if (keys.length !== 1 || !capability || !known.has(capability) || !isObj(spec)) {
-      console.warn(`${where}: "${heading}" under ${USAGE_HEADING} has no single-capability YAML fence; no figure`);
+      console.warn(`${where}: "${heading}" under ${USAGE_HEADING} has no single-capability YAML fence${yamlError}; no figure`);
       return;
     }
     const output = isObj(spec.output) ? spec.output : {};

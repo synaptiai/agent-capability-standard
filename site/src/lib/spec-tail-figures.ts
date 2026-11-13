@@ -512,6 +512,9 @@ export function stepsByLine(fence: string): { capability: string; store_as?: str
   return out;
 }
 
+/** The Standard files whose §12.5 fences are not valid YAML and are read line by line. */
+export const LINE_READ_PATTERN_SOURCES: ReadonlySet<string> = new Set(['spec/STANDARD-v1.0.0.md']);
+
 /** Each §12.5 fence with `capability:` steps, as a workflow, named by the bold "Pattern: …" before it. */
 export function patternStrips(text: string, where: string): PatternStrip[] {
   const blocks = sectionBlocks(text, '12.5 ', where);
@@ -528,13 +531,17 @@ export function patternStrips(text: string, where: string): PatternStrip[] {
     let steps: unknown;
     try {
       steps = parse(b.value);
-    } catch {
-      // A fence that is not valid YAML (1.0.0 writes an unquoted [${a}, ${b}]):
-      // read its steps line by line, keeping what the strip draws.
+    } catch (e) {
+      // 1.0.0 writes an unquoted [${a}, ${b}], which is not valid YAML: its
+      // steps are read line by line, keeping what the strip draws. Any other
+      // Standard's fence must parse.
+      if (!LINE_READ_PATTERN_SOURCES.has(where)) throw new Error(`${where}: §12.5's ${name} fence is not valid YAML: ${(e as Error).message}`);
       steps = stepsByLine(b.value);
     }
     if (!Array.isArray(steps)) throw new Error(`${where}: §12.5's ${name} fence is not a list of steps`);
-    const wf = parseCatalog(where, JSON.stringify({ [name]: { goal: name, risk: 'low', steps } }), 'core', loadOntology())[0]!;
+    // The pattern's name is not a workflow id; the strip is keyed by its slug.
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const wf = parseCatalog(where, JSON.stringify({ [id]: { goal: name, risk: 'low', steps } }), 'core', loadOntology())[0]!;
     out.push({ name, wf });
     name = null;
   }

@@ -6,10 +6,25 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { AXE_TAGS, fileFor, sitemapPaths, THEMES, WIDTHS } from '../scripts/check-axe.mjs';
+import { AXE_TAGS, fileFor, pathsArg, sitemapPaths, THEMES, WIDTHS } from '../scripts/check-axe.mjs';
 
 const dist = mkdtempSync(path.join(tmpdir(), 'acs-axe-'));
 afterAll(() => rmSync(dist, { recursive: true, force: true }));
+
+describe('the --paths argument (check-axe and check-runs)', () => {
+  it('takes the pages it names out of the arguments, and null without it', () => {
+    const args = ['dist', '--paths', '/,/a/', '--all'];
+    expect(pathsArg(args)).toEqual(['/', '/a/']);
+    expect(args).toEqual(['dist', '--all']);
+    expect(pathsArg(['dist'])).toBeNull();
+  });
+
+  it('throws when --paths names no page', () => {
+    expect(() => pathsArg(['--paths'])).toThrow('--paths names no page');
+    expect(() => pathsArg(['--paths', ''])).toThrow('--paths names no page');
+    expect(() => pathsArg(['--paths', ','])).toThrow('--paths names no page');
+  });
+});
 
 describe('check-axe', () => {
   it('reads every page path from a sitemap, in order', () => {

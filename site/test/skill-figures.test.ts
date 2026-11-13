@@ -12,6 +12,7 @@ import {
   exampleMatches,
   guardedSteps,
   scorecard,
+  checklistFamilies,
   SKILL_HEADINGS,
 } from '../src/lib/skill-figures';
 import { catalogSteps, repoText } from './independent';
@@ -110,6 +111,23 @@ describe('the scorecard figure', () => {
 
   it('is absent for a skill without a checklist', () => {
     expect(scorecard('discover-capabilities', text('discover-capabilities'), SOURCE('discover-capabilities'))).toBeNull();
+  });
+
+  it('is absent without an Output Contract or a scorecard key, and an error for a broken contract', () => {
+    const where = 'fixture';
+    expect(scorecard('perspective-validation', '## Intent\n\nx\n', where)).toBeNull();
+    expect(scorecard('perspective-validation', '## Output Contract\n\n```yaml\nresult: object\n```\n', where)).toBeNull();
+    expect(() => scorecard('perspective-validation', '## Output Contract\n\n```yaml\nscorecard: [unclosed\n```\n', where)).toThrow(/^fixture: the Output Contract fence is not valid YAML: /);
+    expect(() => scorecard('perspective-validation', '## Output Contract\n\nNo fence here.\n', where)).toThrow(/^fixture: section "Output Contract" has 0 fence\(s\)/);
+  });
+
+  it('throws on an H3 among the check families that is not a family heading', () => {
+    const checklist = ['# C', '## How to use', '### Step 0 — Start', '## Tests', '### A) Human Factors (HF)', '#### HF-101 — One', '### Notes', '#### HF-102 — Two'].join('\n');
+    expect(() => checklistFamilies(checklist, 'CHECKLIST.md')).toThrow('CHECKLIST.md: "### Notes" sits among the check families but is not "X) Name (CODE)"');
+    // An H3 under another H2, before the families, is not a family and is left alone.
+    expect(checklistFamilies(checklist.replace('### Notes\n', ''), 'CHECKLIST.md')).toEqual([
+      { letter: 'A', name: 'Human Factors', code: 'HF', checks: [{ id: 'HF-101', title: 'One' }, { id: 'HF-102', title: 'Two' }] },
+    ]);
   });
 });
 

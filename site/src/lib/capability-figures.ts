@@ -778,6 +778,7 @@ export function exampleWorkflows(skillText: string, ids: ReadonlySet<string> = n
 }
 
 export function exampleWorkflowsCaption(cap: Capability, rows: { id: string; examples: number[] }[]): string {
+  if (rows.length === 0) throw new Error(`${cap.id}: the examples name no catalog workflow, so there is nothing to caption`);
   const steps = rows.map((r) => loadWorkflows().byId.get(r.id)!.steps.length);
   return `The examples run ${plural(rows.length, 'catalog workflow', 'catalog workflows')} through ${cap.id}, from ${Math.min(...steps)} to ${Math.max(...steps)} steps; each strip is a workflow, with a square per step.`;
 }

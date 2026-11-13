@@ -156,7 +156,7 @@ export function findHexColours(files) {
   const problems = [];
   for (const { path: p, text } of files) {
     text.split('\n').forEach((line, i) => {
-      for (const m of line.matchAll(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b(?![-\w])/g)) problems.push(`${p}:${i + 1}: "${m[0]}" is a hex colour; use a token`);
+      for (const m of line.matchAll(/#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b(?![-\w])/g)) problems.push(`${p}:${i + 1}: "${m[0]}" is a hex colour; use a token`);
     });
   }
   return problems;

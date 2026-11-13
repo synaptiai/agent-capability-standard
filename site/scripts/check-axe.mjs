@@ -139,10 +139,22 @@ export async function runAxe(dist, { concurrency = 6, only = null, log = () => {
   return { pages: paths.length, runs, findings };
 }
 
+/**
+ * The pages a `--paths /a/,/b/` argument names, removed from `args`; null
+ * when there is no --paths. Throws when it names no page, which would
+ * otherwise check nothing and pass.
+ */
+export function pathsArg(args) {
+  const at = args.indexOf('--paths');
+  if (at === -1) return null;
+  const paths = (args.splice(at, 2)[1] ?? '').split(',').filter(Boolean);
+  if (paths.length === 0) throw new Error('--paths names no page; give a comma-separated list such as --paths /,/capabilities/');
+  return paths;
+}
+
 if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
-  const at = args.indexOf('--paths');
-  const only = at === -1 ? null : (args.splice(at, 2)[1] ?? '').split(',').filter(Boolean);
+  const only = pathsArg(args);
   const dist = path.resolve(args[0] ?? fileURLToPath(new URL('../dist', import.meta.url)));
   const { pages, runs, findings } = await runAxe(dist, { only, log: (m) => console.log(m) });
   if (findings.length > 0) {

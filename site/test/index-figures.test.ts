@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   backgroundLayerMatrix,
+  skillsCaption,
   conformanceSuite,
   pageSize,
   readingBars,
@@ -236,5 +237,16 @@ describe('/spec/ conformance coverage', () => {
     expect(got[3]!.codes).toEqual(listed(/"expect":\s*\[([^\]]*)\]/g, checkText));
     expect(got[4]!.codes).toEqual(ends('tests/conformance/runtime'));
     expect(got[5]!.codes).toEqual(ends('tests/conformance/contrib'));
+  });
+});
+
+describe('the composed skills caption', () => {
+  it('counts the skills that run a workflow and the range of their steps', () => {
+    expect(skillsCaption([{ steps: 5 }, { steps: 9 }, { steps: null }])).toBe('2 of the 3 composed skills run a catalog workflow, of 5 to 9 steps; 1 runs none.');
+    expect(skillsCaption([{ steps: 7 }, { steps: 7 }])).toBe('2 of the 2 composed skills run a catalog workflow, of 7 steps.');
+  });
+
+  it('writes no Infinity when no skill runs a workflow', () => {
+    expect(skillsCaption([{ steps: null }, { steps: null }])).toBe('None of the 2 composed skills runs a catalog workflow.');
   });
 });

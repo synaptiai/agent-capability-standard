@@ -196,10 +196,17 @@ describe('domains index (3.6)', () => {
 describe('README capability lists under a workflow card', () => {
   it('folds the first "Capabilities used" list into a details element and leaves the rest (fixture)', () => {
     const html = '<p><strong>Goal:</strong> g</p>\n<p><strong>Capabilities used:</strong></p>\n<ul>\n<li><code>a</code> — x</li>\n</ul>\n<p>After</p>';
-    expect(foldCapabilityList(html)).toBe(
+    expect(foldCapabilityList(html, 'fixture')).toBe(
       '<p><strong>Goal:</strong> g</p>\n<details class="domain-guide"><summary>Capabilities used, with what each step does</summary><ul>\n<li><code>a</code> — x</li>\n</ul></details>\n<p>After</p>',
     );
-    expect(foldCapabilityList('<p>No list</p>')).toBe('<p>No list</p>');
+    expect(() => foldCapabilityList('<p>No list</p>', 'fixture')).toThrow('fixture: no "Capabilities used" list to fold');
+  });
+
+  it('keeps a nested list inside the folded list', () => {
+    const html = '<p><strong>Capabilities used:</strong></p>\n<ul><li>a<ul><li>a1</li></ul></li><li>b</li></ul><p>After</p>';
+    expect(foldCapabilityList(html, 'fixture')).toBe(
+      '<details class="domain-guide"><summary>Capabilities used, with what each step does</summary><ul><li>a<ul><li>a1</li></ul></li><li>b</li></ul></details><p>After</p>',
+    );
   });
 });
 

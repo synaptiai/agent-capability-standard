@@ -68,6 +68,17 @@ describe('stepsPerLayer (F-L4)', () => {
 });
 
 describe('stepsCaption (F-L4)', () => {
+  it('gives layers with as many steps the same rank, marked joint', () => {
+    // Hand-made counts: A 10, B 6, C 6, D 2 (24 steps).
+    const rows = [{ layer: 'A', steps: 10 }, { layer: 'B', steps: 6 }, { layer: 'C', steps: 6 }, { layer: 'D', steps: 2 }];
+    expect(stepsCaption('A', rows)).toBe('10 of the 24 steps in all workflows run A capabilities (42%), the most of the 4 layers.');
+    expect(stepsCaption('B', rows)).toBe('6 of the 24 steps in all workflows run B capabilities (25%), the joint 2nd most of the 4 layers.');
+    expect(stepsCaption('C', rows)).toBe('6 of the 24 steps in all workflows run C capabilities (25%), the joint 2nd most of the 4 layers.');
+    expect(stepsCaption('D', rows)).toBe('2 of the 24 steps in all workflows run D capabilities (8%), the 4th most of the 4 layers.');
+    const top = [{ layer: 'A', steps: 5 }, { layer: 'B', steps: 5 }];
+    expect(stepsCaption('B', top)).toBe('5 of the 10 steps in all workflows run B capabilities (50%), the joint most of the 2 layers.');
+  });
+
   it('prints a share that rounds to 0 but is not 0 as <1%', () => {
     // Hand-made rows: 1 of 277 is 0.36%.
     const rows = [{ layer: 'PERCEIVE', steps: 276 }, { layer: 'REMEMBER', steps: 1 }];

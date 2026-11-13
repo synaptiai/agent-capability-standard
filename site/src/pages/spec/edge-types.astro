@@ -75,7 +75,7 @@ const figNo = () => ++fig;
     <div class="doc__body">
       {segments.map((s, i) => (
         <>
-          <Fragment set:html={i > 0 && segments[i - 1]!.key?.kind === 'changes' ? foldFirstTable(s.html, 'The same changes as the table in the source') : s.html} />
+          <Fragment set:html={i > 0 && segments[i - 1]!.key?.kind === 'changes' ? foldFirstTable(s.html, 'The same changes as the table in the source', 'spec/edge-types: changes') : s.html} />
           {s.key?.kind === 'card' && (
             <Figure id={id(`Figure: ${s.key.type}`)} n={figNo()} title={`${s.key.type}: ${edgeExample(info.get(s.key.type)!).sentence}`} caption={edgeCardCaption(info.get(s.key.type)!)} kind="edge-type-card" class="edge-card-fig">
               <div class="edge-card-host"><EdgeTypeCard info={info.get(s.key.type)!} /></div>

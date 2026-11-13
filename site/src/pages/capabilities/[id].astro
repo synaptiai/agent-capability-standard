@@ -284,7 +284,7 @@ const skillFacts = (
               {fig?.kind === 'procedure' && <ProcedureMap cap={cap} map={procedure} n={fig.n} />}
               {fig?.kind === 'sequence' && <SafetySequence cap={cap} n={fig.n} />}
               {fig?.kind === 'sentence' && <p>{fig.text}</p>}
-              <Fragment set:html={fig?.kind === 'verification' ? foldFirstTaskList(part.body, 'Text version: the checklist as the skill writes it') : part.body} />
+              <Fragment set:html={fig?.kind === 'verification' ? foldFirstTaskList(part.body, 'Text version: the checklist as the skill writes it', `capabilities/${cap.id}: Verification`) : part.body} />
             </>
           );
         })}

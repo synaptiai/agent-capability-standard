@@ -50,7 +50,7 @@ const o = loadOntology();
   {overview ? (
     segments.map((sg, i) => (
       <>
-        <Fragment set:html={i > 0 ? foldFirstBox(sg.html, 'Text version: the box drawing in the source') : sg.html} />
+        <Fragment set:html={i > 0 ? foldFirstBox(sg.html, 'Text version: the box drawing in the source', route.source!) : sg.html} />
         {sg.key === 'periodic' && (
           <Figure id={id('Figure: the periodic table')} n={1} title="The periodic table of agent capabilities" caption={periodicCaption(o)} kind="periodic-table">
             <CapabilityTable />

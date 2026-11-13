@@ -17,7 +17,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { serve, sitemapPaths } from './check-axe.mjs';
+import { pathsArg, serve, sitemapPaths } from './check-axe.mjs';
 import { isMain } from './is-main.mjs';
 import { templateOf } from './page-template.mjs';
 import {
@@ -289,8 +289,7 @@ export function reportLines({ limit, results, missing, unmatched = [] }) {
 
 if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
-  const at = args.indexOf('--paths');
-  const only = at === -1 ? null : (args.splice(at, 2)[1] ?? '').split(',').filter(Boolean);
+  const only = pathsArg(args);
   const all = args.includes('--all');
   if (all) args.splice(args.indexOf('--all'), 1);
   const dist = path.resolve(args[0] ?? fileURLToPath(new URL('../dist', import.meta.url)));

@@ -10,3 +10,4 @@ export function runAxe(
 ): Promise<{ pages: number; runs: number; findings: string[] }>;
 export function serve(dist: string): Promise<import('node:http').Server>;
 export function wideScrollers(): string[];
+export function pathsArg(args: string[]): string[] | null;

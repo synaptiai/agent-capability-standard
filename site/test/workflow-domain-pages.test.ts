@@ -2,7 +2,7 @@
 // pages and the domains index draw from the domain guides' own blocks.
 // Expected values come from line scans of the catalog, profile and README
 // files, never from the functions under test.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadProfiles } from '../src/data/profiles';
 import { headingProfileKey, parameterAcross } from '../src/lib/domain-index';
 import { capabilityUsage, listedCapabilities, usageCheck } from '../src/lib/domain-usage';
@@ -112,5 +112,23 @@ describe('domain guide figures', () => {
       });
     }
     expect(new Set(p.rows.flatMap((r) => r.values.map((v) => v.value)))).toEqual(scanned);
+  });
+});
+
+describe('capabilityUsage warnings', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('warns when the README has no Capability Usage section', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(capabilityUsage('# Domain\n\n## Overview\n\nText.\n', 'docs/domains/x/README.md')).toEqual([]);
+    expect(warn.mock.calls.map((c) => c[0])).toEqual(['docs/domains/x/README.md: no "## Capability Usage" section; no usage figures']);
+  });
+
+  it('names the YAML error of an example fence that does not parse', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const readme = ['# Domain', '', '## Capability Usage', '', '### Detection', '', '```yaml', 'detect: [unclosed', '```', ''].join('\n');
+    expect(capabilityUsage(readme, 'fixture')).toEqual([]);
+    expect(warn.mock.calls.length).toBe(1);
+    expect(warn.mock.calls[0]![0]).toMatch(/^fixture: "Detection" under Capability Usage has no single-capability YAML fence \(its YAML does not parse: .+\); no figure$/);
   });
 });

@@ -507,5 +507,9 @@ export const SKILLS_FIG_TITLE = 'The workflow each composed skill runs';
 export function skillsCaption(rows: readonly { steps: number | null }[]): string {
   const runs = rows.filter((r) => r.steps !== null).map((r) => r.steps!);
   const none = rows.length - runs.length;
-  return `${runs.length} of the ${rows.length} composed skills run a catalog workflow, of ${Math.min(...runs)} to ${Math.max(...runs)} steps${none ? `; ${none} run${none === 1 ? 's' : ''} none` : ''}.`;
+  if (runs.length === 0) return `None of the ${plural(rows.length, 'composed skill', 'composed skills')} runs a catalog workflow.`;
+  const min = Math.min(...runs);
+  const max = Math.max(...runs);
+  const size = min === max ? plural(min, 'step', 'steps') : `${min} to ${max} steps`;
+  return `${runs.length} of the ${rows.length} composed skills run a catalog workflow, of ${size}${none ? `; ${none} run${none === 1 ? 's' : ''} none` : ''}.`;
 }
