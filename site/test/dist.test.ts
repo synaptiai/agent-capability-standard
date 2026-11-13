@@ -1043,3 +1043,23 @@ describe('Cloudflare Pages worker in the build output', () => {
     expect(existsSync(path.join(dist, 'spec', v.standard.current.version, 'index.md'))).toBe(true);
   });
 });
+
+describe('WebMCP tools on the built site', () => {
+  const pages = () => [...ROUTES.map((r) => pageFile(r.url)), '404.html'];
+  const scriptOf = (file: string) => /<script type="module" src="(\/_astro\/WebMcp\.[^"]+\.js)"><\/script>/.exec(readFileSync(path.join(dist, file), 'utf8'))?.[1];
+
+  it('loads the WebMCP script on every page, as one external module', () => {
+    const missing = pages().filter((f) => scriptOf(f) === undefined);
+    expect(missing).toEqual([]);
+    expect(new Set(pages().map(scriptOf)).size).toBe(1);
+  });
+
+  it('registers on document.modelContext, with navigator.modelContext only as the fallback', () => {
+    const js = readFileSync(path.join(dist, scriptOf('index.html')!), 'utf8');
+    const doc = js.indexOf('document.modelContext.registerTool(');
+    const nav = js.indexOf('navigator.modelContext.registerTool(');
+    expect(doc).toBeGreaterThan(-1);
+    expect(nav).toBeGreaterThan(doc);
+    for (const name of ['search_docs', 'read_capability', 'read_workflow', 'read_page_markdown']) expect(js, name).toMatch(new RegExp(`name:["'\`]${name}["'\`]`));
+  });
+});

@@ -1,0 +1,34 @@
+[
+  {
+    "url": "/capabilities/checkpoint/",
+    "excerpt": "Create a <mark>checkpoint</mark> &amp; restore it with rollback &lt;state&gt;.",
+    "content": "Checkpoint Create a checkpoint and restore it with rollback.",
+    "locations": [0, 2],
+    "meta": { "title": "Checkpoint" },
+    "filters": { "section": ["Capabilities"] }
+  },
+  {
+    "url": "/spec/1.0.0/",
+    "excerpt": "A <mark>checkpoint</mark> must precede mutate.",
+    "content": "A checkpoint must precede mutate.",
+    "locations": [1],
+    "meta": { "title": "Standard v1.0.0" },
+    "filters": { "section": ["Specification"], "version": ["1.0.0"] }
+  },
+  {
+    "url": "/glossary/",
+    "excerpt": "The letter <mark>c</mark> alone.",
+    "content": "The letter c alone.",
+    "locations": [2],
+    "meta": { "title": "Glossary" },
+    "filters": { "section": ["Background"] }
+  },
+  {
+    "url": "/workflows/debug-code-change/",
+    "excerpt": "Take a <mark>checkpoint</mark> before the fix.",
+    "content": "Take a checkpoint before the fix.",
+    "locations": [2],
+    "meta": { "title": "Debug code change" },
+    "filters": { "section": ["Workflows"] }
+  }
+]
