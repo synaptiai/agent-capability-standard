@@ -7,6 +7,7 @@
 // Expected values come from git, the repository's files and the published
 // formats (ARD v0.91 and ai-catalog 1.0 from ards-project/ard-spec, the Agent
 // Skills Discovery RFC v0.2.0), not from the modules that build the files.
+import { stripTags } from '../src/lib/strip';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -225,16 +226,23 @@ describe('agents guide and llms.md', () => {
   });
 });
 
+/** `html` without its script elements, found case-insensitively by a scan (no regex tag filter). */
+function withoutScripts(html: string): string {
+  let out = html;
+  for (let i = out.toLowerCase().indexOf('<script'); i !== -1; i = out.toLowerCase().indexOf('<script')) {
+    const end = out.toLowerCase().indexOf('</script', i);
+    const close = end === -1 ? -1 : out.indexOf('>', end);
+    out = close === -1 ? out.slice(0, i) : out.slice(0, i) + out.slice(close + 1);
+  }
+  return out;
+}
+
 describe('about, contact and privacy pages', () => {
   it('each have at least 500 characters of text in the main element, and a Markdown copy', () => {
     for (const p of ['about', 'contact', 'privacy']) {
       const html = read(`${p}/index.html`);
       const main = /<main[\s\S]*?<\/main>/.exec(html)![0];
-      const text = main
-        .replace(/<script[\s\S]*?<\/script>/g, '')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      const text = stripTags(withoutScripts(main), ' ').replace(/\s+/g, ' ').trim();
       expect(text.length, p).toBeGreaterThanOrEqual(500);
       expect(existsSync(path.join(dist, p, 'index.md'))).toBe(true);
     }

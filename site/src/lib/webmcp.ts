@@ -21,6 +21,7 @@
 // carry readOnlyHint and none carries consequentialHint. None carries
 // untrustedContentHint: the text they return is the site's own content, built
 // from the repository, not text written by visitors.
+import { stripTags } from './strip';
 import { PAGE_CHUNK, pagePart, sectionNames } from '../worker/page-text';
 import { CAPABILITY_ID, WORKFLOW_ID } from './agent-contract';
 import { isRealMatch, wordsAt } from './search-match';
@@ -102,8 +103,9 @@ function stringArg(input: Record<string, unknown> | undefined, key: string): str
 
 /** Pagefind's excerpt is escaped HTML with <mark> around the matches; this gives plain text. */
 export function excerptText(excerpt: string): string {
-  return excerpt
-    .replace(/<[^>]*>/g, '')
+  // Tags go first, by a character scan (lib/strip.ts); the entities are
+  // decoded after, so the result is plain text for an agent, never HTML.
+  return stripTags(excerpt)
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
