@@ -30,6 +30,8 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:quickstart': ['.........', '#...#....', '##..##...', '###.###..', '########.', '###.###..', '##..##...', '#...#....', '.........'],
   // A mortarboard with a tassel.
   'page:tutorial': ['.........', '....#....', '..#####..', '#########', '..#####.#', '..#####.#', '..#...#.#', '..#####..', '.........'],
+  // Two stacked records with an arrow out of the side: data served to programs, for the API page.
+  'page:api': ['#####....', '#...#....', '#####.#..', '#...#.##.', '#####.###', '#...#.##.', '#####.#..', '#...#....', '#####....'],
   // A question mark.
   'page:faq': ['..#####..', '.##...##.', '.##...##.', '......##.', '....###..', '...##....', '...##....', '.........', '...##....'],
 
@@ -155,6 +157,7 @@ export const PAGE_GLYPHS: Readonly<Record<string, string>> = {
   '/start/tutorial/': 'page:tutorial',
   '/start/faq/': 'page:faq',
   '/start/glossary/': 'chapter:terms',
+  '/developers/': 'page:api',
 
   '/guides/running-workflows/': 'tool:executor',
   '/guides/orchestration-extensions/': 'page:orchestration-extensions',

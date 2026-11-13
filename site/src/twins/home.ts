@@ -1,6 +1,7 @@
 // The Markdown copy of the home page, from the same content module the page uses.
 import { loadOntology, capabilitiesOfLayer } from '../data/ontology';
 import {
+  AGENTS_API,
   AGENTS_HEADING,
   AGENTS_LINE,
   CAPABILITIES_DERIVED,
@@ -115,6 +116,7 @@ export function homeTwin(): Twin {
     `### ${AGENTS_HEADING}`,
     AGENTS_LINE,
     fence('text', g.prompt),
+    `${AGENTS_API.before}${link(AGENTS_API.link)}${AGENTS_API.after}`,
     g.cards.map((c, n) => `${n + 1}. **${c.title}.** ${c.line} ${link(c.link)}${c.extra ? `, ${link(c.extra)}` : ''}`).join('\n'),
     '## Questions',
     f.items.map((i) => `### ${i.question}\n\n${inlineText(i.answer)}`).join('\n\n'),

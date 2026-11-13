@@ -23,6 +23,7 @@ import { layerHref, pageHref, refSlugger, routeByUrl, workflowHref } from '../li
 import {
   AGENTS_HEADING,
   AGENTS_LINE,
+  AGENTS_API,
   CAPABILITIES_DERIVED,
   CAPABILITIES_INTRO,
   coverage,
@@ -217,6 +218,7 @@ const nextFig = () => ++fig;
         <h3 id={id(AGENTS_HEADING)}>{AGENTS_HEADING}</h3>
         <p>{AGENTS_LINE}</p>
         <CopyBlock label="Prompt" text={g.prompt} />
+        <p>{AGENTS_API.before}<a href={href(AGENTS_API.link)}>{AGENTS_API.link.text}</a>{AGENTS_API.after}</p>
       </div>
       <ol class="home-steps">
         {g.cards.map((c, i) => (

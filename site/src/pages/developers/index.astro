@@ -1,0 +1,134 @@
+---
+// /developers/: how an agent or a program reads the site. The JSON API (its
+// endpoint table comes from the list the OpenAPI document is built from), the
+// Markdown copies and llms.txt, the MCP server and the WebMCP tools. The
+// Markdown copy (src/twins/developers.ts) uses the same content module.
+import CopyBlock from '../../components/CopyBlock.astro';
+import Figure from '../../components/fig/Figure.astro';
+import IconCard from '../../components/fig/IconCard.astro';
+import TableWrap from '../../components/TableWrap.astro';
+import DocLayout from '../../layouts/DocLayout.astro';
+import { API_BASE, OPENAPI_PATH } from '../../lib/api';
+import {
+  accessCaption,
+  accessRoutes,
+  ACCESS_FIG_TITLE,
+  API_FACTS,
+  catalogLine,
+  curlExamples,
+  DEVELOPERS_TITLE,
+  developersDescription,
+  endpointRows,
+  endpointsCaption,
+  ENDPOINTS_FIG_TITLE,
+  ERRORS,
+  LEAD,
+  markdownExamples,
+  MARKDOWN_LINES,
+  MCP_CLAUDE_CODE,
+  mcpCaption,
+  mcpConfig,
+  MCP_FIG_TITLE,
+  MCP_LEAD,
+  MCP_TOOLS,
+  valuesText,
+  VERSIONING,
+  WEBMCP_LINES,
+} from '../../lib/developers';
+import { refSlugger, routeByUrl } from '../../lib/generated';
+import '../../styles/figures-developers.css';
+
+const route = routeByUrl('/developers/');
+const id = refSlugger();
+const routes = accessRoutes();
+const rows = endpointRows();
+---
+<DocLayout route={route} title={DEVELOPERS_TITLE} description={developersDescription()}>
+  <article class="doc doc--developers" data-pagefind-body>
+    <h1 id={id(DEVELOPERS_TITLE)}>{DEVELOPERS_TITLE}</h1>
+    <p class="lead">{LEAD}</p>
+
+    <Figure id={id('fig-access')} n={1} title={ACCESS_FIG_TITLE} caption={accessCaption(routes)} kind="access-routes">
+      <ul class="icon-cards dev-routes">
+        {routes.map((r) => (
+          <IconCard glyph={r.glyph} title={r.name} eyebrow={r.format}>
+            {r.href ? <a href={r.href}><code>{r.where}</code></a> : <code>{r.where}</code>}{' '}{r.line}
+          </IconCard>
+        ))}
+      </ul>
+    </Figure>
+
+    <h2 id={id('JSON API')}>JSON API</h2>
+    <p>
+      The data of the Standard as static JSON files under <code>{API_BASE}/</code>, described by an OpenAPI 3.1 document at
+      <a href={OPENAPI_PATH} type="application/json"><code>{OPENAPI_PATH}</code></a>.
+    </p>
+    <ul>
+      {API_FACTS.map((f) => <li>{f}</li>)}
+    </ul>
+
+    <Figure id={id('fig-endpoints')} n={2} title={ENDPOINTS_FIG_TITLE} caption={endpointsCaption(rows)} kind="endpoints">
+      <TableWrap label={ENDPOINTS_FIG_TITLE}>
+        <table class="dev-endpoints">
+          <thead>
+            <tr><th scope="col">Path</th><th scope="col">Operation</th><th scope="col">Returns</th><th scope="col">Files</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr>
+                <td><a href={r.href}><code>{r.path}</code></a></td>
+                <td><code>{r.operationId}</code></td>
+                <td>{r.summary}</td>
+                <td>{valuesText(r)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+    </Figure>
+
+    <h3 id={id('Examples')}>Examples</h3>
+    {curlExamples().map((x) => <CopyBlock label={x.what} text={x.command} />)}
+
+    <h3 id={id('Errors')}>Errors</h3>
+    <p>{ERRORS}</p>
+
+    <h3 id={id('Versioning and deprecation')}>Versioning and deprecation</h3>
+    <ul>
+      {VERSIONING.map((v) => <li>{v}</li>)}
+    </ul>
+
+    <h3 id={id('Discovery')}>Discovery</h3>
+    <p>{catalogLine()}</p>
+
+    <h2 id={id('Markdown copies and llms.txt')}>Markdown copies and llms.txt</h2>
+    <ul>
+      {MARKDOWN_LINES.map((l) => <li>{l}</li>)}
+    </ul>
+    {markdownExamples().map((x) => <CopyBlock label={x.what} text={x.command} />)}
+
+    <h2 id={id('MCP server')}>MCP server</h2>
+    <p>{MCP_LEAD}</p>
+    <Figure id={id('fig-mcp')} n={3} title={MCP_FIG_TITLE} caption={mcpCaption()} kind="mcp-tools">
+      <TableWrap label={MCP_FIG_TITLE}>
+        <table class="dev-tools">
+          <thead>
+            <tr><th scope="col">Tool</th><th scope="col">What it does</th></tr>
+          </thead>
+          <tbody>
+            {MCP_TOOLS.map((t) => (
+              <tr><td><code>{t.name}</code></td><td>{t.does}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+    </Figure>
+    <CopyBlock label="Add it to Claude Code" text={MCP_CLAUDE_CODE} />
+    <CopyBlock label="Or to a client that reads an MCP configuration file" text={mcpConfig()} />
+
+    <h2 id={id('WebMCP tools in the browser')}>WebMCP tools in the browser</h2>
+    <ul>
+      {WEBMCP_LINES.map((l) => <li>{l}</li>)}
+    </ul>
+  </article>
+</DocLayout>

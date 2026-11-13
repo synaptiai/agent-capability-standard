@@ -10,6 +10,7 @@ import { sourceMeta } from '../lib/listing';
 import { readRepoFile } from '../lib/repo';
 import type { Route } from '../lib/routes';
 import { capabilitiesIndexTwin, capabilityTwin, layerTwin } from './capabilities';
+import { developersTwin } from './developers';
 import { domainsIndexTwin, domainTwin } from './domains';
 import { homeTwin } from './home';
 import { listingTwin } from './listing';
@@ -123,6 +124,8 @@ async function buildTwin(route: Route): Promise<Twin> {
       return rfcsIndexTwin();
     case 'citation':
       return citationTwin();
+    case 'developers':
+      return developersTwin();
     case 'not-found':
       throw new Error('twins: the 404 page has no Markdown copy');
     default: {

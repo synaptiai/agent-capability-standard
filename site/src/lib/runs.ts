@@ -115,6 +115,8 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
   // report-only page whose gap the spec wants reported, not exempted.
   { page: '/rfcs/*/', anchor: '*', category: 'a', run: 'the RFC body' },
   { page: '/community/citation/', anchor: '*', category: 'a', run: 'the citation page' },
+  // The API page's curl examples: one command each under a one-line label (category b).
+  { page: '/developers/', anchor: 'ref-examples', category: 'b', run: 'Examples (curl commands)' },
   { page: '/compliance/eu-ai-act/', anchor: 'reading-order', category: 'a', run: 'Reading Order' },
   { page: '/compliance/eu-ai-act/', anchor: 'document-register', category: 'a', run: 'Document Register' },
 ];
@@ -137,6 +139,7 @@ export const ENFORCED_TEMPLATES: readonly string[] = [
   'listing',
   'edge-types',
   'diagnostics',
+  'developers',
 ];
 export const ENFORCED_URLS: readonly string[] = [CURRENT_STANDARD, '/start/overview/', '/workflows/patterns/', '/guides/claude-agent-sdk/'];
 

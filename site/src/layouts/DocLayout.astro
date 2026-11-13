@@ -118,6 +118,8 @@ const olderStandard = loadVersions().standard.previous.find((p) => route.url ===
         <ul>
           <li><a href="/llms.txt" type="text/plain">llms.txt</a></li>
           <li><a href="/llms-full.txt" type="text/plain">llms-full.txt</a></li>
+          <li><a href="/developers/">API and agent access</a></li>
+          <li><a href="/openapi.json" type="application/json">OpenAPI</a></li>
           {hasMarkdownCopy && <li><a href={`${route.url}index.md`} type="text/markdown">Markdown of this page</a></li>}
           <li><a href={SITEMAP_PATH}>Sitemap</a></li>
         </ul>
