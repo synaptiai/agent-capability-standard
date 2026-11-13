@@ -141,13 +141,14 @@ rendered heading ids differ from GitHub's ids for the source, and, in
 `llms-full.txt` does not resolve, a raw `.md` link remains, a page has no Markdown copy or `llms.txt` does not list it,
 or the sitemap differs from the built pages.
 
-The build also writes `dist/_worker.js` and `dist/_routes.json`: a Cloudflare
-Pages worker (advanced mode), bundled from `site/src/worker/` by
-`src/lib/worker-build.ts`. It serves a page's Markdown copy to clients that
-prefer `text/markdown` and to AI agents, answers `<page>.md`, returns Markdown
-and problem+json 404s to non-browsers, adds Link headers, and runs the
-read-only docs MCP server at `/mcp`. `src/worker/entry.ts` says why advanced
-mode and which paths skip the worker. To try it after `npm run build`:
+The build also writes a Cloudflare Pages worker into the output: _worker.js
+(advanced mode, bundled from `site/src/worker/` by
+`site/src/lib/worker-build.ts`) and _routes.json beside it. The worker serves
+a page's Markdown copy to clients that prefer `text/markdown` and to AI
+agents, answers `<page>.md`, returns Markdown and problem+json 404s to
+non-browsers, adds Link headers, and runs the read-only docs MCP server at
+`/mcp`. `site/src/worker/entry.ts` says why advanced mode and which paths skip
+the worker. To try it after `npm run build`:
 ```bash
 npx wrangler@4.160.0 pages dev dist --ip 127.0.0.1   # the version the deploy job pins
 ```
