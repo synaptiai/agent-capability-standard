@@ -28,6 +28,7 @@ import {
   standardFileVersions,
   symmetricEdgeTypes,
 } from './independent';
+import { validate } from './json-schema-lite';
 
 let work = '';
 let dist = '';
@@ -823,7 +824,7 @@ describe('check-dist.mjs on the built site', () => {
   it('finds no problem once Pagefind has run, and counts one page per route', () => {
     execFileSync('npx', ['pagefind', '--site', dist], { cwd: process.cwd(), stdio: 'pipe' });
     const { problems, stats } = checkDistDir(dist);
-    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [], figures: [], drawn: [], legends: [], review: [] });
+    expect(problems).toEqual({ files: [], links: [], 'md-links': [], copies: [], sitemap: [], figures: [], drawn: [], legends: [], review: [], api: [] });
     expect(stats.pages).toBe(ROUTES.length);
     expect(stats.copies).toBe(ROUTES.length);
   }, 120_000);
@@ -863,5 +864,77 @@ describe('exempt runs', () => {
       if (e.page.startsWith('template:') ? has.length === 0 : has.length < pages.length) problems.push(`${e.page}#${e.anchor}`);
     }
     expect(problems).toEqual([]);
+  });
+});
+
+describe('data API on the built site', () => {
+  const readJson = (f: string) => JSON.parse(readFileSync(path.join(dist, f), 'utf8')) as Record<string, any>;
+
+  it('validates every JSON file under api/v1 against the response schema the built openapi.json gives its path', () => {
+    const doc = readJson('openapi.json');
+    const problems: string[] = [];
+    let files = 0;
+    for (const [p, item] of Object.entries(doc.paths as Record<string, any>)) {
+      const schema = item.get.responses['200'].content['application/json'].schema;
+      const param = item.get.parameters?.[0];
+      const values: (string | null)[] = param ? param.schema.enum : [null];
+      for (const v of values) {
+        const file = (v === null ? p : p.replace(`{${param.name}}`, v)).slice(1);
+        files += 1;
+        problems.push(...validate(doc, schema, readJson(file)).map((l) => `${file}: ${l}`));
+      }
+    }
+    expect(problems).toEqual([]);
+    expect(files).toBe(readdirSync(path.join(dist, 'api/v1'), { recursive: true }).filter((f) => String(f).endsWith('.json')).length);
+  });
+
+  it('indexes every page of the sitemap in pages.json, with its Markdown copy and the H2 and H3 headings of that copy', () => {
+    const pages = readJson('api/v1/pages.json').pages as Record<string, any>[];
+    const sitemap = [...readFileSync(path.join(dist, 'sitemap.xml'), 'utf8').matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!);
+    expect(pages.map((p) => p.url).sort()).toEqual([...sitemap].sort());
+    for (const p of pages) {
+      const rel = `${p.url.replace('https://acs.synapti.ai/', '')}index.md`;
+      expect(p.markdown_url).toBe(`https://acs.synapti.ai/${rel}`);
+      expect(existsSync(path.join(dist, rel)), rel).toBe(true);
+    }
+    // Headings by a line scan of one copy, outside its code fences.
+    const dev = pages.find((p) => p.url === 'https://acs.synapti.ai/developers/')!;
+    let inFence = false;
+    const scanned = readFileSync(path.join(dist, 'developers/index.md'), 'utf8')
+      .split('\n')
+      .flatMap((l) => {
+        if (/^```/.test(l)) inFence = !inFence;
+        const m = !inFence && /^(#{2,3}) (.+)$/.exec(l);
+        return m ? [{ level: m[1]!.length, text: m[2]! }] : [];
+      });
+    expect(dev.headings).toEqual(scanned);
+    expect(dev.title).toBe('Agent Capability Standard API and agent access');
+  });
+
+  it('serves the api-catalog as a file, not a page, and redirects the API base to its index', () => {
+    expect(existsSync(path.join(dist, '.well-known/api-catalog'))).toBe(true);
+    expect(readJson('.well-known/api-catalog').linkset.length).toBeGreaterThan(0);
+    expect(readFileSync(path.join(dist, '_redirects'), 'utf8')).toContain('/api/v1/ /api/v1/index.json 302');
+  });
+
+  it('links the API page from the home page, its Markdown copy, the footer of every page and llms.txt', () => {
+    expect(readFileSync(path.join(dist, 'index.html'), 'utf8')).toMatch(/<main[\s\S]*href="\/developers\/"[\s\S]*<\/main>/);
+    expect(readFileSync(path.join(dist, 'index.md'), 'utf8')).toContain('(https://acs.synapti.ai/developers/index.md)');
+    for (const f of ['spec/diagnostics/index.html', 'capabilities/checkpoint/index.html']) {
+      const footer = /<footer[\s\S]*<\/footer>/.exec(readFileSync(path.join(dist, f), 'utf8'))![0];
+      expect(footer).toContain('href="/developers/"');
+      expect(footer).toContain('href="/openapi.json"');
+    }
+    expect(readFileSync(path.join(dist, 'llms.txt'), 'utf8')).toContain('https://acs.synapti.ai/developers/index.md');
+  });
+
+  it('lists every endpoint of openapi.json in the endpoint table of /developers/, linked to a file in dist', () => {
+    const doc = readJson('openapi.json');
+    const html = readFileSync(path.join(dist, 'developers/index.html'), 'utf8');
+    const table = /<table class="dev-endpoints"[\s\S]*?<\/table>/.exec(html)![0];
+    const rows = [...table.matchAll(/<tr><td><a href="([^"]+)"><code>([^<]+)<\/code><\/a><\/td><td><code>([^<]+)<\/code>/g)];
+    expect(rows.map((r) => r[2])).toEqual(Object.keys(doc.paths));
+    expect(rows.map((r) => r[3])).toEqual(Object.values(doc.paths as Record<string, any>).map((i) => i.get.operationId));
+    for (const r of rows) expect(existsSync(path.join(dist, r[1]!.slice(1))), r[1]).toBe(true);
   });
 });

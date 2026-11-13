@@ -48,6 +48,8 @@ export type Template =
   | 'schemas'
   | 'rfcs-index'
   | 'citation'
+  /** /developers/: the JSON API, the Markdown copies and the MCP server. */
+  | 'developers'
   /** The 404 page. No row uses it. */
   | 'not-found';
 
@@ -211,6 +213,7 @@ export function buildRoutes(): Route[] {
     prose('docs/TUTORIAL.md', '/start/tutorial/', 'Tutorial'),
     prose('docs/FAQ.md', '/start/faq/', 'FAQ'),
     prose('docs/GLOSSARY.md', '/start/glossary/', 'Glossary'),
+    { source: null, url: '/developers/', title: 'API and agent access', template: 'developers' },
   );
 
   const ontology = loadOntology();

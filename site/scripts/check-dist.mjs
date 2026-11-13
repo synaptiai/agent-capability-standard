@@ -22,7 +22,11 @@
 // - legends: no legend or key on a page draws the same glyph (or glyph pair) for two
 //   different entries;
 // - review: no built file outside the review pages (dist/_review/) points at
-//   them, so removing that folder before deploying leaves nothing dangling.
+//   them, so removing that folder before deploying leaves nothing dangling;
+// - api: openapi.json is OpenAPI 3.1, its paths (each parameter expanded by
+//   its enum) are exactly the JSON files under api/v1/, every one of those
+//   parses, the api-catalog is a linkset whose links resolve, and _headers
+//   gives the api-catalog its RFC 9727 media type.
 // Paths are compared with the case they have in dist/, as the host compares
 // them, even on a case-insensitive disk.
 // The heading-id check (rendered ids equal github-slugger run on the source)
@@ -35,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
 import { REVIEW_DIR } from '../src/lib/review.ts';
 import { stripComments, stripTags } from '../src/lib/strip.ts';
+import { API_BASE, API_CATALOG_PATH, API_CATALOG_PROFILE, OPENAPI_PATH } from '../src/lib/api-paths.ts';
 import { isMain } from './is-main.mjs';
 import { bodyClasses, templateOf } from './page-template.mjs';
 
@@ -437,6 +442,7 @@ export const DRAWN_TEMPLATES = [
   'rfcs-index',
   'schemas',
   'spec',
+  'developers',
 ];
 
 /** A page's template, from its body's `page--<template>` class. */
@@ -542,6 +548,94 @@ export function checkReviewLinks(fileList, read) {
     .map((f) => `${f} points at the review pages (/${REVIEW_DIR}/), which are not deployed`);
 }
 
+// ------------------------------------------------------------ data API
+
+/**
+ * The URL paths an OpenAPI document's paths stand for: a path with a
+ * `{param}` becomes one path per value of that parameter's enum. A parameter
+ * with no enum is a problem, because then no file list can be checked.
+ */
+export function openApiFilePaths(doc) {
+  const paths = [];
+  const problems = [];
+  for (const [p, item] of Object.entries(doc.paths ?? {})) {
+    const names = [...p.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+    if (names.length === 0) {
+      paths.push(p);
+      continue;
+    }
+    if (names.length > 1) {
+      problems.push(`openapi.json: ${p} has more than one path parameter`);
+      continue;
+    }
+    const param = (item.get?.parameters ?? []).find((x) => x.in === 'path' && x.name === names[0]);
+    const values = param?.schema?.enum;
+    if (!Array.isArray(values) || values.length === 0) {
+      problems.push(`openapi.json: ${p} has no enum for {${names[0]}}`);
+      continue;
+    }
+    for (const v of values) paths.push(p.replace(`{${names[0]}}`, v));
+  }
+  return { paths, problems };
+}
+
+/** The data API in dist: the OpenAPI document, the JSON files, the api-catalog and its header. */
+export function checkApi(fileList, read, redirects = new Set()) {
+  const problems = [];
+  const files = new Set(fileList);
+  const parse = (f) => {
+    try {
+      return JSON.parse(read(f));
+    } catch (e) {
+      problems.push(`${f} is not valid JSON: ${e.message}`);
+      return null;
+    }
+  };
+  const apiDir = `${API_BASE.slice(1)}/`;
+  const apiFiles = fileList.filter((f) => f.startsWith(apiDir));
+  for (const f of apiFiles) if (!f.endsWith('.json')) problems.push(`${f}: a file under ${apiDir} that is not JSON`);
+  const openapiFile = OPENAPI_PATH.slice(1);
+  if (!files.has(openapiFile)) problems.push(`${openapiFile} is missing from dist`);
+  else {
+    const doc = parse(openapiFile);
+    if (doc) {
+      if (typeof doc.openapi !== 'string' || !/^3\.1\.\d+$/.test(doc.openapi)) problems.push(`${openapiFile}: openapi is ${doc.openapi}, not 3.1.x`);
+      const { paths, problems: p } = openApiFilePaths(doc);
+      problems.push(...p);
+      const served = apiFiles.map((f) => `/${f}`);
+      for (const u of setDiff(paths, served)) problems.push(`${openapiFile} describes ${u}, which is not a file in dist`);
+      for (const u of setDiff(served, paths)) problems.push(`${u} is in dist but ${openapiFile} does not describe it`);
+    }
+  }
+  for (const f of apiFiles.filter((x) => x.endsWith('.json'))) parse(f);
+  const catalogFile = API_CATALOG_PATH.slice(1);
+  if (!files.has(catalogFile)) problems.push(`${catalogFile} is missing from dist`);
+  else {
+    const cat = parse(catalogFile);
+    if (cat && (!Array.isArray(cat.linkset) || cat.linkset.length === 0)) problems.push(`${catalogFile}: no linkset array`);
+    for (const entry of cat?.linkset ?? []) {
+      if (typeof entry.anchor !== 'string') problems.push(`${catalogFile}: a linkset entry has no anchor`);
+      for (const [rel, targets] of Object.entries(entry)) {
+        if (rel === 'anchor') continue;
+        for (const t of Array.isArray(targets) ? targets : []) {
+          const target = internalTarget(t.href ?? '', `/${catalogFile}`);
+          if (target === null) continue;
+          if (servedFile(target.path, files) === null && !redirects.has(target.path)) {
+            problems.push(`${catalogFile}: ${rel} ${t.href} does not resolve to a file in dist`);
+          }
+        }
+      }
+    }
+    const headers = files.has('_headers') ? read('_headers') : '';
+    const block = headers.split(/\n(?=\S)/).find((b) => b.split('\n')[0].trim() === API_CATALOG_PATH) ?? '';
+    const type = /^\s+Content-Type:\s*(.+)$/im.exec(block)?.[1]?.trim() ?? '';
+    if (!type.startsWith('application/linkset+json') || !type.includes(`profile="${API_CATALOG_PROFILE}"`)) {
+      problems.push(`_headers does not serve ${API_CATALOG_PATH} as application/linkset+json; profile="${API_CATALOG_PROFILE}"`);
+    }
+  }
+  return problems;
+}
+
 function kb(bytes) {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
@@ -565,6 +659,7 @@ export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {})
     drawn: checkDrawnFigures(fileList, read, drawnTemplates),
     legends: checkLegends(fileList, read),
     review: checkReviewLinks(fileList, read),
+    api: checkApi(fileList, read, redirects),
   };
   const sum = (list) => list.reduce((n, f) => n + size(f), 0);
   const htmlFiles = fileList.filter((f) => f.endsWith('.html'));

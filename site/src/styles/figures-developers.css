@@ -1,0 +1,18 @@
+/*
+ * Figures of the API and agent access page (/developers/): the ways to read
+ * the site as icon cards, and the endpoint and tool tables. Tokens only.
+ */
+@layer components {
+  .dev-routes {
+    margin: 0;
+  }
+
+  .dev-routes .icon-card__text code {
+    overflow-wrap: anywhere;
+  }
+
+  .dev-endpoints code,
+  .dev-tools code {
+    white-space: nowrap;
+  }
+}

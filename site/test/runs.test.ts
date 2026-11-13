@@ -188,7 +188,7 @@ describe('the sweep covers every page it names', () => {
     const run = { template: 'prose', width: 1440, runs: [], missing: [] };
     // Every enforced URL and exempt-run page of visual spec 3.12 and 4.2 but
     // /workflows/patterns/ and /community/citation/, with the Standard at 9.9.9.
-    const urls = ['/spec/9.9.9/', '/start/overview/', '/guides/claude-agent-sdk/', '/capabilities/rollback/', '/compliance/eu-ai-act/', '/rfcs/0001/'];
+    const urls = ['/spec/9.9.9/', '/start/overview/', '/guides/claude-agent-sdk/', '/capabilities/rollback/', '/compliance/eu-ai-act/', '/rfcs/0001/', '/developers/'];
     const pages = new Map(urls.map((u) => [u, { wide: run }]));
     expect(summarise(pages, { standardUrl: '/spec/9.9.9/' }).unmatched).toEqual(['enforced page /workflows/patterns/', 'exempt run page /community/citation/']);
     // Without the Standard's URL its entries match no page.

@@ -79,6 +79,12 @@ export const CAPABILITIES_DERIVED: HomeLink = { text: 'How the set was derived',
 
 export const AGENTS_HEADING = 'For coding agents';
 export const AGENTS_LINE = 'Paste this into Claude Code, Codex, Cursor or another coding agent.';
+/** The line under the prompt that points programs at the API page. */
+export const AGENTS_API: { before: string; link: HomeLink; after: string } = {
+  before: 'Programs can read the same content as JSON, as Markdown or through MCP tools, with no key: see ',
+  link: { text: 'API and agent access', url: '/developers/' },
+  after: '.',
+};
 
 /** Text with inline code, as one string where code spans are in backticks. */
 export function inlineText(parts: Inline): string {
