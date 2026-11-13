@@ -106,6 +106,9 @@ export function parseReleases(changelog: string): Release[] {
       continue;
     }
     if (!kind) continue;
+    // A line of a code block is neither an entry nor the end of one, as in
+    // releaseBars: a "- " line inside a fence is code, not a change.
+    if (code[i]) continue;
     if (BULLET.test(line)) {
       closeEntry();
       entry = [line.slice(2)];

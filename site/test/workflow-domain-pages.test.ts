@@ -2,12 +2,16 @@
 // pages and the domains index draw from the domain guides' own blocks.
 // Expected values come from line scans of the catalog, profile and README
 // files, never from the functions under test.
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadProfiles } from '../src/data/profiles';
 import { headingProfileKey, parameterAcross } from '../src/lib/domain-index';
-import { capabilityUsage, listedCapabilities, usageCheck } from '../src/lib/domain-usage';
+import { capabilityUsage, listedCapabilities, NO_USAGE_SECTION, usageCheck } from '../src/lib/domain-usage';
 import { domainMap, referenceMap } from '../src/lib/workflow-index';
 import { catalogFiles, repoText } from './independent';
+
+const REPO = path.resolve(process.cwd(), '..');
 
 /** Top-level workflow key of each `workflow_id:` line of a catalog, with the step number it sits in. */
 function invocations(text: string): { parent: string; child: string; step: number }[] {
@@ -118,10 +122,21 @@ describe('domain guide figures', () => {
 describe('capabilityUsage warnings', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('warns when the README has no Capability Usage section', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(capabilityUsage('# Domain\n\n## Overview\n\nText.\n', 'docs/domains/x/README.md')).toEqual([]);
-    expect(warn.mock.calls.map((c) => c[0])).toEqual(['docs/domains/x/README.md: no "## Capability Usage" section; no usage figures']);
+  it('fails on a README without the section unless it is listed, and on a listed README that gains one', () => {
+    const none = '# Domain\n\n## Overview\n\nText.\n';
+    expect(() => capabilityUsage(none, 'docs/domains/x/README.md')).toThrow(/no "## Capability Usage" section; add one, or add the README to NO_USAGE_SECTION/);
+    expect(capabilityUsage(none, 'docs/domains/healthcare/README.md')).toEqual([]);
+    expect(() => capabilityUsage('# D\n\n## Capability Usage\n', 'docs/domains/healthcare/README.md')).toThrow(/remove it from NO_USAGE_SECTION/);
+  });
+
+  it('lists exactly the domain READMEs that have no Capability Usage section', () => {
+    // Read from the files with a plain line test, not through capabilityUsage.
+    const dir = path.join(REPO, 'docs/domains');
+    const without = readdirSync(dir)
+      .map((d) => `docs/domains/${d}/README.md`)
+      .filter((p) => existsSync(path.join(REPO, p)) && !/^## Capability Usage\s*$/m.test(readFileSync(path.join(REPO, p), 'utf8')))
+      .sort();
+    expect([...NO_USAGE_SECTION].sort()).toEqual(without);
   });
 
   it('names the YAML error of an example fence that does not parse', () => {

@@ -17,7 +17,7 @@ const ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>',
  */
 export function decodeEntities(s: string): string {
   return s.replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (m, e: string) => {
-    if (e[1] === 'x' || e[1] === 'X') return String.fromCodePoint(parseInt(e.slice(2), 16));
+    if (e[0] === '#' && (e[1] === 'x' || e[1] === 'X')) return String.fromCodePoint(parseInt(e.slice(2), 16));
     if (e.startsWith('#')) return String.fromCodePoint(Number(e.slice(1)));
     return ENTITIES[e] ?? m;
   });

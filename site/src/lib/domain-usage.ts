@@ -40,15 +40,27 @@ export interface UsageExample {
  * One example per H3 of the README's "Capability Usage" section whose first
  * fence is YAML with a single top-level key that is an ontology capability.
  * Anything else is skipped with a build warning, so a prose edit cannot
- * break the build. A README with no such section gives [], with a warning.
+ * break the build. A README listed in NO_USAGE_SECTION has no such section
+ * and gives []; any other README without one, or a listed README that gains
+ * one, fails the build, so the list cannot drift.
  */
+/** Domain READMEs written without a "Capability Usage" section (they get no usage figures). */
+export const NO_USAGE_SECTION: ReadonlySet<string> = new Set([
+  'docs/domains/data-analysis/README.md',
+  'docs/domains/healthcare/README.md',
+  'docs/domains/manufacturing/README.md',
+  'docs/domains/personal-assistant/README.md',
+]);
+
 export function capabilityUsage(readmeText: string, where: string): UsageExample[] {
   const nodes = parseMarkdown(readmeText).children;
   const h2 = nodes.findIndex((n) => n.type === 'heading' && n.depth === 2 && headingText(n).trim() === USAGE_HEADING);
+  const exempt = NO_USAGE_SECTION.has(where);
   if (h2 === -1) {
-    console.warn(`${where}: no "## ${USAGE_HEADING}" section; no usage figures`);
-    return [];
+    if (exempt) return [];
+    throw new Error(`${where}: no "## ${USAGE_HEADING}" section; add one, or add the README to NO_USAGE_SECTION in domain-usage.ts`);
   }
+  if (exempt) throw new Error(`${where}: has a "## ${USAGE_HEADING}" section; remove it from NO_USAGE_SECTION in domain-usage.ts`);
   const known = new Set(loadOntology().capabilities.map((c) => c.id));
   const body = section(nodes, h2);
   const out: UsageExample[] = [];

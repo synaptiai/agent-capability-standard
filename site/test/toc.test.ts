@@ -1,7 +1,7 @@
 // The contents list read from rendered HTML. Expected entries are written by
 // hand from the fixture.
 import { describe, expect, it } from 'vitest';
-import { tocEntries } from '../src/lib/toc';
+import { decodeEntities, tocEntries } from '../src/lib/toc';
 
 describe('tocEntries', () => {
   it('reads h2 and h3 headings with ids, in order, as plain text', () => {
@@ -18,5 +18,13 @@ describe('tocEntries', () => {
       { depth: 3, id: 'c', text: 'step <one>' },
       { depth: 2, id: 'e', text: 'Café time' },
     ]);
+  });
+});
+
+describe('decodeEntities', () => {
+  it('reads numeric references, and leaves a named one it does not know unchanged', () => {
+    expect(decodeEntities('A &#x26; B &#X3C; C &#38;')).toBe('A & B < C &');
+    // Named references whose second letter is x are not hex references.
+    expect(decodeEntities('&excl; &exist; &ex;')).toBe('&excl; &exist; &ex;');
   });
 });

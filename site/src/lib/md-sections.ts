@@ -6,7 +6,7 @@
 import type { Code, Heading, List, Root, RootContent, Table } from 'mdast';
 import { toString } from 'mdast-util-to-string';
 import { visit } from 'unist-util-visit';
-import { headingText, parseMarkdown, stripFrontmatter } from './anchors';
+import { codeLineNumbers, codeLines, headingText, parseMarkdown, stripFrontmatter } from './anchors';
 
 const trees = new Map<string, Root>();
 
@@ -91,24 +91,12 @@ export function sectionLines(text: string, title: string, depth: number, where: 
 
 /** 1-based line numbers, in the text with any frontmatter removed, that lie in a code block. */
 function codeLineSet(text: string): Set<number> {
-  const out = new Set<number>();
-  visit(tree(text), 'code', (c: Code) => {
-    for (let l = c.position!.start.line; l <= c.position!.end.line; l++) out.add(l);
-  });
-  return out;
+  return codeLineNumbers(tree(text));
 }
 
-/**
- * Per line of `text` (0-based, frontmatter included), whether it lies in a
- * fenced or indented code block, for the parsers that read a file line by
- * line: a heading test must skip these lines.
- */
-export function codeLines(text: string): boolean[] {
-  const lines = text.split('\n');
-  const offset = lines.length - stripFrontmatter(text).split('\n').length;
-  const code = codeLineSet(text);
-  return lines.map((_, i) => i >= offset && code.has(i - offset + 1));
-}
+// codeLines lives in anchors.ts, whose imports are packages only, so the
+// check scripts can load it with plain Node too.
+export { codeLines };
 
 /** Rows of a table as plain cell text, header row first. */
 export function tableRows(t: Table): string[][] {

@@ -27,6 +27,7 @@ import { ruleDeclarations } from './check-contrast.mjs';
 import { CONCEPT_GLYPHS, GLYPH_ALIASES, LAYER_GLYPHS, LETTERS, MARK, UI_GLYPHS } from '../src/pixel/glyphs.ts';
 import { ALL_GRIDS, chapterKey, principleKey, resolveGlyphKey } from '../src/pixel/keys.ts';
 import { parseGrid } from '../src/pixel/grid.ts';
+import { codeLines } from '../src/lib/anchors.ts';
 import { governanceStatuses } from '../src/lib/governance.ts';
 import { PROPOSED_WORKFLOW_STATUS, STATUS_STYLES, statusClause } from '../src/lib/status.ts';
 import { isMain } from './is-main.mjs';
@@ -79,25 +80,15 @@ export function checkGrids(sets) {
 }
 
 /**
- * `text` with the lines of its fenced code blocks blanked (the line count is
- * kept), so a "## " line inside a fence is not read as a heading. A fence
- * opens with three or more backticks or tildes and closes with a run of the
- * same character at least as long.
+ * `text` with the lines of its code blocks blanked (the line count is kept),
+ * so a "## " line inside a fence is not read as a heading. The blocks are the
+ * ones the figure code skips: codeLines in anchors.ts, parsed by remark.
  */
 export function withoutFences(text) {
-  let open = null;
+  const code = codeLines(text);
   return text
     .split('\n')
-    .map((l) => {
-      const f = /^ {0,3}(`{3,}|~{3,})/.exec(l)?.[1];
-      if (open === null) {
-        if (!f || (f[0] === '`' && l.slice(l.indexOf(f) + f.length).includes('`'))) return l;
-        open = f;
-        return '';
-      }
-      if (f && f[0] === open[0] && f.length >= open.length && l.trim() === f) open = null;
-      return '';
-    })
+    .map((l, i) => (code[i] ? '' : l))
     .join('\n');
 }
 

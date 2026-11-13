@@ -78,7 +78,10 @@ const inkFill = (ink: Ink) => (ink === 'current' ? 'currentColor' : `var(--${ink
 // outlined. The rules are written per workflow, keyed by step and row.
 const READ_W = 16;
 const reads = readLane(spine);
-const scope = `.spine[data-workflow="${wf.id}"]`;
+// The id goes into a quoted CSS string inside <style>: the Standard lets a
+// workflow be named anything, so quotes, backslashes, line breaks and "<" are escaped.
+const cssString = (s: string) => s.replace(/[\\"]/g, '\\$&').replace(/</g, '\\3c ').replace(/\n/g, '\\a ');
+const scope = `.spine[data-workflow="${cssString(wf.id)}"]`;
 const when = (k: number) => `${scope}:has(.spine__row[data-step="${k}"]:is(:hover, :focus-within))`;
 const piece = (k: number, row: number, part: string) => `${when(k)} [data-row="${row}"] > .spine__rl > .spine__rl-${part}`;
 const readRules = [

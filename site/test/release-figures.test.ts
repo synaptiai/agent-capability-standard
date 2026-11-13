@@ -160,3 +160,11 @@ describe('the rendered entries of every kind section match the parser', () => {
     expect(() => draw(md)).not.toThrow();
   });
 });
+
+describe('fenced lines', () => {
+  it('does not count a bullet inside a code fence as an entry', () => {
+    // Hand count: 3 real entries; the 2 fenced "- " lines are code.
+    const text = ['## [v1.0.0] — 2026-01-01', '', '### Added', '- one', '- two', '', '```yaml', '- not an entry', '- nor this', '```', '', '- three', ''].join('\n');
+    expect(kindCount(parseReleases(text)[0]!, 'Added')).toBe(3);
+  });
+});
