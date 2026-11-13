@@ -19,6 +19,7 @@
 // a local network, which this is not. An Origin header that is not an origin
 // at all is refused with 403.
 
+import { LLMS_TXT_MEDIA_TYPE, OPENAPI_MEDIA_TYPE } from '../lib/agent-contract';
 import { accepts } from './accept';
 import { SiteData } from './data';
 import type { Env, WorkerConfig } from './env';
@@ -97,7 +98,7 @@ function resources(cfg: WorkerConfig) {
       name: 'llms-txt',
       title: 'Site index for language models (llms.txt)',
       description: 'Every page of the documentation site, with a one-line summary and a link to its Markdown copy.',
-      mimeType: 'text/plain',
+      mimeType: LLMS_TXT_MEDIA_TYPE,
       path: '/llms.txt',
     },
     {
@@ -113,7 +114,7 @@ function resources(cfg: WorkerConfig) {
       name: 'openapi',
       title: 'OpenAPI description of the data API',
       description: 'The read-only JSON data API under /api/v1/: capabilities, layers, edges, workflows, profiles, diagnostics and pages.',
-      mimeType: 'application/json',
+      mimeType: OPENAPI_MEDIA_TYPE,
       path: '/openapi.json',
     },
   ];

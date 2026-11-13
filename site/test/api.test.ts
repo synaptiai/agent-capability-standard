@@ -3,7 +3,10 @@
 // (line scans of the YAML and Markdown sources) and from plugin.json read
 // here, never from the loaders the API is built on. The built files,
 // pages.json among them, are checked against the same schemas in dist.test.ts.
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { catalogEntries } from '../src/lib/resource-catalog';
+import { pageLinks } from '../src/worker/site';
 import {
   apiCatalog,
   capabilitiesFile,
@@ -220,11 +223,37 @@ describe('OpenAPI document', () => {
   });
 });
 
+describe('media types the site names for the files it serves', () => {
+  // The Content-Type public/_headers gives a path, without parameters: what
+  // a client gets. Every link, catalog entry and Link header that names the
+  // file's type must say the same.
+  function served(file: string): string {
+    const lines = readFileSync('public/_headers', 'utf8').split('\n');
+    const at = lines.indexOf(file);
+    expect(at, `${file} in _headers`).toBeGreaterThan(-1);
+    const m = /^\s+Content-Type:\s*([^;\s]+)/.exec(lines[at + 1] ?? '');
+    expect(m, `${file} Content-Type`).not.toBeNull();
+    return m![1]!;
+  }
+
+  it('names the OpenAPI document by the type it is served with', () => {
+    const type = served('/openapi.json');
+    const api = apiCatalog().linkset.find((e) => e.anchor === 'https://acs.synapti.ai/api/v1/') as Obj;
+    expect(api['service-desc'][0].type).toBe(type);
+    expect(catalogEntries().find((e) => e.url.endsWith('/openapi.json'))!.type).toBe(type);
+    expect(pageLinks('/')).toContain(`</openapi.json>; rel="service-desc"; type="${type}"`);
+  });
+
+  it('names llms.txt by the type it is served with', () => {
+    expect(catalogEntries().find((e) => e.url.endsWith('/llms.txt'))!.type).toBe(served('/llms.txt'));
+  });
+});
+
 describe('api-catalog', () => {
   it('anchors the API at /api/v1/ and links its OpenAPI document and documentation, with no status link', () => {
     const c = apiCatalog();
     const api = c.linkset.find((e) => e.anchor === 'https://acs.synapti.ai/api/v1/') as Obj;
-    expect(api['service-desc']).toEqual([{ href: 'https://acs.synapti.ai/openapi.json', type: 'application/openapi+json' }]);
+    expect(api['service-desc'][0].href).toBe('https://acs.synapti.ai/openapi.json');
     expect(api['service-doc'][0].href).toBe('https://acs.synapti.ai/developers/');
     expect(c.linkset.some((e) => 'status' in e)).toBe(false);
     expect((c.linkset.find((e) => e.anchor === 'https://acs.synapti.ai/.well-known/api-catalog') as Obj).item).toEqual([{ href: 'https://acs.synapti.ai/api/v1/' }]);

@@ -8,6 +8,7 @@ import Figure from '../../components/fig/Figure.astro';
 import IconCard from '../../components/fig/IconCard.astro';
 import TableWrap from '../../components/TableWrap.astro';
 import DocLayout from '../../layouts/DocLayout.astro';
+import { OPENAPI_MEDIA_TYPE } from '../../lib/agent-contract';
 import { API_BASE, OPENAPI_PATH } from '../../lib/api';
 import {
   accessCaption,
@@ -61,7 +62,7 @@ const rows = endpointRows();
     <h2 id={id('JSON API')}>JSON API</h2>
     <p>
       The data of the Standard as static JSON files under <code>{API_BASE}/</code>, described by an OpenAPI 3.1 document at
-      <a href={OPENAPI_PATH} type="application/json"><code>{OPENAPI_PATH}</code></a>.
+      <a href={OPENAPI_PATH} type={OPENAPI_MEDIA_TYPE}><code>{OPENAPI_PATH}</code></a>.
     </p>
     <ul>
       {API_FACTS.map((f) => <li>{f}</li>)}

@@ -23,6 +23,17 @@ export const LLMS_MD_PATH = '/llms.md';
 export const LLMS_TXT_PATH = '/llms.txt';
 export const LLMS_FULL_PATH = '/llms-full.txt';
 
+/**
+ * The media type of the OpenAPI document, as public/_headers serves it and
+ * every link and catalog names it. No OpenAPI-specific type is in the IANA
+ * registry (application.csv, read 2026-11-13, lists only
+ * application/vnd.oai.workflows*), and RFC 9727's own service-desc examples
+ * use the generic JSON and YAML types.
+ */
+export const OPENAPI_MEDIA_TYPE = 'application/json';
+/** The media type of llms.txt, as public/_headers serves it. */
+export const LLMS_TXT_MEDIA_TYPE = 'text/plain';
+
 /** Paths that a link may name and the Pages function serves, never a file. */
 export const FUNCTION_PATHS: readonly string[] = [MCP_SERVER_CARD_PATH];
 

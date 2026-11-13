@@ -8,14 +8,17 @@
 // displayName, a media type (`type`) and exactly one of url or data (here
 // always url), plus a description and 2 to 5 representativeQueries, which
 // the spec recommends. Media types are the ones ARD §3.3 lists where it lists
-// one (MCP server card, agent skills); OpenAPI uses the type the OpenAPI
-// Initiative registered, and the Markdown files text/markdown.
+// one (MCP server card, agent skills); otherwise the type the file is served
+// with (OPENAPI_MEDIA_TYPE, LLMS_TXT_MEDIA_TYPE, text/markdown for a page's
+// Markdown copy).
 import { loadVersions } from '../data/versions';
 import {
   AGENT_SKILLS_INDEX_PATH,
   DEVELOPERS_PATH,
+  LLMS_TXT_MEDIA_TYPE,
   LLMS_TXT_PATH,
   MCP_SERVER_CARD_PATH,
+  OPENAPI_MEDIA_TYPE,
   OPENAPI_PATH,
 } from './agent-contract';
 import { SITE_ORIGIN } from './origin';
@@ -42,7 +45,7 @@ export function catalogEntries(): CatalogEntry[] {
   return [
     entry('llms-txt', {
       displayName: 'Agent Capability Standard documentation (llms.txt)',
-      type: 'text/markdown',
+      type: LLMS_TXT_MEDIA_TYPE,
       url: `${SITE_ORIGIN}${LLMS_TXT_PATH}`,
       description: 'Index of the documentation for agents: when to use the standard, the agent interfaces, and a Markdown copy of every page by section.',
       representativeQueries: ['What does the Agent Capability Standard specify?', 'Which capability should a workflow step use?', 'Where is the Markdown version of the specification?'],
@@ -51,7 +54,7 @@ export function catalogEntries(): CatalogEntry[] {
     }),
     entry('openapi', {
       displayName: 'Agent Capability Standard data API',
-      type: 'application/vnd.oai.openapi+json',
+      type: OPENAPI_MEDIA_TYPE,
       url: `${SITE_ORIGIN}${OPENAPI_PATH}`,
       description: 'OpenAPI 3.1 description of the read-only JSON API with the capabilities, layers, edges, workflows, domain profiles and diagnostics.',
       representativeQueries: ['List the capabilities of the Agent Capability Standard as JSON', 'Get the input and output contract of a capability', 'Which workflows are in the reference catalog?'],

@@ -14,6 +14,7 @@ import { SITE_ORIGIN } from './origin';
 import { COMMIT_SHA, GITHUB_BASE } from './repo';
 import { kebab, ROUTES } from './routes';
 
+import { OPENAPI_MEDIA_TYPE } from './agent-contract';
 import { API_BASE, API_CATALOG_PATH, API_VERSION, DEVELOPERS_URL, OPENAPI_PATH } from './api-paths';
 
 export { API_BASE, API_CATALOG_PATH, API_CATALOG_PROFILE, API_VERSION, DEVELOPERS_URL, OPENAPI_PATH } from './api-paths';
@@ -458,7 +459,7 @@ export function apiCatalog(): { linkset: JsonObject[] } {
       { anchor: abs(API_CATALOG_PATH), item: [{ href: abs(`${API_BASE}/`) }] },
       {
         anchor: abs(`${API_BASE}/`),
-        'service-desc': [{ href: abs(OPENAPI_PATH), type: 'application/openapi+json' }],
+        'service-desc': [{ href: abs(OPENAPI_PATH), type: OPENAPI_MEDIA_TYPE }],
         'service-doc': [{ href: abs(DEVELOPERS_URL), type: 'text/html' }],
       },
     ],

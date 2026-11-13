@@ -13,6 +13,7 @@
 // - A path with repeated slashes redirects to the same path with single ones.
 // Every other request goes to the static files unchanged.
 
+import { OPENAPI_MEDIA_TYPE } from '../lib/agent-contract';
 import { namesHtml, prefersMarkdown } from './accept';
 import type { Env, WorkerConfig } from './env';
 import { MCP_PATH, SERVER_CARD_TYPE, serverCard } from './identity';
@@ -66,7 +67,7 @@ export function pageLinks(pagePath: string): string {
   return [
     `<${pagePath}index.md>; rel="alternate"; type="text/markdown"`,
     '</sitemap.xml>; rel="sitemap"; type="application/xml"',
-    '</openapi.json>; rel="service-desc"; type="application/vnd.oai.openapi+json"',
+    `</openapi.json>; rel="service-desc"; type="${OPENAPI_MEDIA_TYPE}"`,
     '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
   ].join(', ');
 }

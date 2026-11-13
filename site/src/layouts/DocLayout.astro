@@ -20,7 +20,7 @@ import Toc from '../components/Toc.astro';
 import WebMcp from '../components/WebMcp.astro';
 import { loadVersions } from '../data/versions';
 import { SITEMAP_PATH } from '../lib/agent-files';
-import { AGENTS_MD_PATH, AI_CATALOG_PATH, ARD_PATH } from '../lib/agent-contract';
+import { AGENTS_MD_PATH, AI_CATALOG_PATH, ARD_PATH, LLMS_TXT_MEDIA_TYPE, OPENAPI_MEDIA_TYPE } from '../lib/agent-contract';
 import { homeJsonLd } from '../lib/structured-data';
 import { COMMIT_SHA, githubBlobUrl } from '../lib/repo';
 import { SECTIONS, type Route } from '../lib/routes';
@@ -123,11 +123,11 @@ const olderStandard = loadVersions().standard.previous.find((p) => route.url ===
       <nav class="site-footer__agents" aria-label="For agents">
         <p class="site-footer__heading">For agents</p>
         <ul>
-          <li><a href="/llms.txt" type="text/plain">llms.txt</a></li>
+          <li><a href="/llms.txt" type={LLMS_TXT_MEDIA_TYPE}>llms.txt</a></li>
           <li><a href="/llms-full.txt" type="text/plain">llms-full.txt</a></li>
           <li><a href={AGENTS_MD_PATH} type="text/markdown">Guide for agents</a></li>
           <li><a href="/developers/">API and agent access</a></li>
-          <li><a href="/openapi.json" type="application/json">OpenAPI</a></li>
+          <li><a href="/openapi.json" type={OPENAPI_MEDIA_TYPE}>OpenAPI</a></li>
           {hasMarkdownCopy && <li><a href={`${route.url}index.md`} type="text/markdown">Markdown of this page</a></li>}
           <li><a href={SITEMAP_PATH}>Sitemap</a></li>
         </ul>
