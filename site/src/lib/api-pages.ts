@@ -22,7 +22,7 @@ export function pageHeadings(markdown: string): { level: number; text: string }[
 
 export async function pageResources(): Promise<JsonObject[]> {
   const routes = [...ROUTES].sort((a, b) => SECTIONS.findIndex((s) => s.id === a.section) - SECTIONS.findIndex((s) => s.id === b.section) || a.order - b.order);
-  const twins = [];
+  const twins: Awaited<ReturnType<typeof twinFor>>[] = [];
   for (const r of routes) twins.push(await twinFor(r));
   const terms = pageSearchTerms(twins.map((t) => t.markdown));
   return routes.map((r, i) => {
