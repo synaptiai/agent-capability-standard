@@ -5,7 +5,8 @@
 // "5.2 " finds "5.2 Step Definition" and nothing else.
 import type { Code, Heading, List, Root, RootContent, Table } from 'mdast';
 import { toString } from 'mdast-util-to-string';
-import { headingText, parseMarkdown } from './anchors';
+import { visit } from 'unist-util-visit';
+import { headingText, parseMarkdown, stripFrontmatter } from './anchors';
 
 const trees = new Map<string, Root>();
 
@@ -27,6 +28,86 @@ export function sectionBlocks(text: string, prefix: string, where: string): Root
   const depth = (nodes[i] as Heading).depth;
   const end = nodes.findIndex((n, j) => j > i && n.type === 'heading' && n.depth <= depth);
   return nodes.slice(i + 1, end === -1 ? undefined : end);
+}
+
+/** Index of the depth-`depth` heading titled exactly `title` among the root's children and of the node that ends its section (-1: none). */
+function titled(text: string, title: string, depth: number, where: string): { at: number; end: number } | null {
+  const nodes = tree(text).children;
+  const starts = nodes.flatMap((n, i) => (n.type === 'heading' && n.depth === depth && headingText(n).trim() === title ? [i] : []));
+  if (starts.length === 0) return null;
+  if (starts.length > 1) throw new Error(`${where}: ${starts.length} headings "${'#'.repeat(depth)} ${title}", expected one`);
+  const at = starts[0]!;
+  return { at, end: nodes.findIndex((n, j) => j > at && n.type === 'heading' && n.depth <= depth) };
+}
+
+/**
+ * The blocks under the depth-`depth` heading whose text is exactly `title`,
+ * or null when there is none. Throws when several match. Headings are the
+ * parsed tree's, so a "## " line inside a code fence neither opens nor ends
+ * a section.
+ */
+export function sectionByTitle(text: string, title: string, depth: number, where: string): RootContent[] | null {
+  const s = titled(text, title, depth, where);
+  return s && tree(text).children.slice(s.at + 1, s.end === -1 ? undefined : s.end);
+}
+
+/**
+ * Blocks split at their headings of `depth`: the blocks before the first
+ * such heading (`title` null), then each heading's text with the blocks up
+ * to the next heading of that depth or higher.
+ */
+export function splitAtHeadings(blocks: RootContent[], depth: number): { title: string | null; blocks: RootContent[] }[] {
+  const out: { title: string | null; blocks: RootContent[] }[] = [{ title: null, blocks: [] }];
+  for (const b of blocks) {
+    if (b.type === 'heading' && b.depth <= depth) out.push({ title: b.depth === depth ? headingText(b).trim() : null, blocks: [] });
+    else out.at(-1)!.blocks.push(b);
+  }
+  return out;
+}
+
+/** Every code block in `blocks`, those inside lists and quotes included, in order. */
+export function codeBlocks(blocks: RootContent[]): Code[] {
+  const out: Code[] = [];
+  for (const b of blocks) visit(b, 'code', (c: Code) => void out.push(c));
+  return out;
+}
+
+/**
+ * The source lines of the section under the depth-`depth` heading whose text
+ * is exactly `title` (the heading line excluded), each flagged when it lies in
+ * a code block; null when there is no such heading.
+ */
+export function sectionLines(text: string, title: string, depth: number, where: string): { text: string; code: boolean }[] | null {
+  const s = titled(text, title, depth, where);
+  if (s === null) return null;
+  const nodes = tree(text).children;
+  const body = stripFrontmatter(text).split('\n');
+  const code = codeLineSet(text);
+  // Lines are 1-based: the heading's last line number is the 0-based index of the line after it.
+  const from = nodes[s.at]!.position!.end.line;
+  const to = s.end === -1 ? body.length : nodes[s.end]!.position!.start.line - 1;
+  return body.slice(from, to).map((l, k) => ({ text: l, code: code.has(from + k + 1) }));
+}
+
+/** 1-based line numbers, in the text with any frontmatter removed, that lie in a code block. */
+function codeLineSet(text: string): Set<number> {
+  const out = new Set<number>();
+  visit(tree(text), 'code', (c: Code) => {
+    for (let l = c.position!.start.line; l <= c.position!.end.line; l++) out.add(l);
+  });
+  return out;
+}
+
+/**
+ * Per line of `text` (0-based, frontmatter included), whether it lies in a
+ * fenced or indented code block, for the parsers that read a file line by
+ * line: a heading test must skip these lines.
+ */
+export function codeLines(text: string): boolean[] {
+  const lines = text.split('\n');
+  const offset = lines.length - stripFrontmatter(text).split('\n').length;
+  const code = codeLineSet(text);
+  return lines.map((_, i) => i >= offset && code.has(i - offset + 1));
 }
 
 /** Rows of a table as plain cell text, header row first. */

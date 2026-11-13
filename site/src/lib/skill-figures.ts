@@ -30,7 +30,7 @@ import { COMPOSED_SKILLS } from '../data/skills';
 import { loadWorkflows, type Workflow } from '../data/workflows';
 import { procedureMap, procedureMapIsFigure, type ProcedureMap } from './capability-figures';
 import { headingText, parseMarkdown } from './anchors';
-import { sectionBlocks, sectionFence } from './md-sections';
+import { sectionBlocks, sectionByTitle, sectionFence, sectionLines } from './md-sections';
 import { readRepoFile, TRACKED_FILES } from './repo';
 import { capabilitySymbol, gateRows } from './views';
 import { riskSummary } from './workflow-figures';
@@ -245,11 +245,9 @@ export interface CheckSteps {
  * A word match, which the caption states, not a reading of the check.
  */
 export function checkSteps(wf: Workflow, skillText: string): CheckSteps {
-  const lines = skillText.split('\n');
-  const start = lines.findIndex((l) => /^## Verification\s*$/.test(l));
-  if (start === -1) return { checks: [] };
-  const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
-  const items = lines.slice(start + 1, end === -1 ? undefined : end).flatMap((l) => /^\s*[-*] \[[ xX]\]\s+(.*)$/.exec(l)?.[1] ?? []);
+  const section = sectionLines(skillText, 'Verification', 2, `checkSteps: ${wf.id}`);
+  if (section === null) return { checks: [] };
+  const items = section.flatMap((l) => (l.code ? [] : (/^\s*[-*] \[[ xX]\]\s+(.*)$/.exec(l.text)?.[1] ?? [])));
   const word = (name: string) => new RegExp(`(?<![A-Za-z0-9_])${name}(?![A-Za-z0-9_])`);
   return {
     checks: items.map((raw, i) => {
@@ -304,7 +302,7 @@ export function composedSkillFigures(dir: string, skillText: string, where: stri
   const wf = skillWorkflow(dir);
   if (wf) {
     const guarded = guardedSteps(wf);
-    if (/^## Preconditions \(hard gates\)\s*$/m.test(skillText) && guarded.length > 0) add('preconditions-hard-gates', { kind: 'guards', wf, steps: guarded });
+    if (sectionByTitle(skillText, 'Preconditions (hard gates)', 2, where) !== null && guarded.length > 0) add('preconditions-hard-gates', { kind: 'guards', wf, steps: guarded });
     add('procedure', { kind: 'spine', wf });
     add('output-contract', { kind: 'flow', wf });
     const checks = checkSteps(wf, skillText);

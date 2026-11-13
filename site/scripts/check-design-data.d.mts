@@ -8,6 +8,7 @@ export function governanceStatuses(text: string): string[];
 export function sourceStatuses(files: { path: string; text: string }[]): Map<string, string>;
 export function checkStatuses(values: Map<string, string>, styles: Record<string, string>): string[];
 export function findHandTypedCounts(files: { path: string; text: string }[], counts: number[]): string[];
+export function withoutFences(text: string): string;
 export function neededGlyphKeys(sources: {
   standards: { path: string; text: string }[];
   profiles: { stem: string; doc: unknown }[];

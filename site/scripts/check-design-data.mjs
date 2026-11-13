@@ -79,12 +79,36 @@ export function checkGrids(sets) {
 }
 
 /**
+ * `text` with the lines of its fenced code blocks blanked (the line count is
+ * kept), so a "## " line inside a fence is not read as a heading. A fence
+ * opens with three or more backticks or tildes and closes with a run of the
+ * same character at least as long.
+ */
+export function withoutFences(text) {
+  let open = null;
+  return text
+    .split('\n')
+    .map((l) => {
+      const f = /^ {0,3}(`{3,}|~{3,})/.exec(l)?.[1];
+      if (open === null) {
+        if (!f || (f[0] === '`' && l.slice(l.indexOf(f) + f.length).includes('`'))) return l;
+        open = f;
+        return '';
+      }
+      if (f && f[0] === open[0] && f.length >= open.length && l.trim() === f) open = null;
+      return '';
+    })
+    .join('\n');
+}
+
+/**
  * Glyph keys the figures need, read from the sources, each with where it came
  * from. `standards` are the Standard files as { path, text }, the current one
  * first; `profiles` are { stem, doc } of the domain profiles.
  */
 export function neededGlyphKeys({ standards, profiles, catalogSchema, edgeTypes }) {
   const out = [];
+  standards = standards.map((s) => ({ ...s, text: withoutFences(s.text) }));
   for (const { path: p, text } of standards) {
     for (const m of text.matchAll(/^## (.+)$/gm)) {
       const key = chapterKey(m[1]);

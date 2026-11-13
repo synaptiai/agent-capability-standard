@@ -6,6 +6,7 @@ import { loadProfiles, type DomainProfile } from '../data/profiles';
 import { COMPOSED_SKILLS } from '../data/skills';
 import { loadWorkflows, type Step, type Workflow } from '../data/workflows';
 import { readRepoFile, TRACKED_FILES } from './repo';
+import { codeLines } from './md-sections';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -425,10 +426,11 @@ export function standardSchemaNames(specText: string): {
   purposes: Record<string, string>;
 } {
   const lines = specText.split('\n');
-  const start = lines.findIndex((l) => /^### 6\.1 /.test(l));
+  const code = codeLines(specText);
+  const start = lines.findIndex((l, i) => !code[i] && /^### 6\.1 /.test(l));
   if (start === -1) throw new Error('views: the Standard has no §6.1');
   const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => /^#{2,3} /.test(l));
+  const end = rest.findIndex((l, i) => !code[start + 1 + i] && /^#{2,3} /.test(l));
   const body = end === -1 ? rest : rest.slice(0, end);
   const purposes: Record<string, string> = {};
   const required = body.flatMap((l) => {

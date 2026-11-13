@@ -13,6 +13,8 @@ import {
   exampleFieldsIsFigure,
   exampleFieldsSame,
   exampleFieldsCaption,
+  exampleWorkflows,
+  verificationMap,
   contractRowId,
   contractSummary,
   edgeRules,
@@ -31,6 +33,7 @@ import {
   relationWords,
   splitAtH2s,
 } from '../src/lib/capability-figures';
+import { codeLines } from '../src/lib/md-sections';
 import { currentStandardText } from '../src/lib/spec-figures';
 import { ontologyEdgeTriples, repoText, sectionLines, symmetricEdgeTypes } from './independent';
 
@@ -174,6 +177,53 @@ describe('composition text against the ontology', () => {
       for (const x of chain.precedes) if (before.has(`${x}>${c.id}`)) bad.push(`${c.id} precedes ${x}`);
     }
     expect(bad).toEqual([]);
+  });
+});
+
+describe('Markdown headings inside code fences (issue #125 review)', () => {
+  // A "## " or "### " line inside a fence is code, not a heading: it neither
+  // starts an example nor ends a section.
+  const fenced = ['```markdown', '## Not a section', '### Not an example', '```'];
+
+  it('persist has the three examples its SKILL.md heads with "### Example", not the "### " line of its Markdown sample', () => {
+    // Typed from skills/persist/SKILL.md: the "### Example" headings of its Examples section.
+    expect(exampleFields(repoText('skills/persist/SKILL.md'), 'persist').examples.map((e) => e.title)).toEqual([
+      'Example 1: Persisting a Project Decision',
+      'Example 2: Detecting Duplicate',
+      'Example 3: Merging with Existing Content',
+    ]);
+  });
+
+  it('exampleFields and exampleWorkflows keep a fenced heading inside its example', () => {
+    const text = [
+      '## Output Contract', '', '```yaml', 'result: object', '```', '',
+      '## Examples', '', '### Example 1: A', '', ...fenced, '', '```yaml', 'result: 1', 'workflow: wf_b', '```', '',
+      '### Example 2: B', '', '```yaml', 'workflow: wf_a', '```', '',
+    ].join('\n');
+    expect(exampleFields(text, 'fixture').examples).toEqual([
+      { title: 'Example 1: A', shows: ['result'] },
+      { title: 'Example 2: B', shows: [] },
+    ]);
+    expect(exampleWorkflows(text, new Set(['wf_a', 'wf_b']))).toEqual([
+      { id: 'wf_b', examples: [1] },
+      { id: 'wf_a', examples: [2] },
+    ]);
+  });
+
+  it('codeLines flags the lines of fenced and indented code, frontmatter counted', () => {
+    const text = ['---', 'name: x', '---', '# T', '```', '## a', '```', '', '    ## indented', '', '## b'].join('\n');
+    expect(codeLines(text)).toEqual([false, false, false, false, true, true, true, false, true, false, false]);
+  });
+
+  it('compositionChain and verificationMap read on past a fenced "## " line', () => {
+    const chain = ['## Composition Patterns', '', ...fenced, '', '**Commonly follows:**', '- `plan` - x'].join('\n');
+    expect(compositionChain(chain)).toEqual({ follows: ['plan'], precedes: [] });
+    const checks = [
+      '## Inputs', '', '| Parameter | Required | Type | Description |', '|---|---|---|---|', '| `target` | Yes | string | t |', '',
+      '## Output Contract', '', '```yaml', 'result: object', '```', '',
+      '## Verification', '', ...fenced, '', '- [ ] `result` is set', '- [ ] `target` is read', '',
+    ].join('\n');
+    expect(verificationMap(checks, 'fixture').checks.map((c) => c.text)).toEqual(['result is set', 'target is read']);
   });
 });
 

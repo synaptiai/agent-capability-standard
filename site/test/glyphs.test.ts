@@ -5,7 +5,7 @@
 // catalog schema and the ontology.
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { checkGlyphKeys, findHexColours, statusGlyphKeys } from '../scripts/check-design-data.mjs';
+import { checkGlyphKeys, findHexColours, neededGlyphKeys, statusGlyphKeys, withoutFences } from '../scripts/check-design-data.mjs';
 import { PROPOSED_WORKFLOW_STATUS, STATUS_STYLES } from '../src/lib/status';
 import { CONCEPT_GLYPHS, GLYPH_ALIASES, LAYER_GLYPHS, UI_GLYPHS } from '../src/pixel/glyphs';
 import { gridMask, gridPairs, maskDistance } from '../src/pixel/grid';
@@ -233,5 +233,14 @@ describe('glyph sheet families', () => {
       ['Firsts', ['a']],
       ['Other shapes', ['b']],
     ]);
+  });
+});
+
+describe('withoutFences', () => {
+  it('blanks the lines of fenced blocks, keeping the line count, so a fenced "## " is not a chapter', () => {
+    const text = ['## 1. Introduction', '````markdown', '```', '## 2. Inside', '```', '````', '~~~', '## 3. Tilde', '~~~', '## 4. After'].join('\n');
+    expect(withoutFences(text).split('\n')).toEqual(['## 1. Introduction', '', '', '', '', '', '', '', '', '## 4. After']);
+    const keys = neededGlyphKeys({ standards: [{ path: 'x.md', text }], profiles: [], catalogSchema: { properties: {} }, edgeTypes: [] } as never);
+    expect(keys.filter((k) => k.from.startsWith('x.md')).map((k) => k.from)).toEqual(['x.md: "## 1. Introduction"', 'x.md: "## 4. After"']);
   });
 });

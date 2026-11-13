@@ -85,6 +85,14 @@ describe('composed skill figures', () => {
   });
 });
 
+describe('checkSteps past a fenced heading', () => {
+  it('reads the checks after a "## " line inside a fence in the Verification section', () => {
+    const wf = loadWorkflows().byId.get('capability_gap_analysis')!;
+    const text = ['## Verification', '', '```markdown', '## Not a section', '```', '', '- [ ] **First**: one', '- [ ] **Second**: two', '', '## Next'].join('\n');
+    expect(checkSteps(wf, text).checks.map((c) => c.title)).toEqual(['First', 'Second']);
+  });
+});
+
 describe('the scorecard figure', () => {
   it('groups the contract scorecard ids by the checklist families, all of them, in checklist order', () => {
     const sc = scorecard('perspective-validation', text('perspective-validation'), SOURCE('perspective-validation'))!;

@@ -5,7 +5,7 @@
 // in its own file.
 import { EDGE_TYPES, loadOntology, type Capability, type EdgeType, type Ontology } from '../data/ontology';
 import { capabilityUsage, loadWorkflows, type CapabilityUse } from '../data/workflows';
-import { sectionFence, sectionOrderedItems, sectionTableByHeader, tableRows } from './md-sections';
+import { codeBlocks, sectionByTitle, sectionFence, sectionLines, sectionOrderedItems, sectionTableByHeader, splitAtHeadings, tableRows } from './md-sections';
 import { capabilitySymbol, contractRows, tableOrder, type SchemaRow } from './views';
 import { andList, plural } from './words';
 
@@ -197,13 +197,12 @@ export interface CompositionChain {
  * with words. Other words are skipped.
  */
 export function compositionChain(skillText: string, ontology: Ontology = loadOntology()): CompositionChain {
-  const lines = skillText.split('\n');
-  const start = lines.findIndex((l) => /^## Composition Patterns\s*$/.test(l));
+  const section = sectionLines(skillText, 'Composition Patterns', 2, 'compositionChain');
   const out: CompositionChain = { follows: [], precedes: [] };
-  if (start === -1) return out;
+  if (section === null) return out;
   let list: keyof CompositionChain | null = null;
-  for (const line of lines.slice(start + 1)) {
-    if (/^#{1,2} /.test(line)) break;
+  for (const { text: line, code } of section) {
+    if (code) continue;
     const label = /^\*\*(.+?):?\*\*:?\s*$/.exec(line.trim());
     if (label) {
       const l = label[1]!.toLowerCase();
@@ -561,32 +560,18 @@ export interface ExampleFields {
  */
 export function exampleFields(skillText: string, where: string): ExampleFields {
   const outputs = skillOutputKeys(skillText, where);
-  const lines = skillText.split('\n');
-  const start = lines.findIndex((l) => /^## Examples\s*$/.test(l));
-  if (start === -1) return { outputs, examples: [] };
-  const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
-  const body = lines.slice(start + 1, end === -1 ? undefined : end);
-  const examples: { title: string; lines: string[] }[] = [];
-  for (const l of body) {
-    const h = /^### (.+)$/.exec(l);
-    if (h) examples.push({ title: h[1]!.trim(), lines: [] });
-    else examples.at(-1)?.lines.push(l);
-  }
-  const fences = (ls: string[]) => {
-    const out: string[] = [];
-    let open = false;
-    for (const l of ls) {
-      if (/^\s*```/.test(l)) open = !open;
-      else if (open) out.push(l);
-    }
-    return out.join('\n');
-  };
+  const section = sectionByTitle(skillText, 'Examples', 2, where);
+  if (section === null) return { outputs, examples: [] };
   return {
     outputs,
-    examples: examples.map((e) => {
-      const code = fences(e.lines);
-      return { title: e.title, shows: outputs.filter((f) => new RegExp(`(?:^|[\\s{,])"?${f}"?\\s*:`, 'm').test(code)) };
-    }),
+    examples: splitAtHeadings(section, 3)
+      .slice(1)
+      .map((e) => {
+        const code = codeBlocks(e.blocks)
+          .map((c) => c.value)
+          .join('\n');
+        return { title: e.title!, shows: outputs.filter((f) => new RegExp(`(?:^|[\\s{,])"?${f}"?\\s*:`, 'm').test(code)) };
+      }),
   };
 }
 
@@ -700,13 +685,8 @@ export interface CheckMap {
 export function verificationMap(skillText: string, where: string): CheckMap {
   const inputs = skillInputNames(skillText, where);
   const outputs = skillOutputKeys(skillText, where);
-  const lines = skillText.split('\n');
-  const start = lines.findIndex((l) => /^## Verification\s*$/.test(l));
-  if (start === -1) return { checks: [], inputs, outputs };
-  const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
-  const items = lines
-    .slice(start + 1, end === -1 ? undefined : end)
-    .flatMap((l) => /^\s*[-*] \[[ xX]\]\s+(.*)$/.exec(l)?.[1] ?? [])
+  const items = (sectionLines(skillText, 'Verification', 2, where) ?? [])
+    .flatMap((l) => (l.code ? [] : (/^\s*[-*] \[[ xX]\]\s+(.*)$/.exec(l.text)?.[1] ?? [])))
     .map((t) => t.replace(/\*\*/g, '').replace(/`/g, '').trim());
   return {
     checks: items.map((text, i) => ({ n: i + 1, text, reads: inputs.filter((f) => names(text, f)), writes: outputs.filter((f) => names(text, f)) })),
@@ -780,27 +760,20 @@ export function inputGroupsCaption(_cap: Capability, g: InputGroups): string {
  * examples that name it.
  */
 export function exampleWorkflows(skillText: string, ids: ReadonlySet<string> = new Set(loadWorkflows().all.map((w) => w.id))): { id: string; examples: number[] }[] {
-  const lines = skillText.split('\n');
-  const start = lines.findIndex((l) => /^## Examples\s*$/.test(l));
-  if (start === -1) return [];
-  const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
+  const section = sectionByTitle(skillText, 'Examples', 2, 'exampleWorkflows');
+  if (section === null) return [];
   const out = new Map<string, number[]>();
-  let ex = 0;
-  let open = false;
-  for (const l of lines.slice(start + 1, end === -1 ? undefined : end)) {
-    if (/^### /.test(l)) ex += 1;
-    if (/^\s*```/.test(l)) {
-      open = !open;
-      continue;
+  // Example 0 holds the code before the first "### " example.
+  splitAtHeadings(section, 3).forEach((e, ex) => {
+    for (const l of codeBlocks(e.blocks).flatMap((c) => c.value.split('\n'))) {
+      const m = /^\s*(?:workflow|workflow_id):\s*"?([a-z_]+)"?\s*$/.exec(l);
+      if (m && ids.has(m[1]!)) {
+        const list = out.get(m[1]!) ?? [];
+        if (!list.includes(ex)) list.push(ex);
+        out.set(m[1]!, list);
+      }
     }
-    if (!open) continue;
-    const m = /^\s*(?:workflow|workflow_id):\s*"?([a-z_]+)"?\s*$/.exec(l);
-    if (m && ids.has(m[1]!)) {
-      const list = out.get(m[1]!) ?? [];
-      if (!list.includes(ex)) list.push(ex);
-      out.set(m[1]!, list);
-    }
-  }
+  });
   return [...out.entries()].map(([id, examples]) => ({ id, examples }));
 }
 

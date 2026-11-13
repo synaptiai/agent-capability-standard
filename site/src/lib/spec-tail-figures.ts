@@ -16,7 +16,7 @@ import { loadOntology } from '../data/ontology';
 import { loadIdentityPolicy, loadTrustModel, RUNTIME_FIXTURE_DIR, type IdentityPolicy } from '../data/spec-sources';
 import { parseCatalog, type Workflow } from '../data/workflows';
 import { readRepoFile, trackedUnder } from './repo';
-import { blockText, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
+import { blockText, codeLines, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
 import { schemaListing } from './views';
 import { andList, plural } from './words';
 
@@ -283,10 +283,15 @@ export function categoryCaption(c: { name: string; count: number }[]): string {
 /** The §5.1 to §5.17 sections: number and the text up to the next §5.x heading (subsections included). */
 function chapter5Sections(text: string): { n: string; title: string; body: string }[] {
   const lines = text.split('\n');
+  const code = codeLines(text);
   const out: { n: string; title: string; body: string }[] = [];
   let cur: { n: string; title: string; body: string } | null = null;
   let in5 = false;
-  for (const l of lines) {
+  for (const [i, l] of lines.entries()) {
+    if (code[i]) {
+      if (in5 && cur) cur.body += `${l}\n`;
+      continue;
+    }
     const h2 = /^## (\d+)\./.exec(l);
     if (h2) {
       in5 = h2[1] === '5';

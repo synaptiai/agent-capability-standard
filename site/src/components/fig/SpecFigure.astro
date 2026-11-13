@@ -33,6 +33,7 @@ import { edgeRects } from '../../pixel/lines';
 import { refSlugger } from '../../lib/generated';
 import { capabilitySymbol } from '../../lib/views';
 import { anchorsOf } from '../../lib/anchors';
+import { codeLines } from '../../lib/md-sections';
 import PixelGlyph from '../../pixel/PixelGlyph.astro';
 import PixelBar from './PixelBar.astro';
 import Rects from './Rects.astro';
@@ -97,8 +98,11 @@ const sectionLink = (sec: string) => {
   return `#${e.slug}`;
 };
 const sectionTitle = (sec: string) => {
-  const m = new RegExp(`^#{2,4} ${sec.replace(/\./g, '\\.')}\\.? (.+)$`, 'm').exec(text);
-  return m ? m[1]!.trim() : '';
+  const code = codeLines(text);
+  const re = new RegExp(`^#{2,4} ${sec.replace(/\./g, '\\.')}\\.? (.+)$`);
+  const lines = text.split('\n');
+  const i = lines.findIndex((l, k) => !code[k] && re.test(l));
+  return i === -1 ? '' : re.exec(lines[i]!)![1]!.trim();
 };
 const chapters = slot === 'requirements' ? D.chapterKeywords(text) : [];
 const kwMax = Math.max(1, ...chapters.flatMap((c) => Object.values(c.counts)));
