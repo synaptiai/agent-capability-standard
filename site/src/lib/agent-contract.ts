@@ -3,13 +3,10 @@
 // /.well-known/ai-catalog.json) and scripts/check-dist.mjs read it. This file
 // has no imports, so the dist check can load it.
 //
-// Some of these are built outside this part of the site: the data API and its
-// OpenAPI description and the developers page (static files), and the MCP
-// server with its server card (served by the Pages function, never a file).
-// PENDING_PATHS lists the static ones: the dist check accepts a link to one of
-// them while no file serves it, so this part builds on its own. FUNCTION_PATHS
-// lists the server card, which the check always accepts. The MCP endpoint
-// itself answers only POST, so llms.txt names it as text and links the card.
+// The MCP server and its server card are served by the site's worker, never
+// as files. FUNCTION_PATHS lists the server card, which the dist check
+// accepts as a link target with no file. The MCP endpoint itself answers only
+// POST, so llms.txt names it as text and links the card.
 
 /** The MCP endpoint (Streamable HTTP, read-only). */
 export const MCP_PATH = '/mcp';
@@ -25,12 +22,6 @@ export const AGENTS_MD_PATH = '/agents.md';
 export const LLMS_MD_PATH = '/llms.md';
 export const LLMS_TXT_PATH = '/llms.txt';
 export const LLMS_FULL_PATH = '/llms-full.txt';
-
-/**
- * Paths other parts of the build produce, which may be missing from a build
- * of this part alone. Remove a path once it is built here.
- */
-export const PENDING_PATHS: readonly string[] = [OPENAPI_PATH, API_INDEX_PATH, DEVELOPERS_PATH, `${DEVELOPERS_PATH}index.md`];
 
 /** Paths that a link may name and the Pages function serves, never a file. */
 export const FUNCTION_PATHS: readonly string[] = [MCP_SERVER_CARD_PATH];

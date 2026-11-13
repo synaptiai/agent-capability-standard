@@ -40,7 +40,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FUNCTION_PATHS, LLMS_TXT_PATH, PENDING_PATHS, ROOT_MARKDOWN, SECTION_LLMS } from '../src/lib/agent-contract.ts';
+import { FUNCTION_PATHS, LLMS_TXT_PATH, ROOT_MARKDOWN, SECTION_LLMS } from '../src/lib/agent-contract.ts';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
 import { REVIEW_DIR } from '../src/lib/review.ts';
 import { stripComments, stripTags } from '../src/lib/strip.ts';
@@ -222,12 +222,11 @@ function isMarkdownWithLinks(f) {
 }
 
 /**
- * True for a link the build of this part of the site cannot resolve on its
- * own: a path served by a function, or one another part of the build
- * produces (agent-contract.ts), while no file in dist serves it.
+ * True for a link no file in dist serves because the worker answers it
+ * (FUNCTION_PATHS in agent-contract.ts).
  */
 export function isAcceptedMissing(urlPath) {
-  return FUNCTION_PATHS.includes(urlPath) || PENDING_PATHS.includes(urlPath);
+  return FUNCTION_PATHS.includes(urlPath);
 }
 
 /**

@@ -78,6 +78,11 @@ export function pageSources(route: Route, routes: readonly Route[] = ROUTES): st
     case 'schemas':
       extra.push(current);
       break;
+    case 'developers':
+      // The page's prose and endpoint table are written in the site's code;
+      // its examples and enums read the ontology, the catalogs and the profiles.
+      extra.push('site/src/lib/developers.ts', 'site/src/lib/api.ts', ONTOLOGY, ...loadWorkflows().all.map((w) => w.source), ...loadProfiles().map((p) => p.profileFile));
+      break;
     default:
       break;
   }
