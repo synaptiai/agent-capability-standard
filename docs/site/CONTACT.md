@@ -1,8 +1,9 @@
 # Contact
 
 The Agent Capability Standard is developed in public on GitHub, and that is
-the one place to reach the people who maintain it. There is no email address,
-phone number or contact form for the site.
+where to reach the people who maintain it. There is no phone number or
+contact form for the site, and apart from security reports (below) all
+contact goes through GitHub.
 
 ## Questions, mistakes and proposals
 
@@ -20,8 +21,9 @@ phone number or contact form for the site.
 
 ## Security issues
 
-Do not report a security vulnerability in a public issue. Follow the
-responsible disclosure process in the [security model](../../spec/SECURITY.md#7-responsible-disclosure).
+Do not report a security vulnerability in a public issue. Report it
+privately, as the responsible disclosure process in the
+[security model](../../spec/SECURITY.md#7-responsible-disclosure) describes.
 
 ## Conduct
 

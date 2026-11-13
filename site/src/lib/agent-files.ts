@@ -115,7 +115,7 @@ export function agentLinks(): string[] {
   return [
     `- [Guide for agents](${o}${AGENTS_MD_PATH}): how to read this site as Markdown, query its data and use its skills.`,
     `- [Data API](${o}${OPENAPI_PATH}): the OpenAPI 3.1 description of a read-only JSON API under ${o}/api/v1/ (GET only, no key); start at [the API index](${o}${API_INDEX_PATH}).`,
-    `- [MCP server](${o}${MCP_PATH}): a read-only MCP server over Streamable HTTP that searches and reads the standard; its [server card](${o}${MCP_SERVER_CARD_PATH}).`,
+    `- [MCP server card](${o}${MCP_SERVER_CARD_PATH}): a read-only MCP server that searches and reads the standard, at \`${o}${MCP_PATH}\` (Streamable HTTP; send JSON-RPC with POST).`,
     `- [Developers](${o}${DEVELOPERS_PATH}index.md): the API, the MCP server and the Markdown copies on one page.`,
     `- [Agent skills index](${o}${AGENT_SKILLS_INDEX_PATH}): every skill of the Claude Code plugin as a SKILL.md file, with its SHA-256 digest.`,
     `- [Resource catalog](${o}${ARD_PATH}): the agent resources above in Agentic Resource Discovery form (also at ${o}${AI_CATALOG_PATH}).`,
@@ -205,7 +205,7 @@ export function agentsMd(): string {
     '',
     '## Report a problem',
     '',
-    `Open an issue at ${githubIssuesUrl()}. There is no other contact channel.`,
+    `Open an issue at ${githubIssuesUrl()}. A security vulnerability is the exception: report it privately, as the [security model](${mdUrl('/spec/security/')}) describes.`,
   ].join('\n')}\n`;
 }
 

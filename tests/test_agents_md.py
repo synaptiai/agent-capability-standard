@@ -30,12 +30,17 @@ def _normalise(text: str) -> str:
 
 
 def test_agents_md_commands_come_from_claude_md_or_ci() -> None:
-    sources = [ROOT / "CLAUDE.md", *sorted((ROOT / ".github" / "workflows").glob("*.yml"))]
+    sources = [
+        ROOT / "CLAUDE.md",
+        *sorted((ROOT / ".github" / "workflows").glob("*.yml")),
+    ]
     haystack = "\n".join(_normalise(p.read_text(encoding="utf-8")) for p in sources)
     commands = _fenced_lines((ROOT / "AGENTS.md").read_text(encoding="utf-8"))
     assert commands, "AGENTS.md has no fenced commands"
     missing = [c for c in commands if _normalise(c) not in haystack]
-    assert missing == [], f"AGENTS.md commands found in neither CLAUDE.md nor CI: {missing}"
+    assert missing == [], (
+        f"AGENTS.md commands found in neither CLAUDE.md nor CI: {missing}"
+    )
 
 
 def test_agents_md_links_claude_md() -> None:

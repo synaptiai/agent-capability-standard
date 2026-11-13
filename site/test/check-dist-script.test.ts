@@ -136,7 +136,7 @@ describe('check-dist.mjs', () => {
 
   it('accepts a link to a path another part of the build serves, and to /agents.md, but not to another missing file', () => {
     const s = cleanSite();
-    s['llms.txt'] += `- [MCP](${O}/mcp)\n- [API](${O}/openapi.json)\n- [Developers](${O}/developers/index.md)\n- [Agents](${O}/agents.md)\n- [Other](${O}/other.json)\n`;
+    s['llms.txt'] += `- [MCP](${O}/.well-known/mcp/server-card.json)\n- [API](${O}/openapi.json)\n- [Developers](${O}/developers/index.md)\n- [Agents](${O}/agents.md)\n- [Other](${O}/other.json)\n`;
     s['agents.md'] = `# Agents\n\n[Home](${O}/index.md) and [missing](${O}/gone/)\n`;
     expect(problems(s)).toEqual([
       `[links] /agents.md: ${O}/gone/ does not resolve to a file in dist`,

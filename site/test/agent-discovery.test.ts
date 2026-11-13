@@ -159,7 +159,8 @@ describe('home page metadata', () => {
 describe('resource catalogs', () => {
   // The identifier pattern of ard-entry.schema.json and ai-catalog.schema.json.
   const URN = /^urn:air:[a-zA-Z0-9.-]+(:[a-zA-Z0-9._-]+)+$/;
-  const PENDING = ['/openapi.json', '/.well-known/mcp/server-card.json', '/developers/index.md'];
+  // Built by other parts of the site (the API) or served by the Pages function (the server card).
+  const ELSEWHERE = ['/openapi.json', '/.well-known/mcp/server-card.json', '/developers/index.md'];
 
   for (const file of ['.well-known/ard.json', '.well-known/ai-catalog.json']) {
     it(`${file}: every entry has a domain-anchored urn:air id, a name, a media type and exactly one of url or data`, () => {
@@ -179,7 +180,7 @@ describe('resource catalogs', () => {
         expect(q.length).toBeGreaterThanOrEqual(2);
         expect(q.length).toBeLessThanOrEqual(5);
         const p = String(e.url).slice(ORIGIN.length);
-        if (!PENDING.includes(p)) expect(existsSync(path.join(dist, p)), p).toBe(true);
+        if (!ELSEWHERE.includes(p)) expect(existsSync(path.join(dist, p)), p).toBe(true);
       }
     });
   }
@@ -239,11 +240,21 @@ describe('about, contact and privacy pages', () => {
     }
   });
 
-  it('match the built site on the privacy page claims: no cookies, no script from another origin', () => {
-    const pages = copyDirs().map((d) => read(`${d.slice(1)}index.html`));
-    for (const html of pages) {
-      expect(html).not.toMatch(/document\.cookie/);
-      for (const m of html.matchAll(/<script\b[^>]*\ssrc="([^"]+)"/g)) expect(m[1]!.startsWith('/')).toBe(true);
+  it('match the built site on the privacy page claims: no cookies, nothing loaded from another site but the overview badges', () => {
+    const offsite: string[] = [];
+    for (const d of copyDirs()) {
+      const html = read(`${d.slice(1)}index.html`);
+      expect(html, d).not.toMatch(/document\.cookie/);
+      for (const m of html.matchAll(/<script\b[^>]*\ssrc="([^"]+)"/g)) expect(m[1]!.startsWith('/'), d).toBe(true);
+      // Elements that load a resource: src on any element, href on <link> other than canonical and alternate.
+      for (const m of html.matchAll(/<[a-z]+\b[^>]*\ssrc="((?:https?:)?\/\/[^"]+)"/g)) offsite.push(`${d} ${new URL(m[1]!, ORIGIN).host}`);
+      for (const m of html.matchAll(/<link\b(?![^>]*rel="(?:canonical|alternate)")[^>]*\shref="((?:https?:)?\/\/[^"]+)"/g)) offsite.push(`${d} ${new URL(m[1]!, ORIGIN).host}`);
     }
+    expect([...new Set(offsite)]).toEqual(['/start/overview/ img.shields.io']);
+    for (const f of readdirSync(path.join(dist, '_astro')).filter((x) => x.endsWith('.css'))) {
+      expect(read(`_astro/${f}`), f).not.toMatch(/url\(\s*["']?(?:https?:)?\/\/|@import/);
+    }
+    // The privacy page names the badges' host.
+    expect(read('privacy/index.html')).toContain('img.shields.io');
   });
 });
