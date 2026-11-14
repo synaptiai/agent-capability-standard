@@ -96,3 +96,42 @@ built pages with the references the user named: how often a visual appears,
 what kinds, how much space. Show the user a few exemplar pages before
 building the rest. Passing checks say the page works, not that it meets the
 brief.
+
+## "Figure out if and how" two standards fit means doing the mapping
+
+**What happened.** Asked whether and how the Standard Agent Specification and
+this standard could work together, I read about half of their specification
+through summaries, answered with a one-screen verdict and offered to draft the
+mapping. The user's reply: do it thoroughly, write the integration document,
+show a grounded agent built on their standard, and prepare upstream issues.
+
+**Rule.** For a public interoperability question, the answer is the work:
+read both specifications from source (clone the repository, read the
+published types), map them concern by concern with citations, build the
+smallest thing that proves the combination works, and write it up. Give the
+short verdict as the summary of that work, not in place of it. Say up front
+what cannot be done from the session (for example filing issues in a
+repository it cannot write to) and prepare it for the user instead.
+
+## Keep the documents under review out of the corpus they are checked against
+
+**What happened.** A script checked that every quotation in the integration
+document occurs in the source repositories. The corpus globbed `docs/**`, so
+it included the document itself and every quotation passed. Excluding the
+document exposed five quotations with a changed capital letter or added
+emphasis.
+
+**Rule.** When a check compares a text with its sources, build the source
+set first and assert the text under review is not in it. Then prove the check
+can fail, with a deliberately wrong input, before trusting a clean run.
+
+## Do not fan out more agents than the usage budget can finish
+
+**What happened.** The mapping ran as ten mappers, twenty reviewers and ten
+reconcilers. The mappers used most of the budget; the limit arrived while the
+reviewers ran, so seven concerns were never reviewed and none was reconciled.
+
+**Rule.** Size a multi-stage workflow so the later stages are certain to run:
+fewer, narrower first-stage agents, or run verification on the first
+concern end to end before starting the rest. Unreviewed output is working
+material, not a deliverable; do not publish it.

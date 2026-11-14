@@ -1,3 +1,60 @@
+# Standard Agent Specification interoperability
+
+Branch `claude/gallant-hypatia-wbucn3`. Request: map the Agent Capability
+Standard against the Standard Agent Specification v0.2.0
+(standardagentspec.org, github.com/standardagents/spec at `faccc8b`), say how
+each can improve and how they combine, show a grounded agent built on their
+standard, write the integration document, and prepare upstream issues.
+
+- [x] 1. Read both specifications from source: their `content/0.2.0/` and the
+      published `@standardagents/spec` types (0.45.10); our STANDARD v1.1.0,
+      ontology, RFCs, executor and SDK
+- [ ] 2. Map by concern (ten concerns), each mapping checked by a citation
+      reviewer and an implementability reviewer, then a completeness critic.
+      **Partly done:** all ten mapped (249 rows); citation review finished for
+      three (approval, checkpoints and state, composition); the other reviews,
+      the reconciliation and the critic did not run (usage limit)
+- [x] 3. Design the binding: annotation contract, in-tool enforcement,
+      checkpoint and approval records, evidence, workflow hosting
+- [x] 4. Reference binding and worked example in TypeScript
+      (`examples/standard_agents/`), type-checked against their published
+      types and tested against an in-memory thread
+- [x] 5. Integration document `docs/integrations/standard_agents.md` with a
+      site route; annotation schema under `schemas/interop/`
+- [x] 6. Upstream proposals in their house format, product-neutral
+      (`tasks/standard-agents-upstream/`). **Not filed:** this session has no
+      write access to `standardagents/spec`
+- [x] 7. Review: every quotation re-checked mechanically against the source;
+      repository validators, site build and tests pass
+- [x] 8. Review section below
+
+## Review
+
+**Delivered.** The integration document; a reference binding
+(`groundedTool`, approval records and endpoints, audit hook, prompt check)
+with 37 tests; the annotation schema; a generator with `--check` for the
+files the binding takes from the ontology and the executor; a CI job; six
+upstream proposals.
+
+**Checked.** Every quoted passage in the document and the proposals matches
+its source, markup included (a script compared them with both repositories).
+Statements about what Standard Agents requires were checked by hand against
+the page cited. The binding compiles against `@standardagents/spec` 0.45.10
+under strict TypeScript; breaking the approval rule or the checkpoint rule
+makes its tests fail; its approval digest equals the reference executor's on
+ten vectors. Python suite, site check, site tests and site build pass.
+
+**Not done.**
+- Upstream issues are drafted, not filed.
+- The example has not run in a Standard Agents runtime.
+- Seven of the ten concern mappings had no second reading, so the row-level
+  mapping (249 rows) is not published. To finish: run the citation and
+  implementability reviews for the remaining concerns, reconcile, then
+  publish the rows as `schemas/interop/standard_agents_mapping.yaml`.
+- Found on our side and not fixed here: `ToolCapabilityMapper.register_mcp_tool`
+  accepts a declared risk below the ontology's (`mutate` with `risk="low"`
+  needs no checkpoint) and an unknown capability id, against STANDARD §5.2.1.
+
 # Issue #120: documentation site
 
 Epic: https://github.com/synaptiai/agent-capability-standard/issues/120
