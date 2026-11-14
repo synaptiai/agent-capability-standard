@@ -12,8 +12,9 @@ standard, write the integration document, and prepare upstream issues.
 - [ ] 2. Map by concern (ten concerns), each mapping checked by a citation
       reviewer and an implementability reviewer, then a completeness critic.
       **Partly done:** all ten mapped (249 rows); citation review finished for
-      three (approval, checkpoints and state, composition); the other reviews,
-      the reconciliation and the critic did not run (usage limit)
+      three (approval, checkpoints and state, composition); two were
+      reconciled (composition with both reviews, approval with the citation
+      review); the other reviews and the critic did not run (usage limit)
 - [x] 3. Design the binding: annotation contract, in-tool enforcement,
       checkpoint and approval records, evidence, workflow hosting
 - [x] 4. Reference binding and worked example in TypeScript
@@ -47,10 +48,11 @@ ten vectors. Python suite, site check, site tests and site build pass.
 **Not done.**
 - Upstream issues are drafted, not filed.
 - The example has not run in a Standard Agents runtime.
-- Seven of the ten concern mappings had no second reading, so the row-level
-  mapping (249 rows) is not published. To finish: run the citation and
-  implementability reviews for the remaining concerns, reconcile, then
-  publish the rows as `schemas/interop/standard_agents_mapping.yaml`.
+- Seven of the ten concern mappings had no second reading and only two are
+  reconciled, so the row-level mapping (249 rows) is not published. To finish:
+  run the citation and implementability reviews for the remaining concerns,
+  reconcile, then publish the rows as
+  `schemas/interop/standard_agents_mapping.yaml`.
 - Found on our side and not fixed here: `ToolCapabilityMapper.register_mcp_tool`
   accepts a declared risk below the ontology's (`mutate` with `risk="low"`
   needs no checkpoint) and an unknown capability id, against STANDARD §5.2.1.

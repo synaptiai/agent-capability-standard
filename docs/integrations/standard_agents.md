@@ -547,8 +547,10 @@ things follow.
   that a parent can read says whether it mutates. `subagent_create` is
   injected by the runtime and has no `execute` to wrap. A parent that wants to
   gate a delegation has to spawn the child from its own code, a grounded tool
-  or a handler, with the relationship `hidden` so that the model is not offered
-  the injected tool. The text does not yet say how code names that call.
+  or a handler, with every relationship on that side `hidden`. The rule is
+  "For a prompt-backed side with non-hidden relationships, runtimes inject
+  three built-in tools", so one visible relationship brings them back. The
+  text does not yet say how code names that call.
 - **A child can require its audit hook of its parent.** `parentHooks` lets an
   exposed child name hooks that the composing agent must run, and a missing
   one "**MUST** fail composition closed". A grounded child can use this so
