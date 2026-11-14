@@ -5,8 +5,12 @@
  * what the approver must see under the digest of those values. A person then
  * decides through an authenticated thread endpoint, which calls
  * `decideApproval` with the caller the runtime authenticated. No model sits
- * between the person and the record: the model cannot call an HTTP endpoint,
- * and the endpoint never reads model output.
+ * between the caller and the record: the endpoint never reads model output.
+ *
+ * The runtime authenticates a caller; it does not say that the caller is a
+ * person. A deployment has to keep every credential the runtime accepts out
+ * of reach of the agent's tools, or a tool that can make HTTP requests could
+ * decide its own request.
  */
 import type { ThreadUser } from '@standardagents/spec';
 import { digest as digestOf, type Json } from './canonical.js';

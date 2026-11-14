@@ -123,7 +123,12 @@ export interface TraceEntry {
   /** `null` for a tool call the audit hook saw that no grounded tool recorded. */
   capability: CapabilityId | null;
   domain?: string;
-  status: 'executed' | 'failed' | 'refused';
+  /**
+   * `started` is written before the tool's own code runs and replaced when
+   * it returns, so an entry that stays `started` is a call that was cut off
+   * (an aborted execution, a lost process) after it may have acted.
+   */
+  status: 'started' | 'executed' | 'failed' | 'refused';
   /** SHA-256 of the canonical JSON of the arguments; absent for an unclassified call. */
   args_digest?: string;
   /** Why the call was refused. */
@@ -149,21 +154,32 @@ export async function appendTrace(store: Store, entry: Omit<TraceEntry, 'seq'>):
   const stored: TraceEntry = { seq, ...entry };
   await store.setValue(KEYS.trace(seq), stored);
   await store.setValue(KEYS.traceCount, seq);
-  if (stored.capability !== null && stored.status === 'executed') {
-    const executed = await readExecuted(store);
-    executed[stored.capability] = (executed[stored.capability] ?? 0) + 1;
-    await store.setValue(KEYS.executed, executed);
-  }
   if (stored.capability !== null && stored.tool_call_id === undefined) {
     const unlinked = (await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? [];
     await store.setValue(KEYS.unlinked, [...unlinked, { seq, action: stored.action }]);
   }
+  await countExecuted(store, stored);
   return stored;
 }
 
-/** The sequence number the next trace entry will get. */
-export async function nextSeq(store: Store): Promise<number> {
-  return ((await store.getValue<number>(KEYS.traceCount)) ?? 0) + 1;
+/** Replace a `started` entry with what became of the call. */
+export async function completeTrace(
+  store: Store,
+  started: TraceEntry,
+  outcome: Pick<TraceEntry, 'at' | 'status'> & Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>,
+): Promise<TraceEntry> {
+  const stored: TraceEntry = { ...started, ...outcome };
+  await store.setValue(KEYS.trace(stored.seq), stored);
+  await countExecuted(store, stored);
+  return stored;
+}
+
+/** Count an executed capability: what `requires` edges read. */
+async function countExecuted(store: Store, stored: TraceEntry): Promise<void> {
+  if (stored.capability === null || stored.status !== 'executed') return;
+  const executed = await readExecuted(store);
+  executed[stored.capability] = (executed[stored.capability] ?? 0) + 1;
+  await store.setValue(KEYS.executed, executed);
 }
 
 /** How many times each capability has executed in this thread. */

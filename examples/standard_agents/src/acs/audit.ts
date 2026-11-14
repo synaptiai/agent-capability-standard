@@ -9,6 +9,10 @@
  * recorded. Matching is by tool name, oldest first, which is right because a
  * runtime executes tool calls "sequentially in the order they were returned"
  * (Tools, Conformance Notes).
+ *
+ * An entry still `started` belongs to a call that was cut off while its tool
+ * ran. A finished entry of the same tool is matched before it, and it then
+ * stops waiting, so a cut-off call never takes the id of a later one.
  */
 import type { HookToolCall, HookToolResult } from '@standardagents/spec';
 import { KEYS, appendTrace, type Store, type TraceEntry, type Unlinked } from './records.js';
@@ -22,18 +26,31 @@ export async function recordToolCall(
 ): Promise<TraceEntry> {
   const name = toolCall.function.name;
   const unlinked = (await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? [];
-  const match = unlinked.find((u) => u.action === name);
+  const cutOff: Unlinked[] = [];
+  let match: { waiting: Unlinked; entry: TraceEntry } | undefined;
+  for (const waiting of unlinked.filter((u) => u.action === name)) {
+    const entry = await store.getValue<TraceEntry>(KEYS.trace(waiting.seq));
+    if (entry && entry.status !== 'started') {
+      match = { waiting, entry };
+      break;
+    }
+    cutOff.push(waiting);
+  }
+  // With no finished entry, the call that is done is itself a cut-off one.
+  const oldest = cutOff[0];
+  if (!match && oldest) {
+    const entry = await store.getValue<TraceEntry>(KEYS.trace(oldest.seq));
+    if (entry) match = { waiting: oldest, entry };
+  }
   if (match) {
-    const entry = await store.getValue<TraceEntry>(KEYS.trace(match.seq));
+    const settled = new Set<Unlinked>([match.waiting, ...cutOff.filter((u) => u.seq < match.waiting.seq)]);
     await store.setValue(
       KEYS.unlinked,
-      unlinked.filter((u) => u !== match),
+      unlinked.filter((u) => !settled.has(u)),
     );
-    if (entry) {
-      const linked: TraceEntry = { ...entry, tool_call_id: toolCall.id };
-      await store.setValue(KEYS.trace(match.seq), linked);
-      return linked;
-    }
+    const linked: TraceEntry = { ...match.entry, tool_call_id: toolCall.id };
+    await store.setValue(KEYS.trace(linked.seq), linked);
+    return linked;
   }
   return appendTrace(store, {
     at: now,

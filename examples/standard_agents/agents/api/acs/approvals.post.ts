@@ -16,8 +16,9 @@ const STATUS: Record<ApprovalError['reason'], number> = {
 };
 
 // A person decides an approval request here. The runtime authenticates the
-// request before this code runs, so `auth.caller` is who decided; the model
-// has no way to call this.
+// request before this code runs, so `auth.caller` is who decided. A model can
+// reach this only through a tool that holds a credential the runtime accepts,
+// which a deployment must not give it.
 export default defineThreadEndpoint(async (req, state, _params, auth) => {
   if (auth.caller === null) {
     return Response.json({ error: 'An approval needs an authenticated caller' }, { status: 401 });

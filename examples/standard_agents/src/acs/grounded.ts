@@ -48,8 +48,8 @@ import {
   CODE_NAMES,
   KEYS,
   appendTrace,
+  completeTrace,
   flowOf,
-  nextSeq,
   readCheckpoints,
   readExecuted,
   type CheckpointRecord,
@@ -265,16 +265,20 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       );
     }
 
-    // 4. Run, check the output contract, record.
-    const used = {
+    // 4. Record that the call is starting, run, check the output contract,
+    // record the outcome. The entry is written first so that a call cut off
+    // while the tool's code runs still leaves a record of what it used.
+    const started = await appendTrace(state, {
+      ...base,
       ...(checkpointId !== undefined ? { checkpoint_id: checkpointId } : {}),
       ...(approvalUse !== undefined ? { approval: approvalUse } : {}),
-    };
-    const seq = await nextSeq(state);
+      at: now(),
+      status: 'started',
+    });
     let output: CapabilityOutput<C>;
     try {
       output = await options.execute(state, args, {
-        seq,
+        seq: started.seq,
         ...(checkpointId !== undefined ? { checkpoint_id: checkpointId } : {}),
         ...(approvers !== undefined ? { approvers } : {}),
       });
@@ -284,14 +288,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      await appendTrace(state, { ...base, ...used, at: now(), status: 'failed', error: message });
+      await completeTrace(state, started, { at: now(), status: 'failed', error: message });
       return { status: 'error', error: message };
     }
 
     const anchors = output['evidence_anchors'];
-    const entry = await appendTrace(state, {
-      ...base,
-      ...used,
+    const entry = await completeTrace(state, started, {
       at: now(),
       status: 'executed',
       ...(Array.isArray(anchors) ? { evidence_anchors: anchors } : {}),

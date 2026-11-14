@@ -1,6 +1,6 @@
 import { validateAgentDefinition, type HookToolCall, type PackedExports, type ToolResult } from '@standardagents/spec';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import approvalsGet from '../agents/api/acs/approvals.get.js';
 import approvalsPost from '../agents/api/acs/approvals.post.js';
@@ -40,6 +40,11 @@ function data(result: ToolResult): Record<string, unknown> {
 function digestOf(result: ToolResult): string {
   expect(result.error_code).toBe('F502');
   return result.error_data?.['digest'] as string;
+}
+
+/** Wait until a call that will never return has written its `started` entry. */
+async function started(t: MemoryThread): Promise<void> {
+  await vi.waitFor(async () => expect((await readTrace(t.state)).at(-1)?.status).toBe('started'));
 }
 
 async function post(t: MemoryThread, caller: ReturnType<typeof user> | null, body: unknown): Promise<Response> {
@@ -323,6 +328,68 @@ describe('evidence and audit trail', () => {
     expect(trace[4]).toMatchObject({ checkpoint_id: cp['checkpoint_id'], approval: { approvers: ['alice'] } });
     expect(trace[4]?.evidence_anchors).toHaveLength(2);
     expect(trace[0]?.args_digest).toBe(await digest({}));
+  });
+
+  it('leaves a started entry for a call that is cut off while it runs', async () => {
+    // A tool whose own code never returns stands for an execution that is
+    // aborted, or a process that is lost, after the tool may have acted.
+    const hangs = groundedTool({
+      name: 'send_report',
+      capability: 'send',
+      description: 'x',
+      args: z.object({ to: z.string() }),
+      execute: () => new Promise<never>(() => {}),
+    });
+    const t = thread();
+    const call = (id: string): HookToolCall => ({ id, type: 'function', function: { name: 'send_report', arguments: '{}' } });
+    const context = { source: { kind: 'prompt', promptName: 'config_steward' } } as const;
+
+    const refused = await hangs.execute(t.state, { to: 'ops' });
+    await auditHook.execute(t.state, call('call_1'), { status: 'error' }, context);
+    await decideApproval(t.state, user('alice'), digestOf(refused), 'approved', Date.now());
+    const cp = data(await checkpointConfig.execute(t.state, { label: 'before send' }));
+    void hangs.execute(t.state, { to: 'ops' });
+    await started(t);
+
+    expect((await readTrace(t.state)).at(-1)).toMatchObject({
+      seq: 3,
+      action: 'send_report',
+      status: 'started',
+      checkpoint_id: cp['checkpoint_id'],
+      approval: { approvers: ['alice'] },
+    });
+
+    // A later call to the same tool finishes (refused: the approval is used).
+    // Its call id goes to its own entry, not to the one that was cut off.
+    await hangs.execute(t.state, { to: 'ops' });
+    await auditHook.execute(t.state, call('call_3'), { status: 'error' }, context);
+    const trace = await readTrace(t.state);
+    expect(trace.map((e) => [e.seq, e.status, e.tool_call_id ?? null])).toEqual([
+      [1, 'refused', 'call_1'],
+      [2, 'executed', null],
+      [3, 'started', null],
+      [4, 'refused', 'call_3'],
+    ]);
+  });
+
+  it('gives a cut-off call its id when the runtime reports it done', async () => {
+    const hangs = groundedTool({
+      name: 'observe_forever',
+      capability: 'observe',
+      description: 'x',
+      args: z.object({}),
+      execute: () => new Promise<never>(() => {}),
+    });
+    const t = thread();
+    void hangs.execute(t.state, {});
+    await started(t);
+    await auditHook.execute(
+      t.state,
+      { id: 'call_1', type: 'function', function: { name: 'observe_forever', arguments: '{}' } },
+      { status: 'error', error: 'aborted' },
+      { source: { kind: 'prompt', promptName: 'config_steward' } },
+    );
+    expect(await readTrace(t.state)).toEqual([expect.objectContaining({ seq: 1, status: 'started', tool_call_id: 'call_1' })]);
   });
 
   it('restores the checkpointed document on rollback', async () => {
