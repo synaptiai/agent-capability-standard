@@ -9,12 +9,11 @@ standard, write the integration document, and prepare upstream issues.
 - [x] 1. Read both specifications from source: their `content/0.2.0/` and the
       published `@standardagents/spec` types (0.45.10); our STANDARD v1.1.0,
       ontology, RFCs, executor and SDK
-- [ ] 2. Map by concern (ten concerns), each mapping checked by a citation
-      reviewer and an implementability reviewer, then a completeness critic.
-      **Partly done:** all ten mapped (249 rows); citation review finished for
-      three (approval, checkpoints and state, composition); two were
-      reconciled (composition with both reviews, approval with the citation
-      review); the other reviews and the critic did not run (usage limit)
+- [x] 2. Map by concern (ten concerns). Each mapping read by a citation
+      reviewer and an implementability reviewer and reconciled with both;
+      then a consistency check across concerns, a coverage check of both
+      standards, and one merged, re-verified findings list per standard.
+      319 rows, published in `docs/research/analysis/standard_agents_mapping/`
 - [x] 3. Design the binding: annotation contract, in-tool enforcement,
       checkpoint and approval records, evidence, workflow hosting
 - [x] 4. Reference binding and worked example in TypeScript
@@ -31,29 +30,45 @@ standard, write the integration document, and prepare upstream issues.
 
 ## Review
 
-**Delivered.** The integration document; a reference binding
-(`groundedTool`, approval records and endpoints, audit hook, prompt check)
-with 37 tests; the annotation schema; a generator with `--check` for the
-files the binding takes from the ontology and the executor; a CI job; six
-upstream proposals.
+**Delivered.**
+- `docs/integrations/standard_agents.md`: the mapping in eight tables, how to
+  build a grounded agent on Standard Agents today, what it guarantees and
+  what it does not, and the changes proposed to each standard.
+- `docs/research/analysis/standard_agents_mapping/`: 319 rows in ten files,
+  each with references and verbatim quotes from both sides; 83 findings about
+  the Standard Agent Specification and 64 about ACS; an index. A test keeps
+  them well formed.
+- `examples/standard_agents/`: the reference binding (`groundedTool`,
+  approval records and endpoints, audit hook, prompt and agent checks) with
+  43 tests, the annotation schema, a generator with `--check`, a CI job.
+- `tasks/standard-agents-upstream/`: six issue texts for `standardagents/spec`.
 
-**Checked.** Every quoted passage in the document and the proposals matches
-its source, markup included (a script compared them with both repositories).
-Statements about what Standard Agents requires were checked by hand against
-the page cited. The binding compiles against `@standardagents/spec` 0.45.10
-under strict TypeScript; breaking the approval rule or the checkpoint rule
-makes its tests fail; its approval digest equals the reference executor's on
-ten vectors. Python suite, site check, site tests and site build pass.
+**Checked.**
+- Each of the ten mappings had two independent reviews (citations;
+  implementability) and a reconciliation. A consistency check across concerns
+  changed the text of 43 rows and the relation of 16; a coverage check of
+  every section of both standards added two rows.
+- Every quotation in the rows, the findings, the document and the proposals
+  is compared mechanically with the source trees (the documents under review
+  excluded).
+- A separate fact-check of the document and the proposals confirmed 340
+  statements and found 6 errors, 18 imprecise statements and 11 omissions,
+  all corrected.
+- The binding compiles against `@standardagents/spec` 0.45.10 under strict
+  TypeScript; its approval digest equals the reference executor's on ten
+  vectors. The mapping changed three of its rules: a rejection cannot be lost
+  to a simultaneous approval (a test showed the old code lost it), a call is
+  recorded before its tool runs, and a checkpoint is valid for ten minutes at
+  most and never outside an execution.
+- Python suite, validators, site check, site tests and site build pass.
 
 **Not done.**
-- Upstream issues are drafted, not filed.
+- Upstream issues are drafted, not filed: this session has no write access to
+  `standardagents/spec`. File 06 first, then 01.
 - The example has not run in a Standard Agents runtime.
-- Seven of the ten concern mappings had no second reading and only two are
-  reconciled, so the row-level mapping (249 rows) is not published. To finish:
-  run the citation and implementability reviews for the remaining concerns,
-  reconcile, then publish the rows as
-  `schemas/interop/standard_agents_mapping.yaml`.
-- Found on our side and not fixed here: `ToolCapabilityMapper.register_mcp_tool`
+- Found on our side and not fixed here (the full list is
+  `findings_agent_capability_standard.yaml`; seven are rated blocker). The
+  one code defect among them: `ToolCapabilityMapper.register_mcp_tool`
   accepts a declared risk below the ontology's (`mutate` with `risk="low"`
   needs no checkpoint) and an unknown capability id, against STANDARD §5.2.1.
 

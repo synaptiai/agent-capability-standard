@@ -1,0 +1,1671 @@
+# The published TypeScript API as a binding surface
+# Part of the Standard Agent Specification mapping; index.yaml explains the fields.
+concern: published-api-extension-points
+title: The published TypeScript API as a binding surface
+rows:
+- id: tools-01
+  relation: partial
+  acs:
+    concept: 'Capability-typed tool: one tool call is one use of one ontology capability, the unit that
+      is classified and on which a safety layer acts'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (lines 109-127)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 270-284)
+    quote: Validators, executors and safety layers MUST act on effective flags.
+  sa:
+    concept: defineTool() / DefineToolOptions / ToolDefinition
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 644 (defineTool), lines 421-517 (DefineToolOptions),
+      lines 529-575 (ToolDefinition), lines 263-282 (ToolArgs), line 640 (comment on tool names)'
+    - content/0.2.0/specification/tools.md §2 Function Tool Definition (lines 15-34), §8 Annotations (line
+      144), §9 Conformance Notes (lines 148-156)
+    - '@standardagents/spec 0.45.10 index.js lines 145-165 (defineTool; implementation observation)'
+    quote: 'declare function defineTool<State = ThreadState, Args extends ToolArgs | null = null, Tenvs
+      extends ToolTenvs | null = null, Uses extends readonly string[] = readonly string[]>(options: DefineToolOptions<State,
+      Args, Tenvs, Uses>): ToolDefinition<State, Args, Tenvs, Uses>;'
+  explanation: 'DefineToolOptions has ten members: description, annotations, args, execute, variables,
+    tenvs (deprecated), executionMode, executionProvider, uses, progressArgument. None expresses a capability
+    id, layer, risk, mutation or an output schema. STANDARD §4.1 requires id, layer, description and both
+    schemas of a capability and gives risk and mutation defaults. The text says less than the types: tools.md
+    has no TypeScript reference, and executionMode, executionProvider, tenvs and the definition of ToolArgs
+    are not found in content/0.2.0. A tool definition carries no name: the published defineTool returns
+    ten fixed keys, none a name, and drops other option keys (observed by running 0.45.10), and the text
+    states no naming rule for function tools (see the Standard Agent Specification findings). Searched:
+    executionMode, executionProvider, tenvs, ToolArgsNode, file-based, filename, tool name.'
+  combined: 'A helper `groundedTool(toolName, capabilityId, options)` calls `defineTool`, adds the annotation
+    (row tools-02) and replaces `execute` with a wrapper (row tools-04); it type-checks under strict settings
+    with two casts, and call sites keep inference. The tool name is passed explicitly because the definition
+    has none; a lint compares it with the file name or the PackedExports.tools key. One capability per
+    tool. The claim is limited: the effective flags of the declared capability are enforced on every call
+    that reaches this `execute`, and the output is checked at run time for the capability''s required
+    fields; the capability''s input contract is not checked, because `args` is the author''s own schema.
+    Tier 1 (the tiers are defined in row drift-01).'
+  see_also:
+  - tools-contracts#cls-01
+- id: tools-02
+  relation: fits
+  acs:
+    concept: 'Classification record of a tool: capability id, layer, risk, mutation, requires_checkpoint,
+      requires_approval'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (lines 113-124)
+    - schemas/capability_ontology.yaml mutate (lines 1095-1101)
+    quote: '| `requires_checkpoint` | boolean | No | A checkpoint must precede each use (default false)
+      |'
+  sa:
+    concept: 'ToolAnnotations: the `annotations` member of DefineToolOptions and ToolDefinition'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 412, 424 and 532'
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 123-146), §9 Conformance Notes (line
+      156)
+    - content/0.2.0/distribution/packaging.md 'PackedExports Interface' (lines 121-147)
+    quote: 'A function tool **MAY** declare `annotations`: an object of implementation-specific hints,
+      keyed by the runtime or tool that reads them.'
+  explanation: '`annotations` is the only pass-through slot on a tool definition. The text says more than
+    the types: the types give `type ToolAnnotations = Record<string, unknown>;` with no comment; tools.md
+    §8 adds four rules (non-normative; defineTool MUST return it unchanged; a runtime MAY read keys it
+    understands and MUST ignore others; annotations MUST NOT change validation, execution, results or
+    model input). Any owner may define a key (''their meaning belongs to whoever owns the key''); what
+    is absent is a naming or collision rule. Values are `unknown`, so typed access needs a runtime check
+    (TS2571 without one, tsc 6.0.3), and the alias cannot be narrowed by declaration merging. No ThreadState
+    member returns a tool definition; a definition is reachable through the PackedExports.tools loaders
+    or a direct import. Searched: loadTool, getToolNames.'
+  combined: 'Generate one literal per capability from the ontology, together with the flags the wrapper
+    enforces, so the two cannot drift: `annotations: { acs: { standard: ''1.1.0'', ontology: ''2.1.0'',
+    capability: ''mutate'', layer: ''EXECUTE'', risk: ''high'', mutation: true, requires_checkpoint: true,
+    requires_approval: true } }`. It describes; the enforcing code never reads it (row tools-03). Its
+    readers are code that imports the definition (the same package, or a checker that calls the PackedExports.tools
+    loaders) and a runtime that opts in; a hook that receives a call by name cannot read it (row thread-02).
+    The short key `acs` is open to collision; if SA adopts a key-naming rule (see the Standard Agent Specification
+    findings), the key should become a name ACS controls. Tier 1.'
+  see_also:
+  - tools-contracts#cls-02
+  - tools-contracts#cls-03
+  - tools-contracts#dom-01
+  - safety-enforcement#flags-01
+  - approval-human#approval-02
+  - packaging-conformance-governance#pkg-03
+  - packaging-conformance-governance#ver-02
+  - models-context-memory-security#profile-06
+- id: tools-03
+  relation: fits
+  acs:
+    concept: 'Enforcement driven by the classification: a safety layer acts on the effective flags'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 84-93)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (line 279)
+    quote: A `checkpoint` MUST run before every `mutate`, `send` and `rollback`
+  sa:
+    concept: 'Annotation semantics: annotations must never affect execution'
+    refs:
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 143-146)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 156)
+    quote: '- Annotations **MUST NOT** change argument validation, execution, the tool''s results, or
+      what is sent to the model. A tool behaves identically in a runtime that ignores them.'
+  explanation: 'tools.md §8 and §9 forbid annotations from changing execution; STANDARD §5.2.1 requires
+    a safety layer to act on effective flags. The two requirements are compatible: a wrapper inside `execute`
+    acts on flags it holds in code and never reads annotations, so the tool behaves identically in a runtime
+    that ignores them. The relation is therefore not a conflict: no pair of normative sentences is jointly
+    unsatisfiable. One design would break SA: carrying the flags only in `annotations.acs` and having
+    a runtime refuse or delay a call because of them violates tools.md lines 146 and 156. Whether the
+    MUST NOT also binds definition code, such as a hook that reads an annotation, is not stated; reading
+    it as addressed to runtimes is an inference. The published types are silent on the point.'
+  combined: 'Keep enforcement out of annotations: the wrapper closes over a flag table generated from
+    the ontology and gates inside `execute` (row tools-04). A lint that compares `annotations.acs` with
+    that table is tooling and changes no execution. A runtime-level gate driven by ACS annotations cannot
+    be built on 0.2.0 as written. Tier 1.'
+  see_also:
+  - tools-contracts#cls-02
+  - tools-contracts#cls-03
+  - safety-enforcement#flags-01
+  - approval-human#approval-02
+  - packaging-conformance-governance#pkg-03
+  - models-context-memory-security#profile-06
+- id: tools-04
+  relation: partial
+  acs:
+    concept: Pre-execution gate with diagnostics (F501, F502) and the typed output contract including
+      evidence_anchors
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.6 Safety Errors (lines 1317-1325), §9.8 Diagnostic Format (lines 1348-1370)
+    - spec/STANDARD-v1.1.0.md §3.5 Explicit Contracts (lines 100-103)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 118-120), 'What the executor enforces'
+      (lines 145-148)
+    quote: '| F501 | CHECKPOINT_REQUIRED | Mutation without checkpoint |'
+  sa:
+    concept: Tool `execute` signature (UsesAwareExecute) and ToolResult
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 411 (UsesAwareExecute), lines 211-249 (ToolResult;
+      error_code line 230, error_data line 236), lines 5967-5984 (HookToolResult)'
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 152-155)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/hooks.md §5.2 (lines 386-398), §5.4 (lines 414-426), §6.3 HookToolResult
+      (lines 478-490)
+    - content/0.2.0/specification/threads.md lines 120 and 671 (ToolResult named, not defined)
+    - content/0.2.0/specification/threads/runtime-streams.md line 82 (error_code in an example)
+    quote: Tool errors **MUST** be persisted as tool results and **MUST NOT** crash the execution loop.
+  explanation: '`execute` receives only (state, args): no tool-call id, tool name or provenance. ToolResult
+    is { status; result?; error?; error_code?; error_data?; stack?; attachments? }; `result` is a string,
+    and there is no metadata member and no output schema (TS2353). The text says less: `interface ToolResult`
+    and `error_data` are not found in content/0.2.0, `error_code` occurs once in an example, and the text-defined
+    HookToolResult has status, result, error, stack and attachments only. MUST-backed: argument validation,
+    sequential local execution, and persisting a tool error as a tool result instead of halting. Not specified:
+    what the stored message holds for an error. A refusal is therefore a tool error, not the end of a
+    run; `after_tool_call_failure` may rewrite the stored error and `before_store_tool_result` the result.
+    Searched: interface ToolResult, error_data, error_code.'
+  combined: 'Order inside the wrapper: check everything; refuse without consuming anything; consume the
+    checkpoint and the approval; write the action record; then call the inner function inside try/catch
+    and report a throw as R402. A refusal returns `{ status: ''error'', error: ''F501 CHECKPOINT_REQUIRED:
+    <message>'', error_code: ''F501'', error_data: <§9.8 diagnostic> }`. The code is the first token of
+    `error` because the text defines no place for `error_code` or `error_data` outside the ToolResult
+    returned to a `state.invokeTool` caller; a model, a hook and the stored record get the `error` text.
+    Outputs are `result: JSON.stringify(output)` with the capability''s required fields, evidence_anchors
+    included; a later hook may alter the stored string. Tier 1; error_code and error_data are tier 3.'
+  see_also:
+  - tools-contracts#io-03
+  - tools-contracts#io-06
+  - safety-enforcement#appr-01
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#err-01
+  - safety-enforcement#hook-03
+  - checkpoint-rollback-state#state-19
+  - approval-human#approval-19
+  - evidence-audit-observability#collect-02
+  - evidence-audit-observability#transform-01
+  - packaging-conformance-governance#diag-03
+- id: tools-05
+  relation: partial
+  acs:
+    concept: 'Declared dependencies: the `requires` edge from checkpoint to mutate, send and rollback;
+      and the binding''s own calls to helper tools'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.3 Edge Types and Dependency Semantics (lines 145-171)
+    - spec/STANDARD-v1.1.0.md §4.4 Safety-Critical Capabilities (lines 182-189)
+    quote: '| `mutate` | `checkpoint` | Cannot mutate without prior checkpoint |'
+  sa:
+    concept: '`uses` on a tool: allow-list for state.invokeTool and state.queueTool (UsesConstrainedState,
+      EmptyUsesState)'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 484 and 568 (uses), lines 367-399 (constrained state
+      types), lines 456, 558-559 and 566 (comments)'
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (lines 36-44)
+    - content/0.2.0/distribution/packaging.md 'Qualified Names' (lines 232-236)
+    - '@standardagents/spec 0.45.10 index.js line 322 (parseQualifiedName; implementation observation)'
+    quote: When a `uses` list is supplied, the runtime **MUST** reject an invocation of a target outside
+      the list.
+  explanation: '`uses` is a may-call allow-list, enforced by the runtime and, with `as const`, by the
+    compiler. An ACS `requires` edge is a must-have-run-before ordering. Neither implies the other. Text
+    and types differ in two details. For an undeclared target, tools.md line 44 says `invokeTool()` ''returns
+    an error result'' while the types'' comment says such calls ''will throw an error'' (line 456). Qualified
+    names are `{packageId}/{name}` in packaging.md, while a types comment gives ''other_pkg:agent'' (line
+    566); the published `parseQualifiedName` splits on ''/'' only (observed by running 0.45.10).'
+  combined: 'A grounded tool that calls a helper declares it, for example `uses: [''acs_checkpoint'']
+    as const`; a packed tool MUST. A grounded tool that calls nothing declares `uses: [] as const`, which
+    removes `invokeTool` and `queueTool` from the state type it receives. Code that invokes an undeclared
+    target handles both an error result and a throw. ACS ordering is checked by the wrapper at call time
+    from recorded state (row thread-01), never by `uses`. Tier 1.'
+  see_also:
+  - tools-contracts#cls-13
+  - safety-enforcement#gate-03
+  - workflow-execution#wf-26
+  - packaging-conformance-governance#pkg-08
+- id: tools-06
+  relation: acs_only
+  acs:
+    concept: A gate that covers every action, including calls the binding did not author
+    refs:
+    - hooks/README.md 'Pre-Tool-Use Hooks' (lines 30-41)
+    - docs/integrations/claude_agent_sdk.md 'PreToolUse Hook Enforcement' (lines 268-272)
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (line 85)
+    quote: Run **before** a tool executes and can block operations. Claude Code passes
+  sa:
+    concept: 'No hook decides before a tool runs (nearest: the observational `tool_call_started`); calls
+      that never pass through a package-authored `execute`: provider-executed tools, prompt tools, agent
+      handoffs, injected lifecycle tools'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 6315 (tool_call_started), line 516 (progressArgument),
+      lines 443-448 (executionMode, executionProvider), lines 110-121 (ProviderCallable, McpCallable),
+      lines 1014-1021 (ProviderResponse.providerTools)'
+    - content/0.2.0/specification/hooks.md §5.1 tool_call_started (lines 367-384), §7 TypeScript Reference
+      (lines 595-600)
+    - content/0.2.0/specification/providers.md §10 Provider Tools (lines 598-653)
+    - content/0.2.0/specification/models.md §1.2 (line 34, `providerTools`)
+    - content/0.2.0/infrastructure/runtime.md §5.3 Tool Classes (lines 94-100), §7.2 Lifecycle Tooling
+      (lines 122-129), §7.3 (line 143)
+    - content/0.2.0/specification/threads.md §1.1 Agent Assignment (line 22)
+    quote: '- The return value **MUST** be ignored; the hook cannot modify the tool call.'
+  explanation: 'ACS''s existing bindings gate in a pre-tool hook that can deny a call. No SA hook can:
+    `tool_call_started` is declared `(state, toolCall, progress, context) => Promise<void>`, is observational,
+    and may fire while arguments are an incomplete JSON fragment. Separately, the wrapper of row tools-04
+    covers only function tools it wraps. Lifecycle tools are injected for a prompt-backed side''s non-hidden
+    relationships; a handoff keeps the thread and its records; provider tools ''execute server-side'';
+    and the text does not say what a runtime does with a call to a tool the prompt does not list. A provider
+    extension is a package-authored point before execution for model-issued calls (row provext-01), hence
+    partial. In the types only: executionMode, executionProvider, ProviderResponse.providerTools, the
+    `provider:` and `mcp:` prefixes. Searched: before_tool, pre_tool, veto, guardrail, unknown tool, unlisted,
+    hallucinat.'
+  combined: 'State coverage as: calls a model makes to function tools wrapped by the binding. Conditions:
+    every relationship of a grounded side is `hidden: true` and delegation goes through a grounded tool;
+    no handoff to an agent outside the binding; side-effecting `providerTools` are left off the model
+    definitions; and the binding assumes a runtime does not execute a tool the active prompt does not
+    list (not stated in 0.2.0). Two stronger structures exist today, each with limits: a provider extension
+    on the agent''s own models (row provext-01) and a handler-backed side that alone invokes the mutating
+    tools (row handler-02). `tool_call_started` serves only as a notification that a call is about to
+    run. Tier 1 for wrapped tools; the allow-list assumption is tier 2.'
+  see_also:
+  - tools-contracts#cls-03
+  - tools-contracts#cls-07
+  - tools-contracts#cls-08
+  - tools-contracts#cls-14
+  - tools-contracts#eff-01
+  - safety-enforcement#gate-01
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-01
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - workflow-execution#wf-14
+  - multi-agent#coord-20
+  - packaging-conformance-governance#pkg-03
+- id: options-01
+  relation: partial
+  acs:
+    concept: 'A per-use declaration on a step: the `domain` parameter, and safety flags stricter than
+      the ontology''s'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2 Step Definition (lines 260-262)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 279-284)
+    quote: '| `domain` | string | Domain parameter for the capability |'
+  sa:
+    concept: 'PromptToolConfig: a prompt''s per-tool entry with `env` and `options`'
+    refs:
+    - content/0.2.0/specification/prompts.md §3.2 Tool Configuration with Environment Values (lines 103-125),
+      §10 TypeScript Reference (lines 335-339)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4205-4223 (PromptToolConfig), line 411 (UsesAwareExecute)'
+    - '@standardagents/spec 0.45.10 index.js line 182 (definePrompt; implementation observation)'
+    quote: '| `options` | `Record<string, unknown>` | Static tool options |'
+  explanation: 'A prompt''s `tools` entry may be an object with `name`, `env` and `options`. Text and
+    types agree on the shape, and it is the one declared per-prompt, per-tool slot that could carry a
+    third-party declaration such as an ACS `domain` or a stricter flag for one use of a tool. Text and
+    types disagree on its effect: prompts.md calls it ''Static tool options''; the types'' comment adds
+    ''Passed to the tool handler at execution time.'' (line 4220), yet `execute` has no parameter that
+    could receive it (line 411). The published `definePrompt` keeps the value (observed by running 0.45.10).
+    The types also carry a deprecated `tenvs` on the entry, absent from the text. Searched: tenvs.'
+  combined: 'Use `options` descriptively only, for example `{ name: ''write_config'', options: { acs:
+    { domain: ''config'', requires_approval: true } } }`, read by a build-time checker that loads the
+    prompt definition. It cannot make the wrapper stricter at run time, because the wrapper never receives
+    it; a stricter variant of a tool is a second grounded tool with its own flags. Per-prompt values a
+    tool must read at run time go through `env`, which a thread value can override (row thread-07), so
+    nothing security-relevant belongs there. Tier 2: descriptive text, and no behaviour is relied on.'
+  see_also:
+  - safety-enforcement#appr-02
+  - checkpoint-rollback-state#state-15
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - approval-human#users-01
+  - evidence-audit-observability#audit-02
+  - workflow-execution#wf-05
+  - multi-agent#coord-26
+  - models-context-memory-security#profile-01
+- id: provext-01
+  relation: partial
+  acs:
+    concept: A check that runs before the effect of an action a model asks for (in the ACS bindings, a
+      blocking pre-tool check)
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 85-88)
+    - docs/integrations/claude_agent_sdk.md 'PreToolUse Hook Enforcement' (line 272)
+    quote: A `checkpoint` MUST run before every `mutate`, `send` and `rollback`
+  sa:
+    concept: 'Provider extension: defineProvider({ baseProvider, overrides, createFetch }) with request-scoped
+      overrides of `generate` and `stream`'
+    refs:
+    - content/0.2.0/specification/providers.md §1.3 Provider Extension Factories, 'Method Overrides' (lines
+      174-216)
+    - content/0.2.0/infrastructure/providers.md 'Method Overrides' (lines 141-180), 'Per-request Transport
+      (`createFetch`)' (lines 182-201)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 40-50)
+    - content/0.2.0/specification/models.md §3 Fallback Chains (lines 40-48)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3638-3655 (ProviderOverrideContext; `state` line
+      3654), lines 3678-3684 (generate and stream overrides), line 3772 (defineProvider), lines 1008-1021
+      (ProviderResponse)'
+    quote: Provider extensions can override any provider hook. Each override receives a context object
+      plus `next()`, where `next()` calls the base provider implementation.
+  explanation: 'A provider extension is package code between a model and the runtime. Its `generate` and
+    `stream` overrides wrap every model request of a model definition that uses it, receive the executing
+    thread''s `state` ''when the runtime has one'', and return the ProviderResponse or chunk stream that
+    carries the tool calls. An override that replaces a refused call with a call to a refusal tool, in
+    the response and in the stream, type-checks against 0.45.10. Text and types agree on the override
+    mechanism. That a runtime executes only the calls the provider returns is an inference from the step
+    cycle, not a stated rule. Limits: one extension per model definition, fallback models included; no
+    effect on `invokeTool`, `queueTool`, provider-executed tools or a composed child''s models; the stored
+    assistant message shows the replaced call.'
+  combined: 'Optional second layer under the wrapper, for agents that list tools the binding did not write:
+    define `acs_gated` from the provider the project already uses, check each returned tool call against
+    the binding''s name table and guard records, and substitute a call to an `acs_refused` tool that returns
+    the F501 or F502 text. Fail closed when `state` is absent. It reaches lifecycle tools and prompt tools,
+    which the `execute` wrapper cannot. It does not compose with other packages'' decisions and rewrites
+    what the model appears to have asked for, so the action record keeps the original call. Tier 2: no
+    sentence requires a runtime to act only on the returned calls.'
+- id: hooks-01
+  relation: partial
+  acs:
+    concept: 'Safety hooks around tool use (in ACS''s Claude Code plugin: a blocking pre-tool checkpoint
+      check and a post-tool audit log)'
+    refs:
+    - hooks/hooks.json
+    - hooks/README.md 'Spec-Aligned Hooks' (lines 5-12)
+    quote: '| `pretooluse_require_checkpoint.sh` | `checkpoint` | Require checkpoint marker before mutation
+      operations |'
+  sa:
+    concept: defineHook() / HookSignatures / HookName (17 hook types), HookExecutionContext, and hook
+      scoping
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6023-6355 (HookSignatures), line 6359 (HookName),
+      line 6361 (ThreadHookName), lines 6381-6404 (definition types), line 6455 (defineHook), lines 5918-5940
+      (HookExecutionSource, HookExecutionContext)'
+    - content/0.2.0/specification/hooks.md intro (line 5), §1.1 Available Hooks (lines 17-36), §1.2 (lines
+      38-68), §1.3 Hook Scoping (lines 70-100), §2.4 Execution Provenance (lines 171-196), §7 TypeScript
+      Reference (lines 506-642)
+    - content/0.2.0/specification/users.md §7 Lifecycle Hooks (lines 207-230)
+    - content/0.2.0/specification/prompts.md §8 Hook Scoping (lines 258-277)
+    - content/0.2.0/specification/agents.md §6 Required Parent Hooks (lines 132-167)
+    - '@standardagents/spec 0.45.10 index.js lines 249-267 (defineHook; implementation observation)'
+    quote: 'declare function defineHook<K extends HookName>(options: HookDefinitionOptions<K>): HookDefinitionResult<K>;'
+  explanation: 'The types declare 17 hook types: 14 thread hooks and three user-scope hooks. Eight thread
+    hooks return a value the runtime uses (three request-context hooks, two before-message hooks, three
+    tool-result hooks); none returns a decision about a tool call. hooks.md §1.1 lists the 14; the user
+    hooks appear only on the draft Users page, at SHOULD level, and are project-scoped. The per-hook signature
+    blocks in hooks.md §3 to §5 omit the trailing context that §2.1, §7 and the types include. The set
+    is closed: an unknown type is a compile error and the published defineHook throws. A thread hook runs
+    only when listed: a non-empty prompt list replaces the agent''s, at-rest operations use the agent-level
+    list, and `parentHooks` of a composed child are added. Hook failures are non-fatal to the turn.'
+  combined: 'List the ACS hook ids in the agent''s `hooks` and in every prompt that has a non-empty `hooks`
+    list, prompts used as tools included, and lint for it. Use `parentHooks` only on a child the host
+    really composes, such as the approval gate: it needs `exposeAsTool: true`, reaches the direct parent
+    only, and its hook cannot see the host''s tool table; set `hidden: true` on it and on every other
+    relationship of that side when the model must not spawn it (multi-agent#coord-20). Treat hooks as
+    best-effort observation: a throw or a timeout loses the observation and nothing reports it. The record
+    ACS requires is written by the wrapper before it acts (row hooks-02). No hook can block a call. Tier
+    1 for the calls of an active `tool_call_done` or message hook; tier 2 for timing and failure behaviour.'
+  see_also:
+  - tools-contracts#cls-07
+  - safety-enforcement#flags-02
+  - safety-enforcement#scope-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-07
+  - approval-human#approval-16
+  - evidence-audit-observability#collect-03
+  - workflow-execution#wf-26
+  - multi-agent#coord-18
+  - multi-agent#coord-20
+  - packaging-conformance-governance#naming-02
+  - packaging-conformance-governance#pkg-01
+  - models-context-memory-security#hooks-01
+- id: hooks-02
+  relation: partial
+  acs:
+    concept: Audit trail entry per action (ActionRecord) and evidence taken from tool output
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.2 Auditable Transforms (lines 79-82), §5.14 Approval (lines 898-902)
+    - schemas/world_state_schema.yaml ActionRecord (lines 329-430)
+    quote: The decision is recorded on the action record (`world_state_schema.yaml`
+  sa:
+    concept: HookToolCall, HookToolResult, and the tool-result hooks (before_store_tool_result, after_tool_call_success,
+      after_tool_call_failure, tool_call_done)
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5951-5963 (HookToolCall), lines 5967-5984 (HookToolResult),
+      lines 6232, 6257, 6282 and 6331 (the four tool-result hooks)'
+    - content/0.2.0/specification/hooks.md §5.2 to §5.5 (lines 386-444), §6.2 and §6.3 (lines 465-490)
+    - content/0.2.0/getting-started/examples.md §3 (lines 546-547; example prose)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 40-50), §5 Tool Execution (lines 84-100)
+    quote: '- Implementations **MUST** call this hook once per tool call, whether it succeeded or failed.'
+  explanation: 'HookToolCall is { id; type: ''function''; function: { name; arguments (a JSON string)
+    } }. HookToolResult is { status; result?; error?; stack?; attachments? }. Text and types agree on
+    both. HookToolResult lacks the `error_code` and `error_data` of ToolResult (TS2339) and has no metadata
+    member, although hooks.md line 397 lists ''Add metadata to tool results'' as a use. Only `tool_call_started`
+    and `tool_call_done` carry a ''MUST call'' sentence. No normative statement gives the order of the
+    three result hooks, which result `tool_call_done` receives, what is stored when one throws, or for
+    which tool classes and for `invokeTool` or `queueTool` they fire; runtime.md names none of the five.
+    The Examples page says informatively that `before_store_tool_result` ''runs for the results of every
+    tool in the prompt''. Searched: after_tool_call_success, after_tool_call_failure, before_store_tool_result,
+    tool_call_done (content/0.2.0/infrastructure: not found).'
+  combined: 'The wrapper, not a hook, writes the action record: before the effect with status `planned`
+    or `approved`, refusing when that write fails, and afterwards with `executed`, `failed` or `rejected`.
+    The wrapper knows the capability, the arguments, the digest and the decision; a hook knows only the
+    tool name and has no `intent`, which ActionRecord requires. `tool_call_done` only adds `toolCall.id`
+    to that record, and `after_create_message` the stored message id; both are conveniences that may not
+    fire for `invokeTool` calls. An ACS code is never recovered from hook-side `error` text for enforcement.
+    Tier 1 for the wrapper''s record; tier 2 for the hook additions.'
+  see_also:
+  - tools-contracts#cls-04
+  - safety-enforcement#exec-01
+  - safety-enforcement#flags-02
+  - safety-enforcement#hook-01
+  - safety-enforcement#hook-02
+  - evidence-audit-observability#action-01
+  - evidence-audit-observability#audit-01
+  - evidence-audit-observability#audit-04
+  - evidence-audit-observability#collect-01
+  - evidence-audit-observability#collect-02
+  - evidence-audit-observability#collect-03
+  - multi-agent#coord-20
+  - models-context-memory-security#security-02
+- id: hooks-03
+  relation: fits
+  acs:
+    concept: Provenance on stored records, and stored items that an evidence anchor can point at
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.1 Grounded Claims (lines 76-77), §6.2 Observation Requirements (lines
+      1121-1143)
+    - schemas/event_schema.yaml Anchor (lines 13-35)
+    quote: Every claim MUST be evidence-backed or explicitly marked as inferred.
+  sa:
+    concept: Message / HookMessage, `metadata`, and the message hooks (before_create_message, after_create_message,
+      before_update_message, after_update_message); MessageUpdates
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2006-2097 (Message; metadata line 2042), line 5947
+      (HookMessage), lines 6133, 6154, 6183 and 6204 (message hooks), lines 6109-6112 (comment on a throwing
+      hook), lines 2134-2139 (MessageUpdates)'
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 9-38), §1.1 (lines 40-49),
+      §3.1 (lines 115-121), §5 and §6 (lines 169-186)
+    - content/0.2.0/specification/hooks.md §4 Message Lifecycle Hooks (lines 308-363), §6.1 HookMessage
+      (lines 448-463), §8.6 (lines 743-762)
+    - content/0.2.0/specification/threads/client-api.md §10 (line 296), §13 (line 378)
+    quote: '| `metadata` | `Record<string, unknown>` | Custom metadata (may include runtime status markers
+      such as `status_kind`) |'
+  explanation: '`metadata?: Record<string, unknown>` is on Message in the text and the types, and every
+    insert MUST pass `before_create_message` and `after_create_message`, tool result messages included.
+    Disagreements: hooks.md §6.1 declares HookMessage as a ten-field interface without metadata, while
+    the types have `type HookMessage = Message;`; the §8.6 example assigns a string to `metadata` and
+    does not compile (TS2322, TS18047). On a throwing hook the text says ''Failures **SHOULD** prevent
+    message creation''; the types'' comment lets a runtime still insert a tool result message. That `updateMessage`
+    merges metadata is a types comment only (line 2137). Message records `prompt`, `subagent_id` and the
+    SHOULD-level `metadata.subagent_id` and `metadata.forwarded_from`; none identifies the authenticated
+    caller. A message can be updated and deleted, also by a client with thread access. Searched: sender,
+    author (messages.md: not found).'
+  combined: '`before_create_message` adds `metadata.acs = { action_id, capability }` to tool result rows,
+    which carry `tool_call_id` and `name`; the capability comes from the name table of row thread-02.
+    To change metadata later, read, change and write the whole object instead of relying on merge. Treat
+    a message id as a locator, not as evidence that will stay: an anchor names thread id, message id and
+    `tool_call_id` and carries a SHA-256 of the stored content, so a later reader can tell whether the
+    row changed (see also row erase-01). When the stamping hook throws, the row may be unstamped or missing;
+    the wrapper''s record does not depend on it. Tier 1 for the insert path; tier 2 for hook failure behaviour.'
+  see_also:
+  - tools-contracts#io-09
+  - checkpoint-rollback-state#state-26
+  - evidence-audit-observability#anchors-02
+  - models-context-memory-security#context-04
+- id: callid-01
+  relation: partial
+  acs:
+    concept: 'One identifier per action: `action_id` on the action record, and in the Python SDK a checkpoint
+      reservation keyed by the call id'
+    refs:
+    - schemas/world_state_schema.yaml ActionRecord (lines 329-336)
+    - docs/integrations/claude_agent_sdk.md 'PreToolUse Hook Enforcement' (line 272)
+    quote: reserves the active checkpoint for the call, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`)
+  sa:
+    concept: 'The tool-call id: `HookToolCall.id` and `Message.tool_calls` carry it; `execute` does not
+      receive it; `execution.messageHistory` lets a tool look it up'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 42-50)
+    - content/0.2.0/specification/threads/execution-state.md §2 (line 30), §2.2 Live execution history
+      (line 45)
+    - content/0.2.0/specification/threads/messages.md §1 (line 17, `tool_calls`)
+    - '@standardagents/spec 0.45.10 index.d.ts line 411 (UsesAwareExecute), line 2598 (messageHistory),
+      lines 5951-5963 (HookToolCall), lines 2578-2634 (ExecutionState)'
+    quote: '`execution.messageHistory` **MUST** represent live chronological persisted execution history.'
+  explanation: '`execute` receives (state, args) and ExecutionState has no current-call member (TS2339
+    on `state.execution?.toolCall`), so a tool is not told which call it serves. It can usually find out:
+    the step cycle MUST persist the assistant response before executing its tool calls, and `execution.messageHistory`
+    MUST be the live persisted history, so the last assistant message''s `tool_calls` holds an entry with
+    the tool''s own name and arguments. A helper doing this type-checks against 0.45.10. The lookup fails
+    for two identical calls in one response and for calls made with `invokeTool` or `queueTool`, and it
+    needs the tool to know its own name, which a definition does not carry (row tools-01). Text and types
+    agree on `messageHistory` and on the stored `tool_calls` shape.'
+  combined: The wrapper derives `action_id` from the recovered call id when exactly one unanswered call
+    in the last assistant message matches its name and arguments; otherwise it generates its own id and
+    records that no call id was available. With the call id on the wrapper's record, the `tool_call_done`
+    hook is no longer needed to join tool-side and hook-side records. Unlike the ACS Python adapter, the
+    binding cannot reserve a checkpoint for a call id before the call starts, because nothing runs before
+    `execute`; it validates and consumes inside `execute` (row thread-05). Tier 1 when the lookup is unambiguous.
+- id: thread-01
+  relation: fits
+  acs:
+    concept: Checkpoint record and approval decision record (digest-bound, expiring, single-use)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 829-837)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces' (lines 145-148)
+    quote: has not expired, and it has not been used before.
+  sa:
+    concept: 'ThreadState.getValue / setValue: the durable per-thread key-value store'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3152 and 3167 (getValue, setValue), lines 2913 and
+      2919 (getChildThread, getParentThread)'
+    - content/0.2.0/specification/threads.md §7 Durable Key-Value Store (lines 408-445)
+    - content/0.2.0/infrastructure/runtime.md second heading '## 14. Durable Key-Value Store' (lines 344-362),
+      §11 Concurrency (line 239), §16 Conformance Summary (line 392)
+    - content/0.2.0/specification/subagents.md §6.4 (line 219)
+    quote: 1. Values **MUST** be persisted to durable per-thread storage that survives execution boundaries,
+      process restarts, and runtime redeploys.
+  explanation: 'Text and types agree on the two signatures. MUST-backed: durable, one key space per thread,
+    JSON round-trip, null or undefined deletes, never copied to children. Only SHOULD: ''Writes **SHOULD**
+    be durable before the promise returned by `setValue` resolves'', so an acknowledged delete can be
+    lost in a crash. Not provided: key ownership, key listing, a conditional write, and a statement of
+    whether endpoint or effect writes can interleave with a running flow. Any code on the thread can overwrite
+    a record, and so can code in a related thread: `getParentThread()` and `getChildThread()` return a
+    full ThreadState, and subagents.md names ''the parent''s key-value store'' as a child''s result channel,
+    against runtime.md''s rule that values are not readable by any other thread. Searched: atomic, compare,
+    ifAbsent (threads.md, runtime.md: no rule for thread values).'
+  combined: One writer per key. The endpoint writes one key per approver, `acs.approval.<request>.by.<callerId>`;
+    the tool writes a tombstone `acs.used.<request>` before acting and never deletes it, and a decision
+    counts only while no tombstone exists. The request id includes the digest, so two identical actions
+    need two decisions. `acs.checkpoint.<id>` holds { id, scope, flow, created_at }. Where single use
+    must hold under interleaving, consume with `moveFile` (row consume-01). The trust boundary is all
+    code installed on the thread, on composed children whose `parentHooks` run with this ThreadState,
+    and on a parent holding `getChildThread()`; the binding cannot make these records tamper-proof. Tier
+    1 for storage; durability at acknowledgement is tier 2.
+  see_also:
+  - tools-contracts#io-04
+  - tools-contracts#rec-01
+  - safety-enforcement#appr-01
+  - safety-enforcement#appr-03
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#edge-02
+  - safety-enforcement#scope-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-01
+  - checkpoint-rollback-state#state-04
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-09
+  - checkpoint-rollback-state#state-24
+  - approval-human#approval-04
+  - approval-human#approval-07
+  - approval-human#approval-10
+  - approval-human#approval-13
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-03
+  - evidence-audit-observability#prov-04
+  - evidence-audit-observability#store-01
+  - workflow-execution#wf-06
+  - workflow-execution#wf-09
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - multi-agent#coord-08
+  - multi-agent#coord-13
+  - multi-agent#coord-19
+  - multi-agent#coord-22
+  - multi-agent#coord-23
+  - packaging-conformance-governance#pkg-03
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#remember-02
+- id: thread-02
+  relation: acs_only
+  acs:
+    concept: 'Classifying an arbitrary tool call when enforcing or auditing: tool name to capability and
+      flags, with a default for unknown tools'
+    refs:
+    - grounded_agency/capabilities/mapper.py ToolCapabilityMapper.map_tool (lines 339-375), register_mcp_tool
+      (line 304)
+    - grounded_agency/adapter.py lines 195-200 and 589-596
+    - docs/integrations/claude_agent_sdk.md 'PreToolUse Hook Enforcement' (line 272)
+    quote: '# Unknown tool - default to medium risk observe'
+  sa:
+    concept: 'ThreadState definition lookup: loadModel, loadPrompt, loadAgent, getPromptNames, getAgentNames,
+      getModelNames; there is no tool lookup'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2872-2906 (lookup methods), lines 5456-5457 (ControllerContext.tools),
+      lines 5828-5860 (PackedExports)'
+    - content/0.2.0/specification/threads.md §1.2.2 Resource Loading (lines 100-113), §2 Resource Loading
+      (lines 188-206)
+    - content/0.2.0/distribution/packaging.md 'Lazy Loading' (lines 110-119), 'PackedExports Interface'
+      (lines 121-147)
+    quote: '| `loadAgent(name)` | `Promise<T>` | Load agent definition |'
+  explanation: 'The ACS reference SDK maps a tool name to a capability: a registered or built-in name
+    gets its mapping; a name it does not know gets `observe`, medium risk, no checkpoint; only when the
+    mapper itself fails does the pre-tool hook substitute a high-risk `mutate`. In SA, text and types
+    agree on six lookup methods and neither has a tool lookup (`state.loadTool` is TS2339). A tool hook
+    receives only `toolCall.function.name` and cannot reach the ToolDefinition or its annotations through
+    ThreadState. A definition is reachable outside ThreadState, through the PackedExports.tools loaders
+    or a direct import. `ControllerContext.tools` is optional and in the types only. In SA a hook can
+    record a call but cannot deny it. Searched: loadTool, getToolNames, loadHook, loadHandler, loadEffect.'
+  combined: 'Generate one static module `{ toolName: capabilityId }` at build time from the project''s
+    tool files, or from the PackedExports.tools keys, import it from the hooks, and lint it against each
+    definition''s `annotations.acs`. A registry filled when definitions load is not reliable: packed definitions
+    sit behind lazy loaders, and the text does not say that a tool module and a hook module share one
+    instance. A call to a name outside the table (a host tool, a lifecycle tool, a `provider:` or `mcp:`
+    callable) is recorded as unclassified. No rule for unknown tools is enforced, since a hook cannot
+    refuse. Tier 1: a build-time table and plain imports.'
+  see_also:
+  - tools-contracts#cls-04
+  - packaging-conformance-governance#pkg-09
+- id: thread-03
+  relation: fits
+  acs:
+    concept: Checkpoint snapshot and rollback source, audit trail, evidence artifacts
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.12 Recovery and Escalation (lines 678-683), §9.6 Safety Errors (line
+      1323)
+    - schemas/capability_ontology.yaml checkpoint (lines 1211-1246)
+    quote: '| `rollback` | Roll back to the latest checkpoint; with none, or if the host fails it, the
+      run ends F503 |'
+  sa:
+    concept: 'Thread file system on ThreadState: writeFile, readFile, readFileStream, statFile, readdirFile,
+      unlinkFile, mkdirFile, rmdirFile, moveFile, renameFile, getFileStats, grepFiles, findFiles, getFileThumbnail'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3261-3380 (file methods), lines 2253-2276 (FileRecord)'
+    - content/0.2.0/specification/threads/filesystem.md §1 to §9 (the one MUST is at line 178)
+    - content/0.2.0/specification/threads.md §1.2.2 File System table (lines 67-82), §12 TypeScript Reference
+      (lines 611-741)
+    - content/0.2.0/specification/threads/client-api.md §10 Deleting a Thread (line 296), §14 Reading
+      a File (lines 383-395)
+    quote: '5. **Ordering Guarantee**: Chunks are always yielded in sequential order. Implementations
+      **MUST NOT** yield chunks out of order.'
+  explanation: 'A per-thread file tree with custom `FileRecord.metadata`. It cannot snapshot anything
+    outside the thread and has no snapshot, copy or append primitive; a restore is many writes and is
+    not atomic. filesystem.md states one MUST (chunks are not yielded out of order) and no persistence
+    or read-after-write requirement. Files die with the thread: a thread delete MUST remove messages,
+    files and stored values. Nothing reserves a path prefix, so any code on the thread, and a model through
+    any file-writing tool, can overwrite or unlink a record. Text versus types: `moveFile` and `renameFile`
+    are in filesystem.md §5 and the types but missing from the method table and the §12 reference in threads.md;
+    `FileRecord.createdAt` and `updatedAt` are in the types only. Searched: createdAt, updatedAt (filesystem.md:
+    not found).'
+  combined: 'Call it a thread-local trace, not a durable audit log. A checkpoint of thread files is a
+    copy under `/acs/checkpoints/<id>/` plus a manifest with a SHA-256 per file; the checkpoint tool refuses
+    when a file cannot be read; rollback verifies the hashes, and a partial restore is F503. Trace records
+    are one file each under `/acs/audit/`, since there is no append. External state (an API, a database)
+    needs a capability-specific checkpoint that the tool author supplies. Records that must outlive the
+    thread, or resist the thread''s own code, go to a store outside it. Files are readable through the
+    Thread Client API by any caller with thread access. Tier 2: the page is descriptive apart from one
+    MUST.'
+  see_also:
+  - safety-enforcement#ckpt-03
+  - checkpoint-rollback-state#state-06
+  - checkpoint-rollback-state#state-16
+  - checkpoint-rollback-state#state-23
+  - checkpoint-rollback-state#state-24
+  - checkpoint-rollback-state#state-26
+  - approval-human#approval-13
+  - workflow-execution#wf-08
+- id: thread-04
+  relation: partial
+  acs:
+    concept: 'Time: approval `expires`, step `timeout` (R401), `delay`, the executor''s `Sleep` action,
+      schedule triggers'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (line 824)
+    - spec/STANDARD-v1.1.0.md §5.10 Triggers (lines 562-595), §5.13 Delays (lines 792-802)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (line 91)
+    quote: '| `expires` | How long a decision stays valid: a duration longer than zero |'
+  sa:
+    concept: defineEffect() / EffectDefinition, and ThreadState.scheduleEffect, getScheduledEffects, removeScheduledEffect,
+      runAgent
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1353-1396 (Effect, EffectDefinition, ScheduledEffect,
+      defineEffect), lines 3056, 3066 and 3077 (scheduling methods), line 3097 (runAgent)'
+    - content/0.2.0/specification/effects.md §1 to §4 (§3 Execution Semantics, lines 81-90)
+    - content/0.2.0/specification/threads.md §4 Effect Scheduling (lines 274-322)
+    - content/0.2.0/specification/threads/client-api.md §10 (line 294)
+    quote: '- **MUST** preserve scheduled `args` until execution time.'
+  explanation: '`scheduleEffect(name, args, delay?)` takes a relative delay in milliseconds and returns
+    an id; there is no cron, recurrence, absolute time or time zone. Runtimes MUST enqueue asynchronously
+    and preserve args; inspection and cancellation are SHOULD; nothing is promised about when an effect
+    runs relative to `delay`, or how often. An effect belongs to an existing thread, and ThreadState has
+    no call that creates a top-level thread, so an ACS schedule trigger can wake a standing thread but
+    cannot start a fresh one. A thread delete discards scheduled effects. ACS step `timeout` (R401) has
+    no counterpart: the text sets no deadline on `execute`. Text and types agree on defineEffect and the
+    three scheduling methods; `runAgent` is in the types only. Searched: runAgent, cron; timeout, deadline
+    (tools.md).'
+  combined: Expiry is enforced by the wrapper, which compares the current time with an `expires_at` stored
+    in the request; an `acs_expire_approval` effect only cleans up. A workflow host maps `Sleep(until)`
+    to `scheduleEffect('acs_resume', { run }, until - now)`, whose handler calls `state.queueMessage`
+    and re-checks the time when it runs. ACS schedule triggers with cron and time zone need an external
+    scheduler, or a self-rescheduling effect on a standing thread. Tier 1 for the wrapper's comparison;
+    tier 2 for anything that depends on when an effect fires.
+  see_also:
+  - tools-contracts#eff-01
+  - checkpoint-rollback-state#state-16
+  - approval-human#approval-08
+  - workflow-execution#wf-11
+  - multi-agent#coord-26
+  - models-context-memory-security#remember-01
+- id: thread-05
+  relation: partial
+  acs:
+    concept: Run identity and the validity window of a checkpoint (a wait invalidates it, W608); gate
+      action `stop`
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 777-790)
+    - spec/STANDARD-v1.1.0.md §5.6 Gate Semantics (lines 389-392)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces' (lines 145-148)
+    quote: checkpoint taken before it no longer authorises the step. Take a new
+  sa:
+    concept: 'ThreadState.execution (ExecutionState: flowId, currentSide, stepCount, sideAStepCount, sideBStepCount,
+      stopped, stoppedBy, messageHistory, abortSignal, promptPath, forceTurn(), stop()), status(), stopSession(),
+      terminate()'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2578-2634 (ExecutionState; stop comment lines 2611-2612),
+      line 3410 (execution), line 3392 (status), lines 2224-2238 (ThreadStatus), lines 3010 and 3104 (stopSession,
+      terminate)'
+    - content/0.2.0/specification/threads/execution-state.md §1 to §4 (flowId line 23; stop lines 63 and
+      70; §4.1 lines 99-103; reasons table lines 111-114)
+    - content/0.2.0/specification/hooks.md §1.3 (lines 99-100), §2.1 (line 136)
+    - content/0.2.0/specification/threads.md §1.2.1 (line 49), §1.3 Access Contexts (line 185)
+    quote: '| `flowId` | `string` | Unique execution ID |'
+  explanation: '`flowId` identifies one execution; the only statement about it is a table cell, and nothing
+    says when a new one starts. Text and types agree on the members of ExecutionState. Disagreement: hooks.md
+    line 136 and threads.md line 185 present `execution` as always present in hooks; the types and threads.md
+    line 49 make it nullable, and hooks.md lines 99-100 say lifecycle hooks also run at rest. `hook_blocked`
+    is a listed stop reason with no rule that produces it. `stop()` is a request: the types'' comment
+    says it signals the loop ''to terminate after the current operation'' completes, and the text does
+    not say whether the remaining tool calls of the step run. A run that hands the turn to a human-backed
+    side ends (execution-state.md §4.1); that the next execution carries a different `flowId`, and that
+    a wait inside one execution, such as a tool awaiting a blocking child, keeps it, are inferences from
+    the table cell ''Unique execution ID''.'
+  combined: 'A checkpoint is valid only when all of these hold: its stored `flow` equals `state.execution?.flowId`;
+    it is younger than a maximum age the binding sets; and the binding has not waited since it was taken
+    (an approval wait or a blocking delegation invalidates every checkpoint). Following the executor,
+    the checkpoint is taken or re-validated after the approval is in hand, then consumed. When `state.execution`
+    is null the wrapper refuses. After a refusal it may call `state.execution?.stop()` to mirror the gate
+    action `stop`, but it relies on each later call being gated on its own. Tier 2 for the `flowId` comparison:
+    no MUST sentence says when `flowId` changes, so it is an additional check, and the maximum age is
+    the rule the binding guarantees (checkpoint-rollback-state#state-08). Tier 1 for the values the wrapper
+    stores.'
+  see_also:
+  - tools-contracts#cls-14
+  - tools-contracts#eff-01
+  - tools-contracts#io-07
+  - safety-enforcement#appr-01
+  - safety-enforcement#ckpt-01
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#exec-01
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-04
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-20
+  - approval-human#approval-09
+  - approval-human#approval-19
+  - approval-human#wait-02
+  - evidence-audit-observability#audit-03
+  - multi-agent#coord-03
+  - packaging-conformance-governance#pkg-03
+- id: thread-06
+  relation: partial
+  acs:
+    concept: '`delegate` (task_id, accepted, effective { fresh_context, model_family, role, read_only
+      }, result) and `invoke`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 904-940)
+    - spec/STANDARD-v1.1.0.md §5.13 (lines 753-775), §5.16 Quorum (lines 978-979)
+    quote: '`delegate` accepts `fresh_context` (start the delegate without the'
+  sa:
+    concept: 'Subagent surface: ThreadState.children (SubagentRegistryEntry), getChildThread, getParentThread,
+      notifyParent, setStatus, invokeTool, queueTool; SubagentRelationship'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 2786 (children), lines 1925-1976 (SubagentRegistryEntry),
+      lines 2913-2919 and 2984-3033 (hierarchy and tool invocation methods), lines 4546-4685 (SubagentRelationship),
+      lines 5915-5916 (comment)'
+    - content/0.2.0/specification/subagents.md intro (line 3), §3.1 Creation Paths (lines 88-94), §3.3
+      (lines 106-112), §4.1 (line 120), §4.2 Registry (lines 126-149), §5 Lifecycle Tools (lines 155-165),
+      §6 (lines 184-228)
+    - content/0.2.0/specification/threads.md §9 (lines 480-542)
+    quote: The child runs in its own isolated [thread](/0.2.0/specification/threads) — messages, filesystem,
+      queue, lifecycle — linked to the parent through the thread hierarchy and the parent's child registry.
+  explanation: '`reference` (the child thread UUID) plays the role of ACS `task_id`; `blocking` returns
+    the session result to the caller. A new child starts without the parent''s messages, but an existing
+    instance keeps its history: with `blocking: true` and `maxInstances: 1`, `subagent_create` MUST create-or-continue,
+    and a later message starts ''a **new session with history intact**''. SA has no counterpart of `read_only`
+    or `role` and no `effective` attestation; results return as message text and attachments. How code
+    creates a child is described two ways: ''`invokeTool` / `queueTool` on the lifecycle surface, or dedicated
+    runtime APIs'' (subagents.md line 93) and ''the exposed relationship name that may be'' passed to
+    `state.invokeTool()` (types, lines 5915-5916); no argument shape for code is given. Text and types
+    agree on SubagentRegistryEntry and SubagentRelationship.'
+  combined: 'An ACS `delegate` tool wraps child creation and declares `uses: [''subagent_create''] as
+    const`; the side''s relationships are `hidden: true`, so a model cannot spawn or message children
+    directly. It finds `task_id` by comparing `state.children` before and after, and attests `effective.fresh_context:
+    true` only when the call produced a registry entry whose `reference` was not there before; otherwise
+    it reports false. Relationships used for independent reviews are not declared `blocking: true` with
+    `maxInstances: 1`. `read_only` is attested `false` by default and `true` only on the conditions of
+    safety-enforcement#gate-04 (a child that offers only non-mutating tools and whose code was reviewed)
+    or for a `decide()` reviewer (multi-agent#coord-10), so a quorum with `require_read_only` cannot be
+    satisfied by SA mechanisms alone; `model_family` could be attested from the child''s prompt and model
+    definitions (inference). The creation call from code is not specified in 0.2.0 and must be checked
+    on each runtime. Tier 2.'
+  see_also:
+  - tools-contracts#cls-07
+  - safety-enforcement#gate-03
+  - safety-enforcement#gate-04
+  - approval-human#approval-06
+  - approval-human#approval-14
+  - approval-human#approval-16
+  - approval-human#identity-06
+  - workflow-execution#wf-16
+  - workflow-execution#wf-20
+  - multi-agent#coord-01
+  - multi-agent#coord-05
+  - multi-agent#coord-06
+  - multi-agent#coord-07
+  - multi-agent#coord-10
+  - multi-agent#coord-20
+  - models-context-memory-security#models-02
+  - models-context-memory-security#secrets-03
+- id: thread-07
+  relation: fits
+  acs:
+    concept: 'Supporting needs: live notification, scratch data shared by gate and recorder, policy configuration
+      that a thread cannot weaken, sandboxed `execute`, distribution of capability skills'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (line 93)
+    - skills/mutate/SKILL.md frontmatter (lines 1-10)
+    quote: '- A workflow cannot weaken a capability''s safety flags (§5.2.1)'
+  sa:
+    concept: 'Remaining ThreadState members: emit, context, arguments, env / envType / setEnv / instanceEnv?,
+      runCode, skills, runtimeStreams?, _notPackableRuntimeContext'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 3115 (emit), line 3130 (context), line 2801 (arguments),
+      lines 2932-2972 (env family; instanceEnv line 2947), line 3477 (runCode), lines 3249 and 1853-1880
+      (skills), lines 2809 and 3492'
+    - content/0.2.0/specification/threads.md §1.2.2 Skills table (line 168), §2.3 (lines 208-242), §5
+      Events (lines 324-348), §6 (lines 350-406), §7.4 Agent Skills (lines 447-465), §10 (lines 544-582)
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (line 9), §6 Creating a Thread (line
+      150), §16.2 Delivery (line 455)
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 9-17)
+    quote: must feature-detect the method and fail closed if the capability is unavailable
+  explanation: '`emit(event, data)` reaches connected clients at most once with no history, and only where
+    the runtime exposes the client API (a SHOULD): it notifies and is not a record. `context` is per-execution
+    scratch; sharing between tools and hooks is described without a MUST. `env` lets a thread value override
+    agent, prompt, user and instance values, and a client can set thread values at creation; `instanceEnv?`
+    reads only the instance value but is optional, and a packed agent MUST execute correctly when such
+    enhancements are absent. `runCode` runs source in a sandbox. `skills` is the thread owner''s Agent
+    Skills library, and installs require mutation authorization. Text and types agree on these signatures;
+    `skills`, `user` and `runtimeStreams` are absent from the §12 reference in threads.md although its
+    tables list them.'
+  combined: 'Emit `acs_*` events for live views only. `state.context` may pass one entry per call, keyed
+    by tool name and arguments, from wrapper to hook as a convenience; nothing depends on it. Policy that
+    must not be weakened, such as ''approval required'', lives in constants of the binding''s code; nothing
+    security-relevant is read from `env`, and `instanceEnv` is not required, so a packed binding stays
+    portable. Agent code does not install skills: that would write ACS skills into a person''s library,
+    and the ACS skill files name Claude Code tools. Tier 1 for constants; tier 2 for `emit` and `context`.'
+  see_also:
+  - safety-enforcement#appr-02
+  - checkpoint-rollback-state#state-15
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - approval-human#users-01
+  - evidence-audit-observability#audit-02
+  - evidence-audit-observability#policy-01
+  - workflow-execution#wf-05
+  - multi-agent#coord-19
+  - multi-agent#coord-26
+  - packaging-conformance-governance#ver-04
+  - models-context-memory-security#portability-01
+  - models-context-memory-security#profile-01
+- id: decide-01
+  relation: partial
+  acs:
+    concept: 'Judgments with a confidence: an ungrounded claim carries an inference method and a confidence
+      score (as in the outputs of classify, detect, measure, compare and verify)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.1 Grounded Claims (lines 76-77)
+    - schemas/capability_ontology.yaml classify (lines 323-360)
+    quote: Ungrounded claims MUST include an `inference_method` and `confidence` score.
+  sa:
+    concept: state.decide() and the decision provider extension point (DecisionProviderInterface, DecisionProviderFactory)
+    refs:
+    - content/0.2.0/specification/threads/decisions.md §1 Thread Interface (lines 8-30), §2 Request Types
+      (lines 32-64), §4.1 Answer Semantics (lines 153-167), §5 Provider Interface (lines 169-198), §6
+      Conversation Semantics (lines 200-210)
+    - content/0.2.0/infrastructure/runtime.md §1.1 Decision Inference (lines 19-25)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1308-1320 (DecisionProviderInterface, DecisionProviderFactory),
+      line 1325 (decide helper), line 3401 (ThreadState.decide)'
+    quote: A decision provider **MUST** implement `decide()` and declare
+  explanation: '`state.decide()` evaluates typed questions over caller-supplied context and returns probabilities;
+    providers and runtimes MUST NOT coerce a probability to a boolean or apply a threshold, and `decide()`
+    MUST NOT implicitly read or change the conversation or execute tools. The runtime MUST expose it,
+    also when `state.execution` is null. Every call names a `provider` factory and a `model`, so a binding
+    that used it would choose a vendor. DecisionProviderInterface is the extension point: a package may
+    supply a provider that declares `kind: ''decision''` and `specificationVersion: ''1''`. Text and types
+    agree on both. A probability is a judgment, not a verification, and caller-supplied context is an
+    evidence anchor only when it points at something stored.'
+  combined: 'An optional example, not part of the binding: a grounded `classify` or `detect` tool may
+    call `state.decide()`, return the answer''s probability as the ACS `confidence`, record the provider
+    and model as the inference method, and list as `evidence_anchors` the stored items (message ids, file
+    paths) whose content it passed as context. The threshold that turns a probability into a `verify`
+    verdict is the tool author''s, as decisions.md requires of callers, and belongs in the tool''s constants.
+    The deployer chooses the decision provider and model. Tier 1 for the call; the mapping to ACS fields
+    is a binding convention.'
+  see_also:
+  - tools-contracts#io-08
+  - evidence-audit-observability#trust-02
+  - models-context-memory-security#ground-01
+  - models-context-memory-security#profile-04
+- id: consume-01
+  relation: partial
+  acs:
+    concept: 'Single use: one checkpoint authorises one step, and a decision is not reused'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 831-837)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces' (lines 145-152)
+    quote: One checkpoint authorises one step that requires one,
+  sa:
+    concept: '`moveFile`: by its stated constraints it fails when the source is missing or the destination
+      exists'
+    refs:
+    - content/0.2.0/specification/threads/filesystem.md §5 Moving and Renaming (lines 78-107)
+    - content/0.2.0/specification/threads.md §1.2.2 File System table (lines 67-82; `moveFile` is not
+      listed)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3340 and 3353 (moveFile, renameFile), lines 3152-3167
+      (getValue, setValue)'
+    quote: 1. **Source must exist.** Moving a missing path throws.
+  explanation: 'The key-value store has no conditional write: `setValue(key, null)` succeeds whether or
+    not the key was present, so reading, checking and deleting a record is not a single step. `moveFile`
+    behaves differently by its stated constraints: moving a missing path throws, and it ''does not overwrite''
+    an existing destination. That gives create-if-absent and consume-once with members present in both
+    the text and the types; a helper that consumes by moving a file from an open directory to a used one
+    type-checks against 0.45.10. The constraints are written without MUST and say nothing about two moves
+    issued at the same moment. `moveFile` is in filesystem.md §5 and the types but missing from the method
+    table of threads.md §1.2.2.'
+  combined: 'Where single use must hold even if an endpoint handler runs during a flow, the approval and
+    the checkpoint are files: the granting side writes `/acs/approvals/open/<request>.json`, and the gated
+    tool consumes by `moveFile` to `/acs/approvals/used/<request>.json` before acting. A throw means the
+    record was already consumed or never granted, and the tool refuses with F502 or F501. The file is
+    the single-use token only: thread files are served to every caller with thread access and can be written
+    by any file-writing tool the agent offers a model, so the decision and its approvers are still read
+    from the key-value record, and a file with no matching record is refused (approval-human#approval-13).
+    This is stronger than deleting a key, which cannot report that the key was already gone; the guarantee
+    is descriptive text, so the tombstone rule of row thread-01 stays in place as well. Tier 2.'
+  see_also:
+  - safety-enforcement#appr-03
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#edge-02
+  - checkpoint-rollback-state#state-09
+  - checkpoint-rollback-state#state-24
+  - approval-human#approval-04
+  - approval-human#approval-10
+  - approval-human#approval-13
+  - workflow-execution#wf-06
+  - workflow-execution#wf-09
+  - multi-agent#coord-13
+- id: erase-01
+  relation: partial
+  acs:
+    concept: 'Records that persist: observations are append-only, and every approval decision is recorded
+      on an action record'
+    refs:
+    - spec/STANDARD-v1.1.0.md §2 Terms (line 58)
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 898-902)
+    - schemas/capability_ontology.yaml audit (lines 1336-1375)
+    quote: '| **Observation** | Append-only event grounded in evidence anchors |'
+  sa:
+    concept: 'Thread Client API operations that remove or interrupt thread state: thread deletion, message
+      deletion, stop'
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (lines 9-14), §10 Deleting a Thread (lines
+      290-298), §13 Deleting a Message (line 378), §15 Stopping Execution (line 404)
+    - content/0.2.0/specification/threads/messages.md §6 Deleting Messages (lines 180-186)
+    - content/0.2.0/infrastructure/runtime.md §15 Thread Client API (lines 364-380)
+    quote: 5. The runtime **MUST** delete the messages, files, and stored values of every thread in the
+      deletion set.
+  explanation: 'Every record a binding keeps inside a thread can be removed from outside the binding.
+    Where the runtime exposes the client API (a SHOULD), a caller with thread access can delete the thread,
+    which MUST delete its messages, files and stored values and discard its queued messages and scheduled
+    effects; delete one message, with the semantics of `deleteMessage` (tool-result messages cascade with
+    their parent assistant message); or stop a run, which MUST abort the execution in flight and settle
+    it as `idle` with reason `aborted_by_user`. Thread retention is runtime-defined. ACS treats observations
+    as append-only and requires each decision on an action record. No published types are involved: the
+    client API''s wire types are in the text only.'
+  combined: 'Write the action record before the effect and update it after, so an aborted mutation still
+    leaves a `planned` or `approved` record. Anything that must outlive the thread, or survive its deletion
+    by an admitted caller, is copied to a store outside the thread that the package declares as part of
+    its purpose. A binding claim states this limit: inside SA 0.2.0 the trail is a thread-local trace
+    under the control of everyone the runtime admits to the thread. Tier 1: the deletions are MUSTs, so
+    the limit is certain.'
+  see_also:
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-15
+  - checkpoint-rollback-state#state-19
+  - evidence-audit-observability#audit-01
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#retention-01
+  - evidence-audit-observability#store-02
+  - workflow-execution#wf-25
+  - multi-agent#coord-27
+  - packaging-conformance-governance#pkg-07
+  - models-context-memory-security#context-02
+  - models-context-memory-security#portability-01
+- id: hitl-01
+  relation: partial
+  acs:
+    concept: 'Approval: a decision bound to the SHA-256 of the canonical JSON of the shown values, with
+      min_approvers distinct approvers, expiry and single use'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 804-902)
+    - schemas/world_state_schema.yaml `approval` (lines 373-412)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (line 88)
+    quote: canonical JSON of the shown values matches, at least `min_approvers` distinct approvers agree,
+      it
+  sa:
+    concept: A human-backed side composed as a child (the `approval_gate` example), registry status `awaiting_human`,
+      blocking relationships
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4772-4790 (HumanSide), lines 4608-4615 (blocking),
+      lines 1962-1967 (status)'
+    - content/0.2.0/specification/agents.md §1.1 (line 19), §7 Human-in-the-Loop Composition (lines 169-191)
+    - content/0.2.0/specification/subagents.md §3.3 (lines 106-112), §4.3 (lines 151-153)
+    - content/0.2.0/specification/threads/client-api.md §12 Sending a Message (lines 341-345)
+    - '@standardagents/spec 0.45.10 index.d.ts line 6510 (validateAgentDefinition)'
+    quote: 'This is a deliberate capability, not an accident of the model. The canonical use is an **approval
+      gate**:'
+  explanation: 'SA describes a waiting state: a child whose turn belongs to a human side parks as `awaiting_human`
+    and resumes on an inbound message. The description carries no MUST, and the approval gate is example
+    code in which a model produces the decision: side A is a prompt that ''renders the request, records
+    the outcome''. SA does not bind a decision to what was shown, identify or count approvers, expire
+    a decision or prevent reuse, and it ''deliberately does **not** define who the person is or how their
+    input arrives''. Messages carry no caller identity, and the send route accepts role ''user'', ''assistant''
+    or ''system'' from any admitted caller, so a role says nothing about who sent a message. A `blocking`
+    relationship holds the parent''s flow while a person decides. Text and types agree on HumanSide.'
+  combined: 'Decisions are taken only from the authenticated thread endpoint (row endpoint-01), never
+    from a chat message or a model''s report. The gated tool is two-phase: the first call stores the request
+    (shown values, digest, expiry) and returns F502 with the request id; after the decision arrives the
+    call is made again and consumes it. A human-backed child may be used to notify, with a handler-backed
+    presenter instead of a prompt (an agent with a handler side and a human side validates with no issues
+    in 0.45.10), never as the source of the decision. On SA 0.2.0 an approver is a caller the runtime
+    admitted to the thread, identified by `caller.id`. Tier 1 through the endpoint; the waiting state
+    itself is tier 2.'
+  see_also:
+  - safety-enforcement#appr-01
+  - approval-human#approval-01
+  - approval-human#approval-03
+  - approval-human#approval-07
+  - approval-human#approval-19
+  - approval-human#approval-24
+  - approval-human#identity-01
+  - workflow-execution#wf-09
+  - workflow-execution#wf-30
+  - multi-agent#coord-08
+  - multi-agent#coord-22
+  - models-context-memory-security#perceive-03
+- id: endpoint-01
+  relation: fits
+  acs:
+    concept: Authenticated principal of an approver or event sender; out-of-band approval; delivering
+      an event to a waiting run
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 932-940)
+    - spec/STANDARD-v1.1.0.md §5.17 Sender Identity (lines 1021-1030)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 88-90)
+    quote: the principal of an item the authenticated party that delivered it to the
+  sa:
+    concept: defineThreadEndpoint() / ThreadEndpointHandler / ThreadEndpointAuth (caller, threadAccess)
+      / EndpointAccess
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 5326 (EndpointAccess), lines 5367-5372 (ThreadEndpointAuth),
+      line 5508 (ThreadEndpointHandler), line 5641 (defineThreadEndpoint), lines 1892-1905 (ThreadUser),
+      line 5543 (defineController), line 1810 (defineUserEndpoint)'
+    - content/0.2.0/specification/threads/endpoints.md §2 (lines 22-54), §3 (lines 56-69), §4 Access and
+      Authentication (lines 71-105)
+    - content/0.2.0/specification/threads/client-api.md §2 Routes (line 35)
+    - content/0.2.0/specification/users.md status (line 3), §1 Identity (lines 9-10), §3 User Endpoints
+      (lines 111 and 146-148)
+    quote: '| `caller` | `ThreadUser \| null` | **MUST** be the authenticated identity when the request
+      presented credentials the runtime verified, and `null` otherwise.'
+  explanation: 'In the non-draft surface this is the one place where SA hands package code a runtime-verified
+    identity for a request; the draft Users page adds user endpoints with the same property. Text and
+    types agree on the four-argument handler and the two access levels. `caller` is `ThreadUser | null`
+    in the types, so `auth.caller.id` needs a null check (TS18047), although the text says an `authenticated`
+    endpoint always has a caller. How the caller was authenticated is implementation-defined. That `id`
+    is stable and one per principal is stated only on the draft Users page. Whoever has thread access
+    may call, which normally includes the requester. `defineController` and `ControllerContext` are in
+    the types only. The mount path is written two ways: `{runtime_prefix}/{threadId}/{endpoint_path}`
+    in endpoints.md and beneath `{runtime_prefix}/threads/{threadId}/` in client-api.md. Searched: defineController,
+    ControllerContext.'
+  combined: 'A thread endpoint such as `acs/approvals/[id].post.ts`, with the default `authenticated`
+    access, or `public` only under the admission rule of approval-human#approval-04, accepts { decision,
+    digest } only for a stored request with that digest, applies an approver rule in the handler (for
+    example a role in `caller.roles`, or `caller.id !== state.userId`), and writes one key per approver
+    (row thread-01). When the count is reached it may resume without the model by `state.queueTool(tool,
+    storedArgs)`; a model that calls again with different arguments has a different digest and is refused
+    again. Approvers are recorded as runtime principals, not as people: on a one-principal runtime `min_approvers:
+    2` cannot be met, which fails closed. The URL cannot be stated portably. Tier 1.'
+  see_also:
+  - safety-enforcement#appr-03
+  - approval-human#approval-04
+  - approval-human#approval-10
+  - approval-human#approval-19
+  - approval-human#identity-02
+  - workflow-execution#wf-09
+  - models-context-memory-security#identity-01
+- id: shown-01
+  relation: partial
+  acs:
+    concept: '`shows`: the values the approvers see, to which the decision is bound'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 821-822 and 829-833)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (line 88)
+    quote: '| `shows` | References whose values the approvers see (each a `${...}` reference, else S303)
+      |'
+  sa:
+    concept: No defined surface on which a person sees a pending request; a package can serve one from
+      a GET thread endpoint
+    refs:
+    - content/0.2.0/specification/agents.md §1.1 (line 19), §7 (line 189)
+    - content/0.2.0/specification/threads/endpoints.md §2 File-Based Routing (lines 32-42), §4 (lines
+      89-91)
+    - content/0.2.0/specification/threads/code-execution.md line 389
+    - '@standardagents/spec 0.45.10 index.d.ts line 5641 (defineThreadEndpoint)'
+    quote: The runtime does not define who sees the parked session or through which interface they answer
+      — only the waiting state and its fulfillment.
+  explanation: 'ACS binds a decision to the SHA-256 of the canonical JSON of the values shown to the approvers.
+    SA defines no presentation surface for a pending request: notification and reply surfaces are ''runtime
+    and interface concerns''. If the approver reads a model''s description of the action, the digest binds
+    the decision to something the approver did not see. Thread endpoints close the gap with members present
+    in both text and types: a file without a method suffix is a GET endpoint, and the default access level
+    authenticates the caller before the handler runs. The text does not say that SHA-256 is available
+    to definition code, and it names no canonical JSON form, so the binding carries its own. Searched:
+    subtle; crypto (found only for the `runCode` sandbox and in the word ''cryptographic'').'
+  combined: 'The package serves the stored request itself: `acs/approvals/[id].ts` (GET) returns the shown
+    values, their digest and the expiry exactly as the gated tool stored them, and the POST endpoint of
+    row endpoint-01 accepts a decision only with that digest. Any client the deployer builds renders the
+    GET response, not model output. For a tool call, which has no `shows`, the binding hashes a fixed
+    object (capability, tool name, arguments, thread id, request id); ACS does not yet say which (see
+    the Agent Capability Standard findings), so the object''s shape is published with the binding. Tier
+    1.'
+  see_also:
+  - safety-enforcement#appr-01
+  - approval-human#approval-06
+  - approval-human#approval-18
+  - evidence-audit-observability#collect-02
+  - workflow-execution#wf-07
+- id: user-01
+  relation: partial
+  acs:
+    concept: Agent identity, actor_identity and trust class of a party; principal
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.17 Sender Identity (lines 1021-1030; Actor, lines 1095-1101)
+    - schemas/agent_identity_schema.yaml (`authenticated_by` pattern, line 37)
+    quote: fills it in; the standard does not say how a party is authenticated or
+  sa:
+    concept: ThreadState.userId, user() returning UserHandle, ThreadUser, UserState (the Users page is
+      a draft)
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 2777 (userId), line 3231 (user), lines 1561-1583 (UserHandle),
+      lines 1892-1905 (ThreadUser; role comment line 1895), lines 1418-1421 (UserIdentity), lines 3179-3211
+      (user value methods)'
+    - content/0.2.0/specification/threads.md §1.2.1 (line 41), User identity table (lines 155-159)
+    - content/0.2.0/specification/users.md status (line 3), §1 Identity (lines 7-43), §2.1 (lines 77-80),
+      §2.2 (line 87), §5 UserHandle (lines 165-182)
+    quote: '> **Status: draft proposal.** Not yet part of the frozen specification surface.'
+  explanation: 'The result of `user()` is stated three ways: `Promise<ThreadUser | null>` in threads.md;
+    a UserHandle that `extends UserIdentity` (username and role optional) in users.md §5; and `Promise<UserHandle
+    | null>` with `interface UserHandle extends ThreadUser` (username and role required) in the types.
+    `getUserValue`, `setUserValue` and `listUserValues` on ThreadState are in the types only. The identity
+    is the thread''s owner; a caller is a separate identity. The runtime gives an identity, not what it
+    is: the types note "''admin'' | ''user'' | ''api'' in the reference runtime." for `role`. `agentId`
+    is the definition''s name, shared by every thread of that agent. There is no trust class and no record
+    of how a user was authenticated. The per-user serialization of the draft Users page does not extend
+    to thread values. Searched: getUserValue, setUserValue, listUserValues.'
+  combined: 'An approver is recorded as { principal: ''sa-user:'' + caller.id, authenticated_by: ''x-acs.sa-caller''
+    }: ACS already admits `x-` vendor values, and this one attests an identity the runtime verified by
+    a mechanism it does not disclose. `kind` (human, agent or service) comes from the deployer''s configuration,
+    because the binding cannot observe it. The actor is a self-described `actor_identity` with a principal
+    that cannot collide, such as package id, agent name and thread id; it is not an authenticated sender.
+    `caller.roles` can satisfy an ACS approver role. Tier 1 for `caller`; nothing depends on the draft
+    Users surface.'
+  see_also:
+  - safety-enforcement#appr-03
+  - approval-human#approval-13
+  - approval-human#identity-02
+  - approval-human#identity-03
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-03
+  - workflow-execution#wf-09
+  - multi-agent#coord-08
+  - models-context-memory-security#identity-01
+  - models-context-memory-security#identity-02
+  - models-context-memory-security#perceive-03
+- id: grant-01
+  relation: fits
+  acs:
+    concept: 'A check before an external effect: `send` and `mutate` need a checkpoint and an approval'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.4 Safety-Critical Capabilities (lines 182-189)
+    - schemas/capability_ontology.yaml send (lines 1133-1139)
+    quote: '| `send` | `checkpoint` | Cannot send without prior checkpoint |'
+  sa:
+    concept: 'Credential grants (draft Users page): `UserHandle.fetch(grant, ...)` with runtime-enforced
+      `origins` and `allow` lists'
+    refs:
+    - content/0.2.0/specification/users.md status (line 3), §5 UserHandle (line 175), §6 Credential Grants
+      (lines 184-205)
+    - '@standardagents/spec 0.45.10 index.d.ts line 1593 (CredentialGrant), lines 1561-1583 (UserHandle;
+      fetch line 1582)'
+    quote: 4. The runtime MUST reject a `fetch` from a caller not covered by `allow`. An absent `allow`
+      denies all callers.
+  explanation: 'On the draft Users page, a credential grant is a named, user-scoped credential with a
+    use policy. `UserHandle.fetch(grant, input, init)` makes the runtime inject the credential, and the
+    runtime MUST reject a `fetch` whose destination origin is not covered by `origins` or whose caller
+    is not covered by `allow` (tools, endpoints, user endpoints, rooms, agents). Secret material is not
+    readable by packaged code. This is a pre-effect gate that the runtime, not the package, enforces:
+    it limits which tool may reach which origin with which credential. It does not decide whether a particular
+    action may proceed. Text and types agree on CredentialGrant and `fetch`; the page is marked as outside
+    ''the frozen specification surface'', and a thread without a user has no handle.'
+  combined: 'Where the draft surface exists, a grounded `send` or `mutate` tool that needs a credential
+    calls `fetch` on the handle that `state.user()` resolves to, instead of reading a secret from `env`,
+    and the deployer lists only grounded tools in the grant''s `allow`. An ungrounded tool then cannot
+    use the credential, which narrows the coverage gap of row tools-06 for credentialed effects. The ACS
+    checkpoint and approval checks still run in the wrapper first. The tool feature-detects the handle
+    and its `fetch`, and a packed binding still works without them. Tier 2: a draft surface, feature-detected.'
+  see_also:
+  - safety-enforcement#cred-01
+  - models-context-memory-security#secrets-02
+- id: agent-01
+  relation: partial
+  acs:
+    concept: 'Agent-level declaration: which safety hooks are active, attended or unattended runs, and
+      a must-understand declaration of what the agent depends on'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.9 Workflow Extensions (lines 526-560)
+    - spec/STANDARD-v1.1.0.md §5.10 Triggers (line 577), §5.14 Approval (lines 839-844)
+    quote: consumer that does not implement a listed extension MUST reject the
+  sa:
+    concept: defineAgent() / AgentDefinition / SideConfig (HumanSide | PromptSide | HandlerSide) and definePrompt()
+      / PromptDefinition (tools, hooks, toolChoice, parallelToolCalls, requiredSchema)
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 4935 (SideConfig), lines 4959-5114 (AgentDefinition),
+      line 5174 (defineAgent), lines 4309-4456 (PromptDefinition; historyLimit line 4428, providerOptions
+      line 4444), line 4493 (definePrompt), line 4099 (PromptPart), lines 4719-4726 (ParentHookRequirement)'
+    - content/0.2.0/specification/agents.md §1.2 (lines 21-57), §2 (lines 68-95), §6 Required Parent Hooks
+      (lines 132-167), §10 (lines 273-334)
+    - content/0.2.0/specification/prompts.md §1 (lines 5-38), §8 Hook Scoping (lines 258-277), §10 (lines
+      298-407)
+    - content/0.2.0/specification/tools.md §3 Variable Declarations (line 61)
+    - content/0.2.0/specification/threads/client-api.md §12 (lines 341-345)
+    - content/0.2.0/infrastructure/runtime.md §5.1 Ordering (line 88)
+    - '@standardagents/spec 0.45.10 index.js lines 182 and 708 (definePrompt, defineAgent; implementation
+      observation)'
+    quote: '- When `hooks` is non-empty, only those hooks form the prompt base set'
+  explanation: 'Neither AgentDefinition nor PromptDefinition has an annotations or extension member; typed
+    literals reject unknown keys (TS2353), although the published defineAgent and definePrompt keep them
+    at run time. There is no place to declare a requirement that a runtime must understand or refuse;
+    the nearest are `parentHooks`, which fail closed, and a `required: true` tool variable, whose runtime
+    behaviour the text does not spell out. A human-backed side does not mean attended: its turn is fulfilled
+    by an inbound message, which a script can send. Tools MUST execute sequentially in a thread, so ACS
+    `conflicts_with` holds there; the prompts.md cell ''Allow parallel tool execution'' for `parallelToolCalls`
+    concerns the provider option. In the types only: `historyLimit`, `PromptEnvPart`, deprecated `tenvs`,
+    and `providerOptions` on a prompt (named in providers.md §2.1, absent from prompts.md). Searched:
+    historyLimit, tenvs, PromptEnvPart.'
+  combined: 'A grounded agent is: wrapped tools only; every relationship hidden, with delegation through
+    a grounded tool; the ACS hook ids at agent level and in every prompt that has its own list; no handoff
+    to an agent outside the binding; and attendance set by the deployer, unattended by default, so a call
+    that needs approval returns F502 unless the deployer configured the `when_unattended` behaviour otherwise.
+    Per-tool declarations may sit in a prompt''s tool `options` (row options-01). Nothing in the definition
+    can make a runtime refuse an agent whose ACS requirements it does not meet. Tier 1.'
+  see_also:
+  - safety-enforcement#appr-02
+  - approval-human#approval-11
+  - approval-human#approval-12
+  - approval-human#identity-04
+  - workflow-execution#wf-02
+  - workflow-execution#wf-13
+- id: handler-01
+  relation: fits
+  acs:
+    concept: 'Workflow host: drive the executor''s actions (InvokeCapability, CreateCheckpoint, Rollback,
+      RequestApproval, RecheckSource, AwaitEvent, Sleep) and keep a snapshot between waits'
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md intro (lines 10-14), 'Actions and responses' (lines 81-101), 'Driving
+      a run yourself' (lines 258-288)
+    - spec/STANDARD-v1.1.0.md §5 Workflow DSL (from line 199)
+    - core/Cargo.toml (lines 8-17)
+    quote: The executor does no I/O. It tells your code what to do next (an
+  sa:
+    concept: 'defineHandler() / HandlerDefinition / HandlerSide: deterministic code that owns one side''s
+      turns'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 5207 (HANDLER_SYMBOL), lines 5233-5264 (HandlerDefinition,
+      DefineHandlerOptions), lines 5294 and 5299 (defineHandler, isHandler), lines 4896-4924 (HandlerSide)'
+    - content/0.2.0/specification/handlers.md §1 (lines 7-28), §3 to §6 (lines 44-88), §10 (lines 139-150)
+    - content/0.2.0/infrastructure/runtime.md §14.8 (lines 317-318; the only mentions of WebAssembly outside
+      the sandbox globals list)
+    quote: '- The runtime **MUST** invoke the handler exactly once for each inbound message on the side''s
+      perspective, in message persistence order.'
+  explanation: 'A handler receives the full ThreadState and the full Message. Delivery is exactly once,
+    in order, never concurrent on a thread, and a failed invocation MUST NOT be redelivered automatically;
+    a throw fails only that turn. A handler turn makes no model request. That matches the executor''s
+    design: deterministic, resumable, asked what to do next. Text and types state the same contract; the
+    types additionally brand the definition with `[HANDLER_SYMBOL]: true` and export `isHandler()`, neither
+    in handlers.md §10. Whether `state.invokeTool` from a handler fires tool hooks or stores a tool message
+    is not stated. The ACS core type-checks for the wasm32-unknown-unknown target as it stands but exports
+    no interface, and the 0.2.0 text does not say that WebAssembly is available to definition code. Searched:
+    webassembly, wasm (the `runCode` sandbox pages only), HANDLER_SYMBOL, isHandler.'
+  combined: 'Possible in principle and blocked on an ACS deliverable (see the Agent Capability Standard
+    findings): a handler-backed side runs the executor, restores the run from `getValue(''acs.run'')`
+    on each inbound message, submits the message as the answer to the pending action, and loops on the
+    next action (InvokeCapability to `state.invokeTool`; RequestApproval and AwaitEvent record the request
+    and return; Sleep to `scheduleEffect`). Two requirements follow from the delivery rules: the snapshot
+    is saved after every answer and capability tools tolerate a repeat, because a turn that dies after
+    an effect is not redelivered and the run asks again; and the handler writes its own records, since
+    hooks may see nothing. A long loop holds the thread''s delivery slot. Not buildable today; tier 1
+    once an executor exists in TypeScript.'
+  see_also:
+  - tools-contracts#cls-04
+  - safety-enforcement#exec-01
+  - safety-enforcement#hook-02
+  - checkpoint-rollback-state#state-15
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#collect-02
+  - workflow-execution#wf-04
+  - workflow-execution#wf-05
+  - workflow-execution#wf-22
+  - workflow-execution#wf-25
+  - multi-agent#coord-20
+  - multi-agent#coord-26
+  - packaging-conformance-governance#pkg-06
+- id: handler-02
+  relation: fits
+  acs:
+    concept: 'Deterministic checks between a proposed action and its effect: a plan before `execute` and
+      `mutate`, a checkpoint before the mutation'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 85-92)
+    quote: '- A plan is not required. Where a workflow has `plan`, it MUST run before'
+  sa:
+    concept: A handler-backed side as the only caller of mutating tools, opposite a prompt-backed side
+      that proposes actions
+    refs:
+    - content/0.2.0/specification/handlers.md §4 Delivery Semantics (lines 57-65), §6 Capabilities (lines
+      79-88)
+    - content/0.2.0/specification/agents.md §1.1 (lines 9-17), §1.3 Derivations (line 66)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (line 52)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5233-5253 (HandlerDefinition), lines 4896-4924 (HandlerSide),
+      line 6510 (validateAgentDefinition)'
+    quote: 'A handler receives the full [`ThreadState`](/0.2.0/specification/threads) and may do anything
+      tools can do:'
+  explanation: 'An agent may pair a prompt-backed side with a handler-backed side. If the prompt lists
+    no mutating tool and replies with one proposed action as JSON, the handler receives that reply as
+    an inbound message, exactly once and in order, and is the only code that calls the mutating tools.
+    Deterministic code then sits between the model and every effect without any hook. An agent of this
+    shape, with a handler that validates the proposal, takes a checkpoint and calls `state.invokeTool`,
+    type-checks against 0.45.10, and `validateAgentDefinition` returns no issues for it. The pattern needs
+    no ACS executor. It rests on one assumption the text does not state: that a runtime does not execute
+    a model''s call to a tool the active prompt does not list. Text and types agree on the handler contract.'
+  combined: 'For agents whose mutating tools must never be callable by a model: side A is a planner prompt
+    with read-only tools and `stopOnResponse`; side B is an `acs_gatekeeper` handler that parses the proposal,
+    refuses unknown tools with R402, obtains the checkpoint and the approval, invokes the grounded tool
+    and injects the result on its own side. The grounded tools keep their own wrapper, so the handler
+    is a second layer, not a replacement. Set `maxSessionTurns`, since a handler that answers every message
+    can loop against a prompt side. The handler writes its own records. Tier 1 for delivery; the allow-list
+    assumption is tier 2.'
+- id: pack-01
+  relation: partial
+  acs:
+    concept: Distributing the binding, and stating which versions a package targets
+    refs:
+    - spec/STANDARD-v1.1.0.md §11.5 Version Declaration (lines 1492-1516)
+    - spec/STANDARD-v1.1.0.md §5.9 Workflow Extensions (lines 534-543)
+    quote: V109. A validator for this version MUST support 1.0 and 1.1.
+  sa:
+    concept: PackedMeta / PackedExports / PackageSignature / the `standardagent` field of package.json;
+      namespace visibility; SPEC_VERSION
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5778-5795 (PackedMeta), lines 5828-5860 (PackedExports),
+      lines 5669-5678 (PackageSignature), lines 5727-5738 (PackedMetadata), lines 6525-6528 (SPEC_VERSION),
+      lines 731, 1310 and 3521 (specificationVersion)'
+    - content/0.2.0/distribution/packaging.md intro (line 3), 'Portability requirements' (lines 7-25),
+      'package.json Requirements' (lines 149-187), 'PackedMeta' (lines 189-215), 'Visibility Rules' (lines
+      221-230), 'Packed Thread Endpoints' (lines 268-278), 'Type Definitions' (lines 280-332)
+    - content/0.2.0/specification/threads/endpoints.md §2 (lines 48-52)
+    - content/0.2.0/specification/effects.md §2.1 Packed Effect Names (lines 69-79)
+    - content/0.2.0/specification/providers.md §1 (line 15)
+    quote: by this specification. Packed definitions MUST NOT require private runtime
+  explanation: 'PackedMeta is { packageId; version; entryAgents; packedAt; description?; parentHooks?
+    }; text and types agree, and it rejects an extra member (TS2353). A package''s internal tools, prompts
+    and hooks are hidden from outside; its entry agents, its thread endpoints (which share the host''s
+    route namespace) and its effects (schedulable by qualified name, at ''should'' level) are reachable.
+    The portability rule lets a packed binding rely only on surfaces the specification defines. Versions:
+    the types export SPEC_VERSION as 0.2.0, which the text does not mention; packaging.md''s peer range
+    `>=0.2.0` is an npm range while the package is 0.45.10; and provider interfaces already declare `specificationVersion:
+    ''1''`. The d.ts example in packaging.md omits a required type argument (TS2314). The text does not
+    say how an ordinary npm dependency of a packed project is carried. Searched: SPEC_VERSION, specVersion.'
+  combined: 'Ship source that is compiled into the adopter''s package: the helpers (`groundedTool`, hook
+    and endpoint factories) with their own SHA-256 and RFC 8785 canonical JSON, and the generated ontology
+    table. Optionally offer a packed agent that exposes `approval_gate`, carries the approval endpoints
+    and the expiry effect, and contributes the audit hook through `parentHooks`; that hook observes the
+    direct parent only and cannot see the host''s tool table. A packed endpoint is mounted without a package
+    prefix, and the text does not say what happens when two paths collide, so the paths start with `acs/`.
+    ACS versions travel in each tool''s annotation, since PackedMeta has no slot. Tier 1.'
+- id: valid-01
+  relation: partial
+  acs:
+    concept: 'Diagnostic model: code, name, severity, message, location, suggestion'
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.1 Categories and Severity (lines 1257-1270), §9.2 Validation Errors (lines
+      1276-1277), §9.8 Diagnostic Format (lines 1348-1370)
+    quote: 'Diagnostics MUST be returned in this format:'
+  sa:
+    concept: validateAgentDefinition() / DefinitionIssue / DEFINITION_ISSUE_CODES / RESERVED_RELATIONSHIP_NAMES
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts line 6477 (DEFINITION_ISSUE_CODES, 26 codes), line 6481
+      (DefinitionIssueCode), lines 6485-6494 (DefinitionIssue), line 6500 (RESERVED_RELATIONSHIP_NAMES),
+      line 6510 (validateAgentDefinition), lines 5828-5860 (PackedExports)'
+    - content/0.2.0/specification/agents.md §8 Definition-Time Errors (lines 193-205)
+    - content/0.2.0/specification/subagents.md §2.4 Reserved Names (lines 76-78)
+    quote: Validation issues **SHOULD** be reported as a structured list (`code`, `severity`, `message`,
+      `path`) so tooling can surface every problem in one pass.
+  explanation: 'The shapes are close. DefinitionIssue is { code; severity: ''error'' | ''warning''; message;
+    path }; an ACS diagnostic adds `name`, a structured `location` and a `suggestion`. The text names
+    the four fields at SHOULD level and requires a ''dedicated validation code'' for reserved names but
+    lists no codes; the 26 codes, the pure function and its use by defineAgent exist only in the types.
+    `DefinitionIssueCode` is a closed union, so another validator cannot emit a DefinitionIssue with its
+    own code (TS2322). The function covers agent definitions only. On the ACS side the code ranges are
+    fixed and severity is fixed per code, and no ACS code exists for an unwrapped tool or an unlisted
+    hook. Searched: validateAgentDefinition, DEFINITION_ISSUE_CODES.'
+  combined: 'An ACS checker for SA projects runs beside validateAgentDefinition, not through it. For a
+    packed package it iterates PackedExports.prompts and .tools; for an unpacked project it depends on
+    the conventional directory layout. It reuses an ACS code only where the rule is the same: V101 for
+    an annotation that names no capability, W602 for annotation flags weaker than the ontology''s, V102
+    where a prompt offers a `mutate`, `send` or `rollback` tool and no `checkpoint` tool. Binding-only
+    checks get identifiers outside the ACS code space, for example `acs-sa/unwrapped-tool`, until ACS
+    defines binding diagnostics. Output keeps the §9.8 object shape with the SA `path` in `location.field`.
+    Tier 1: build-time only.'
+  see_also:
+  - packaging-conformance-governance#diag-01
+- id: registry-01
+  relation: fits
+  acs:
+    concept: Checking references to capability ids and typed contracts before anything runs (at validation
+      time)
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.5 Explicit Contracts (lines 100-103)
+    - spec/STANDARD-v1.1.0.md §9.2 Validation Errors (line 1276), §10.2 Conformance Requirements (line
+      1391)
+    quote: '- Type mismatches MUST be detected at validation time'
+  sa:
+    concept: 'The StandardAgentSpec declaration-merging registries: ModelRegistry, PromptRegistry, AgentRegistry,
+      ToolRegistry, CallableRegistry, HookIdRegistry, HandlerRegistry, PromptSchemaRegistry'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 26-133 (registries; PromptSchemaRegistry line 83,
+      SchemaFields line 88, ProviderCallable line 110, McpCallable line 114, Callables line 121), line
+      412 (ToolAnnotations)'
+    - content/0.2.0/specification/type-registry.md §1 (lines 5-57), §3 (lines 142-220), §4 Implementation
+      Requirements (lines 222-283)
+    quote: 'Generation **MUST** be non-additive: a deleted definition''s name **MUST** disappear from
+      the regenerated unions, so stale references fail rather than lingering.'
+  explanation: 'Both standards check names before anything runs, at different stages. SA narrows definition
+    names at compile time through registries that a runtime''s build tooling generates. ACS checks capability
+    ids at validation time: V101 for an id not in the ontology, which L1 conformance requires. What ACS
+    lacks is TypeScript types for its ids. The types say more than the text: `PromptSchemaRegistry` and
+    `SchemaFields` are not in type-registry.md, and the published `Callables` adds `ProviderCallable |
+    McpCallable` where the text has `keyof CallableRegistry` only. There is no registry for annotation
+    keys, message metadata keys, key-value keys or event names, and `ToolAnnotations` is an alias that
+    declaration merging cannot narrow. Registries are generated, and generation MUST be non-additive,
+    so a library must not add entries by hand. Searched: PromptSchemaRegistry, SchemaFields, ProviderCallable,
+    McpCallable.'
+  combined: 'The binding exports its own types generated from the ontology (a capability id union and
+    an `AcsAnnotation` interface) and a checked accessor that validates `tool.annotations?.acs` at run
+    time. It adds nothing to the StandardAgentSpec registries. Tier 1: compile-time only.'
+  see_also:
+  - tools-contracts#cls-12
+  - packaging-conformance-governance#type-01
+- id: ext-01
+  relation: partial
+  acs:
+    concept: 'Vendor extension slot: field names starting with `x-` are vendor data that validators never
+      report; an extension a consumer must understand is declared in `workflow_extensions.requires`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.1 (lines 203-204 and 228-230), §5.5 (lines 350-352), §5.9 Workflow Extensions
+      (lines 534-543), §11.3 (lines 1457-1458), Appendix B (line 1730)
+    quote: Field names starting with `x-` are reserved for vendor extensions.
+  sa:
+    concept: '`annotations` on a function tool: owner-keyed hints that a runtime may read and must otherwise
+      ignore'
+    refs:
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 123-146)
+    - '@standardagents/spec 0.45.10 index.d.ts line 412 (ToolAnnotations)'
+    quote: '- Annotations are non-normative. This specification defines no annotation keys, and their
+      meaning belongs to whoever owns the key.'
+  explanation: 'Each standard has one slot for data it does not define, with the same core rule: a consumer
+    that does not know the data ignores it and behaves as before. They differ in three ways. ACS has a
+    naming rule (the `x-` prefix, also used for vendor values in vocabularies such as `authenticated_by`);
+    SA says only that meaning ''belongs to whoever owns the key''. ACS allows `x-` fields on catalogs,
+    workflows and input bindings and reports other unknown fields as W604; SA has the slot on function
+    tools only. ACS also has a must-understand mechanism (`workflow_extensions.requires`, V106), which
+    SA lacks (row agent-01). The published types add nothing to the SA rule.'
+  combined: 'The binding uses each slot in its own direction. ACS data rides in SA as `annotations.acs`
+    (row tools-02). Standard Agents data rides in an ACS catalog or workflow as `x-` fields, or as `x-`
+    keys in a step''s `input_bindings`, which the host receives; for example `x-standardagents: { agent:
+    ''release_agent'', tool: ''write_config'' }`. Validators accept these without a warning. Neither slot
+    changes behaviour in a consumer that ignores it. Tier 1.'
+  see_also:
+  - packaging-conformance-governance#ver-04
+- id: drift-01
+  relation: partial
+  acs:
+    concept: A contract an implementer can cite and compile against, with stated differences between the
+      text and the reference artifact
+    refs:
+    - spec/STANDARD-v1.1.0.md status header (lines 4-8)
+    - spec/STANDARD-v1.1.0.md §11 Versioning and Compatibility (lines 1435-1516)
+    quote: and executor implement §4, §5 and §9–§11; they do not check §3.1's
+  sa:
+    concept: 'Inventory, part 1: members of @standardagents/spec 0.45.10 (SPEC_VERSION 0.2.0) that the
+      text under content/0.2.0 does not contain'
+    refs:
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6525-6528 (SPEC_VERSION), 211-249 (ToolResult), 443-448,
+      3097, 3179-3211, 4428, 4090-4099, 83-121, 6477-6510, 5207 and 5299, 5338-5349, 5420 and 5543, 5727-5756,
+      5872, 1014-1021, 1096-1139, 246'
+    - content/0.2.0 (whole tree; each name searched case-insensitively)
+    - content/0.2.0/specification/hooks.md §6.3 (lines 486 and 490; ToolAttachment named)
+    - content/0.2.0/specification/providers.md §2.1 (line 248; `prompt.providerOptions`)
+    quote: declare const SPEC_VERSION = "0.2.0";
+  explanation: 'Not found in content/0.2.0 (each name searched): tools: executionMode, executionProvider,
+    tenvs, the ToolResult interface with error_data (error_code appears once, in an example), the ToolArgs
+    Zod subset, validateToolName, the rule that new attachments are stored under /attachments/. ThreadState:
+    runAgent, getUserValue, setUserValue, listUserValues. Prompts: historyLimit, PromptEnvPart. Registry:
+    PromptSchemaRegistry, SchemaFields, ProviderCallable, McpCallable. Agents: validateAgentDefinition,
+    DEFINITION_ISSUE_CODES, HANDLER_SYMBOL, isHandler. Endpoints: defineController, ControllerContext,
+    EndpointOptions, getEndpointAccess. Packaging: PackedMetadata, NamespaceContext, isPacked, belongsToPackage,
+    isVisibleInNamespace, parseQualifiedName. Providers: ProviderExecutedToolResult, ProviderResponse.providerTools,
+    the provider-tool-done chunk. Also SPEC_VERSION itself. Named in the text but not defined there: ToolAttachment,
+    and `prompt.providerOptions` (absent from prompts.md). The types'' comments present some of these
+    as one product''s features (''stored by Standard Agents Builder prompts'').'
+  combined: 'Compile against the published types and cite the text, in three tiers, which every row of
+    this mapping names. Tier 1: behaviour the binding requires rests only on sentences with MUST in the
+    0.2.0 text and compiles against 0.45.10. Tier 2: SHOULD-level and descriptive behaviour is used only
+    with a stated fallback. Tier 3: members found only in the types are passed as extra fields or feature-detected
+    as methods and never relied on; a field that a runtime may drop cannot be feature-detected. Presence
+    in both text and types does not make a member required of every runtime: the file system has one MUST,
+    and `emit` reaches a client only through an API a runtime SHOULD expose. ACS states such differences
+    in its own status header; SA has no equivalent statement.'
+- id: drift-02
+  relation: partial
+  acs:
+    concept: Agreement between a specification and its reference implementation, checked by conformance
+      fixtures
+    refs:
+    - spec/STANDARD-v1.1.0.md §10.3 Conformance Testing (lines 1414-1431)
+    quote: '- Negative fixtures (invalid workflows that MUST fail with specific error codes)'
+  sa:
+    concept: 'Inventory, part 2: what the 0.2.0 text has and the published types lack, and where the two
+      disagree'
+    refs:
+    - content/0.2.0/specification/threads/client-api.md (wire types, lines 147-156 and 341-359)
+    - content/0.2.0/specification/users.md §3.2 (line 148), §5 (lines 167-177), §7 (lines 211-215)
+    - content/0.2.0/specification/subagents.md §5.1 (line 175)
+    - content/0.2.0/specification/hooks.md §1.1 (lines 17-36), §2.1 (line 136), §4.1 (line 322), §5.1
+      (line 373), §6.1 (lines 448-463)
+    - content/0.2.0/specification/tools.md §2.1 (line 44)
+    - content/0.2.0/distribution/packaging.md 'Qualified Names' (line 234)
+    - content/0.2.0/specification/threads.md line 159, §12 (lines 611-741)
+    - content/0.2.0/specification/prompts.md §3.2 (line 123), §10 (line 320)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5947, 3410, 6109-6112, 456, 566, 1561, 3231, 6339-6354,
+      4099, 4219-4222, 2137, 2150-2239'
+    quote: '| `execution` | `ExecutionState` | Always present in hooks |'
+  explanation: 'In the text only: the Thread Client API wire types (AgentListEntry, CreateThreadRequest,
+    SendMessageRequest, the `message_data` and `event` stream frames, stream tickets; the types declare
+    three stream events under other names), the `X-Standard-Agents-Caller` header, the error code `subagent_arguments_required`.
+    Disagreements: HookMessage (ten-field interface versus alias of Message); `execution` ''Always present
+    in hooks'' versus nullable; per-hook signatures without the trailing context; `before_create_message`
+    failure (SHOULD prevent versus the types'' comment); an undeclared `invokeTool` target (error result
+    versus throw); the qualified-name separator (''/'' versus a '':'' example); the result of `user()`
+    (three versions); user hooks returning `void` versus `Promise<void>`; 14 hooks listed versus 17 declared;
+    `PromptPart` with two members versus three; tool `options` ''Passed to the tool handler at execution
+    time.'' with no such parameter; metadata merge on `updateMessage` stated in the types only; threads.md
+    §12 omits user, skills, runtimeStreams, moveFile and renameFile.'
+  combined: 'For each disagreement the binding takes the reading that fails safe and compiles: `state.execution`
+    is treated as nullable everywhere; hooks declare the trailing context parameter; code that calls `invokeTool`
+    handles both a throw and an error result; qualified names use ''/''; metadata is written whole, not
+    merged; nothing is passed through tool `options` at run time; and the result of `user()` is read through
+    optional fields only. The wire types of the client API are copied from the text where a client needs
+    them, since the package does not export them. Tier 1 where the text has a MUST; otherwise tier 2.'
+  see_also:
+  - checkpoint-rollback-state#state-26
+  - evidence-audit-observability#anchors-02
+  - models-context-memory-security#context-04
+- id: drift-03
+  relation: partial
+  acs:
+    concept: 'Corrections to a published text: clarifications and typo fixes are patch releases'
+    refs:
+    - spec/STANDARD-v1.1.0.md §11.1 Semantic Versioning (lines 1437-1445)
+    quote: '| Bug fixes | PATCH | Clarifications, typo fixes |'
+  sa:
+    concept: 'Inventory, part 3: errata inside the 0.2.0 text and stale comments in the published types'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md headings at lines 253 and 344; line 391; §5.1 (line 88)
+    - content/0.2.0/specification/threads.md line 445
+    - content/0.2.0/specification/models.md line 481
+    - content/0.2.0/getting-started/examples.md line 1532
+    - content/0.2.0/specification/threads/client-api.md §6 Creating a Thread (lines 140-163)
+    - content/0.2.0/specification/hooks.md §1.3 (lines 88-90), §2.3 (line 161), §8.2 (line 673), §8.6
+      (lines 743-762)
+    - content/0.2.0/specification/agents.md §6 (line 155)
+    - content/0.2.0/specification/prompts.md §1.2 (lines 28 and 38)
+    - content/0.2.0/distribution/packaging.md 'Type Definitions' (line 320)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2741-2758 (positional defineTool example), lines
+      1405, 2361 and 3434 (links to /0.1.0/), lines 1973, 2090, 4235, 4666, 4675, 4682, 4704 and 4977
+      (links to a changelog page)'
+    - src/data/community.md line 45; AGENTS.md lines 105-110
+    quote: Runtime semantics and conformance requirements for the durable key-value store live in [Runtime
+      §15](/0.2.0/infrastructure/runtime#15-durable-key-value-store).
+  explanation: 'Inside the text: runtime.md has two headings numbered 14; threads.md line 445 cites ''Runtime
+    §15'' for the key-value store; runtime.md line 391 links `#13-code-execution-runtime`; models.md line
+    481 links `providers#9-provider-tools` while Provider Tools is §10; examples.md line 1532 says the
+    specification ''defines no route to create a thread'' while client-api.md §6 defines one; agents.md
+    line 155 lets a handoff compose a child''s `parentHooks`, while hooks.md lines 88-90 name only a direct
+    subagent relationship; prompts.md describes `parallelToolCalls` as ''Allow parallel tool execution''
+    while runtime.md §5.1 requires sequential execution. Examples that do not compile against 0.45.10:
+    hooks.md §8.6 (TS2322, TS18047), §2.3 and §8.2 (TS18047), and the packaging.md d.ts block (TS2314).
+    Stale comments in the types: a positional `defineTool` example (TS2554), three links to /0.1.0/ pages,
+    and eight links to a changelog page that content/0.2.0 does not contain.'
+  combined: 'Each item is reported upstream as a separate small erratum with its reproduction (see the
+    Standard Agent Specification findings), not as part of a feature proposal. The binding cites sections
+    by heading text as well as by number, because two numbers are ambiguous, and copies no example from
+    the text without compiling it. Whether an erratum can be fixed in place depends on whether content/0.2.0
+    is frozen (an open question). Tier 1 is unaffected: none of these items changes a MUST the binding
+    relies on.'

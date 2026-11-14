@@ -17,15 +17,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   a mapping of this standard against the Standard Agent Specification 0.2.0,
   how to build a grounded agent on it, and the changes proposed to each
   standard.
+- `docs/research/analysis/standard_agents_mapping/`: the row-level mapping
+  behind that document (319 rows in ten concerns, each with references and
+  verbatim quotes from both sides) and the findings it produced about each
+  standard. `tests/test_standard_agents_mapping.py` keeps the index, the
+  files and their references to this repository in agreement.
 - `examples/standard_agents/`: a reference binding in TypeScript and a worked
   example. `groundedTool` classifies a Standard Agents tool by an ontology
   capability and enforces the capability's checkpoint, approval and output
   rules inside the tool; approvals are recorded through an authenticated
   thread endpoint and bound to the §5.14 digest, which is tested against the
-  reference executor's. `lintPromptTools` and `lintAgentBindings` check a
-  prompt's tools and an agent's stop and session bindings before anything
-  runs. CI type-checks it against the published `@standardagents/spec` types
-  and runs its tests.
+  reference executor's. A rejection cannot be lost to an approval made at the
+  same moment, a call is recorded before its tool runs, and a checkpoint
+  authorises a call for ten minutes at most and only inside the execution it
+  was taken in. `lintPromptTools` and `lintAgentBindings` check a prompt's
+  tools and an agent's stop and session bindings before anything runs. CI
+  type-checks it against the published `@standardagents/spec` types and runs
+  its tests.
 - `schemas/interop/standard_agents_annotation.schema.json`: the schema of
   the `acs` annotation the binding puts on a tool.
 - `scripts/gen_standard_agents_binding.py` generates the binding's ontology

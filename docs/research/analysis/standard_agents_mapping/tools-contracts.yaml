@@ -1,0 +1,1211 @@
+# Capabilities, tools and typed contracts
+# Part of the Standard Agent Specification mapping; index.yaml explains the fields.
+concern: tools-contracts
+title: Capabilities, tools and typed contracts
+rows:
+- id: cls-01
+  relation: partial
+  acs:
+    concept: 'Capability: one of 36 atomic verbs in 9 layers, each with an input contract, an output contract
+      and safety flags'
+    refs:
+    - spec/STANDARD-v1.1.0.md §2 Terms (line 55)
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (lines 109-127), §4.2 Layers (lines 129-143)
+    - schemas/capability_ontology.yaml meta and layers (lines 6-96); ontology version 2.1.0
+    - 'docs/methodology/REJECTED_CANDIDATES.md §5 ''Rejected: Tool-Specific'' (lines 550-613; non-normative)'
+    quote: '| **Capability** | An atomic primitive with single purpose, composable with explicit I/O contracts
+      |'
+  sa:
+    concept: 'Tool: a named callable exposed to a model. The Tools page sorts tools by how they are defined
+      (function, prompt, agent); the Runtime page adds runtime-injected lifecycle tools, and the Models
+      page provider-embedded tools'
+    refs:
+    - content/0.2.0/specification/tools.md intro (line 3), §1 Tool Categories (lines 5-11)
+    - content/0.2.0/infrastructure/runtime.md §5.3 Tool Classes (lines 94-100)
+    - content/0.2.0/specification/models.md §1.2 Optional Properties (line 34, `providerTools`)
+    - content/0.2.0/specification/agents.md intro (line 5)
+    quote: Tools are callable capabilities exposed to models during execution.
+  explanation: 'The words overlap; the concepts do not. An ACS capability is a member of a closed, versioned
+    vocabulary that says what kind of act is performed and carries a contract and flags. An SA tool is
+    an open-ended concrete callable identified by name. A tool implements zero, one or several capabilities,
+    and many tools can implement one capability; ACS''s own non-normative text says so (''This is an implementation
+    of `retrieve`, not a separate capability.''). SA categories sort tools by how they are defined, ACS
+    layers by what they do; the axes are independent. SA text uses ''capabilities'' informally and defines
+    no vocabulary of tool kinds or risk. Searched: readOnlyHint, destructiveHint, idempotentHint, risk
+    level, risk:, requiresApproval, requires_approval, requires_checkpoint (content/0.2.0; not found).'
+  combined: 'Classification is a declaration by the tool author: tool name to capability id, plus domain
+    and flags. SA 0.2.0 promises only that the declaration is preserved on function tools (row cls-02);
+    no party is required to read it, and prompts and agents have no slot (rows cls-05, cls-06). Fit by
+    capability (inference): function tools for capabilities that read or act (retrieve, search, observe,
+    execute, mutate, send, persist, recall, audit) and for checkpoint and rollback, which the author must
+    implement because SA has no such primitive; `state.decide()`-backed function tools for classify, detect,
+    measure and compare only; prompt tools for generative capabilities; `delegate` by the reserved lifecycle
+    tool name. Searched: checkpoint, rollback, roll back, undo, revert (content/0.2.0; not found).'
+  see_also:
+  - published-api-extension-points#tools-01
+- id: cls-02
+  relation: fits
+  acs:
+    concept: 'What a classification of a tool would carry (a proposal: no normative ACS text defines a
+      tool binding): capability id, the §4.1 safety flags and the step-level `domain`. The one precedent,
+      the Python SDK''s MCP tool `metadata`, carries `capability_id`, `risk`, `mutation` and `requires_checkpoint`'
+    refs:
+    - grounded_agency/mcp.py `create_grounded_mcp_server` docstring (lines 45-54) and registration (lines
+      100-110)
+    - docs/integrations/claude_agent_sdk.md 'MCP Tool Mapping' (lines 160-186)
+    - spec/STANDARD-v1.1.0.md §4.1 (lines 111-124), §5.2 (line 260)
+    quote: 'Each tool may optionally carry ``metadata`` with:'
+  sa:
+    concept: '`annotations` on a function tool: a free-form object that `defineTool()` returns unchanged'
+    refs:
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 123-146), §9 Conformance Notes (line
+      156)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 412, 424, 532'
+    - '@standardagents/spec 0.45.10 index.js lines 145-165 (`defineTool`; implementation observation)'
+    quote: '`defineTool()` **MUST** return `annotations` unchanged on the tool definition.'
+  explanation: 'Spec text: a function tool MAY declare annotations; the specification defines no keys
+    and leaves their meaning to the key owner; `defineTool()` MUST return them unchanged and implementations
+    MUST preserve them. Published types: `annotations?: ToolAnnotations`, where `type ToolAnnotations
+    = Record<string, unknown>;`; an unknown top-level property such as `capability` is a compile error
+    (TS2353, tsc 6.0.3). `annotations` is therefore the only free-form metadata slot on a tool that is
+    promised to survive. Limits: the declaration has no run-time effect and no in-thread reader (row cls-04);
+    a raw literal is not type-checked (row cls-12); and §8 says annotations are ''keyed by the runtime
+    or tool that reads them'', whereas an ACS key is read by neither (open question).'
+  combined: 'defineTool({ annotations: { acs: { standard, ontology, capability, layer, domain, risk, mutation,
+    requires_checkpoint, requires_approval } }, ... }), the key and the members that `schemas/interop/standard_agents_annotation.schema.json`
+    defines (`domain` is optional; no other member is allowed). This type-checks against @standardagents/spec
+    0.45.10. The key name and the value schema are ACS''s to define and publish. Its readers are build-time
+    lints, packagers and reviewers (row cls-15). Keep the value JSON-serialisable: the SA text does not
+    require it and function values compile, so this is an ACS rule. Implementation observation, not spec:
+    the published `defineTool` builds its return value from a fixed list of keys, so an undeclared top-level
+    key would also be dropped at run time.'
+  see_also:
+  - published-api-extension-points#tools-02
+  - published-api-extension-points#tools-03
+  - safety-enforcement#flags-01
+  - approval-human#approval-02
+  - packaging-conformance-governance#pkg-03
+  - packaging-conformance-governance#ver-02
+  - models-context-memory-security#profile-06
+- id: cls-03
+  relation: fits
+  acs:
+    concept: Effective safety flags are acted on where the capability is used, and a declaration cannot
+      weaken them (written for workflow steps)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 270-284)
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 84-93)
+    quote: Validators, executors and safety layers MUST act on effective flags.
+  sa:
+    concept: 'Annotations are inert: they must not change validation, execution, results, or what the
+      model is sent; and no hook is specified as able to refuse a tool call'
+    refs:
+    - content/0.2.0/specification/tools.md §8 Semantics (lines 142-146), §9 (lines 150-156)
+    - content/0.2.0/specification/hooks.md §5.1 tool_call_started (lines 367-384), §4.1 before_create_message
+      (lines 310-322), §3.3 note on policy gates (line 273)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (line 113, `hook_blocked`)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 42-50)
+    quote: Annotations **MUST NOT** change argument validation, execution, the tool's results, or what
+      is sent to the model. A tool behaves identically in a runtime that ignores them.
+  explanation: 'Not a conflict between the texts: both requirements hold when the annotation is a declaration
+    only and enforcement is ordinary code of the tool. A conflict arises for one design only, an SA runtime
+    that refuses a `mutate` tool because of its annotation. §5.2.1 addresses ACS validators, executors
+    and safety layers acting on workflow steps; the SA sentence has ''Annotations'' as its subject and
+    names no bound party (open question). A hook cannot be the gate: of the five tool hooks only `tool_call_started`
+    runs before execution, and its ''return value **MUST** be ignored; the hook cannot modify the tool
+    call''. The stop reason `hook_blocked` is listed once and not defined, and whether a failing `before_create_message`
+    on the assistant message prevents its tool calls is not stated.'
+  combined: 'Enforce inside the tool''s own `execute`: a wrapper closes over the configuration it also
+    writes to `annotations`, checks checkpoint and approval records (row rec-01) and returns { status:
+    ''error'', error: ... } when a precondition is missing. It is a cooperative gate: it stops a model
+    from skipping a checkpoint or an approval, and relies on all other definition code on the thread being
+    trusted. It does not cover unclassified tools in the same prompt, provider-executed tools (cls-08),
+    injected lifecycle tools (cls-07) or scheduled effects (eff-01). A generic wrapper around `defineTool`
+    needs one type assertion at `execute` (TS2322 without it, tsc 6.0.3). The absence of a pre-execution
+    hook that can refuse a call is recorded as an SA gap under the safety-enforcement and approval concerns.'
+  see_also:
+  - published-api-extension-points#tools-02
+  - published-api-extension-points#tools-03
+  - published-api-extension-points#tools-06
+  - safety-enforcement#flags-01
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-02
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - multi-agent#coord-20
+  - packaging-conformance-governance#pkg-03
+  - models-context-memory-security#profile-06
+- id: cls-04
+  relation: acs_only
+  acs:
+    concept: Looking up a tool's classification by name at call time (`ToolCapabilityMapper.map_tool`
+      in the Python SDK; the Claude Code plugin hook matches tool names)
+    refs:
+    - grounded_agency/capabilities/mapper.py `map_tool` (lines 339-375)
+    - hooks/hooks.json PreToolUse matcher (line 5)
+    quote: Map a tool invocation to its capability metadata.
+  sa:
+    concept: 'Reading a tool''s definition or annotations from a hook, a tool or a handler: no ThreadState
+      method loads or lists tool definitions'
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 Resource Loading (lines 100-113), §2.1-§2.2 (lines
+      190-206)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 70-100), §5.5 tool_call_done (line
+      440), §6.2 HookToolCall (lines 465-476)
+    - content/0.2.0/specification/threads/execution-state.md §2 Execution Properties (lines 19-32), §2.2
+      (lines 43-49)
+    - content/0.2.0/distribution/packaging.md 'PackedExports Interface' (lines 121-147)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2866-2906 (load and list methods), 2578-2634 (ExecutionState),
+      5951-5963 (HookToolCall)'
+    quote: '| `loadAgent(name)` | `Promise<T>` | Load agent definition |'
+  explanation: 'SA text: ThreadState loads models, prompts and agents by name and lists their names; no
+    tool counterpart is listed, and in the published types `state.loadTool` and `state.getToolNames` are
+    compile errors. Hooks receive a HookToolCall with id, type, function.name and function.arguments only.
+    `execute(state, args)` is given neither the tool''s registered name nor the call id; a tool can read
+    `execution.messageHistory` but cannot tell which of several identical calls is its own. So nothing
+    inside a thread can read a tool''s annotations. Outside a thread a specified reader exists for packed
+    tools: the package entry point exports `tools` as loaders keyed by name (row cls-15). Searched: loadTool,
+    getToolNames, getTool( (content/0.2.0, src/data, README.md, AGENTS.md, index.d.ts; not found).'
+  combined: 'Keep the classification table in an ordinary module that the tool wrappers and an audit hook
+    both import, keyed by the name a prompt lists; the author repeats the name, because a tool definition
+    does not contain it. The hook maps `toolCall.function.name` to a classification for after-the-fact
+    audit. Limits: a non-empty prompt `hooks` list replaces the agent''s, so the hook must be listed on
+    every grounded prompt; `tool_call_done` MUST fire ''once per tool call'', but the text does not say
+    whether that covers invokeTool or queueTool calls, sub-prompt tool calls, provider-executed tools
+    or lifecycle tools, nor whether a packed tool''s name is local or qualified. Annotations cannot be
+    looked up from inside a thread with 0.2.0.'
+  see_also:
+  - published-api-extension-points#handler-01
+  - published-api-extension-points#hooks-02
+  - published-api-extension-points#thread-02
+  - safety-enforcement#exec-01
+  - safety-enforcement#hook-02
+  - evidence-audit-observability#collect-02
+  - multi-agent#coord-20
+  - packaging-conformance-governance#pkg-09
+- id: cls-05
+  relation: partial
+  acs:
+    concept: Cognitive capabilities (UNDERSTAND, REASON, MODEL, SYNTHESIZE); in the ACS repository each
+      capability is a prompt-driven skill with an `allowed-tools` grant
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.2 (lines 131-143)
+    - schemas/capability_ontology.yaml `classify` (lines 323-360)
+    - skills/classify/SKILL.md frontmatter (lines 1-11)
+    - grounded_agency/capabilities/mapper.py `Skill` mapped to `invoke` (lines 245-250)
+    quote: 'allowed-tools: Read, Grep'
+  sa:
+    concept: 'Prompt tool: a prompt named in another prompt''s `tools`, with `toolDescription`, `requiredSchema`
+      and its own `tools`'
+    refs:
+    - content/0.2.0/specification/tools.md §1 (line 10), §2.1 (line 38), §4 (lines 66-79)
+    - content/0.2.0/specification/prompts.md §1.1-§1.2 (lines 9-36), §3.3 (lines 127-168), §5 (lines 201-222)
+    - content/0.2.0/specification/threads/execution-state.md §2.1 Prompt Path (lines 34-41)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4309-4456 (PromptDefinition)'
+    quote: 'The `requiredSchema` property defines inputs when the prompt is called as a tool:'
+  explanation: 'The nearest SA construct to an ACS cognitive capability: system instructions, a model,
+    a tool grant and a validated input schema. A prompt tool whose instructions do one thing can take
+    one capability id, and its `requiredSchema` can mirror the capability''s input schema. Missing: (1)
+    a free-form metadata slot: §8 gives annotations to function tools only, the PromptDefinition tables
+    list none, and the published types reject the property (TS2353). (2) An output schema (row io-04).
+    (3) A risk of its own: it depends on the tools the prompt may call; the ACS mapper treats the analogous
+    `Skill` tool as `invoke` with the comment ''Skills may mutate but we check at skill level''.'
+  combined: 'Leave the prompt tool unannotated and ground every function tool it can call: a sub-prompt
+    runs inside the calling thread (Execution State tracks it in `promptPath`), so each inner call enforces
+    its own flags against the same records. Record the prompt''s classification in the shared table of
+    row cls-04 for audit. A grounded function tool placed in front of the prompt (`uses: [''<prompt name>'']`,
+    then `state.invokeTool`) can carry a label, but only that: what `invokeTool` returns for a prompt
+    target is not specified, code has nowhere to set the result-shaping options, and their defaults include
+    the inner tool traffic. Where a typed output is needed, back the tool with `state.decide()` or with
+    code, not with a prompt.'
+- id: cls-06
+  relation: partial
+  acs:
+    concept: '`delegate` (assign a task to another agent) and `invoke` (run a composed workflow)'
+    refs:
+    - schemas/capability_ontology.yaml `delegate` (lines 1443-1538), `invoke` (lines 1609-1644)
+    - grounded_agency/capabilities/mapper.py `Task` mapped to `delegate` (lines 239-244)
+    quote: 'description: Assign task to another agent'
+  sa:
+    concept: 'Agent tool: an `exposeAsTool: true` agent with a human side, listed in a prompt''s `tools`,
+      is a handoff of the same thread'
+    refs:
+    - content/0.2.0/specification/agents.md §2.2 (lines 89-90), §5 Tool Exposure (lines 126-130)
+    - content/0.2.0/specification/threads.md §1.1 Agent Assignment (lines 20-30)
+    - content/0.2.0/infrastructure/runtime.md §5.3 (line 99)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4959-5114 (AgentDefinition)'
+    quote: 'When `exposeAsTool: true`, an agent referenced directly in a prompt''s `tools` array is a
+      **handoff**: the tool call transfers control of the *same thread* to the target agent, preserving
+      history.'
+  explanation: 'A handoff changes which agent owns the thread; it is not a general way to assign a task.
+    The same paragraph adds: ''Handoff requires the target agent to have a human side matching the thread''s
+    conversational surface.'' The text does not say what the calling tool call receives (inference: nothing
+    the caller acts on). ACS `delegate` returns `accepted`, an optional `result` and the `effective` settings,
+    so the fit is loose and `delegate` serves as an audit label only. AgentDefinition has no annotations
+    in the text tables (§2.1, §2.2) and the published types reject the property (TS2353), so the classification
+    has no home on the definition. In ontology 2.1.0 `delegate` is medium risk and requires neither checkpoint
+    nor approval, so nothing has to be enforced by default.'
+  combined: 'Record handoff targets as `delegate` in the shared table (row cls-04) for audit. Where a
+    stricter flag is wanted, do not list the agent in `tools`; give the model a grounded function tool
+    that declares `uses: [''<agent name>'']`, runs its gate, and then calls `state.queueTool`. The basis
+    is a descriptive table row (''Queue a tool call to an agent to trigger handoff programmatically''),
+    not a requirement, so test it per runtime: when a queued handoff takes effect and which arguments
+    an agent callable accepts are not specified. After a handoff the target agent''s tools run on the
+    same thread and can read and write the same gate records (row rec-01).'
+- id: cls-07
+  relation: partial
+  acs:
+    concept: '`delegate` with a waiting result, and the `delegation@1` inputs `fresh_context`, `role`,
+      `read_only`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 904-940; the quoted sentence starts on line 917
+      and continues on the next line)
+    - schemas/capability_ontology.yaml `delegate` (lines 1443-1538)
+    quote: '`delegate` accepts `fresh_context` (start the delegate without the'
+  sa:
+    concept: Runtime-injected lifecycle tools `subagents`, `subagent_create`, `subagent_message`
+    refs:
+    - content/0.2.0/specification/subagents.md §1 (lines 40, 45), §3.1 (lines 88-94), §3.3 (lines 106-110),
+      §5 Lifecycle Tools (lines 155-165)
+    - content/0.2.0/infrastructure/runtime.md §5.3 (lines 94-100), §7.3 (lines 137-145)
+    - content/0.2.0/specification/tools.md §5 (lines 81-87)
+    quote: 'For a prompt-backed side with non-hidden relationships, runtimes inject three built-in tools
+      scoped to that side''s declarations:'
+  explanation: '`subagent_create` is SA''s closest equivalent of `delegate`: the child runs in its own
+    thread (ACS `fresh_context: true`), and on a relationship declared `blocking: true` the call waits
+    and returns the child''s result (an ACS waiting delegate). The tools are injected by the runtime,
+    so there is no definition object to annotate and no `execute` to wrap; they can be classified by reserved
+    name only. ACS `delegate` output requires `accepted` and `evidence_anchors`, which the lifecycle tools
+    do not produce. ACS does not settle how `subagent_message` and `subagents` are classified (open question).'
+  combined: 'Classify by reserved name in the shared table: `subagent_create` as `delegate`. By default
+    nothing needs enforcing, because `delegate` requires neither checkpoint nor approval in ontology 2.1.0.
+    To gate a delegation, declare every relationship on the side `hidden: true` and spawn from a grounded
+    function tool: while any relationship is visible the injected `subagent_create` stays callable, and
+    the text does not promise that it refuses a hidden relationship''s name. The code path is named (''`invokeTool`
+    / `queueTool` on the lifecycle surface, or dedicated runtime APIs'') but not specified. Gate records
+    are per thread: a child sees none of its parent''s checkpoints or approvals (row rec-01).'
+  see_also:
+  - published-api-extension-points#hooks-01
+  - published-api-extension-points#thread-06
+  - published-api-extension-points#tools-06
+  - safety-enforcement#gate-03
+  - safety-enforcement#scope-01
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - workflow-execution#wf-20
+  - workflow-execution#wf-26
+  - multi-agent#coord-01
+  - multi-agent#coord-20
+  - packaging-conformance-governance#naming-02
+  - packaging-conformance-governance#pkg-03
+- id: cls-08
+  relation: sa_only
+  acs:
+    concept: (no counterpart) every capability use is dispatched to a host that runs it and reports the
+      output
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md intro (lines 10-14), 'Actions and responses' (lines 81-93); guide
+      to the reference executor, non-normative
+    quote: The executor does no I/O.
+  sa:
+    concept: Provider tools that execute server-side at the model provider (`providerTools` on a model,
+      `getTools` on a provider)
+    refs:
+    - content/0.2.0/specification/providers.md §10 Provider Tools (lines 598-653)
+    - content/0.2.0/specification/models.md §1.2 (line 34), §9.7 (lines 461-481)
+    - content/0.2.0/specification/tools.md §9 (line 153)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 108-121 (`provider:` and `mcp:` callables), 438-448
+      (`executionMode`, `executionProvider`), 1014-1021 (`ProviderResponse.providerTools`), 1089-1112
+      (ProviderExecutedToolResult)'
+    quote: Providers can embed built-in tools that leverage provider-specific capabilities. For example,
+      OpenAI provides web search, file search, code interpreter, and image generation tools that execute
+      server-side.
+  explanation: 'Spec text: a model lists `providerTools` (''Provider-embedded tools available for this
+    model.'') and a provider may return their definitions from `getTools`; the Tools page requires runtimes
+    to ''execute local tools sequentially'' without saying what a non-local tool is. That such a call
+    is not executed locally is stated by the published types only (the comment on `ProviderResponse.providerTools`
+    says such entries ''must not be re-executed locally''), which also add `executionMode` and the reserved
+    `provider:` and `mcp:` prefixes. In ACS terms these are real capability uses (a code interpreter is
+    `execute`, web search is `search`) outside any enforcement point, and the agent author does not own
+    the definition to annotate it. The text does not say whether tool hooks fire for them. Searched: executionMode,
+    executionProvider, mcp:, MCP, tenvs (content/0.2.0; not found).'
+  combined: 'Cannot be gated with what 0.2.0 guarantees. Recommendation (from neither text), checkable
+    at definition time by an author-side lint (row cls-15): a grounded agent uses no model `providerTools`
+    entry, no `provider:` or `mcp:` tool reference and no tool with `executionMode: ''provider''` whose
+    capability requires a checkpoint or an approval, and records the ones it allows in the shared classification
+    table for audit. Under ontology 2.1.0 that admits a provider web search (`search`) and excludes a
+    provider code interpreter (`execute` has `requires_approval: true`).'
+  see_also:
+  - published-api-extension-points#tools-06
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - evidence-audit-observability#provider-01
+  - multi-agent#coord-20
+  - packaging-conformance-governance#pkg-03
+  - models-context-memory-security#perceive-02
+- id: cls-09
+  relation: partial
+  acs:
+    concept: 'Atomicity: a capability has one responsibility and composition is the workflow''s job. Non-normative
+      precedents exist for one external unit mapping to several capabilities'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.4 Composable Atoms (lines 95-98)
+    - schemas/interop/oasf_mapping.yaml mapping types (lines 9-14)
+    - grounded_agency/adapters/oasf.py `OASFSkillResult` and `translate` (lines 56-64, 178-191)
+    - grounded_agency/capabilities/mapper.py compound Bash commands (lines 418-434)
+    - docs/methodology/REJECTED_CANDIDATES.md §5.2 and §5.4 (lines 566-598; non-normative)
+    quote: '- Workflows orchestrate; capabilities do one thing'
+  sa:
+    concept: A function tool is arbitrary code and may invoke other callables
+    refs:
+    - content/0.2.0/specification/tools.md §1 (line 9), §2.1 Tool Dependencies (lines 36-44)
+    - content/0.2.0/getting-started/examples.md `apply_triage` (lines 1422-1473), `close_as_duplicate`
+      (lines 426-483); non-normative examples
+    quote: 'description: ''Add labels to one GitHub issue and post a comment on it.'','
+  explanation: 'SA places no atomicity requirement on tools. Its own examples (non-normative) include
+    tools that perform two writes in one call (labels plus a comment; a comment plus closing the issue),
+    and `uses` lets a tool call further tools. ACS has no normative rule for classifying a non-atomic
+    tool, and three non-normative precedents: the OASF mapping (`composition`: ''Multiple capabilities
+    required''), whose adapter takes the highest risk among the mapped capabilities and ORs `requires_checkpoint`
+    only; the SDK mapper, which classifies a compound Bash command by its sub-commands; and the rejected-candidates
+    analysis, which treats one tool as implementing several capabilities.'
+  combined: 'Proposal by analogy with the stricter-of rule of §5.2.1 (which is written for a step''s declaration
+    against the ontology): declare a primary capability and the others the tool performs, and compute
+    the effective flags as the strictest across all of them (highest risk, OR of every boolean, which
+    goes beyond the OASF adapter). One checkpoint and one approval then cover the whole call. The tool
+    must report partial completion (first write done, second failed), because ordering edges cannot be
+    checked inside a tool body. Prefer splitting the tool so that each call is one capability. Neither
+    text defines a field for the additional capabilities.'
+- id: cls-10
+  relation: acs_only
+  acs:
+    concept: 'Classification by call arguments: the ACS Python SDK (not the Standard) classifies a `Bash`
+      call by its command and treats unknown commands as high risk'
+    refs:
+    - grounded_agency/capabilities/mapper.py `_classify_bash_command` and `_classify_single_command` (lines
+      377-516)
+    - docs/integrations/claude_agent_sdk.md 'Bash Command Classification' (lines 148-158)
+    - docs/methodology/REJECTED_CANDIDATES.md §5.2 (line 572; non-normative)
+    quote: '# SECURE DEFAULT: Unknown commands are high-risk'
+  sa:
+    concept: Annotations are a static value on the definition; general-purpose tools such as code execution
+      exist
+    refs:
+    - content/0.2.0/specification/tools.md §1 (line 13), §8 example (lines 127-140)
+    - content/0.2.0/infrastructure/runtime.md 'Code Execution Runtime', Isolation (lines 257-265)
+    - content/0.2.0/specification/threads/code-execution.md §11 Security Considerations (line 551)
+    quote: Function tools that evaluate model- or user-authored JavaScript or TypeScript **SHOULD** do
+      so through [`state.runCode`](/0.2.0/specification/threads/code-execution) rather than `eval` or
+      `new Function`.
+  explanation: 'For a general-purpose tool (a shell, an HTTP client, a code runner) the capability depends
+    on the arguments: the ACS SDK mapper returns observe, mutate, send or execute for the same `Bash`
+    tool. An SA annotation is one static value per definition, and SA has no per-call classification concept.
+    For `runCode` the sandbox has no host APIs unless the caller installs them, and ''Bridged functions
+    **MUST** validate arguments against an explicit schema'', so what the code can do is decided by the
+    tool''s own code, which is where a per-call decision has to live.'
+  combined: Annotate the worst case the tool can perform. Let the wrapper accept an optional classify(args)
+    function, evaluated inside `execute` on arguments the runtime has already validated, that selects
+    the capability for this call and falls back to the annotated worst case for input it does not recognise.
+    Write the classifier as an allow-list, as the Python one is. Because the annotation is static, the
+    wrapper must write the per-call classification into its own audit record or result; a hook can recompute
+    it only by importing the same classifier. This mirrors the mapper's fail-safe default and needs nothing
+    from SA.
+  see_also:
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-18
+  - evidence-audit-observability#exec-01
+- id: cls-11
+  relation: sa_only
+  acs:
+    concept: (no counterpart as a capability) control flow belongs to the workflow DSL (gates, `end`,
+      failure modes), not to a capability
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.6 Gate Semantics (lines 363-412)
+    - grounded_agency/capabilities/mapper.py default for an unregistered tool (lines 369-375)
+    quote: '| `action` | enum | Yes | `stop`, `rollback`, `skip`, `warn`, `end` (else S303) |'
+  sa:
+    concept: 'Tools whose job is to end a turn or a session: the `stopTool`, `sessionStop`, `sessionFail`
+      and `sessionStatus` bindings, and `stopToolResponseProperty`'
+    refs:
+    - content/0.2.0/specification/agents.md §1.2 PromptSide (lines 34-47), §3 SessionToolBinding (lines
+      97-113), §4 Stop Semantics (lines 115-124)
+    - content/0.2.0/getting-started/examples.md `submit_triage` (lines 869-881); non-normative example
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4826-4836 (`stopTool`, `stopToolResponseProperty`)'
+    quote: 'description: ''Submit the finished triage. This ends the session.'','
+  explanation: 'In SA a turn or a session is ended by calling a designated tool, whose body is often trivial
+    (the example returns its argument). `stopToolResponseProperty` (''Extracted property for stop tool
+    outcomes'') implies that a runtime also reads a property of the stop tool''s result; the extraction
+    is not defined. ACS has no capability for signalling completion and does not need one: in a workflow
+    that is a gate or the end of the step list. Forcing such a tool into one of the 36 capabilities would
+    misclassify it. Leaving it unclassified makes it indistinguishable from a forgotten tool: the ACS
+    SDK maps an unregistered tool to `observe` at medium risk, and a binding that failed closed on unclassified
+    tools would refuse it.'
+  combined: 'Let the ACS annotation schema mark a tool as control-only (no capability, no effect on the
+    world), so that audits and any fail-closed default can tell it from an unclassified tool. The marker
+    cannot be verified at run time (the body can still call `fetch` or write the key-value store), so
+    pair it with an author-side lint: a control-only tool is referenced by a `stopTool`, `sessionStop`,
+    `sessionFail` or `sessionStatus` binding and declares `uses: [] as const` (''An empty list permits
+    no targets.''). This is a proposal for the ACS schema; SA needs no change.'
+  see_also:
+  - approval-human#approval-20
+  - multi-agent#coord-09
+  - multi-agent#coord-23
+- id: cls-12
+  relation: fits
+  acs:
+    concept: An unknown capability id is a validation error; the ontology is the registry
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.2 (line 1276), §10.2 L1 (lines 1389-1396)
+    - site/src/lib/api.ts capability endpoints of the documentation site's JSON data API (lines 317-332)
+    quote: '| V101 | UNKNOWN_CAPABILITY | Capability ID not found in ontology |'
+  sa:
+    concept: 'Type registry: name unions built by declaration merging, so invalid references fail at compile
+      time when the registries are generated'
+    refs:
+    - content/0.2.0/specification/type-registry.md §1 (lines 5-57), §3.3 (lines 209-220), §4.1 (lines
+      224-230), §5.2 (lines 299-309), §6.1 (lines 317-323)
+    - '@standardagents/spec 0.45.10 index.d.ts line 412 (`ToolAnnotations`)'
+    quote: 'TypeScript catches invalid references at compile time:'
+  explanation: 'Both reject dangling references, at different times: SA at compile time for the names
+    of models, prompts, agents, tools, hooks and handlers, when the registries are generated (a SHOULD;
+    ''Empty registries default to `string`''); ACS at workflow validation for capability ids. The SA registries
+    hold names only (''Registry entries use `true` as a placeholder value:''), so they cannot carry capability
+    metadata. The annotation slot is untyped: a raw literal with a misspelt capability id compiles, and
+    a key owner cannot narrow `ToolAnnotations` by declaration merging, because it is a type alias (TS2300,
+    tsc 6.0.3). The ACS documentation site serves the ontology as JSON, but ACS publishes no npm package
+    or TypeScript types of it (the example binding written alongside this analysis is not counted).'
+  combined: Ship the ontology as generated TypeScript (a union of capability ids and a table of flags)
+    with a helper through which the annotation is written. A wrong id is then a compile error when the
+    declaration passes through the helper or a `satisfies` clause, the code-first equivalent of V101,
+    and the helper can apply the stricter-of rule of §5.2.1 and report W602 from the same table. A raw
+    annotation literal bypasses the types, so add a build-time lint over loaded definitions (row cls-15).
+    SA needs no change; an interface with an index signature for `ToolAnnotations` would let key owners
+    type their keys.
+  see_also:
+  - published-api-extension-points#registry-01
+  - packaging-conformance-governance#type-01
+- id: cls-13
+  relation: fits
+  acs:
+    concept: A workflow's call set is its step list, and `invoke` targets are named and checked; ACS has
+      no call-set declaration for a tool binding (`allowed-tools` in skill frontmatter is Claude Code
+      metadata, not Standard text)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.1 (line 213), §5.12 (lines 659-663), §9.2 V107 (line 1282)
+    - skills/mutate/SKILL.md frontmatter (line 7)
+    quote: '| `steps` | array | Yes | Ordered list of capability invocations |'
+  sa:
+    concept: '`uses`: a tool''s declared and runtime-enforced list of the callables it may invoke by name'
+    refs:
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (lines 36-44)
+    - content/0.2.0/distribution/packaging.md intro (line 5)
+    - content/0.2.0/getting-started/examples.md intro (line 11)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 449-484'
+    quote: When a `uses` list is supplied, the runtime **MUST** reject an invocation of a target outside
+      the list.
+  explanation: 'SA makes a tool''s outgoing named calls a declared and enforced set, mandatory for packed
+    tools (''A packed tool **MUST** declare the targets it invokes by name.''); the published types narrow
+    invokeTool and queueTool to it when it is declared `as const`. ACS has the same property for its own
+    composite unit, the workflow, and lacks it for tool bindings. `uses` bounds invocation by name only:
+    not `state.scheduleEffect`, storage, `runCode`, a direct `fetch` or an imported implementation, so
+    the reachable set is a lower bound on what a tool can cause. Text and types differ on a violation:
+    invokeTool ''returns an error result for an undeclared target'' in the text, while the types say ''At
+    runtime, attempts to call unlisted items will throw an error.'''
+  combined: Require every grounded tool to declare `uses`, because when it is omitted 'this restriction
+    does not apply' (`[] as const` when it calls nothing; compile-time narrowing needs `as const`). An
+    author-side lint over a package's exports (row cls-15) walks `uses`, recursing through the `tools`
+    of reachable prompts and agents, which carry no annotations, and checks that the tool's declared flags
+    are at least as strict as those of every reachable callable. Treat scheduling an effect that writes
+    as the mutate or send act itself, gated at the scheduling call (row eff-01). Name-to-definition resolution
+    is specified for packages only.
+  see_also:
+  - published-api-extension-points#tools-05
+  - safety-enforcement#gate-03
+  - workflow-execution#wf-26
+  - packaging-conformance-governance#pkg-08
+- id: cls-14
+  relation: partial
+  acs:
+    concept: Every act is a classified capability use with effective flags; a write to durable state is
+      `mutate` or `persist` wherever it happens
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.1 (line 213), §5.2.1 (lines 270-284)
+    - schemas/capability_ontology.yaml `mutate` (lines 1095-1132), `persist` (lines 1376-1410)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 81-93); non-normative guide
+    quote: 'description: Change persistent state'
+  sa:
+    concept: 'Acts that are not tool calls: state-changing ThreadState primitives (`writeFile`, `setValue`,
+      `setEnv`, `scheduleEffect`, `skills.install`, `runCode`) called by definition code that is not a
+      tool (handlers, hooks, effects, thread endpoints)'
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (lines 52-176)
+    - content/0.2.0/specification/handlers.md §1 (line 28), §6 Capabilities (lines 79-88)
+    - content/0.2.0/specification/threads/endpoints.md §3 Handler Signature (lines 56-69)
+    - content/0.2.0/specification/tools.md §8 (line 125)
+    quote: 'A handler receives the full [`ThreadState`](/0.2.0/specification/threads) and may do anything
+      tools can do:'
+  explanation: 'In ACS every act is a classified capability use. In SA a tool call is one of several ways
+    to act: handlers, hooks, effects and thread endpoints receive the ThreadState and can write files,
+    set durable values, set environment values, schedule effects, install skills and run code without
+    any tool call. SA treats this code as trusted (''handlers are trusted definition code, like tools.'').
+    Annotations exist for function tools only (§8), so none of these acts has a declaration slot, and
+    the tool hooks are defined for tool calls only. A binding that classifies tools therefore classifies
+    only the acts a model can request through a prompt''s `tools`; what other definition code does lies
+    outside it.'
+  combined: 'State the scope of a grounded agent plainly: the classification and the in-tool gate cover
+    model-issued calls to grounded function tools. Keep state-changing ThreadState calls inside grounded
+    tools; give handlers, hooks and endpoints no writes of their own except the binding''s own record
+    keeping (row rec-01), and review them as trusted code. Where a handler must act, have it call a grounded
+    tool through `state.invokeTool`, so that the same gate runs. An author-side lint can check the tools
+    a prompt lists (row cls-15); nothing in 0.2.0 lets it check what a handler or endpoint body does.'
+  see_also:
+  - published-api-extension-points#thread-05
+  - published-api-extension-points#tools-06
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#exec-01
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - multi-agent#coord-20
+  - packaging-conformance-governance#pkg-03
+- id: cls-15
+  relation: fits
+  acs:
+    concept: 'Static checking before anything runs: an L1 validator resolves every capability id against
+      the ontology and resolves effective flags'
+    refs:
+    - spec/STANDARD-v1.1.0.md §10.2 L1 (lines 1389-1396), §9.2 V101 (line 1276)
+    quote: '- Resolves effective safety flags and reports downgrades (§5.2.1)'
+  sa:
+    concept: A packed agent's entry point exports every definition as a loader keyed by name (`PackedExports.tools`),
+      so code outside a runtime can load a tool definition and read its `annotations` and `uses`
+    refs:
+    - content/0.2.0/distribution/packaging.md 'Lazy Loading' and 'PackedExports Interface' (lines 110-147),
+      'Visibility Rules' (lines 221-230)
+    - content/0.2.0/getting-started/examples.md intro (line 11)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5830-5838 (PackedExports)'
+    quote: 'tools: Record<string, DefinitionLoader<ToolDefinition>>;'
+  explanation: 'The one specified way for code to read a tool''s annotations is outside a thread and at
+    build time: a package''s entry point exports `tools` as loaders keyed by name, and a loaded ToolDefinition
+    carries `annotations`, `uses` and `variables` (a lint written this way compiles against the published
+    types). This is the SA counterpart of ACS static validation. It is also the only place where a rule
+    that every tool listed by a grounded prompt is classified can be enforced: nothing in SA 0.2.0 lets
+    a third party refuse an unclassified tool at run time. Limit: name-to-definition resolution is specified
+    for packages only (''The specification does not define a folder layout.''), so for unpacked projects
+    the lint depends on the runtime''s layout.'
+  combined: 'Ship a lint with the binding that takes a package''s exports and checks: every name in a
+    grounded prompt''s `tools` is a classified tool, a control-only tool (row cls-11) or an allowed provider
+    tool (row cls-08); every annotation value validates against the ACS schema, names an existing capability
+    (the equivalent of V101) and declares flags no weaker than the ontology''s (W602); `uses` closures
+    satisfy row cls-13; no tool exposes raw key-value writes or bridges `state` into `runCode`. Run it
+    in CI and at packing time.'
+  see_also:
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-01
+  - checkpoint-rollback-state#state-02
+  - checkpoint-rollback-state#state-18
+  - evidence-audit-observability#exec-01
+  - models-context-memory-security#remember-01
+- id: eff-01
+  relation: sa_only
+  acs:
+    concept: '(no counterpart) ACS has no deferred side-effect handler: a side effect is a step whose
+      effective flags apply where it runs, and a checkpoint taken before a wait or a delay no longer authorises
+      the step'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 (lines 84-93), §5.2.1 (lines 270-284)
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 777-781, 792-798)
+    quote: '- A workflow cannot weaken a capability''s safety flags (§5.2.1)'
+  sa:
+    concept: 'Effects: scheduled side-effect handlers that run outside tool execution, possibly after
+      the conversation has completed'
+    refs:
+    - content/0.2.0/specification/effects.md intro (line 3), §1.2 (lines 15-49), §3 Execution Semantics
+      (lines 81-90), §4 (lines 94-102)
+    - content/0.2.0/specification/tools.md §2.1 (line 38)
+    - content/0.2.0/specification/threads.md §1.2.2 Effect Scheduling (lines 122-128)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1388, 1396 (`defineEffect`)'
+    quote: Effect execution is runtime-managed and may occur after the invoking conversation has completed.
+  explanation: 'An effect is defined with `defineEffect(description, args?, handler)`, which has no annotations
+    parameter. It runs ''outside normal tool execution''; `uses` does not bound `state.scheduleEffect`
+    (§2.1 names only invokeTool and queueTool, and a tool declared `uses: [] as const` that schedules
+    an effect compiles); and no hook is defined for an effect run. Effects take a `ToolArgs` schema, but
+    §3 states no requirement to validate effect arguments. A grounded tool that schedules an effect that
+    writes therefore moves the write to a place with no gate and no audit hook. ACS has no counterpart
+    construct; in ACS terms the deferred write is still a `mutate` or `send`.'
+  combined: Treat the scheduling call as the mutate or send act itself and gate it there, inside the grounded
+    tool that schedules. At the top of the effect handler, which receives a ThreadState, re-read the binding's
+    own record of the scheduled act (still scheduled, not cancelled, approval not expired), because time
+    passes between scheduling and execution; the checkpoint check is not repeated there, since the text
+    does not say that an effect has a `state.execution` and a checkpoint bound to its `flowId` could not
+    match (checkpoint-rollback-state#state-08, checkpoint-rollback-state#state-16). List effects by name
+    in the shared classification table (row cls-04) and have the handler write its own audit record, since
+    no tool hook observes it.
+  see_also:
+  - published-api-extension-points#thread-04
+  - published-api-extension-points#thread-05
+  - published-api-extension-points#tools-06
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-16
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-08
+  - approval-human#approval-09
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - approval-human#wait-02
+  - workflow-execution#wf-11
+  - multi-agent#coord-03
+  - multi-agent#coord-13
+  - multi-agent#coord-20
+  - multi-agent#coord-26
+  - packaging-conformance-governance#pkg-03
+  - models-context-memory-security#remember-01
+- id: rec-01
+  relation: fits
+  acs:
+    concept: 'The record a gate checks: a checkpoint that precedes the use, and an approval decision that
+      expires and is used once. For calls outside a workflow only the Python SDK defines such a record
+      (scope, expiry, consumption)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 (lines 84-88), §5.14 Approval (lines 827-834)
+    - grounded_agency/state/checkpoint_tracker.py `Checkpoint` (lines 40-62)
+    quote: A checkpoint must be created before mutations and is consumed
+  sa:
+    concept: 'Durable key-value store on the thread: visible to all definition code on the thread, isolated
+      per thread'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store', Runtime Semantics items 2, 3
+      and 8 (lines 344-358; the page has two sections numbered 14)
+    - content/0.2.0/specification/threads.md §7 Durable Key-Value Store (lines 408-433)
+    - content/0.2.0/specification/threads/client-api.md §6 (line 150)
+    - content/0.2.0/specification/threads/endpoints.md §4 (line 91)
+    - content/0.2.0/specification/agents.md §7 (line 173; the approval-gate pattern)
+    quote: 3. Each thread **MUST** maintain its own isolated key space. Values **MUST NOT** be readable
+      by any other thread, including parent, child, or sibling threads.
+  explanation: 'An in-tool gate needs records of checkpoints and approvals that outlive one tool call.
+    SA''s durable key-value store fits: a written value ''**MUST** be visible to every subsequent `getValue(key)`
+    on the same thread, across any execution context (tools, hooks, endpoints)'', and local tools execute
+    sequentially, so the tool calls of one step do not race. The same rule means that any definition code
+    holding the ThreadState can write those records. Records are per thread: a subagent child starts with
+    none of its parent''s checkpoints or approvals, and after a handoff a different agent''s tools share
+    the thread and its records. SA specifies no approval record; its approval-gate pattern is a human-in-the-loop
+    child agent (see the approval concern).'
+  combined: 'Keep checkpoint and approval records in the durable key-value store under reserved keys,
+    written only by the grounded checkpoint tool and by an approval path the model cannot drive, for example
+    an `authenticated` thread endpoint; a decision that returns to the model as text and comes back as
+    a tool argument can be invented by the model. Do not keep records in env: a client may supply env
+    when it creates a thread. Publish both scope consequences (a child thread starts empty; records outlive
+    a handoff). The gate then holds against the model, provided no tool in its prompt exposes raw key-value
+    writes; it does not hold against other code on the thread.'
+  see_also:
+  - published-api-extension-points#thread-01
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-01
+  - checkpoint-rollback-state#state-02
+  - checkpoint-rollback-state#state-04
+  - multi-agent#coord-19
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#remember-01
+  - models-context-memory-security#remember-02
+- id: dom-01
+  relation: acs_only
+  acs:
+    concept: 'Domain parameter: one capability specialised by a per-step `domain` string instead of one
+      capability per domain'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2 (line 260), §5.1 (line 225)
+    - core/src/exec/mod.rs `InvokeCapability` (lines 104-116)
+    - schemas/interop/oasf_mapping.yaml `domain_hint` (for example lines 34, 80)
+    quote: '| `domain` | string | Domain parameter for the capability |'
+  sa:
+    concept: '(no counterpart) nearest carriers: an annotation value, the `env` of a tool reference in
+      a prompt, or an argument; `options` on a tool reference has no specified delivery'
+    refs:
+    - content/0.2.0/specification/prompts.md §3.2 (lines 103-125)
+    - content/0.2.0/specification/tools.md §2 (lines 17-34)
+    - content/0.2.0/specification/threads.md §2.3 (lines 220-225)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4205-4223 (PromptToolConfig)'
+    quote: '| `env` | `Record<string, string>` | Environment variable values for this tool |'
+  explanation: 'SA has no domain parameter on a tool. On the ACS side `domain` is a per-step value, a
+    bare string with no grammar or registry in the Standard; the executor passes it to the host with each
+    InvokeCapability action. SA''s per-use-site setting for a tool is the `env` of a tool reference in
+    a prompt, read with `state.env(name)`; ''Prompt-level `env` values serve as defaults.'', so thread
+    and agent values override them, and the text does not say that a reference''s env is visible to that
+    tool only. `PromptToolConfig.options` is described as ''Static tool options'' (types: ''Passed to
+    the tool handler at execution time.''), but the text does not say how a tool reads them, since `execute`
+    takes (state, args). Searched: domain (content/0.2.0, case-insensitive; not found).'
+  combined: 'Three carriers, by how often the domain varies: a static domain as a field of the ACS annotation;
+    a per-prompt domain as the tool reference''s `env` plus a declared `variables` entry, with one variable
+    name per tool; a per-call domain as an ordinary field of `args`. `options` cannot be used until its
+    delivery to the tool is specified (open question).'
+  see_also:
+  - published-api-extension-points#tools-02
+  - safety-enforcement#flags-01
+  - approval-human#approval-02
+  - packaging-conformance-governance#pkg-03
+  - packaging-conformance-governance#ver-02
+  - models-context-memory-security#profile-06
+- id: io-01
+  relation: partial
+  acs:
+    concept: Capability `input_schema` and consumer contract checking of bindings
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 (line 118), §5.5 Consumer Contract Checking (lines 335-361), §5.2 (line
+      259, `output_conforms_to`)
+    - schemas/capability_ontology.yaml `retrieve` input_schema (lines 103-122)
+    - grounded_agency/workflows/runner.py module example (lines 16-19) and `Host.invoke_capability` (lines
+      76-80)
+    quote: 3. The inferred or annotated type is compatible with the consumer's input
+  sa:
+    concept: 'Tool `args` and prompt `requiredSchema`: Zod object schemas validated by the runtime'
+    refs:
+    - content/0.2.0/specification/tools.md §2 (lines 15-34), §9 (line 152)
+    - content/0.2.0/specification/prompts.md §1.2 (line 30), §5 Input Validation (lines 201-222)
+    - content/0.2.0/specification/subagents.md §5.1 (lines 167-175)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 252-282 (ToolArgsNode, ToolArgs)'
+    quote: '- validate tool args against the declared schema.'
+  explanation: 'Both sides have first-class, validated input contracts, at different levels and times.
+    SA validates each call''s arguments at run time against the tool''s own schema (MUST) and persists
+    validated creation arguments for subagents. ACS checks at validation time that what a step binds is
+    type-compatible with the capability''s generic input schema (for `retrieve`: target, format, filter,
+    references). A tool''s `args` (owner, repo, number) specialise the capability''s inputs; neither schema
+    replaces the other. Types only: `args` must be a Zod object built from a fixed set of node kinds,
+    nesting depth 7 by default (''Tool arguments MUST be defined as a Zod object schema.''); the 0.2.0
+    text types `requiredSchema` as `ZodSchema` and uses `ToolArgs` in its TypeScript references without
+    defining it.'
+  combined: 'Keep the tool''s `args` as the tool''s contract. For free-form tool use by a model no mapping
+    is needed. When an ACS workflow step is dispatched to an SA tool, the mapping from the capability''s
+    inputs to the tool''s arguments is host code, as in the reference runner''s `invoke_capability`. A
+    step can already carry tool-specific arguments: an `input_bindings` key that starts with `x-` is not
+    reported and ''The host still receives it'', and `output_conforms_to` pins a step''s whole output
+    to a schema. A declarative input map would be a convenience for a generic SA host, not a prerequisite.'
+- id: io-02
+  relation: partial
+  acs:
+    concept: 'Contracts written as JSON Schema: Draft 2020-12 is a normative reference, and the ontology
+      uses a JSON-Schema-like dialect'
+    refs:
+    - spec/STANDARD-v1.1.0.md §1.1 (line 33), §4.1 (lines 118-119), §5.4 (lines 320-333)
+    - schemas/capability_ontology.schema.json `input_schema` and `output_schema` (lines 169-178)
+    - schemas/capability_ontology.yaml type spellings, for example lines 131 (`any`), 151 (`string|object`),
+      991 (`object|array`)
+    - core/src/types.rs (lines 148-181)
+    quote: JSON-Schema-like description of the capability's input contract.
+  sa:
+    concept: Contracts written as Zod; JSON Schema is generated for the model
+    refs:
+    - content/0.2.0/specification/prompts.md §5.2 Schema Usage (lines 214-220)
+    - content/0.2.0/specification/providers.md §2 (line 237), §4 Tool Definitions (lines 331-341)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 263 (ToolArgsNode), 971-977 (ProviderTool)'
+    - '@standardagents/spec 0.45.10 package.json (dependency `zod` `^4.0.0`)'
+    quote: 2. Implementations **MUST** generate JSON Schema for LLM tool definitions
+  explanation: 'Zod to JSON Schema: required by the text for a prompt''s `requiredSchema`; for function-tool
+    `args` it is implied by `parameters?: JSONSchema` on ProviderTool, a type the text does not define
+    (the published types say `Record<string, unknown>`). Experiment (zod 4.6.7): `z.toJSONSchema` emits
+    `$schema` https://json-schema.org/draft/2020-12/schema, the draft ACS references. JSON Schema to Zod:
+    neither specification covers it. `z.fromJSONSchema` throws ''Unsupported type: any'' and ''Unsupported
+    type: string|object'' on the ontology''s spellings, which 23 of the 36 capabilities use (26 uses of
+    `any`, 6 pipe unions); ACS §5.4 mentions type `any`, and the reference core reads the pipe shorthand.
+    A strict `{}` converts to ZodAny, which `ToolArgsNode` does not list (it lists ZodUnknown). Searched:
+    json schema, jsonschema (content/0.2.0, case-insensitive: prompts.md line 219 and four type references
+    in providers.md).'
+  combined: 'SA to ACS works today for documentation: export each grounded tool''s `args` with `z.toJSONSchema`
+    and diff it between releases (a runtime''s own generator decides what the model is sent). A tool''s
+    `args` need not equal the capability''s input schema (row io-01); the well-defined checks are that
+    each required capability input of a workflow-dispatched tool has a source of a compatible primitive
+    type, and that the wrapper''s declared output keys cover the capability''s required output fields.
+    ACS to SA needs strict 2020-12 schemas from ACS (ACS gap) and generated Zod source that emits `z.unknown()`
+    for open slots and `z.union` for type lists; a schema converted at run time is typed `ZodType<unknown>`,
+    needs a cast as `args` (TS2740, tsc 6.0.3) and loses the inferred argument types.'
+- id: io-03
+  relation: acs_only
+  acs:
+    concept: Capability `output_schema` with required fields; the reference executor rejects an output
+      that is not an object or lacks a required key (a presence check)
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 (line 119), §3.5 Explicit Contracts (lines 100-103)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 118-120); non-normative guide
+    - core/src/exec/machine.rs `output` (lines 1399-1427)
+    quote: '| `output_schema` | object | Yes | JSON Schema for outputs |'
+  sa:
+    concept: 'Tool result: a status and a text `result`; no output schema'
+    refs:
+    - content/0.2.0/specification/tools.md §2 example (lines 21-24), §9 (lines 150-156)
+    - content/0.2.0/specification/hooks.md §5.2-§5.3 (lines 386-412), §6.3 HookToolResult (lines 478-490)
+    - content/0.2.0/specification/threads.md §1.2.2 Tool Invocation (line 120)
+    - content/0.2.0/specification/providers.md §2 (line 237), §2.1 (line 248)
+    - content/0.2.0/getting-started/examples.md (lines 136-144); non-normative example
+    - '@standardagents/spec 0.45.10 index.d.ts lines 145-165 (ToolContent), 208-249 (ToolResult)'
+    quote: '| `invokeTool(toolName, args)` | `Promise<ToolResult>` | Invoke tool and wait for result |'
+  explanation: 'SA 0.2.0 has no output schema for tools. Spec text: the Tools page shows a result object
+    in examples only and never defines `ToolResult`; the only result interface written out is HookToolResult,
+    with `result?: string`. Types: `result?: string` (''Text representation of the tool output.''); a
+    non-string result is a compile error (TS2322) and an `outputSchema` property is rejected (TS2353);
+    the types export ToolContent items, and a comment mentions tools ''that return structured content'',
+    but ToolResult has no such member. The provider request has `responseFormat` with an optional schema;
+    the only route to it from a definition is the provider-specific `prompt.providerOptions`. The specification''s
+    own examples put JSON into the string. Searched: output schema, outputSchema, result schema, resultSchema,
+    returnSchema, return schema, responseSchema, response schema, structured output, structuredContent,
+    response_format (content/0.2.0, src/data, README.md: one unrelated hit, src/data/models.md line 402;
+    index.d.ts: lines 3831 and 4440, neither about tool results).'
+  combined: 'Encode the capability''s output object as JSON in `result`, and have the wrapper check the
+    ontology''s required output fields before returning, as the ACS executor does (presence only: `evidence_anchors:
+    []` passes in both). Consumers (another tool through invokeTool, a hook, a workflow host) parse the
+    string. This is a convention between ACS-aware parties: SA runtimes treat the text as opaque, a hook
+    that rewrites results (`before_store_tool_result`, `after_tool_call_success`) can alter it before
+    it is stored, and the text does not say whether an `invokeTool` caller receives the tool''s own result
+    or the rewritten one. The stored tool message ties the result to its call (row io-09).'
+  see_also:
+  - published-api-extension-points#tools-04
+  - safety-enforcement#hook-03
+  - checkpoint-rollback-state#state-19
+  - evidence-audit-observability#anchors-01
+  - evidence-audit-observability#collect-02
+  - evidence-audit-observability#transform-01
+- id: io-04
+  relation: partial
+  acs:
+    concept: Typed outputs of cognitive capabilities and of `delegate` and `invoke` (result objects)
+    refs:
+    - schemas/capability_ontology.yaml `classify` output (lines 342-360), `delegate` output (lines 1503-1538),
+      `invoke` output (lines 1628-1644)
+    quote: 'description: Workflow result (contains nested workflow outputs)'
+  sa:
+    concept: A sub-prompt's result is one text string; a composed agent returns one text field of its
+      stop tool's arguments, plus attachment paths
+    refs:
+    - content/0.2.0/specification/prompts.md §3.3 Sub-Prompt Tool Configuration (lines 127-168)
+    - content/0.2.0/specification/agents.md §1.2 (lines 41-47), §3 SessionToolBinding (lines 97-113)
+    - content/0.2.0/specification/subagents.md §3.3 (line 108), §6.2 (lines 195-205), §6.4 (lines 211-219)
+    - content/0.2.0/infrastructure/runtime.md §8.3 (line 217)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2659-2665 (`StopSessionOptions.result`)'
+    quote: Since sub-prompts return their results as tool call responses, all output must be serialized
+      into a single text string.
+  explanation: 'SA has a typed channel at the boundary: a stop tool''s arguments are validated against
+    its Zod schema like any tool''s, so a prompt that must finish by calling such a tool produces a schema-checked
+    object. What is forwarded is narrower: `messageProperty` is ''which arg field becomes lifecycle message
+    text'', and `attachmentsProperty` names a field of attachment paths, which are ''copied child → parent
+    and included as parent-local paths''. So a child can return text and files, not an object. In the
+    implicit path the text arrives inside a template (''Subagent (reference: {uuid}) has returned the
+    following result:''). For a sub-prompt the result string is assembled from text, tool calls and errors
+    according to includeTextResponse, includeToolCalls and includeErrors; its format is not specified.'
+  combined: 'Give the stop tool typed arguments, which the runtime validates, and let its `execute` build
+    the capability output and return it from code with `state.stopSession({ result: JSON.stringify(output)
+    })`. Delivery of `result` to a blocking caller is stated in the published types (''Result text returned
+    to a blocking parent/subagent caller.'') and at lower-case ''should'' level in Runtime §8.3. A child
+    that reports from code may use another channel; Subagents §6.4 names ''the parent''s key-value store,
+    for example''. A JSON file returned through `attachmentsProperty` is a third route. Fallback: one
+    string argument named in `messageProperty` that carries the JSON; the receiver must then extract it
+    from the surrounding text.'
+  see_also:
+  - published-api-extension-points#thread-01
+  - safety-enforcement#scope-01
+  - approval-human#approval-07
+  - approval-human#approval-20
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-03
+  - evidence-audit-observability#prov-04
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - multi-agent#coord-08
+  - multi-agent#coord-09
+  - multi-agent#coord-22
+  - multi-agent#coord-23
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#remember-02
+- id: io-05
+  relation: acs_only
+  acs:
+    concept: Every capability output requires `evidence_anchors`; 23 of the 36 also require `confidence`.
+      The element type of `evidence_anchors` is not defined
+    refs:
+    - 'schemas/capability_ontology.yaml meta.principles (lines 11-15) and each node''s `output_schema.required`
+      (counted by script; every `evidence_anchors` is `type: array` without `items`)'
+    - spec/STANDARD-v1.1.0.md §3.1 Grounded Claims (lines 76-77), §6.2 (lines 1123-1126), §9.6 F505 (line
+      1325)
+    - schemas/world_state_schema.yaml `Anchor` (lines 62-84)
+    quote: '- Every capability returns evidence anchors and confidence'
+  sa:
+    concept: (no counterpart) a tool result carries status, text, error and attachments
+    refs:
+    - content/0.2.0/specification/hooks.md §5.5 tool_call_done (lines 430-444), §6.3 (lines 478-490)
+    - content/0.2.0/specification/threads/messages.md §1 (lines 16-18), §1.1 (lines 40-42)
+    - content/0.2.0/specification/threads/decisions.md §4 (lines 105-124)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 208-249'
+    quote: Files returned by a tool are surfaced through `attachments`.
+  explanation: 'SA defines no evidence or confidence field on a tool result; `confidence` occurs only
+    in decision answers, and ''provenance'' only as hook execution provenance and as metadata conventions
+    for cross-thread messages. On the ACS side the anchor shape for capability outputs is itself undefined:
+    every `evidence_anchors` is `type: array` with no `items`, and the Standard says a capability''s ''`evidence_anchors`
+    output and an event''s `anchors` field are different things.'' The world-state `Anchor` type (kind
+    `tool`; `ref` described as ''Pointer like file:line, URL, tool-output-id'') is the nearest model.
+    The principle text says every capability returns confidence, while 13 do not require it. Searched:
+    evidence, anchor, grounded, grounding, citation (content/0.2.0, src/data/home.md, src/data/community.md,
+    README.md: one unrelated hit, ''trust anchors'', threads.md line 111); confidence, provenance (content/0.2.0:
+    only the uses just described).'
+  combined: The wrapper requires the implementation to return the ontology's required output fields, `evidence_anchors`
+    included, and serialises them into `result`. The check is presence-only, as in the reference executor
+    (F505 is reserved and not checked), so a binding should itself require a non-empty anchor list for
+    capabilities that read. Anchors refer to what the tool read (a URL, a path in the thread file system).
+    A tool cannot name its own call (row cls-04); the stored tool message already carries `tool_call_id`
+    and `name`, so no hook is needed to tie a result to its call (row io-09). Values of variables declared
+    `secret` must be kept out of anchors and excerpts (row var-01).
+  see_also:
+  - evidence-audit-observability#anchors-01
+- id: io-06
+  relation: partial
+  acs:
+    concept: Diagnostic codes and format; in the Claude Code plugin a blocked call is reported to the
+      model with a reason
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.5-§9.6 (lines 1306-1325), §9.8 Diagnostic Format (lines 1348-1370)
+    - hooks/pretooluse_require_checkpoint.sh header (lines 9-11)
+    quote: '| F501 | CHECKPOINT_REQUIRED | Mutation without checkpoint |'
+  sa:
+    concept: 'A tool error is a result and does not halt the step: `status: ''error''` with `error` text.
+      `error_code` and `error_data` exist in the published types only, and a runtime may end a run on
+      `repeated_tool_error`'
+    refs:
+    - content/0.2.0/specification/tools.md §9 (line 155)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (lines 90-92)
+    - content/0.2.0/specification/hooks.md §5.4 (lines 414-428), §6.3 (lines 478-488)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (lines 105-114)
+    - content/0.2.0/specification/threads/runtime-streams.md example (line 82)
+    - content/0.2.0/specification/providers.md §3.2 (lines 324-328)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 222-236 (`error_code`, `error_data`), 5967-5984 (HookToolResult)'
+    quote: '- persist tool errors as tool result messages rather than halting execution.'
+  explanation: 'The behaviour matches ACS''s Claude Code hook, where a refused call is reported back to
+    the model with the reason and the loop continues; SA makes it a MUST. Caveat: the stop-reason table
+    lists `repeated_tool_error` under `failed` (codes at SHOULD level), so a runtime may end a run after
+    repeated tool errors, which a grounded tool that keeps refusing could trigger. For machine-readable
+    codes the published ToolResult has `error_code` and `error_data` (''Machine-readable error code for
+    structured handling.''); in the 0.2.0 text `error_code` appears once, in an example, ToolResult is
+    never defined, and HookToolResult (text and types) has no code field, so a hook cannot see a code.
+    ACS run-level outcomes (a run that ends with F503, a gate `stop`) have no counterpart in a free-form
+    tool loop. Searched: error_data, errorCode (content/0.2.0; not found).'
+  combined: 'A refused grounded call returns { status: ''error'', error: ''F501 CHECKPOINT_REQUIRED: ...''
+    } with the ACS code at the start of the text. Hooks receive that text as `error`, and the runtime
+    must persist it as a tool result message; that the model reads the same text is implied by the specification,
+    not stated, and an `after_tool_call_failure` hook may rewrite it. Where the published types are used
+    the tool may also set `error_code: ''F501''` and put a §9.8 diagnostic object in `error_data`; its
+    `location` names a workflow and a step, which a free-form call lacks, so use `capability` and add
+    a tool-name key, which §9.8 allows. Do not rely on `error_code` reaching hooks.'
+  see_also:
+  - published-api-extension-points#tools-04
+  - safety-enforcement#err-01
+  - safety-enforcement#hook-03
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-19
+  - approval-human#approval-01
+  - evidence-audit-observability#collect-02
+  - evidence-audit-observability#transform-01
+  - workflow-execution#wf-15
+  - packaging-conformance-governance#diag-03
+- id: io-07
+  relation: acs_only
+  acs:
+    concept: 'Typed bindings: a step''s inputs reference earlier steps'' outputs and are type-checked
+      before the run'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.3 Binding Syntax (lines 286-318), §5.4 Typed Binding Rules (lines 320-333),
+      §5.5 (lines 335-361)
+    - docs/guides/RUNNING_WORKFLOWS.md intro (lines 3-14); non-normative guide
+    - 'core/Cargo.toml (lines 8-17: `publish = false`; one feature, `python`)'
+    quote: 1. Untyped bindings infer type from the producer's output schema.
+  sa:
+    concept: (no counterpart) data moves between tool calls through the model, or through code with untyped
+      arguments, text results, `state.context` and the key-value store
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 40-52)
+    - content/0.2.0/specification/threads.md §3 Tool Invocation (lines 244-272), §6.2 Per-Execution Context
+      (lines 372-392), §7 Durable Key-Value Store (lines 408-433)
+    - content/0.2.0/specification/threads/endpoints.md §3 (line 67), §4 (line 91)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3011-3033 (queueTool, invokeTool)'
+    quote: 5. Execute tool calls sequentially
+  explanation: 'SA has no declarative data flow between tool calls. In a prompt-backed turn the model
+    reads earlier results and writes the next call''s arguments; in code, invokeTool takes `args: Record<string,
+    unknown>` and returns a ToolResult whose `result` is text. Tools can also share values without the
+    model through `state.context` and the durable key-value store, both untyped. There is no producer
+    output schema to infer from (row io-03), so nothing like B201 to B204 can be checked on the SA side.
+    This is the part of ACS that SA does not attempt, and it is why the two compose: an ACS workflow can
+    be the typed plan and SA the place where its steps run.'
+  combined: 'Works today, out of process: the ACS executor (it does no I/O) stays in the Python package,
+    and each InvokeCapability action is answered by an HTTP request to an `authenticated` thread endpoint
+    whose handler calls `state.invokeTool` on a grounded tool; the host parses `result` back into the
+    output object the executor checks. `invokeTool` outside an execution is described only in the published
+    types, and hook coverage for such calls is unspecified. In-process use needs an exported WebAssembly
+    or TypeScript build of the core: the Rust crate compiles for wasm32-unknown-unknown (`cargo check
+    --lib`, run for this analysis), but no interface or JavaScript wrapper is published, and SA makes
+    no promise that packed code may load a WebAssembly module. Searched: wasm (core/Cargo.toml, pyproject.toml,
+    spec/ROADMAP.md, docs/guides/RUNNING_WORKFLOWS.md; not found).'
+  see_also:
+  - published-api-extension-points#thread-05
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#exec-01
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-08
+  - workflow-execution#wf-24
+  - multi-agent#coord-27
+- id: io-08
+  relation: partial
+  acs:
+    concept: '`classify`, `measure`, `detect`: typed judgements with probabilities and confidence'
+    refs:
+    - schemas/capability_ontology.yaml `detect` (lines 282-322), `classify` (lines 323-360), `measure`
+      (lines 361-405)
+    quote: 'description: Assign labels or categories to items'
+  sa:
+    concept: 'Decisions: `state.decide()` evaluates typed questions (`choice`, `score`, `boolean`) against
+      explicit context, with a caller-supplied provider and model'
+    refs:
+    - content/0.2.0/specification/threads/decisions.md §1-§4 (lines 1-167), §6 Conversation Semantics
+      (lines 200-210)
+    - content/0.2.0/infrastructure/runtime.md §1.1 Decision Inference (lines 19-25)
+    quote: A decision evaluates named, typed questions against caller-supplied context.
+  explanation: 'Besides validated tool arguments (row io-04), this is where SA specifies typed model outputs.
+    A `choice` answer (choice, probabilities, optional confidence) lines up with classify''s labels, probabilities
+    and confidence. A `boolean` answer carries only `probability`, P(true), and no confidence member,
+    while `detect` requires `confidence`; SA says ''Confidence is provider-reported and is distinct from
+    an individual outcome probability.'' A `score` is a probability-weighted level index, not a value
+    in the caller''s unit, and `measure` also requires `uncertainty`. Two properties suit grounding: the
+    context is supplied explicitly by the caller (decide() must not implicitly read conversation messages),
+    so the evidence is known; and thresholds are left to the caller, which is where ACS gates belong.
+    No evidence anchors are returned.'
+  combined: Where a decision provider is configured (decide() takes a caller-supplied `provider` factory
+    and a provider model id; the runtime MUST expose the method, not a provider), a grounded function
+    tool classified `classify`, `detect` or `measure` may call `state.decide()` in its `execute` and map
+    the answer to the capability's output, adding anchors for the context it passed. `confidence` for
+    detect, and `uncertainty` and the unit conversion for measure, have to be derived by the tool from
+    the returned probabilities and labelled as derived; whether ACS permits that derivation, or requires
+    the tool to fail the required-field check, is an open question.
+  see_also:
+  - published-api-extension-points#decide-01
+  - evidence-audit-observability#trust-02
+  - models-context-memory-security#ground-01
+  - models-context-memory-security#profile-04
+- id: io-09
+  relation: fits
+  acs:
+    concept: 'An evidence anchor that points at tool output: the world-state `Anchor` has kind `tool`
+      and a `ref` for a tool output id'
+    refs:
+    - schemas/world_state_schema.yaml `Anchor` (lines 62-84)
+    - spec/STANDARD-v1.1.0.md §6.2 (lines 1123-1126)
+    quote: 'description: Pointer like file:line, URL, tool-output-id'
+  sa:
+    concept: 'Structured carriers beside the text `result`: the stored tool message (`tool_call_id`, `name`,
+      `metadata`), result `attachments`, `state.context` and the durable key-value store'
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 (lines 16-18, 29), §3 (lines 102-113)
+    - content/0.2.0/specification/hooks.md §4.1 before_create_message (lines 310-322), §6.3 (lines 478-490)
+    - content/0.2.0/specification/threads.md §6.2-§6.3 (lines 372-404), §7 (lines 408-433)
+    - content/0.2.0/specification/tools.md §9 (line 154)
+    quote: '| `metadata` | `Record<string, unknown>` | Custom metadata (may include runtime status markers
+      such as `status_kind`) |'
+  explanation: 'SA needs no change for a result to be tied to its call: runtimes MUST ''persist tool results
+    as messages before advancing'', and a message record has `tool_call_id` and `name`, which fits the
+    ACS anchor kind `tool`. Structured data can travel beside the text: a `before_create_message` hook
+    may add classification or anchors to the tool message''s `metadata` (''The returned object **MUST**
+    be used for insertion''); a result may carry `attachments`; tools in one execution can share values
+    through `state.context`; and the key-value store persists them. Limits: the hook must be in scope
+    (row cls-04); the text does not say whether `metadata` is kept out of the model request, preserved
+    or merged; `context` is lost when the execution ends; and all four are untyped.'
+  combined: Use the stored tool message's `tool_call_id` as the `ref` of an anchor of kind `tool` when
+    a later step cites a tool result. Where an audit trail outside the model-visible text is wanted, a
+    `before_create_message` hook writes the classification under the binding's own `metadata` key on tool
+    messages; treat it as best effort until SA states preservation rules for `metadata`. Keep the JSON-encoded
+    `result` (row io-03) as the authoritative copy of the capability output.
+  see_also:
+  - published-api-extension-points#hooks-03
+  - evidence-audit-observability#anchors-02
+  - models-context-memory-security#context-04
+- id: var-01
+  relation: sa_only
+  acs:
+    concept: (no counterpart in the Standard) the STANDARD does not model the configuration or credentials
+      a capability needs; rules about secrets exist only as skill instructions
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 (lines 109-127)
+    - skills/perspective-validation/SKILL.md (line 149), skills/audit/SKILL.md (line 314); instructions
+      to a model, not Standard text
+    quote: '- Do not include secrets/PII in evidence excerpts; prefer references/hashes over raw content.'
+  sa:
+    concept: '`variables` on tools and prompts: name, `text` or `secret`, required, scoped'
+    refs:
+    - content/0.2.0/specification/tools.md §3 Variable Declarations (lines 46-64)
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (lines 208-240)
+    - content/0.2.0/specification/hooks.md §1.2 (line 68)
+    quote: '- `type: ''secret''` indicates sensitive values that should be encrypted at rest.'
+  explanation: 'SA lets a tool declare the configuration and secrets it needs and gives runtime rules
+    for resolution, scoping and redaction. ACS has no equivalent on a capability or a step, and no rule
+    about secrets in the Standard or in SECURITY.md; rules exist as skill instructions to a model (for
+    example ''Redact sensitive information (credentials, PII) from audit output''). A declared secret
+    is not a classification signal by itself (a read may need a token). It matters for grounded output:
+    anchors and excerpts are copied from tool output and must not contain secret values. The SA sentence
+    on redaction is a lower-case ''should'' (''Values marked `secret` should be redacted from tool output
+    and logs''); the MUST in this area binds hooks. Searched: secret, redact (spec/STANDARD-v1.1.0.md,
+    spec/SECURITY.md, case-insensitive; not found).'
+  combined: Nothing is needed for classification. For each declared variable whose `state.envType(name)`
+    is `secret`, the wrapper removes occurrences of the resolved value from the serialised result, anchors,
+    excerpts, error text and `error_data` before returning. An ACS audit hook that logs tool arguments
+    is bound by 'Hooks **MUST NOT** expose sensitive data in logs or error messages.' Since the SA redaction
+    sentence is advisory, this is ACS's rule to set (ACS gap).
+  see_also:
+  - evidence-audit-observability#privacy-01
+  - models-context-memory-security#secrets-01
+- id: skl-01
+  relation: partial
+  acs:
+    concept: 'Each capability ships as an Agent Skills-style folder: skills/<id>/SKILL.md with `name`
+      and `description` frontmatter, plus its output schema'
+    refs:
+    - skills/classify/SKILL.md frontmatter (lines 1-11)
+    - skills/classify/schemas/output_schema.yaml
+    - skills/capability-gap-analysis/SKILL.md and skills/digital-twin-sync-loop/SKILL.md frontmatter (`name`
+      differs from the folder name)
+    - CLAUDE.md 'Skill Structure'
+    quote: 'name: classify'
+  sa:
+    concept: '`state.skills`: a per-owner Agent Skills library with list, get, readFile, install, setEnabled,
+      remove'
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 Skills (lines 161-170), §7.4 Agent Skills (lines 447-465)
+    - content/0.2.0/distribution/packaging.md 'PackedExports Interface' (lines 121-147)
+    - content/0.2.0/specification/prompts.md §2.2-§2.4 (lines 52-91)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1828-1880 (SkillMetadata, SkillsNamespace)'
+    quote: Skills follow the [Agent Skills](https://agentskills.io) standard
+  explanation: 'All 42 ACS SKILL.md files have a kebab-case `name` of at most 64 characters and a `description`
+    of at most 1024 (the longest is 292; checked by script), the two frontmatter constraints the SA text
+    states. Limits: a skill is text for a model, with no flags and no enforcement. Every ACS skill carries
+    extra frontmatter written for Claude Code (argument-hint, disable-model-invocation, user-invocable,
+    allowed-tools, context, agent; layer in 13; hooks in 6), and ''installs **MUST** validate the frontmatter
+    against the standard'' without saying whether extra keys pass. Two composed skills have a frontmatter
+    name that differs from their folder (SA takes identity from the frontmatter). Their `allowed-tools`
+    name Claude Code tools that do not exist in an SA thread.'
+  combined: 'Do not install skills from agent code: `skills.install` writes to the thread owner''s library
+    (''Runtimes **MUST** authorize mutations and confine them to the calling principal''s scope.''), which
+    in ACS terms is itself a mutation to classify, and whether a model ever sees an installed skill is
+    a SHOULD. Where the capability procedures are wanted inside an agent, put the text in the prompt through
+    an `include` part, which ships with the package; skills belong to a principal''s library, and PackedExports
+    has no skills entry. Mention ACS skills only as something a user or an administrator may install.'
+  see_also:
+  - packaging-conformance-governance#pkg-05
+  - models-context-memory-security#prompts-02

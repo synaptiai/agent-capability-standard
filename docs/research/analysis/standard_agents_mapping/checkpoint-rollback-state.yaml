@@ -1,0 +1,1238 @@
+# Checkpoints, rollback, state and memory
+# Part of the Standard Agent Specification mapping; index.yaml explains the fields.
+concern: checkpoint-rollback-state
+title: Checkpoints, rollback, state and memory
+rows:
+- id: state-01
+  relation: partial
+  acs:
+    concept: '`persist` capability (REMEMBER layer): store data durably. `data` is the only required input;
+      `key` and `ttl` are optional'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=persist] (lines 1376-1410; quote at line 1378)
+    - schemas/capability_ontology.yaml edges persist enables recall (lines 1799-1801), mutate enables
+      persist (lines 1814-1817)
+    - spec/STANDARD-v1.1.0.md §4.2 Layers, REMEMBER row (line 142), §5.10.1 Durations (lines 597-605)
+    - skills/persist/SKILL.md Inputs (lines 74-78), Procedure step 8 (line 120), Output Contract (line
+      130)
+    quote: 'description: Store data durably'
+  sa:
+    concept: 'Thread durable key-value store: `ThreadState.setValue(key, value)`'
+    refs:
+    - content/0.2.0/specification/threads.md §7 Durable Key-Value Store (lines 408-445)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 items 1-9 and §14.2 (lines 344-362; quote at line 350)
+    - content/0.2.0/specification/effects.md §3 Execution Semantics (lines 83-90)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3153-3167 (ThreadState.setValue), 258-263 (ToolArgsNode)'
+    quote: Values **MUST** be persisted to durable per-thread storage that survives execution boundaries,
+      process restarts, and runtime redeploys.
+  explanation: 'SA supplies the storage half of `persist` with normative force: per-thread, JSON-equivalent
+    values, durable across executions, restarts and redeploys (MUST), and visible to later reads on the
+    same thread (MUST). Durability at the moment `setValue` resolves is SHOULD only (item 7), and runtimes
+    MAY cap key length, value size and key count (§14.2). SA has no counterpart for `ttl` (thread values
+    do not expire), for the output `timestamp` (values carry no metadata), for `evidence_anchors`, or
+    for binary data (non-JSON values MAY be rejected). On the ACS side the contract is the ontology node
+    alone: the Standard states no storage requirement, and `ttl` has no grammar. Searched: ttl, time to
+    live, expir, expires_at (content/0.2.0 and the published types; only stream-ticket, room-challenge
+    and grant-metadata hits).'
+  combined: 'A `persist` function tool declares `data: z.unknown()` (`z.any()` is not an allowed tool-argument
+    type in the published types), generates a key when none is given, and calls `await state.setValue(''<pkg>/persist/''
+    + key, { v: data, stored_at, expires_at })`, where `<pkg>` is the package ID (a binding convention).
+    It then reads the key back and returns `stored: true` only if the envelope is there: that is the MUST-level
+    guarantee, and the persist skill''s verify step. A thrown `setValue` becomes an error result. For
+    `ttl` the binding accepts the §5.10.1 duration grammar (its own choice), stores `expires_at`, and
+    schedules a package effect that deletes the key if `expires_at` is unchanged. When that effect runs
+    is not bounded, so `recall` also checks expiry.'
+  see_also:
+  - tools-contracts#cls-15
+  - tools-contracts#rec-01
+  - published-api-extension-points#thread-01
+  - safety-enforcement#ckpt-02
+  - approval-human#approval-13
+  - evidence-audit-observability#store-01
+  - workflow-execution#wf-09
+  - models-context-memory-security#remember-01
+- id: state-02
+  relation: partial
+  acs:
+    concept: '`recall` capability: retrieve previously stored data by `key`, with `default`, `found` and
+      `stored_at`'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=recall] (lines 1411-1442; quote at line 1413)
+    - skills/recall/SKILL.md Procedure steps 1-2 (lines 36-44), Output Contract (lines 73-83)
+    quote: 'description: Retrieve previously stored data'
+  sa:
+    concept: '`ThreadState.getValue(key)`'
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, Durable Key-Value Store table (lines 136-141),
+      §7.2 Semantics (lines 424-433)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 items 2, 5, 6 (lines 351-355; quote at line 355)
+    - content/0.2.0/specification/users.md §2 UserState, `listValues` (lines 54-57; Draft page)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3131-3152 (ThreadState.getValue), 3193-3211 (listUserValues)'
+    quote: '`setValue(key, null)` and `setValue(key, undefined)` **MUST** delete the key so that subsequent
+      `getValue(key)` calls return `null`.'
+  explanation: '`getValue` is the lookup, with MUST-level visibility of earlier writes from tools, hooks
+    and endpoints on the same thread. Two ACS outputs need help: `found` (SA returns `null` for a missing
+    key, and because writing `null` deletes the key, a stored `null` cannot exist) and `stored_at` (thread
+    values carry no metadata). The envelope written by `persist` (state-01) supplies both; `default` is
+    applied by the tool. The thread store cannot be listed: the 0.2.0 text gives `ThreadState` only `getValue`
+    and `setValue`; `listValues` exists on the Draft `UserState` and, in the published types only, as
+    `ThreadState.listUserValues` for the user store. Exact-key lookup therefore cannot serve the ranked,
+    query-style recall that the ACS recall skill describes.'
+  combined: '`const e = await state.getValue(''<pkg>/persist/'' + key)`. Validate that `e` has the envelope
+    shape before using it, because any definition code on the thread can write the same key; treat an
+    entry whose `expires_at` has passed as missing and delete it. Return `{ data: found ? e.v : (args.default
+    ?? null), found, stored_at, evidence_anchors }` as JSON in `ToolResult.result`. Store `null` data
+    as `{ v: null }`, never as an absent member, so the required `data` output survives the JSON round
+    trip.'
+  see_also:
+  - tools-contracts#cls-15
+  - tools-contracts#rec-01
+  - models-context-memory-security#remember-01
+- id: state-03
+  relation: partial
+  acs:
+    concept: 'Persistent state that is file-shaped: targets of `mutate`, large or binary `persist` data,
+      checkpoint copies'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition, `mutation` field (line 121)
+    - schemas/capability_ontology.yaml nodes[id=mutate] (lines 1095-1132)
+    - hooks/hooks.json PreToolUse matcher (line 5)
+    quote: '| `mutation` | boolean | No | Whether the capability changes persistent state (default false)
+      |'
+  sa:
+    concept: 'Thread file system on `ThreadState`: writeFile, readFile, readFileStream, statFile, readdirFile,
+      unlinkFile, mkdirFile, rmdirFile, moveFile, renameFile, findFiles, grepFiles, getFileStats'
+    refs:
+    - content/0.2.0/specification/threads/filesystem.md intro (line 3), §1 File Record (lines 7-21), §2
+      Writing Files (lines 23-40), §5 Moving and Renaming (lines 78-107), §9.4 Behavior (lines 172-179)
+    - content/0.2.0/specification/threads.md §1.2.2 File System table (lines 67-82), §7.3 Comparison With
+      Other Storage (line 443), §11.3 Error Handling (lines 600-605), §12 TypeScript Reference (lines
+      698-712)
+    - content/0.2.0/specification/threads/client-api.md §12 item 4 (line 365), §14 Reading a File (lines
+      383-395), §10 item 5 (line 296)
+    - content/0.2.0/infrastructure/runtime.md §8 Cross-Thread Communication (lines 194, 201), §16 Conformance
+      Summary (lines 384-392)
+    - content/0.2.0/specification/subagents.md §7 Attachment Copying (lines 230-237)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2253-2287 (FileRecord, WriteFileOptions), 3250-3261
+      (writeFile), 3340 and 3353 (moveFile, renameFile), 3367-3373 (findFiles)'
+    quote: Each thread has an isolated file system for storing files, images, and other binary data. It
+      is addressable through `ThreadState` and survives execution cycles — two separate invocations of
+      the same thread see the same file tree.
+  explanation: 'The API is sufficient as a mutation target and for large or binary data, but its guarantees
+    are weaker than the key-value store''s. filesystem.md has one RFC 2119 sentence (chunk ordering, §9.4);
+    durability and isolation are described, not required. Other pages bind runtimes for particular cases
+    only: storing client attachments in the tree, copying attachments between threads, serving files to
+    clients, deleting files with the thread. Not stated for the `ThreadState` methods: what `writeFile`
+    does when the path exists (only `moveFile` is said not to overwrite), whether it creates parent directories,
+    `unlinkFile` on a missing path, `mkdirFile` on an existing directory, the glob grammar of `findFiles`,
+    and what `readFile` returns for external storage. `WriteFileOptions.metadata`, `FileRecord.createdAt`
+    and `updatedAt` are in the published types only. Searched: overwrit, already exists, parent director,
+    intermediate director, recursive, glob.'
+  combined: 'Bind file-shaped persistence to `writeFile`, `readFile` and `statFile`, with defensive rules.
+    Never rely on overwrite: `statFile`, `unlinkFile` if the path exists, then `writeFile`. Create parent
+    directories with `mkdirFile` and tolerate an error for an existing one. After each write compare `statFile(path)?.size`
+    with the bytes written and return an error result on a mismatch. Keep small values that a later step
+    must be able to rely on (flags, ids, manifests) in the key-value store, which has MUST-level durability.
+    State in the binding''s documentation that in 0.2.0 a file''s survival across executions is described
+    but not required, that the tree is shared with attachments the runtime stores, and that clients can
+    read it where the Thread Client API is exposed.'
+- id: state-04
+  relation: fits
+  acs:
+    concept: Checkpoint record that authorises a step whose effective `requires_checkpoint` is true
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 85-88), §5.2.1 Safety Flags (lines 279-284),
+      §12.5 example (line 1609)
+    - schemas/capability_ontology.yaml mutate.input_schema.checkpoint_id (lines 1114-1116)
+    - grounded_agency/state/checkpoint_tracker.py Checkpoint dataclass (lines 40-64), state file format
+      (lines 165-173), marker file (lines 478-517), validate_and_reserve (lines 547-598), has_checkpoint_for_scope
+      (lines 633-648)
+    - hooks/pretooluse_require_checkpoint.sh marker contract (lines 13-19)
+    - core/src/exec/machine.rs checkpoint() (lines 663-677), add_checkpoint (lines 1524-1527)
+    - docs/guides/RUNNING_WORKFLOWS.md What the executor enforces, Checkpoints (lines 145-148)
+    quote: '- A `checkpoint` MUST run before every `mutate`, `send` and `rollback` (the'
+  sa:
+    concept: Durable thread key-value store, read by a later tool call in the same thread
+    refs:
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 items 1-3 (lines 350-352; quote at line 351), §14.2 (line 362)
+    - content/0.2.0/infrastructure/runtime.md §5.1 Ordering (line 88), §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/threads.md §7 (line 410), §6.3 Context Limitations (lines 397-406)
+    - content/0.2.0/distribution/packaging.md Portability requirements (lines 9-13)
+    - content/0.2.0/specification/users.md §2.2 Reaching Threads (lines 82-88; Draft page)
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks, `after_thread_created` (line 23)
+    quote: A value written by `setValue(key, value)` **MUST** be visible to every subsequent `getValue(key)`
+      on the same thread, across any execution context (tools, hooks, endpoints).
+  explanation: 'ACS requires that a checkpoint exist; its reference implementations keep the record in
+    a JSON state file and a marker file. SA offers a portable place for the same record: the thread key-value
+    store is the only key-addressed surface with MUST-level durability and read-after-write across tools,
+    hooks and endpoints. The record is evidence against the model only. Any definition code holding the
+    `ThreadState` can write the same key (tools, hooks, handlers, effects, endpoints, a child''s parent
+    hooks, Draft `UserState.thread()`), and SA defines no key ownership. The gate proves that a record
+    exists, not that the checkpoint covers the target; the ACS Python tracker likewise reserves without
+    comparing scope. Refusing with F501 follows the ACS validator and hook; the reference executor instead
+    asks the host for a checkpoint (state-20). Searched: namespace, prefix, reserved, valuePrefix.'
+  combined: 'The checkpoint tool writes `{ checkpoint_id, scope, created_at, expires_at, flow_id, consumed_at
+    }` under `<pkg>/checkpoint/active` and its manifest under `<pkg>/checkpoint/<id>`. A tool whose effective
+    `requires_checkpoint` is true begins `execute` by reading the record. It accepts the ACS `mutate`
+    input `checkpoint_id`, requires its target to be in that checkpoint''s manifest, refuses any path
+    or key under the binding''s own prefix, and otherwise returns `{ status: ''error'', error: ''F501
+    CHECKPOINT_REQUIRED: ...'' }`. Keep an index key, since the store cannot be listed, and prune it,
+    since key count and value size may be capped. No initialisation is needed (`getValue` returns `null`
+    for an unset key); initial keys, if wanted, belong in an `after_thread_created` hook.'
+  see_also:
+  - tools-contracts#rec-01
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#thread-05
+  - safety-enforcement#ckpt-01
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#trust-01
+  - approval-human#approval-09
+  - approval-human#approval-13
+  - approval-human#approval-19
+  - evidence-audit-observability#store-01
+  - workflow-execution#wf-09
+  - multi-agent#coord-19
+  - packaging-conformance-governance#pkg-03
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#remember-02
+- id: state-05
+  relation: acs_only
+  acs:
+    concept: '`checkpoint` capability: save state for potential recovery (`scope`, `label`, `metadata`
+      in; `checkpoint_id`, `timestamp`, `size` out). The Standard and the ontology do not define the saved
+      content; the reference skill does'
+    refs:
+    - spec/STANDARD-v1.1.0.md §2 Terms, Checkpoint (line 64)
+    - schemas/capability_ontology.yaml nodes[id=checkpoint] (lines 1211-1246)
+    - skills/checkpoint/SKILL.md Procedure (lines 76-102), Output Contract (lines 108-125), capability-specific
+      rules (lines 246-252)
+    - docs/guides/RUNNING_WORKFLOWS.md Actions and responses, CreateCheckpoint (line 86)
+    - core/src/exec/machine.rs checkpoint output handling (lines 1464-1484)
+    - grounded_agency/state/checkpoint_tracker.py Checkpoint dataclass (lines 40-56)
+    - grounded_agency/adapter.py wrap_options (lines 306, 403)
+    - spec/SECURITY.md §8.2 (line 383), §9.1 (line 400)
+    quote: '| **Checkpoint** | A saved state that enables rollback |'
+  sa:
+    concept: No snapshot primitive; a userland copy built from `ThreadState` file and key-value methods
+    refs:
+    - content/0.2.0 (whole tree searched; terms in the explanation)
+    - content/0.2.0/specification/threads.md §1.2.2 File System table (lines 67-82; quote at line 71),
+      Effect Scheduling table (lines 122-128)
+    - content/0.2.0/specification/threads/filesystem.md §2-§6 (lines 23-124), §9.4 item 2 (line 175)
+    - content/0.2.0/specification/effects.md §3 (line 87)
+    - content/0.2.0/distribution/packaging.md intro (line 3)
+    quote: '| `writeFile(path, data, mimeType, options?)` | `Promise<FileRecord>` | Write file |'
+  explanation: 'SA 0.2.0 defines no snapshot, versioning, copy-on-write or backup of thread state. On
+    the ACS side the normative layer is thin: the ontology input is a free-text `scope` and the executor
+    tracks an id and a validity flag. The reference checkpoint skill does define content (mechanism types,
+    a manifest, hashes, `scope.files`, `scope.state_keys`, `restore_command`, `expiry`), in git and project-directory
+    terms; the Python tracker stores metadata only, and the SDK adapter leaves file capture to the Claude
+    Agent SDK (`enable_file_checkpointing`), for which SA has no host equivalent. Searched: checkpoint,
+    backup, copy-on-write, copyFile, immutable, snapshot, restor (content/0.2.0, src/data, README.md,
+    published types). ''snapshot'' names only message-history, registry, status, report and identity snapshots;
+    ''restor'' concerns thread arguments and sockets; ''immutable'' has one unrelated type comment.'
+  combined: 'A `checkpoint` function tool mirroring the skill''s `file_backup` type. Scope it to the paths
+    the next gated call names and exclude the binding''s own directory. For each file: `statFile`, `readFile`,
+    create parents, `writeFile` the copy under `/<pkg>/checkpoints/<id>/`, `statFile` the copy and compare
+    sizes, and compute SHA-256 with a bundled implementation. Copy named keys with `getValue`; call `getScheduledEffects()`
+    in try/catch (it is SHOULD-level); write the manifest last with `setValue`. Return `checkpoint_id`,
+    `timestamp`, `size`, `type`, `scope.files`, `scope.state_keys`, `pre_mutation_state.hash`, `expiry`,
+    `evidence_anchors`. Not guaranteed: durability of the copies (no MUST for files), atomicity, capacity,
+    and anything outside the listed files and keys of this thread. Environment values and child threads
+    cannot be captured; messages can be read but not faithfully restored.'
+  see_also:
+  - safety-enforcement#ckpt-01
+- id: state-06
+  relation: acs_only
+  acs:
+    concept: '`rollback` capability and the `rollback` gate and failure-mode actions (F503 when it cannot
+      be done)'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=rollback] (lines 1247-1278), edge rollback specializes
+      mutate (lines 2101-2104)
+    - spec/STANDARD-v1.1.0.md §5.6 Gate Semantics (lines 389-392), §5.12 runtime table (lines 678-683;
+      quote at line 681), §9.6 F503 (line 1323)
+    - grounded_agency/workflows/runner.py Host.rollback (lines 93-96)
+    - core/src/exec/machine.rs rollback (lines 644-661)
+    - skills/rollback/SKILL.md Procedure steps 3-4 (lines 93-103), Output Contract (lines 115-139), Safety
+      Constraints (lines 262-275)
+    - grounded_agency/hooks/skill_tracker.py (lines 111-114)
+    quote: '| `rollback` | Roll back to the latest checkpoint; with none, or if the host fails it, the
+      run ends F503 |'
+  sa:
+    concept: No rollback or undo; the handler error rule is the only statement that uses the word
+    refs:
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (lines 69-77; quote at line 74)
+    - content/0.2.0/specification/threads.md §4.3 Managing Scheduled Effects (lines 312-322), §8 Lifecycle
+      (lines 467-478)
+    - content/0.2.0/specification/threads/filesystem.md §5 constraint 2 (lines 101-103)
+    - content/0.2.0/specification/threads/messages.md §6 Deleting Messages (lines 180-186)
+    - content/0.2.0/specification/effects.md §3 (line 87)
+    quote: '- The inbound message stays persisted. Nothing is rolled back.'
+  explanation: 'The quoted sentence is the only rollback vocabulary in SA 0.2.0. It describes what the
+    runtime does when a handler throws; it does not forbid a tool from restoring files it saved, so there
+    is no conflict. SA defines no undo of file writes, key-value writes, environment changes, messages
+    or executed effects. ACS specifies the outcome codes but not the restoration: the reference `Host.rollback`
+    raises `NotImplementedError("no rollback")`, so a restoring tool goes beyond the reference host. The
+    ontology output has `restored`, `previous_state` and `restored_state`; the rollback skill adds `changes_reverted[]`,
+    `verification.match` and `warnings[]`. The skill refuses an expired checkpoint, while the executor
+    rolls back to the latest checkpoint whatever its validity; a binding has to choose. Searched: rollback,
+    rolled back, roll back, undo, revert, restor, transaction, compensat, backup.'
+  combined: 'A `rollback` function tool: load the manifest (missing: an F503 error result). For each entry:
+    `statFile`, `unlinkFile` if present, `writeFile` from the copy, then `statFile` and a digest check.
+    Delete only paths that the binding''s own journal records as created by a gated call after the checkpoint,
+    never by listing a scope, because the tree also holds attachments the runtime stored. Cancel only
+    effect ids the binding recorded when it scheduled them, in try/catch. Return `restored: true` only
+    when every entry verified; otherwise return an F503 error result with per-file outcomes in `changes_reverted`
+    and `warnings`, and keep the checkpoint so the call can be repeated. Afterwards leave the record''s
+    validity as it was: in the reference executor a rollback neither consumes nor invalidates a checkpoint
+    (safety-enforcement#ckpt-02). Always list what was not restored: effects that ran, external calls,
+    environment values, child threads, messages.'
+  see_also:
+  - published-api-extension-points#thread-03
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#ckpt-03
+  - workflow-execution#wf-08
+- id: state-07
+  relation: acs_only
+  acs:
+    concept: 'Where checkpoint-before-mutation is enforced: validator (V102, F501), executor (`CreateCheckpoint`),
+      Claude Code PreToolUse hook (exit code 2)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.3 enforcement table (lines 165-171), §5.2.1 (lines 279-284), §9.6 F501
+      (line 1321)
+    - hooks/pretooluse_require_checkpoint.sh (lines 1-47; quote at line 11)
+    - spec/SECURITY.md §1.1 (line 13), §2.2.7 Checkpoint Bypass (lines 165-172)
+    - docs/integrations/claude_agent_sdk.md PreToolUse Hook Enforcement (lines 272-277)
+    quote: '# 2 block it; the reason on stderr is shown to Claude'
+  sa:
+    concept: Tool execution hooks (observational, or after execution), `before_create_message` (effect
+      on tool calls not stated), and non-normative tool annotations
+    refs:
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks (lines 21-36), §3.3 note (line 273), §4.1
+      before_create_message (lines 320-322), §5.1 tool_call_started (lines 367-384; quote at line 382),
+      §5.4 (lines 414-421), §6.3 HookToolResult (lines 478-488)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 42-50), §5.2 Error Handling (line 92),
+      §7.3 `hidden` (line 143)
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (line 44), §8 Annotations (lines 142-146)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (lines 113-114)
+    - content/0.2.0/specification/models.md §1 `providerTools` (line 34)
+    - content/0.2.0/distribution/packaging.md Visibility Rules (line 230)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 225-236 (ToolResult.error_code, error_data), 438-443
+      (executionMode)'
+    quote: '- The return value **MUST** be ignored; the hook cannot modify the tool call.'
+  explanation: 'No SA hook has a defined power to refuse a tool call. `tool_call_started` is observational
+    and may see incomplete arguments. `before_create_message` runs before the assistant message carrying
+    the calls is stored, but its effect on those calls is not stated. The other tool hooks run after execution.
+    Annotations can label a tool, but they ''**MUST NOT** change argument validation, execution, the tool''s
+    results, or what is sent to the model''. The one runtime-side refusal before `execute` is for an invocation
+    target outside a `uses` list. The checkpoint record can therefore be checked only inside the gated
+    tool''s own `execute`, which cannot be imposed on another package''s tools (internal tools are hidden
+    from outside), on provider-embedded tools, or directly on runtime-injected lifecycle tools. Searched:
+    before_tool, pre_tool, beforeTool, before_execute, veto.'
+  combined: 'Wrap only tools whose effective `requires_checkpoint` is true (`mutate`, `send`, or a raised
+    flag), never the checkpoint tool: `checkpoint`, `persist` and `audit` are mutations that need no checkpoint.
+    On failure return `{ status: ''error'', error: ''F501 CHECKPOINT_REQUIRED: ...'' }`; the runtime MUST
+    persist it and continue. Put the code in the `error` text, because `error_code` and `error_data` exist
+    only in the published types. Carry the ACS classification as a descriptive annotation only. Publish
+    the binding as cooperative: it covers locally executed tools written with the wrapper. A delegation
+    that needs the gate can be declared `hidden` and spawned from a gated tool, provided every other relationship
+    on that side is `hidden` too: with any visible one the lifecycle tools are injected, and the text
+    does not say that they refuse a hidden relationship''s name (multi-agent#coord-20). Two caveats: `after_tool_call_failure`
+    may replace the stored refusal, and `repeated_tool_error` is a listed `failed` reason with no defined
+    trigger, so repeated refusals may end a run on some runtimes.'
+  see_also:
+  - tools-contracts#cls-03
+  - tools-contracts#cls-07
+  - tools-contracts#cls-08
+  - tools-contracts#cls-14
+  - tools-contracts#eff-01
+  - tools-contracts#io-06
+  - published-api-extension-points#hooks-01
+  - published-api-extension-points#tools-06
+  - safety-enforcement#gate-01
+  - safety-enforcement#scope-01
+  - safety-enforcement#surface-01
+  - approval-human#approval-01
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - workflow-execution#wf-14
+  - workflow-execution#wf-15
+  - workflow-execution#wf-26
+  - multi-agent#coord-20
+  - packaging-conformance-governance#diag-03
+  - packaging-conformance-governance#naming-02
+  - packaging-conformance-governance#pkg-03
+- id: state-08
+  relation: partial
+  acs:
+    concept: 'Checkpoint validity over time: a wait or delay invalidates earlier checkpoints (W608); the
+      reference tracker expires them after 30 minutes'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 777-790; quote at line 780), Delays (lines
+      792-800), §9.7 W608 (line 1338)
+    - core/src/exec/machine.rs invalidate_checkpoints (lines 865-884), end of a delay (lines 2124-2126)
+    - grounded_agency/state/checkpoint_tracker.py DEFAULT_EXPIRY_MINUTES (line 176), Checkpoint.is_valid
+      (lines 58-64)
+    - docs/guides/RUNNING_WORKFLOWS.md Checkpoints (lines 145-148)
+    quote: checkpoint taken before it no longer authorises the step. Take a new
+  sa:
+    concept: 'Execution boundary: `execution.flowId`, per-execution `context`, key-value lifetime equal
+      to the thread''s'
+    refs:
+    - content/0.2.0/specification/threads/execution-state.md §2 Execution Properties (lines 21-32; quote
+      at line 23), §4.1 States (lines 91-103)
+    - content/0.2.0/specification/hooks.md §2.2 Execution State (line 144)
+    - content/0.2.0/specification/threads.md §1.3 Access Contexts (lines 180-186), §6.2 (line 390), §6.3
+      (lines 397-404), §7.2 Persistence row (line 429)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2579-2580 (ExecutionState.flowId), 3022-3033 (invokeTool),
+      3116-3130 (context)'
+    quote: '| `flowId` | `string` | Unique execution ID |'
+  explanation: 'ACS invalidates checkpoints when a wait or delay ends, because ''a wait can last hours
+    and the run may resume elsewhere''. SA has no wait step, but it has execution boundaries: a run settles
+    as `idle` when the turn passes to a human-backed side, and a later message starts a new execution.
+    Key-value values outlive that boundary, so a stored record stays valid across a park unless the binding
+    bounds it. `flowId` could tie a record to one execution, but the text describes it only in table cells.
+    It does not say that a later execution always gets a different id, or whether a sub-prompt, a handoff,
+    a queued tool or `invokeTool` from an endpoint shares the caller''s. `context` is likewise descriptive,
+    may be seeded by the runtime, and is writable by every tool and hook. Neither is backed by an RFC
+    2119 sentence.'
+  combined: 'Publish a short `expires_at` (a few minutes) as the validity rule the binding guarantees.
+    Store `flow_id: state.execution?.flowId` as an additional check that fails closed (it can refuse a
+    valid call, never admit a stale one), and say that it rests on behaviour the specification does not
+    define. Do not present a `context` token as equivalent. ACS `mutate` and `send` also require approval,
+    and a person''s answer arrives as a new execution, so the order inside one execution is approval,
+    then checkpoint, then the gated call, which is the reference executor''s order. Evaluate the gate
+    when a deferred action is scheduled, not inside the effect handler, where `state.execution` is not
+    specified. Checkpoint-on-write (state-20) has no validity window.'
+  see_also:
+  - tools-contracts#cls-14
+  - tools-contracts#eff-01
+  - tools-contracts#io-07
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#thread-05
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#exec-01
+  - safety-enforcement#surface-01
+  - approval-human#approval-09
+  - approval-human#wait-02
+  - evidence-audit-observability#audit-03
+  - multi-agent#coord-03
+  - multi-agent#coord-13
+  - packaging-conformance-governance#pkg-03
+- id: state-09
+  relation: fits
+  acs:
+    concept: Single-use checkpoints and the reservation that prevents two concurrent tool calls sharing
+      one
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md What the executor enforces, Checkpoints (lines 145-148; quote at
+      line 145)
+    - core/src/exec/machine.rs checkpoint() (lines 663-677), retry reuse (lines 1389-1391)
+    - grounded_agency/state/checkpoint_tracker.py validate_and_reserve (lines 547-598), consume_checkpoint
+      (lines 662-708)
+    - docs/integrations/claude_agent_sdk.md PreToolUse Hook Enforcement (lines 272-274)
+    - spec/STANDARD-v1.1.0.md §10.3 (lines 1427-1431)
+    quote: '- **Checkpoints.** One checkpoint authorises one step that requires one,'
+  sa:
+    concept: Sequential tool execution and one flow per thread
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §2 Invocation Triggers (lines 27-38), §3 Step Cycle (lines
+      42-50), §5.1 Ordering (line 88), §11 Concurrency (line 239)
+    - content/0.2.0/specification/handlers.md §4 Delivery Semantics (line 62)
+    - content/0.2.0/specification/threads.md §4 Effect Scheduling (line 277)
+    - content/0.2.0/specification/threads/endpoints.md §5 Endpoint Context (lines 107-119)
+    - content/0.2.0/specification/users.md §2.1 Serialization (lines 77-80), §2.2 Reaching Threads (lines
+      82-88) (Draft page)
+    - content/0.2.0/specification/prompts.md §1 `parallelToolCalls` (lines 28, 38)
+    - '@standardagents/spec 0.45.10 index.d.ts line 3033 (invokeTool)'
+    quote: A single thread **MUST NOT** execute multiple concurrent flows. Cross-thread concurrency is
+      allowed.
+  explanation: 'The ACS Python tracker reserves a checkpoint so that two concurrent tool calls cannot
+    both proceed on it. For the tool calls a model returns, SA removes that race: they MUST execute sequentially,
+    and a thread MUST NOT run concurrent flows. Not covered by any sentence found: tool invocations started
+    concurrently by code (`Promise.all` over `state.invokeTool` type-checks against the published types),
+    thread endpoint handlers, effects (which ''Run **independently** of the conversation flow''), another
+    thread''s handle, and Draft `UserState.thread()`. The store has no compare-and-set. Single use is
+    itself reference behaviour (the guide and an informative fixture), and the ACS references consume
+    at different moments: the executor before the step runs, a retry reusing the checkpoint; the SDK adapter
+    after a successful mutation, releasing on failure. Searched: concurren, parallel, serializ, lock,
+    mutex, atomic, compare-and.'
+  combined: 'Consume before acting, as the reference executor does: read the record, write it back with
+    `consumed_at` set, then act. This fails safe if the process dies in between. Claim single use only
+    for model-issued tool calls on one thread; it is not guaranteed against concurrent `invokeTool` calls
+    made by code, endpoint handlers, effects or another thread''s handle. The binding''s own tools, hooks
+    and handlers must not invoke gated tools concurrently, and must not write the binding''s keys from
+    endpoint handlers or effects. The binding relies on the Runtime MUST for sequential execution, not
+    on the prompt option `parallelToolCalls`, whose table text reads ''Allow parallel tool execution''.'
+  see_also:
+  - published-api-extension-points#consume-01
+  - published-api-extension-points#thread-01
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#edge-02
+  - approval-human#approval-04
+  - approval-human#approval-10
+  - workflow-execution#wf-06
+  - multi-agent#coord-13
+- id: state-10
+  relation: partial
+  acs:
+    concept: Step outputs held under `store_as`, and `_recovery` context, for the life of a workflow run
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2 Step Definition (lines 234-243; quote at line 240), §5.12 injected
+      context (lines 655-658)
+    - docs/guides/RUNNING_WORKFLOWS.md intro (lines 10-14)
+    quote: '| `store_as` | string | Yes | Output identifier for later reference (missing: S304) |'
+  sa:
+    concept: '`ThreadState.context`: mutable per-execution scratch storage'
+    refs:
+    - content/0.2.0/specification/threads.md §6.2 Per-Execution Context (lines 372-395), §6.3 Context
+      Limitations (lines 397-406; quote at line 402)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 154)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.2 (line 362)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3116-3130 (ThreadState.context)'
+    quote: '| **Persistence** | Mutations are lost after execution ends |'
+  explanation: 'Both carry values from one step or tool call to later ones. Their lifetimes differ: an
+    ACS run can wait for hours and resume from a snapshot with its stores intact, while SA `context` lasts
+    for one execution and is described without RFC 2119 keywords (the published type comment allows a
+    runtime to rehydrate a value from another durable source). `context` can therefore back ACS stores
+    only for a run that finishes inside one execution. The mapping matters only where an ACS executor
+    holds `store_as` values, and no executor can run inside an SA tool today (state-15). In a model-driven
+    loop the step outputs are the tool results, which the runtime MUST persist as messages, so nothing
+    has to be bound.'
+  combined: Keep stores that must survive a park in the key-value store (`setValue('<pkg>/run/<run_id>/stores',
+    ...)`), subject to runtime-defined size caps; use `state.context` only as a per-execution cache of
+    them.
+- id: state-11
+  relation: partial
+  acs:
+    concept: 'Storage scope of `persist`, `recall` and `checkpoint`: not modelled in the ontology (`key`
+      and `scope` are free strings); the reference skills name memory stores (`session`, `project`, `global`)'
+    refs:
+    - schemas/capability_ontology.yaml checkpoint.input_schema.scope (lines 1221-1223), persist.input_schema
+      (lines 1381-1394), recall.input_schema (lines 1416-1426)
+    - skills/recall/SKILL.md Procedure step 2 (lines 41-44), capability-specific rules (line 298)
+    - skills/persist/SKILL.md Procedure step 2 (lines 90-93)
+    - skills/checkpoint/SKILL.md Output Contract, scope (lines 114-116)
+    - schemas/world_state_schema.yaml meta.world_id (lines 454-456)
+    quote: 'description: What to checkpoint'
+  sa:
+    concept: 'Scope tiers: thread invocation (`arguments`, read-only), execution (`context`), thread (key-value
+      store, files, messages, thread environment), user (Draft), runtime instance (environment)'
+    refs:
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (lines 220-225), §6.1
+      Thread Arguments (lines 354-355), §7.3 Comparison With Other Storage (lines 435-443; quote at line
+      441), §7.4 Agent Skills (lines 447-465)
+    - content/0.2.0/specification/users.md §2 UserState (lines 45-75; Draft page)
+    - content/0.2.0/specification/threads/client-api.md §10 item 5 (line 296)
+    quote: '| `getValue` / `setValue` | Thread | Durable | Small structured state scoped to the thread
+      |'
+  explanation: 'SA publishes a comparison of its storage surfaces by scope and persistence. ACS has scope
+    vocabulary only in its reference skills: the recall skill names `session`, `project` and `global`
+    memory stores and says to respect scope boundaries, and the persist skill selects a destination file.
+    The ontology and the Standard give `persist` and `recall` no input by which a caller can ask for a
+    scope, and a checkpoint''s `scope` is a free string. A binding therefore has to choose, and a wrong
+    choice either loses data at the end of an execution or shares it more widely than intended. ACS `session`
+    corresponds to SA thread scope; `project` and `global` have no frozen SA tier for key-addressed values
+    (the Draft user scope is the nearest; `state.skills` holds Agent Skills folders, state-27).'
+  combined: 'Default `persist`, `recall` and checkpoint records to thread scope: it is the only choice
+    that rests on frozen, MUST-level SA text, and it ends with the thread. Use `context` for nothing that
+    must last, and do not treat `arguments` as a store (it is read-only). Use the user scope only on runtimes
+    that implement the Draft Users page (state-13). Report the scope used in each tool result.'
+  see_also:
+  - models-context-memory-security#remember-02
+- id: state-12
+  relation: partial
+  acs:
+    concept: State shared between a workflow and what it invokes or delegates to (a nested `invoke` shares
+      the caller's checkpoints)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.12 `invoke` (lines 659-672), §5.13 (lines 785-790; quote at line 788),
+      §5.15 Delegation (from line 904)
+    - docs/guides/RUNNING_WORKFLOWS.md Invocations (lines 230-236)
+    quote: run it invokes shares the caller's checkpoints, so its waits invalidate
+  sa:
+    concept: 'Child thread isolation: key-value store neither shared nor copied; files isolated with attachments
+      copied; thread environment propagates; parent and child `ThreadState` lookup'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 items 3 and 8 (lines 352, 357; quote at line 357)
+    - content/0.2.0/infrastructure/runtime.md §7.4 Initial Payload Mapping (line 174), §8 Cross-Thread
+      Communication (lines 189-211)
+    - content/0.2.0/specification/threads.md §1.1 Agent Assignment (line 30), §2.3 setEnv (line 238),
+      §6.1 Thread Arguments (lines 352-370), §7.2 (lines 428-433), §9 and §9.1 (lines 480-520)
+    - content/0.2.0/specification/subagents.md intro (line 3), §5.1 (lines 167-175), §6.1 (line 189),
+      §6.4 (lines 211-219), §7 Attachment Copying (lines 230-237)
+    - content/0.2.0/specification/threads/execution-state.md §2.1 Prompt Path (lines 34-41)
+    - content/0.2.0/specification/tools.md §3 Variable Declarations, `scoped` (lines 60-64)
+    quote: Values **MUST NOT** be automatically copied, inherited, or synchronized between threads when
+      subagents are spawned.
+  explanation: A child thread does not see its parent's state. The key-value store is per thread and nothing
+    is copied at spawn; the file system is isolated and referenced attachments are copied by value in
+    each direction; creation arguments are validated and persisted on the child; thread environment values
+    propagate to active descendants except names marked `scoped`. Either side can obtain the other's `ThreadState`,
+    but whether the store may be used through that handle is contradictory (see the isolation gap). ACS's
+    rule that an invoked run shares the caller's checkpoints fits a same-thread construct. A handoff is
+    stated to stay in the thread; that a sub-prompt shares the caller's store, `flowId` and `context`
+    is inference, since the text describes only `promptPath`. A parent's checkpoint does not cover a child's
+    file system, and a child's returned attachments are written into the parent's tree by the runtime.
+  combined: 'Treat same-thread constructs (a prompt used as a tool, `state.invokeTool`, a handoff) as
+    an analogy for the shared checkpoint context of ACS `invoke`, not as a binding of `invoke`: running
+    a nested workflow needs an ACS executor (state-15). Map `delegate` to a subagent relationship. A child
+    built with this binding takes its own checkpoint in its own thread before it mutates. That cannot
+    be required of a third-party child, for which the parent can only checkpoint its own tree before delegating
+    and treat returned attachments as new files. If the parent''s `checkpoint_id` is passed, declare it
+    in the child''s `requiredSchema`, since creation arguments are validated, and use it as a reference
+    only, never as authorisation.'
+  see_also:
+  - safety-enforcement#scope-01
+  - multi-agent#coord-05
+  - models-context-memory-security#isolation-01
+- id: state-13
+  relation: partial
+  acs:
+    concept: Memory that outlives one session (REMEMBER layer as long-term memory)
+    refs:
+    - schemas/capability_ontology.yaml layers.REMEMBER (lines 83-88; quote at line 85)
+    - skills/persist/SKILL.md Intent (lines 58-60)
+    quote: 'cognitive_mapping: ''Cognitive: Long-term memory'''
+  sa:
+    concept: 'User-scope values (Draft): `UserState.getValue`/`setValue`/`listValues`, `UserHandle.getValue`/`setValue`/`call`'
+    refs:
+    - content/0.2.0/specification/users.md status line (line 3), §2 UserState (lines 45-75), §2.1 Serialization
+      (lines 77-80), §5 UserHandle (lines 165-182), §7.1 `valuePrefix` (lines 284-286)
+    - content/0.2.0/specification/threads.md §1.2.2 User identity, `user()` (lines 155-159), §7.4 Agent
+      Skills (lines 447-465)
+    - content/0.2.0/distribution/packaging.md Portability requirements (lines 15-17)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3168-3211 (getUserValue, setUserValue, listUserValues),
+      3231 (user()), 1561-1583 (UserHandle)'
+    quote: '> **Status: draft proposal.** Not yet part of the frozen specification surface.'
+  explanation: The thread store is invisible to other threads and is deleted with the thread, so memory
+    across conversations needs a wider scope. For key-addressed values SA's only candidate is the user
+    scope, which is a Draft page; nothing on it is required of a conforming 0.2.0 runtime. There, serialized
+    read-modify-write exists only inside user endpoints and `UserHandle.call()`; `UserHandle.getValue`
+    and `setValue` are explicitly not serialized, and the page mentions 'client-writable value routes',
+    so a recalled user value is unverified input. The frozen Threads page types `state.user()` as identity
+    only; the published types return a `UserHandle` and also declare `getUserValue`, `setUserValue` and
+    `listUserValues` on `ThreadState`, which no 0.2.0 page mentions. A thread may have no user. The frozen
+    cross-thread store, `state.skills`, is not a key-value memory (state-27).
+  combined: 'For cross-thread `persist`/`recall`: `const u = await state.user()`, then test at run time
+    that `u` has `setValue` (the published types always say so) and write the envelope; route read-modify-write
+    through a packaged user endpoint with `u.call(...)`. Return the scope actually used in the tool result.
+    When the caller asked for cross-thread storage and the runtime lacks it, return an error instead of
+    falling back to thread scope, because a silent fallback changes what `persist` means. Mark data recalled
+    from user scope as low-trust, for example with an evidence anchor naming the scope. This is an optional
+    enhancement under the packaging rules, not a portable dependency.'
+  see_also:
+  - models-context-memory-security#remember-02
+- id: state-14
+  relation: acs_only
+  acs:
+    concept: 'World state: `state` and `transition` capabilities and the canonical versioned snapshot
+      (`meta.version_id`, `parent_version_id`, `lineage`)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §2 Terms, World State (line 59), §6.3 World State Requirements (lines 1145-1170)
+    - schemas/world_state_schema.yaml principles (lines 7-13), TransitionRule (lines 287-328), world_state.meta
+      (lines 443-484)
+    - schemas/capability_ontology.yaml nodes[id=state] (lines 711-754), nodes[id=transition] (lines 755-795)
+    quote: '| **World State** | Derived snapshot from observations and transition rules |'
+  sa:
+    concept: 'None: thread state is the agent''s own messages, files, key-value values and environment'
+    refs:
+    - content/0.2.0 (whole tree searched; terms in the explanation)
+    - content/0.2.0/specification/threads.md §1 Thread Definition (lines 16-18)
+    - content/0.2.0/specification/threads/client-api.md §14 Reading a File (lines 383-395)
+    quote: A thread is an **instance** of an agent with isolated storage for messages and files.
+  explanation: 'ACS world state is a model of the external world (entities, state variables, observations,
+    transition rules, action records) kept as versioned snapshots. SA thread state is the storage of one
+    conversation; SA defines no world model, entity, observation, lineage or snapshot version. `state`
+    and `transition` are `mutation: false`, so they bind as ordinary function tools; only storing their
+    output touches SA state. §6.3 requires the snapshot fields, not a storage mechanism, so nothing normative
+    depends on the choice of surface. Searched: world state, world_state, world model, lineage, long-term,
+    observation, entity, transition, memory, recall (content/0.2.0, src/data, README.md, published types;
+    the few hits are unrelated: an observation point for tool calls, status transitions, sandbox memory
+    limits).'
+  combined: 'Write each snapshot as JSON to `/<pkg>/world/<version_id>.json`: `statFile` first (skip when
+    the file is present and its digest matches), verify the size after writing, then move the head pointer
+    with `setValue(''<pkg>/world/head'', { version_id, sha256 })`, so that a missing or altered file is
+    detected on read. Keep small snapshots in the key-value store itself. A change produces a new `version_id`
+    with `parent_version_id` and `lineage`. ''Never rewrite a snapshot'' is a convention that the binding
+    enforces only by refusing its own directory in gated tools. The files are readable by clients where
+    the Thread Client API is exposed, and their durability is runtime-documented in 0.2.0. Validation
+    against world_state_schema.yaml is the tool''s job.'
+- id: state-15
+  relation: fits
+  acs:
+    concept: Executor run snapshot and restore (canonical JSON, SHA-256, optional HMAC), so a run can
+      be saved and resumed
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md intro (lines 10-14; quote at line 14), Driving a run yourself (lines
+      258-277)
+    - grounded_agency/_core.pyi Run.restore, Run.snapshot (lines 55-68)
+    - core/Cargo.toml lib and features (lines 10-17)
+    - core/src/lib.rs (lines 19-20)
+    - core/src/validate/mod.rs Context::load (line 99)
+    - core/src/ontology.rs Ontology::from_value (line 109)
+    - spec/ROADMAP.md Multi-language SDKs (line 86)
+    quote: the same snapshot, and a run can be saved and resumed anywhere.
+  sa:
+    concept: Persist-before-advance for messages and tool results, durable queues, and the durable key-value
+      store
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §1 Overview (lines 9-13; quote at line 11), §3 Step Cycle
+      (lines 42-50), §9 Queue and Delivery Semantics (lines 219-225), §16 Conformance Summary (lines 384-392)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.2 (line 362)
+    - content/0.2.0/specification/threads/execution-state.md §4.3 Requirements (lines 118-122)
+    - content/0.2.0/distribution/packaging.md intro (line 3), Portability requirements (lines 9-25)
+    - content/0.2.0/specification/threads/code-execution.md §6.1 (line 389)
+    quote: '- persist messages and tool results before continuing'
+  explanation: 'Both make a long-running process resumable, at different layers. The SA runtime persists
+    the conversation step by step and keeps queued messages durably; a lost execution settles as `failed`
+    with reason `execution_lost`. The ACS executor exposes its own deterministic state as an I-JSON snapshot.
+    An ACS run hosted in an SA thread needs both, because the SA runtime does not know the workflow''s
+    position. The run cannot be hosted in-process today. The core compiles for wasm32-unknown-unknown
+    unchanged, but the artefact exports only `memory`: the single interface module is behind the `python`
+    feature, and the validator context loads from file paths. SA says nothing about WebAssembly in tool
+    modules, and packs an agent into a single module. Searched: wasm, webassembly (the hits concern the
+    `runCode` sandbox only).'
+  combined: 'Design for when a JavaScript interface exists: after each `submit`, `await state.setValue(''<pkg>/run/<run_id>'',
+    snapshotString)`; at the start of the next execution, `restore` from it and continue. Store the snapshot
+    as a string and check its size against the runtime''s documented cap. Bundle the catalog and ontology
+    as data, because a snapshot restores only against the ones it was taken from. An HMAC key read with
+    `state.env` is readable by every definition on the thread. Until then only the checkpoint gate and
+    the tools of state-04 to state-06 and state-20 can be bound. A remote executor would be an external
+    service; the packaging rules allow one only when the package declares it as part of the agent''s purpose
+    (inference: the text does not address this case directly).'
+  see_also:
+  - published-api-extension-points#erase-01
+  - published-api-extension-points#handler-01
+  - published-api-extension-points#options-01
+  - published-api-extension-points#thread-07
+  - safety-enforcement#exec-01
+  - safety-enforcement#trust-01
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - approval-human#users-01
+  - evidence-audit-observability#audit-02
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#retention-01
+  - evidence-audit-observability#store-02
+  - workflow-execution#wf-04
+  - workflow-execution#wf-05
+  - workflow-execution#wf-22
+  - workflow-execution#wf-25
+  - multi-agent#coord-26
+  - multi-agent#coord-27
+  - packaging-conformance-governance#pkg-06
+  - packaging-conformance-governance#pkg-07
+  - models-context-memory-security#context-02
+  - models-context-memory-security#portability-01
+  - models-context-memory-security#profile-01
+- id: state-16
+  relation: partial
+  acs:
+    concept: '`send` requires a checkpoint; what rollback means for data already transmitted is not defined'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 (lines 85-88), §4.4 Safety-Critical Capabilities (lines 184-188), §12.1
+      When to Use Checkpoints (lines 1522-1545; guidance; quote at line 1543)
+    - schemas/capability_ontology.yaml nodes[id=send] (lines 1133-1170), edge checkpoint requires send
+      (lines 1766-1768)
+    - schemas/world_state_schema.yaml TransitionRule.rollback (lines 314-323)
+    - spec/RFC-0002-agent-reliability-profile.md (lines 122-128)
+    quote: '| Send HTTP POST | Yes | May cause side effects |'
+  sa:
+    concept: 'Effects: `scheduleEffect`, `getScheduledEffects`, `removeScheduledEffect`; a deferred side
+      effect can be cancelled while pending'
+    refs:
+    - content/0.2.0/specification/effects.md §1.1 Purpose (line 11), §3 Execution Semantics (lines 81-90;
+      quote at line 87)
+    - content/0.2.0/specification/threads.md §4 Effect Scheduling (lines 274-322)
+    - content/0.2.0/specification/threads/client-api.md §10 item 3 (line 294)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3056 (scheduleEffect), 3067-3077 (removeScheduledEffect)'
+    quote: '- **SHOULD** expose inspection and cancellation APIs (`getScheduledEffects`, `removeScheduledEffect`).'
+  explanation: 'Neither standard can undo a transmission. ACS requires a checkpoint before `send` (§3.3,
+    §4.4 and the ontology; §12.1 is guidance) and says nothing further; its world-state schema has a compensation
+    descriptor (`TransitionRule.rollback.inverse_effects`) that `send` does not use. SA offers one lever:
+    a deferred side effect has an id and can be cancelled while pending. The lever is weak. Inspection
+    and cancellation are SHOULD-level; the delivery guarantee of effects is not stated, so a handler may
+    run more than once (the idempotency sentence is addressed to runtimes); effects return no output to
+    the model; thread deletion discards scheduled effects; and by the published type comment `removeScheduledEffect`
+    returns `false` alike for an executed, a cancelled and an unknown effect. Searched (effects.md, threads.md
+    §4): at-least-once, at most once, exactly-once, redeliver, retr.'
+  combined: 'A cancellable `send`: the tool runs the approval and checkpoint checks, writes `{ state:
+    ''scheduled'' }` under a send id, schedules the effect with a grace period, and returns `sent: false`
+    with `scheduled: true` and the id (the ACS output `sent` has no value for ''scheduled''). The effect
+    handler reads the record, does nothing unless it is `scheduled`, marks `sending`, transmits with the
+    send id as an idempotency key, then marks `sent`. Cancel or `rollback`: a `scheduled` record is set
+    to `cancelled`, which the handler honours, and `removeScheduledEffect` is called in try/catch as a
+    courtesy; a `sending` or `sent` record is reported as not reversible. Residual risks: a handler may
+    run twice or interleave with a running execution, and a send made directly inside a tool is irreversible.'
+  see_also:
+  - tools-contracts#eff-01
+  - published-api-extension-points#thread-03
+  - published-api-extension-points#thread-04
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#ckpt-03
+  - safety-enforcement#surface-01
+  - approval-human#approval-08
+  - workflow-execution#wf-08
+  - workflow-execution#wf-11
+  - multi-agent#coord-13
+  - multi-agent#coord-26
+  - models-context-memory-security#remember-01
+- id: state-17
+  relation: acs_only
+  acs:
+    concept: Retention of checkpoints, snapshots and audit records (`retention_policy`, `audit.retention`,
+      tracker history and archive)
+    refs:
+    - schemas/world_state_schema.yaml retention_policy (lines 559-586)
+    - schemas/capability_ontology.yaml audit.input_schema.retention (lines 1357-1359; quote at line 1359)
+    - spec/STANDARD-v1.1.0.md §6.3 retention_policy row (line 1167)
+    - grounded_agency/state/checkpoint_tracker.py history pruning and archive (lines 405-437)
+    quote: 'description: How long to retain'
+  sa:
+    concept: Thread deletion and runtime-defined retention
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §1 Scope items 1 and 6 (lines 9, 14), §10 Deleting
+      a Thread (lines 275-300; quote at line 296), §13 Deleting a Message (lines 372-381)
+    - content/0.2.0/infrastructure/runtime.md §10 Termination Semantics (lines 227-235), §15 Thread Client
+      API (lines 364-380)
+    - content/0.2.0/specification/subagents.md §4.1 (lines 116-124)
+    - content/0.2.0/distribution/packaging.md Portability requirements (lines 21-25)
+    quote: 5. The runtime **MUST** delete the messages, files, and stored values of every thread in the
+      deletion set.
+  explanation: 'Everything a binding keeps in thread scope (checkpoint copies, manifests, run snapshots,
+    audit entries) disappears when the thread is deleted; deletion extends to every descendant thread
+    and discards queued messages and scheduled effects. The deletion rule binds runtimes that expose the
+    Thread Client API, which is a SHOULD; retention of idle threads is declared out of scope, and clients
+    can also delete individual messages. ACS retention fields presuppose a store that keeps records: `observations.max_age`
+    and `audit_logs.max_age` are durations, `snapshots` uses `max_count` and `keep_tagged`, and `audit.retention`
+    is a free string. This is not a MUST-level conflict (`retention_policy` is optional in §6.3), but
+    a retention promise cannot be met from thread storage alone.'
+  combined: 'Keep recovery data (checkpoints, run snapshots) in thread scope, where its lifetime matches
+    what it can restore. Export records that must outlive the thread synchronously inside the tool call,
+    before returning success, to an external sink that the package declares as part of the agent''s purpose;
+    use an effect only for retries, because a deferred export is discarded if the thread is deleted first.
+    The Draft user scope is a weaker alternative (its values are not tamper-resistant, state-13). Report
+    in the `audit` output which store was written and its lifetime: `thread`, `user (Draft)` or `external`.'
+  see_also:
+  - evidence-audit-observability#retention-01
+  - workflow-execution#wf-27
+  - models-context-memory-security#context-02
+- id: state-18
+  relation: fits
+  acs:
+    concept: '`execute` capability: run code deterministically, `mutation: false`, `requires_approval:
+      true`'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=execute] (lines 1053-1094; quote at line 1055)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 270-284)
+    quote: 'description: Run code or script deterministically'
+  sa:
+    concept: '`ThreadState.runCode` sandbox (where the runtime implements code execution): no ambient
+      state; persistence only through bridged functions'
+    refs:
+    - content/0.2.0/specification/threads/code-execution.md §6.7 (lines 423-425), §6.8 Each Run Is Fresh
+      (lines 427-429), §9 Interaction With Thread State (lines 450-468), §11 Security Considerations (lines
+      548-555)
+    - content/0.2.0/infrastructure/runtime.md 'Code Execution Runtime' (the first section numbered 14)
+      §14.1 Isolation (lines 257-265), §14.3 Value Marshaling (line 279), §14.9 Conformance Checklist
+      (line 323), §16 Conformance Summary (line 391)
+    - content/0.2.0/specification/threads.md §12 TypeScript Reference (line 717)
+    - '@standardagents/spec 0.45.10 index.d.ts line 3477 (runCode)'
+    quote: Every call to `runCode` gets its own isolate. State — module caches, intrinsic mutations, top-level
+      variables — does **not** carry over between runs. If you need persistence, write to thread storage
+      through a bridged function.
+  explanation: 'The sandbox cannot reach thread files, the key-value store or the network unless the calling
+    tool bridges them in, and a runtime that implements code execution MUST create a fresh isolate per
+    call. `runCode` is a conditional capability although `ThreadState` declares it without `?`: the conformance
+    summary applies ''when `ThreadState.runCode` is exposed''. An `execute` bound to `runCode` with read-only
+    bridges does not change thread state, which matches the ontology''s `mutation: false`; that is a property
+    of the tool''s own bridge code, not of the sandbox. Once a write bridge is passed, the same call can
+    change persistent state, and under §5.2.1 the step should declare stricter flags. `Date.now()` and
+    `Math.random()` are nondeterministic inside the sandbox. `requires_approval: true` is left to the
+    approval concern.'
+  combined: Feature-detect `runCode` and return an error result when it is absent. Bridge a path-restricted
+    reader that refuses the binding's directory and returns a string or a `Uint8Array` (the marshaling
+    rule names typed arrays, not `ArrayBuffer`). If writes are bridged, bridge the checkpoint-on-write
+    function of state-20, one restore point per write, instead of the single-use gate, which would fail
+    on the second write of a run; classify the tool as `mutate`. Tie termination to `state.execution?.abortSignal`
+    and, where the module environment has timers, a deadline. For determinism, bridge deterministic replacements
+    through `globals`.
+  see_also:
+  - tools-contracts#cls-10
+  - tools-contracts#cls-15
+  - safety-enforcement#surface-01
+  - evidence-audit-observability#exec-01
+- id: state-19
+  relation: partial
+  acs:
+    concept: 'Durable record of what was done: `ActionRecord` (status includes `rolled_back`), the `audit`
+      capability, append-only observations'
+    refs:
+    - schemas/world_state_schema.yaml ActionRecord (lines 329-367), composition_contracts guarantees (lines
+      599-604; quote at line 603)
+    - schemas/capability_ontology.yaml nodes[id=audit] (lines 1336-1375)
+    - hooks/README.md Audit Trail (lines 126-151)
+    quote: '- Observations are append-only and grounded.'
+  sa:
+    concept: Tool results persisted as messages before the runtime advances; message update and delete
+      APIs
+    refs:
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 148-156; quote at line 154)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 42-50), §5.2 Error Handling (lines
+      90-92)
+    - content/0.2.0/specification/threads/messages.md intro note (line 7), §5 Updating Messages and §6
+      Deleting Messages (lines 169-186)
+    - content/0.2.0/specification/threads/client-api.md §13 Deleting a Message (lines 372-381)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 87-88), §5.2-§5.5 (lines 386-444)
+    quote: '- persist tool results as messages before advancing.'
+  explanation: 'SA guarantees that the result of every tool call, success or error, is persisted in thread
+    history before the runtime advances. That is a durable, ordered record that the checkpoint, mutating
+    and rollback tools ran and what they returned. It is not append-only: `updateMessage` and `deleteMessage`
+    change persisted storage, clients can delete messages through the Thread Client API, tool-result messages
+    cascade with their parent assistant message, and `before_store_tool_result` and the `after_tool_call_*`
+    hooks may rewrite a result before it is stored. SA defines no integrity chain; the ACS reference audit
+    log is HMAC-chained. The step cycle lists ''Execute tool calls sequentially'' before ''Persist tool
+    results'' and does not say whether each result is persisted before the next call of the same step
+    runs. Searched: audit, tamper, integrity, hmac.'
+  combined: 'Have ACS tools return their ACS output as JSON in `ToolResult.result`, so thread history
+    carries `checkpoint_id`, `restored` and the list of unrestored items. For an audit trail of ACS strength,
+    additionally append a chained record from the tool: a key per entry plus a counter key (the store
+    cannot be listed), a bundled hash function, and a plan for the runtime''s key-count cap; or use an
+    external sink. Such a chain is tamper-evident against the model, not against other definition code
+    holding the same `ThreadState`. `tool_call_done` is the one hook that observes every tool call, gated
+    or not, on prompts whose hook set includes it.'
+  see_also:
+  - tools-contracts#io-03
+  - tools-contracts#io-06
+  - published-api-extension-points#erase-01
+  - published-api-extension-points#tools-04
+  - safety-enforcement#audit-01
+  - safety-enforcement#hook-03
+  - evidence-audit-observability#audit-01
+  - evidence-audit-observability#audit-02
+  - evidence-audit-observability#collect-02
+  - evidence-audit-observability#transform-01
+  - models-context-memory-security#context-02
+- id: state-20
+  relation: fits
+  acs:
+    concept: 'Checkpoint taken on demand: the reference executor asks the host for one (`CreateCheckpoint`)
+      when no valid checkpoint exists, and the failure-mode action `pause_and_checkpoint` takes a new
+      one; F501 only when the host cannot'
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md Actions and responses, CreateCheckpoint (line 86); Checkpoints
+      (lines 145-148; quote at line 147)
+    - spec/STANDARD-v1.1.0.md §5.12 runtime table, `pause_and_checkpoint` (line 682)
+    - core/src/exec/machine.rs checkpoint() (lines 663-677), checkpoint responses (lines 2041-2046)
+    - tests/conformance/runtime/checkpoint_per_mutation.json, checkpoint_error.json, pause_and_checkpoint.json
+    quote: is valid, the executor asks for a new one (`CreateCheckpoint`). A
+  sa:
+    concept: A restore point taken inside the gated tool's own `execute`, immediately before the write,
+      recorded in the thread key-value store
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §5.1 Ordering (line 88), §5.2 Error Handling (line 92)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 item 2 (line 351)
+    - content/0.2.0/specification/threads.md §1.2.2 File System table (lines 67-82), §7 (line 410)
+    - content/0.2.0/specification/tools.md §2 Function Tool Definition (lines 17-24)
+    quote: Tool calls **MUST** execute sequentially in the returned order.
+  explanation: 'ACS has two responses to a missing checkpoint. The validator and the Claude Code hook
+    refuse (F501, exit code 2). The reference executor takes one: it asks the host with `CreateCheckpoint`
+    and raises F501 only if the host cannot. SA has no executor and no pre-execution hook, but a tool
+    wrapper can play the host''s part: before a gated write it saves the one target file, or records that
+    it did not exist, writes a journal entry to the thread store, then writes. This rests on the same
+    MUSTs as the record gate of state-04 (read-after-write and sequential tool calls), needs no cooperation
+    from the model, has no validity window, and costs in proportion to what changes. A wrapper of this
+    shape type-checks against the published types. It restores single writes; a restore point spanning
+    several calls still needs the explicit `checkpoint` tool.'
+  combined: '`writeWithCheckpoint(state, path, data, mimeType)`: refuse paths under the binding''s prefix;
+    read the journal counter; `statFile(path)`; if the file exists, `readFile` it and `writeFile` the
+    copy to `/<pkg>/undo/<seq>`, comparing sizes; `setValue(''<pkg>/undo/<seq>'', { path, existed, copy,
+    size, mimeType, at })` before the change; then `unlinkFile` if present and `writeFile`. Return the
+    journal sequence as `checkpoint_id` in the `mutate` output. If the copy cannot be read or written,
+    return an F501 error result and do not write. `rollback` replays journal entries in reverse (state-06).
+    Prune old entries and copies, since storage may be capped.'
+  see_also:
+  - published-api-extension-points#thread-05
+  - safety-enforcement#ckpt-01
+  - safety-enforcement#ckpt-02
+  - approval-human#approval-09
+  - approval-human#approval-19
+  - packaging-conformance-governance#pkg-03
+- id: state-21
+  relation: partial
+  acs:
+    concept: '`conflicts_with` edges rollback/persist and mutate/rollback (the pair may not share a `parallel_group`,
+      F504); `alternative_to` persist/checkpoint'
+    refs:
+    - schemas/capability_ontology.yaml conflicts_with edges (lines 2021-2036; quote at line 2032), alternative_to
+      edges (lines 2053-2060), constrain enables checkpoint (lines 1885-1888)
+    - spec/STANDARD-v1.1.0.md §4.3 edge table (line 155), enforcement table (line 170), §9.6 F504 (line
+      1324)
+    quote: 'rationale: Cannot mutate during rollback operation'
+  sa:
+    concept: Sequential tool execution within one thread; cross-thread concurrency allowed
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §5.1 Ordering (line 88), §11 Concurrency (line 239)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 153)
+    quote: '- execute local tools sequentially in the order they were returned.'
+  explanation: 'ACS forbids `rollback` to run concurrently with `mutate` or `persist`; in sequence they
+    are allowed. Inside one SA thread the rule holds by construction for the tool calls a model returns,
+    because they MUST execute sequentially and a thread MUST NOT run concurrent flows. It does not hold
+    across threads: cross-thread concurrency is allowed, so a parent can roll back while a child mutates
+    its own thread, which is harmless only because the child''s storage is separate (state-12). Nor is
+    it stated for code that starts tool invocations concurrently, for effects, or for endpoint handlers
+    (state-09). The `alternative_to` edge between `persist` and `checkpoint` matches the SA picture, where
+    both are writes to the same two storage surfaces and differ only in purpose.'
+  combined: Nothing to add inside one thread for model-issued calls. The binding's own code must not start
+    a `rollback` concurrently with a gated tool or a `persist` (no `Promise.all` over `state.invokeTool`
+    for these), and a `rollback` should not be scheduled as an effect. Across a delegation, a parent that
+    rolls back its own thread does not roll back the child; say so in the `rollback` result.
+  see_also:
+  - safety-enforcement#edge-02
+  - multi-agent#coord-13
+- id: state-22
+  relation: acs_only
+  acs:
+    concept: 'Domain-profile `checkpoint_policy`: free-form event keys mapped to `always`, `high_risk`,
+      `medium_risk` or `never`'
+    refs:
+    - schemas/profiles/profile_schema.yaml required list (line 12), checkpoint_policy (lines 56-61; quote
+      at line 58)
+    - schemas/profiles/personal_assistant.yaml checkpoint_policy (lines 44-49)
+    - tools/validate_profiles.py validate_checkpoint_policy (lines 175-199)
+    quote: 'description: When to create checkpoints'
+  sa:
+    concept: None
+    refs:
+    - content/0.2.0 (whole tree searched; terms in the explanation)
+  explanation: 'A domain profile must carry a `checkpoint_policy` whose keys are free-form event names
+    (`before_send_message`, `before_purchase`) and whose values are `always`, `high_risk`, `medium_risk`
+    or `never`. `tools/validate_profiles.py` checks the shape. No file under `grounded_agency/`, `core/`
+    or `hooks/` reads the policy, and the term does not occur in spec/STANDARD-v1.1.0.md. SA has no counterpart:
+    it has no profile document and no statement of when state should be saved. Searched: checkpoint, checkpoint_policy,
+    policy (content/0.2.0, src/data, README.md; the ''policy'' hits are the thread access policy, credential-grant
+    policy, parent teardown policy and request-context ''policy gates'').'
+  combined: A binding may read a profile at build time and translate each policy key it understands into
+    a wrapper decision (which tools take a restore point before writing). The keys are not capability
+    ids, so the translation table is the binding's own and must be published with it. A profile value
+    can add checkpoints; it cannot remove one the ontology requires.
+  see_also:
+  - models-context-memory-security#profile-03
+- id: state-23
+  relation: partial
+  acs:
+    concept: 'Failure of the safety operations themselves: a checkpoint the host cannot take ends the
+      step F501; a rollback the host fails ends the run F503'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.12 runtime table (lines 681-682; quote at line 682), §9.5 R402 (line
+      1311), §9.6 (lines 1321-1323)
+    - core/src/exec/machine.rs (lines 2044-2046)
+    - tests/conformance/runtime/checkpoint_error.json, rollback_error.json
+    quote: '| `pause_and_checkpoint` | Take a new checkpoint; if the host fails it, the run ends F501
+      |'
+  sa:
+    concept: 'Storage error contract: promise-returning methods SHOULD throw on storage errors; a capped
+      `setValue` SHOULD reject; tool errors are persisted as results'
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 File System table (lines 72-74), §11.3 Error Handling
+      (lines 600-609)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 item 2 (line 351), §14.2 Capacity and Errors (line 362)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    quote: Runtimes **MAY** enforce implementation-defined caps on key length, value size, and total number
+      of keys per thread. When a cap is exceeded, `setValue` **SHOULD** reject with an error that identifies
+      which limit was hit.
+  explanation: 'ACS gives a failed checkpoint and a failed rollback their own codes, so a host must be
+    able to tell that the save or the restore did not happen. SA lets a tool detect this only at SHOULD
+    level: `ThreadState` methods that return promises SHOULD throw on storage errors, and a `setValue`
+    that exceeds a runtime cap SHOULD reject with an error naming the limit. Nothing requires a failed
+    `writeFile` to throw. What is MUST-level is the read side for the key-value store: a value read back
+    after `setValue` is the value written (item 2). A tool error, once returned, MUST be persisted as
+    a tool result and MUST NOT crash the loop.'
+  combined: 'Wrap every storage call of the checkpoint and rollback tools in try/catch and verify by reading
+    back: `getValue` after `setValue`, `statFile` and a size or digest comparison after `writeFile`. Map
+    a failed or unverified save to an error result with `F501 CHECKPOINT_REQUIRED` and perform no write;
+    map a failed or unverified restore to `F503 ROLLBACK_FAILED` with the per-file outcome. Map a capacity
+    rejection of an ordinary `persist` to `R402 EXECUTION_FAILED` naming the limit. Never report `checkpoint_created`,
+    `stored` or `restored` as true from a call that merely did not throw.'
+  see_also:
+  - published-api-extension-points#thread-03
+  - safety-enforcement#ckpt-03
+  - safety-enforcement#err-01
+  - workflow-execution#wf-08
+- id: state-24
+  relation: fits
+  acs:
+    concept: 'Confidentiality of saved state: the checkpoint skill excludes sensitive files and keeps
+      checkpoint metadata inside the workspace'
+    refs:
+    - skills/checkpoint/SKILL.md capability-specific rules (lines 246-252; quote at line 250)
+    - skills/recall/SKILL.md capability-specific rules (line 297)
+    - skills/persist/SKILL.md Procedure step 1 (line 87)
+    quote: '- Do not checkpoint sensitive files (.env, credentials) - warn and exclude'
+  sa:
+    concept: 'Client reach into thread storage: the Thread Client API serves thread files and deletes
+      messages; no client route is specified for the thread key-value store'
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §1 Scope item 3 (line 11), §2 Routes (lines 18-35),
+      §13 Deleting a Message (lines 372-381), §14 Reading a File (lines 383-395; quote at line 391)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 item 9 (line 358)
+    - content/0.2.0/infrastructure/runtime.md §15 Thread Client API (lines 364-380)
+    quote: 1. For a stored file, a successful request **MUST** return `200` with the file's bytes as the
+      response body.
+  explanation: ACS addresses exposure by saying what must not be saved; SA by saying who can read what
+    is stored. Where a runtime exposes the Thread Client API, a caller with access to the thread can fetch
+    any stored file by path and can delete individual messages. The route list contains no route for the
+    thread key-value store, though a runtime MAY define further routes. Checkpoint copies and world-state
+    snapshots written as thread files are therefore client-readable, and any file tool on the prompt can
+    read them too. Key-value values are not required to be encrypted at rest (item 9).
+  combined: 'Apply the skill''s exclusion rule in the checkpoint tool: skip paths that match a deny-list
+    (`.env`, credential files) and report them as excluded in the result. Do not copy secrets into checkpoint
+    files or manifests; reference environment values by name only. Assume everything under the binding''s
+    directory is visible to the thread''s clients and to other tools on the prompt, and say so in the
+    binding''s documentation. Keep small restore data that should not be served as a file in the key-value
+    store.'
+  see_also:
+  - published-api-extension-points#consume-01
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#thread-03
+  - approval-human#approval-13
+- id: state-25
+  relation: sa_only
+  acs:
+    concept: 'No counterpart: ACS classifies state changes by capability (`mutation`, `requires_checkpoint`)
+      and has no category for a write the host performs on its own'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition, `mutation` and `requires_checkpoint` fields
+      (lines 121-122; quote at line 122), §5.2.1 (line 279)
+    quote: '| `requires_checkpoint` | boolean | No | A checkpoint must precede each use (default false)
+      |'
+  sa:
+    concept: Writes the runtime performs in the thread file tree without any package tool (client message
+      attachments, tool-result attachments, attachments copied from a child), and provider-executed tools,
+      which have no local `execute`
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §12 item 4 (line 365)
+    - content/0.2.0/infrastructure/runtime.md §8.1-§8.2 (lines 191-201; quote at line 201)
+    - content/0.2.0/specification/subagents.md §7 Attachment Copying (lines 230-237)
+    - content/0.2.0/specification/hooks.md §6.3 HookToolResult (line 490)
+    - content/0.2.0/specification/models.md §1 `providerTools` (line 34)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 239-247 (ToolResult.attachments), 438-443 (executionMode)'
+    quote: '- payload attachments **MUST** be copied child filesystem -> parent filesystem'
+  explanation: 'An SA runtime changes a thread''s file tree on its own account. It MUST store each attachment
+    of a client message in the thread''s file system; it stores new attachments returned by any tool (a
+    published type comment places them under `/attachments/`; the 0.2.0 text does not name the directory);
+    and it MUST copy attachments from a child''s file system into the parent''s when the child reports.
+    None of these passes through a package tool, so no checkpoint gate sees them. Provider-embedded tools
+    are a further path: by the published types they are executed by the model provider, with no local
+    `execute` to wrap. ACS has no category for host-initiated writes; its flags describe capabilities
+    invoked as steps.'
+  combined: 'Treat runtime-written files as outside the checkpoint contract. Exclude them from every checkpoint
+    scope, never delete or overwrite them in `rollback` (state-06 deletes only what the binding''s journal
+    recorded), and list them as not covered in the `rollback` result. Record in the binding''s documentation
+    the paths that never reach the gate: runtime-stored attachments, provider-embedded tools, other tools
+    on the prompt, and any hook, handler, effect or endpoint that holds the `ThreadState`. An agent that
+    needs every change gated should not offer provider-embedded tools.'
+  see_also:
+  - tools-contracts#cls-03
+  - tools-contracts#cls-07
+  - tools-contracts#cls-08
+  - tools-contracts#cls-14
+  - tools-contracts#eff-01
+  - published-api-extension-points#tools-06
+  - safety-enforcement#surface-01
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - multi-agent#coord-20
+  - packaging-conformance-governance#pkg-03
+- id: state-26
+  relation: fits
+  acs:
+    concept: 'What a rollback leaves in the record: action status `rolled_back` and an audit trail of
+      what was reverted. The Standard does not say whether a rollback covers the conversation'
+    refs:
+    - schemas/world_state_schema.yaml ActionRecord.status (lines 355-364)
+    - skills/rollback/SKILL.md capability-specific rules (lines 269-275; quote at line 274)
+    - spec/STANDARD-v1.1.0.md §2 Terms, Checkpoint (line 64)
+    quote: '- Preserve audit trail of what was reverted'
+  sa:
+    concept: Message metadata updates, message deletion and the request-context hook `filter_messages`
+    refs:
+    - content/0.2.0/specification/threads/messages.md §5 Updating Messages (lines 169-178), §6 Deleting
+      Messages (lines 180-186)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 70-93), §3.2 filter_messages (lines
+      217-231; quote at line 230), §3.4 (lines 291-306)
+    - content/0.2.0/specification/threads/execution-state.md §2.2 Live execution history (lines 43-49)
+    - content/0.2.0/specification/tools.md §2 Function Tool Definition (lines 17-24)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2134-2139 (MessageUpdates)'
+    quote: '- Synthetic or transformed messages returned here **MUST** remain confined to the request
+      context. They **MUST NOT** replace [`execution.messageHistory`](/0.2.0/specification/threads/execution-state#22-live-execution-history).'
+  explanation: 'After a rollback the stored conversation still holds the tool results of the undone calls,
+    and the model will read them as true. ACS asks that the audit trail of what was reverted be preserved,
+    and its action record has a `rolled_back` status; it does not say whether the conversation is within
+    a rollback''s reach. SA has two levers that keep the record while correcting what the model sees:
+    `updateMessage(id, { metadata })` can tag a stored message without touching its content (metadata
+    is merged, by the published type comment), and a `filter_messages` hook can annotate or hide tagged
+    results in the request context only, on prompts whose hook set includes it. Deleting the messages
+    would destroy the record. The `execute` signature shown in the text is `(state, args)`, with no tool-call
+    id, so the messages to tag must be found by searching `execution.messageHistory`.'
+  combined: 'Leave messages in place. The `rollback` result states, in plain words, which earlier results
+    no longer describe the files (paths and the journal or checkpoint ids). Optionally tag the superseded
+    tool-result messages by reading each message''s `metadata`, adding `''<pkg>'': { rolled_back_by: <checkpoint_id>
+    }` and writing the whole object back with `updateMessage`, since only a published type comment says
+    an update merges metadata (published-api-extension-points#hooks-03), and ship a `filter_messages`
+    hook that prefixes tagged results with a notice; the hook is active only where a prompt or agent lists
+    it. Never use `deleteMessage` for this.'
+  see_also:
+  - published-api-extension-points#drift-02
+  - published-api-extension-points#hooks-03
+  - published-api-extension-points#thread-03
+  - safety-enforcement#ckpt-03
+  - evidence-audit-observability#anchors-02
+  - workflow-execution#wf-08
+  - models-context-memory-security#context-04
+- id: state-27
+  relation: partial
+  acs:
+    concept: 'Durable, cross-session knowledge kept as files: ACS capabilities are Agent Skills (`skills/<name>/SKILL.md`
+      with `name` and `description` frontmatter), and the persist skill writes learnings, decisions and
+      patterns to project files'
+    refs:
+    - skills/persist/SKILL.md Intent (line 60), Procedure step 2 (lines 90-93)
+    - skills/recall/SKILL.md frontmatter (lines 1-10), Procedure step 2 (lines 41-44)
+    quote: Execute **persist** to write stable learnings, decisions, and patterns to durable storage for
+      future recall and consistency.
+  sa:
+    concept: '`state.skills`: the thread owner''s server-side Agent Skills library (`list`, `get`, `readFile`,
+      `install`, `setEnabled`, `remove`)'
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 Skills table (lines 161-170), §7.4 Agent Skills (lines
+      447-465; quote at line 453)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1853-1880 (SkillsNamespace), 3232-3249 (ThreadState.skills)'
+    quote: '- Skills are stored server-side and scoped to the calling principal. A principal''s private
+      skills **MUST NOT** be visible to another principal.'
+  explanation: '`state.skills` is the one cross-thread, principal-scoped store on the frozen Threads page,
+    and it uses the Agent Skills format that ACS skills also use (a folder whose `SKILL.md` opens with
+    `name` and `description` frontmatter). It is not a key-value memory: an entry is a validated skill
+    folder, its identity comes from the frontmatter, installs and removals require mutation authorization,
+    and runtimes SHOULD surface each enabled skill''s `name` and `description` in the agent''s ambient
+    context. That makes it a counterpart for what the ACS persist skill does in a project (writing learnings
+    to `CLAUDE.md` or a named file), and a place to install ACS skill documents, but not a store for `persist`
+    keys or checkpoint records.'
+  combined: 'Do not bind `persist`/`recall` keys to `state.skills`. Where an operator wants durable, model-visible
+    guidance across threads, a tool may call `state.skills.install([{ path: ''SKILL.md'', content }])`
+    with a skill whose frontmatter names it, expecting the call to fail without mutation authorization,
+    and `recall` may read it with `state.skills.get(name)`. Treat anything installed this way as content
+    the model will be shown.'
+  see_also:
+  - models-context-memory-security#remember-03

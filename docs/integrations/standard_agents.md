@@ -78,10 +78,26 @@ package/runtime agreement."
 ([Packaging, Portability requirements](https://standardagentspec.org/0.2.0/distribution/packaging#portability-requirements))
 The proposals at the end of this document follow from that sentence.
 
+### Words the two standards use differently
+
+| Word | In ACS | In Standard Agents |
+|---|---|---|
+| Capability | One of the 36 verbs of the ontology | A feature or limit of a model (`ModelCapabilities`) |
+| Step | One entry of a workflow | One model request and response: `stepCount` is "Total LLM request/response cycles" |
+| Handler | A workflow step that runs only as an escalation target (`handler: true`, [§5.11](../../spec/STANDARD-v1.1.0.md#511-handler-steps)) | "a function that takes one side's turns in a conversation" ([Handlers](https://standardagentspec.org/0.2.0/specification/handlers)) |
+| Hook | A Claude Code hook: the plugin's, or one a skill declares | A thread hook defined with `defineHook` |
+| Skill | A `SKILL.md`: one per capability, and one per composed workflow | An entry in the thread owner's Agent Skills library (`state.skills`) |
+| Invoke | The `invoke` capability: run another workflow as a nested run | `state.invokeTool()`: call a tool, a prompt or an agent by name from code |
+| Host, runtime | The host performs the actions the executor names | The runtime executes threads |
+
+Below, a handler is always the Standard Agents kind.
+
 ## How the concepts map
 
 Each table sets an ACS concept beside the nearest Standard Agents concept.
-**Fit** is one of:
+The tables summarise the
+[row-level mapping](../research/analysis/standard_agents_mapping/index.yaml):
+319 rows in ten files, each with the passages it rests on. **Fit** is one of:
 
 - *Partial*: one covers part of the other.
 - *Fits*: they address different layers and combine without conflict.
@@ -102,20 +118,20 @@ requirement of the other.
 | `classify`, `detect`, `measure`: typed judgements with a confidence | `state.decide()`: typed questions answered with probabilities ([Decisions](https://standardagentspec.org/0.2.0/specification/threads/decisions)) | Partial | A grounded tool calls `decide()` and maps the answer to the capability's output |
 | One capability per step ([§3.4](../../spec/STANDARD-v1.1.0.md#34-composable-atoms)) | A tool is arbitrary code and may call other tools through `uses` | Partial | Classify by the strictest capability a tool performs, or split the tool |
 | Every action passes through the safety layer | Provider tools "execute server-side" at the model provider ([Providers §10](https://standardagentspec.org/0.2.0/specification/providers#10-provider-tools)) | SA only | Per the published types such a call is "not" to "be re-executed locally"; the 0.2.0 text does not say whether its `execute` runs. It does not pass through a grounded wrapper. Offer one only where its capability needs neither checkpoint nor approval |
-| Capability skills: one `SKILL.md` per capability | `state.skills`, an Agent Skills library ([Threads §7.4](https://standardagentspec.org/0.2.0/specification/threads#74-agent-skills)) | Fits | A user or an administrator could install the ACS skills in their own library as guidance. A package cannot ship them: the library belongs to the thread's owner. Whether a runtime's frontmatter check accepts their extra keys is not stated |
+| Capability skills: one `SKILL.md` per capability | `state.skills`, an Agent Skills library ([Threads §7.4](https://standardagentspec.org/0.2.0/specification/threads#74-agent-skills)) | Partial | A user or an administrator could install the ACS skills in their own library as guidance. A package cannot ship them: the library belongs to the thread's owner. Whether a runtime's frontmatter check accepts their extra keys is not stated |
 
 ### Safety flags and enforcement
 
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
 | `risk`, `mutation`, `requires_checkpoint`, `requires_approval` on every capability | Nothing comparable. Tool `annotations` are hints with no defined keys | ACS only | The effective flags travel in `annotations.acs` |
-| "Validators, executors and safety layers MUST act on effective flags" ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)) | A runtime must "never let them affect execution" ([Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)) | Partial | The annotation may publish the flags; enforcement may not be keyed on it by a runtime. The binding enforces in the tool's own code |
+| "Validators, executors and safety layers MUST act on effective flags" ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)) | A runtime must "never let them affect execution" ([Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)) | Fits | The annotation may publish the flags; enforcement may not be keyed on it by a runtime. The binding enforces in the tool's own code |
 | A check that refuses a step before it runs | No hook can refuse a tool call. `tool_call_started` is observational; the others run afterwards ([Hooks §5](https://standardagentspec.org/0.2.0/specification/hooks#5-tool-execution-hooks)) | ACS only | Enforcement in the tool's own `execute`. [Proposed to SA](#changes-proposed-to-the-standard-agent-specification) |
 | A gate whose expression errors fires, except an `end` gate ([§5.8.2](../../spec/STANDARD-v1.1.0.md#582-evaluation)) | A hook's "failures are non-fatal to the decorated turn" | Partial | Nothing safety-relevant is placed in a hook |
 | `requires` edges, checked before a workflow runs (V102) | The model chooses the calls; the runtime runs them in order | Fits | Checked per call by the tool, and per prompt by `lintPromptTools` |
-| `conflicts_with`: not in the same `parallel_group` (F504) | "Tool calls **MUST** execute sequentially in the returned order" ([Runtime §5.1](https://standardagentspec.org/0.2.0/infrastructure/runtime#51-ordering)) | Fits | Cannot arise between the tool calls of one thread. Effects and endpoints run apart from them |
+| `conflicts_with`: not in the same `parallel_group` (F504) | "Tool calls **MUST** execute sequentially in the returned order" ([Runtime §5.1](https://standardagentspec.org/0.2.0/infrastructure/runtime#51-ordering)) | Partial | Cannot arise between the tool calls of one thread. Effects and endpoints run apart from them |
 | Safety diagnostics with fixed codes ([§9.6](../../spec/STANDARD-v1.1.0.md#96-safety-errors)) | A tool error is a persisted result, never a halt ([Runtime §5.2](https://standardagentspec.org/0.2.0/infrastructure/runtime#52-error-handling)) | Fits | A refusal is an error result carrying the ACS code |
-| Bounds on repetition: `retry.max`, `max_loops` | `maxSteps`, `maxSessionTurns`, runtime hard caps | Partial | Both apply. A model that repeats a refused call is stopped only by a cap the agent sets (`maxSteps` and `maxSessionTurns` have no default) or by a runtime's own |
+| Bounds on repetition: `retry.max`, `max_loops` | `maxSteps`, `maxSessionTurns`, runtime hard caps | Fits | Both apply. A model that repeats a refused call is stopped only by a cap the agent sets (`maxSteps` and `maxSessionTurns` have no default) or by a runtime's own |
 
 ### Checkpoints, state and memory
 
@@ -165,7 +181,7 @@ requirement of the other.
 | `read_only` delegation | No read-only mode for a child | ACS only | Cannot be attested. A grounded child enforces its own rules |
 | `invoke`: a nested run that shares the caller's checkpoints | Prompt tools, in the same thread | Partial | A prompt tool is classified by what it does, not as `invoke` |
 | `synchronize`, quorum ([§5.16](../../spec/STANDARD-v1.1.0.md#516-quorum)) | No agreement or voting construct | ACS only | Built from several children and code that counts |
-| `inquire` | A human-backed side: the session parks until input arrives | Partial | A text reply that hands the turn to the person |
+| `inquire` | A human-backed side: the session parks until input arrives | Fits | A tool returns the questions and the model puts them to the person in a reply that hands over the turn |
 | Nothing comparable | `parentHooks`: hooks a child requires of its parent, failing closed ([Agents §6](https://standardagentspec.org/0.2.0/specification/agents#6-required-parent-hooks)) | SA only | A grounded child can require its audit hook on whoever composes it |
 | Nothing comparable | Handoff: another agent takes over the same thread | SA only | The end of one actor's run and the start of another's |
 | Safety flags of what a delegate may do | No machine-readable statement of a child's effects | ACS only | A parent cannot know that a child mutates. Each agent grounds its own tools |
@@ -181,7 +197,7 @@ requirement of the other.
 | `AwaitEvent`, `Sleep` | Inbound messages and endpoints; `scheduleEffect(name, args, delay)` | Partial | A handler resumes on a message; an effect resumes after a delay |
 | Triggers: schedule, event ([§5.10](../../spec/STANDARD-v1.1.0.md#510-triggers)) | A user message, a queued message or tool, a scheduled effect. No recurring schedule | Partial | Recurrence is rebuilt from one-shot effects |
 | Conditions, gates, failure modes, retries | None of these; a tool error is returned to the model | ACS only | Stay in the executor |
-| `parallel_group` | One execution per thread; concurrency only across threads | Partial | Members run in order, or each as a child thread |
+| `parallel_group` | One execution per thread; concurrency only across threads | Partial | Members run in order. The reference executor issues one action at a time, so running each member as a child thread needs a host that schedules the group itself |
 
 ### Packaging, versions and conformance
 
@@ -274,6 +290,25 @@ The annotation describes; it cannot enforce. SA is explicit:
 
 A runtime that changed its behaviour because of `acs` would not conform.
 Enforcement therefore has to live somewhere else.
+
+### Which construct for which capability
+
+Any capability can be a function tool. The table gives the construct that
+suits each layer, as the
+[row-level mapping](../research/analysis/standard_agents_mapping/index.yaml)
+works it out.
+
+| Layer | Capabilities | On Standard Agents |
+|---|---|---|
+| PERCEIVE | `retrieve`, `search`, `observe`, `receive` | Function tools over the thread's own reads (`readFile`, `grepFiles`, `getMessages`, `status()`). `receive` is inbound traffic: a client's message, a thread endpoint, a child's completion. A search the model's provider executes passes through no tool, so nothing anchors its sources |
+| UNDERSTAND | `detect`, `classify`, `measure`, `predict`, `compare`, `discover` | A prompt tool, or a function tool that asks `state.decide()` for a typed judgement and maps the answer to the capability's output |
+| REASON | `plan`, `decompose`, `critique`, `explain` | Prompt tools. Every capability in the layer is low risk, so no flag needs enforcing |
+| MODEL | `state`, `transition`, `attribute`, `ground`, `simulate` | The world model is data the agent keeps in thread files or values, one version per change. `ground` is a function tool that resolves the cited records and asks `state.decide()` whether they support the claim |
+| SYNTHESIZE | `generate`, `transform`, `integrate` | A model step that must call one output tool whose arguments mirror the capability's output. The tool checks that each anchor resolves |
+| EXECUTE | `execute`, `mutate`, `send` | Grounded function tools, behind approval and, for `mutate` and `send`, a checkpoint. `execute` can run on `state.runCode` where the runtime has it. A `send` scheduled as an effect can still be cancelled before it goes out |
+| VERIFY | `verify`, `checkpoint`, `rollback`, `constrain`, `audit` | Grounded function tools. A quorum on `constrain` is counted by code, from one child per reviewer. `audit` is a tool, backed by the audit hook |
+| REMEMBER | `persist`, `recall` | Function tools over `setValue` and `getValue`, under a key prefix of their own, with expiry checked on read |
+| COORDINATE | `delegate`, `synchronize`, `invoke`, `inquire` | `delegate` is the injected `subagent_create`, or a grounded tool that creates the child. `synchronize` is code over several children. `invoke` is a nested ACS workflow and stays inside the executor; a prompt tool is classified by what it does. `inquire` is a tool whose questions the model then puts to the person |
 
 ### Enforce: inside the tool
 
@@ -370,7 +405,7 @@ The rules, and where each comes from:
 |---|---|
 | A `checkpoint` must have run before `mutate`, `send` and `rollback` (`requires` edges, [§4.3](../../spec/STANDARD-v1.1.0.md#43-edge-types-and-dependency-semantics)) | A call is refused until a `checkpoint` tool has executed in the thread |
 | One checkpoint authorises one step that requires one ([Running workflows](../guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces)) | The newest valid checkpoint is marked used when the call runs; the next call needs its own |
-| A checkpoint taken before a wait "no longer authorises the step" ([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events), W608) | A checkpoint counts only in the execution it was taken in (`state.execution.flowId`). A thread that went idle, for instance to wait for a person, needs a new one |
+| A checkpoint taken before a wait "no longer authorises the step" ([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events), W608) | A checkpoint counts only in the execution it was taken in (`state.execution.flowId`), and for ten minutes at most. A thread that went idle, for instance to wait for a person, needs a new one |
 | An action that requires approval runs only on a valid decision ([§5.14](../../spec/STANDARD-v1.1.0.md#514-approval)) | See [Approval](#approval) |
 | A refused or skipped step leaves the checkpoint valid | Nothing is used up until every check has passed |
 | A capability's output has the fields its contract requires | The return type of `execute` is the capability's output contract, checked again at run time |
@@ -390,10 +425,13 @@ wrapper records the id in the thread's key-value store, where later calls
 find it.
 
 Approval is checked before the checkpoint, as in the reference executor, and
-a checkpoint counts only in the execution it was taken in. That rests on each
-execution of a thread having its own `flowId`. The 0.2.0 text calls it the
-"Unique execution ID" and says no more, so the rule holds as far as a runtime
-issues a new id when an idle thread runs again. Where the executor
+a checkpoint counts only in the execution it was taken in, and for ten minutes
+at most. The time limit is the rule the binding guarantees. The execution rule
+rests on each execution of a thread having its own `flowId`; the 0.2.0 text
+calls it the "Unique execution ID" and says no more, so that rule holds as far
+as a runtime issues a new id when an idle thread runs again. A call made
+outside an execution, as from a thread endpoint, has no `flowId`, and no
+checkpoint authorises it. Where the executor
 finds no valid checkpoint it asks its host to take one; a tool has nobody to
 ask, so it refuses and names what is missing. The order that works is
 therefore: ask, wait for the approval, then take the restore point and make
@@ -537,10 +575,10 @@ gated one has succeeded.
 | An approval applies to exactly the arguments shown, once | The trace, the checkpoint records and the approval decisions are as trustworthy as the thread's key-value store. Any code running in the thread can write them, including a hook that a composed child requires of it. The binding stops a model from skipping a checkpoint or an approval; it is not a boundary against other code in the thread |
 | The approver's identity is the one the runtime authenticated | Identity is as strong as the runtime's authentication, which SA leaves "implementation-defined", and an authenticated caller need not be a person |
 | Every grounded call is recorded, including refusals. A call cut off while its tool runs stays recorded as `started`, with the approval and checkpoint it used | The audit hook is best effort: a hook failure is "non-fatal", and a runtime "**SHOULD**" time hooks out |
-| A checkpoint taken before the thread last went idle is not accepted | This rests on each execution having its own `flowId`, which the 0.2.0 text does not state |
+| A checkpoint older than ten minutes is not accepted, and none is accepted outside an execution | That a checkpoint taken before the thread last went idle is refused sooner than that rests on each execution having its own `flowId`, which the 0.2.0 text does not state |
 | The classification survives packaging and any conforming runtime | No runtime acts on it |
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
-| | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. A grounded agent routes such writes through a grounded tool with `state.invokeTool()` |
+| | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint refuses there, so a deferred write is checked when it is scheduled |
 | A rejection is never lost to an approval made at the same moment | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and
@@ -758,16 +796,36 @@ continued instead of restarted.
   repository: Standard 1.1.0, the ontology, the RFCs, the reference executor
   and the Python SDK.
 - **Mapping.** Ten concerns were mapped separately, each from the full text
-  of both sides. A second reader, told to refute the citations, went through
-  three of the ten (approval, checkpoints and state, composition) and its
-  corrections are applied here. The other seven did not get that second
-  reading. Every passage this document quotes was checked mechanically
-  against the source files, and every statement about what Standard Agents
-  requires was checked by hand against the page it cites.
+  of both sides. Each mapping was then read by two independent reviewers.
+  One, told to refute, checked every reference and quotation and searched
+  again for everything a row said was absent. The other checked that every
+  combination relies only on what the specification requires of every
+  runtime, and compiled what it could against the published types. A third
+  pass reconciled each mapping with both reviews.
+- **Across the concerns.** Two further checks read the ten mappings together.
+  One compared rows that rest on the same passage and settled, from the
+  sources, every place where two rows would lead two implementers to build
+  different things: it changed the text of 43 rows and the relation of 16.
+  The other went through every section of both standards looking for
+  anything no row accounted for, and added two rows. The result is 319 rows,
+  published with their references and quotations in
+  [`standard_agents_mapping/`](../research/analysis/standard_agents_mapping/index.yaml).
+- **Findings.** The gaps the ten concerns recorded, 259 in all, were merged
+  into 83 findings about the Standard Agent Specification and 64 about ACS.
+  Each was checked against the sources again, by running code where that was
+  the way to check.
+- **This document.** After the reviews, a separate reader checked every
+  factual statement here and in the six proposals against the sources. It
+  confirmed 340 and found 6 errors, 18 imprecise statements and 11 omissions,
+  all corrected. Every quoted passage is compared mechanically with the
+  source files.
 - **The binding.** The example compiles against the published types under
   TypeScript's strict settings. Its rules are tested against an in-memory
   `ThreadState`, and its approval digest is tested against digests produced by
-  the ACS reference executor.
+  the ACS reference executor. Three of its rules changed because of the
+  mapping: a rejection can no longer be lost to an approval made at the same
+  moment, a call is recorded before its tool runs, and a checkpoint is valid
+  for ten minutes at most and never outside an execution.
 - **What was not done.** The example was not run in a Standard Agents runtime,
   so nothing here is a statement about how any runtime behaves beyond what the
   specification requires of it. No runtime's source and no conformance suite
