@@ -197,6 +197,18 @@ describe('OpenAPI document', () => {
     expect(Object.keys(problem.properties)).toEqual(['type', 'title', 'status', 'detail', 'instance']);
   });
 
+  // The worker answers any /api/ path it cannot read with a 503 problem body
+  // and Retry-After (src/worker/site.ts), so every operation documents it.
+  it('documents the 503 problem response on every operation, and types each 200 body as an object', () => {
+    for (const { op } of ops) {
+      expect(op.responses['503'], op.operationId).toEqual({ $ref: '#/components/responses/Unavailable' });
+      expect(op.responses['200'].content['application/json'].schema.type, op.operationId).toBe('object');
+    }
+    const un = resolveRef(doc, '#/components/responses/Unavailable') as Obj;
+    expect(un.content['application/problem+json'].schema).toEqual({ $ref: '#/components/schemas/Problem' });
+    expect(un.headers['Retry-After'].schema.type).toBe('integer');
+  });
+
   it('resolves every $ref inside the document', () => {
     const refs = refsIn(doc);
     expect(refs.length).toBeGreaterThan(0);

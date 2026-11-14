@@ -103,7 +103,8 @@ export function homeGraph(): Record<string, unknown> {
         isAccessibleForFree: true,
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
         publisher: { '@id': org },
-        sameAs: [GITHUB_BASE],
+        // Its listing in the skills.sh directory (checked to exist on 2026-11-14).
+        sameAs: [GITHUB_BASE, `https://skills.sh/${GITHUB_BASE.replace('https://github.com/', '')}`],
         isBasedOn: { '@id': `${SITE_ORIGIN}/#standard` },
       },
     ],

@@ -274,7 +274,7 @@ export function apiDescription(): string {
     '- **Read-only.** The files are built from the source repository at the commit in `generated_from.commit`, and change only when the site is rebuilt.',
     '- **Not paginated.** Each list operation returns the full collection in one response, with its size in `count`.',
     `- **Versioned path.** The major version is in the path (\`${API_BASE}\`). Adding a field or a file is not a breaking change. Removing or renaming one gets a new major path (\`/api/v2\`). The old path then stays available for at least one minor version of the Standard, and its responses carry \`Deprecation\` and \`Sunset\` headers before it is removed.`,
-    `- **Errors.** A path under \`${API_BASE}\` that names no file returns 404 with an RFC 9457 problem details body (\`application/problem+json\`).`,
+    `- **Errors.** A path under \`${API_BASE}\` that names no file returns 404 with an RFC 9457 problem details body (\`application/problem+json\`). Any operation can return 503 in the same format, with a \`Retry-After\` header, when its file could not be read.`,
     '',
     `Documentation, curl examples and the other ways agents can read the site (Markdown copies, llms.txt, an MCP server): ${SITE_ORIGIN}${DEVELOPERS_URL}`,
   ].join('\n');
@@ -306,9 +306,12 @@ export function openApiDocument(): Record<string, unknown> {
     const tag = TAGS[e.operationId];
     if (!tag) throw new Error(`openapi: ${e.operationId} has no tag`);
     const responses: Record<string, unknown> = {
-      '200': { description: e.summary, content: { 'application/json': { schema: ref(e.schema) } } },
+      // `type` beside the $ref (allowed in OpenAPI 3.1) lets a tool that does
+      // not follow references see that the response is an object.
+      '200': { description: e.summary, content: { 'application/json': { schema: { type: 'object', ...ref(e.schema) } } } },
     };
     if (e.param) responses['404'] = { $ref: '#/components/responses/NotFound' };
+    responses['503'] = { $ref: '#/components/responses/Unavailable' };
     const op: Record<string, unknown> = { operationId: e.operationId, summary: e.summary, description: e.description, tags: [tag], responses };
     if (e.param) {
       op.parameters = [
@@ -351,6 +354,11 @@ export function openApiDocument(): Record<string, unknown> {
       responses: {
         NotFound: {
           description: 'No file at this path: the id is not one the enum lists.',
+          content: { 'application/problem+json': { schema: ref('Problem') } },
+        },
+        Unavailable: {
+          description: 'The file could not be read this time. Retry after the number of seconds in the Retry-After header.',
+          headers: { 'Retry-After': { description: 'Seconds to wait before retrying.', schema: { type: 'integer', minimum: 0 } } },
           content: { 'application/problem+json': { schema: ref('Problem') } },
         },
       },

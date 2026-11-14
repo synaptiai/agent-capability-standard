@@ -135,6 +135,7 @@ describe('home page metadata', () => {
     expect(org.name).toBe('Synapti');
     expect(org.url).toBe('https://synapti.ai');
     expect(org.sameAs).toContain('https://github.com/synaptiai');
+    expect(byType('SoftwareApplication').sameAs).toEqual(['https://github.com/synaptiai/agent-capability-standard', 'https://skills.sh/synaptiai/agent-capability-standard']);
     const contact = org.contactPoint as Record<string, string>;
     expect(contact.contactType).toBeTruthy();
     expect(contact.url).toMatch(/^https:\/\/github\.com\/synaptiai\/[^/]+\/issues$/);

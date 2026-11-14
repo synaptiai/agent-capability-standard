@@ -94,6 +94,18 @@ export { CAPABILITY_ID, WORKFLOW_ID };
 /** The paths of the data API (the site's static JSON under /api/v1/). */
 export const capabilityPath = (id: string) => `/api/v1/capabilities/${id}.json`;
 export const workflowPath = (id: string) => `/api/v1/workflows/${id}.json`;
+export const PAGES_PATH = '/api/v1/pages.json';
+
+/** The fields of a page in /api/v1/pages.json that list_pages reads. */
+interface PageEntry {
+  url: string;
+  markdown_url: string;
+  title: string;
+  description: string | null;
+  section: string;
+  section_label: string;
+  group: string | null;
+}
 
 function stringArg(input: Record<string, unknown> | undefined, key: string): string {
   const v = input?.[key];
@@ -143,7 +155,7 @@ async function fetchText(deps: ToolDeps, path: string, missing: string, signal?:
   return res.text();
 }
 
-/** The four read-only tools, in the order they are registered. */
+/** The five read-only tools, in the order they are registered. */
 export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
   const readOnly: ToolAnnotations = { readOnlyHint: true };
   const abs = (p: string) => new URL(p, deps.origin).href;
@@ -263,7 +275,7 @@ export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
       type: 'object',
       properties: {
         path: { type: 'string', minLength: 1, description: 'The page path on this site, such as "/workflows/", or its full URL.' },
-        section: { type: 'string', minLength: 1, maxLength: 200, description: 'A heading of the page, such as "Safety" (case ignored): return only that section. When a heading repeats, name it with the headings above it, such as "Claude Code skill > Inputs".' },
+        section: { type: 'string', minLength: 1, maxLength: 200, description: 'A heading, such as "Safety", to read only that section. Name a repeated heading with its parent: "Claude Code skill > Inputs".' },
         offset: { type: 'integer', minimum: 0, default: 0, description: 'Where to start, in characters: the offset the previous part ends with.' },
       },
       required: ['path'],
@@ -287,5 +299,60 @@ export function webMcpTools(deps: ToolDeps): ModelContextTool[] {
     },
   };
 
-  return [searchStandard, readCapability, readWorkflow, readPage];
+  // Only in the page: the MCP server keeps its four tools, and an agent there
+  // reads /api/v1/pages.json or /llms.txt for the same list.
+  const listPages: ModelContextTool = {
+    name: 'list_pages',
+    title: 'List the pages',
+    description:
+      'Lists the pages of this site, the documentation tree. With no section, returns each section with its page count and pages. With a section, returns its pages by sidebar group, each with a URL and summary. Use read_page to read one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        section: { type: 'string', minLength: 1, maxLength: 40, description: 'A section id, such as "capabilities", "workflows" or "spec". Leave it out to list every section.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+    async execute(input, options) {
+      const section = input?.section === undefined ? undefined : stringArg(input, 'section').toLowerCase();
+      let pages: PageEntry[];
+      try {
+        pages = (JSON.parse(await fetchText(deps, PAGES_PATH, `The page list at ${abs(PAGES_PATH)} is missing.`, options?.signal)) as { pages: PageEntry[] }).pages;
+      } catch (e) {
+        if (e instanceof SyntaxError) throw new Error(`The page list at ${abs(PAGES_PATH)} is not valid JSON. Try again.`);
+        throw e;
+      }
+      const sections = new Map<string, { label: string; pages: PageEntry[] }>();
+      for (const p of pages) {
+        const s = sections.get(p.section) ?? { label: p.section_label, pages: [] };
+        s.pages.push(p);
+        sections.set(p.section, s);
+      }
+      if (section === undefined) {
+        const lines = [`The site has ${pages.length} pages in ${sections.size} sections. Call list_pages with a section id for its pages with summaries.`];
+        for (const [id, s] of sections) {
+          lines.push('', `## ${s.label} (section "${id}", ${s.pages.length} page${s.pages.length === 1 ? '' : 's'})`);
+          for (const p of s.pages) lines.push(`- ${p.title}: ${p.url}`);
+        }
+        return lines.join('\n');
+      }
+      const s = sections.get(section);
+      if (!s) throw new Error(`No section "${section}". The sections are: ${[...sections.keys()].join(', ')}.`);
+      const lines = [`# ${s.label}`, '', `${s.pages.length} page${s.pages.length === 1 ? '' : 's'}, in sidebar order. Markdown copies are at each "Markdown" URL.`];
+      let group: string | null | undefined;
+      for (const p of s.pages) {
+        if (p.group !== group) {
+          group = p.group;
+          if (group) lines.push('', `## ${group}`);
+        }
+        lines.push('', `- ${p.title}`, `  URL: ${p.url}`, `  Markdown: ${p.markdown_url}`);
+        if (p.description) lines.push(`  ${p.description}`);
+      }
+      return lines.join('\n');
+    },
+  };
+
+  return [searchStandard, readCapability, readWorkflow, readPage, listPages];
 }
