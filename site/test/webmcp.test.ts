@@ -29,6 +29,14 @@ const FILES: Record<string, string> = {
   [`${ORIGIN}/api/v1/workflows/debug_code_change.json`]: fixture('workflow-debug_code_change.json'),
   [`${ORIGIN}/capabilities/detect/index.md`]: fixture('page-capabilities-detect.txt'),
   // 30 lines of 1,000 characters under "## Alpha", then "## Beta".
+  // A hand-written page list in the shape of /api/v1/pages.json: three pages in two sections.
+  [`${ORIGIN}/api/v1/pages.json`]: JSON.stringify({
+    pages: [
+      { url: `${ORIGIN}/capabilities/`, markdown_url: `${ORIGIN}/capabilities/index.md`, title: 'Capabilities', description: 'All 36.', section: 'capabilities', section_label: 'Capabilities', group: null },
+      { url: `${ORIGIN}/capabilities/detect/`, markdown_url: `${ORIGIN}/capabilities/detect/index.md`, title: 'detect', description: 'Find things.', section: 'capabilities', section_label: 'Capabilities', group: 'UNDERSTAND' },
+      { url: `${ORIGIN}/spec/edge-types/`, markdown_url: `${ORIGIN}/spec/edge-types/index.md`, title: 'Edge types', description: null, section: 'spec', section_label: 'Specification', group: 'Reference' },
+    ],
+  }),
   [`${ORIGIN}/long/index.md`]: `# Long\n\n## Alpha\n\n${`${'y'.repeat(1000)}\n`.repeat(30)}\n## Beta\n\nBeta text.\n`,
 };
 
@@ -67,17 +75,18 @@ function setup(opts: { pagefind?: PagefindApi | null } = {}) {
 }
 
 describe('WebMCP tool registration', () => {
-  it('registers the four read-only tools by name', () => {
-    expect(setup().registered.map((t) => t.name)).toEqual(['search_standard', 'read_capability', 'read_workflow', 'read_page']);
+  it('registers the five read-only tools by name', () => {
+    expect(setup().registered.map((t) => t.name)).toEqual(['search_standard', 'read_capability', 'read_workflow', 'read_page', 'list_pages']);
   });
 
   it('gives every tool a name the draft accepts, verb-led in snake_case', () => {
     for (const t of setup().registered) {
       expect(t.name, t.name).toMatch(/^[A-Za-z0-9_.-]{1,128}$/);
-      expect(t.name, t.name).toMatch(/^(search|read)_[a-z]+(_[a-z]+)*$/);
+      expect(t.name, t.name).toMatch(/^(search|read|list)_[a-z]+(_[a-z]+)*$/);
     }
   });
 
+  // Chrome's WebMCP guidance suggests at most 150 characters for a parameter description.
   it('describes every tool and parameter, within the size an agent reads', () => {
     for (const t of setup().registered) {
       expect(t.description.length, t.name).toBeGreaterThanOrEqual(20);
@@ -85,7 +94,7 @@ describe('WebMCP tool registration', () => {
       for (const [k, p] of Object.entries(t.inputSchema.properties)) {
         expect(typeof p.description, `${t.name}.${k}`).toBe('string');
         expect((p.description as string).length, `${t.name}.${k}`).toBeGreaterThanOrEqual(10);
-        expect((p.description as string).length, `${t.name}.${k}`).toBeLessThanOrEqual(200);
+        expect((p.description as string).length, `${t.name}.${k}`).toBeLessThanOrEqual(150);
       }
     }
   });
@@ -95,7 +104,6 @@ describe('WebMCP tool registration', () => {
       const s = t.inputSchema;
       expect(s.type, t.name).toBe('object');
       expect(s.additionalProperties, t.name).toBe(false);
-      expect(s.required.length, t.name).toBeGreaterThan(0);
       for (const r of s.required) expect(Object.keys(s.properties), t.name).toContain(r);
       for (const p of Object.values(s.properties)) {
         expect(['string', 'integer'], t.name).toContain(p.type);
@@ -105,7 +113,7 @@ describe('WebMCP tool registration', () => {
       expect(JSON.parse(JSON.stringify(s))).toEqual(s);
     }
     const required = Object.fromEntries(setup().registered.map((t) => [t.name, t.inputSchema.required]));
-    expect(required).toEqual({ search_standard: ['query'], read_capability: ['id'], read_workflow: ['id'], read_page: ['path'] });
+    expect(required).toEqual({ search_standard: ['query'], read_capability: ['id'], read_workflow: ['id'], read_page: ['path'], list_pages: [] });
   });
 
   it('marks every tool read-only and none consequential or untrusted', () => {
@@ -228,12 +236,16 @@ describe('one set of tool names and id patterns for the MCP server and WebMCP', 
   // same arguments (review of c24b7af).
   const web = () => webMcpTools({ origin: ORIGIN, fetch: async () => ({ ok: false, status: 404, text: async () => '' }), loadPagefind: async () => null });
 
-  it('uses the MCP server\'s tool names', () => {
-    expect(web().map((t) => t.name).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  // list_pages is the one tool only the page has; the MCP server stays at four.
+  const shared = () => web().filter((t) => t.name !== 'list_pages');
+
+  it('uses the MCP server\'s tool names, plus list_pages', () => {
+    expect(shared().map((t) => t.name).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+    expect(web().map((t) => t.name)).toContain('list_pages');
   });
 
   it('gives each tool the same argument names, and the id arguments the same patterns', () => {
-    for (const t of web()) {
+    for (const t of shared()) {
       const m = TOOLS.find((x) => x.name === t.name)!;
       expect(Object.keys(t.inputSchema.properties).sort(), t.name).toEqual(Object.keys(m.inputSchema.properties).sort());
       for (const k of ['id']) {
@@ -277,3 +289,45 @@ describe('WebMCP search failures', () => {
   });
 });
 
+describe('WebMCP list_pages', () => {
+  it('with no section, lists each section with its page count and pages', async () => {
+    const { tool, fetched } = setup();
+    const out = await tool('list_pages').execute({});
+    expect(fetched).toEqual([`${ORIGIN}/api/v1/pages.json`]);
+    expect(out).toContain('The site has 3 pages in 2 sections.');
+    expect(out).toContain('## Capabilities (section "capabilities", 2 pages)');
+    expect(out).toContain('## Specification (section "spec", 1 page)');
+    expect(out).toContain(`- detect: ${ORIGIN}/capabilities/detect/`);
+  });
+
+  it('with a section, lists its pages by group with URLs, Markdown URLs and summaries', async () => {
+    const out = await setup().tool('list_pages').execute({ section: 'Capabilities' });
+    expect(out).toBe(
+      [
+        '# Capabilities',
+        '',
+        '2 pages, in sidebar order. Markdown copies are at each "Markdown" URL.',
+        '',
+        '- Capabilities',
+        `  URL: ${ORIGIN}/capabilities/`,
+        `  Markdown: ${ORIGIN}/capabilities/index.md`,
+        '  All 36.',
+        '',
+        '## UNDERSTAND',
+        '',
+        '- detect',
+        `  URL: ${ORIGIN}/capabilities/detect/`,
+        `  Markdown: ${ORIGIN}/capabilities/detect/index.md`,
+        '  Find things.',
+      ].join('\n'),
+    );
+  });
+
+  it('names the sections when asked for one that does not exist', async () => {
+    await expect(setup().tool('list_pages').execute({ section: 'nope' })).rejects.toThrow('No section "nope". The sections are: capabilities, spec.');
+  });
+
+  it('rejects an empty section', async () => {
+    await expect(setup().tool('list_pages').execute({ section: ' ' })).rejects.toThrow('"section" must be a non-empty string.');
+  });
+});

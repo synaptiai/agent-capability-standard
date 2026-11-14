@@ -208,11 +208,11 @@ export function mcpConfig(): string {
 }
 
 /** The WebMCP tools each page registers, by name, as src/lib/webmcp.ts defines them. */
-export const WEBMCP_TOOLS: readonly string[] = ['search_standard', 'read_capability', 'read_workflow', 'read_page'];
+export const WEBMCP_TOOLS: readonly string[] = ['search_standard', 'read_capability', 'read_workflow', 'read_page', 'list_pages'];
 
 export const WEBMCP_LINES: readonly string[] = [
   'Each page registers read-only tools with the browser\'s WebMCP interface (document.modelContext, or navigator.modelContext in earlier drafts) when the browser has it. An agent that runs in the browser can call them without leaving the page.',
-  `The tools are ${WEBMCP_TOOLS.slice(0, -1).join(', ')} and ${WEBMCP_TOOLS[WEBMCP_TOOLS.length - 1]}, with the names and arguments of the MCP server's tools. They search the site and read a capability, a workflow or a page's Markdown copy, through the same JSON files and copies described here. One difference: search_standard in the page searches the full text of every page with the site's search index. They change nothing and send nothing anywhere but this site.`,
+  `The tools are ${WEBMCP_TOOLS.slice(0, -1).join(', ')} and ${WEBMCP_TOOLS[WEBMCP_TOOLS.length - 1]}. The first four have the names and arguments of the MCP server's tools: they search the site and read a capability, a workflow or a page's Markdown copy, through the same JSON files and copies described here. Two differences: search_standard in the page searches the full text of every page with the site's search index, and list_pages, which lists the pages by section, is only in the page. They change nothing and send nothing anywhere but this site.`,
 ];
 
 export { DEVELOPERS_URL, MCP_TOOLS, MCP_URL };
