@@ -12,7 +12,7 @@ import readConfig from '../agents/tools/read_config.js';
 import rollbackConfig from '../agents/tools/rollback_config.js';
 import verifyConfig from '../agents/tools/verify_config.js';
 import writeConfig from '../agents/tools/write_config.js';
-import { decideApproval, readApproval } from '../src/acs/approval.js';
+import { approvalState, decideApproval, readApproval } from '../src/acs/approval.js';
 import { digest } from '../src/acs/canonical.js';
 import { ANNOTATION_KEY, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
@@ -256,6 +256,59 @@ describe('approval bound to what was shown', () => {
     await decideApproval(t.state, user('bob', ['release-manager']), d, 'approved', clock);
     clock += 60_001;
     expect(await tool.execute(t.state, { version: '1.2.0' })).toMatchObject({ error_code: 'F502' });
+  });
+});
+
+describe('decisions made at the same moment', () => {
+  // Endpoint requests are not serialised with one another, and the store has
+  // no conditional write, so two decisions can be in flight together.
+  const both = async (first: 'approved' | 'rejected', second: 'approved' | 'rejected') => {
+    const t = thread();
+    const d = digestOf(await writeConfig.execute(t.state, CHANGE));
+    await Promise.all([
+      decideApproval(t.state, user('alice'), d, first, 1),
+      decideApproval(t.state, user('bob'), d, second, 1),
+    ]);
+    return { t, d };
+  };
+
+  it('never loses a rejection to an approval', async () => {
+    for (const order of [
+      ['approved', 'rejected'],
+      ['rejected', 'approved'],
+    ] as const) {
+      const { t, d } = await both(order[0], order[1]);
+      const record = await readApproval(t.state, d);
+      expect(record && approvalState(record, 2), order.join(' then ')).toBe('rejected');
+      await checkpointConfig.execute(t.state, { label: 'one' });
+      expect(await writeConfig.execute(t.state, CHANGE)).toMatchObject({ error_code: 'F502' });
+    }
+  });
+
+  it('can lose an approval, which the approver gives again', async () => {
+    const tool = groundedTool({
+      name: 'release',
+      capability: 'execute',
+      description: 'Run the release.',
+      approval: { min_approvers: 2 },
+      args: z.object({ version: z.string() }),
+      execute: async () => ({ result: 'released', success: true, evidence_anchors: [] }),
+    });
+    const t = thread();
+    const d = digestOf(await tool.execute(t.state, { version: '1.2.0' }));
+    await Promise.all([
+      decideApproval(t.state, user('alice'), d, 'approved', 1),
+      decideApproval(t.state, user('bob'), d, 'approved', 1),
+    ]);
+    // Whichever approval the shared list lost is simply given again.
+    for (const name of ['alice', 'bob']) {
+      await decideApproval(t.state, user(name), d, 'approved', 2).catch((error: unknown) => {
+        expect(String(error)).toMatch(/already decided/);
+      });
+    }
+    const record = await readApproval(t.state, d);
+    expect(record?.decisions.map((x) => x.approver).sort()).toEqual(['alice', 'bob']);
+    expect(await tool.execute(t.state, { version: '1.2.0' })).toMatchObject({ status: 'success' });
   });
 });
 

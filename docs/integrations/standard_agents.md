@@ -468,6 +468,11 @@ flowchart TB
 - **The settings are part of the tool.** The role, the number of approvers
   and the expiry are fixed in the tool's definition. They are not read from
   `state.env()`, which code in the thread can set.
+- **Decisions that arrive together.** Nothing serialises two endpoint
+  requests, and the key-value store has no conditional write. A decision
+  therefore never rewrites the request: a rejection sets one fixed key, and
+  each approval is stored under the approver's own key. A request can lose an
+  approval that way, and never a rejection.
 
 | §5.14 field | In the binding |
 |---|---|
@@ -536,7 +541,7 @@ gated one has succeeded.
 | The classification survives packaging and any conforming runtime | No runtime acts on it |
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
 | | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. A grounded agent routes such writes through a grounded tool with `state.invokeTool()` |
-| | Records are read and rewritten in a store with no atomic update, and SA does not say whether an endpoint can run while a tool call is in progress |
+| A rejection is never lost to an approval made at the same moment | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and
 its rules are tested against an in-memory `ThreadState`. It has not been run

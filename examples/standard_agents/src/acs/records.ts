@@ -29,6 +29,13 @@ export const KEYS = {
   unlinked: 'acs:trace:unlinked',
   checkpoints: 'acs:checkpoints',
   approval: (digest: string) => `acs:approval:${digest}`,
+  /** One approver's approval. Only that approver's request writes it. */
+  approvedBy: (digest: string, round: number, approver: string) =>
+    `acs:approval:${digest}:${round}:by:${encodeURIComponent(approver)}`,
+  /** Who has approved in this round: the list `approvedBy` keys are found by. */
+  approvers: (digest: string, round: number) => `acs:approval:${digest}:${round}:approvers`,
+  /** Set by any rejection in this round. A fixed key, so it cannot be lost. */
+  rejected: (digest: string, round: number) => `acs:approval:${digest}:${round}:rejected`,
   pendingApprovals: 'acs:approvals:pending',
 } as const;
 
@@ -91,6 +98,10 @@ export interface ApprovalDecision {
  * An approval request and the decisions on it (STANDARD v1.1.0 §5.14). The
  * request is keyed by the digest of the shown values, so a decision can only
  * ever apply to exactly what the approver was shown.
+ *
+ * The request is written only by the tool that needs the approval.
+ * `decisions` is not stored with it: each decision is under a key of its
+ * own, and `readApproval` puts them together. See `decideApproval` for why.
  */
 export interface ApprovalRecord {
   digest: string;
