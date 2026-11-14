@@ -15,6 +15,13 @@ export interface HeaderRule {
   headers: Readonly<Record<string, string>>;
 }
 
+/**
+ * How the site's content may be used once fetched (contentsignals.org): in
+ * search results, as input to AI answers, and for AI training. robots.txt
+ * states the same.
+ */
+export const CONTENT_SIGNAL = 'search=yes, ai-input=yes, ai-train=yes';
+
 const JSON_OPEN = { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' };
 
 export const HEADER_RULES: readonly HeaderRule[] = [
@@ -32,6 +39,7 @@ export const HEADER_RULES: readonly HeaderRule[] = [
   },
   // Hashed build output; _routes.json keeps it off the worker, so Pages applies this.
   { pattern: '/_astro/*', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
+  { pattern: '/*', headers: { 'Content-Signal': CONTENT_SIGNAL } },
 ];
 
 export function matchesPattern(pattern: string, path: string): boolean {

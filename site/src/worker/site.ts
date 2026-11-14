@@ -20,7 +20,7 @@ import { namesHtml, prefersMarkdown } from './accept';
 import type { Env, WorkerConfig } from './env';
 import { MCP_PATH, SERVER_CARD_TYPE, serverCard } from './identity';
 import { CORS_HEADERS, handleMcp, mcpInternalError } from './mcp';
-import { isPagesDevHost, markdownRedirect, redirectTarget, withStaticRules } from './static-rules';
+import { CONTENT_SIGNAL, isPagesDevHost, markdownRedirect, redirectTarget, withStaticRules } from './static-rules';
 
 /**
  * User agents that get the Markdown copy of a page even when they ask for
@@ -81,15 +81,30 @@ export function pageLinks(pagePath: string): string {
  * canonical link to the page and, for a negotiated URL, Vary. A 304 from the
  * static file stays a 304.
  */
-function markdownResponse(request: Request, url: URL, copy: Response, pagePath: string, cfg: WorkerConfig, vary: string | null): Response {
+async function markdownResponse(request: Request, url: URL, copy: Response, pagePath: string, cfg: WorkerConfig, vary: string | null): Promise<Response> {
   const headers = new Headers(copy.headers);
   headers.set('Content-Type', 'text/markdown; charset=utf-8');
+  headers.set('Content-Signal', CONTENT_SIGNAL);
+  // The copy is read whole (the largest is about 0.8 MB) to estimate its
+  // tokens; a 304 has no body and gets no estimate.
+  const text = copy.status === 304 ? null : await copy.text();
+  if (text !== null) headers.set('X-Markdown-Tokens', String(markdownTokens(text)));
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Link', `<${cfg.origin}${pagePath}>; rel="canonical"`);
   if (vary) headers.append('Vary', vary);
   for (const [k, v] of Object.entries(robotsHeaders(url))) headers.set(k, v);
-  const body = request.method === 'HEAD' || copy.status === 304 ? null : copy.body;
+  headers.delete('Content-Length');
+  const body = request.method === 'HEAD' || text === null ? null : text;
   return new Response(body, { status: copy.status, headers });
+}
+
+/**
+ * An estimate of the tokens in a Markdown text, for the X-Markdown-Tokens
+ * header agents use to plan their context: one token per four characters,
+ * the usual rule of thumb for English text. Not any one model's tokenizer.
+ */
+export function markdownTokens(text: string): number {
+  return Math.ceil(text.length / 4);
 }
 
 export function notFoundMarkdown(path: string, cfg: WorkerConfig): string {
@@ -159,7 +174,7 @@ async function notFound(request: Request, url: URL, original: Response, cfg: Wor
   if (markdown) {
     return new Response(head ? null : notFoundMarkdown(path, cfg), {
       status: 404,
-      headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept, User-Agent', ...robotsHeaders(url) },
+      headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept, User-Agent', 'Content-Signal': CONTENT_SIGNAL, ...robotsHeaders(url) },
     });
   }
   const res = withStaticRules(url, new Response(original.body, original));

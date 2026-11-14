@@ -191,6 +191,7 @@ export const MARKDOWN_LINES: readonly string[] = [
   'Every page has a Markdown copy at its URL followed by index.md; the home page\'s is /index.md. Each HTML page links to it with <link rel="alternate" type="text/markdown">.',
   'The same copy is served at the page\'s URL with .md in place of the final slash (/capabilities/mutate.md), and at the page\'s own URL to a request whose Accept header prefers text/markdown. A page that does not exist answers 404 in Markdown to a client that is not a browser.',
   'Each copy opens with front matter (title, description, canonical and last_updated), then the page with a top-level heading. Links in a copy point at the other pages\' copies, so an agent can follow them without reading HTML. Figures are given as tables or lists with the same data.',
+  'Each Markdown answer carries X-Markdown-Tokens, an estimate of its length in tokens (one per four characters), and every answer carries Content-Signal: search=yes, ai-input=yes, ai-train=yes: the content may be used in search, as input to AI answers and for AI training.',
   `llms.txt lists the main pages of each section and links one llms.txt per section, which lists every copy. llms-full.txt holds the current Standard, every capability page and every workflow page in one file. The sitemap is at /sitemap.xml.`,
 ];
 

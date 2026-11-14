@@ -15,6 +15,7 @@ export const PUBLISHER = {
   name: 'Synapti',
   url: 'https://synapti.ai',
   github: 'https://github.com/synaptiai',
+  linkedin: 'https://www.linkedin.com/company/synapti-ai/',
 } as const;
 
 interface PluginJson {
@@ -63,7 +64,7 @@ export function homeGraph(): Record<string, unknown> {
         '@id': org,
         name: PUBLISHER.name,
         url: PUBLISHER.url,
-        sameAs: [PUBLISHER.github],
+        sameAs: [PUBLISHER.github, PUBLISHER.linkedin],
         contactPoint: {
           '@type': 'ContactPoint',
           contactType: 'technical support',
