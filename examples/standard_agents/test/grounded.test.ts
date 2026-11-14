@@ -15,7 +15,7 @@ import writeConfig from '../agents/tools/write_config.js';
 import { decideApproval, readApproval } from '../src/acs/approval.js';
 import { digest } from '../src/acs/canonical.js';
 import { ANNOTATION_KEY, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
-import { lintPromptTools } from '../src/acs/lint.js';
+import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
 import { CAPABILITIES, effectiveFlags } from '../src/acs/ontology.js';
 import { readCheckpoints, readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH } from '../src/example/settings.js';
@@ -379,6 +379,32 @@ describe('the agent definition', () => {
     const plain = { ...tools, web_search: { annotations: { agentbuilder: {} } } };
     expect(lintPromptTools('config_steward', plain)).toEqual([
       expect.objectContaining({ code: 'unclassified', severity: 'warning', location: { prompt: 'config_steward', tool: 'web_search' } }),
+    ]);
+  });
+
+  it('binds no stop or session action to a tool that can be refused', () => {
+    const tools = { read_config: readConfig, checkpoint_config: checkpointConfig, write_config: writeConfig, rollback_config: rollbackConfig };
+    expect(lintAgentBindings(configSteward, tools)).toEqual([]);
+
+    // The specification acts on the call, not on its result: a refused write
+    // would still end the session and report the model's text to a parent.
+    const ending = {
+      name: 'ends_on_write',
+      sideA: {
+        prompt: 'config_steward',
+        stopTool: 'rollback_config',
+        sessionStop: { name: 'write_config', messageProperty: 'value' },
+        sessionStatus: { name: 'read_config' },
+      },
+      sideB: { human: true },
+    } as const;
+    expect(lintAgentBindings(ending, tools).map((d) => [d.code, d.severity, d.location])).toEqual([
+      ['bound_gated_tool', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'stopTool', tool: 'rollback_config', capability: 'rollback' }],
+      ['bound_gated_tool', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'sessionStop', tool: 'write_config', capability: 'mutate' }],
+    ]);
+    expect(lintAgentBindings(ending, tools).map((d) => d.message)).toEqual([
+      "agent 'ends_on_write' binds stopTool to 'rollback_config' (rollback), which is refused without a 'checkpoint' call; the binding acts on the call, not on its result",
+      "agent 'ends_on_write' binds sessionStop to 'write_config' (mutate), which is refused without approval and a 'checkpoint' call; the binding acts on the call, not on its result",
     ]);
   });
 

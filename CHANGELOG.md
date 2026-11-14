@@ -22,8 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   capability and enforces the capability's checkpoint, approval and output
   rules inside the tool; approvals are recorded through an authenticated
   thread endpoint and bound to the §5.14 digest, which is tested against the
-  reference executor's. CI type-checks it against the published
-  `@standardagents/spec` types and runs its tests.
+  reference executor's. `lintPromptTools` and `lintAgentBindings` check a
+  prompt's tools and an agent's stop and session bindings before anything
+  runs. CI type-checks it against the published `@standardagents/spec` types
+  and runs its tests.
 - `schemas/interop/standard_agents_annotation.schema.json`: the schema of
   the `acs` annotation the binding puts on a tool.
 - `scripts/gen_standard_agents_binding.py` generates the binding's ontology

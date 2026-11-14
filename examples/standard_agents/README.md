@@ -53,7 +53,7 @@ code enforces its rules, not how a particular runtime behaves.
 | `src/acs/ontology.gen.ts` | Each capability's flags and required output fields, generated from `schemas/capability_ontology.yaml` |
 | `src/acs/approval.ts` | Approval requests and decisions, bound to a digest of what the approver was shown |
 | `src/acs/audit.ts` | Joins tool call ids to the trace from a `tool_call_done` hook |
-| `src/acs/lint.ts` | Checks a prompt's tool list before anything runs: every tool classified, no requirement the prompt can never meet |
+| `src/acs/lint.ts` | Checks before anything runs. A prompt's tool list: every tool classified, no requirement the prompt can never meet. An agent's stop and session bindings: none names a tool that can be refused |
 | `src/acs/canonical.ts` | RFC 8785 canonical JSON and the SHA-256 digest, equal to the reference executor's |
 | `src/acs/records.ts` | The records kept in the thread's key-value store |
 | `src/package.ts` | The example as a packed agent: the entry point exports that Packaging describes |
