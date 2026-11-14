@@ -2,12 +2,13 @@
 
 ## Problem
 
-In 0.2.0, nothing runs between the model asking for a tool call and the tool
-executing, except the tool's own code.
+In 0.2.0 no hook, and no other specified decision point, can decline a tool
+call between the model asking for it and the tool executing.
 
-- `tool_call_started` fires while the call is still streaming. Its arguments
-  "**MAY** be an incomplete JSON fragment (or empty)", and "The return value
-  **MUST** be ignored; the hook cannot modify the tool call."
+- `tool_call_started` fires when the call appears in the model's stream, or
+  once the tool's `progressArgument` has streamed. Its arguments "**MAY** be
+  an incomplete JSON fragment (or empty)", and "The return value **MUST** be
+  ignored; the hook cannot modify the tool call."
   ([Hooks §5.1](https://standardagentspec.org/0.2.0/specification/hooks#51-tool_call_started))
 - `before_store_tool_result`, `after_tool_call_success`,
   `after_tool_call_failure` and `tool_call_done` all run after the tool has
@@ -19,19 +20,22 @@ executing, except the tool's own code.
   the calls is stored, and "Failures **SHOULD** prevent message creation"
   ([Hooks §4.1](https://standardagentspec.org/0.2.0/specification/hooks#41-before_create_message)).
   The text does not say what happens to that message's tool calls when it
-  does, and it would stop every call in the message, not one.
+  does, and it would stop every call in the message, not one. The published
+  types (0.45.10) add that a runtime "can still perform an insertion that an
+  execution cannot go on without, such as the message of a model step", so a
+  failure there does not stop the calls.
 
 So a rule that should hold before a side effect can only be written inside
-each tool. Rules of that kind are common and are not specific to any one
-product:
+each tool, or by reshaping the agent around it (see Alternatives). Rules of
+that kind are common and are not specific to any one product:
 
 - a rate limit or a spending cap across all of an agent's tools;
 - an allow list or deny list that depends on the arguments (which paths,
   which recipients, which hosts);
 - a dry-run mode that answers every side-effecting call without performing it;
 - confirmation by a person before a destructive call;
-- a tenant's policy applied to an agent the tenant installed but did not
-  write.
+- a policy an agent's author applies to every tool its prompts offer,
+  including tools that come from other packages.
 
 Writing the rule inside each tool has three costs.
 
@@ -39,8 +43,8 @@ Writing the rule inside each tool has three costs.
    composes it. `parentHooks` lets a child require a hook on its parent, and
    a missing one "**MUST** fail composition closed"
    ([Agents §6](https://standardagentspec.org/0.2.0/specification/agents#6-required-parent-hooks)),
-   but no hook that exists today can stop a call, so neither side can use the
-   mechanism to hold the other to a rule.
+   but no hook that exists today can stop a call, so a child cannot use the
+   mechanism to hold its parent to a rule.
 2. **It is not portable if a runtime adds its own gate.** Packaging says a
    packed agent must not depend on "private runtime RPCs", and: "When an
    agent category needs a new runtime primitive, that primitive belongs in
@@ -88,9 +92,11 @@ been validated against the tool's schema, and before the tool executes.
 - Hooks run in the order of
   [Hooks §1.3](https://standardagentspec.org/0.2.0/specification/hooks#13-hook-scoping).
   A child may require one on its parent through `parentHooks`.
-- A runtime that does not implement `before_tool_call` **MUST** reject a
-  definition that uses it. A runtime that ignored it would run the tools it
-  was meant to guard.
+- Hooks §1.2 already requires that `hook` "**MUST** reference one of the hook
+  types in §1.1", and the published `defineHook()` throws for a type it does
+  not know. A runtime that predates this hook is not bound by it, so a
+  package that needs the gate on such a runtime keeps its check inside the
+  tool.
 
 Scope, to keep the rule small:
 
@@ -102,6 +108,13 @@ Scope, to keep the rule small:
   requires of its parent runs with the parent's `ThreadState`
   ([Agents §6](https://standardagentspec.org/0.2.0/specification/agents#6-required-parent-hooks)),
   so it sees the parent's calls, not calls made inside the child's thread.
+  Whoever composes a packaged agent still cannot gate the calls that agent
+  makes in its own thread.
+- A hook listed on an agent applies to prompts that list no hooks of their
+  own: "When `hooks` is non-empty, only those hooks form the prompt base set"
+  ([Prompts §8](https://standardagentspec.org/0.2.0/specification/prompts#8-hook-scoping)).
+  A hook required through `parentHooks` applies "during every prompt on
+  either side".
 - It decides at once. "Runtimes **SHOULD** enforce a timeout on hook
   execution", and hooks "**SHOULD NOT** perform blocking operations"
   ([Hooks §1.2](https://standardagentspec.org/0.2.0/specification/hooks#12-hook-definition)),
@@ -123,6 +136,22 @@ Two properties are deliberate.
 - **Leave it to each tool.** This is what authors do today. It cannot be
   applied to a tool one did not write, and every tool author has to remember
   it.
+- **A provider extension that filters tool calls.** An override of `generate`
+  or `stream` receives the executing thread's `state` and returns the
+  response that carries the calls
+  ([Providers §1.3](https://standardagentspec.org/0.2.0/specification/providers#13-provider-extension-factories)).
+  It belongs to a model definition, not to an agent; it has to rewrite a
+  stream; the stored assistant message no longer shows what the model asked
+  for; it does not see calls made through `invokeTool` or `queueTool`, or by
+  a child's models; and the text does not say that a runtime executes only
+  the calls an override returns.
+- **A handler-backed side that alone calls the tools that act.** The model
+  proposes and deterministic code acts. This works, and it changes the shape
+  of the agent to get one check.
+- **A guard tool that fronts another through `state.invokeTool()`.** One
+  wrapper per guarded tool, and the model must be unable to call the guarded
+  tool directly; the 0.2.0 text does not say what a runtime does with a call
+  to a tool the prompt did not offer.
 - **Give `tool_call_started` a return value.** It fires before the arguments
   are complete, by design, so that a UI can show progress early. A gate needs
   the complete, validated arguments.
@@ -149,8 +178,9 @@ Two properties are deliberate.
 
 Additive for existing packages: an agent that defines no `before_tool_call`
 hook behaves as it does today, and no existing interface changes. It is a new
-requirement on runtimes, which must implement the hook or reject definitions
-that use it. A runtime's conformance checks would cover:
+requirement on runtimes of the version that adds it (the community page says
+accepted changes are published "in a new version of the specification"). A
+runtime's conformance checks would cover:
 
 - the hook is called exactly once per call, before execution, with complete
   arguments;
@@ -161,8 +191,7 @@ that use it. A runtime's conformance checks would cover:
   error result, and the turn continues;
 - with several hooks, the first returned result wins and later hooks are not
   called;
-- a hook required through `parentHooks` runs for the parent's tool calls;
-- a runtime without the hook rejects a definition that names it.
+- a hook required through `parentHooks` runs for the parent's tool calls.
 
 ## Evidence that this is needed more widely
 

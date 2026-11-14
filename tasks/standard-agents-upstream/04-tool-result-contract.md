@@ -18,7 +18,9 @@ passing:
   result the code goes;
 - [Hooks §6.3](https://standardagentspec.org/0.2.0/specification/hooks#63-hooktoolresult)
   defines `HookToolResult` as `status`, `result`, `error`, `stack` and
-  `attachments`: no `error_code`, no `error_data`;
+  `attachments`: no `error_code`, no `error_data` and no metadata, although
+  [Hooks §5.2](https://standardagentspec.org/0.2.0/specification/hooks#52-before_store_tool_result)
+  lists "Add metadata to tool results" among that hook's uses;
 - the stored message has `tool_status` and `content`
   ([Messages §1](https://standardagentspec.org/0.2.0/specification/threads/messages#1-message-structure)),
   and nothing says what becomes of an error code.
@@ -32,9 +34,9 @@ Two things follow.
    error text.
 2. **A result has no place for data that is about the result but not for the
    model.** Where the data came from, how long the call took, what it cost,
-   whether it was served from a cache: the only field is `result`, a string,
-   and all of it is sent to the model. `Message` has `metadata`, but nothing
-   connects a tool's return value to it.
+   whether it was served from a cache: the only text field is `result`, a
+   string, and all of it is sent to the model. `Message` has `metadata`, but
+   nothing connects a tool's return value to it directly.
 
 ## Proposed rule
 
@@ -83,13 +85,23 @@ metadata?: Record<string, unknown>; // JSON-serialisable
 - **Write side data to the thread's key-value store.** Also possible today,
   but then it is not attached to the message it describes, and since a tool
   does not know its own call id it cannot even key the entry by the call.
+- **Pass side data through `state.context`** and have a
+  `before_create_message` hook copy it into the tool message's `metadata`.
+  Possible today: the context is for "sharing derived values between tools,
+  hooks, effects, and runtime lifecycle code during one execution". It needs
+  that hook in scope on every prompt, and a way to pair the data with the
+  right message.
+- **Return files.** `attachments` carries files with a result, which suits
+  documents and images, not a few fields about the call.
 - **Leave `error_code` to the types.** Then it is implementation behaviour,
   and a second runtime has nothing to conform to.
 
 ## Conformance impact
 
-Parts 1 to 3 document and pin down what the published types already expose;
-no definition changes. Part 4 is additive and optional. A runtime's
+Part 1 documents what the published types already expose; no definition
+changes. Part 2 adds two optional members to `HookToolResult`, which has
+neither in the text or in the published types. Part 3 is a new storage
+requirement on runtimes. Part 4 is additive and optional. A runtime's
 conformance checks would cover: `error_code` and `error_data` returned by a
 tool reach `after_tool_call_failure`, `before_store_tool_result` and
 `tool_call_done`, and are readable from the stored message; `metadata`

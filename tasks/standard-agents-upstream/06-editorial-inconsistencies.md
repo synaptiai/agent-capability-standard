@@ -14,17 +14,26 @@ numbered 14.1 and 14.2, which repeats the code execution section's 14.1 and
 
 **Suggested fix:** renumber from the second section 14 onward (Durable
 Key-Value Store becomes 15, Thread Client API 16, Conformance Summary 17), or
-whichever numbering you prefer, and update the references in items 2 and 3.
+whichever numbering you prefer. With that numbering the Threads reference in
+item 3 resolves as written, and the Conformance Summary's own links to
+`#14-durable-key-value-store` and `#15-thread-client-api` need the new
+numbers.
 
 ## 2. The Conformance Summary links to an anchor that does not exist
 
 The Conformance Summary's Code Execution item links to
 `#13-code-execution-runtime`. Section 13 is "Runtime Streams"; the code
-execution section's anchor is `#14-code-execution-runtime`.
+execution section's anchor is `#14-code-execution-runtime`. The Code
+Execution page (`specification/threads/code-execution.md`, introduction)
+links the same anchor, labelled "Runtime §13 Code Execution Runtime".
 
-## 3. Threads §7 points at "Runtime §15" for the key-value store
+One more of the same kind: the Models page links
+`providers#9-provider-tools`, and Provider Tools is section 10 of the
+Providers page.
 
-`specification/threads.md` §7 ends by sending the reader to "Runtime §15"
+## 3. Threads §7.3 points at "Runtime §15" for the key-value store
+
+`specification/threads.md` §7.3 ends by sending the reader to "Runtime §15"
 for the key-value store's runtime semantics, with the link target
 `/0.2.0/infrastructure/runtime#15-durable-key-value-store`. On the Runtime
 page that section is numbered 14 and §15 is the Thread Client API, so the

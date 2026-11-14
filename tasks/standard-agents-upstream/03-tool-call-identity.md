@@ -17,7 +17,8 @@ and the persisted result message carries `tool_call_id` and `name`
 registered under (in a package, its key in the `tools` registry), so the
 tool's own module does not contain it.
 
-A tool therefore cannot connect anything it does to the call that caused it:
+A tool therefore has no reliable way to connect what it does to the call that
+caused it:
 
 - an idempotency key for an external API, so that a retried step does not
   repeat a payment or a message;
@@ -25,11 +26,12 @@ A tool therefore cannot connect anything it does to the call that caused it:
   hook or a client can later match to the tool result message;
 - the name of a file it writes for this call.
 
-The workaround is to match records by order: a `tool_call_done` hook assumes
-that the most recent record a tool wrote belongs to the call the hook is
-being told about. That relies on sequential execution, breaks if a hook
-invocation is lost (hook failures are non-fatal), and cannot be used at all
-from inside the tool.
+There are two workarounds, and both are fragile. A `tool_call_done` hook can
+match records by order, assuming that the oldest unmatched record a tool
+wrote belongs to the call the hook is being told about. That relies on
+sequential execution, breaks if a hook invocation is lost (hook failures are
+non-fatal), and cannot be used from inside the tool. A tool can also look for
+its own call in the history; see Alternatives.
 
 ## Proposed rule
 
@@ -57,15 +59,30 @@ interface ExecutionState {
   visible to helper functions that only receive `state`.
 - **Match by order from a hook.** Described above; fragile, and not available
   to the tool.
+- **Read the call from the history.** The assistant response is persisted
+  before its tool calls execute
+  ([Runtime §3](https://standardagentspec.org/0.2.0/infrastructure/runtime#3-step-cycle)),
+  "`execution.messageHistory` **MUST** represent live chronological persisted
+  execution history", and each stored tool call carries its id, name and
+  arguments. A tool can therefore search the last assistant message's
+  `tool_calls` for a call with its name and arguments. It has to know its own
+  name, it cannot tell two identical calls in one response apart, and there
+  is nothing to find for `invokeTool` or `queueTool`.
 - **A `name` field on `defineTool`.** Gives the name but not the call id, and
   can disagree with the name the runtime assigned.
 
-## Open question
+## Open questions
 
-What should a tool invoked from code through `state.invokeTool()` or
-`state.queueTool()` see? There is no model-issued call in that case. The
-property could be absent, or carry a runtime-generated id; either is workable
-if it is specified.
+1. What should a tool invoked from code through `state.invokeTool()` or
+   `state.queueTool()` see? There is no model-issued call in that case. The
+   property could be absent, or carry a runtime-generated id; either is
+   workable if it is specified.
+2. When a tool invokes another, the natural value is the innermost call that
+   is executing, restored when the nested call returns.
+3. For a tool from a package, is `name` the local name or the
+   [qualified name](https://standardagentspec.org/0.2.0/distribution/packaging#qualified-names)?
+   It should be whichever `HookToolCall.function.name` carries for the same
+   call.
 
 ## Conformance impact
 

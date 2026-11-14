@@ -4,7 +4,8 @@ A reference binding of the Agent Capability Standard for the
 [Standard Agent Specification](https://standardagentspec.org) (0.2.0), and an
 agent built with it. The agent changes a settings document, and its write
 tool is classified as the ontology's `mutate` capability, so every change
-needs a restore point and a recorded approval from a person.
+needs a restore point and an approval recorded through an authenticated
+endpoint.
 
 [Standard Agents interoperability](../../docs/integrations/standard_agents.md)
 explains the design, what it guarantees and what it cannot.
@@ -31,7 +32,8 @@ flowchart TB
 
 ## Run it
 
-Node 22 or newer.
+Node 22.12 or newer on the 22, 24 or 26 release line (CI uses the version in
+`site/.nvmrc`).
 
 ```bash
 cd examples/standard_agents
@@ -52,7 +54,7 @@ code enforces its rules, not how a particular runtime behaves.
 | `src/acs/grounded.ts` | `groundedTool`: defines a function tool for one capability and enforces its safety flags inside the tool |
 | `src/acs/ontology.gen.ts` | Each capability's flags and required output fields, generated from `schemas/capability_ontology.yaml` |
 | `src/acs/approval.ts` | Approval requests and decisions, bound to a digest of what the approver was shown |
-| `src/acs/audit.ts` | Joins tool call ids to the trace from a `tool_call_done` hook |
+| `src/acs/audit.ts` | Joins tool call ids to the trace from a `tool_call_done` hook, and records calls no grounded tool recorded |
 | `src/acs/lint.ts` | Checks before anything runs. A prompt's tool list: every tool classified, no requirement the prompt can never meet. An agent's stop and session bindings: none names a tool that can be refused |
 | `src/acs/canonical.ts` | RFC 8785 canonical JSON and the SHA-256 digest, equal to the reference executor's |
 | `src/acs/records.ts` | The records kept in the thread's key-value store |
@@ -97,6 +99,21 @@ A restore point counts only in the execution it was taken in, so the order
 that works is: ask, wait for the approval, then take the restore point and
 make the change. The example's prompt tells the model so, and a tool that is
 refused says what is missing.
+
+## Deploying one
+
+Three things the binding cannot do for a deployment:
+
+- **Keep credentials away from tools.** The runtime authenticates whoever
+  calls the approval endpoint; it does not say that the caller is a person.
+  No tool, prompt variable or thread environment value should hold a
+  credential the runtime accepts.
+- **Set a step limit.** `maxSteps` and `maxSessionTurns` have no default, and
+  nothing else stops a model from repeating a refused call.
+- **Bind stop and session actions to ungated tools.** `stopTool`,
+  `sessionStop`, `sessionFail` and `sessionStatus` act when the named tool is
+  called, whatever its result. `lintAgentBindings` reports a bound tool that
+  can be refused.
 
 ## Generated files
 
