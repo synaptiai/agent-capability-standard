@@ -1,0 +1,5 @@
+{
+  "id": "debug_code_change",
+  "goal": "Find and fix the cause of a failing test.",
+  "steps": [{ "capability": "observe" }, { "capability": "checkpoint" }, { "capability": "mutate" }]
+}

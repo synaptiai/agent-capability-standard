@@ -138,8 +138,26 @@ npm run dev     # local server; search works only on a built site (npm run previ
 `npm run build` fails when a Markdown link or `#anchor` does not resolve, when
 rendered heading ids differ from GitHub's ids for the source, and, in
 `scripts/check-dist.mjs`, when a link in the built HTML, the Markdown copies or
-`llms-full.txt` does not resolve, a raw `.md` link remains, a page has no Markdown copy or `llms.txt` does not list it,
-or the sitemap differs from the built pages.
+`llms-full.txt` does not resolve, a raw `.md` link remains, a page has no
+Markdown copy, a copy is listed in no section's `<section>/llms.txt` (the root
+`llms.txt` links each section's file), the sitemap differs from the built
+pages, or the files under `/api/v1/` differ from the paths `/openapi.json`
+describes.
+
+The sitemap's `lastmod` dates come from `git log`, so the build needs the full
+history: it fails in a shallow clone (CI checks out with `fetch-depth: 0`).
+
+The build also writes a Cloudflare Pages worker into the output: _worker.js
+(advanced mode, bundled from `site/src/worker/` by
+`site/src/lib/worker-build.ts`) and _routes.json beside it. The worker serves
+a page's Markdown copy to clients that prefer `text/markdown` and to AI
+agents, answers `<page>.md`, returns Markdown and problem+json 404s to
+non-browsers, adds Link headers, and runs the read-only docs MCP server at
+`/mcp`. `site/src/worker/entry.ts` says why advanced mode and which paths skip
+the worker. To try it after `npm run build`:
+```bash
+npx wrangler@4.160.0 pages dev dist --ip 127.0.0.1   # the version the deploy job pins
+```
 
 Rules:
 - **No YAML file under `site/`.** `tests/test_core_yaml.py` checks every

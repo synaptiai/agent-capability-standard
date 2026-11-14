@@ -1,0 +1,40 @@
+---
+// Registers the site's read-only WebMCP tools (lib/webmcp.ts) on every page,
+// for an agent working in the visitor's browser. In a browser without the
+// WebMCP API it does nothing. The search tool loads the Pagefind index on its
+// first call, as the search dialog does on its first open.
+---
+<script>
+  import { retryingLoader } from '../lib/search-loader';
+  import { webMcpTools, type ModelContextTool, type PagefindApi } from '../lib/webmcp';
+
+  // document.modelContext is the API's entry point; navigator.modelContext,
+  // from earlier drafts, is only the fallback.
+  function register(tool: ModelContextTool): unknown {
+    if (document.modelContext) return document.modelContext.registerTool(tool);
+    return navigator.modelContext!.registerTool(tool);
+  }
+
+  if (document.modelContext || (typeof navigator !== 'undefined' && navigator.modelContext)) {
+    const loadPagefind = retryingLoader('/pagefind/pagefind.js', async (url) => {
+      const mod = (await import(/* @vite-ignore */ url)) as PagefindApi & { options(o: Record<string, unknown>): Promise<void> };
+      // The same options as the search dialog, so either may load it first.
+      await mod.options({ excerptLength: 24 });
+      return mod;
+    });
+    const tools = webMcpTools({
+      origin: location.origin,
+      fetch: (url, init) => fetch(url, init),
+      loadPagefind,
+    });
+    for (const tool of tools) {
+      // A browser that refuses a tool (a name already taken, say) must not
+      // stop the others or put an error in the console.
+      try {
+        Promise.resolve(register(tool)).catch(() => {});
+      } catch {
+        // Ignored, as above.
+      }
+    }
+  }
+</script>

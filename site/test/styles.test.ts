@@ -117,6 +117,22 @@ describe('tables', () => {
       .filter((s) => /(^|[\s>])table\b(?![\w-])/.test(s.replace(/:not\([^)]*\)/g, '')));
     expect(block).toEqual([]);
   });
+
+  it('gives a table whose code cells never wrap normal word wrapping, so its other columns do not break letter by letter', () => {
+    // A figure's drawing sets overflow-wrap: anywhere. In a table there, code
+    // kept on one line takes its full width and the remaining columns shrink
+    // until each letter is a line (review of c24b7af: at 360px the
+    // /developers/ endpoint table was 4,909px tall). A sheet that keeps a
+    // table's code on one line must also give that table normal wrapping.
+    const all = rules();
+    const tableOf = (sel: string) => /^(\.[\w-]+) code$/.exec(sel)?.[1];
+    const nowrap = all.flatMap((r) => (/white-space:\s*nowrap/.test(r.body) ? r.selectors.map((s) => ({ file: r.file, table: tableOf(s) })) : []));
+    const tables = nowrap.filter((x): x is { file: string; table: string } => x.table !== undefined);
+    expect(tables.length).toBeGreaterThan(0);
+    const normal = (t: { file: string; table: string }) =>
+      all.some((r) => r.file === t.file && r.selectors.includes(t.table) && /overflow-wrap:\s*normal/.test(r.body));
+    expect(tables.filter((t) => !normal(t)).map((t) => `${t.file} ${t.table}`)).toEqual([]);
+  });
 });
 
 describe('menu without JavaScript', () => {

@@ -10,6 +10,7 @@ export interface DistStats {
   copyBytes: number;
   copies: number;
   llmsBytes: number;
+  sectionLlms: number;
   llmsFullBytes: number;
   totalBytes: number;
   files: number;
@@ -33,7 +34,9 @@ export function checkLinks(
 export function htmlPages(fileList: string[]): string[];
 export function sitemapPaths(xml: string, origin?: string): { paths: string[]; foreign: string[] };
 export function llmsTxtCopies(text: string, origin?: string): { copies: string[]; other: string[] };
-export function checkCopies(fileList: string[], llmsTxt: string): string[];
+export function checkCopies(fileList: string[], read: (file: string) => string): string[];
+export function isSectionLlms(file: string): boolean;
+export function isAcceptedMissing(urlPath: string): boolean;
 export function checkSitemap(fileList: string[], xml: string): string[];
 export function pageFigures(html: string): { n: number; title: string | null }[];
 export function copyFigureTitles(md: string): string[];

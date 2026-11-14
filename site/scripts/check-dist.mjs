@@ -4,13 +4,17 @@
 // - links: every internal href and src (root-relative, relative, or an
 //   absolute URL on the site's own origin), every <meta> content that is a URL
 //   on the site's origin (og:image), and every Markdown link in the Markdown
-//   copies and llms-full.txt names a file in dist/, a page directory with an
+//   copies, the llms.txt files, llms-full.txt, agents.md and llms.md names a
+//   file in dist/ (or a path agent-contract.ts lists as served elsewhere), a page directory with an
 //   index.html, or a _redirects source; every #fragment on an HTML target
 //   names an id (or a name) on that page;
 // - md-links: no internal link ends in .md, other than a link to a page's
-//   Markdown copy (<page>/index.md next to that page's index.html);
-// - copies: every page has a Markdown copy, every copy has a page, and
-//   llms.txt lists exactly the copies;
+//   Markdown copy (<page>/index.md next to that page's index.html) or to
+//   /agents.md or /llms.md;
+// - copies: every page has a Markdown copy, every copy has a page, and the
+//   llms.txt files (the root one and one per section) list exactly the
+//   copies, each section's once, in its own file (the root may name a copy
+//   in its prose and in its list);
 // - sitemap: the sitemap lists exactly the HTML pages, the 404 page aside;
 // - figures: every numbered figure on a page ("Fig n") has a
 //   "**Figure: {title}.**" block in the page's Markdown copy, and the copy has
@@ -22,7 +26,11 @@
 // - legends: no legend or key on a page draws the same glyph (or glyph pair) for two
 //   different entries;
 // - review: no built file outside the review pages (dist/_review/) points at
-//   them, so removing that folder before deploying leaves nothing dangling.
+//   them, so removing that folder before deploying leaves nothing dangling;
+// - api: openapi.json is OpenAPI 3.1, its paths (each parameter expanded by
+//   its enum) are exactly the JSON files under api/v1/, every one of those
+//   parses, the api-catalog is a linkset whose links resolve, and _headers
+//   gives the api-catalog its RFC 9727 media type.
 // Paths are compared with the case they have in dist/, as the host compares
 // them, even on a case-insensitive disk.
 // The heading-id check (rendered ids equal github-slugger run on the source)
@@ -32,9 +40,11 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FUNCTION_PATHS, LLMS_TXT_PATH, ROOT_MARKDOWN, SECTION_LLMS } from '../src/lib/agent-contract.ts';
 import { SITE_ORIGIN } from '../src/lib/origin.ts';
 import { REVIEW_DIR } from '../src/lib/review.ts';
 import { stripComments, stripTags } from '../src/lib/strip.ts';
+import { API_BASE, API_CATALOG_PATH, API_CATALOG_PROFILE, OPENAPI_PATH } from '../src/lib/api-paths.ts';
 import { isMain } from './is-main.mjs';
 import { bodyClasses, templateOf } from './page-template.mjs';
 
@@ -194,9 +204,29 @@ export function isCopyLink(urlPath, files) {
   return files.has(`${urlPath.slice(1, -COPY.length)}index.html`);
 }
 
+/** True for a section's llms.txt: `<section>/llms.txt`. */
+export function isSectionLlms(f) {
+  return new RegExp(`^[^/]+/${SECTION_LLMS.replace('.', '\\.')}$`).test(f);
+}
+
 /** True for a Markdown file whose links the link check reads. */
 function isMarkdownWithLinks(f) {
-  return f === COPY || f.endsWith(`/${COPY}`) || f === 'llms-full.txt';
+  return (
+    f === COPY ||
+    f.endsWith(`/${COPY}`) ||
+    f === 'llms-full.txt' ||
+    f === LLMS_TXT_PATH.slice(1) ||
+    isSectionLlms(f) ||
+    ROOT_MARKDOWN.includes(`/${f}`)
+  );
+}
+
+/**
+ * True for a link no file in dist serves because the worker answers it
+ * (FUNCTION_PATHS in agent-contract.ts).
+ */
+export function isAcceptedMissing(urlPath) {
+  return FUNCTION_PATHS.includes(urlPath);
 }
 
 /**
@@ -222,13 +252,13 @@ export function checkLinks(fileList, read, redirects = new Set()) {
       const t = internalTarget(value, from);
       if (t === null) continue;
       checked += 1;
-      if (/\.md$/i.test(t.path) && !isCopyLink(t.path, files)) {
+      if (/\.md$/i.test(t.path) && !isCopyLink(t.path, files) && !ROOT_MARKDOWN.includes(t.path) && !isAcceptedMissing(t.path)) {
         mdLinks.add(`${from}: links to ${value}, a .md file that is not a page's Markdown copy`);
         continue;
       }
       const target = servedFile(t.path, files);
       if (target === null) {
-        if (!redirects.has(t.path)) links.add(`${from}: ${value} does not resolve to a file in dist`);
+        if (!redirects.has(t.path) && !isAcceptedMissing(t.path)) links.add(`${from}: ${value} does not resolve to a file in dist`);
         continue;
       }
       if (t.fragment !== null && t.fragment !== '' && target.endsWith('.html') && !idsOf(target).has(t.fragment)) {
@@ -256,7 +286,7 @@ export function sitemapPaths(xml, origin = SITE_ORIGIN) {
   return { paths, foreign };
 }
 
-/** URL paths of the Markdown copies llms.txt links to. Links elsewhere are returned in `other`. */
+/** URL paths of the Markdown copies an llms.txt links to. Links elsewhere are returned in `other`. */
 export function llmsTxtCopies(text, origin = SITE_ORIGIN) {
   const copies = [];
   const other = [];
@@ -278,8 +308,15 @@ function duplicates(list) {
   return [...new Set(list.filter((x) => (seen.has(x) ? true : (seen.add(x), false))))];
 }
 
-/** Every page has a Markdown copy, every copy has a page, and llms.txt lists exactly the copies. */
-export function checkCopies(fileList, llmsTxt) {
+/**
+ * Every page has a Markdown copy and every copy has a page. The llms.txt
+ * files list the copies: each section's llms.txt (`<section>/llms.txt`)
+ * lists its copies once, no copy is in two of them, the root llms.txt links
+ * every section's file, and together the files list every copy and nothing
+ * that is not one. (Whether the root's other links resolve is the link
+ * check's business.)
+ */
+export function checkCopies(fileList, read) {
   const problems = [];
   const files = new Set(fileList);
   const pages = htmlPages(fileList).filter((u) => u.endsWith('/'));
@@ -288,11 +325,22 @@ export function checkCopies(fileList, llmsTxt) {
   for (const u of pages) if (!files.has(`${u.slice(1)}${COPY}`)) problems.push(`${u}: no Markdown copy at ${u}${COPY}`);
   const copies = fileList.filter((f) => f === COPY || f.endsWith(`/${COPY}`)).map((f) => `/${f}`);
   for (const c of copies) if (!files.has(`${c.slice(1, -COPY.length)}index.html`)) problems.push(`${c}: a Markdown copy with no page`);
-  const listed = llmsTxtCopies(llmsTxt);
-  for (const c of setDiff(copies, listed.copies)) problems.push(`llms.txt does not list ${c}`);
-  for (const c of setDiff(listed.copies, copies)) problems.push(`llms.txt lists ${c}, which is not in dist`);
-  for (const c of duplicates(listed.copies)) problems.push(`llms.txt lists ${c} more than once`);
-  for (const u of listed.other) problems.push(`llms.txt links to ${u}, which is not a Markdown copy on the site`);
+  const root = llmsTxtCopies(read(LLMS_TXT_PATH.slice(1)));
+  const sections = fileList.filter(isSectionLlms);
+  const owner = new Map();
+  for (const f of sections) {
+    const listed = llmsTxtCopies(read(f));
+    for (const c of duplicates(listed.copies)) problems.push(`${f} lists ${c} more than once`);
+    for (const c of new Set(listed.copies)) {
+      if (owner.has(c)) problems.push(`${c} is listed by both ${owner.get(c)} and ${f}`);
+      else owner.set(c, f);
+    }
+    if (!root.other.includes(`${SITE_ORIGIN}/${f}`)) problems.push(`llms.txt does not link ${f}`);
+  }
+  // A copy another part of the build makes may be missing from this build.
+  const listed = [...owner.keys(), ...root.copies.filter((c) => copies.includes(c) || !isAcceptedMissing(c))];
+  for (const c of setDiff(copies, listed)) problems.push(`no llms.txt lists ${c}`);
+  for (const c of setDiff(listed, copies)) problems.push(`an llms.txt lists ${c}, which is not in dist`);
   return problems;
 }
 
@@ -437,6 +485,7 @@ export const DRAWN_TEMPLATES = [
   'rfcs-index',
   'schemas',
   'spec',
+  'developers',
 ];
 
 /** A page's template, from its body's `page--<template>` class. */
@@ -542,6 +591,94 @@ export function checkReviewLinks(fileList, read) {
     .map((f) => `${f} points at the review pages (/${REVIEW_DIR}/), which are not deployed`);
 }
 
+// ------------------------------------------------------------ data API
+
+/**
+ * The URL paths an OpenAPI document's paths stand for: a path with a
+ * `{param}` becomes one path per value of that parameter's enum. A parameter
+ * with no enum is a problem, because then no file list can be checked.
+ */
+export function openApiFilePaths(doc) {
+  const paths = [];
+  const problems = [];
+  for (const [p, item] of Object.entries(doc.paths ?? {})) {
+    const names = [...p.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+    if (names.length === 0) {
+      paths.push(p);
+      continue;
+    }
+    if (names.length > 1) {
+      problems.push(`openapi.json: ${p} has more than one path parameter`);
+      continue;
+    }
+    const param = (item.get?.parameters ?? []).find((x) => x.in === 'path' && x.name === names[0]);
+    const values = param?.schema?.enum;
+    if (!Array.isArray(values) || values.length === 0) {
+      problems.push(`openapi.json: ${p} has no enum for {${names[0]}}`);
+      continue;
+    }
+    for (const v of values) paths.push(p.replace(`{${names[0]}}`, v));
+  }
+  return { paths, problems };
+}
+
+/** The data API in dist: the OpenAPI document, the JSON files, the api-catalog and its header. */
+export function checkApi(fileList, read, redirects = new Set()) {
+  const problems = [];
+  const files = new Set(fileList);
+  const parse = (f) => {
+    try {
+      return JSON.parse(read(f));
+    } catch (e) {
+      problems.push(`${f} is not valid JSON: ${e.message}`);
+      return null;
+    }
+  };
+  const apiDir = `${API_BASE.slice(1)}/`;
+  const apiFiles = fileList.filter((f) => f.startsWith(apiDir));
+  for (const f of apiFiles) if (!f.endsWith('.json')) problems.push(`${f}: a file under ${apiDir} that is not JSON`);
+  const openapiFile = OPENAPI_PATH.slice(1);
+  if (!files.has(openapiFile)) problems.push(`${openapiFile} is missing from dist`);
+  else {
+    const doc = parse(openapiFile);
+    if (doc) {
+      if (typeof doc.openapi !== 'string' || !/^3\.1\.\d+$/.test(doc.openapi)) problems.push(`${openapiFile}: openapi is ${doc.openapi}, not 3.1.x`);
+      const { paths, problems: p } = openApiFilePaths(doc);
+      problems.push(...p);
+      const served = apiFiles.map((f) => `/${f}`);
+      for (const u of setDiff(paths, served)) problems.push(`${openapiFile} describes ${u}, which is not a file in dist`);
+      for (const u of setDiff(served, paths)) problems.push(`${u} is in dist but ${openapiFile} does not describe it`);
+    }
+  }
+  for (const f of apiFiles.filter((x) => x.endsWith('.json'))) parse(f);
+  const catalogFile = API_CATALOG_PATH.slice(1);
+  if (!files.has(catalogFile)) problems.push(`${catalogFile} is missing from dist`);
+  else {
+    const cat = parse(catalogFile);
+    if (cat && (!Array.isArray(cat.linkset) || cat.linkset.length === 0)) problems.push(`${catalogFile}: no linkset array`);
+    for (const entry of cat?.linkset ?? []) {
+      if (typeof entry.anchor !== 'string') problems.push(`${catalogFile}: a linkset entry has no anchor`);
+      for (const [rel, targets] of Object.entries(entry)) {
+        if (rel === 'anchor') continue;
+        for (const t of Array.isArray(targets) ? targets : []) {
+          const target = internalTarget(t.href ?? '', `/${catalogFile}`);
+          if (target === null) continue;
+          if (servedFile(target.path, files) === null && !redirects.has(target.path)) {
+            problems.push(`${catalogFile}: ${rel} ${t.href} does not resolve to a file in dist`);
+          }
+        }
+      }
+    }
+    const headers = files.has('_headers') ? read('_headers') : '';
+    const block = headers.split(/\n(?=\S)/).find((b) => b.split('\n')[0].trim() === API_CATALOG_PATH) ?? '';
+    const type = /^\s+Content-Type:\s*(.+)$/im.exec(block)?.[1]?.trim() ?? '';
+    if (!type.startsWith('application/linkset+json') || !type.includes(`profile="${API_CATALOG_PROFILE}"`)) {
+      problems.push(`_headers does not serve ${API_CATALOG_PATH} as application/linkset+json; profile="${API_CATALOG_PROFILE}"`);
+    }
+  }
+  return problems;
+}
+
 function kb(bytes) {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
@@ -559,12 +696,13 @@ export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {})
     files: missing.map((f) => `${f} is missing from dist`),
     links,
     'md-links': mdLinks,
-    copies: has.has('llms.txt') ? checkCopies(fileList, read('llms.txt')) : [],
+    copies: has.has('llms.txt') ? checkCopies(fileList, read) : [],
     sitemap: has.has('sitemap.xml') ? checkSitemap(fileList, read('sitemap.xml')) : [],
     figures: checkFigureCopies(fileList, read),
     drawn: checkDrawnFigures(fileList, read, drawnTemplates),
     legends: checkLegends(fileList, read),
     review: checkReviewLinks(fileList, read),
+    api: checkApi(fileList, read, redirects),
   };
   const sum = (list) => list.reduce((n, f) => n + size(f), 0);
   const htmlFiles = fileList.filter((f) => f.endsWith('.html'));
@@ -576,6 +714,7 @@ export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {})
     copyBytes: sum(copies),
     copies: copies.length,
     llmsBytes: has.has('llms.txt') ? size('llms.txt') : 0,
+    sectionLlms: fileList.filter(isSectionLlms).length,
     llmsFullBytes: has.has('llms-full.txt') ? size('llms-full.txt') : 0,
     totalBytes: sum(fileList),
     files: fileList.length,
@@ -586,7 +725,7 @@ export function checkDistDir(distDir, { drawnTemplates = DRAWN_TEMPLATES } = {})
 export function formatStats(s) {
   return [
     `pages: ${s.pages} HTML pages (404 aside), ${kb(s.htmlBytes)} of HTML in all`,
-    `Markdown copies: ${s.copies}, ${kb(s.copyBytes)}; llms.txt ${kb(s.llmsBytes)}; llms-full.txt ${kb(s.llmsFullBytes)}`,
+    `Markdown copies: ${s.copies}, ${kb(s.copyBytes)}; llms.txt ${kb(s.llmsBytes)} and ${s.sectionLlms} section llms.txt files; llms-full.txt ${kb(s.llmsFullBytes)}`,
     `links: ${s.checkedLinks} internal links checked`,
     `dist: ${s.files} files, ${kb(s.totalBytes)}`,
   ];

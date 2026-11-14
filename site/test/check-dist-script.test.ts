@@ -15,7 +15,11 @@ function page(body: string): string {
   return `<!doctype html><html><head><link rel="stylesheet" href="/_astro/site.css"><script type="module" src="/_astro/app.js"></script></head><body class="page page--prose">${body}</body></html>`;
 }
 
-/** A clean two-page site: home and /guide/, each with its copy, plus 404, sitemap, llms.txt and Pagefind. */
+/**
+ * A clean two-page site: home and /guide/, each with its copy, plus 404,
+ * sitemap, Pagefind, a root llms.txt that lists the home copy and links the
+ * guide section's llms.txt, which lists the guide's copy.
+ */
 function cleanSite(): Files {
   return {
     'index.html': page('<h1 id="home">Home</h1><a href="/guide/#setup">Setup</a><a href="/index.md">Copy</a><a href="https://github.com/x/y/blob/main/README.md">GitHub</a>'),
@@ -28,8 +32,36 @@ function cleanSite(): Files {
     '_redirects': '/spec/ /guide/ 302\n',
     'pagefind/pagefind.js': '',
     'llms-full.txt': '# all\n',
-    'llms.txt': `# Site\n\n## Pages\n\n- [Home](${O}/index.md)\n- [Guide](${O}/guide/index.md): how to start\n`,
+    'llms.txt': `# Site\n\n## Pages\n\n- [Home](${O}/index.md)\n- [All guide pages](${O}/guide/llms.txt)\n`,
+    'guide/llms.txt': `# Guide\n\n- [Guide](${O}/guide/index.md): how to start\n`,
     'sitemap.xml': `<?xml version="1.0"?><urlset><url><loc>${O}/</loc></url><url><loc>${O}/guide/</loc></url></urlset>`,
+    ...apiFiles(),
+  };
+}
+
+/** A data API of two files and one parameter with two values, its OpenAPI document, api-catalog and header. */
+function apiFiles(): Files {
+  const openapi = {
+    openapi: '3.1.1',
+    paths: {
+      '/api/v1/index.json': { get: { operationId: 'readApiIndex' } },
+      '/api/v1/things/{id}.json': { get: { operationId: 'readThing', parameters: [{ name: 'id', in: 'path', schema: { type: 'string', enum: ['a', 'b'] } }] } },
+    },
+  };
+  const catalog = {
+    linkset: [
+      { anchor: `${O}/.well-known/api-catalog`, item: [{ href: `${O}/api/v1/` }] },
+      { anchor: `${O}/api/v1/`, 'service-desc': [{ href: `${O}/openapi.json` }], 'service-doc': [{ href: `${O}/guide/` }] },
+    ],
+  };
+  return {
+    'openapi.json': JSON.stringify(openapi),
+    'api/v1/index.json': '{}',
+    'api/v1/things/a.json': '{}',
+    'api/v1/things/b.json': '{}',
+    '.well-known/api-catalog': JSON.stringify(catalog),
+    '_headers': '/*.md\n  Content-Type: text/markdown\n\n/.well-known/api-catalog\n  Content-Type: application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"\n',
+    '_redirects': '/spec/ /guide/ 302\n/api/v1/ /api/v1/index.json 302\n',
   };
 }
 
@@ -106,17 +138,36 @@ describe('check-dist.mjs', () => {
     const s = cleanSite();
     delete s['guide/index.md'];
     expect(problems(s)).toEqual([
+      `[links] /guide/llms.txt: ${O}/guide/index.md does not resolve to a file in dist`,
       '[copies] /guide/: no Markdown copy at /guide/index.md',
-      '[copies] llms.txt lists /guide/index.md, which is not in dist',
+      '[copies] an llms.txt lists /guide/index.md, which is not in dist',
     ]);
   });
 
-  it('fails a copy that llms.txt leaves out, and one it lists twice', () => {
+  it('fails a copy that no llms.txt lists and a section file the root does not link, but lets the root name a copy twice', () => {
     const s = cleanSite();
     s['llms.txt'] = `# Site\n\n- [Home](${O}/index.md)\n- [Home again](${O}/index.md)\n`;
+    s['guide/llms.txt'] = '# Guide\n';
     expect(problems(s)).toEqual([
-      '[copies] llms.txt does not list /guide/index.md',
-      '[copies] llms.txt lists /index.md more than once',
+      '[copies] llms.txt does not link guide/llms.txt',
+      '[copies] no llms.txt lists /guide/index.md',
+    ]);
+  });
+
+  it('fails a copy that two section files list', () => {
+    const s = cleanSite();
+    s['llms.txt'] += `- [More](${O}/more/llms.txt)\n`;
+    s['more/llms.txt'] = `# More\n\n- [Guide](${O}/guide/index.md)\n- [Guide](${O}/guide/index.md)\n`;
+    expect(problems(s)).toEqual(['[copies] more/llms.txt lists /guide/index.md more than once', '[copies] /guide/index.md is listed by both guide/llms.txt and more/llms.txt']);
+  });
+
+  it('accepts a link to a path the worker serves, and to /agents.md, but not to another missing file', () => {
+    const s = cleanSite();
+    s['llms.txt'] += `- [MCP](${O}/.well-known/mcp/server-card.json)\n- [API](${O}/openapi.json)\n- [Agents](${O}/agents.md)\n- [Other](${O}/other.json)\n`;
+    s['agents.md'] = `# Agents\n\n[Home](${O}/index.md) and [missing](${O}/gone/)\n`;
+    expect(problems(s)).toEqual([
+      `[links] /agents.md: ${O}/gone/ does not resolve to a file in dist`,
+      `[links] /llms.txt: ${O}/other.json does not resolve to a file in dist`,
     ]);
   });
 
@@ -310,5 +361,47 @@ describe('link parsing', () => {
     expect(internalTarget('mailto:a@b.c', '/')).toBeNull();
     expect(internalTarget('https://github.com/x', '/')).toBeNull();
     expect(internalTarget('//cdn.example/x.js', '/')).toBeNull();
+  });
+});
+
+describe('check-dist.mjs: the data API', () => {
+  it('fails an enum value with no file, and a file the OpenAPI document does not describe', () => {
+    const s = cleanSite();
+    delete s['api/v1/things/b.json'];
+    s['api/v1/things/c.json'] = '{}';
+    expect(problems(s)).toEqual([
+      '[api] openapi.json describes /api/v1/things/b.json, which is not a file in dist',
+      '[api] /api/v1/things/c.json is in dist but openapi.json does not describe it',
+    ]);
+  });
+
+  it('fails a path parameter with no enum, a JSON file that does not parse, and an OpenAPI 3.0 document', () => {
+    const s = cleanSite();
+    const doc = JSON.parse(s['openapi.json']!);
+    doc.openapi = '3.0.3';
+    delete doc.paths['/api/v1/things/{id}.json'].get.parameters[0].schema.enum;
+    s['openapi.json'] = JSON.stringify(doc);
+    s['api/v1/index.json'] = '{';
+    const p = problems(s);
+    expect(p.slice(0, 2)).toEqual(['[api] openapi.json: openapi is 3.0.3, not 3.1.x', '[api] openapi.json: /api/v1/things/{id}.json has no enum for {id}']);
+    expect(p).toContain('[api] /api/v1/things/a.json is in dist but openapi.json does not describe it');
+    expect(p.some((l) => l.startsWith('[api] api/v1/index.json is not valid JSON'))).toBe(true);
+  });
+
+  it('fails an api-catalog link that does not resolve, and a missing api-catalog header', () => {
+    const s = cleanSite();
+    s['.well-known/api-catalog'] = s['.well-known/api-catalog']!.replace(`${O}/guide/`, `${O}/developers/`);
+    s['_headers'] = '/*.md\n  Content-Type: text/markdown\n';
+    expect(problems(s)).toEqual([
+      `[api] .well-known/api-catalog: service-doc ${O}/developers/ does not resolve to a file in dist`,
+      '[api] _headers does not serve /.well-known/api-catalog as application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"',
+    ]);
+  });
+
+  it('fails when openapi.json or the api-catalog is missing', () => {
+    const s = cleanSite();
+    delete s['openapi.json'];
+    delete s['.well-known/api-catalog'];
+    expect(problems(s)).toEqual(['[api] openapi.json is missing from dist', '[api] .well-known/api-catalog is missing from dist']);
   });
 });

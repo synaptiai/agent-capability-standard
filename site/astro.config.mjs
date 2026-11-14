@@ -9,6 +9,7 @@ import { formatLinkStats, linkStats } from './src/lib/links';
 import { spaceBuiltPages } from './src/lib/search-text';
 import { REDIRECTS_FILE, redirectsFile } from './src/lib/redirects';
 import { REVIEW_DIR } from './src/lib/review';
+import { ROUTES_FILE, WORKER_FILE, writeWorker } from './src/lib/worker-build';
 import { markdownSources } from './src/lib/routes';
 import { PROCESSOR_OPTIONS, SHIKI_CONFIG } from './src/lib/markdown';
 
@@ -67,7 +68,7 @@ export default defineConfig({
     {
       name: 'acs-markdown-report',
       hooks: {
-        'astro:build:done': ({ dir, logger }) => {
+        'astro:build:done': async ({ dir, logger }) => {
           // A warm build reuses cached renders and skips the link plugin, so
           // the link checks must be seen to have run on every source.
           const expected = markdownSources().length;
@@ -93,6 +94,9 @@ export default defineConfig({
           // The /spec/ redirect names the current version, so it is written here rather than kept in public/.
           writeFileSync(new URL(REDIRECTS_FILE, dir), redirectsFile());
           logger.info(`redirects: ${redirectsFile().trim().split('\n').join('; ')}`);
+          // The request-time layer on Cloudflare Pages (src/worker/entry.ts says why advanced mode).
+          const workerBytes = await writeWorker(fileURLToPath(dir));
+          logger.info(`worker: ${WORKER_FILE} (${(workerBytes / 1024).toFixed(1)} KB) and ${ROUTES_FILE} written`);
           logger.info(`pages: every one of the ${dist.pages} routes has a page; no id is repeated; every heading has an id; generated headings use ref- ids`);
         },
       },

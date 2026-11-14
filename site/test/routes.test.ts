@@ -21,6 +21,8 @@ const PLAN_EXCLUDED = [
   /^docs\/research\/raw_data\//,
   /^skills\/[^/]+\/reference\//,
   /^CLAUDE\.md$/,
+  // AGENTS.md, like CLAUDE.md, is instructions for agents working on the repository.
+  /^AGENTS\.md$/,
   /^\.github\//,
   /^\.claude\//,
 ];
@@ -56,7 +58,7 @@ describe('route table against the repository', () => {
   });
 
   it('gives no route to excluded files', () => {
-    for (const p of ['CLAUDE.md', '.github/pull_request_template.md', 'tasks/todo.md']) {
+    for (const p of ['CLAUDE.md', 'AGENTS.md', '.github/pull_request_template.md', 'tasks/todo.md']) {
       expect(bySource.has(p)).toBe(false);
     }
   });
@@ -171,6 +173,10 @@ describe('sidebar order', () => {
       '/community/release-notes/',
       '/community/citation/',
       '/community/press-kit/',
+      // The pages about the site, at the top level (issue #127).
+      '/about/',
+      '/contact/',
+      '/privacy/',
     ]);
   });
 

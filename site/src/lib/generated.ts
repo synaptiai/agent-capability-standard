@@ -11,6 +11,7 @@ import { loadCitation } from '../data/citation';
 import { loadDiagnostics } from '../data/diagnostics';
 import { loadOntology } from '../data/ontology';
 import { loadWorkflows } from '../data/workflows';
+import { developersDescription } from './developers';
 import { standardVersions } from '../data/versions';
 import { anchorsOf } from './anchors';
 import { repoResolver } from './links';
@@ -149,6 +150,7 @@ export const GENERATED_DESCRIPTIONS: Readonly<Record<string, () => string>> = {
   '/spec/diagnostics/': () =>
     `The ${loadDiagnostics().length} diagnostic codes of Standard ${currentStandard().version}: what each one means, its category and whether it is an error or a warning.`,
   '/spec/schemas/': () => 'The schema files of the Agent Capability Standard, grouped by what the Standard requires of them, with a link to each file.',
+  '/developers/': developersDescription,
   '/community/citation/': () => {
     const c = loadCitation();
     return `How to cite ${c.title}, version ${c.version}, with the citation file and a BibTeX entry.`;
