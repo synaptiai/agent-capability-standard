@@ -320,8 +320,10 @@ export function buildRoutes(): Route[] {
     prose('docs/guides/MODALITY_HANDLING.md', '/guides/modality-handling/', 'Modality handling'),
     prose('docs/integrations/claude_agent_sdk.md', '/guides/claude-agent-sdk/', 'Claude Agent SDK'),
     prose('docs/integrations/oasf_coverage.md', '/guides/oasf-coverage/', 'OASF coverage'),
+    prose('docs/integrations/standard_agents.md', '/guides/standard-agents/', 'Standard Agents interoperability'),
     prose('hooks/README.md', '/guides/hooks/', 'Safety hooks'),
     prose('examples/README.md', '/guides/examples/', 'Examples'),
+    prose('examples/standard_agents/README.md', '/guides/examples/standard-agents/', 'Standard Agents example'),
     prose('skills/README.md', '/guides/skills/', 'Skills overview', 'Skills'),
   );
   for (const dir of Object.keys(COMPOSED_SKILLS).sort()) {

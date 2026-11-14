@@ -12,6 +12,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Building from source needs Rust 1.88 or newer (was 1.86), because `sha2`
   0.11 requires it.
 
+### Added
+- [Standard Agents interoperability](docs/integrations/standard_agents.md):
+  a mapping of this standard against the Standard Agent Specification 0.2.0,
+  how to build a grounded agent on it, and the changes proposed to each
+  standard.
+- `examples/standard_agents/`: a reference binding in TypeScript and a worked
+  example. `groundedTool` classifies a Standard Agents tool by an ontology
+  capability and enforces the capability's checkpoint, approval and output
+  rules inside the tool; approvals are recorded through an authenticated
+  thread endpoint and bound to the §5.14 digest, which is tested against the
+  reference executor's. CI type-checks it against the published
+  `@standardagents/spec` types and runs its tests.
+- `schemas/interop/standard_agents_annotation.schema.json`: the schema of
+  the `acs` annotation the binding puts on a tool.
+- `scripts/gen_standard_agents_binding.py` generates the binding's ontology
+  table, the annotation schema and the digest fixtures from the ontology and
+  the reference executor; `--check` fails on drift (CI).
+
 ### Changed
 - Direct dependencies are at their latest releases. Python: the dev ranges are
   pytest 8.4.2–9, pytest-asyncio 1.x, mypy 1.19.1–2 and ruff 0.17 (CI runs

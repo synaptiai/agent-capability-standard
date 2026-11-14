@@ -42,6 +42,10 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:modality-handling': ['#########', '#.......#', '#.....#.#', '#.......#', '#...#...#', '#..###..#', '#.#####.#', '#########', '.........'],
   // A bullseye with a solid centre.
   'page:oasf-coverage': ['..#####..', '.##...##.', '##.....##', '#..###..#', '#..###..#', '#..###..#', '##.....##', '.##...##.', '..#####..'],
+  // Two overlapping squares: where two standards meet.
+  'page:standard-agents': ['######...', '#....#...', '#....#...', '#..######', '#..#.#..#', '######..#', '...#....#', '...#....#', '...######'],
+  // The electrical ground symbol: a lead into three shortening bars, for a grounded agent.
+  'page:standard-agents-example': ['....#....', '....#....', '....#....', '....#....', '#########', '.........', '.#######.', '.........', '...###...'],
   // A fish hook: eye, shank and barbed bend.
   'page:hooks': ['.....###.', '.....#.#.', '.....###.', '......#..', '.#....#..', '##....#..', '.#....#..', '.##..##..', '..####...'],
   // A light bulb.
@@ -170,8 +174,10 @@ export const PAGE_GLYPHS: Readonly<Record<string, string>> = {
   '/guides/modality-handling/': 'page:modality-handling',
   '/guides/claude-agent-sdk/': 'tool:sdk',
   '/guides/oasf-coverage/': 'page:oasf-coverage',
+  '/guides/standard-agents/': 'page:standard-agents',
   '/guides/hooks/': 'page:hooks',
   '/guides/examples/': 'page:examples',
+  '/guides/examples/standard-agents/': 'page:standard-agents-example',
   '/guides/skills/': 'skill:composed',
   '/guides/skills/capability-gap-analysis/': 'page:capability-gap-analysis',
   '/guides/skills/debug-workflow/': 'page:debug-workflow',
