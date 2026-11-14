@@ -8,7 +8,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { parseAccept, prefersMarkdown } from '../src/worker/accept';
 import type { Env, WorkerConfig } from '../src/worker/env';
-import { createHandler } from '../src/worker/site';
+import { createHandler, markdownTokens } from '../src/worker/site';
 import { scorePage } from '../src/worker/tools';
 import { pagePart } from '../src/worker/page-text';
 import type { PageEntry } from '../src/worker/data';
@@ -167,6 +167,54 @@ describe('paths with repeated slashes', () => {
     expect(res.headers.get('Location')).toBe(location);
     expect(res.headers.get('Link')).toBeNull();
     expect(env.calls).toEqual([]);
+  });
+});
+
+describe('token estimate and content signal', () => {
+  const SIGNAL = 'search=yes, ai-input=yes, ai-train=yes';
+
+  it('estimates one token per four characters, rounded up', () => {
+    expect(markdownTokens('')).toBe(0);
+    expect(markdownTokens('abcd')).toBe(1);
+    expect(markdownTokens('abcde')).toBe(2);
+  });
+
+  it('sends X-Markdown-Tokens and Content-Signal on every way of asking for Markdown', async () => {
+    // MUTATE_MD is "# mutate" (8), two newlines, "Change persistent state" (23) and a newline: 34 characters, 9 tokens.
+    expect(MUTATE_MD.length).toBe(34);
+    for (const [p, headers] of [
+      ['/capabilities/mutate/index.md', {}],
+      ['/capabilities/mutate.md', {}],
+      ['/capabilities/mutate/', { Accept: 'text/markdown' }],
+      ['/capabilities/mutate/', { 'User-Agent': 'Mozilla/5.0 (compatible; ClaudeBot/1.0)' }],
+    ] as const) {
+      const res = await get(p, headers);
+      expect(res.headers.get('X-Markdown-Tokens'), p).toBe('9');
+      expect(res.headers.get('Content-Signal'), p).toBe(SIGNAL);
+      expect(await res.text(), p).toBe(MUTATE_MD);
+    }
+  });
+
+  it('gives a HEAD request the estimate without a body', async () => {
+    const res = await get('/capabilities/mutate/index.md', {}, 'HEAD');
+    expect(res.headers.get('X-Markdown-Tokens')).toBe('9');
+    expect(await res.text()).toBe('');
+  });
+
+  it('sends no estimate with a 304, which has no body', async () => {
+    const res = await get('/capabilities/mutate/index.md', { 'If-None-Match': '"etag-/capabilities/mutate/index.md"' });
+    expect(res.status).toBe(304);
+    expect(res.headers.get('X-Markdown-Tokens')).toBeNull();
+  });
+
+  it('sends Content-Signal on HTML pages, static files and the Markdown 404 too', async () => {
+    for (const [p, headers] of [
+      ['/capabilities/mutate/', { Accept: BROWSER_ACCEPT }],
+      ['/api/v1/capabilities.json', {}],
+      ['/capabilities/nothing.md', {}],
+    ] as const) {
+      expect((await get(p, headers)).headers.get('Content-Signal'), p).toBe(SIGNAL);
+    }
   });
 });
 

@@ -113,6 +113,8 @@ describe('robots.txt', () => {
     const text = read('robots.txt');
     const groups = text.split(/\n\s*\n/).filter((g) => /User-agent:/i.test(g));
     for (const g of groups) expect(g.split('\n').filter((l) => /^(Allow|Disallow):/i.test(l))).toEqual(['Allow: /']);
+    // Every group states the content signal (contentsignals.org): a crawler reads only the group that names it.
+    for (const g of groups) expect(g.split('\n').filter((l) => /^Content-Signal:/i.test(l))).toEqual(['Content-Signal: search=yes, ai-input=yes, ai-train=yes']);
     for (const bot of ['*', 'OAI-SearchBot', 'Claude-SearchBot', 'PerplexityBot', 'ChatGPT-User', 'Claude-User', 'Perplexity-User']) {
       expect(text).toContain(`User-agent: ${bot}\n`);
     }
@@ -134,7 +136,7 @@ describe('home page metadata', () => {
     const org = byType('Organization');
     expect(org.name).toBe('Synapti');
     expect(org.url).toBe('https://synapti.ai');
-    expect(org.sameAs).toContain('https://github.com/synaptiai');
+    expect(org.sameAs).toEqual(['https://github.com/synaptiai', 'https://www.linkedin.com/company/synapti-ai/']);
     expect(byType('SoftwareApplication').sameAs).toEqual(['https://github.com/synaptiai/agent-capability-standard', 'https://skills.sh/synaptiai/agent-capability-standard']);
     const contact = org.contactPoint as Record<string, string>;
     expect(contact.contactType).toBeTruthy();

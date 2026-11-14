@@ -10,6 +10,7 @@ import { SITE_ORIGIN } from './links';
 import { ROUTES, SECTIONS, type Route, type Section } from './routes';
 import { GITHUB_BASE, githubBlobUrl, readRepoFile } from './repo';
 import { pageLastModified } from './page-dates';
+import { CONTENT_SIGNAL } from '../worker/static-rules';
 import { MCP_TOOLS } from './api';
 import { WEBMCP_TOOLS } from './developers';
 import {
@@ -254,7 +255,8 @@ export const NAMED_AGENTS = ['OAI-SearchBot', 'ChatGPT-User', 'Claude-SearchBot'
  * with the same single rule, so the file says the same thing for everyone.
  */
 export function robotsTxt(): string {
-  const groups = [['*'], [...NAMED_AGENTS]].map((agents) => `${agents.map((a) => `User-agent: ${a}`).join('\n')}\nAllow: /`);
+  // Each group repeats the content signal, since a crawler reads only the group that names it.
+  const groups = [['*'], [...NAMED_AGENTS]].map((agents) => `${agents.map((a) => `User-agent: ${a}`).join('\n')}\nContent-Signal: ${CONTENT_SIGNAL}\nAllow: /`);
   return `${groups.join('\n\n')}\n\nSitemap: ${SITE_ORIGIN}${SITEMAP_PATH}\n`;
 }
 

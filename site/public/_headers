@@ -33,3 +33,7 @@ https://:version.:project.pages.dev/*
 # Build output with a content hash in its name never changes: cache it for a year.
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
+
+# How the content may be used (contentsignals.org); robots.txt says the same.
+/*
+  Content-Signal: search=yes, ai-input=yes, ai-train=yes
