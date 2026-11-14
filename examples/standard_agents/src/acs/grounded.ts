@@ -16,9 +16,13 @@
  * passed: a call refused for lack of approval leaves the checkpoint valid,
  * and one refused for lack of a checkpoint leaves the approval unused.
  *
- * A checkpoint authorises a call only in the execution it was taken in, so
- * the restore point is taken after the approval arrives, just before the
- * change (see `flowOf` in records.ts).
+ * A checkpoint authorises a call only in the execution it was taken in, and
+ * only for a few minutes, so the restore point is taken after the approval
+ * arrives, just before the change. The time limit is the rule the binding
+ * guarantees: the specification calls `flowId` the "Unique execution ID" and
+ * does not say when it changes (see `flowOf` in records.ts). A call made
+ * outside an execution, from an endpoint or an effect, has no `flowId`, and
+ * no checkpoint authorises it.
  */
 import {
   defineTool,
@@ -106,6 +110,11 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
   progressArgument?: string;
   /** Other owners' annotation keys. The `acs` key is set by the wrapper. */
   annotations?: Record<string, unknown>;
+  /**
+   * How long a checkpoint can authorise this tool's call, in milliseconds
+   * (default `CHECKPOINT_MAX_AGE_MS`). Only for a tool that requires one.
+   */
+  checkpoint_max_age_ms?: number;
   /** Milliseconds since the Unix epoch; defaults to `Date.now`. */
   now?: () => number;
   /**
@@ -114,6 +123,9 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    */
   execute: (state: ThreadState, args: z.infer<Args>, call: GroundedCall) => Promise<CapabilityOutput<C>>;
 }
+
+/** How long a checkpoint can authorise a call, unless the tool says otherwise: ten minutes. */
+export const CHECKPOINT_MAX_AGE_MS = 10 * 60 * 1000;
 
 function refusal(
   code: RefusalCode,
@@ -224,21 +236,32 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       }
     }
 
-    // 3. A valid checkpoint for this call alone, taken in this execution.
+    // 3. A valid checkpoint for this call alone, taken in this execution and
+    // not long ago.
     const checkpoints = flags.requires_checkpoint ? await readCheckpoints(state) : [];
     const unused = [...checkpoints].reverse().filter((c) => c.valid);
-    const checkpoint = unused.find((c) => c.flow_id === flow);
+    const maxAge = options.checkpoint_max_age_ms ?? CHECKPOINT_MAX_AGE_MS;
+    const at = now();
+    const checkpoint =
+      flow === null ? undefined : unused.find((c) => c.flow_id === flow && at - c.at <= maxAge);
     if (flags.requires_checkpoint && !checkpoint) {
-      const stale = unused.length > 0;
+      const message =
+        flow === null
+          ? 'This call is not part of an execution, and a checkpoint authorises a call only in the execution it was taken in.'
+          : unused.some((c) => c.flow_id === flow)
+            ? 'The last checkpoint was taken too long ago, and what it saved may have changed since.'
+            : unused.length > 0
+              ? 'The last checkpoint was taken before this thread last went idle, and what it saved may have changed since.'
+              : 'Every earlier checkpoint has been used; each call that requires a checkpoint needs its own.';
       return refuse(
         refusal(
           'F501',
           name,
           capability,
-          stale
-            ? 'The last checkpoint was taken before this thread last went idle, and what it saved may have changed since.'
-            : 'Every earlier checkpoint has been used; each call that requires a checkpoint needs its own.',
-          `Call a 'checkpoint' tool, then call ${name} again.`,
+          message,
+          flow === null
+            ? `Call ${name} from a tool call, after a 'checkpoint' tool in the same execution.`
+            : `Call a 'checkpoint' tool, then call ${name} again.`,
         ),
         'F501',
       );

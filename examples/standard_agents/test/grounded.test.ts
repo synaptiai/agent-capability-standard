@@ -14,7 +14,7 @@ import verifyConfig from '../agents/tools/verify_config.js';
 import writeConfig from '../agents/tools/write_config.js';
 import { approvalState, decideApproval, readApproval } from '../src/acs/approval.js';
 import { digest } from '../src/acs/canonical.js';
-import { ANNOTATION_KEY, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
+import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
 import { CAPABILITIES, effectiveFlags } from '../src/acs/ontology.js';
 import { readCheckpoints, readTrace } from '../src/acs/records.js';
@@ -150,6 +150,45 @@ describe('checkpoint before mutation', () => {
     await checkpointConfig.execute(t.state, { label: 'just before the change' });
     data(await writeConfig.execute(t.state, CHANGE));
     expect((await readTrace(t.state)).at(-1)).toMatchObject({ flow_id: 'flow-2', checkpoint_id: 'cp-4' });
+  });
+
+  it('does not accept a checkpoint that is too old, or any outside an execution', async () => {
+    let clock = 0;
+    const now = () => clock;
+    const anchors = { evidence_anchors: [] };
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'x',
+      args: z.object({}),
+      now,
+      execute: async (_state, _args, call) => ({ checkpoint_id: `cp-${call.seq}`, ...anchors }),
+    });
+    const store = groundedTool({
+      name: 'store',
+      capability: 'persist',
+      flags: { requires_checkpoint: true },
+      description: 'x',
+      args: z.object({}),
+      now,
+      execute: async () => ({ stored: true, ...anchors }),
+    });
+    const t = thread();
+
+    // In one execution: valid at ten minutes, refused a millisecond later.
+    await save.execute(t.state, {});
+    clock = CHECKPOINT_MAX_AGE_MS + 1;
+    expect((await store.execute(t.state, {})).error).toMatch(/too long ago/);
+    await save.execute(t.state, {});
+    clock += CHECKPOINT_MAX_AGE_MS;
+    data(await store.execute(t.state, {}));
+
+    // Outside an execution there is no flow to tie a checkpoint to.
+    t.atRest();
+    await save.execute(t.state, {});
+    const result = await store.execute(t.state, {});
+    expect(result).toMatchObject({ status: 'error', error_code: 'F501' });
+    expect(result.error).toMatch(/not part of an execution/);
   });
 
   it('refuses a rollback when no checkpoint has run', async () => {

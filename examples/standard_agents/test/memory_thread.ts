@@ -16,6 +16,8 @@ export interface MemoryThread {
   queued: QueueMessageInput[];
   /** Start a new execution, as when an idle thread runs again. */
   newExecution(): void;
+  /** Leave any execution: `state.execution` is null, as in a thread endpoint. */
+  atRest(): void;
 }
 
 export function memoryThread(): MemoryThread {
@@ -24,13 +26,14 @@ export function memoryThread(): MemoryThread {
   const queued: QueueMessageInput[] = [];
 
   let flow = 1;
+  let executing = true;
   const implemented = {
     threadId: 'thread-1',
     agentId: 'config_steward',
     userId: 'owner',
     // Only the execution's identity is modelled.
     get execution() {
-      return { flowId: `flow-${flow}` };
+      return executing ? { flowId: `flow-${flow}` } : null;
     },
     getValue: async <T>(key: string): Promise<T | null> => {
       const stored = values.get(key);
@@ -72,6 +75,10 @@ export function memoryThread(): MemoryThread {
     queued,
     newExecution: () => {
       flow += 1;
+      executing = true;
+    },
+    atRest: () => {
+      executing = false;
     },
   };
 }

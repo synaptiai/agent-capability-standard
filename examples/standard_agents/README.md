@@ -95,9 +95,9 @@ wraps `execute` so that the call is refused until the capability's rules are
 met. The return type of `execute` is the capability's output contract: leaving
 out `evidence_anchors` is a compile error, and an error result at run time.
 
-A restore point counts only in the execution it was taken in, so the order
-that works is: ask, wait for the approval, then take the restore point and
-make the change. The example's prompt tells the model so, and a tool that is
+A restore point counts only in the execution it was taken in, and for ten
+minutes at most, so the order that works is: ask, wait for the approval, then
+take the restore point and make the change. The example's prompt tells the model so, and a tool that is
 refused says what is missing.
 
 ## Deploying one

@@ -68,7 +68,8 @@ export interface CheckpointRecord {
   /**
    * The execution (`state.execution.flowId`) it was taken in, or `null` when
    * taken outside one. A checkpoint authorises a call only within that
-   * execution: see `flowOf`.
+   * execution, so one taken outside an execution authorises nothing: see
+   * `flowOf`.
    */
   flow_id: string | null;
 }
