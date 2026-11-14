@@ -334,12 +334,13 @@ fail closed: a hook's "failures are non-fatal to the decorated turn".
 SA gives an author's code three other positions ahead of a tool call. Each
 has a cost:
 
-- **A provider extension.** An override of `generate` or `stream` receives
-  the executing thread's `state` and returns the response that carries the
-  tool calls
+- **A provider extension.** An override of `generate` or `stream` returns
+  the response that carries the tool calls
   ([Providers §1.3](https://standardagentspec.org/0.2.0/specification/providers#13-provider-extension-factories)),
-  so it could drop or replace a call. It belongs to a model definition, not to
-  an agent. It does not see calls made through `invokeTool` or `queueTool`, or
+  so it could drop or replace a call. It receives the thread's `state` only
+  "when the runtime has one"
+  ([Infrastructure: Providers](https://standardagentspec.org/0.2.0/infrastructure/providers#method-overrides)).
+  It belongs to a model definition, not to an agent. It does not see calls made through `invokeTool` or `queueTool`, or
   by a child's models, and the text does not say that a runtime executes only
   the calls an override returns.
 - **A handler-backed side.** Code takes that side's turns and can be the only
@@ -720,7 +721,7 @@ conformance impact). None has been filed yet.
 | **Let a tool know which call it is serving.** The call's id and name on `state.execution` while `execute` runs | Evidence, audit entries and idempotency keys tied to the stored tool result, without matching by order |
 | **Specify what `execute` returns, and add a metadata field.** Define `ToolResult` in the text, carry `error_code` and `error_data` through hooks and storage, and add `metadata` that is stored but not sent to the model | Refusal codes that clients can act on, and evidence that is not model-facing text |
 | **Annotations on agents and prompts, and on the call a hook receives.** The same inert field on `defineAgent` and then `definePrompt`, a tool's annotations passed to its hooks, and a stated subject for the rule, so that it reads as a requirement on runtimes | A composed agent that carries a classification, and hooks that can read a tool's |
-| **Editorial.** Nine places where two passages disagree, such as two sections numbered 14 on the Runtime page | Nothing for grounding; found while checking references |
+| **Editorial.** Ten places where two passages disagree, such as two sections numbered 14 on the Runtime page | Nothing for grounding; found while checking references |
 
 Other points the mapping turned up, not written up as proposals: how code
 creates a child (the call's name, arguments and return value are not
@@ -760,18 +761,32 @@ gaps of its own.
 3. **Make every binding compute effective flags the same way.** The Python
    `ToolCapabilityMapper.register_mcp_tool` accepts a declared risk below the
    ontology's (`mutate` with `risk: "low"` needs no checkpoint) and an unknown
-   capability id. This binding refuses both, as §5.2.1 requires.
+   capability id. This binding refuses both when a tool is defined; §5.2.1
+   gives a step's weaker declaration no effect and reports it as W602, an
+   unknown capability is V101, and the Standard states neither rule for a
+   tool. The mapper also classifies a tool name it does not know as
+   `observe`, with no checkpoint requirement, so an unregistered tool passes
+   the adapter's checkpoint rule even in strict mode; the adapter's own
+   high-risk fallback applies only when classification raises an error.
+   `ToolMapping` carries no `requires_approval`, and neither the adapter nor
+   the plugin hook asks for the approval the ontology requires of `execute`,
+   `mutate` and `send`.
 4. **Publish the contracts as strict JSON Schema.** The ontology's schemas use
    `type: any` and unions written `string|object`, which Draft 2020-12 tools
    reject. A generated strict rendering would let a Zod-based host derive or
    check tool schemas mechanically. `evidence_anchors` also needs an item
-   schema: the ontology says only `array`, and the Python SDK's anchor kinds
-   (`tool_output`, `file`, `command`, `mutation`) differ from the world state
-   schema's (`file`, `url`, `tool`, `log`, `sensor`, `human_note`).
+   schema: the ontology says only `array`, the Python SDK's anchor kinds
+   (`tool_output`, `file`, `command`, `mutation`, `coordination`) differ from
+   the world state schema's (`file`, `url`, `tool`, `log`, `sensor`,
+   `human_note`), and the event schema has a seventh kind, `api`, that the
+   world state schema lacks.
 5. **Ship the core for JavaScript.** A WebAssembly build of the validator and
    executor with a typed wrapper, taking parsed documents instead of file
-   paths, would let ACS workflows run inside a Standard Agents thread. This is
-   the roadmap's
+   paths, would let ACS workflows run inside a Standard Agents thread, on a
+   runtime whose definition code can load WebAssembly. What a tool-calling
+   binding needs is smaller and has no such dependency: the ontology table,
+   effective flags, canonical JSON and the digest, as a plain TypeScript
+   package generated from the ontology. This is the roadmap's
    [multi-language SDKs](https://github.com/synaptiai/agent-capability-standard/issues/83)
    item, with one data point: the crate already compiles for
    `wasm32-unknown-unknown` unchanged. The host protocol (actions, responses,
@@ -780,7 +795,38 @@ gaps of its own.
 6. **Say what crosses a delegation.** An invoked workflow "shares the caller's
    checkpoints"; nothing equivalent is said of a delegate. On Standard Agents
    a child's effects are outside its parent's checkpoints and rollback, and the
-   Standard should say so in §5.15.
+   Standard should say so in §5.15. The step's flags are the other half: the
+   ontology gives `delegate` `risk: medium` and `mutation: false`, with no
+   checkpoint or approval flag, whatever the target agent may do, so a change
+   handed to a delegate needs no approval in the delegating workflow unless
+   its author raises the step's flags by hand. A manifest of the capabilities
+   an agent may exercise would let a validator derive a `delegate` step's
+   flags from its target.
+7. **Say what applying a domain profile changes, or mark profiles
+   informative.** The Standard mentions profiles twice, as a descriptive
+   workflow field (§5.1) and as a `trust_weights` override (§8.3), and neither
+   the validator, the executor, the Python SDK nor the hooks reads one.
+   `risk_thresholds.require_human` admits `critical`, a level §4.1 does not
+   define, and the keys of `checkpoint_policy` are free-form. A binding
+   therefore cannot state that it applies a profile. A normative section would
+   say how a run selects one, that a profile only tightens effective flags, as
+   a step's declaration does in §5.2.1, and what each field changes.
+8. **Give secrets a rule.** Neither the Standard nor SECURITY.md states a rule
+   on secrets or redaction; the rules exist only as model instructions in
+   skill text. §6.2 requires an event's `raw` to be "Original unmodified
+   data", so a host that redacts before storing departs from the text, and one
+   that does not can write credentials into evidence and audit records: the
+   Python SDK stores a tool's input in anchor metadata, and the plugin's audit
+   hook logs skill arguments as given. The Standard should forbid secret
+   values in anchors, excerpts, diagnostics, audit records and persisted
+   memory, and say whether `raw` may hold a redacted payload as documented
+   loss under §3.2.
+
+These eight are the changes that matter most to a binding. The mapping
+produced 64 findings about ACS in all, seven of them rated as blocking for
+someone implementing the standard on a host it was not designed around; they
+are listed, with evidence, in
+[`findings_agent_capability_standard.yaml`](../research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml).
 
 Standard Agents also does several things ACS could learn from: numbered,
 testable runtime rules for storage; `uses`, a declared and enforced list of
@@ -813,7 +859,9 @@ continued instead of restarted.
 - **Findings.** The gaps the ten concerns recorded, 259 in all, were merged
   into 83 findings about the Standard Agent Specification and 64 about ACS.
   Each was checked against the sources again, by running code where that was
-  the way to check.
+  the way to check. The 221 questions the concerns left open were checked the
+  same way: 22 turned out to be answered by the texts, and the 45 that an
+  implementer most needs answered are listed with the findings.
 - **This document.** After the reviews, a separate reader checked every
   factual statement here and in the six proposals against the sources. It
   confirmed 340 and found 6 errors, 18 imprecise statements and 11 omissions,

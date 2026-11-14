@@ -26,12 +26,13 @@ caused it:
   hook or a client can later match to the tool result message;
 - the name of a file it writes for this call.
 
-There are two workarounds, and both are fragile. A `tool_call_done` hook can
+There are three workarounds, and each is fragile. A `tool_call_done` hook can
 match records by order, assuming that the oldest unmatched record a tool
 wrote belongs to the call the hook is being told about. That relies on
 sequential execution, breaks if a hook invocation is lost (hook failures are
 non-fatal), and cannot be used from inside the tool. A tool can also look for
-its own call in the history; see Alternatives.
+its own call in the history, or be handed it through the shared execution
+context; see Alternatives.
 
 ## Proposed rule
 
@@ -54,9 +55,23 @@ interface ExecutionState {
 
 ## Alternatives considered
 
-- **A third parameter to `execute`.** Equivalent. A property on
-  `state.execution` keeps the `execute(state, args)` signature and is also
-  visible to helper functions that only receive `state`.
+- **A third parameter to `execute`.** Equivalent as long as tool executions
+  on a thread never overlap. Runtime §5.1 requires that for the calls a model
+  returns; the text does not say whether two `state.invokeTool()` calls
+  awaited together may run at once. If they may, only a parameter identifies
+  each call. Otherwise a property on `state.execution` keeps the
+  `execute(state, args)` signature and is also visible to helper functions
+  that only receive `state`.
+- **Pass the call through `state.context`.** A `tool_call_started` hook
+  receives the call and can append its id and name to a list in
+  `state.context`, which tools and hooks share during one execution
+  ([Threads §6.2](https://standardagentspec.org/0.2.0/specification/threads#62-per-execution-context));
+  each tool then takes the next entry. Every tool on the thread has to take
+  its entry, including tools from other packages. The hook has to be listed
+  on the agent and on every prompt that lists hooks of its own. The text does
+  not say that the hook fires in the order the calls execute, or that it has
+  settled before `execute` starts. A failed hook invocation shifts every
+  later match.
 - **Match by order from a hook.** Described above; fragile, and not available
   to the tool.
 - **Read the call from the history.** The assistant response is persisted
@@ -83,6 +98,11 @@ interface ExecutionState {
    [qualified name](https://standardagentspec.org/0.2.0/distribution/packaging#qualified-names)?
    It should be whichever `HookToolCall.function.name` carries for the same
    call.
+4. An idempotency key needs two properties of the id that the text does not
+   state. Within what scope is a tool call id unique: the response, the
+   thread, or the runtime? And does the run that follows a lost execution
+   ("a later recovery run", Execution State §4.3) execute a persisted call
+   again under the same id, or ask the model again?
 
 ## Conformance impact
 

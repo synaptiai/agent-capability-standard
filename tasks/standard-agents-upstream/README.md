@@ -18,7 +18,7 @@ specification", so each addition proposed here would apply from that version.
 | [03](03-tool-call-identity.md) | Let a tool know which call it is serving | Lets a tool's own records (evidence, audit, idempotency keys) be tied to the stored tool result | One optional property |
 | [04](04-tool-result-contract.md) | Specify what a tool's `execute` returns, and give results a field for metadata | Gives refusal codes and evidence a defined place that is not model-facing text | Text, plus one optional field |
 | [05](05-annotations.md) | Annotations: allow them on agents and prompts, pass a tool's to its hooks, and say whom the rule binds | Lets a composed agent carry a classification, and lets a hook read a tool's | Three optional fields, one reworded sentence |
-| [06](06-editorial-inconsistencies.md) | Nine inconsistencies in the 0.2.0 text | None directly; found while checking references | Editorial |
+| [06](06-editorial-inconsistencies.md) | Ten inconsistencies in the 0.2.0 text | None directly; found while checking references | Editorial |
 
 ## Order
 

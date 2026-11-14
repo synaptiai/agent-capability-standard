@@ -147,6 +147,8 @@ findings:
     268-284 and 850-861, and schemas/workflow_catalog.yaml lines 1674-1690.'
   concerns:
   - multi-agent
+  related:
+  - ACS-18
 - id: ACS-05
   title: Domain profiles have no application semantics, undefined thresholds and free-form policy keys
   priority: blocker
@@ -186,6 +188,8 @@ findings:
   - checkpoint-rollback-state
   - evidence-audit-observability
   - models-context-memory-security
+  related:
+  - ACS-06
 - id: ACS-06
   title: '`evidence_anchors` has no item schema, and the anchor vocabularies in the repository disagree'
   priority: blocker
@@ -224,6 +228,9 @@ findings:
   - published-api-extension-points
   - evidence-audit-observability
   - models-context-memory-security
+  related:
+  - ACS-05
+  - ACS-62
 - id: ACS-07
   title: Python tool mapper classifies unknown tools as `observe` and lets declarations weaken ontology
     flags
@@ -290,6 +297,8 @@ findings:
     returns the §9.8 object with `location: { tool, capability }`.'
   concerns:
   - safety-enforcement
+  related:
+  - ACS-09
 - id: ACS-09
   title: §9.8 does not define the keys of a diagnostic's `location`
   priority: important
@@ -320,6 +329,8 @@ findings:
     and core/src/diag.rs lines 110-132.'
   concerns:
   - packaging-conformance-governance
+  related:
+  - ACS-08
 - id: ACS-10
   title: §5.14 does not state the request made for a step with no `approval` field
   priority: important
@@ -350,6 +361,8 @@ findings:
     expectation holds `kind`, `step`, `mode` and `shown`.'
   concerns:
   - approval-human
+  related:
+  - ACS-11
 - id: ACS-11
   title: The §5.14 digest input is under-specified and no conformance fixture pins a digest
   priority: important
@@ -384,6 +397,8 @@ findings:
     is current.
   concerns:
   - approval-human
+  related:
+  - ACS-10
 - id: ACS-12
   title: Approvers are bare strings with no identity, role or authentication check
   priority: important
@@ -614,6 +629,8 @@ findings:
   document_item: 6
   concerns:
   - multi-agent
+  related:
+  - ACS-04
 - id: ACS-19
   title: '`send` requires a checkpoint, but rollback of a transmission is undefined'
   priority: important
@@ -646,6 +663,9 @@ findings:
     identical `inputs` (`attempt` 1 and 2) and one approval request, and the run completed.'
   concerns:
   - checkpoint-rollback-state
+  related:
+  - ACS-26
+  - ACS-31
 - id: ACS-20
   title: No rule for evidence capture failure outside `audit`; failed runs end without audit
   priority: important
@@ -679,6 +699,9 @@ findings:
     for failed calls too).'
   concerns:
   - evidence-audit-observability
+  related:
+  - ACS-26
+  - ACS-48
 - id: ACS-21
   title: '`inference_method` is carried by no schema, and F505 is never raised'
   priority: important
@@ -781,6 +804,9 @@ findings:
   - tools-contracts
   - evidence-audit-observability
   - models-context-memory-security
+  related:
+  - ACS-36
+  - ACS-52
 - id: ACS-24
   title: The step field `domain` has no grammar, registry or matching rule
   priority: important
@@ -885,6 +911,10 @@ findings:
     403) leaves file capture to the Claude Agent SDK.'
   concerns:
   - checkpoint-rollback-state
+  related:
+  - ACS-19
+  - ACS-20
+  - ACS-48
 - id: ACS-27
   title: '`persist` and `recall` have no storage scope, and `ttl` has no grammar'
   priority: important
@@ -1018,6 +1048,9 @@ findings:
     calls the runtime fixtures, which include the trace, informative.'
   concerns:
   - evidence-audit-observability
+  related:
+  - ACS-37
+  - ACS-60
 - id: ACS-31
   title: No stated host obligations for single writer, snapshot persistence, idempotency and interruption
   priority: important
@@ -1054,6 +1087,10 @@ findings:
     the identical pending action, id included, at 968 of 968 points.'
   concerns:
   - workflow-execution
+  related:
+  - ACS-19
+  - ACS-32
+  - ACS-34
 - id: ACS-32
   title: The host protocol has no way to end a run as cancelled
   priority: important
@@ -1085,6 +1122,8 @@ findings:
     restore, next, submit, tick, finished, trace, action_records, snapshot.'
   concerns:
   - workflow-execution
+  related:
+  - ACS-31
 - id: ACS-33
   title: Run snapshots grow with the run and have no documented size model
   priority: important
@@ -1150,6 +1189,8 @@ findings:
     were unchanged at the deadline and changed after it; `Sleep` changed at `until`.'
   concerns:
   - workflow-execution
+  related:
+  - ACS-31
 - id: ACS-35
   title: A saved run can be restored under a different actor; handoff is unrepresented
   priority: important
@@ -1220,6 +1261,9 @@ findings:
   concerns:
   - safety-enforcement
   - models-context-memory-security
+  related:
+  - ACS-23
+  - ACS-52
 - id: ACS-37
   title: The host protocol is defined only in a guide, and conformance covers validators only
   priority: important
@@ -1259,6 +1303,9 @@ findings:
   - workflow-execution
   - multi-agent
   - packaging-conformance-governance
+  related:
+  - ACS-30
+  - ACS-60
 - id: ACS-38
   title: No normative tool-to-capability binding record, and no statement that a declaration only strengthens
     flags
@@ -1337,6 +1384,8 @@ findings:
   document_item: 2
   concerns:
   - tools-contracts
+  related:
+  - ACS-57
 - id: ACS-40
   title: The evidence store has no host-neutral contract
   priority: important
@@ -1630,6 +1679,9 @@ findings:
     `stored: false`: the step completed and the run went on.'
   concerns:
   - checkpoint-rollback-state
+  related:
+  - ACS-20
+  - ACS-26
 - id: ACS-49
   title: Workflow catalogs and profiles have no package or namespace model
   priority: minor
@@ -1750,6 +1802,9 @@ findings:
     `constrain` step: the host received the destination unchanged.'
   concerns:
   - models-context-memory-security
+  related:
+  - ACS-23
+  - ACS-36
 - id: ACS-53
   title: Retention fields assume a store that outlives the session
   priority: minor
@@ -1904,6 +1959,8 @@ findings:
     document names `uses` in the unnumbered paragraph that follows item 6, not in a numbered item.
   concerns:
   - tools-contracts
+  related:
+  - ACS-39
 - id: ACS-58
   title: No defined notification for newly recorded evidence
   priority: minor
@@ -1993,6 +2050,9 @@ findings:
     fixtures that name an approval kind: 11, of which 8 name `approval_requested`.'
   concerns:
   - approval-human
+  related:
+  - ACS-30
+  - ACS-37
 - id: ACS-61
   title: No guide maps delegation waiting style and instance caps to a host
   priority: minor
@@ -2060,6 +2120,8 @@ findings:
     R402).
   concerns:
   - models-context-memory-security
+  related:
+  - ACS-06
 - id: ACS-63
   title: Terms with different meanings in the two specifications are not disambiguated in a glossary
   priority: minor
@@ -2114,3 +2176,170 @@ findings:
     Found by the coverage check, which looked for sections of the Standard that no mapping row cites.
   concerns:
   - evidence-audit-observability
+questions:
+- id: ACS-Q01
+  question: 'For a guard over tool calls outside a workflow: does §5.2.1 bind it; are `requires` and `precedes`
+    evaluated over one execution, one session or the thread''s lifetime; and is a `precedes` violation,
+    visible only at the later call, refused, reported or ignored?'
+  refs:
+  - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (line 279)
+  - spec/STANDARD-v1.1.0.md §2 Terms (lines 67-68)
+  - spec/STANDARD-v1.1.0.md §4.3 Edge Types and Dependency Semantics (lines 159-170)
+  depends: The history a guard keeps and searches before each call, when that history is cleared, and
+    whether a call that breaks an ordering edge is refused with V102 or only logged.
+  finding: ACS-01
+- id: ACS-Q02
+  question: 'Is one checkpoint per gated step normative for every host, or host-defined? If normative:
+    is it consumed before the step runs (executor) or after it succeeds (SDK adapter), and with no valid
+    checkpoint does a tool-call layer refuse (hook, adapter) or create one (executor)?'
+  refs:
+  - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 85-88)
+  - spec/STANDARD-v1.1.0.md §5.13 (lines 777-781)
+  - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces', Checkpoints (lines 145-148)
+  - core/src/exec/machine.rs checkpoint() (lines 663-677)
+  - grounded_agency/adapter.py PreToolUse hook (lines 612-630), PostToolUse consumer (lines 660-698)
+  depends: Whether a guard marks a checkpoint used and when, whether a failed call gives it back, and
+    whether a missing checkpoint yields F501 or a checkpoint taken on the caller's behalf.
+  finding: ACS-02
+- id: ACS-Q03
+  question: For a tool-level guard, when a model calls one tool several times with identical arguments,
+    is approval one decision per call, single use as §5.14 states for a step, or one decision per digest
+    until it expires?
+  refs:
+  - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 831-833)
+  - examples/standard_agents/src/acs/approval.ts consumeApproval
+  depends: Whether the guard stores a used-decision marker per call or per digest, and whether a repeated
+    identical call is refused with F502 until a person decides again.
+  finding: ACS-03
+- id: ACS-Q04
+  question: 'Which classification applies to a tool with no capability binding: non-mutating `observe`
+    at medium risk, as `ToolCapabilityMapper.map_tool` returns, or the high-risk mutation the adapter
+    assumes when classification raises an error?'
+  refs:
+  - grounded_agency/capabilities/mapper.py map_tool, unknown tool (lines 369-375)
+  - grounded_agency/adapter.py `_UNCLASSIFIED_TOOL` (lines 192-200)
+  - examples/standard_agents/src/acs/lint.ts lintPromptTools, `unclassified`
+  depends: Whether an unbound tool runs with no check, is refused in strict mode, or needs a checkpoint.
+    The reference binding reports it as a lint warning and applies no rule to its calls.
+  finding: ACS-07
+- id: ACS-Q05
+  question: 'What may an item of a capability''s `evidence_anchors` be: a string, an `Anchor` object as
+    in event_schema.yaml, or a host-defined reference such as `message:<id>`? Does an empty list satisfy
+    §3.1?'
+  refs:
+  - schemas/capability_ontology.yaml `retrieve` output, `evidence_anchors` (lines 133-135)
+  - spec/STANDARD-v1.1.0.md §6.2 Observation Requirements (lines 1123-1126)
+  - spec/STANDARD-v1.1.0.md §3.1 Grounded Claims (lines 76-77)
+  - templates/SKILL_TEMPLATE_ENHANCED.md (lines 50, 65, 75)
+  - core/src/exec/machine.rs (line 1640)
+  depends: The item type a binding emits and validates, the `ref` scheme it uses for host artefacts, and
+    whether a capability output with no anchors is accepted or refused.
+  finding: ACS-06
+- id: ACS-Q06
+  question: Is a domain profile normative? If so, do `auto_approve`, `require_review`, `require_human`
+    and `block_autonomous` change effective `requires_approval` and §5.14, and what do the keys of `checkpoint_policy`
+    and the level `critical` denote?
+  refs:
+  - spec/STANDARD-v1.1.0.md §5.1 (line 225)
+  - spec/STANDARD-v1.1.0.md §8.3 (lines 1249-1251)
+  - spec/STANDARD-v1.1.0.md §4.1 (line 120)
+  - schemas/profiles/profile_schema.yaml risk_thresholds, checkpoint_policy (lines 35-61)
+  depends: Whether a host reads a profile at all and, if it does, which steps it sends to a person, which
+    capabilities it refuses to run unattended and where it takes checkpoints.
+  finding: ACS-05
+- id: ACS-Q07
+  question: 'Which capability classifies each of: a write to a remote system through an API (`mutate`
+    or `send`); a write to the host''s own durable store (`persist` or `mutate`); a message to an existing
+    delegate (`delegate` or `send`); a tool that only signals control, such as a stop tool?'
+  refs:
+  - schemas/capability_ontology.yaml nodes `mutate` (lines 1095-1101), `send` (lines 1133-1139), `persist`
+    (lines 1376-1379), `delegate` (lines 1443-1447)
+  - grounded_agency/capabilities/mapper.py `_NETWORK_SEND_PATTERNS` (lines 55-57)
+  - skills/send/SKILL.md frontmatter `description` (line 3)
+  depends: Whether such a tool needs a checkpoint and an approval (`mutate`, `send`) or neither (`persist`,
+    `delegate`), and which capability name `requires` edges and audit records carry.
+  finding: ACS-39
+- id: ACS-Q08
+  question: May a per-call classifier return, for one input, a capability with weaker flags than the tool's
+    declared worst case, as the SDK's Bash classifier does for read-only commands, or does "cannot weaken"
+    (§3.3, §5.2.1) extend to a tool's declaration?
+  refs:
+  - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (line 93)
+  - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 272-277)
+  - grounded_agency/capabilities/mapper.py `_classify_bash_command` (line 377)
+  depends: Whether a binding gates every call of a tool by its worst case, or reads the arguments first
+    and lets a read-only call through with no checkpoint or approval.
+  finding: ACS-39
+- id: ACS-Q09
+  question: Do a delegator's checkpoints and `rollback` cover what a delegate changes, as an invoked run
+    "shares the caller's checkpoints" (§5.13), or does a delegate that mutates take its own?
+  refs:
+  - spec/STANDARD-v1.1.0.md §5.13 (lines 786-790)
+  - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 917-922)
+  depends: Whether a parent's rollback must reach into a child's state, and whether a child agent needs
+    a checkpoint tool of its own before it may mutate.
+  finding: ACS-18
+- id: ACS-Q10
+  question: 'How does a host establish `attendance` for a model-driven thread that no trigger started:
+    is a run attended when a person can answer, or only when one is present in the session at the moment
+    approval is asked?'
+  refs:
+  - spec/STANDARD-v1.1.0.md §5.10 Triggers (line 577)
+  - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 839-844)
+  - docs/guides/ORCHESTRATION_EXTENSIONS.md 'Triggers (`triggers@1`)' (lines 68-69)
+  - grounded_agency/workflows/runner.py start() (line 240)
+  depends: Whether a guard asks a `human` approver and waits, or applies `when_unattended` at once (F502
+    by default). On Standard Agents a human-backed side shows that someone can answer, not that someone
+    is there.
+- id: ACS-Q11
+  question: May a canonical event's `raw` hold a payload from which the host has removed secrets, with
+    the removal recorded as documented loss under §3.2, or does "Original unmodified data" in §6.2 forbid
+    it?
+  refs:
+  - spec/STANDARD-v1.1.0.md §6.2 Observation Requirements (line 1136)
+  - spec/STANDARD-v1.1.0.md §3.2 Auditable Transforms (lines 79-82)
+  depends: Whether a host redacts before it stores an event, which §6.2 as written rules out, or stores
+    the payload as received, which can put credentials into evidence and audit records.
+  finding: ACS-23
+- id: ACS-Q12
+  question: What does a host answer for the pending action when its own execution is stopped, terminated
+    or deleted, and does a run ended that way attempt a rollback to the latest checkpoint?
+  refs:
+  - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 81-92)
+  - grounded_agency/_core.pyi `Run` (lines 39-68)
+  - spec/STANDARD-v1.1.0.md §9.5 Runtime Errors (lines 1306-1315)
+  depends: Whether a stopped thread answers `Error` and lets retries and failure modes run, leaves the
+    run unanswered, or ends it with a recorded cause; and whether what the run changed so far is restored.
+  finding: ACS-32
+- id: ACS-Q13
+  question: Must an executor run the members of a `parallel_group` concurrently, or does running them
+    in list order, as the reference executor does, conform? Which values of `join` are defined, and what
+    does each do to members that have not finished?
+  refs:
+  - spec/STANDARD-v1.1.0.md §4.3 Edge Types and Dependency Semantics (lines 159-161)
+  - spec/STANDARD-v1.1.0.md §5.2 (lines 256-257)
+  - docs/GLOSSARY.md 'Parallel Group' (lines 300-303)
+  - core/src/exec/mod.rs check_state (lines 735-737)
+  depends: Whether an executor needs concurrent dispatch and a join rule, and whether a host that maps
+    group members to separate agents may start them one after another.
+  finding: ACS-15
+- id: ACS-Q14
+  question: 'Are the strings in a decision''s `approvers` meant to be principals (§5.15), so that `min_approvers`
+    counts distinct authenticated parties, or free names, as in the guide''s example `"approvers": ["alice"]`?'
+  refs:
+  - schemas/world_state_schema.yaml ActionRecord.approval.approvers (lines 393-397)
+  - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 831-833)
+  - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 932-934)
+  - docs/guides/RUNNING_WORKFLOWS.md (line 52)
+  depends: 'Whether a host records the authenticated caller''s identifier or a display name, and so whether
+    one person under two names can satisfy `min_approvers: 2`.'
+  finding: ACS-12
+- id: ACS-Q15
+  question: Is `acs` the final annotation key on a Standard Agents tool, or will it be replaced by a name
+    the project controls, such as an npm package name or a domain name?
+  refs:
+  - schemas/interop/standard_agents_annotation.schema.json `description` (line 5)
+  - examples/standard_agents/src/acs/grounded.ts `ANNOTATION_KEY`
+  - 'SA: content/0.2.0/specification/tools.md §8 Annotations (lines 125, 143)'
+  depends: The key every annotated tool carries and every reader looks up. A rename after packages are
+    published leaves their tools unclassified to a reader of the new key.

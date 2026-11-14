@@ -9,6 +9,9 @@ passing:
 - the published `@standardagents/spec` types (0.45.10, `SPEC_VERSION` 0.2.0)
   declare `ToolResult` with `status`, `result`, `error`, `error_code`,
   `error_data`, `stack` and `attachments`;
+- [Threads §1.2.2](https://standardagentspec.org/0.2.0/specification/threads#122-methods)
+  gives `invokeTool` the return type `Promise<ToolResult>`, a type the text
+  never defines;
 - an example in
   [Runtime Streams](https://standardagentspec.org/0.2.0/specification/threads/runtime-streams)
   returns `{ status: 'error', error: opened.error, error_code: opened.code }`;
@@ -55,6 +58,24 @@ interface ToolResult {
 }
 ```
 
+Define `ToolAttachment` beside it, as published. Hooks §6.3 names the type
+and the text does not define it:
+
+```typescript
+interface ToolAttachment {
+  name: string;
+  mimeType: string;
+  data: string;      // base64-encoded
+  width?: number;    // pixels, for images
+  height?: number;
+}
+```
+
+Subagents §5.1 and §5.2 can then say that the structured errors they require
+are `ToolResult` values with `status: 'error'` and the named code in
+`error_code` (`subagent_arguments_required`, `subagent_env_required`); the
+request ID of §5.2 goes in `error_data`.
+
 **2. Align `HookToolResult` with it.** Hooks that receive a result **MUST**
 receive `error_code` and `error_data` when the tool returned them, and a hook
 that replaces a result may set them.
@@ -63,7 +84,9 @@ that replaces a result may set them.
 **MUST** keep `error_code` and `error_data` with the tool result message, so
 that `getMessages()` and a client reading the thread can see them. Naming the
 place is a decision for the maintainers; `metadata.error_code` and
-`metadata.error_data` on the message would need no new message field.
+`metadata.error_data` on the message would need no new message field. Say
+also which fields of an error result are sent to the model: `error` alone, or
+`error` with `error_code`.
 
 **4. Add an optional `metadata` field to `ToolResult` and `HookToolResult`:**
 
@@ -76,6 +99,10 @@ metadata?: Record<string, unknown>; // JSON-serialisable
 - The runtime **MUST NOT** include it in what is sent to the model.
 - Keys are owned by whoever writes them, as tool `annotations` are: the
   specification defines none.
+- Where a key of the result's `metadata` equals a key the runtime itself
+  writes on the message (`status_kind`, the provenance keys of Messages §1.1,
+  and `error_code` / `error_data` if part 3 places them in `metadata`), the
+  runtime's value **MUST** win. Every other key is copied as the tool gave it.
 
 ## Alternatives considered
 

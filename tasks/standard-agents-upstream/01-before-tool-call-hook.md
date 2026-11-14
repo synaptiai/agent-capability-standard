@@ -91,6 +91,9 @@ been validated against the tool's schema, and before the tool executes.
   ([Runtime §5.2](https://standardagentspec.org/0.2.0/infrastructure/runtime#52-error-handling)).
 - Hooks run in the order of
   [Hooks §1.3](https://standardagentspec.org/0.2.0/specification/hooks#13-hook-scoping).
+  That section orders the sources of hooks and does not order two hooks of
+  one type listed in one `hooks` array. The first-result rule above needs
+  that order as well: within one array, hooks run in array order.
   A child may require one on its parent through `parentHooks`.
 - Hooks §1.2 already requires that `hook` "**MUST** reference one of the hook
   types in §1.1", and the published `defineHook()` throws for a type it does
@@ -103,7 +106,8 @@ Scope, to keep the rule small:
 - It covers tool calls the runtime executes. Provider tools "execute
   server-side"
   ([Providers §10](https://standardagentspec.org/0.2.0/specification/providers#10-provider-tools))
-  and are out of reach of any runtime hook.
+  and have already run when the response reaches the runtime, so no runtime
+  hook can decline them.
 - It covers the thread whose prompt or agent lists the hook. A hook a child
   requires of its parent runs with the parent's `ThreadState`
   ([Agents §6](https://standardagentspec.org/0.2.0/specification/agents#6-required-parent-hooks)),
@@ -137,9 +141,13 @@ Two properties are deliberate.
   applied to a tool one did not write, and every tool author has to remember
   it.
 - **A provider extension that filters tool calls.** An override of `generate`
-  or `stream` receives the executing thread's `state` and returns the
-  response that carries the calls
+  or `stream` returns the response that carries the calls
   ([Providers §1.3](https://standardagentspec.org/0.2.0/specification/providers#13-provider-extension-factories)).
+  The request-scoped overrides "additionally receive the executing thread's
+  `state` on their context when the runtime has one"
+  ([Infrastructure: Providers, Method Overrides](https://standardagentspec.org/0.2.0/infrastructure/providers#method-overrides));
+  the context that Providers §1.3 lists has no `state`, and the published
+  type makes it optional, so an override cannot count on thread state.
   It belongs to a model definition, not to an agent; it has to rewrite a
   stream; the stored assistant message no longer shows what the model asked
   for; it does not see calls made through `invokeTool` or `queueTool`, or by
@@ -155,6 +163,12 @@ Two properties are deliberate.
 - **Give `tool_call_started` a return value.** It fires before the arguments
   are complete, by design, so that a UI can show progress early. A gate needs
   the complete, validated arguments.
+- **Stop the run from `tool_call_started`.** The hook receives `state`, so it
+  can call `state.execution.stop()` or `state.terminate()`. That ends the
+  run, or terminates the thread, where a gate should decline one call. The
+  hook may fire before the arguments are complete, and the text does not say
+  that the runtime waits for the hook before it executes the tool, or that a
+  stop prevents the calls already returned in the same response.
 - **Declarative fields on the tool** (for example a "needs confirmation"
   flag). This would put one policy into the specification. A hook leaves
   policy in userland, in the same way the Handlers page leaves outbound
@@ -173,6 +187,13 @@ Two properties are deliberate.
 3. Is `hook_blocked` meant for this, or for a hook that ends the run? If the
    latter, that behaviour needs its own rule; this proposal does not end the
    run.
+4. When a hook returns a result for a call to a tool that a side names in
+   `stopTool`, `sessionStop`, `sessionFail` or `sessionStatus`, does the
+   binding still take effect? Agents §3 and §4 do not say whether a binding
+   applies when its tool returns `status: 'error'`. If it does, a declined
+   `sessionStop` call still ends the session and forwards the model-supplied
+   `messageProperty` argument to the parent. A gate that declines such a call
+   needs the answer to be no.
 
 ## Conformance impact
 

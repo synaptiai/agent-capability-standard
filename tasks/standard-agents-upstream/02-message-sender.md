@@ -20,8 +20,9 @@ A `role: 'user'` message can have been created by any of these:
 The record ([Messages §1](https://standardagentspec.org/0.2.0/specification/threads/messages#1-message-structure))
 already answers part of this. `prompt` is the "Name of the prompt that
 produced the message", and `subagent_id` with the projected `subagent_*`
-fields relate a message to a child. The one case it does not cover is the
-first: a message a client sent. The send route requires "an authenticated
+fields relate a message to a child. It does not cover the first case, a
+message a client sent, and that is the one case only the runtime can attest.
+The send route requires "an authenticated
 caller"
 ([Thread Client API §3.1](https://standardagentspec.org/0.2.0/specification/threads/client-api#31-authentication-and-access)),
 so the runtime has resolved who that caller is, and the stored message does
@@ -97,7 +98,9 @@ for the request is kept with the message the request created.
 
 Agents §1.1 could then say which messages fulfil a human-backed side's turn:
 any message on that side's perspective, and code that needs a client's answer
-checks `user_id`. This documents today's behaviour and needs no new one.
+checks `user_id`. Agents §1.1 reads that way today. Agents §4 and §7 and
+Runtime §3 speak of "the human's inbound message", so the sentence would also
+settle which of the two readings a runtime follows.
 
 ### One thing to decide
 
@@ -125,7 +128,9 @@ choose deliberately: either state that it is intended, or let a runtime omit
 - **A `sender` object that classifies every message** (client, model, tool,
   package code, another thread). The record already says which prompt
   produced a message and which child it relates to, so most of such a
-  classification would repeat it. Only the client case is missing.
+  classification would repeat it. The client case is the one that only the
+  runtime can fill in; with it, code can tell a client's message from every
+  other.
 
 ## Conformance impact
 

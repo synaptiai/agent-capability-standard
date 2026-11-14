@@ -1,8 +1,8 @@
-# Nine inconsistencies in the 0.2.0 text (numbering, cross-references, requirement levels)
+# Ten inconsistencies in the 0.2.0 text (numbering, cross-references, requirement levels)
 
 Small corrections found while reading 0.2.0 closely. Each is a place where
 two passages disagree, so an implementer cannot tell which to follow. Items 1
-to 3 are mechanical; 4 to 9 need a decision.
+to 3 are mechanical; 4 to 10 need a decision.
 
 ## 1. The Runtime page has two sections numbered 14
 
@@ -51,6 +51,14 @@ anchor does not resolve.
 **Suggested fix:** use MUST in both. A cap that a runtime may ignore is not a
 cap an agent author can rely on.
 
+The same two pages differ on argument validation, in the other direction.
+[Subagents §5.1](https://standardagentspec.org/0.2.0/specification/subagents#51-persistent-invocation-arguments):
+"runtimes **MUST** validate them against the schema and persist the validated
+arguments for the life of the child thread."
+[Runtime §7.4](https://standardagentspec.org/0.2.0/infrastructure/runtime#74-initial-payload-mapping):
+"`subagent_create.arguments` should be validated against the `requiredSchema`
+of the child's side A prompt". **Suggested fix:** use MUST in Runtime §7.4.
+
 ## 5. The order of child-required hooks is described two ways
 
 - [Hooks §1.3](https://standardagentspec.org/0.2.0/specification/hooks#13-hook-scoping):
@@ -85,8 +93,8 @@ channel that Subagents §6.4 has in mind, or a violation of item 3.
 **Suggested fix:** reword item 3 to say what is isolated (a thread's own
 `getValue` and `setValue` never resolve another thread's keys, and nothing is
 inherited or copied), and state whether a `ThreadState` obtained through
-`getParentThread()` or `getChildThread()` may read and write that thread's
-store. The same question applies to its file system.
+`getParentThread()`, `getChildThread()` or the `childState` argument of
+`after_subagent_created` may read and write that thread's store. The same question applies to its file system.
 
 ## 7. Where thread endpoints are mounted
 
@@ -122,7 +130,8 @@ SHOULD ([Runtime, Thread Client API](https://standardagentspec.org/0.2.0/infrast
 describes `parallelToolCalls` as "Allow parallel tool execution".
 [Runtime §5.1](https://standardagentspec.org/0.2.0/infrastructure/runtime#51-ordering)
 says "Tool calls **MUST** execute sequentially in the returned order", and
-Tools §9 says the same.
+Tools §9 requires implementations to "execute local tools sequentially in the
+order they were returned", without defining a local tool.
 
 The sentence after the Prompts table suggests the intent: "An explicit
 `parallelToolCalls` value controls the provider option." That option lets a
@@ -131,4 +140,21 @@ them at once.
 
 **Suggested fix:** describe the property as "Allow the model to return
 several tool calls in one response; the runtime still executes them in
-order."
+order." The comment on `parallelToolCalls` in the published types ("Allow
+parallel execution of multiple tool calls.") needs the same wording.
+
+## 10. Whether a handoff activates `parentHooks`
+
+- [Agents §6](https://standardagentspec.org/0.2.0/specification/agents#6-required-parent-hooks):
+  "Declaring a `SubagentRelationship` targeting the agent (or adding it to an
+  enabled parent prompt as a handoff) is what composes it, and composing it
+  **MUST** activate every `parentHooks` requirement automatically."
+- [Hooks §1.3](https://standardagentspec.org/0.2.0/specification/hooks#13-hook-scoping):
+  "A child contributes hooks only when its entry agent is the target of an
+  enabled direct subagent relationship on either side."
+
+Runtime §7.3.1 and Packaging also name only subagent relationships.
+
+**Suggested fix:** say in one place whether adding an exposed agent to a
+prompt as a handoff activates its `parentHooks`, and make the four passages
+agree.

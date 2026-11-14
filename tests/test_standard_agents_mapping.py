@@ -228,6 +228,8 @@ def test_findings_match_the_index_and_have_the_documented_fields(
                 "verified",
                 "note",
             }, where
+            for other in finding.get("related", []):
+                assert other in ids and other != finding["id"], where
             counted[finding["priority"]] = counted.get(finding["priority"], 0) + 1
         assert counted == entry["priorities"], about
         for q in doc.get("questions", []):

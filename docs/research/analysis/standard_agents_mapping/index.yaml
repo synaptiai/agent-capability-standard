@@ -43,12 +43,13 @@ meta:
     quote: A verbatim passage, when the finding rests on one.
     searched: 'For an absence: what was searched for, and where.'
     proposed_change: The smallest change that would resolve the finding.
-    disposition: 'Standard Agent Specification findings only. proposal: one of the six drafted issues
-      asks for the change (tasks/standard-agents-upstream/). not_proposed: no issue asks for it, with
-      the reason. candidate: worth an issue of its own.'
+    disposition: 'Standard Agent Specification findings only. proposal: one of the drafted issues asks
+      for the change (tasks/standard-agents-upstream/). not_proposed: no issue asks for it, with the reason.
+      candidate: would stand as an issue of its own; not drafted.'
     document_item: 'Agent Capability Standard findings only: the numbered item in the integration document''s
       list of proposed changes that states the finding.'
     concerns: The concerns whose mapping produced the finding.
+    related: Findings that ask for the same change in part.
   references: Paths under content/ and src/ are in the Standard Agent Specification repository at the
     commit above. Other paths are in this repository at the commit above, and line numbers refer to those
     commits. The exceptions are the files this analysis added (examples/standard_agents/, schemas/interop/standard_agents_annotation.schema.json,
@@ -157,7 +158,7 @@ findings:
     priorities:
       important: 29
       minor: 54
-    questions: 0
+    questions: 30
   agent_capability_standard:
     file: findings_agent_capability_standard.yaml
     findings: 64
@@ -165,7 +166,7 @@ findings:
       blocker: 7
       important: 36
       minor: 21
-    questions: 0
+    questions: 15
 not_mapped:
 - standard: acs
   ref: schemas/capability_ontology.yaml nodes[id=predict] (lines 406-448), nodes[id=discover] (lines 493-533),

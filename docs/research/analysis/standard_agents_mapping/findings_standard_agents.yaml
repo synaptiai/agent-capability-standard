@@ -134,6 +134,8 @@ findings:
   - safety-enforcement
   - evidence-audit-observability
   - multi-agent
+  related:
+  - SA-04
 - id: SA-04
   title: 'Provider-executed tools: definition, persistence and hook coverage are not in the text'
   priority: important
@@ -178,6 +180,14 @@ findings:
   - tools-contracts
   - evidence-audit-observability
   - models-context-memory-security
+  related:
+  - SA-03
+  - SA-07
+  - SA-28
+  - SA-29
+  - SA-47
+  - SA-67
+  - SA-74
 - id: SA-05
   title: Hook failure and timeout outcomes are stated for the message hooks only
   priority: important
@@ -220,6 +230,8 @@ findings:
   - safety-enforcement
   - evidence-audit-observability
   - models-context-memory-security
+  related:
+  - SA-31
 - id: SA-06
   title: A running tool is not told the id or name of its call
   priority: important
@@ -308,6 +320,13 @@ findings:
   - safety-enforcement
   - evidence-audit-observability
   - packaging-conformance-governance
+  related:
+  - SA-04
+  - SA-28
+  - SA-29
+  - SA-47
+  - SA-67
+  - SA-74
 - id: SA-08
   title: Tool results have no metadata member although hooks.md lists adding metadata as a use
   priority: important
@@ -423,6 +442,8 @@ findings:
   - published-api-extension-points
   - multi-agent
   - packaging-conformance-governance
+  related:
+  - SA-60
 - id: SA-11
   title: A message accepted through the Thread Client API records no authenticated caller
   priority: important
@@ -732,6 +753,8 @@ findings:
   - safety-enforcement
   - workflow-execution
   - packaging-conformance-governance
+  related:
+  - SA-80
 - id: SA-19
   title: Whether stop and session bindings apply when the bound tool errors is unstated
   priority: important
@@ -919,6 +942,8 @@ findings:
   concerns:
   - workflow-execution
   - multi-agent
+  related:
+  - SA-41
 - id: SA-24
   title: Whether `state.stopSession()` produces the implicit completion message is not stated
   priority: important
@@ -960,6 +985,8 @@ findings:
   concerns:
   - approval-human
   - workflow-execution
+  related:
+  - SA-27
 - id: SA-25
   title: The code-facing contract for creating and messaging a child is not specified
   priority: important
@@ -1043,6 +1070,9 @@ findings:
   concerns:
   - approval-human
   - workflow-execution
+  related:
+  - SA-69
+  - SA-80
 - id: SA-27
   title: Outcome of a blocking `subagent_create` whose child does not close normally is undefined
   priority: important
@@ -1080,6 +1110,9 @@ findings:
   concerns:
   - approval-human
   - multi-agent
+  related:
+  - SA-24
+  - SA-56
 - id: SA-28
   title: Members present only in the published types have no stated status
   priority: important
@@ -1129,6 +1162,14 @@ findings:
   - checkpoint-rollback-state
   - workflow-execution
   - models-context-memory-security
+  related:
+  - SA-04
+  - SA-07
+  - SA-29
+  - SA-47
+  - SA-66
+  - SA-67
+  - SA-74
 - id: SA-29
   title: '''Eligible persisted history'' is used normatively but not defined'
   priority: important
@@ -1164,6 +1205,13 @@ findings:
     a default the normative text does not state.'
   concerns:
   - models-context-memory-security
+  related:
+  - SA-04
+  - SA-07
+  - SA-28
+  - SA-47
+  - SA-67
+  - SA-74
 - id: SA-30
   title: Execution order of several thread hooks of one type is not stated
   priority: minor
@@ -1235,6 +1283,9 @@ findings:
   concerns:
   - safety-enforcement
   - evidence-audit-observability
+  related:
+  - SA-05
+  - SA-51
 - id: SA-32
   title: An agent cannot require a hook for every one of its prompts
   priority: minor
@@ -1495,6 +1546,8 @@ findings:
   concerns:
   - evidence-audit-observability
   - models-context-memory-security
+  related:
+  - SA-80
 - id: SA-40
   title: Message deletion fires no hook and has no stream frame
   priority: minor
@@ -1565,6 +1618,8 @@ findings:
     format is a difference between the text and the published types.'
   concerns:
   - evidence-audit-observability
+  related:
+  - SA-23
 - id: SA-42
   title: '`ThreadUser` is referenced by frozen pages but defined only in the Draft and types'
   priority: minor
@@ -1768,6 +1823,13 @@ findings:
   concerns:
   - checkpoint-rollback-state
   - evidence-audit-observability
+  related:
+  - SA-04
+  - SA-07
+  - SA-28
+  - SA-29
+  - SA-67
+  - SA-74
 - id: SA-48
   title: No naming convention separates packages that share a thread's keys, files or events
   priority: minor
@@ -1895,6 +1957,8 @@ findings:
     meaning of `hook_blocked` is raised in issue 01.'
   concerns:
   - approval-human
+  related:
+  - SA-31
 - id: SA-52
   title: Semantics of `invokeTool` on a prompt or agent target from code are unspecified
   priority: minor
@@ -2056,6 +2120,8 @@ findings:
     has to end on time. The integration document lists the point among those not written up.'
   concerns:
   - approval-human
+  related:
+  - SA-27
 - id: SA-57
   title: Child results have no structured data member
   priority: minor
@@ -2188,6 +2254,8 @@ findings:
     the loaders.
   concerns:
   - packaging-conformance-governance
+  related:
+  - SA-10
 - id: SA-61
   title: Whether unknown `package.json` and `__meta` members are permitted and preserved is unstated
   priority: minor
@@ -2394,6 +2462,8 @@ findings:
   concerns:
   - published-api-extension-points
   - packaging-conformance-governance
+  related:
+  - SA-28
 - id: SA-67
   title: The definition-issue record and its codes exist only in the published types
   priority: minor
@@ -2427,6 +2497,13 @@ findings:
     finding asks for.'
   concerns:
   - packaging-conformance-governance
+  related:
+  - SA-04
+  - SA-07
+  - SA-28
+  - SA-29
+  - SA-47
+  - SA-74
 - id: SA-68
   title: Optional runtime surfaces are not listed and conformance reporting is not defined
   priority: minor
@@ -2492,6 +2569,9 @@ findings:
     are instances; the notation paragraph could be raised with that issue as a question.'
   concerns:
   - safety-enforcement
+  related:
+  - SA-26
+  - SA-80
 - id: SA-70
   title: The specification repository tracks no LICENSE file
   priority: minor
@@ -2649,6 +2729,13 @@ findings:
     that names a mechanism the text does not define, and is for authors of portable prompts to raise.'
   concerns:
   - models-context-memory-security
+  related:
+  - SA-04
+  - SA-07
+  - SA-28
+  - SA-29
+  - SA-47
+  - SA-67
 - id: SA-75
   title: Model input capabilities cover images only, and filtered parts leave no trace
   priority: minor
@@ -2862,6 +2949,11 @@ findings:
   - safety-enforcement
   - approval-human
   - multi-agent
+  related:
+  - SA-18
+  - SA-26
+  - SA-39
+  - SA-69
 - id: SA-81
   title: runtime.md numbers two sections 14, and cross-references match no heading
   priority: minor
@@ -2956,3 +3048,347 @@ findings:
     not among the repository''s tracked files.'
   concerns:
   - packaging-conformance-governance
+questions:
+- id: SA-Q01
+  question: 'What does a runtime do with a model-issued tool call whose name was not in the tool list
+    of the request that produced it, or that was made under `toolChoice: ''none''`, or that names a `hidden`
+    relationship: execute it, or store an error result?'
+  refs:
+  - content/0.2.0/specification/prompts.md §4.2 Tool Choice Behavior (line 197)
+  - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (line 44)
+  - content/0.2.0/specification/subagents.md §5 Lifecycle Tools (line 163)
+  - content/0.2.0/infrastructure/runtime.md §7.3 Optional + Immediate + Hidden Branches (line 143)
+  depends: Whether a prompt's `tools` list and `hidden` are boundaries. If they are, a read-only prompt,
+    a guard tool or a handler-only caller can rely on omission; if not, every tool refuses in its own
+    `execute`.
+  finding: SA-02
+- id: SA-Q02
+  question: Are effect handlers, thread endpoint handlers and `invokeTool` calls that code starts together
+    serialized with a running execution of the same thread, or may they interleave with it and with each
+    other? Is `state.execution` present inside an effect?
+  refs:
+  - content/0.2.0/infrastructure/runtime.md §2 Invocation Triggers (lines 36-38)
+  - content/0.2.0/infrastructure/runtime.md §11 Concurrency (line 239)
+  - content/0.2.0/specification/threads.md §1.3 Access Contexts (lines 182-186)
+  - content/0.2.0/specification/threads.md §4 Effect Scheduling (line 277)
+  - content/0.2.0/specification/threads/endpoints.md §5 Endpoint Context (line 109)
+  depends: Whether a read-modify-write on the thread store (a counter, a single-use approval, a checkpoint
+    list) is safe as written, or needs one writer or a lock outside the thread.
+  finding: SA-22
+- id: SA-Q03
+  question: May code that holds another thread's `ThreadState` (from `getParentThread()`, `getChildThread()`
+    or the `childState` argument of `after_subagent_created`) read and write that thread's key-value store
+    and files, and call `stopSession()`, `execution.stop()` or `terminate()` on it?
+  refs:
+  - content/0.2.0/infrastructure/runtime.md Durable Key-Value Store (the second section numbered 14) §14.1
+    item 3 (line 352)
+  - 'content/0.2.0/specification/subagents.md §6.4 Child → Parent: Explicit Escalation (line 219)'
+  - content/0.2.0/specification/threads.md §9 (lines 485-486)
+  - content/0.2.0/specification/hooks.md §7 TypeScript Reference (lines 525-529)
+  depends: Whether a child hands structured records to its parent through the parent's store, or only
+    through messages and attachments; and whether a parent can end a child's session from code.
+  finding: SA-15
+- id: SA-Q04
+  question: Where the 0.2.0 text and `@standardagents/spec` (which declares `SPEC_VERSION = "0.2.0"`)
+    differ, which governs? Are members found only in the types, such as `historyLimit`, `runAgent`, `QueueMessageInput.metadata`
+    and the user-value methods, part of 0.2.0?
+  refs:
+  - README.md (line 16)
+  - '@standardagents/spec 0.45.10 dist/index.d.ts lines 6513-6521 (package comment), line 6528 (`SPEC_VERSION`),
+    lines 4416-4428 (`historyLimit`), lines 3078-3097 (`runAgent`)'
+  - content/0.2.0/specification/threads/execution-state.md §2.2 Live execution history (line 45)
+  depends: Whether a portable package may use a types-only member and a runtime built from the text must
+    provide it. With `historyLimit`, whether `execution.messageHistory` may be a window of the history.
+  finding: SA-28
+- id: SA-Q05
+  question: 'Do lowercase ''must'', ''should'' and ''may'' carry requirement force? Examples: ''Stop evaluation
+    order should be:'' (Runtime §6), ''`subagent_create` must receive a non-empty `name` argument'' (Runtime
+    §7.4), ''Implementations should treat this as a successful terminal child run'' (Runtime §8.3).'
+  refs:
+  - content/0.2.0/infrastructure/runtime.md §6 Stop Conditions (line 104)
+  - content/0.2.0/infrastructure/runtime.md §7.4 Initial Payload Mapping (lines 172, 174)
+  - content/0.2.0/infrastructure/runtime.md §8.3 Status Updates (line 217)
+  depends: Whether a binding may rely on those sentences (the stop order, argument validation in Runtime
+    §7.4, the outcome of `stopSession()`), or only on sentences that use the bold capitals.
+  finding: SA-69
+- id: SA-Q06
+  question: Do the five tool hooks fire for prompt tools, agent handoffs, the injected lifecycle tools
+    and calls made through `state.invokeTool()` and `state.queueTool()`? Does a caller of `invokeTool`
+    receive the tool's own result or the result as hooks rewrote it?
+  refs:
+  - content/0.2.0/specification/hooks.md §5 Tool Execution Hooks (lines 365-444; a MUST to invoke at lines
+    381 and 440 only)
+  - content/0.2.0/specification/threads.md §3 Tool Invocation (lines 244-272)
+  - content/0.2.0/infrastructure/runtime.md §5.3 Tool Classes (lines 94-100)
+  depends: 'What a redaction, audit or metering hook covers: whether a record kept in `tool_call_done`
+    is complete, or code-issued and lifecycle calls need a record of their own.'
+  finding: SA-03
+- id: SA-Q07
+  question: In what order do `after_tool_call_success` or `after_tool_call_failure`, `before_store_tool_result`,
+    persistence of the result and `tool_call_done` run; which result does `tool_call_done` receive; and
+    is each result persisted before the next call of the same response executes?
+  refs:
+  - content/0.2.0/specification/hooks.md §5.2 to §5.5 (lines 386-444)
+  - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 48-49)
+  - content/0.2.0/specification/tools.md §9 Conformance Notes (line 154)
+  depends: Whether a tool can read earlier results of its own step on `execution.messageHistory`, and
+    whether an observing hook sees the stored result or the tool's own.
+  finding: SA-03
+- id: SA-Q08
+  question: 'Does a `stopTool`, `sessionStop`, `sessionFail` or `sessionStatus` binding take effect when
+    the bound tool returns `status: ''error''`?'
+  refs:
+  - content/0.2.0/specification/agents.md §1.2 SideConfig, PromptSide (line 42)
+  - content/0.2.0/specification/agents.md §3 SessionToolBinding (lines 109-110)
+  - content/0.2.0/specification/agents.md §4 Stop Semantics (lines 117-122)
+  - content/0.2.0/infrastructure/runtime.md §6 Stop Conditions (lines 104-109)
+  depends: Whether a tool that can decline (failed validation, a missing approval) may be named in a binding,
+    or a separate tool or `state.stopSession()` has to end the turn or the session.
+  finding: SA-19
+- id: SA-Q09
+  question: When does `execution.flowId` change? Is it new when a thread that parked for a human turn
+    resumes and after a recovery run, and unchanged across a sub-prompt, a handoff, a queued tool and
+    a blocking `subagent_create`?
+  refs:
+  - content/0.2.0/specification/threads/execution-state.md §2 Execution Properties (line 23)
+  - content/0.2.0/specification/threads/execution-state.md §4.1 States (lines 99-101), §4.3 Requirements
+    (line 120)
+  - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (line 52)
+  - '@standardagents/spec 0.45.10 dist/index.d.ts lines 2579-2580'
+  depends: Whether a checkpoint, an approval or a budget scoped to one execution can be keyed on `flowId`,
+    or needs a run identifier of its own in the thread store.
+  finding: SA-17
+- id: SA-Q10
+  question: 'Which call creates a child from code: `invokeTool(''subagent_create'', ...)`, `invokeTool(''<relationship
+    name>'', ...)` or another API? What are its arguments, what does it return, does `state.children`
+    show the child at once, and must a tool list the call in `uses`?'
+  refs:
+  - content/0.2.0/specification/subagents.md §3.1 Creation Paths (line 93), §5 Lifecycle Tools (lines
+    157-165)
+  - content/0.2.0/specification/handlers.md §6 Capabilities (line 85)
+  - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (line 44)
+  - '@standardagents/spec 0.45.10 dist/index.d.ts lines 5911-5917 (comment on `HookExecutionSource`)'
+  depends: How a handler, or a tool that gates a delegation, spawns a `hidden` relationship portably.
+    Only `immediate` children reached through `state.children` are specified today.
+  finding: SA-25
+- id: SA-Q11
+  question: Does a session ended through `state.stopSession({ result })` under `implicit` parent communication
+    queue the completion message of Subagents §6.2 with `result` as its payload? What does the parent
+    receive when a child session ends by a turn cap or an error?
+  refs:
+  - 'content/0.2.0/specification/subagents.md §6.2 Child → Parent: Completion and Failure (lines 197-205)'
+  - content/0.2.0/infrastructure/runtime.md §8.3 Status Updates (line 217)
+  - content/0.2.0/specification/threads.md §9.3 Parent Messaging (line 540)
+  - '@standardagents/spec 0.45.10 dist/index.d.ts lines 2659-2666 (`StopSessionOptions.result`)'
+  depends: Whether a code-terminated child also passes `notifyParent`, at the risk of two messages, and
+    whether a parent has to poll the child's status to learn that it ended.
+  finding: SA-24
+- id: SA-Q12
+  question: What does a blocking `subagent_create` return when the child is terminated, its run settles
+    `failed` or stops on a cap, or the caller's execution is lost while it waits; and is any bound placed
+    on the wait?
+  refs:
+  - content/0.2.0/specification/subagents.md §3.3 Blocking and Create-or-Continue (lines 108-112), §4.1
+    (line 120)
+  - content/0.2.0/specification/threads/execution-state.md §4.3 Requirements (line 120)
+  - content/0.2.0/specification/handlers.md §4 Delivery Semantics (line 65)
+  depends: Whether a caller can build a deadline from an effect and `terminate()`, and tell a failed child
+    from a finished one without parsing text. If not, blocking relationships are avoided.
+  finding: SA-27
+- id: SA-Q13
+  question: Does any message on a human-backed side's perspective fulfil its parked turn, including a
+    parent's `subagent_message` and `queueMessage` from code, or only a message from a client?
+  refs:
+  - content/0.2.0/specification/agents.md §1.1 The Three Backings (line 19), §4 Stop Semantics (line 124),
+    §7 Human-in-the-Loop Composition (line 171)
+  - content/0.2.0/specification/subagents.md §4.3 Human-in-the-Loop Children (line 153), §6.1 Parent →
+    Child (lines 189-191)
+  - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (line 52)
+  depends: Whether an approval taken as a message can be trusted. If any message ends the wait, the requesting
+    model can end it, and a decision has to go through an authenticated endpoint.
+  finding: SA-12
+- id: SA-Q14
+  question: 'Which user does a child thread belong to: what does `ThreadState.userId` report on it, who
+    may reach it through thread-addressed routes and endpoints, and does it appear in its owner''s thread
+    list?'
+  refs:
+  - content/0.2.0/specification/threads/client-api.md §3.1 item 6 (line 46), §6 item 1 (line 159), §7
+    item 2 (line 209)
+  - content/0.2.0/specification/threads.md §1.2.1 Properties (line 42)
+  - content/0.2.0/specification/subagents.md §4 Instance Lifecycle (lines 114-153)
+  depends: Whether the person meant to act on a child thread, such as an approver, can call its endpoints,
+    and which user-account environment values `env()` resolves there.
+  finding: SA-13
+- id: SA-Q15
+  question: Is a caller's `id` (`auth.caller.id`, `state.user()`) stable across requests on a runtime
+    that does not implement the Draft Users page, and are `ThreadUser` and its `roles` part of the frozen
+    0.2.0 surface?
+  refs:
+  - content/0.2.0/specification/threads.md §1.2.2 Methods, User identity (line 159)
+  - content/0.2.0/specification/threads/endpoints.md §4 Access and Authentication (lines 100, 103)
+  - content/0.2.0/specification/users.md status note (line 3), §1 Identity item 1 (line 9)
+  depends: Whether code may compare principals by `id` (an approver against a requester, a decision against
+    its request), or must treat an identity as valid for one request only.
+  finding: SA-42
+- id: SA-Q16
+  question: What produces the stop reason `hook_blocked`, and how does a hook signal a block and not a
+    failure? Does a throwing `before_create_message` on an assistant message prevent that message's tool
+    calls from executing?
+  refs:
+  - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (line 113)
+  - content/0.2.0/specification/hooks.md §3.3 Note (line 273), §4.1 before_create_message (lines 320-322)
+  - '@standardagents/spec 0.45.10 dist/index.d.ts lines 6109-6112'
+  depends: Whether any hook can stop a model request or a tool call today, which decides whether a moderation
+    or policy hook fails open or closed on a given runtime.
+  finding: SA-31
+- id: SA-Q17
+  question: In what order do several hooks of one type in one `hooks` array run, and does each transforming
+    hook receive the previous hook's result, also across the child-before, base and child-after sources?
+  refs:
+  - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 76-85)
+  - content/0.2.0/specification/prompts.md §8 Hook Scoping (lines 270-275)
+  - content/0.2.0/infrastructure/runtime.md §7.3.1 Required Parent-Hook Composition (lines 161-163)
+  depends: Whether two hooks of one type (trimming and redaction, or two gates) give the same result on
+    every runtime, or have to be written as one hook.
+  finding: SA-30
+- id: SA-Q18
+  question: After `state.execution.stop()`, `state.stopSession()` or `state.terminate()` is called during
+    a tool call or a tool hook, are the remaining tool calls of the same model response executed? Does
+    the runtime wait for `tool_call_started` to settle before it calls `execute`?
+  refs:
+  - content/0.2.0/specification/threads/execution-state.md §3 Controlling Execution (lines 63-64, 70)
+  - content/0.2.0/specification/threads.md §8 Lifecycle (lines 471-473)
+  - content/0.2.0/specification/hooks.md §5.1 tool_call_started (lines 369, 381-382)
+  - '@standardagents/spec 0.45.10 dist/index.d.ts lines 2609-2614 (`stop()`)'
+  depends: Whether code can keep the rest of a batch of calls from running once one call shows a problem,
+    or every later tool has to check a flag itself.
+- id: SA-Q19
+  question: Is a message whose handler invocation was interrupted by a lost execution delivered again
+    by the 'later recovery run', and what starts a recovery run and what does it execute?
+  refs:
+  - content/0.2.0/specification/handlers.md §4 Delivery Semantics (lines 61-63)
+  - content/0.2.0/specification/threads/execution-state.md §4.3 Requirements (line 120)
+  depends: Whether a handler turn has to be idempotent, or the thread waits for a new message after `execution_lost`.
+  finding: SA-20
+- id: SA-Q20
+  question: Does a scheduled effect survive restarts and redeploys, can it run before its scheduled time,
+    how many times may its handler run, and is a throwing handler retried?
+  refs:
+  - content/0.2.0/specification/effects.md §3 Execution Semantics (lines 83-90)
+  - content/0.2.0/specification/threads.md §4 Effect Scheduling (lines 276-280), §4.3 Managing Scheduled
+    Effects (lines 312-322)
+  - content/0.2.0/infrastructure/runtime.md §2 Invocation Triggers (line 36)
+  depends: Whether a timeout, reminder or watchdog can be built on an effect, and whether its handler
+    has to be idempotent; otherwise an external scheduler is needed.
+  finding: SA-21
+- id: SA-Q21
+  question: 'With `includePastTools: false`, are tool results of earlier steps of the current execution
+    excluded from the next model request, or only those of earlier turns? Which persisted messages are
+    ''eligible'' for a snapshot?'
+  refs:
+  - content/0.2.0/infrastructure/runtime.md §4 Context Assembly (lines 61-75)
+  - content/0.2.0/specification/prompts.md §1.2 Optional Properties (lines 26-27)
+  - content/0.2.0/getting-started/examples.md §2 (line 300; non-normative)
+  depends: 'Whether a model sees a tool''s refusal or result on its next step by default, or every prompt
+    whose tools return instructions has to set `includePastTools: true`.'
+  finding: SA-29
+- id: SA-Q22
+  question: Are a provider-executed tool call and its result persisted as messages, and do any tool hooks
+    fire for it? Does the 'local tools' wording of Tools §9 exclude such calls from the sequential rule?
+  refs:
+  - content/0.2.0/specification/providers.md §10.1 Overview (line 602)
+  - content/0.2.0/specification/tools.md §9 Conformance Notes (line 153)
+  - '@standardagents/spec 0.45.10 dist/index.d.ts lines 439-448 (`executionMode`, `executionProvider`),
+    1014-1021 (`ProviderResponse.providerTools`)'
+  depends: Whether provider-side tool activity appears in the thread record and in a hook-kept audit,
+    or a model that lists `providerTools` has activity nothing records.
+  finding: SA-04
+- id: SA-Q23
+  question: May a thread creator's `env` carry names no definition declares, such as the flag of an `optional`
+    relationship; when is that flag read; and does `env(name)` resolve user-account and instance values
+    for names the calling definition did not declare?
+  refs:
+  - content/0.2.0/specification/threads/client-api.md §6 item 4 (line 162)
+  - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (lines 220-225)
+  - content/0.2.0/specification/subagents.md §1 SubagentRelationship (line 44)
+  - content/0.2.0/infrastructure/runtime.md §7.3 (lines 139-140)
+  - content/0.2.0/specification/tools.md §3 Variable Declarations (lines 46-64)
+  depends: Whether a guard may read its settings with `state.env()` or has to fix them in code or read
+    them with `instanceEnv`, and whether an installed package can read another's secrets by name.
+  finding: SA-45
+- id: SA-Q24
+  question: For a child whose side A is a handler or a person, are `subagent_create.arguments` accepted,
+    validated and persisted? May validation strip or coerce values, and what happens to new arguments
+    on create-or-continue?
+  refs:
+  - content/0.2.0/specification/subagents.md §5.1 Persistent Invocation Arguments (lines 169-175), §3.3
+    (line 110)
+  - content/0.2.0/infrastructure/runtime.md §7.4 Initial Payload Mapping (line 174)
+  - content/0.2.0/specification/handlers.md §1 Handler Definition (lines 23-26)
+  depends: Whether a deterministic child can rely on `state.arguments` and a parent can bind a digest
+    to what it sent, or the child has to validate and echo its inputs itself.
+  finding: SA-26
+- id: SA-Q25
+  question: Are thread endpoints mounted at `{runtime_prefix}/{threadId}/{endpoint_path}` or beneath `{runtime_prefix}/threads/{threadId}/`,
+    and is `POST {runtime_prefix}/threads` the specified route to create a thread, contrary to Examples
+    §9?
+  refs:
+  - content/0.2.0/specification/threads/endpoints.md §2 File-Based Routing (line 27)
+  - content/0.2.0/specification/threads/client-api.md §2 Routes, item 2 (line 35), §6 Creating a Thread
+    (line 143)
+  - content/0.2.0/getting-started/examples.md §9 Remote Trigger (lines 1530, 1532)
+  - content/0.2.0/distribution/packaging.md Packed Thread Endpoints (line 275)
+  depends: The URL a client or an approver's interface calls for a package endpoint, and whether thread
+    creation can be scripted against any runtime.
+  finding: SA-80
+- id: SA-Q26
+  question: Does adding an exposed agent to a prompt as a handoff activate its `parentHooks`, and do a
+    child's `parentHooks` run when the owning side is handler-backed or the thread is at rest?
+  refs:
+  - content/0.2.0/specification/agents.md §6 Required Parent Hooks (lines 155, 163)
+  - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 88-90, 99-100)
+  - content/0.2.0/infrastructure/runtime.md §7.3.1 Required Parent-Hook Composition (lines 149-153)
+  - content/0.2.0/distribution/packaging.md PackedMeta (lines 213-215)
+  depends: Whether a child that requires an audit or gate hook of its parent gets it in every composition,
+    or only under prompt-backed sides with subagent relationships.
+  finding: SA-80
+- id: SA-Q27
+  question: What starts and ends a session, is a session identified, and can one session span several
+    executions? The text uses the term for `maxSessionTurns`, `sessionStop` and `stopSession()` and does
+    not define it.
+  refs:
+  - content/0.2.0/specification/agents.md §1.3 Derivations (line 66), §2.2 Optional (line 84)
+  - content/0.2.0/specification/subagents.md §4.1 Persistence Is Universal (line 120)
+  - content/0.2.0/specification/threads.md §9.3 Parent Messaging (line 540)
+  depends: How a runtime counts `maxSessionTurns`, and whether code can scope a record to one session.
+    Without an identifier it scopes to one execution or to the thread.
+- id: SA-Q28
+  question: 'What makes a runtime settle a run as `failed` with `repeated_tool_error`: how many error
+    results, of the same tool or the same arguments, in a row? When does a runtime use `handler_idle`?'
+  refs:
+  - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (lines 113-114)
+  depends: 'Whether a tool that answers with error results by design (failed validation, a refusal before
+    approval) can end the run, and so has to return its refusals with `status: ''success''`.'
+  finding: SA-51
+- id: SA-Q29
+  question: Is a file written in one execution required to be present in the next and after a restart?
+    Does `writeFile` replace an existing path and create missing parent directories, and what does `readFile`
+    return for an externally stored file?
+  refs:
+  - content/0.2.0/specification/threads/filesystem.md introduction (line 3), §9.4 Behavior (line 175)
+  - content/0.2.0/specification/threads.md §7.3 Comparison With Other Storage (line 443)
+  - content/0.2.0/infrastructure/runtime.md §16 Conformance Summary (lines 384-392)
+  depends: Whether a restore point or an evidence file may be kept in the thread file system, and whether
+    code has to call `mkdirFile` and `unlinkFile` before each write.
+  finding: SA-16
+- id: SA-Q30
+  question: 'Is a message''s `metadata` ever included in a provider request, and how does `updateMessage`
+    combine `metadata` with the stored value: merge or replace?'
+  refs:
+  - content/0.2.0/specification/threads/messages.md §1 Message Structure (line 29), §5 Updating Messages
+    (lines 174-177)
+  - content/0.2.0/infrastructure/runtime.md §4 Context Assembly (lines 61-69)
+  - '@standardagents/spec 0.45.10 dist/index.d.ts line 2137 (`MessageUpdates.metadata`)'
+  depends: Whether evidence, sources or codes kept in `metadata` stay out of the model's context, and
+    whether a hook that adds one key has to read and rewrite the whole object.
+  finding: SA-39

@@ -48,7 +48,15 @@ ignore the others.
 For a packed agent, the packer **SHOULD** copy the annotations of each entry
 agent into the package metadata (`PackedMeta` and the `standardagent` field
 of `package.json`), as it already does for `parentHooks`, so that they can be
-read without importing the package's code.
+read without importing the package's code. Two rules make that copy safe:
+
+- Annotations on an agent **MUST** be JSON-serializable, so that a packer can
+  copy them. Tools §8 does not say this of a tool's annotations.
+- Packaging does not say whether a reader of `__meta` or of the
+  `standardagent` field ignores members it does not recognise. State that
+  rule with this change (readers **MUST** ignore members they do not
+  recognise), as Thread Client API §1 does for clients; the copy is additive
+  only with it.
 
 `PromptDefinition` is the natural second step, for prompts used as tools. The
 existing per-reference slot does not serve: `options` on a prompt's tool
@@ -62,13 +70,14 @@ read-only member to `HookToolCall`:
 ```typescript
 interface HookToolCall {
   // ...
-  /** The annotations of the function tool this call resolved to, if any. */
+  /** The annotations of the tool this call resolved to, if any. */
   readonly annotations?: Readonly<Record<string, unknown>>;
 }
 ```
 
-The runtime sets it when the call resolves to a function tool that declares
-annotations. A hook can then observe, label or display a call by what its
+The runtime sets it when the call resolves to a definition that declares
+annotations: a function tool today, and a prompt tool or an agent handoff
+once part 1 gives those definitions the field. A hook can then observe, label or display a call by what its
 tool declares, without importing anything.
 
 A `loadTool(name)` beside the existing loaders would be the more general
