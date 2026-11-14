@@ -30,6 +30,8 @@ export const HEADER_RULES: readonly HeaderRule[] = [
       'Access-Control-Allow-Origin': '*',
     },
   },
+  // Hashed build output; _routes.json keeps it off the worker, so Pages applies this.
+  { pattern: '/_astro/*', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
 ];
 
 export function matchesPattern(pattern: string, path: string): boolean {

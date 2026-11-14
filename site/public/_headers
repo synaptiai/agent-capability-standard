@@ -29,3 +29,7 @@ https://:version.:project.pages.dev/*
 /.well-known/api-catalog
   Content-Type: application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"
   Access-Control-Allow-Origin: *
+
+# Build output with a content hash in its name never changes: cache it for a year.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
