@@ -7,7 +7,7 @@ before a risky one runs. This document maps the two, shows how to build a
 grounded agent on Standard Agents today, and lists what each standard would
 have to change for the combination to be complete.
 
-| | Compared here |
+| Standard | Compared here |
 |---|---|
 | Agent Capability Standard (ACS) | [Standard 1.1.0](../../spec/STANDARD-v1.1.0.md), ontology 2.1.0 |
 | Standard Agent Specification (SA) | 0.2.0, [`standardagents/spec`](https://github.com/standardagents/spec) at commit `faccc8b` (12 November 2026), and the published `@standardagents/spec` 0.45.10 types |
