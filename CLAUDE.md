@@ -146,8 +146,14 @@ npm ci          # install the exact versions in package-lock.json
 npm run check   # type-check, colour contrast, design data, no hand-typed counts
 npm test        # vitest; also builds the site into a temporary directory
 npm run build   # build, Pagefind index, then scripts/check-dist.mjs
+npm run check:axe  # after a build: axe over every built page (CI runs it; slow)
 npm run dev     # local server; search works only on a built site (npm run preview)
 ```
+
+`check:axe` needs a Chromium: Playwright's own, or the binary `ACS_CHROMIUM`
+names. For a quick run on the pages a change touches:
+`node scripts/check-axe.mjs --paths /guides/standard-agents/`. It fails on any
+axe violation, for example a Markdown table whose header cell is empty.
 
 `npm run build` fails when a Markdown link or `#anchor` does not resolve, when
 rendered heading ids differ from GitHub's ids for the source, and, in

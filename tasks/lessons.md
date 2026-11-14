@@ -135,3 +135,16 @@ reviewers ran, so seven concerns were never reviewed and none was reconciled.
 fewer, narrower first-stage agents, or run verification on the first
 concern end to end before starting the rest. Unreviewed output is working
 material, not a deliverable; do not publish it.
+
+## Run every check the pull request's CI runs, not only the ones the guide lists
+
+**What happened.** The first CI run on the Standard Agents pull request failed
+in the site job: `npm run check:axe`, which runs after the build, found a
+table header cell with no text on the new guide page. The local runs had
+covered `npm run check`, `npm test` and `npm run build`, the three commands
+CLAUDE.md lists, and not the accessibility step in `.github/workflows/site.yml`.
+
+**Rule.** Before the first push of a branch, read the workflow files and run
+each step that can run locally. For the site: after `npm run build`, run
+`ACS_CHROMIUM=<chromium> node scripts/check-axe.mjs --paths <changed pages>`.
+A Markdown table needs text in every header cell.
