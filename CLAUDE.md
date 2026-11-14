@@ -76,6 +76,20 @@ python scripts/gen_runtime_fixtures.py          # after editing the fixtures the
 python scripts/gen_runtime_fixtures.py --check  # CI: fail on drift
 ```
 
+### Regenerate the Standard Agents binding's generated files
+```bash
+python scripts/gen_standard_agents_binding.py          # after changing the ontology
+python scripts/gen_standard_agents_binding.py --check  # CI: fail on drift
+```
+
+### Check the Standard Agents binding (TypeScript, in `examples/standard_agents/`)
+```bash
+cd examples/standard_agents
+npm ci          # install the exact versions in package-lock.json
+npm run check   # type-check against the published @standardagents/spec types
+npm test        # vitest
+```
+
 ### Run conformance tests (optional, local only)
 ```bash
 python scripts/run_conformance.py
@@ -330,6 +344,12 @@ This regenerates `skills/<name>/schemas/output_schema.yaml` from the ontology
 `schemas/workflow_catalog.yaml` with their schema paths rewritten, and keeps the
 vendored schema copies in sync. `--check` fails on drift (CI); `--dry-run` lists
 what would change.
+
+Then regenerate the Standard Agents binding's ontology table and annotation
+schema, which list every capability:
+```bash
+python scripts/gen_standard_agents_binding.py
+```
 
 ## Releasing
 

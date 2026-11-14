@@ -39,6 +39,7 @@ python tools/validate_transform_refs.py
 python tools/validate_benchmark_deps.py
 python tools/sync_skill_schemas.py --check
 python scripts/gen_runtime_fixtures.py --check
+python scripts/gen_standard_agents_binding.py --check
 pytest tests/ -v --tb=short
 ```
 

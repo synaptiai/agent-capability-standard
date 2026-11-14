@@ -1,0 +1,131 @@
+{
+  "generated_by": "scripts/gen_standard_agents_binding.py",
+  "source": "the reference executor's approval digest (STANDARD v1.1.0 §5.14)",
+  "vectors": [
+    {
+      "shown": [
+        {
+          "action": "write_config",
+          "capability": "mutate",
+          "args": {
+            "key": "a",
+            "value": "b"
+          }
+        }
+      ],
+      "digest": "e3cf33cccce568634c5c6dab7d7988d66f94b8b9cc34ed4eec1006edfd88879b"
+    },
+    {
+      "shown": [
+        {
+          "b": 2,
+          "a": 1,
+          "A": 0,
+          "aa": [
+            3,
+            2,
+            1
+          ],
+          "": null
+        }
+      ],
+      "digest": "ba72be80f186532cf68ce09c44f22b0ece7348aa2dea09b4bcb0d77b41d747a4"
+    },
+    {
+      "shown": [
+        {
+          "numbers": [
+            0,
+            -0.0,
+            1,
+            -1,
+            1.5,
+            1e+21,
+            1e-07,
+            123456789012,
+            0.1,
+            100,
+            1.0,
+            4.5e-10,
+            9007199254740992
+          ]
+        }
+      ],
+      "digest": "78533df9a65308cfc734f548ae90057fa7ca82b43c76b8217733ef905ba98ebf"
+    },
+    {
+      "shown": [
+        {
+          "text": "line\nbreak\ttab \"quote\" back\\slash \u0001  é € 😀"
+        }
+      ],
+      "digest": "113d69a0f6d95d5856507c62eccade92298f5972f5ce8ccdbce030dcb0350da5"
+    },
+    {
+      "shown": [
+        {
+          "€": "Euro",
+          "\r": "CR",
+          "דּ": "Dalet",
+          "1": "One",
+          "😀": "Emoji",
+          "": "Control",
+          "ö": "o umlaut"
+        }
+      ],
+      "digest": "3ce06065920bb0bcbd8c5cba67c42b621b54547f03c5d5ec80c887fe4221bbe7"
+    },
+    {
+      "shown": [
+        {
+          "nested": {
+            "z": {
+              "y": {
+                "x": [
+                  true,
+                  false,
+                  null,
+                  {
+                    "k": []
+                  },
+                  {}
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "digest": "672adc2e63eae0d913f1109f4a289685a45c3db6603e162ef516d20edc308055"
+    },
+    {
+      "shown": [
+        "a bare string"
+      ],
+      "digest": "6fc99d8b15b09678b8215ca48e6ec992689b2a26098f3225c8c05084f4bbffd6"
+    },
+    {
+      "shown": [
+        [
+          1,
+          "two",
+          {
+            "three": 3
+          }
+        ]
+      ],
+      "digest": "96dc417b7147e64da749a70ba9e3ffc93561680a2a94d733dc2c06af5671d9a2"
+    },
+    {
+      "shown": [
+        42
+      ],
+      "digest": "b86b1ea11b28136fe5224b9d1e3017b7efb68d4fae0b90c4940e0c0f89b3907a"
+    },
+    {
+      "shown": [
+        null
+      ],
+      "digest": "1d8fc6ceb1f94c6326d6d5483d258fcb2e179e9869325b245d105c2219bf69fd"
+    }
+  ]
+}

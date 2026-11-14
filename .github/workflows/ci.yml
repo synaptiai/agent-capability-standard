@@ -89,6 +89,9 @@ jobs:
       - name: Check runtime fixtures are generated
         run: python scripts/gen_runtime_fixtures.py --check
 
+      - name: Check Standard Agents binding files are generated
+        run: python scripts/gen_standard_agents_binding.py --check
+
   rust-core:
     name: Rust core (fmt, clippy, tests, MSRV)
     runs-on: ubuntu-latest
@@ -172,7 +175,7 @@ jobs:
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
 
       - name: Ruff format check
-        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py
+        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/gen_standard_agents_binding.py
 
       - name: Mypy type check
         run: mypy grounded_agency/
@@ -287,3 +290,30 @@ jobs:
           name: conformance-results
           path: build/conformance_results.json
           if-no-files-found: warn
+
+  standard-agents-binding:
+    name: Standard Agents binding (type-check, tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/standard_agents
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+          cache: npm
+          cache-dependency-path: examples/standard_agents/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Compiles the binding and the example agent against the published
+      # @standardagents/spec types, so a change there that breaks them shows.
+      - name: Type-check
+        run: npm run check
+
+      - name: Tests
+        run: npm test
