@@ -6,10 +6,26 @@ is the body. They come out of the mapping in
 [Standard Agents interoperability](../../docs/integrations/standard_agents.md).
 
 **Status: not filed.** They are written against 0.2.0 at commit `faccc8b`
-(12 November 2026). Before filing, check that the passages they quote are
-unchanged; the specification's maintainers edit 0.2.0 in place. Their
-community page says accepted changes are published "in a new version of the
-specification", so each addition proposed here would apply from that version.
+(12 November 2026) and were checked again against `78fa54c` (14 November
+2026): `content/0.2.0` had not changed between the two. Before filing later
+than that, check that the passages they quote are unchanged; the
+specification's maintainers edit 0.2.0 in place. Their community page says
+accepted changes are published "in a new version of the specification", so
+each addition proposed here would apply from that version.
+
+## Filing
+
+The issues link to this repository's `main` (the reference binding and the
+integration document), so file them once this work is merged.
+
+```bash
+tasks/standard-agents-upstream/file-issues.sh          # lists what would be filed
+tasks/standard-agents-upstream/file-issues.sh --file   # creates the nine issues
+```
+
+The script needs the GitHub CLI, signed in as the account the issues should
+come from. It files in the order under [Order](#order), skips a title that
+already exists, and prints each new issue's address.
 
 | # | Title | Why it matters for a grounded agent | Size |
 |---|-------|-------------------------------------|------|
@@ -29,7 +45,7 @@ File 06 first: it is small, checkable and asks for nothing. Then 01, which
 the others do not depend on but which matters most. 02 to 05 and 07 to 09 are
 independent of one another. 07 and 09 ask only for sentences that settle what
 the text leaves open, with no API change, so they are the easiest of the rest
-to accept.
+to accept and the script files them next.
 
 The proposals come out of 83 findings about the specification, listed with
 their evidence in

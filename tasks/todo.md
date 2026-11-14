@@ -75,6 +75,41 @@ standard, write the integration document, and prepare upstream issues.
   accepts a declared risk below the ontology's (`mutate` with `risk="low"`
   needs no checkpoint) and an unknown capability id, against STANDARD §5.2.1.
 
+## Round 2: fix our side, pull request, merge
+
+Request: fix the issues identified on our end, file the upstream issues, open
+the pull request, review and fix, merge.
+
+Scope decision. Standard 1.1.0 is released, and GOVERNANCE routes normative
+changes through an RFC. So this round changes no normative requirement: it
+fixes implementation defects and inconsistencies, adds informative material
+(fixtures, renderings, guides), and puts the normative gaps a binding needs
+into a Draft RFC for Standard 1.2.0. Every finding gets a status in the
+published findings file: fixed, proposed (RFC) or open.
+
+- [ ] A. Python SDK: mapper fails closed and cannot weaken ontology flags;
+      the adapter asks for the approval the ontology requires; deny reasons
+      carry the diagnostic code; tool input in anchors is opt-in (ACS-07, 03,
+      08, 23)
+- [ ] B. Hooks and skills: blocking exit code in skill command hooks and in
+      SECURITY.md; audit hook logs every tool call with a digest, not the
+      arguments (ACS-36, 55, 23, 08)
+- [ ] C. Interop data: `schemas/interop/standard_agents_mapping.yaml`; one
+      version table; OASF files name the two versions (ACS-43, 25)
+- [ ] D. Documentation: profiles are informative and the compliance documents
+      say so; trace kinds listed and tested; delegation mapped to a host;
+      modality guide and glossary (ACS-05, 59, 60, 61, 62, 63)
+- [ ] E. Conformance vectors: approval digests and trust scores, language
+      neutral, with a reference function (ACS-10, 11, 56)
+- [ ] F. Strict JSON Schema 2020-12 rendering of the ontology's contracts,
+      generated and checked in CI (ACS-28)
+- [ ] G. RFC-0005 (Draft): tool-calling hosts. Safety layer over tool calls,
+      checkpoint lifetime, approval for a call, tool binding record, evidence
+      anchor item (ACS-01, 02, 03, 06, 08, 38, 39, 41, 57)
+- [ ] H. Upstream issues: re-verify against their latest commit; a script
+      that files them in order (this session cannot write to their repository)
+- [ ] I. Pull request, review of the whole diff, fixes, CI green, merge
+
 # Issue #120: documentation site
 
 Epic: https://github.com/synaptiai/agent-capability-standard/issues/120
