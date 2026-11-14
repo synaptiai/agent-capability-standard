@@ -712,7 +712,8 @@ Three things a consumer of such a package cannot yet do:
 
 Each is written up as an issue for `standardagents/spec`, under the headings
 a recent pull request there uses (problem, proposed rule, alternatives,
-conformance impact). None has been filed yet.
+conformance impact). The texts are in this repository under
+`tasks/standard-agents-upstream/`. None has been filed yet.
 
 | Proposal | What it would allow |
 |---|---|
@@ -721,16 +722,21 @@ conformance impact). None has been filed yet.
 | **Let a tool know which call it is serving.** The call's id and name on `state.execution` while `execute` runs | Evidence, audit entries and idempotency keys tied to the stored tool result, without matching by order |
 | **Specify what `execute` returns, and add a metadata field.** Define `ToolResult` in the text, carry `error_code` and `error_data` through hooks and storage, and add `metadata` that is stored but not sent to the model | Refusal codes that clients can act on, and evidence that is not model-facing text |
 | **Annotations on agents and prompts, and on the call a hook receives.** The same inert field on `defineAgent` and then `definePrompt`, a tool's annotations passed to its hooks, and a stated subject for the rule, so that it reads as a requirement on runtimes | A composed agent that carries a classification, and hooks that can read a tool's |
+| **What a runtime does with a tool call the request did not offer.** Such a call, and any call under `toolChoice: 'none'`, is not executed and gets an error result; the same for a model's lifecycle call that targets a hidden relationship | A prompt's tool list and `hidden` as boundaries. A read-only prompt, a guard tool and a gated delegation rest on it |
+| **The lifecycle operations code calls to create and message a child.** The call, its arguments, how the caller gets the new reference, what a child without a side A prompt accepts, and which user a child thread has | A delegation that is checked first: the injected `subagent_create` has no `execute` to wrap, so the child has to be created from code |
+| **What may run alongside an execution, and when `flowId` changes.** A definition of a flow, what is serialized with a running execution, and a `flowId` that is unique per execution | Records that are read and rewritten without a conditional write, and a checkpoint rule keyed on `flowId` |
 | **Editorial.** Ten places where two passages disagree, such as two sections numbered 14 on the Runtime page | Nothing for grounding; found while checking references |
 
-Other points the mapping turned up, not written up as proposals: how code
-creates a child (the call's name, arguments and return value are not
-specified); which tool calls fire the tool hooks; no way for code to end a
-session as failed; what a runtime does with a tool call the prompt did not
-offer; when `flowId` changes; the thread file system has no durability or
-isolation rules like the key-value store's; a parked human turn has no
-deadline; a child returns text and files but no structured data; and no hook
-list on an agent applies to all of its prompts.
+The nine come out of 83 findings about the specification, none of which
+stops a grounded agent from being built and 29 of which leave a rule
+enforceable only cooperatively or with a workaround. They are listed, with
+evidence and with the issue that covers each, in
+[`findings_standard_agents.yaml`](../research/analysis/standard_agents_mapping/findings_standard_agents.yaml).
+Among those not written up as proposals: which tool calls fire the tool
+hooks; no way for code to end a session as failed; scheduled effects have no
+delivery guarantee; the thread file system has no durability or isolation
+rules like the key-value store's; a parked human turn has no deadline; and a
+child returns text and files but no structured data.
 
 ## Changes proposed to the Agent Capability Standard
 
@@ -863,10 +869,12 @@ continued instead of restarted.
   same way: 22 turned out to be answered by the texts, and the 45 that an
   implementer most needs answered are listed with the findings.
 - **This document.** After the reviews, a separate reader checked every
-  factual statement here and in the six proposals against the sources. It
-  confirmed 340 and found 6 errors, 18 imprecise statements and 11 omissions,
-  all corrected. Every quoted passage is compared mechanically with the
-  source files.
+  factual statement here and in the first six proposals against the sources.
+  It confirmed 340 and found 6 errors, 18 imprecise statements and 11
+  omissions, all corrected. The three later proposals were each drafted from
+  verified findings and then given to a reader told to find what was wrong,
+  whose corrections are in the texts. Every quoted passage is compared
+  mechanically with the source files.
 - **The binding.** The example compiles against the published types under
   TypeScript's strict settings. Its rules are tested against an in-memory
   `ThreadState`, and its approval digest is tested against digests produced by

@@ -19,12 +19,24 @@ specification", so each addition proposed here would apply from that version.
 | [04](04-tool-result-contract.md) | Specify what a tool's `execute` returns, and give results a field for metadata | Gives refusal codes and evidence a defined place that is not model-facing text | Text, plus one optional field |
 | [05](05-annotations.md) | Annotations: allow them on agents and prompts, pass a tool's to its hooks, and say whom the rule binds | Lets a composed agent carry a classification, and lets a hook read a tool's | Three optional fields, one reworded sentence |
 | [06](06-editorial-inconsistencies.md) | Ten inconsistencies in the 0.2.0 text | None directly; found while checking references | Editorial |
+| [07](07-unoffered-tool-call.md) | State what a runtime does with a tool call the request did not offer | Decides whether a prompt's tool list, `toolChoice: 'none'` and `hidden` are boundaries a runtime enforces. A read-only prompt, a guard tool and a gated delegation all rest on it | Two sentences, no API change |
+| [08](08-child-creation-from-code.md) | Specify the lifecycle operations code calls to create and message a child | The injected `subagent_create` has no `execute` to wrap, so a delegation that must be checked first has to be created from code, and the text does not give the call | One subsection, two sentences |
+| [09](09-execution-concurrency-and-flow-id.md) | Say what may run alongside an execution of a thread, and when `flowId` changes | The binding's records are read and rewritten in a store with no conditional write, and its checkpoint rule is keyed on `flowId` | Text only |
 
 ## Order
 
 File 06 first: it is small, checkable and asks for nothing. Then 01, which
-the others do not depend on but which matters most. 02 to 05 are independent
-of one another.
+the others do not depend on but which matters most. 02 to 05 and 07 to 09 are
+independent of one another. 07 and 09 ask only for sentences that settle what
+the text leaves open, with no API change, so they are the easiest of the rest
+to accept.
+
+The proposals come out of 83 findings about the specification, listed with
+their evidence in
+[`findings_standard_agents.yaml`](../../docs/research/analysis/standard_agents_mapping/findings_standard_agents.yaml).
+Each finding says which issue covers it, or why none does. Eleven are marked
+`candidate`: they would stand as issues of their own and are not drafted. The
+file also lists 30 questions the text leaves open.
 
 ## How the maintainers take proposals
 

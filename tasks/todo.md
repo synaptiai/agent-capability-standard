@@ -41,7 +41,7 @@ standard, write the integration document, and prepare upstream issues.
 - `examples/standard_agents/`: the reference binding (`groundedTool`,
   approval records and endpoints, audit hook, prompt and agent checks) with
   43 tests, the annotation schema, a generator with `--check`, a CI job.
-- `tasks/standard-agents-upstream/`: six issue texts for `standardagents/spec`.
+- `tasks/standard-agents-upstream/`: nine issue texts for `standardagents/spec`.
 
 **Checked.**
 - Each of the ten mappings had two independent reviews (citations;
@@ -51,9 +51,11 @@ standard, write the integration document, and prepare upstream issues.
 - Every quotation in the rows, the findings, the document and the proposals
   is compared mechanically with the source trees (the documents under review
   excluded).
-- A separate fact-check of the document and the proposals confirmed 340
-  statements and found 6 errors, 18 imprecise statements and 11 omissions,
-  all corrected.
+- A separate fact-check of the document and the first six proposals
+  confirmed 340 statements and found 6 errors, 18 imprecise statements and 11
+  omissions, all corrected. Proposals 07 to 09 were drafted from verified
+  findings and each fact-checked adversarially (40 problems found, 39 fixed
+  and one judged outside the issue's scope).
 - The binding compiles against `@standardagents/spec` 0.45.10 under strict
   TypeScript; its approval digest equals the reference executor's on ten
   vectors. The mapping changed three of its rules: a rejection cannot be lost
@@ -64,7 +66,8 @@ standard, write the integration document, and prepare upstream issues.
 
 **Not done.**
 - Upstream issues are drafted, not filed: this session has no write access to
-  `standardagents/spec`. File 06 first, then 01.
+  `standardagents/spec`. File 06 first, then 01. Eleven further findings are
+  marked as candidates for issues and are not drafted.
 - The example has not run in a Standard Agents runtime.
 - Found on our side and not fixed here (the full list is
   `findings_agent_capability_standard.yaml`; seven are rated blocker). The

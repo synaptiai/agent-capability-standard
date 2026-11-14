@@ -31,7 +31,7 @@ findings:
     an error result. State whether lifecycle tools and `invokeTool` or `queueTool` calls fire it.
   backwards_compatible: true
   disposition: proposal
-  proposal: '01'
+  proposal: 01-before-tool-call-hook.md
   coverage: full
   disposition_note: 'Issue 01 asks for this hook with the `HookToolResult | null | undefined` return,
     a throw or timeout that prevents execution, the order of Hooks §1.3 and reach through `parentHooks`.
@@ -80,13 +80,11 @@ findings:
     and MUST be persisted as an error tool result. Extend the Subagents §5 rejection to model-issued lifecycle
     calls that target a hidden relationship.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue asks for this rule. Issue 01 mentions the absence once, in its Alternatives
-    section, as the weakness of a guard tool. The rule decides whether a prompt's `tools` list is a boundary
-    the runtime enforces or a description sent to the model. A grounded agent that keeps a mutating tool
-    out of a read-only prompt, or makes a handler-backed side the only caller of such tools, rests on
-    the answer; so does any author who limits a model by omission. The change is one sentence in Runtime
-    §5.
+  disposition: proposal
+  proposal: 07-unoffered-tool-call.md
+  coverage: full
+  disposition_note: Issue 07 asks for the rule in Runtime §5 and for the Subagents §5 rejection to cover
+    model-issued lifecycle calls that target a hidden relationship.
   concerns:
   - published-api-extension-points
   - safety-enforcement
@@ -263,7 +261,7 @@ findings:
     sees, and whether `name` is local or qualified.'
   backwards_compatible: true
   disposition: proposal
-  proposal: '03'
+  proposal: 03-tool-call-identity.md
   coverage: full
   disposition_note: 'Issue 03 proposes the same optional `toolCall` property on `ExecutionState` with
     the same identity rule for `id`, and lists as open questions the points on which the records differ:
@@ -307,7 +305,7 @@ findings:
     is a `ToolResult` with that `error_code`.
   backwards_compatible: true
   disposition: proposal
-  proposal: '04'
+  proposal: 04-tool-result-contract.md
   coverage: partial
   disposition_note: Parts 1 to 3 of issue 04 ask for the `ToolResult` definition in Tools §2, for `error_code`
     and `error_data` on `HookToolResult`, and for a rule that both are kept with the stored tool result
@@ -353,7 +351,7 @@ findings:
     and does not send it to the model. Alternatively, remove the bullet from Hooks §5.2.'
   backwards_compatible: true
   disposition: proposal
-  proposal: '04'
+  proposal: 04-tool-result-contract.md
   coverage: full
   disposition_note: Part 4 of issue 04 asks for the member on both types, the merge into the `metadata`
     of the persisted tool result message, delivery to the result hooks and exclusion from what is sent
@@ -390,7 +388,7 @@ findings:
     returns a tool's description, variables, `uses` and annotations without `execute` is a possible follow-up.
   backwards_compatible: true
   disposition: proposal
-  proposal: '05'
+  proposal: 05-annotations.md
   coverage: partial
   disposition_note: 'Part 2 of issue 05 adds a read-only `annotations` member to `HookToolCall`, as the
     evidence-audit-observability mapping and the packaging-conformance-governance mapping ask, and says
@@ -431,7 +429,7 @@ findings:
     as they do `parentHooks`.'
   backwards_compatible: true
   disposition: proposal
-  proposal: '05'
+  proposal: 05-annotations.md
   coverage: full
   disposition_note: Part 1 of issue 05 asks for the field on `AgentDefinition` with the semantics of Tools
     §8 and a packer copy into `PackedMeta` and `package.json.standardagent`, and names `PromptDefinition`
@@ -477,7 +475,7 @@ findings:
     the runtime overwrites supplied values.
   backwards_compatible: true
   disposition: proposal
-  proposal: '02'
+  proposal: 02-message-sender.md
   coverage: full
   disposition_note: Issue 02 proposes the read-only top-level `user_id` of the approval-human mapping,
     set only for the send route and settable by no input type or message hook. Among its alternatives
@@ -514,7 +512,7 @@ findings:
     that the session resumes on such a message.
   backwards_compatible: true
   disposition: proposal
-  proposal: '02'
+  proposal: 02-message-sender.md
   coverage: partial
   disposition_note: 'Issue 02, under ''A related clarification'', asks that Agents §1.1 say which messages
     fulfil a human-backed side''s turn: any message on that side''s perspective, with code that needs
@@ -552,12 +550,10 @@ findings:
   proposed_change: 'Add one sentence to Subagents §4: a child thread''s user is its parent''s user, and
     `ThreadState.userId` on the child reports it; or state the intended rule if it differs.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue text covers it. Per-user environment resolution, thread listing and the access
-    check on thread routes and endpoints all presuppose an answer, so the sentence is needed by any SA
-    author who composes children. For a grounded agent it decides whether an approver can reach the decision
-    endpoint of a child thread, where the integration document says a child that mutates asks for its
-    own approvals. One sentence; it fits the issue led by SA-25 and can also be filed alone.
+  disposition: proposal
+  proposal: 08-child-creation-from-code.md
+  coverage: full
+  disposition_note: Issue 08 asks for the sentence in Subagents §4.
   concerns:
   - approval-human
 - id: SA-14
@@ -624,7 +620,7 @@ findings:
     that thread''s store and files; if not, replace the example channel in Subagents §6.4.'
   backwards_compatible: true
   disposition: proposal
-  proposal: '06'
+  proposal: 06-editorial-inconsistencies.md
   coverage: full
   disposition_note: 'Item 6 of issue 06 quotes the three passages, asks for item 3 to be reworded and
     for a statement on a `ThreadState` obtained through `getParentThread()` or `getChildThread()`, and
@@ -705,12 +701,11 @@ findings:
     queued tools, blocking child sessions, `invokeTool` at rest, recovery runs) run under the caller's
     `flowId`. No API change.
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue covers it; the integration document lists 'when `flowId` changes' among the
-    points not written up. The reference binding accepts a checkpoint only in the execution that took
-    it (ACS §5.13, W608) and keys that on `flowId`, so the rule holds only as far as a runtime changes
-    the id; whether the id survives a blocking child's wait is unstated. The change is two sentences with
-    no API change, and serves any per-execution approval, budget, idempotency key or trace.
+  disposition: proposal
+  proposal: 09-execution-concurrency-and-flow-id.md
+  coverage: full
+  disposition_note: Issue 09 asks Execution State §2 to state that each execution has its own `flowId`
+    and which nested activities keep the caller's.
   concerns:
   - checkpoint-rollback-state
 - id: SA-18
@@ -891,12 +886,12 @@ findings:
     with it? If they may, say so in the key-value section. Add effects and handler turns to the access-context
     table of Threads §1.3, with the value of `state.execution`.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: 'No issue text covers it. The reference binding reads and rewrites its records in
-    the thread store from tools and from the approval endpoint (the trace counter, the checkpoint list,
-    the single-use approval), so their integrity depends on the answer; the integration document states
-    this limit. It stands without ACS: the key-value example in Threads §7.1 is a read-modify-write counter,
-    and the Draft Users page already states a serialization rule for user scope.'
+  disposition: proposal
+  proposal: 09-execution-concurrency-and-flow-id.md
+  coverage: full
+  disposition_note: Issue 09 asks Runtime §11 to define a flow and to say what is serialized with a running
+    execution, and asks for rows for effects and handler turns in the access-context table of Threads
+    §1.3.
   concerns:
   - checkpoint-rollback-state
   - workflow-execution
@@ -1020,13 +1015,13 @@ findings:
     `state.children` reflects it at once, the arguments of `subagent_message`, and how a name that is
     both a relationship name and an exposed agent resolves.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue text covers it; issue 01 only asks, as an open question, whether its hook
-    fires for the lifecycle tools. The text refers to APIs it does not define, so the request stands for
-    any SA author of a relay, a router or a `hidden` relationship. For a grounded agent it is the route
-    the integration document names for gating a delegation (spawn the child from a grounded tool or a
-    handler, with every relationship `hidden`), and that document records that the text does not say how
-    code names the call. SA-26 and SA-13 fit the same issue.
+  disposition: proposal
+  proposal: 08-child-creation-from-code.md
+  coverage: full
+  disposition_note: 'Issue 08 asks for a subsection of Subagents §5 on the lifecycle operations code calls:
+    the call, its arguments, how the caller obtains the reference, when `state.children` lists the instance,
+    and the arguments of `subagent_message`. Which name is normative where a relationship name equals
+    an exposed agent''s is one of its open questions.'
   concerns:
   - approval-human
   - workflow-execution
@@ -1059,14 +1054,12 @@ findings:
     declare an argument schema that is used wherever the side A prompt''s `requiredSchema` is used today.
     Align Runtime §7.4 with the MUST of §5.1.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: 'No issue text covers it. Any agent may be composed, so a handler-backed child is
-    legal, and the argument contract of Subagents §5.1 has no rule for it; that holds for every SA author
-    of a deterministic child. A grounded child written as a handler can check `state.arguments` in its
-    own code, but only after its thread exists, and the text defines no schema to show the parent''s model.
-    It does not need an issue of its own: it is the paragraph on arguments of the issue led by SA-25.
-    The MUST in Subagents §5.1 against the ''should'' in Runtime §7.4 is a difference of the kind issue
-    06 lists; 06 does not include it.'
+  disposition: proposal
+  proposal: 08-child-creation-from-code.md
+  coverage: partial
+  disposition_note: Issue 08 asks for one sentence in Subagents §5.1 on arguments when the child's side
+    A has no `requiredSchema`, and lists an argument schema on `defineHandler` among its alternatives
+    without asking for it. Issue 06, item 4, asks for the MUST in Runtime §7.4.
   concerns:
   - approval-human
   - workflow-execution
@@ -1272,7 +1265,7 @@ findings:
     supported, how a block is told apart from a failure.
   backwards_compatible: true
   disposition: proposal
-  proposal: '01'
+  proposal: 01-before-tool-call-hook.md
   coverage: partial
   disposition_note: 'Issue 01 states the gap in its Problem section (item 3: neither passage says which
     hook may block, how, or what the runtime then does) and asks in open question 3 whether `hook_blocked`
@@ -1468,7 +1461,7 @@ findings:
     on them.
   backwards_compatible: true
   disposition: proposal
-  proposal: '05'
+  proposal: 05-annotations.md
   coverage: full
   disposition_note: 'Part 3 of issue 05 rewords the bullet with the runtime as its subject and asks whether
     package code may read annotations and act on them, without preferring an answer, as the record does.
@@ -2246,7 +2239,7 @@ findings:
     out a per-tool map, which would publish the names of internal tools.
   backwards_compatible: true
   disposition: proposal
-  proposal: '05'
+  proposal: 05-annotations.md
   coverage: partial
   disposition_note: Part 1 of issue 05 has the packer copy each entry agent's annotations into `PackedMeta`
     and the `standardagent` field, which gives installers owner-keyed metadata without importing code,
@@ -2894,7 +2887,7 @@ findings:
     in order (Runtime §5.1). Reword the published type comment the same way.
   backwards_compatible: true
   disposition: proposal
-  proposal: '06'
+  proposal: 06-editorial-inconsistencies.md
   coverage: full
   disposition_note: Item 9 of issue 06 quotes Prompts §1.2 and Runtime §5.1 and proposes the rewording.
     It does not mention the published type comment, which repeats the wording, the change of default since
@@ -2933,7 +2926,7 @@ findings:
     types; correct the Handlers §5 parenthesis and the two examples that do not type-check.
   backwards_compatible: true
   disposition: proposal
-  proposal: '06'
+  proposal: 06-editorial-inconsistencies.md
   coverage: partial
   disposition_note: 'Issue 06 items 4 to 8 cover `maxInstances`, the order of child-required hooks, key-value
     isolation against a parent''s or child''s `ThreadState`, the endpoint mount path and the thread-creation
@@ -2979,7 +2972,7 @@ findings:
     link to `providers#10-provider-tools`. The Threads §7.3 link then resolves as written.
   backwards_compatible: true
   disposition: proposal
-  proposal: '06'
+  proposal: 06-editorial-inconsistencies.md
   coverage: full
   disposition_note: Issue 06 items 1 to 3 state the duplicate numbering, both uses of `#13-code-execution-runtime`,
     the Threads §7.3 reference and the Models anchor, and suggest the one-step renumbering together with

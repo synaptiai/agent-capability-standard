@@ -44,8 +44,8 @@ meta:
     searched: 'For an absence: what was searched for, and where.'
     proposed_change: The smallest change that would resolve the finding.
     disposition: 'Standard Agent Specification findings only. proposal: one of the drafted issues asks
-      for the change (tasks/standard-agents-upstream/). not_proposed: no issue asks for it, with the reason.
-      candidate: would stand as an issue of its own; not drafted.'
+      for the change (the file named in `proposal`, under tasks/standard-agents-upstream/). not_proposed:
+      no issue asks for it, with the reason. candidate: would stand as an issue of its own; not drafted.'
     document_item: 'Agent Capability Standard findings only: the numbered item in the integration document''s
       list of proposed changes that states the finding.'
     concerns: The concerns whose mapping produced the finding.

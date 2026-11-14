@@ -241,15 +241,15 @@ def test_findings_match_the_index_and_have_the_documented_fields(
 def test_a_finding_covered_by_a_proposal_names_one_that_exists(
     findings: dict[str, dict[str, Any]],
 ) -> None:
-    numbers = {p.name[:2] for p in PROPOSALS.glob("[0-9][0-9]-*.md")}
-    assert numbers
+    issues = {p.name for p in PROPOSALS.glob("[0-9][0-9]-*.md")}
+    assert issues
     for finding in findings["standard_agent_specification"]["findings"]:
         where = finding["id"]
         assert finding["disposition"] in {"proposal", "not_proposed", "candidate"}, (
             where
         )
         if finding["disposition"] == "proposal":
-            assert finding.get("proposal") in numbers, where
+            assert finding.get("proposal") in issues, where
             assert finding.get("coverage") in {"full", "partial"}, where
         else:
             assert "proposal" not in finding, where

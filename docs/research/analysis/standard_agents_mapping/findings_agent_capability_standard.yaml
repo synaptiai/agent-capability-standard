@@ -1500,7 +1500,9 @@ findings:
     Conventions a binding needs are recorded in no machine-readable form: anchor `ref` forms for SA artefacts,
     conversion of SA epoch timestamps to ISO-8601, how a `ThreadUser` or a child thread becomes an `agent_identity`,
     which `authenticated_by` value to record, and which capability `subagent_message` and `notifyParent`
-    are.'
+    are. The row-level mapping published with this analysis (docs/research/analysis/standard_agents_mapping/)
+    pins the versions compared and is checked by a test; the conventions are in its rows, not in a form
+    a binding can load.'
   refs:
   - schemas/interop/ (oasf_mapping.yaml and standard_agents_annotation.schema.json only)
   - schemas/interop/oasf_mapping.yaml meta, lines 16-22; tests/test_oasf_adapter.py

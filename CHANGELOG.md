@@ -19,8 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   standard.
 - `docs/research/analysis/standard_agents_mapping/`: the row-level mapping
   behind that document (319 rows in ten concerns, each with references and
-  verbatim quotes from both sides) and the findings it produced about each
-  standard. `tests/test_standard_agents_mapping.py` keeps the index, the
+  verbatim quotes from both sides), the findings it produced about each
+  standard (83 and 64) and the questions the texts leave open. `tests/test_standard_agents_mapping.py` keeps the index, the
   files and their references to this repository in agreement.
 - `examples/standard_agents/`: a reference binding in TypeScript and a worked
   example. `groundedTool` classifies a Standard Agents tool by an ontology
