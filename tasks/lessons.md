@@ -176,3 +176,19 @@ adversary would: wrappers (`env`, `xargs`, `sh -c`), every shell operator and
 redirection, quoting, case, path tricks (`//`, `..`), malformed state files,
 and a failing command inside the check. A hook must fail closed: any exit
 code other than the blocking one lets the call run.
+
+## Use the kernel's lock; do not build one from mkdir and timeouts
+
+**What happened.** A `mkdir` lock with a five-second give-up broke the audit
+log's chain on slow CI runners (a waiter appended beside a slow holder and
+removed its lock). Each patch to it (an age rule, a PID file, a turn to
+break stale locks) was broken again by reviewers: `kill -0` misreads holders
+in another uid or PID namespace, a FIFO planted as the PID file hangs the
+hook, check-then-act races remove fresh locks, and iteration counts are not
+time. flock(2) through `flock` or `perl` removed the whole class: the kernel
+releases the lock when its holder exits.
+
+**Rule.** For mutual exclusion in a shell script, use flock(2) (with a
+portable way to call it) before inventing a lock. Bound every wait by wall
+clock, and make the timeout path degrade to something detectable, not to
+silence. Test a lock under CPU load and with a slow holder, not only idle.

@@ -2187,8 +2187,8 @@ findings:
   resolution: 'The plugin''s audit hook now runs after every tool call: hooks/hooks.json registers it
     for PostToolUse and PostToolUseFailure with matcher `*`. It appends one HMAC-chained line per call
     to .claude/audit.log with ts, event, tool, the skill name on a Skill call, and input_sha256. Concurrent
-    runs are serialised with flock, or with a lock directory where flock is missing. Tests show that the
-    chain breaks without either lock. tools/verify_audit_log.py verifies the new format and earlier entries.
+    runs are serialised with flock(2), taken by flock or else perl, and a held lock delays a run by 40
+    seconds at most. Tests show that the chain breaks without the lock. tools/verify_audit_log.py verifies the new format and earlier entries.
     Remaining: Three parts change the Standard and need an RFC: a required hook that a host must refuse
     to run without, a record of which configuration activated a hook, and a stated concurrency assumption
     for the safety layer.'

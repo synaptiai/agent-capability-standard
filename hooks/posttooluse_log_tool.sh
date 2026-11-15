@@ -40,8 +40,9 @@
 # SEC-006: Consistent path resolution (matches pretooluse_require_checkpoint.sh)
 set -euo pipefail
 
-# Read JSON from stdin (Claude Code hooks receive data via stdin)
-input=$(cat)
+# Read JSON from stdin (Claude Code hooks receive data via stdin), with a
+# builtin so that the hook does not need cat
+IFS= read -r -d '' input || true
 
 # Without jq the tool call cannot be read, so nothing is logged
 if ! command -v jq &> /dev/null; then
@@ -177,46 +178,45 @@ _do_append() {
 
 # Serialize read + append, so that concurrent hook runs (tool calls made in
 # parallel) do not read the same prev_hmac and break the HMAC chain.
+#
+# The lock is flock(2) on "<log>.lock", taken on file descriptor 200 of the
+# subshell that appends, so the kernel releases it when that subshell exits,
+# however it exits: there is no stale lock to detect or break. flock(1) takes
+# it where installed; elsewhere (macOS ships perl, not flock) perl does, on
+# the same descriptor. Both are flock(2), so sessions with and without
+# flock(1) exclude each other. A run waits for the lock for at most
+# AUDIT_LOCK_WAIT seconds (default 40; Claude Code stops a hook after 60),
+# then appends without it, as it does where neither tool exists or the lock
+# file is not a regular file (one planted as a FIFO would block the open):
+# an entry out of chain order is reported by the verifier, a missing one is
+# not, so a held or planted lock cannot silence the log.
 lock_file="${log_file}.lock"
+lock_wait="${AUDIT_LOCK_WAIT:-40}"
+[[ "$lock_wait" =~ ^[0-9]+$ ]] || lock_wait=40
 
-if command -v flock &> /dev/null; then
-  # Opened for append, so a lock file replaced by a symlink truncates nothing
-  (flock -x 200 && _do_append) 200>>"$lock_file"
-else
-  # No flock (macOS ships none): mkdir is atomic, so a directory is the lock,
-  # and only the run that made it removes it. An append holds it for well
-  # under a second, so a lock ten seconds old was left by a run that died
-  # holding it: it is removed and the wait goes on. A run that cannot get the
-  # lock in about thirty seconds appends anyway and leaves the lock alone: an
-  # entry out of chain order is reported by the verifier, a missing entry is
-  # not.
-  lock_dir="${lock_file}.d"
-  held=""
-  lock_age() {
-    local mtime
-    if [[ "$OSTYPE" == darwin* ]]; then
-      mtime=$(stat -f %m "$lock_dir" 2>/dev/null) || return 1
-    else
-      mtime=$(stat -c %Y "$lock_dir" 2>/dev/null) || return 1
-    fi
-    echo $(( $(date +%s) - mtime ))
-  }
-  for i in $(seq 1 600); do
-    if mkdir "$lock_dir" 2>/dev/null; then
-      held=1
-      break
-    fi
-    # About once a second, look for a lock its holder left behind.
-    if (( i % 20 == 0 )) && age=$(lock_age) && (( age >= 10 )); then
-      rmdir "$lock_dir" 2>/dev/null || true
-      continue
-    fi
-    sleep 0.05
-  done
-  if [[ -n "$held" ]]; then
-    trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+# Take flock(2) on descriptor 200, waiting at most $lock_wait seconds.
+_lock_fd200() {
+  if command -v flock &> /dev/null; then
+    flock -x -w "$lock_wait" 200
+  elif command -v perl &> /dev/null; then
+    perl -MFcntl=:flock -MTime::HiRes=time -e '
+      open(my $fd, ">>&=", 200) or exit 1;
+      my $end = time + $ARGV[0];
+      until (flock($fd, LOCK_EX | LOCK_NB)) {
+        exit 1 if time >= $end;
+        select(undef, undef, undef, 0.05);
+      }
+      exit 0;
+    ' "$lock_wait"
+  else
+    return 1
   fi
+}
+
+if [[ -L "$lock_file" || ( -e "$lock_file" && ! -f "$lock_file" ) ]]; then
   _do_append
+else
+  (_lock_fd200 || true; _do_append) 200>>"$lock_file"
 fi
 
 exit 0
