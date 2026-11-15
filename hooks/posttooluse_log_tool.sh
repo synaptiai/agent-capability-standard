@@ -183,20 +183,39 @@ if command -v flock &> /dev/null; then
   # Opened for append, so a lock file replaced by a symlink truncates nothing
   (flock -x 200 && _do_append) 200>>"$lock_file"
 else
-  # No flock (macOS ships none): mkdir is atomic, so a directory is the lock.
-  # Wait up to about five seconds for it, then append anyway: an entry out of
-  # chain order is reported by the verifier, a missing entry is not.
+  # No flock (macOS ships none): mkdir is atomic, so a directory is the lock,
+  # and only the run that made it removes it. An append holds it for well
+  # under a second, so a lock ten seconds old was left by a run that died
+  # holding it: it is removed and the wait goes on. A run that cannot get the
+  # lock in about thirty seconds appends anyway and leaves the lock alone: an
+  # entry out of chain order is reported by the verifier, a missing entry is
+  # not.
   lock_dir="${lock_file}.d"
-  for _ in $(seq 1 100); do
+  held=""
+  lock_age() {
+    local mtime
+    if [[ "$OSTYPE" == darwin* ]]; then
+      mtime=$(stat -f %m "$lock_dir" 2>/dev/null) || return 1
+    else
+      mtime=$(stat -c %Y "$lock_dir" 2>/dev/null) || return 1
+    fi
+    echo $(( $(date +%s) - mtime ))
+  }
+  for i in $(seq 1 600); do
     if mkdir "$lock_dir" 2>/dev/null; then
+      held=1
       break
+    fi
+    # About once a second, look for a lock its holder left behind.
+    if (( i % 20 == 0 )) && age=$(lock_age) && (( age >= 10 )); then
+      rmdir "$lock_dir" 2>/dev/null || true
+      continue
     fi
     sleep 0.05
   done
-  # Release the lock on any exit. After a full wait the lock is another run's
-  # and is taken to be stale (an append takes milliseconds), so it is removed
-  # too rather than left to delay every later call.
-  trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+  if [[ -n "$held" ]]; then
+    trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+  fi
   _do_append
 fi
 

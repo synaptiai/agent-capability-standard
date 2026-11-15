@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -500,6 +501,7 @@ _AUDIT_HOOK_TOOLS = [
     "rmdir",
     "sleep",
     "seq",
+    "stat",
 ]
 
 
@@ -566,6 +568,47 @@ class TestAuditLogConcurrency:
         assert not (tmp_path / ".claude" / "audit.log.lock.d").exists(), (
             "the lock directory is released"
         )
+
+    def _bin_without_flock(self, tmp_path: Path) -> Path:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for tool in _AUDIT_HOOK_TOOLS:
+            tool_path = shutil.which(tool)
+            assert tool_path is not None
+            (bin_dir / tool).symlink_to(tool_path)
+        return bin_dir
+
+    def test_chain_holds_when_the_holder_is_slow(self, tmp_path: Path) -> None:
+        """A run waiting for the lock directory does not give up and append
+        beside a holder that is slow (as on a loaded CI runner): openssl is
+        slowed so the six appends take longer than the old five-second wait,
+        which made the last writer append unlocked and remove the lock."""
+        bin_dir = self._bin_without_flock(tmp_path)
+        (bin_dir / "openssl").unlink()
+        slow = bin_dir / "openssl"
+        slow.write_text(
+            f"#!{shutil.which('bash')}\n"
+            f"{shutil.which('sleep')} 1.5\n"
+            f'exec {shutil.which("openssl")} "$@"\n'
+        )
+        slow.chmod(0o755)
+
+        _run_concurrently(self.PAYLOADS, self._env(tmp_path, str(bin_dir)))
+        self._assert_chain(tmp_path)
+
+    def test_a_lock_left_by_a_dead_run_is_taken_over(self, tmp_path: Path) -> None:
+        """A lock directory older than ten seconds belongs to a run that died
+        holding it: it is removed, and the chain goes on."""
+        bin_dir = self._bin_without_flock(tmp_path)
+        lock_dir = tmp_path / ".claude" / "audit.log.lock.d"
+        lock_dir.mkdir(parents=True)
+        old = time.time() - 60
+        os.utime(lock_dir, (old, old))
+
+        _run_concurrently(self.PAYLOADS[:2], self._env(tmp_path, str(bin_dir)))
+        total, valid, errors = verify_log(tmp_path / ".claude" / "audit.log", self.KEY)
+        assert (total, valid, errors) == (2, 2, [])
+        assert not lock_dir.exists()
 
 
 # ─── Audit log when the digest cannot be computed ───
