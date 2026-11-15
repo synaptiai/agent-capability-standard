@@ -933,6 +933,122 @@ def _resumption(add):
         attendance="unattended",
     )
 
+    # A nested queue that waits through two resumptions: the first escalates
+    # before the invoke step continues its nested run, and the handler's own
+    # nested run defers, so the run ends deferred again.
+    m0 = mutate(
+        "m0",
+        approval={"approver": NIGHTLY, "when_unattended": "defer_to_queue"},
+        failure_modes=[
+            {
+                "condition": "the change failed",
+                "on_error": "R402",
+                "action": "escalate",
+                "recovery": {"goto_step": "page"},
+            }
+        ],
+    )
+    invoke_child = st(
+        "invoke",
+        "i",
+        workflow_id="child",
+        after_deferral="run",
+        input_bindings={"workflow": "child"},
+    )
+    page = st(
+        "invoke",
+        "page",
+        handler=True,
+        workflow_id="oncall",
+        input_bindings={"workflow": "oncall", "input": {"why": "the change failed"}},
+    )
+    queued_child = wf([CP, POLICY, mutate(approval=DEFER)], requires=["approval@1"])
+    oncall = dict(queued_child, inputs={"why": {"type": "string", "required": True}})
+    twice = {
+        "w": wf(
+            [CP, POLICY, m0, invoke_child, page], requires=["approval@1", "recovery@1"]
+        ),
+        "child": queued_child,
+        "oncall": oncall,
+    }
+    child = ["w", "child"]
+    paging = ["w", "oncall"]
+    nested_cp = {"kind": "Checkpoint", "checkpoint_id": "cp9"}
+    add(
+        "resume_nested_queue_after_escalation",
+        "A resumption that escalates before an invoke step continues its nested run puts the step back among the deferred; when the run ends deferred again (here because the handler's own nested run deferred), the next resumption continues that nested run with its queued action intact, then the handler's (§5.14.1).",
+        twice,
+        CHECKPOINTED
+        + [
+            {
+                "expect": {"kind": "RequestApproval", "step": 2, "approver": NIGHTLY},
+                "respond": unavailable,
+            },
+            {
+                "expect": inv("checkpoint", frame=child),
+                "respond": out(checkpoint_id="cp2"),
+            },
+            {"expect": inv("constrain", frame=child), "respond": out(compliant=True)},
+            deferred_end({"step": 2}, {"frame": child, "step": 2}, {"step": 3}),
+            resume(attendance="unattended", at=3600000),
+            {
+                "expect": queued_request(2, "run-1/w/2/0", approver=NIGHTLY),
+                "respond": approve("d1", who=("nightly",)),
+            },
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 2},
+                "respond": {"kind": "Checkpoint", "checkpoint_id": "cp4"},
+            },
+            {"expect": inv("mutate", step=2), "respond": down},
+            {
+                "expect": inv("checkpoint", frame=paging),
+                "respond": out(checkpoint_id="cp3"),
+            },
+            {"expect": inv("constrain", frame=paging), "respond": out(compliant=True)},
+            deferred_end(
+                {"frame": child, "step": 2},
+                {"step": 3},
+                {"frame": paging, "step": 2},
+                {"step": 4},
+                cause="R402",
+            ),
+            resume(at=7200000),
+            {
+                "expect": queued_request(
+                    2, "run-1/w/child/2/1", frame=child, approver=HUMAN
+                ),
+                "respond": approve("d2"),
+            },
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 2, "frame": child},
+                "respond": nested_cp,
+            },
+            {"expect": inv("mutate", frame=child), "respond": out(success=True)},
+            {
+                "expect": queued_request(2, "run-1/w/oncall/2/2", frame=paging),
+                "respond": approve("d3"),
+            },
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 2, "frame": paging},
+                "respond": nested_cp,
+            },
+            {"expect": inv("mutate", frame=paging), "respond": out(success=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "escalated",
+            "cause": "R402",
+            "deferred": [],
+            "action_records": [
+                {"action_id": "run-1/w/2/0", "status": "failed"},
+                {"action_id": "run-1/w/child/2/1", "status": "executed"},
+                {"action_id": "run-1/w/oncall/2/2", "status": "executed"},
+            ],
+        },
+        ["run_resumed", "invoke_resumed", "escalated"],
+        attendance="unattended",
+    )
+
     # Loops, failures, skips and gates during a resumption.
     verify_loop = st(
         "verify",

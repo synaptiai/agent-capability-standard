@@ -2713,11 +2713,13 @@ impl<'a> Machine<'a> {
 
 /// Whether a deferral's queued action can no longer be carried out: its
 /// path runs through a step that is not deferred in its frame (the nested
-/// run it was queued in failed), or a nested run that was not kept.
+/// run it was queued in failed), or a nested run that was not kept. A step
+/// still listed by an earlier resumption of a nested run that was never
+/// continued counts as deferred.
 fn orphaned(top: &Frame, path: &[usize]) -> bool {
     let mut f = top;
     for (j, k) in path.iter().enumerate() {
-        if !f.deferred.contains(k) {
+        if !f.deferred.contains(k) && !f.resume.iter().flatten().any(|r| r == k) {
             return true;
         }
         if j + 1 < path.len() {

@@ -122,3 +122,12 @@ Design: `tasks/standard-1.2/designs/S2a.md`. Base: tag `round3/S2a-base`
 10. **W616 names.** The two features are reported as "approver
     'sender_check'" and "approver 'accept_trust_classes'" at
     `steps[i].approval.approver.<key>`.
+11. **Orphaned deferrals across two resumptions.** The design's orphan rule
+    ("a path through a step not in its frame's `deferred`") would supersede
+    the queued actions of a kept nested run that an earlier resumption had
+    reopened but not continued (its steps are in its resumption list, not
+    in `deferred`): a resumption that escalates before the invoke step
+    continues, and ends deferred again through its handler. A step still
+    in the resumption list counts as deferred; fixture
+    `resume_nested_queue_after_escalation` pins it (it fails without the
+    rule).

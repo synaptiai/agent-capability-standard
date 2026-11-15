@@ -178,7 +178,8 @@ and checks (including mismatched authentication and trust class, and the 1.1
 treatment of the approver fields), and resumption (attended, rejected,
 unattended, a mandate step in either attendance, nested, deferred handler, a
 new actor, steps that ran ahead read and unread, a bound checkpoint, a loop, a
-loop with a deferred handler, a gate `end`, a failure). The runtime fixture
+loop with a deferred handler, a gate `end`, a failure, a nested queue that
+waits through two resumptions). The runtime fixture
 format gains a `resume` entry.
 
 ## Backward compatibility
@@ -212,7 +213,7 @@ existing catalog, so none needs migrating.
   `tool_call` vectors).
 - Runtime fixtures: `approval_defaults_partial`,
   `approval_out_of_band_unattended`, `approval_digest_any_case`,
-  `approval_shows_unresolved`, ten `approver_*` fixtures and sixteen
+  `approval_shows_unresolved`, ten `approver_*` fixtures and seventeen
   `resume_*` fixtures; the `resume` script entry and the `{{digest_upper}}`
   placeholder in every replayer.
 - Validator fixtures for the approver fields (pass, V106, S303 in 1.2

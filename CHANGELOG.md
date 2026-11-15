@@ -76,7 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `WorkflowRunner.restore` take `actor_identity` and refuse another
     principal; a resumption may name a new actor, which the trace and later
     records show.
-  - 30 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
+  - 31 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
     `resume` entry and the `{{digest_upper}}` placeholder) and four
     validator fixtures (`*approver_identity*`).
 - [Standard Agents interoperability](docs/integrations/standard_agents.md):
