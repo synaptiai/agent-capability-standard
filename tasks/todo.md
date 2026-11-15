@@ -76,6 +76,50 @@ standard, write the integration document, and prepare upstream issues.
   needs no checkpoint) and an unknown capability id, against STANDARD §5.2.1.
   Fixed in round 2 (ACS-07).
 
+## Round 3: implement every remaining ACS finding (Standard 1.2.0)
+
+Request: implement and fix all findings; the RFC process must not stop the
+changes. Scope: the 38 open findings, what remains of the 14 partly fixed
+ones, and the 7 proposed in RFC-0005 (59, plus ACS-07's binding profile).
+
+Approach, following the 1.1.0 precedent (a draft Standard text and the RFCs
+that accept it, implemented in the same change):
+- `spec/STANDARD-v1.2.0.md` (MINOR): every change backward compatible; a
+  change that would break a valid 1.1 workflow is phased in as a warning.
+- Ontology 2.2.0 and the canonical schemas: additive only.
+- RFC-0005 and RFC-0006 to RFC-0010 record the decisions (Accepted, by the
+  maintainer's instruction), with the sections GOVERNANCE requires.
+- The reference validator, executor, Python SDK, TypeScript binding and hooks
+  implement each rule, with conformance fixtures.
+
+Workstreams:
+- [ ] S1 Tool-calling hosts and the hook layer (RFC-0005): ACS-01, 02, 03,
+      07, 08, 36, 38, 39, 41, 55, 57
+- [ ] S2a Approval, deferral and run identity (RFC-0006): ACS-10, 11, 12,
+      13, 35, 44
+- [ ] S2b Host protocol and executor conformance (RFC-0006): ACS-14, 15, 20,
+      30, 31, 32, 33, 34, 37, 45, 62
+- [ ] S3 Validator, delegation and catalogs (RFC-0007): ACS-04, 09, 16, 17,
+      24, 29, 46, 47, 49, 50, 54
+- [ ] S4 Evidence, grounding and secrets (RFC-0008): ACS-06, 21, 22, 23, 40,
+      51, 53, 58
+- [ ] S5 Checkpoint, rollback, send and memory (RFC-0009): ACS-18, 19, 26,
+      27, 48, 52
+- [ ] S6 Profiles, trust, versioning, schema dialect and packaging
+      (RFC-0010): ACS-05, 25, 28, 42, 56, 59, 64
+
+Phases:
+- [ ] 1. Design: one design per workstream, an adversarial review, a
+      revision; then a cross-stream consistency pass that fixes shared shapes
+      and allocates the new diagnostic codes
+- [ ] 2. Foundation: STANDARD-v1.2.0.md base, ontology and canonical schema
+      deltas, new codes, version lines, validator support for 1.2
+- [ ] 3. Implementation: S1, S3, S5, S6 in parallel worktrees; S2a, S2b, S4
+      in one chain (they share the executor); merge
+- [ ] 4. Verification: every CI check, site checks, adversarial review of the
+      whole change, fixes
+- [ ] 5. Findings file, CHANGELOG, Appendix D, RFC statuses
+
 ## Round 2: fix our side, pull request, merge
 
 Request: fix the issues identified on our end, file the upstream issues, open
