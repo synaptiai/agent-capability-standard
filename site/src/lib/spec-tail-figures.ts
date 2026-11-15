@@ -15,7 +15,7 @@ import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { loadOntology } from '../data/ontology';
 import { loadIdentityPolicy, loadTrustModel, RUNTIME_FIXTURE_DIR, type IdentityPolicy } from '../data/spec-sources';
 import { parseCatalog, type Workflow } from '../data/workflows';
-import { readRepoFile, trackedUnder } from './repo';
+import { readRepoFile, trackedIn, trackedUnder } from './repo';
 import { blockText, codeLines, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
 import { schemaListing } from './views';
 import { andList, plural } from './words';
@@ -416,7 +416,7 @@ export function conformanceSuite(text: string, where: string): SuitePart[] {
     if (!Array.isArray(doc.cases)) throw new Error(`tests/conformance/expressions/${f}.json has no cases list`);
     return a + doc.cases.length;
   }, 0);
-  const runtime = trackedUnder(RUNTIME_FIXTURE_DIR, '.json').length;
+  const runtime = trackedIn(RUNTIME_FIXTURE_DIR, '.json').length;
   return [
     { label: 'Positive fixtures (pass_)', count: count('pass_'), dir: 'tests/fixtures' },
     { label: 'Negative fixtures (fail_)', count: count('fail_'), dir: 'tests/fixtures' },

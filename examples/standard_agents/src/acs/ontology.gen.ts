@@ -2,7 +2,7 @@
 // scripts/gen_standard_agents_binding.py. DO NOT EDIT: regenerate with
 //   python scripts/gen_standard_agents_binding.py
 
-export const ONTOLOGY_VERSION = "2.1.0";
+export const ONTOLOGY_VERSION = "2.2.0";
 
 export const CAPABILITIES = {
   "retrieve": {"layer": "PERCEIVE", "risk": "low", "mutation": false, "requires_checkpoint": false, "requires_approval": false, "mutation_overridable": false, "output_required": ["data", "evidence_anchors", "confidence"]},

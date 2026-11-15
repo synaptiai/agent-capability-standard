@@ -42,6 +42,10 @@ RUNTIME = ROOT / "tests" / "conformance" / "runtime"
 DOC: dict[str, Any] = json.loads(VECTORS.read_text(encoding="utf-8"))
 CASES: list[dict[str, Any]] = DOC["vectors"]
 IDS = [v["name"] for v in CASES]
+# The vectors of workflow steps, which the reference executor replays; a
+# `tool_call` vector has no step to run.
+STEP_CASES = [v for v in CASES if v["kind"] == "step"]
+STEP_IDS = [v["name"] for v in STEP_CASES]
 
 
 # ---------------------------------------------------------------------------
@@ -180,9 +184,13 @@ def test_the_vectors_are_informative_and_named() -> None:
     assert len(set(IDS)) == len(IDS)
     for vector in CASES:
         assert set(vector) <= set(DOC["fields"]), vector["name"]
-        assert {"name", "about", "approval", "shown", "canonical", "digest"} <= set(
-            vector
-        )
+        assert {"name", "kind", "about", "shown", "canonical", "digest"} <= set(vector)
+        assert vector["kind"] in ("step", "tool_call"), vector["name"]
+        if vector["kind"] == "step":
+            assert "approval" in vector and "call" not in vector, vector["name"]
+        else:
+            assert vector["shown"] == [vector["call"]], vector["name"]
+            assert not {"approval", "inputs"} & set(vector), vector["name"]
 
 
 def test_the_vectors_cover_what_the_digest_depends_on() -> None:
@@ -345,7 +353,7 @@ def replay(
     raise AssertionError(f"{vector['name']}: the run did not end")
 
 
-@pytest.mark.parametrize("vector", CASES, ids=IDS)
+@pytest.mark.parametrize("vector", STEP_CASES, ids=STEP_IDS)
 def test_the_executor_asks_with_the_vector(
     validator: _core.Validator, vector: dict[str, Any]
 ) -> None:
@@ -367,7 +375,7 @@ def test_the_executor_refuses_the_digest_of_other_values(
 ) -> None:
     """The replay answers with the vector's digest, so a vector whose digest
     is not the digest of its shown values does not complete (F502)."""
-    vector, other = CASES[0], CASES[1]
+    vector, other = STEP_CASES[0], STEP_CASES[1]
     assert vector["digest"] != other["digest"]
     requests, end = replay(validator, {**vector, "digest": other["digest"]})
     assert requests[-1]["digest"] == vector["digest"]

@@ -166,6 +166,23 @@ impl Context {
         })
     }
 
+    /// Every capability's contracts with each `$ref` resolved, in ontology
+    /// order: `{<capability>: {"input": <schema>, "output": <schema>}}`.
+    /// These are what validation and the executor read, so a rendering of
+    /// the contracts starts from them (STANDARD v1.2 §4.1.2).
+    pub fn contracts_json(&self) -> Value {
+        let mut out = Map::new();
+        for id in self.ontology.capabilities.keys() {
+            if let Some(c) = self.contracts.get(id) {
+                out.insert(
+                    id.clone(),
+                    json!({"input": c.input.clone(), "output": c.output.clone()}),
+                );
+            }
+        }
+        Value::Object(out)
+    }
+
     /// The registry transform turning `actual` into something `expected`
     /// accepts: an exact match on the printed types first, then the first
     /// entry whose types are compatible.

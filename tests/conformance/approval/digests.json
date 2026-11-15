@@ -6,9 +6,11 @@
   "description": "Approval digests computed by the reference executor (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each vector is one approval request. STANDARD v1.1.0 section 5.14 states that a decision is valid only if the SHA-256 digest of the canonical JSON (RFC 8785) of the shown values matches. What is shown when a step declares no `shows`, and the object added when a step asks again after a recheck, are the reference executor's behaviour; the Standard does not state them. This file is printable ASCII: any other character is written as a JSON \\u escape, so no tool that normalises or transcodes text can change a vector.",
   "fields": {
     "name": "The vector's name, unique in this file.",
+    "kind": "`step`: an approval request of a workflow step, with `approval` and, without `shows`, `inputs`; `tool_call`: the approval of a tool call (STANDARD v1.2.0 \u00a75.18.7), with `call`.",
     "about": "What the vector covers.",
-    "approval": "The `approval` field of the step that asks, as the workflow declares it; null when the step has none.",
-    "inputs": "The step's resolved inputs. Present where the step declares no `shows`, so that `shown` is built from them.",
+    "approval": "For a `step` vector: the `approval` field of the step that asks, as the workflow declares it; null when the step has none.",
+    "inputs": "For a `step` vector: the step's resolved inputs. Present where the step declares no `shows`, so that `shown` is built from them.",
+    "call": "For a `tool_call` vector: the call, `{action, capability, args}`; `shown` is `[call]`.",
     "shown": "The JSON array of shown values that the approval request carries.",
     "canonical": "The RFC 8785 (JCS) serialization of `shown`. It is held here as a JSON string: the canonical text is the value a JSON parser returns for it.",
     "digest": "The SHA-256 of the UTF-8 encoding of the canonical text, in lowercase hexadecimal: the digest the request carries and a decision repeats."
@@ -16,6 +18,7 @@
   "vectors": [
     {
       "name": "object",
+      "kind": "step",
       "about": "An object with a nested object. Members are written in the order of their names, whatever order the value had.",
       "approval": {
         "approver": {
@@ -40,6 +43,7 @@
     },
     {
       "name": "member_order",
+      "kind": "step",
       "about": "Member names sort by UTF-16 code unit: the empty name first, an uppercase letter before a lowercase one, a name before a longer name that begins with it. Array elements keep their order.",
       "approval": {
         "approver": {
@@ -67,6 +71,7 @@
     },
     {
       "name": "numbers",
+      "kind": "step",
       "about": "Numbers are written as ECMAScript writes the binary64 value, so -0.0, 1.0, 1e+21 and 1e-07 in the JSON text of `shown` become 0, 1, 1e+21 and 1e-7. 9007199254740992 is 2^53, the bound that section 5.14 gives for integers.",
       "approval": {
         "approver": {
@@ -100,6 +105,7 @@
     },
     {
       "name": "string_escapes",
+      "kind": "step",
       "about": "A string with a line feed, a tab, quotation marks, a backslash, U+0001, U+007F, U+00E9, U+20AC and U+1F600. The canonical text escapes the first five (U+0001 as `\\u0001`, in lowercase) and holds the other four as themselves.",
       "approval": {
         "approver": {
@@ -119,6 +125,7 @@
     },
     {
       "name": "member_order_non_ascii",
+      "kind": "step",
       "about": "The member names of the sorting example in RFC 8785 section 3.2.3. U+1F600 is the surrogate pair D83D DE00 in UTF-16, so it sorts before U+FB33, although its code point is higher.",
       "approval": {
         "approver": {
@@ -144,6 +151,7 @@
     },
     {
       "name": "nesting",
+      "kind": "step",
       "about": "Objects and arrays nested, with true, false, null, an empty array and an empty object.",
       "approval": {
         "approver": {
@@ -177,6 +185,7 @@
     },
     {
       "name": "string_value",
+      "kind": "step",
       "about": "The shown value is a string.",
       "approval": {
         "approver": {
@@ -194,6 +203,7 @@
     },
     {
       "name": "array_value",
+      "kind": "step",
       "about": "The shown value is an array: it is one element of `shown`, not spliced into it.",
       "approval": {
         "approver": {
@@ -217,6 +227,7 @@
     },
     {
       "name": "number_value",
+      "kind": "step",
       "about": "The shown value is a number.",
       "approval": {
         "approver": {
@@ -234,6 +245,7 @@
     },
     {
       "name": "null_value",
+      "kind": "step",
       "about": "The shown value is null.",
       "approval": {
         "approver": {
@@ -251,6 +263,7 @@
     },
     {
       "name": "empty_list_value",
+      "kind": "step",
       "about": "The shown value is an empty array.",
       "approval": {
         "approver": {
@@ -268,6 +281,7 @@
     },
     {
       "name": "two_values_in_order",
+      "kind": "step",
       "about": "Two references: `shown` keeps the order of `shows`.",
       "approval": {
         "approver": {
@@ -287,6 +301,7 @@
     },
     {
       "name": "empty_shows",
+      "kind": "step",
       "about": "`shows` is an empty list: `shown` is the empty array.",
       "approval": {
         "approver": {
@@ -300,6 +315,7 @@
     },
     {
       "name": "no_shows",
+      "kind": "step",
       "about": "The `approval` field has no `shows`: the reference executor shows the step's resolved inputs, wrapped in an array.",
       "approval": {
         "approver": {
@@ -325,6 +341,7 @@
     },
     {
       "name": "no_approval_field",
+      "kind": "step",
       "about": "The step has no `approval` field and needs approval by the ontology: the reference executor shows the step's resolved inputs, wrapped in an array, as for `no_shows`.",
       "approval": null,
       "inputs": {
@@ -346,6 +363,7 @@
     },
     {
       "name": "asked_again_after_recheck",
+      "kind": "step",
       "about": "The recheck read a changed source, so the reference executor asks again (`on_change: reask`, the default). `shown` gains one object whose `recheck` member holds the value approved before (`previous`) and the value read now (`current`).",
       "approval": {
         "approver": {

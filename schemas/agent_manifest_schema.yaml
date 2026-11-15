@@ -1,0 +1,92 @@
+schema:
+  name: agent_manifest
+  version: 1.0.0
+  description: What an agent that a delegate step names may do (Standard v1.2
+    §5.15.1, RFC-0007) - the ontology capabilities it may exercise and the task
+    inputs it accepts. Its maxima are derived from the ontology, never stated
+    here. A manifest is given to a validator or an executor beside the
+    catalogs it checks or runs; one that does not conform to this schema,
+    that cites another ontology major or an unsupported standard, or that
+    names an agent another manifest of the same set names is refused when
+    loaded. A capability the ontology does not define is V101 where the
+    manifest is used, and the manifest then has no maxima.
+agent_manifest:
+  type: object
+  required:
+  - agent
+  - standard
+  - ontology
+  - capabilities
+  additionalProperties: false
+  patternProperties:
+    ^x-: {}
+  properties:
+    agent:
+      type: string
+      minLength: 1
+      description: The name a delegate step's agent input and a workflow's
+        agents list use. A target name, not a principal, compared by exact
+        (code-point) equality.
+    standard:
+      type: string
+      pattern: ^[0-9]+\.[0-9]+(\.[0-9]+)?$
+      description: The Standard version the manifest was written against,
+        MAJOR.MINOR[.PATCH] (Standard v1.2 §11.6); one the consumer does not
+        support refuses the manifest (V109).
+    ontology:
+      type: string
+      pattern: ^[0-9]+\.[0-9]+(\.[0-9]+)?$
+      description: The ontology version the manifest was written against,
+        MAJOR.MINOR[.PATCH] (Standard v1.2 §11.6); another major than the
+        consumer's ontology refuses the manifest (V109).
+    version:
+      type: string
+      description: The version of the agent definition, for people.
+    description:
+      type: string
+      description: What the agent is for, for people.
+    capabilities:
+      type: array
+      uniqueItems: true
+      items:
+        type: string
+        pattern: ^[a-z][a-z0-9-]*$
+      description: Every ontology capability the agent may exercise, directly
+        or through agents it delegates to and workflows it invokes. Its maxima
+        are the highest risk and the OR of mutation, requires_checkpoint and
+        requires_approval over these capabilities' ontology values; its
+        read-only maxima the same over those whose mutation is false.
+    task:
+      type: object
+      additionalProperties:
+        $ref: '#/agent_task_input'
+      description: The task inputs the agent accepts, in the form of workflow
+        inputs (Standard §5.1). A literal task that gives a name not declared
+        here, or lacks a required one, is S303 or S304 in a workflow that
+        declares agents; the executor refuses both (R402).
+agent_task_input:
+  type: object
+  additionalProperties: true
+  properties:
+    type:
+      oneOf:
+      - type: string
+      - type: array
+        minItems: 1
+        items:
+          type: string
+      description: Data type of this input, a JSON Schema type name or a list
+        of them.
+    required:
+      type: boolean
+      description: Whether the task must give this input.
+    description:
+      type: string
+      description: What the input is, for people.
+    properties:
+      type: object
+      additionalProperties: true
+      description: Sub-properties of this input.
+    ref:
+      type: string
+      description: Reference to an external schema.

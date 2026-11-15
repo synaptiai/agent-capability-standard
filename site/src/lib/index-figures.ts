@@ -3,7 +3,7 @@
 // copies both read these, so the words agree.
 import { codeLines } from './md-sections';
 import { releaseHeading } from './release-figures';
-import { readRepoFile, trackedUnder } from './repo';
+import { readRepoFile, trackedIn } from './repo';
 import type { Route } from './routes';
 import type { RfcRow } from './rfcs';
 import { statusStyle } from './status';
@@ -401,7 +401,8 @@ export function conformanceSuite(): SuitePart[] {
   const evalCases = cases(EVAL_SOURCE);
   const checkCases = cases(CHECK_SOURCE);
   const runs = (dir: string, label: string): SuitePart => {
-    const files = trackedUnder(dir, '.json');
+    // The fixtures are the files in the directory itself; schema/ holds their format.
+    const files = trackedIn(dir, '.json');
     const codes = files.flatMap((f) => {
       const end = (JSON.parse(readRepoFile(f)) as { end?: { code?: unknown; cause?: unknown } }).end ?? {};
       return codesIn([end.code, end.cause]);

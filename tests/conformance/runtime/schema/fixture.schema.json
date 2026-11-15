@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Runtime fixture (Agent Capability Standard 1.2.0, section 10.5)",
+  "type": "object",
+  "required": ["description", "catalog", "header", "workflow", "inputs", "attendance", "start", "script", "end", "trace_kinds"],
+  "additionalProperties": false,
+  "properties": {
+    "description": { "type": "string", "minLength": 1 },
+    "catalog": { "type": "object" },
+    "header": {
+      "oneOf": [
+        { "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" },
+        { "type": "null" }
+      ],
+      "description": "The version the catalog's '# Standard version:' header declares, or null for a catalog without one; the runner passes it to start as is (STANDARD v1.2 §11.5, §5.19.2). Required."
+    },
+    "catalogs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["catalog", "header"],
+        "additionalProperties": false,
+        "properties": {
+          "catalog": { "type": "object" },
+          "header": { "oneOf": [{ "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" }, { "type": "null" }] }
+        }
+      },
+      "description": "Further catalogs of the run's catalog set (§5.1.1), each with its header's version."
+    },
+    "agents": { "type": "array", "items": { "type": "object" }, "description": "Agent manifests the host gives (§5.15.1)." },
+    "workflow": { "type": "string" },
+    "inputs": { "type": "object" },
+    "attendance": { "enum": ["attended", "unattended"] },
+    "actor_identity": { "type": "object" },
+    "records": { "enum": ["approvals", "actions"] },
+    "destinations": { "type": "array", "items": { "type": "array", "items": { "type": "string" } }, "description": "The run's destination policies (§4.4.2); absent: none." },
+    "grounding": { "type": "array", "items": { "type": "object" }, "description": "Grounding policies the host applies (§5.20); absent: none." },
+    "profiles": { "type": "array", "items": { "type": "object" }, "description": "Domain profiles the host applies (§5.21); absent: none." },
+    "start": { "$ref": "#/$defs/time" },
+    "script": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "end": { "type": "object", "required": ["kind"], "properties": { "kind": { "enum": ["Completed", "Failed"] } } },
+    "run_record": {
+      "type": "object",
+      "description": "Optional: what the run record derived from the end (section 5.19.8) must match, by the subset rule of section 10.5."
+    },
+    "trace_kinds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Informative: kinds the reference executor's trace must hold. Not part of class EX."
+    }
+  },
+  "$defs": {
+    "time": { "type": "integer", "minimum": 0, "maximum": 253402300799999 },
+    "entry": {
+      "oneOf": [
+        { "$ref": "#/$defs/act" },
+        { "$ref": "#/$defs/tick" },
+        { "$ref": "#/$defs/wake" },
+        { "$ref": "#/$defs/cancel" },
+        { "$ref": "#/$defs/resume" }
+      ]
+    },
+    "act": {
+      "type": "object",
+      "required": ["expect"],
+      "additionalProperties": false,
+      "properties": {
+        "expect": { "type": "object", "required": ["kind"] },
+        "respond": {
+          "type": "object",
+          "required": ["kind"],
+          "description": "A host_protocol.schema.json response, in which the string \"{{digest}}\" stands for the pending action's digest and \"{{digest_upper}}\" for it in uppercase. Members the protocol does not define are ignored by the executor (section 5.19.1)."
+        },
+        "at": { "$ref": "#/$defs/time" }
+      }
+    },
+    "tick": {
+      "type": "object",
+      "required": ["tick"],
+      "additionalProperties": false,
+      "properties": { "tick": { "$ref": "#/$defs/time" }, "changed": { "type": "boolean" } }
+    },
+    "wake": {
+      "type": "object",
+      "required": ["wake_at"],
+      "additionalProperties": false,
+      "properties": { "wake_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] } }
+    },
+    "cancel": {
+      "type": "object",
+      "required": ["cancel"],
+      "additionalProperties": false,
+      "properties": {
+        "cancel": {
+          "type": "object",
+          "required": ["reason"],
+          "additionalProperties": false,
+          "properties": { "reason": { "type": "string", "minLength": 1 }, "at": { "$ref": "#/$defs/time" } }
+        }
+      }
+    },
+    "resume": {
+      "type": "object",
+      "required": ["resume"],
+      "additionalProperties": false,
+      "properties": {
+        "resume": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "attendance": { "enum": ["attended", "unattended"] },
+            "at": { "$ref": "#/$defs/time" },
+            "actor_identity": { "type": "object" }
+          }
+        }
+      }
+    }
+  }
+}

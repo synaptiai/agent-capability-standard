@@ -1,6 +1,6 @@
 schema:
   name: canonical_world_state
-  version: 1.1.0
+  version: 1.2.0
   description: Canonical, composition-safe world-state representation for real+digital
     modeling. Designed for agent workflows (evidence, uncertainty, provenance, transitions).
   generated_at: '2026-01-24T02:33:26.585814Z'
@@ -35,7 +35,13 @@ types:
         description: The role it acts in, e.g. reviewer or owner.
       model_family:
         type: string
-        description: For an agent, the model family it ran on.
+        description: For an agent, the family of the model it ran on, derived from
+          the model's identifier and compared by exact (code-point) equality (Standard
+          v1.2 §5.15).
+      model_id:
+        type: string
+        description: For an agent, the identifier of the model it ran on, such as
+          acme-large-2 (Standard v1.2 §5.17).
       owner:
         type: string
         description: The principal of the person or organisation it acts for.
@@ -61,28 +67,39 @@ types:
           each class a default source weight.
   Anchor:
     type: object
+    description: An evidence anchor (Standard v1.2 §6.5); the same type as event_schema.yaml's
+      Anchor. world_state_schema.yaml repeats this type. Other members may appear;
+      a producer's own should start with x-.
     required:
     - ref
     - kind
     properties:
       ref:
         type: string
-        description: Pointer like file:line, URL, tool-output-id
+        description: Where the evidence is. A URI or <scheme>:<rest> with a scheme
+          its producer documents (file:src/app.py#L10-L20, tool:Read:toolu_01). The
+          scheme acs is reserved for workflow values (acs:search_out.results[0]).
       kind:
         type: string
-        enum:
-        - file
-        - url
-        - tool
-        - log
-        - sensor
-        - human_note
-      excerpt:
-        type: string
+        pattern: ^(file|url|tool|log|sensor|human_note|api|record|x-[a-z0-9][a-z0-9_.-]*)$
+        description: file, url, tool (a tool call's result), log, sensor, human_note
+          (written by a person), api (a service's API response), record (a record
+          the agent system wrote or holds - an action or audit record, a checkpoint,
+          a memory item, a workflow value), or a vendor kind starting with x-
       timestamp:
         type: string
-        description: ISO-8601 Z
         nullable: true
+        description: ISO-8601 time at which the producer read or observed the evidence
+      excerpt:
+        type: string
+        nullable: true
+        description: A short quotation of the evidence as the producer read it; never
+          a secret (Standard v1.2 §6.7)
+      digest:
+        type: string
+        pattern: ^sha256:[0-9a-f]{64}$
+        description: SHA-256 of the evidence's content as the producer read it - the
+          bytes ref names or, for a JSON value, its RFC 8785 canonical JSON in UTF-8
   Uncertainty:
     type: object
     required:
@@ -142,6 +159,8 @@ types:
     properties:
       entity_id:
         type: string
+        description: The entity id, <class>:<namespace>/<local_id> (Standard v1.2
+          §7.1; entity_taxonomy.yaml id_convention)
       entity_type:
         type: string
         nullable: true
@@ -314,6 +333,8 @@ types:
       rollback:
         type: object
         nullable: true
+        description: How the transition's effect is undone or compensated. A send's
+          compensation has the same form (Standard v1.2 §4.4.2).
         properties:
           strategy:
             type: string
@@ -337,8 +358,81 @@ types:
     properties:
       action_id:
         type: string
+      run_id:
+        type: string
+        description: The run the record belongs to (Standard v1.2 §5.19) or, for a
+          record of a tool call, the layer scope its safety layer keeps records for
+          (§5.18.5).
+      frame:
+        type: array
+        items:
+          type: string
+        description: For a step of a run, the workflows of its nested runs, root first.
+      step:
+        type: integer
+        minimum: 0
+        description: For a step of a run, its index in the last workflow of frame.
+      capability:
+        type: string
+        description: The ontology capability the action performs.
+      tool:
+        type: string
+        description: For a tool call, the name the host offers the tool under (§5.18).
+      call_id:
+        type: string
+        description: For a tool call, the host's identifier of the call, if it has
+          one.
+      checkpoint_id:
+        type: string
+        description: The checkpoint the action used, took or restored.
+      idempotency_key:
+        type: string
+        description: For a step that called its capability, the key of the pass, under
+          which the host performs the effect at most once (Standard v1.2 §4.4.2).
+      code:
+        type: string
+        description: The diagnostic code (Standard v1.2 §9) of an action that failed,
+          was refused or was cancelled.
+      reason_code:
+        type: string
+        description: Why, as a token (Standard v1.2 §5.19.7), such as unsupported_domain.
+      details:
+        type: object
+        description: Other data the record carries, such as the event an audit step
+          recorded (details.event) or how a run ended (a run record, Standard v1.2
+          §5.19.8, §6.4).
+      recorded_by:
+        type: object
+        required:
+        - name
+        properties:
+          name:
+            type: string
+          version:
+            type: string
+          config_sha256:
+            type: string
+            description: SHA-256 of the configuration the implementation applied.
+          settings:
+            type: object
+            description: The settings that decided the action, listed where they are
+              few (Standard v1.2 §5.18.8), such as a safety layer's approval mode
+              and checkpoint maximum age.
+        description: The implementation that wrote the record, set by that implementation
+          only, never taken from what it records (Standard v1.2 §6.4).
+      prev_hmac:
+        type: string
+        description: In an append-only log of records, the hmac of the record before
+          this one; empty for the first (Standard v1.2 §6.4).
+      hmac:
+        type: string
+        description: In such a log, the HMAC-SHA-256 of this record without hmac,
+          under the log's key, as lowercase hexadecimal. The log computes prev_hmac
+          and hmac when it appends the record, never taking them from what it records.
       timestamp:
         type: string
+        description: When the record was written. A record that a resumed run updates
+          (Standard v1.2 §5.14.1) carries the time of its latest change.
       actor:
         type: string
         description: agent/human
@@ -349,7 +443,14 @@ types:
       always_ask:
         type: boolean
         description: The action used an item from an always-ask trust class, so no
-          standing mandate could approve it (Standard v1.1 §5.17).
+          standing mandate could approve it (Standard v1.1 §5.17). A step that a domain
+          profile requires a person for carries person_required instead (Standard
+          v1.2 §5.21.3).
+      person_required:
+        type: boolean
+        description: An applied domain profile required a person's approval for this
+          step (require_human or block_autonomous), so no standing mandate could approve
+          it (Standard v1.2 §5.21.3). Unlike always_ask it marks no data.
       intent:
         type: string
       status:
@@ -362,14 +463,24 @@ types:
         - executed
         - failed
         - rolled_back
-        description: rejected and expired (Standard v1.1 §5.14) record an approval
-          that was refused or lapsed; an action deferred to a queue stays planned
-          (its approval, if any, says why it was not approved now).
+        - cancelled
+        description: rejected, an action that was refused before it ran, by its approvers
+          (Standard v1.1 §5.14) or by an executor or a safety layer (Standard v1.2
+          §5.18), with code saying why; expired, an approval that lapsed; an action
+          deferred to a queue stays planned (its approval, if any, says why it was
+          not approved now) until its run is resumed, which updates this record in
+          place and keeps its action_id (Standard v1.2 §5.14.1), and a run record
+          is planned while its run can be resumed (§5.19.8); a planned record in the
+          terminal action of a run that did not end deferred is abandoned and never
+          carried out; cancelled, an action that was approved or queued when its run
+          was cancelled, or had started and may have been carried out (Standard v1.2
+          §5.19.5).
       reason:
         type: string
         nullable: true
-        description: Why the action did not go ahead (rejected, expired or refused
-          in an unattended run).
+        description: Why the action did not go ahead or failed, in words (rejected,
+          expired, refused in an unattended run, cancelled); reason_code says it as
+          a token.
       approval:
         type: object
         nullable: true
@@ -380,7 +491,9 @@ types:
         properties:
           digest:
             type: string
-            description: SHA-256 of the canonical JSON of the values shown to the approvers.
+            description: SHA-256 of the canonical JSON (RFC 8785) of the values shown
+              to the approvers, as 64 lowercase hexadecimal digits (Standard v1.2
+              §5.14).
           decision:
             type: string
             enum:
@@ -390,16 +503,33 @@ types:
             - unavailable
             description: unavailable means no one could decide (no standing mandate
               covered the action); the step's when_unattended then applied.
+          decision_id:
+            type: string
+            description: The identifier the host gave the decision; single-use within
+              the run (Standard v1.2 §5.14, §5.19.1). Absent when no decision arrived
+              (expired).
           approvers:
             type: array
             items:
               type: string
-            description: Distinct approver identities.
+            description: The distinct approvers that counted toward min_approvers.
+              With attested approver identities, their principals (Standard v1.2 §5.17).
+          approver_identities:
+            type: array
+            items:
+              $ref: '#/types/AgentIdentity'
+            description: The identities of the approvers that counted, as the host
+              attested them (Standard v1.2 §5.17, identity@1), one per principal.
+              Present only when the decision carried identities.
           mode:
             type: string
             enum:
             - in_session
             - out_of_band
+            description: Where the approvers were asked (Standard v1.2 §5.14). in_session,
+              the party attending the run, in its session; out_of_band, through a
+              channel separate from the run's session, whose approvers need not attend
+              the run.
           mandate_ref:
             type: string
             nullable: true
@@ -497,9 +627,12 @@ world_state:
         properties:
           id:
             type: string
+            description: The entity id, <class>:<namespace>/<local_id> (Standard v1.2
+              §7.1; entity_taxonomy.yaml id_convention)
           type:
             type: string
-            description: entity class, e.g. service, host, person, document
+            description: entity class, e.g. service, host, person, document; the class
+              part of the id names it or an alias of it (Standard v1.2 §7.1)
           labels:
             type: array
             items:
@@ -558,6 +691,8 @@ world_state:
           description: time buckets -> pointers
     retention_policy:
       type: object
+      description: How long the store that holds the world's records keeps them (Standard
+        v1.2 §6.3); a session-scoped store cannot keep them longer than the session
       required:
       - observations
       - audit_logs
@@ -568,7 +703,7 @@ world_state:
           properties:
             max_age:
               type: string
-              description: ISO-8601 duration e.g. P30D
+              description: A duration (Standard v1.2 §5.10.1), e.g. P30D or 30d
             max_count:
               type: integer
         audit_logs:
@@ -576,7 +711,7 @@ world_state:
           properties:
             max_age:
               type: string
-              description: ISO-8601 duration e.g. P90D
+              description: A duration (Standard v1.2 §5.10.1), e.g. P90D or 90d
         snapshots:
           type: object
           properties:

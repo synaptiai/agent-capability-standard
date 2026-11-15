@@ -16,8 +16,9 @@ Validates:
 5) identity_resolution_policy threshold ordering and weight ranges
 6) entity_taxonomy id convention
 7) Cross-file agreement between the trust model and the benchmark fixture,
-   and between agent_identity_schema.yaml and the trust classes and the world
-   state's AgentIdentity
+   between agent_identity_schema.yaml and the trust classes and the world
+   state's AgentIdentity (model_id included), and between the event schema's
+   Anchor and Uncertainty and the world state's copies of them
 8) Skill reference/ copies of a canonical schema match their source
 
 Usage:
@@ -229,15 +230,18 @@ def validate_trust_model(schema: dict[str, Any], errors: list[str], name: str) -
 
     # Every source named as a field authority must be a known source.  This is
     # the check that would have caught the NIST profile citing an
-    # `unverified: 0.20` source that never existed (issue #105).
-    for entry in schema.get("field_authority", {}).get("examples") or []:
-        field = entry.get("field", "<unnamed>")
-        for source in entry.get("authorities") or []:
-            if source not in weights:
-                errors.append(
-                    f"[{name}] field_authority['{field}'] names unknown source "
-                    f"'{source}'"
-                )
+    # `unverified: 0.20` source that never existed (issue #105). `fields` is
+    # what Standard v1.2 §8.2 reads; `examples` is kept from 1.1.
+    authority = schema.get("field_authority") or {}
+    for member in ("fields", "examples"):
+        for entry in authority.get(member) or []:
+            field = entry.get("field", "<unnamed>")
+            for source in entry.get("authorities") or []:
+                if source not in weights:
+                    errors.append(
+                        f"[{name}] field_authority.{member}['{field}'] names "
+                        f"unknown source '{source}'"
+                    )
 
     decay = schema.get("decay_model") or {}
     half_life = decay.get("half_life")
@@ -343,6 +347,48 @@ def validate_identity_type(
             f"[{label}] types.AgentIdentity differs from "
             f"agent_identity_schema.yaml#/agent_identity; copy it over"
         )
+
+
+def _without_descriptions(value: Any) -> Any:
+    """A schema with every `description` key removed."""
+    if isinstance(value, dict):
+        return {
+            k: _without_descriptions(v) for k, v in value.items() if k != "description"
+        }
+    if isinstance(value, list):
+        return [_without_descriptions(v) for v in value]
+    return value
+
+
+def validate_shared_types(schemas_dir: Path, errors: list[str]) -> None:
+    """The world state repeats the event schema's Anchor and Uncertainty, so
+    each of its vendored copies stays self-contained. The two must be the
+    same type: equal once descriptions are removed (Standard v1.2 §6.5)."""
+    label = "world_state_schema <-> event_schema"
+    types: list[dict[str, Any]] = []
+    for name in ("world_state_schema", "event_schema"):
+        path = schemas_dir / f"{name}.yaml"
+        try:
+            types.append((safe_yaml_load(path) or {}).get("types") or {})
+        except (
+            yaml.YAMLError,
+            YAMLSizeExceededError,
+            OSError,
+            UnicodeDecodeError,
+        ) as exc:
+            errors.append(f"[{label}] Could not load {_display_path(path)}: {exc}")
+            return
+    world, event = types
+    for type_name in ("Anchor", "Uncertainty"):
+        if type_name not in world or type_name not in event:
+            errors.append(f"[{label}] types.{type_name} is missing from one of them")
+        elif _without_descriptions(world[type_name]) != _without_descriptions(
+            event[type_name]
+        ):
+            errors.append(
+                f"[{label}] types.{type_name} differs between the two files; "
+                f"copy event_schema.yaml's over (descriptions may differ)"
+            )
 
 
 def validate_trust_classes(
@@ -521,6 +567,7 @@ def main() -> None:
 
         validated_count += 1
 
+    validate_shared_types(schemas_dir, errors)
     validate_vendored_copies(schemas_dir, skills_dir, errors)
 
     if errors:

@@ -725,6 +725,42 @@ class TestValidateCanonicalSchemas:
             "    - unverified\n    - system_of_record",
         )
 
+    def test_catches_phantom_source_in_the_examples(self, tmp_path: Path) -> None:
+        """`examples`, kept from 1.1, is checked as `fields` is."""
+        schemas = self._schemas_copy(tmp_path)
+        path = schemas / "authority_trust_model.yaml"
+        text = path.read_text()
+        examples = text.index("  examples:")
+        path.write_text(
+            text[:examples]
+            + text[examples:].replace("- hardware_sensor", "- unverified", 1)
+        )
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--schemas-dir", str(schemas)]
+        )
+        assert result.returncode != 0
+        assert "field_authority.examples['serial_number']" in result.stdout
+
+    def test_catches_anchor_drift_between_event_and_world_state(
+        self, tmp_path: Path
+    ) -> None:
+        """The world state's Anchor is the event schema's (Standard v1.2 §6.5)."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "world_state_schema.yaml",
+            "|human_note|api|record|",
+            "|human_note|record|",
+        )
+
+    def test_catches_identity_model_id_drift(self, tmp_path: Path) -> None:
+        """The world state's AgentIdentity is agent_identity, model_id too."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "world_state_schema.yaml",
+            "      model_id:\n        type: string",
+            "      model_id:\n        type: integer",
+        )
+
     def test_catches_source_ranking_asymmetry(self, tmp_path: Path) -> None:
         self._assert_drift_is_caught(
             tmp_path,
@@ -854,7 +890,7 @@ class TestValidateCanonicalSchemas:
 
     def test_catches_malformed_schema_version(self, tmp_path: Path) -> None:
         self._assert_drift_is_caught(
-            tmp_path, "entity_taxonomy.yaml", "  version: 1.0.0", "  version: v1"
+            tmp_path, "entity_taxonomy.yaml", "  version: 1.1.0", "  version: v1"
         )
 
     def test_catches_missing_canonical_schema_file(self, tmp_path: Path) -> None:
@@ -1075,9 +1111,9 @@ class TestSyncSkillSchemas:
         )
 
     def test_vendored_ontology_copies_are_maintained(self, tmp_path: Path) -> None:
-        """Every skills/*/reference/capability_ontology.yaml is a verbatim
-        copy of the ontology; a stale one fails --check and a sync repairs
-        it."""
+        """Every skills/*/reference/capability_ontology.yaml is the ontology
+        with its $refs pointed at the co-located copies; a stale one fails
+        --check and a sync repairs it."""
         root = self._tree(tmp_path)
         copies = sorted((root / "skills").glob("*/reference/capability_ontology.yaml"))
         assert copies, "expected skills that vendor the ontology"
@@ -1088,8 +1124,37 @@ class TestSyncSkillSchemas:
         assert check.returncode == 1
         assert str(stale.relative_to(root)) in check.stdout
         assert self._sync(root).returncode == 0
-        source = (root / "schemas" / "capability_ontology.yaml").read_bytes()
-        assert all(copy.read_bytes() == source for copy in copies)
+        source = (root / "schemas" / "capability_ontology.yaml").read_text()
+        rendered = self._module().render_vendored_ontology(source)
+        assert all(copy.read_text() == rendered for copy in copies)
+
+    def test_vendored_ontology_differs_only_in_its_refs(self) -> None:
+        """The rendering only points `schemas/event_schema.yaml` at the copy
+        beside it, which every vendoring skill has; undone, it is the source."""
+        module = self._module()
+        source = (ROOT / "schemas" / "capability_ontology.yaml").read_text()
+        rendered = module.render_vendored_ontology(source)
+        assert "schemas/event_schema.yaml" in source
+        assert "schemas/event_schema.yaml" not in rendered
+        # Every mention of the file in the source is the repository path, so
+        # putting the directory back undoes the rendering.
+        assert source.count("event_schema.yaml") == source.count(
+            "schemas/event_schema.yaml"
+        )
+        undone = rendered.replace("event_schema.yaml", "schemas/event_schema.yaml")
+        assert undone == source
+        for copy in sorted(
+            (ROOT / "skills").glob("*/reference/capability_ontology.yaml")
+        ):
+            assert (copy.parent / "event_schema.yaml").is_file(), copy
+
+    def test_skill_output_schemas_hold_no_ref(self) -> None:
+        """Skill-local output schemas are self-contained: the resolved
+        contract, with every $ref inlined."""
+        for path in sorted((ROOT / "skills").glob("*/schemas/output_schema.yaml")):
+            text = path.read_text()
+            assert "$ref" not in text, path.relative_to(ROOT)
+            assert "STANDARD v1.2 §4.1.2" in text, path.relative_to(ROOT)
 
     def test_crlf_checkout_is_not_drift(self, tmp_path: Path) -> None:
         root = self._tree(tmp_path)

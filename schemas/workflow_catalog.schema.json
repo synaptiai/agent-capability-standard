@@ -4,6 +4,13 @@
   "title": "Grounded Agency Workflow Catalog Schema",
   "description": "JSON Schema for workflow_catalog.yaml — defines composed workflow patterns that orchestrate atomic capabilities from the ontology.",
   "type": "object",
+  "properties": {
+    "catalog": {
+      "if": { "type": "object", "required": ["steps"] },
+      "then": { "$ref": "#/$defs/workflow" },
+      "else": { "$ref": "#/$defs/catalog_manifest" }
+    }
+  },
   "patternProperties": {
     "^x-": {
       "description": "Vendor data; not a workflow."
@@ -25,11 +32,11 @@
         },
         "domain": {
           "type": "string",
-          "description": "Domain the workflow belongs to (e.g. healthcare)."
+          "description": "The domain of the profile the workflow is written for (e.g. healthcare). Descriptive; not the step field domain."
         },
         "profile": {
           "type": "string",
-          "description": "Path of the domain profile the workflow runs under."
+          "description": "Descriptive: the domain profile the workflow is written for, by its domain or a path (STANDARD v1.2 §5.1). It applies nothing; a host applies profiles (§5.21)."
         },
         "goal": {
           "type": "string",
@@ -127,6 +134,47 @@
           "type": "array",
           "items": { "$ref": "#/$defs/trigger" },
           "description": "How runs of this workflow start (STANDARD v1.1 §5.10; needs triggers@1)."
+        },
+        "agents": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "The agents this workflow's delegate steps may delegate to (STANDARD v1.2 §5.15.2). Only in a workflow that targets 1.2 or later (S303 otherwise). Declaring it raises delegate steps' flags to the agents' manifests; without a manifest, the executor does not delegate."
+        },
+        "grounding": {
+          "$ref": "#/$defs/grounding",
+          "description": "Grounding policy (STANDARD v1.2 §5.20; needs grounding@1)."
+        }
+      }
+    },
+    "catalog_manifest": {
+      "type": "object",
+      "description": "The catalog's manifest (STANDARD v1.2 §5.1.1): its id, version, the ontology it is written against and the workflows other catalogs may invoke by qualified id.",
+      "required": ["id", "version"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*(\\.[a-z0-9][a-z0-9_-]*)*$",
+          "description": "Dot-separated lowercase segments, e.g. acs.reference."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+          "description": "The catalog's own version (Semantic Versioning 2.0.0)."
+        },
+        "ontology": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$",
+          "description": "Ontology version the catalog is written against; another major version than the validator's is V109."
+        },
+        "description": { "type": "string" },
+        "exports": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "Workflows other catalogs may invoke; default none."
         }
       }
     },
@@ -144,7 +192,7 @@
     },
     "fireable_code": {
       "type": "string",
-      "enum": ["R401", "R402", "R403", "R406", "F501", "F502", "F504"]
+      "enum": ["R401", "R402", "R403", "R406", "F501", "F502", "F504", "F505"]
     },
     "trigger": {
       "type": "object",
@@ -327,15 +375,15 @@
         },
         "parallel_group": {
           "type": "string",
-          "description": "Group ID for parallel execution."
+          "description": "Group ID (STANDARD v1.2 §5.2.3): the steps of one group are not ordered relative to each other; an executor may run them in any order or concurrently."
         },
         "join": {
           "type": "string",
-          "description": "Join strategy for parallel groups (e.g. 'all_complete')."
+          "description": "When the group is complete (STANDARD v1.2 §5.2.3). The one value defined is 'all_complete', the default; any other value is W618 and ignored."
         },
         "domain": {
           "type": "string",
-          "description": "Domain specialization for this capability invocation."
+          "description": "The capability variant to run: a domain id, lowercase segments joined by '.' (STANDARD v1.2 §5.2.4); another form is W620."
         },
         "condition": {
           "type": "string",
@@ -355,7 +403,7 @@
         },
         "approval": {
           "$ref": "#/$defs/approval",
-          "description": "How the step's approval is obtained and bound (STANDARD v1.1 §5.14; needs approval@1). Only where approval is required."
+          "description": "How the step's approval is obtained and bound (STANDARD v1.2 §5.14; needs approval@1). Only where approval is required."
         },
         "after_deferral": {
           "type": "string",
@@ -372,7 +420,7 @@
         },
         "workflow_id": {
           "type": "string",
-          "description": "For invoke steps, the ID of the sub-workflow to execute."
+          "description": "For invoke steps, the workflow to run: a name in this catalog or a qualified id <catalog id>/<name> (STANDARD v1.2 §5.1.1)."
         },
         "mapping_ref": {
           "type": "string",
@@ -432,10 +480,33 @@
             "kind": { "type": "string", "enum": ["human", "standing_mandate"] },
             "role": { "type": "string" },
             "min_approvers": { "type": "integer", "minimum": 1, "default": 1 },
-            "mandate_ref": { "type": "string", "description": "The standing mandate that approves (kind standing_mandate only)." }
+            "mandate_ref": { "type": "string", "description": "The standing mandate that approves (kind standing_mandate only)." },
+            "sender_check": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^(session_id|chat_user_id|code_host_login|directory_id|api_key|signed_token|x-[a-z0-9][a-z0-9_.-]*)$"
+              },
+              "description": "identity@1, in a workflow that targets 1.2 (STANDARD v1.2 §5.17): an approver counts only if the host attested an identity whose authenticated_by is listed; a decision without approver identities counts none. In an earlier target, an unknown field (W604, W616)."
+            },
+            "accept_trust_classes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "enum": ["owner", "decision_person", "system_of_record", "own_subagent_report", "peer_agent", "colleague", "external"]
+              },
+              "description": "identity@1, in a workflow that targets 1.2 (STANDARD v1.2 §5.17): an approver counts only if the host attested an identity whose trust_class is listed; a decision without approver identities counts none. In an earlier target, an unknown field (W604, W616)."
+            }
           }
         },
-        "mode": { "type": "string", "enum": ["in_session", "out_of_band"], "default": "in_session" },
+        "mode": {
+          "type": "string",
+          "enum": ["in_session", "out_of_band"],
+          "default": "in_session",
+          "description": "Where the approver is asked (STANDARD v1.2 §5.14): in_session, the party attending the run, in its session; out_of_band, through a separate channel whose approvers need not attend the run. A human approver is never asked in an unattended run, in either mode."
+        },
         "shows": {
           "type": "array",
           "items": { "type": "string" },
@@ -454,7 +525,7 @@
         },
         "expires": {
           "$ref": "#/$defs/positive_duration",
-          "description": "How long a decision stays valid; longer than zero."
+          "description": "How long after the request a decision may arrive; longer than zero. Absent, no limit."
         },
         "when_unattended": {
           "type": "string",
@@ -624,6 +695,27 @@
         "message": {
           "type": "string",
           "description": "Human-readable message explaining the gate action."
+        }
+      }
+    },
+    "grounding": {
+      "type": "object",
+      "required": ["require"],
+      "additionalProperties": true,
+      "properties": {
+        "require": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "Capabilities whose outputs are checked (ontology ids)."
+        },
+        "kinds": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^(file|url|tool|log|sensor|human_note|api|record|x-[a-z0-9][a-z0-9_.-]*)$" },
+          "description": "Only anchors of these kinds count (STANDARD v1.2 §6.5)."
+        },
+        "attested": {
+          "type": "boolean",
+          "description": "Count only anchors whose availability is established (default false)."
         }
       }
     }

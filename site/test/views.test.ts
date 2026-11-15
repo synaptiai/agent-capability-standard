@@ -190,6 +190,32 @@ describe('contract tables', () => {
     expect(by.get('b.deep')!.nested).toBe('properties:\n  leaf:\n    type: string');
     expect(by.get('b')!.nested).toBeUndefined();
   });
+
+  it('names the type a $ref or an anyOf of items stands for, and shows a pattern', () => {
+    const typed = new Map(
+      schemaRows({
+        uncertainty: { $ref: 'schemas/event_schema.yaml#/types/Uncertainty', description: 'u' },
+        anchors: {
+          type: 'array',
+          items: {
+            anyOf: [
+              { $ref: 'schemas/event_schema.yaml#/types/Anchor' },
+              { type: 'string', description: 'Deprecated legacy form' },
+              { type: 'object', description: 'Deprecated legacy form' },
+            ],
+          },
+        },
+        refs: { type: 'array', items: { $ref: '#/types/Anchor' } },
+        either: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
+        kind: { type: 'string', pattern: '^(file|x-[a-z]+)$' },
+      }).map((r) => [r.path, r]),
+    );
+    expect(typed.get('uncertainty')!.type).toBe('Uncertainty');
+    expect(typed.get('anchors')!.type).toBe('array of Anchor (or deprecated string or object)');
+    expect(typed.get('refs')!.type).toBe('array of Anchor');
+    expect(typed.get('either')!.type).toBe('array of string or number');
+    expect(typed.get('kind')!.constraints).toEqual(['Matches `^(file|x-[a-z]+)$`']);
+  });
 });
 
 describe('workflow diagram roles', () => {

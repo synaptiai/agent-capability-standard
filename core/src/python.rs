@@ -285,6 +285,12 @@ impl Validator {
         report_to_py(py, &report)
     }
 
+    /// The ontology's contracts with every `$ref` resolved, by capability in
+    /// ontology order: `{id: {"input": schema, "output": schema}}`.
+    fn contracts(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        to_py(py, &self.ctx.contracts_json())
+    }
+
     /// Validate an in-memory catalog (a mapping of workflow name to
     /// workflow). `header` stands in for a file's `# Standard version:`.
     #[pyo3(signature = (catalog, header = None))]

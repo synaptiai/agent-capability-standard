@@ -1,41 +1,49 @@
 """Generate a strict JSON Schema rendering of the ontology's capability contracts.
 
 schemas/capability_ontology.yaml writes each capability's `input_schema` and
-`output_schema` in a dialect of JSON Schema with two spellings that Draft
-2020-12 does not have: `type: any`, and a union written `type: a|b`. This
-script renders the contracts as one Draft 2020-12 document,
-schemas/generated/capability_contracts.schema.json, whose `$defs` holds
-`<capability>.input` and `<capability>.output` for every capability. The
-ontology stays the source: the rendering is for tools that read JSON Schema,
-and nothing in this repository reads a contract from it.
+`output_schema` in the ACS schema dialect (STANDARD v1.2 §4.1.2): Draft
+2020-12 keywords, plus `type: any`, a union written `type: a|b`, `$ref` with
+the keywords beside it merged over its target, `nullable`, and `x-`
+annotations. This script renders the contracts as one Draft 2020-12
+document, schemas/generated/capability_contracts.schema.json, whose `$defs`
+holds `<capability>.input` and `<capability>.output` for every capability.
+The ontology stays the source: the rendering is for tools that read JSON
+Schema, and nothing in this repository reads a contract from it.
 
-The rendering follows the reference validator's reading of the dialect. The
-core reads a schema's `type` in three places: `schema_type` in
-core/src/types.rs (binding types), `type_names` in core/src/schema.rs
-(paths) and `schema_kinds` in core/src/expr/check.rs (expressions).
+It renders the contracts the reference core resolved
+(`_core.Validator(...).contracts()`), the ones validation and the executor
+read, so no `$ref` reaches the renderer; one that did not resolve is an
+error. The rules of §4.1.2:
 
-- `type: a|b` becomes `type: ["a", "b"]`, which admits the same values. The
-  validator reads both as the same union, unless a member is `null`, where
-  `schema_type` reads the two spellings differently; the ontology writes no
-  union with `null`.
+- `type: a|b` becomes `type: ["a", "b"]`, which admits the same values. A
+  union with `null` is outside the dialect and an error.
 - `type: any` becomes a schema with no `type` and the keyword
   `"x-acs-type": "any"`. A schema with no `type` accepts every JSON value,
-  which is what `any` admits, and the validator reads `any` as it reads a
-  schema that states no type and holds no keyword it could infer one from
-  (`properties`, `items`, `enum` and the like). `type: any` beside any
-  keyword but `description` and `default` is refused here, so the two
-  readings cannot part. The keyword records that the ontology wrote
-  `any`, so the slot stays apart from one where the ontology states no type
-  (the "missing type metadata" of STANDARD v1.1.0 §5.4 rule 3). Draft 2020-12
+  which is what `any` admits. `any` may stand only beside annotations
+  (`description`, `title`, `default`, `examples`, `nullable`, `x-` keys), so
+  the rendering cannot accept less than the dialect. The keyword records that
+  the ontology wrote `any`, so the slot stays apart from one where the
+  ontology states no type (the "missing type metadata" of §5.4). Draft 2020-12
   says an implementation SHOULD treat a keyword it does not know as an
   annotation (JSON Schema Core §4.3.1 and §6.5), so the keyword asserts
-  nothing; a tool that refuses unknown keywords has to be told about it. The
-  `x-` prefix marks the keyword as an extension, as the Standard marks
-  vendor fields (Appendix B).
-- Every other keyword the ontology uses means there what it means in Draft
-  2020-12 and is carried over unchanged, in the ontology's order;
-  `properties` and `items` are rendered recursively. A keyword this script
-  does not know is an error, not a pass-through.
+  nothing; Appendix B reserves `x-acs-` keys for this Standard.
+- `nullable: true` adds `"null"` to the rendered `type` (making a list of a
+  single name; nothing where there is no `type`) and is dropped; `nullable:
+  false` is dropped.
+- Every other keyword of the dialect means there what it means in Draft
+  2020-12 and is carried over unchanged, in the contract's order; `x-` keys
+  are carried as they are; `properties`, `items`, `additionalProperties` and
+  the schema lists are rendered recursively. A keyword this script does not
+  know is an error, not a pass-through.
+
+The rendering accepts exactly the values the dialect accepts. It is not
+type-identical for §5.4: the reference validator reads a rendered
+`["t", "null"]` as nullable but ignores the dialect's `nullable: true`
+(STANDARD v1.2 §4.1.2), so a reference to such a member can be W610 against
+the rendering and not against the ontology. `render_contracts` and
+`render_schema` take `nullable_as_null=False` to drop `nullable` without
+adding `"null"`; the published document never does, and only the test that
+compares the two readings uses it.
 
 An object schema is left open, as the ontology writes it. For an output, the
 reference executor fails a step whose output lacks a field its contract
@@ -59,6 +67,8 @@ from grounded_agency import _core
 
 ROOT = Path(__file__).resolve().parent.parent
 ONTOLOGY = ROOT / "schemas" / "capability_ontology.yaml"
+# The root the ontology's `$ref`s are resolved from (the repository root).
+SCHEMA_ROOT = ROOT
 OUT = ROOT / "schemas" / "generated" / "capability_contracts.schema.json"
 ME = "scripts/gen_capability_json_schemas.py"
 
@@ -78,14 +88,28 @@ ANY_KEYWORD = "x-acs-type"
 ANY = "any"
 UNION_SEPARATOR = "|"
 
-# Keywords that assert nothing about a value, and the others whose value is
-# carried over as it is.
-ANNOTATIONS = frozenset({"default", "description"})
-CARRIED = ANNOTATIONS | {"enum", "format", "maximum", "minimum", "required"}
+# Keywords that assert nothing about a value, beside which `type: any` may
+# stand, and the others whose value is carried over as it is.
+ANNOTATIONS = frozenset({"default", "description", "examples", "title"})
+CARRIED = ANNOTATIONS | {
+    "const",
+    "enum",
+    "format",
+    "maxItems",
+    "maxLength",
+    "maximum",
+    "minItems",
+    "minLength",
+    "minimum",
+    "pattern",
+    "required",
+    "uniqueItems",
+}
 # Keywords holding a list of schemas, which the reference validator also reads
-# (`schema_type` in core/src/types.rs). Like `additionalProperties`, which it
-# reads there and in core/src/schema.rs, the ontology uses none of them today.
+# (`schema_type` in core/src/types.rs).
 SCHEMA_LISTS = frozenset({"allOf", "anyOf", "oneOf"})
+NULLABLE = "nullable"
+VENDOR_PREFIX = "x-"
 
 
 class RenderError(ValueError):
@@ -100,6 +124,11 @@ def render_type(value: Any, where: str) -> dict[str, Any]:
     if isinstance(value, str) and UNION_SEPARATOR in value:
         # The validator trims the names of a union.
         rendered = [name.strip() for name in value.split(UNION_SEPARATOR)]
+        if "null" in rendered:
+            raise RenderError(
+                f"{where}: {value!r} is a union with null, outside the dialect;"
+                " write nullable: true"
+            )
     elif isinstance(value, (str, list)) and value:
         rendered = value
     else:
@@ -115,53 +144,97 @@ def render_type(value: Any, where: str) -> dict[str, Any]:
     return {"type": rendered}
 
 
-def render_schema(schema: Any, where: str) -> dict[str, Any]:
+def with_null(rendered: dict[str, Any]) -> dict[str, Any]:
+    """`nullable: true` rendered: `"null"` added to the schema's `type`."""
+    kind = rendered.get("type")
+    if kind is None:
+        return rendered
+    names = [kind] if isinstance(kind, str) else list(kind)
+    if "null" not in names:
+        names.append("null")
+    return {**rendered, "type": names}
+
+
+def render_schema(
+    schema: Any, where: str, *, nullable_as_null: bool = True
+) -> dict[str, Any]:
     """One schema of the dialect as a Draft 2020-12 schema."""
     if not isinstance(schema, dict):
         raise RenderError(f"{where}: a schema must be a mapping, not {schema!r}")
     if schema.get("type") == ANY:
         # `any` is rendered as a schema that accepts every value, which it
         # would not be beside a keyword that constrains the value.
-        asserting = sorted(set(schema) - ANNOTATIONS - {"type"})
+        asserting = sorted(
+            key
+            for key in set(schema) - ANNOTATIONS - {"type", NULLABLE}
+            if not key.startswith(VENDOR_PREFIX)
+        )
         if asserting:
             raise RenderError(f"{where}: `type: any` beside {asserting}")
+
+    def sub(value: Any, at: str) -> dict[str, Any]:
+        return render_schema(value, at, nullable_as_null=nullable_as_null)
+
     out: dict[str, Any] = {}
+    nullable = False
     for key, value in schema.items():
         at = f"{where}/{key}"
         if key == "type":
             out.update(render_type(value, at))
+        elif key == "$ref":
+            raise RenderError(f"{at}: {value!r} did not resolve")
+        elif key == NULLABLE:
+            if not isinstance(value, bool):
+                raise RenderError(f"{at}: must be true or false, not {value!r}")
+            nullable = value
         elif key == "properties":
             if not isinstance(value, dict):
                 raise RenderError(f"{at}: must be a mapping")
-            out[key] = {
-                name: render_schema(sub, f"{at}/{name}") for name, sub in value.items()
-            }
+            out[key] = {name: sub(s, f"{at}/{name}") for name, s in value.items()}
         elif key == "items":
-            out[key] = render_schema(value, at)
+            out[key] = sub(value, at)
         elif key == "additionalProperties":
-            out[key] = value if isinstance(value, bool) else render_schema(value, at)
+            out[key] = value if isinstance(value, bool) else sub(value, at)
         elif key in SCHEMA_LISTS:
             if not isinstance(value, list) or not value:
                 raise RenderError(f"{at}: must be a list of schemas")
-            out[key] = [render_schema(sub, f"{at}/{i}") for i, sub in enumerate(value)]
-        elif key in CARRIED:
+            out[key] = [sub(s, f"{at}/{i}") for i, s in enumerate(value)]
+        elif key in CARRIED or key.startswith(VENDOR_PREFIX):
             out[key] = value
         else:
             raise RenderError(
                 f"{at}: no rendering is defined for this keyword; add one to {ME}"
             )
-    return out
+    return with_null(out) if nullable and nullable_as_null else out
 
 
-def render_document(ontology: dict[str, Any]) -> str:
-    version = str(ontology["meta"]["version"])
+def render_contracts(
+    ontology: dict[str, Any],
+    contracts: dict[str, Any],
+    *,
+    nullable_as_null: bool = True,
+) -> dict[str, Any]:
+    """`<capability>.input` and `<capability>.output` for every node of the
+    ontology, rendered from its resolved contracts (`contracts()` of the
+    core)."""
     defs: dict[str, Any] = {}
     for node in ontology["nodes"]:
+        resolved = contracts.get(node["id"]) or {}
         for side in ("input", "output"):
             name = f"{node['id']}.{side}"
             if name in defs:
                 raise RenderError(f"{name}: defined twice")
-            defs[name] = render_schema(node.get(f"{side}_schema"), name)
+            if not isinstance(node.get(f"{side}_schema"), dict):
+                raise RenderError(f"{name}: the ontology gives no {side}_schema")
+            defs[name] = render_schema(
+                resolved.get(side), name, nullable_as_null=nullable_as_null
+            )
+    return defs
+
+
+def render_document(ontology: dict[str, Any], contracts: dict[str, Any]) -> str:
+    version = str(ontology["meta"]["version"])
+    defs = render_contracts(ontology, contracts)
     document = {
         "$schema": DIALECT,
         "$id": ID,
@@ -173,15 +246,16 @@ def render_document(ontology: dict[str, Any]) -> str:
         "description": (
             "The input and output contract of each capability in the Agent "
             "Capability Standard ontology, rendered as JSON Schema Draft "
-            "2020-12. `$defs` holds `<capability>.input` and "
-            "`<capability>.output`; the document itself constrains nothing. "
-            "The ontology writes `type: any`, and writes a union as `a|b`. A "
-            "union is rendered as a type list. `any` is rendered as a schema "
-            "with no `type`, which accepts every value, and the keyword "
-            f'`"{ANY_KEYWORD}": "{ANY}"`. A schema with neither `type` nor '
-            "that keyword is one whose type the ontology does not state. "
-            "Objects are open: a contract lists the fields it requires and "
-            "does not forbid others."
+            "2020-12 by the rules of STANDARD v1.2 §4.1.2. `$defs` holds "
+            "`<capability>.input` and `<capability>.output`; the document "
+            "itself constrains nothing. The ontology writes its contracts in "
+            "the ACS schema dialect: `$ref`s are rendered as their merged "
+            "targets, a union `a|b` as a type list, `nullable: true` as "
+            '`"null"` in the type list, and `type: any` as a schema with no '
+            f'`type` and the keyword `"{ANY_KEYWORD}": "{ANY}"`, which accepts '
+            "every value. A schema with neither `type` nor that keyword is one "
+            "whose type the ontology does not state. Objects are open: a "
+            "contract lists the fields it requires and does not forbid others."
         ),
         "$defs": defs,
     }
@@ -195,7 +269,8 @@ def main(argv: list[str]) -> int:
     )
     check = parser.parse_args(argv).check
     try:
-        text = render_document(_core.load_yaml(str(ONTOLOGY)))
+        contracts = _core.Validator(str(ONTOLOGY), str(SCHEMA_ROOT)).contracts()
+        text = render_document(_core.load_yaml(str(ONTOLOGY)), contracts)
     except RenderError as error:
         print(f"{ONTOLOGY.relative_to(ROOT)}: {error}")
         return 1

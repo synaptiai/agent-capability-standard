@@ -213,11 +213,12 @@ def test_rows_named_in_prose_exist(known_rows: set[str]) -> None:
 
 def test_anchor_forms_fit_the_anchor_type(mapping: dict[str, Any]) -> None:
     anchor = load(WORLD_STATE)["types"]["Anchor"]
-    kinds = set(anchor["properties"]["kind"]["enum"])
+    # The kinds of Standard v1.2 §6.5, and x- vendor kinds, as a pattern.
+    kind = re.compile(anchor["properties"]["kind"]["pattern"])
     assert {"tool_call", "file", "message"} <= set(mapping["anchor_refs"])
     schemes = []
     for name, form in mapping["anchor_refs"].items():
-        assert form["kind"] in kinds, name
+        assert kind.fullmatch(form["kind"]), name
         scheme, _, rest = form["ref"].partition(":")
         assert re.fullmatch(r"[a-z_]+", scheme) and rest, name
         schemes.append(scheme)

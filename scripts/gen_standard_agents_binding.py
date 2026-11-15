@@ -329,14 +329,23 @@ DIGEST_VECTORS = [
 
 DIGEST_FIELDS = {
     "name": "The vector's name, unique in this file.",
+    "kind": (
+        "`step`: an approval request of a workflow step, with `approval` and,"
+        " without `shows`, `inputs`; `tool_call`: the approval of a tool call"
+        " (STANDARD v1.2.0 §5.18.7), with `call`."
+    ),
     "about": "What the vector covers.",
     "approval": (
-        "The `approval` field of the step that asks, as the workflow declares"
-        " it; null when the step has none."
+        "For a `step` vector: the `approval` field of the step that asks, as"
+        " the workflow declares it; null when the step has none."
     ),
     "inputs": (
-        "The step's resolved inputs. Present where the step declares no"
-        " `shows`, so that `shown` is built from them."
+        "For a `step` vector: the step's resolved inputs. Present where the"
+        " step declares no `shows`, so that `shown` is built from them."
+    ),
+    "call": (
+        "For a `tool_call` vector: the call, `{action, capability, args}`;"
+        " `shown` is `[call]`."
     ),
     "shown": "The JSON array of shown values that the approval request carries.",
     "canonical": (
@@ -530,7 +539,12 @@ def render_digests() -> str:
         canonical = canonical_json(shown)
         if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != digest:
             raise SystemExit(f"{name}: {canonical} does not have digest {digest}")
-        entry = {"name": name, "about": vector.about, "approval": vector.approval}
+        entry = {
+            "name": name,
+            "kind": "step",
+            "about": vector.about,
+            "approval": vector.approval,
+        }
         if "shows" not in (vector.approval or {}):
             if shown != [inputs]:
                 raise SystemExit(f"{name}: shown is not the step's inputs")

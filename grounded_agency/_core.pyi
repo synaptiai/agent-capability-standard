@@ -34,6 +34,9 @@ class Validator:
     ) -> Validator: ...
     def validate_file(self, path: str | PathLike[str]) -> dict[str, Any]: ...
     def validate(self, catalog: Any, header: str | None = None) -> dict[str, Any]: ...
+    def contracts(self) -> dict[str, dict[str, Any]]:
+        """Every capability's ``{"input": ..., "output": ...}`` contracts with
+        each ``$ref`` resolved, in ontology order."""
 
 @final
 class Run:

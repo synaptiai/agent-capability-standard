@@ -1,6 +1,6 @@
 schema:
   name: canonical_event
-  version: 1.1.0
+  version: 1.2.0
   generated_at: '2026-01-24T02:37:11.950296Z'
   description: Canonical event schema used by transform/integrate steps. Supports
     raw ingestion, normalization, and linkage to world_state.observations.
@@ -12,28 +12,40 @@ schema:
 types:
   Anchor:
     type: object
+    description: An evidence anchor (Standard v1.2 §6.5), the item of a capability
+      output's evidence_anchors, of an event's anchors and of world-state records'
+      anchors. world_state_schema.yaml repeats this type. Other members may appear;
+      a producer's own should start with x-.
     required:
     - ref
     - kind
     properties:
       ref:
         type: string
+        description: Where the evidence is. A URI or <scheme>:<rest> with a scheme
+          its producer documents (file:src/app.py#L10-L20, tool:Read:toolu_01). The
+          scheme acs is reserved for workflow values (acs:search_out.results[0]).
       kind:
         type: string
-        enum:
-        - file
-        - url
-        - tool
-        - log
-        - sensor
-        - human_note
-        - api
+        pattern: ^(file|url|tool|log|sensor|human_note|api|record|x-[a-z0-9][a-z0-9_.-]*)$
+        description: file, url, tool (a tool call's result), log, sensor, human_note
+          (written by a person), api (a service's API response), record (a record
+          the agent system wrote or holds - an action or audit record, a checkpoint,
+          a memory item, a workflow value), or a vendor kind starting with x-
       timestamp:
         type: string
         nullable: true
+        description: ISO-8601 time at which the producer read or observed the evidence
       excerpt:
         type: string
         nullable: true
+        description: A short quotation of the evidence as the producer read it; never
+          a secret (Standard v1.2 §6.7)
+      digest:
+        type: string
+        pattern: ^sha256:[0-9a-f]{64}$
+        description: SHA-256 of the evidence's content as the producer read it - the
+          bytes ref names or, for a JSON value, its RFC 8785 canonical JSON in UTF-8
   Uncertainty:
     type: object
     required:
@@ -50,6 +62,18 @@ types:
         type: number
         minimum: 0
         maximum: 1
+      interval:
+        type: object
+        properties:
+          low:
+            type: number
+          high:
+            type: number
+        nullable: true
+      distribution:
+        type: object
+        nullable: true
+        description: 'e.g. {name: normal, mean: x, stdev: y}'
       notes:
         type: string
         nullable: true
@@ -146,7 +170,8 @@ event:
           nullable: true
     raw:
       type: object
-      description: original payload (unchanged)
+      description: original payload, unchanged except that each secret is replaced
+        by "[REDACTED]" (Standard v1.2 §6.7)
     canonical:
       type: object
       description: normalized fields for integration
@@ -168,6 +193,13 @@ event:
         ruleset_id:
           type: string
           nullable: true
+    redactions:
+      type: array
+      items:
+        type: string
+      nullable: true
+      description: JSON pointers (RFC 6901), from the event, of the members in which
+        a secret was replaced by "[REDACTED]" (Standard v1.2 §6.2, §6.7)
 to_observation_event:
   description: Mapping constraints for converting canonical_event → world_state.observations[]
   required_fields:

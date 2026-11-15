@@ -16,7 +16,7 @@ Four version numbers are in use. Each is declared in one file, and
 | Version line | Current | Declared in |
 |--------------|---------|-------------|
 | Standard | 1.1.0 | The `**Version:**` line of [STANDARD-v1.1.0.md](STANDARD-v1.1.0.md) |
-| Capability ontology | 2.1.0 | `meta.version` in [capability_ontology.yaml](../schemas/capability_ontology.yaml) |
+| Capability ontology | 2.2.0 | `meta.version` in [capability_ontology.yaml](../schemas/capability_ontology.yaml) |
 | Plugin | 2.0.0 | `version` in [plugin.json](../.claude-plugin/plugin.json) |
 | Python package `grounded-agency` | 0.1.0 | `version` under `[project]` in [pyproject.toml](../pyproject.toml); `grounded_agency.__version__` repeats it |
 

@@ -3279,7 +3279,7 @@ TypeScript: `test/records.test.ts` (5.16).
   same `parallel_group` are not ordered relative to each other: an executor
   may run them in any order or at the same time (the reference executor
   runs them in list order), and the group joins when all have finished
-  ([STANDARD v1.2.0 §5.2.3](../spec/STANDARD-v1.2.0.md#523-parallel-groups))".
+  (`[STANDARD v1.2.0 §5.2.3](../spec/STANDARD-v1.2.0.md#523-parallel-groups)`)".
 - `docs/TUTORIAL.md` §4.1 "Parallel Execution": "Some steps can run
   concurrently" becomes "Steps in one `parallel_group` are not ordered
   relative to each other, so an executor may run them in any order or at

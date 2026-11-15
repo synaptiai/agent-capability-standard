@@ -141,8 +141,18 @@ pub fn schema_type(schema: &Value) -> (Type, bool) {
     };
     for comb in ["oneOf", "anyOf", "allOf"] {
         if let Some(Value::Array(opts)) = obj.get(comb) {
-            let opts = opts.iter().map(|o| schema_type(o).0).collect();
-            return (Type::Union(opts), true);
+            // A member that types like an earlier one adds nothing: an
+            // evidence anchor and a plain object both read as `object`.
+            let mut members: Vec<Type> = Vec::new();
+            for t in opts.iter().map(|o| schema_type(o).0) {
+                if !members.contains(&t) {
+                    members.push(t);
+                }
+            }
+            if members.len() == 1 {
+                return (members.remove(0), true);
+            }
+            return (Type::Union(members), true);
         }
     }
     match obj.get("type") {
@@ -243,6 +253,21 @@ mod tests {
         // The printed form of an inferred type parses back to the same type.
         let inferred = schema_type(&json!({"oneOf": [{"type": "string"}, {"type": "object"}]})).0;
         assert_eq!(p(&inferred.to_string()), inferred);
+        // A member typed like an earlier one is dropped, in order.
+        let anchors = json!({"anyOf": [
+            {"type": "object", "required": ["ref", "kind"]},
+            {"type": "string"},
+            {"type": "object"}
+        ]});
+        assert_eq!(
+            schema_type(&anchors),
+            (Type::Union(vec![Type::Object, Type::String]), true)
+        );
+        assert_eq!(schema_type(&anchors).0.to_string(), "union<object,string>");
+        assert_eq!(
+            schema_type(&json!({"oneOf": [{"type": "object"}, {"type": "object"}]})),
+            (Type::Object, true)
+        );
         assert!(parse_annotation("union<string>").is_err());
         let deep = |n: usize| format!("{}string{}", "array<".repeat(n), ">".repeat(n));
         assert!(parse_annotation(&deep(MAX_ANNOTATION_DEPTH)).is_ok());

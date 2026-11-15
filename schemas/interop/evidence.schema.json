@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/schemas/interop/evidence.schema.json",
+  "title": "Evidence anchors, records, stores and notifications",
+  "description": "STANDARD v1.2 §6.5 and §6.6. EvidenceAnchor restates schemas/event_schema.yaml#/types/Anchor (1.2.0) in Draft 2020-12; tests check that the two agree. EvidenceRecord is what an evidence store keeps and exports, one per line of a JSON Lines export. StoreInfo is what a store states about itself. EvidenceRecorded is the notification a host MAY send when it stores evidence records, a canonical event or audit records; it is not a record and may be delivered at most once. No member of any of them holds a secret (§6.7).",
+  "$defs": {
+    "EvidenceAnchor": {
+      "type": "object",
+      "required": ["ref", "kind"],
+      "properties": {
+        "ref": {"type": "string", "minLength": 1, "description": "Where the evidence is. Opaque, except the reserved scheme acs: (a workflow value)."},
+        "kind": {"$ref": "#/$defs/Kind"},
+        "timestamp": {"type": ["string", "null"], "description": "ISO-8601 time at which the producer read or observed the evidence."},
+        "excerpt": {"type": ["string", "null"], "description": "A short quotation of the evidence as read; never a secret."},
+        "digest": {"$ref": "#/$defs/Digest"}
+      },
+      "description": "An evidence anchor. Other members may appear; a producer's own should start with x-."
+    },
+    "Kind": {
+      "type": "string",
+      "pattern": "^(file|url|tool|log|sensor|human_note|api|record|x-[a-z0-9][a-z0-9_.-]*)$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 of the content as the producer read it (for a JSON value, of its RFC 8785 canonical JSON in UTF-8)."
+    },
+    "Correlation": {
+      "type": "object",
+      "properties": {
+        "run_id": {"type": "string", "description": "The run (STANDARD v1.2 §5.19) or, for a call, the scope of the safety layer (§5.18)."},
+        "frame": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "For a step, the workflows of its nested runs, root first."},
+        "step": {"type": "integer", "minimum": 0, "description": "For a step, its index in the last workflow of frame."},
+        "capability": {"type": "string"},
+        "tool": {"type": "string", "description": "For a call, the name the host offers the tool under."},
+        "call_id": {"type": "string", "description": "For a call, the host's identifier of the call."}
+      }
+    },
+    "EvidenceRecord": {
+      "allOf": [{"$ref": "#/$defs/Correlation"}],
+      "type": "object",
+      "required": ["record_id", "anchor", "recorded_at"],
+      "properties": {
+        "record_id": {"type": "string", "minLength": 1, "description": "Unique within its store."},
+        "anchor": {"$ref": "#/$defs/EvidenceAnchor"},
+        "recorded_at": {"type": "string", "description": "ISO-8601 time at which the store kept the record."},
+        "metadata": {"type": "object", "description": "What the implementation keeps beside the anchor; never a secret."}
+      }
+    },
+    "StoreInfo": {
+      "type": "object",
+      "required": ["durability", "bounded"],
+      "properties": {
+        "durability": {"enum": ["memory", "session", "durable"]},
+        "bounded": {"type": "boolean", "description": "The store removes records before their retention ends to stay within a size."},
+        "count": {"type": "integer", "minimum": 0},
+        "removed": {"type": "integer", "minimum": 0, "description": "Records the store removed other than by their retention: evicted to stay within a size, or cleared. Record ids are never reused."},
+        "retention": {"type": "string", "description": "A duration (STANDARD v1.2 §5.10.1)."}
+      }
+    },
+    "EvidenceRecorded": {
+      "allOf": [{"$ref": "#/$defs/Correlation"}],
+      "type": "object",
+      "required": ["type", "anchors", "recorded_at"],
+      "oneOf": [{"required": ["record_ids"]}, {"required": ["event_id"]}, {"required": ["action_ids"]}],
+      "properties": {
+        "type": {"const": "acs.evidence_recorded"},
+        "record_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "The evidence records stored (STANDARD v1.2 §6.6)."},
+        "event_id": {"type": "string", "description": "The canonical event stored (STANDARD v1.2 §6.2)."},
+        "action_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "The audit records stored, by their ActionRecord action_id (STANDARD v1.2 §6.4)."},
+        "anchors": {
+          "type": "array",
+          "description": "The anchors of what was stored; for audit records, their own anchors, possibly none.",
+          "items": {
+            "type": "object",
+            "required": ["ref", "kind"],
+            "properties": {
+              "ref": {"type": "string", "minLength": 1},
+              "kind": {"$ref": "#/$defs/Kind"},
+              "digest": {"$ref": "#/$defs/Digest"},
+              "excerpt": false
+            }
+          }
+        },
+        "recorded_at": {"type": "string"}
+      }
+    }
+  }
+}
