@@ -597,17 +597,32 @@ class TestProfileScaffold:
         with open(profile_path, encoding="utf-8") as f:
             profile = yaml.safe_load(f)
 
-        # Required fields from profile_schema.yaml
-        required = [
-            "domain",
-            "version",
-            "trust_weights",
-            "risk_thresholds",
-            "checkpoint_policy",
-            "evidence_policy",
-        ]
-        for field in required:
-            assert field in profile, f"Missing required field: {field}"
+        # Required fields from profile_schema.yaml (Standard v1.2 §5.21.2)
+        schema = yaml.safe_load(
+            (REPO_ROOT / "schemas" / "profiles" / "profile_schema.yaml").read_text()
+        )
+        assert schema["profile_schema"]["required"] == ["domain", "version"]
+        for field in ("domain", "version", "standard", "ontology"):
+            assert field in profile, f"Missing field: {field}"
+
+    def test_profile_template_loads_with_no_diagnostic(self, tmp_path: Path) -> None:
+        """The template is a profile the core accepts as it is (§5.21.2)."""
+        from grounded_agency import _core
+
+        _setup_isolated_repo(tmp_path)
+        _run_main_isolated(tmp_path, ["profile", "core-check"])
+        profile = yaml.safe_load(
+            (tmp_path / "schemas" / "profiles" / "core-check.yaml").read_text()
+        )
+        # It cites the ontology it was scaffolded against (§11.6).
+        isolated = yaml.safe_load(
+            (tmp_path / "schemas" / "capability_ontology.yaml").read_text()
+        )
+        assert profile["ontology"] == str(isolated["meta"]["version"])
+        ontology = REPO_ROOT / "schemas" / "capability_ontology.yaml"
+        profile["ontology"] = yaml.safe_load(ontology.read_text())["meta"]["version"]
+        validator = _core.Validator(str(ontology), str(REPO_ROOT))
+        assert validator.check_profiles([profile])["diagnostics"] == []
 
     def test_profile_trust_weights_valid(self, tmp_path: Path) -> None:
         """Trust weights should be between 0 and 1."""

@@ -617,3 +617,106 @@ def test_check_fails_on_drift(
     # Writing again restores the file.
     assert gen.main([]) == 0
     assert gen.main(["--check"]) == 0
+
+
+# --- The dialect at load, and the stated divergence (STANDARD v1.2 §4.1.2) ---
+
+
+def synthetic(tmp_path: Path, ontology: dict[str, Any], output: dict[str, Any]) -> Path:
+    """The ontology with `retrieve`'s output contract replaced, as a file."""
+    changed = copy.deepcopy(ontology)
+    for node in changed["nodes"]:
+        if node["id"] == "retrieve":
+            node["output_schema"] = output
+    path = tmp_path / "capability_ontology.yaml"
+    path.write_text(json.dumps(changed, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        {"type": "object", "properties": {"x": {"type": "string|null"}}},
+        {"type": "object", "properties": {"x": {"type": "any", "minimum": 0}}},
+        {"type": "object", "properties": {"x": {"type": "string", "if": {}}}},
+    ],
+    ids=["union_with_null", "any_beside_an_assertion", "unknown_keyword"],
+)
+def test_the_dialect_metaschema_refuses(
+    ontology: dict[str, Any], output: dict[str, Any]
+) -> None:
+    """`schemas/capability_ontology.schema.json` checks the contracts against
+    the dialect, so a keyword outside it fails the ontology's own check."""
+    import yaml
+
+    schema = json.loads(
+        (ROOT / "schemas" / "capability_ontology.schema.json").read_text()
+    )
+    changed = copy.deepcopy(ontology)
+    for node in changed["nodes"]:
+        if node["id"] == "retrieve":
+            node["output_schema"] = output
+    validator = Draft202012Validator(schema)
+    assert list(validator.iter_errors(changed))
+    shipped = yaml.safe_load(ONTOLOGY.read_text(encoding="utf-8"))
+    assert not list(validator.iter_errors(shipped))
+
+
+def test_nullable_divergence_is_pinned(
+    tmp_path: Path, ontology: dict[str, Any]
+) -> None:
+    """§5.4 reads a rendered `["number", "null"]` as nullable but not the
+    dialect's `nullable: true`: ordering on such a member is W610 against the
+    rendering only, and nothing else differs."""
+    output = {
+        "type": "object",
+        "required": ["n", "evidence_anchors"],
+        "properties": {
+            "n": {"type": "number", "nullable": True},
+            "evidence_anchors": {"type": "array"},
+        },
+    }
+    dialect_path = synthetic(tmp_path, ontology, output)
+    rendered = gen.render_schema(output, "retrieve.output", nullable_as_null=True)
+    assert rendered["properties"]["n"]["type"] == ["number", "null"]
+    rendering_dir = tmp_path / "rendering"
+    rendering_dir.mkdir()
+    rendering_path = synthetic(rendering_dir, ontology, rendered)
+    catalog = {
+        "probe": {
+            "goal": "Order on a nullable member.",
+            "risk": "low",
+            "steps": [
+                {
+                    "capability": "retrieve",
+                    "purpose": "Produce n.",
+                    "store_as": "r",
+                    "input_bindings": {"target": "x"},
+                },
+                transform("t", "constant", "${r.n} > 1"),
+            ],
+        }
+    }
+    on_dialect = _core.Validator(str(dialect_path), str(ROOT)).validate(
+        catalog, "1.1.0"
+    )
+    on_rendering = _core.Validator(str(rendering_path), str(ROOT)).validate(
+        catalog, "1.1.0"
+    )
+    assert [d["code"] for d in on_dialect["diagnostics"]] == []
+    assert [
+        (d["code"], d["location"]["step"]) for d in on_rendering["diagnostics"]
+    ] == [("W610", 1)]
+
+
+def test_unresolved_contract_ref_is_refused(
+    tmp_path: Path, ontology: dict[str, Any]
+) -> None:
+    """A contract whose `$ref` names nothing refuses the ontology at load, so
+    no consumer (this generator included) sees it."""
+    path = synthetic(tmp_path, ontology, {"$ref": "schemas/nowhere.yaml#/X"})
+    with pytest.raises(ValueError) as caught:
+        _core.Validator(str(path), str(ROOT))
+    message = str(caught.value)
+    assert "retrieve" in message and "output" in message
+    assert "schemas/nowhere.yaml#/X" in message

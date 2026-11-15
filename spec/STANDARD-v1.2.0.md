@@ -36,6 +36,8 @@ This standard specifies:
    approval, delegation, quorum, sender identity) that a workflow opts into
 10. **Tool-calling hosts**: how a safety layer applies the ontology's flags
     and edges to tool calls that a model chooses (§5.18)
+11. **Domain profiles** that a host, a safety layer or a validator applies to
+    tighten the rules for steps and calls in one domain (§5.21)
 
 Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 
@@ -73,13 +75,16 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Observation** | Append-only event grounded in evidence anchors |
 | **World State** | Derived snapshot from observations and transition rules |
 | **Provenance** | Traceability record for claims and transformations |
-| **Trust Score** | Authority-weighted, confidence-weighted, recency-decayed score |
+| **Trust Score** | The weight of a piece of evidence: its source's static weight × its confidence × a half-life decay of its age (§8.1) |
 | **Binding** | A reference from one step to another step's output |
 | **Gate** | A conditional check that can halt or redirect workflow execution |
 | **Checkpoint** | A saved state that enables rollback |
 | **Grounding** | Anchoring claims to evidence references |
 | **Diagnostic** | An error or warning reported by a validator or executor (§9) |
 | **Effective flag** | The safety flag a step is treated as: the stricter of its declaration and the ontology (§5.2.1) |
+| **Domain profile** | A document of rules for one domain that tighten flags, checks, evidence, confidence and destinations and replace trust weights, applied to runs and calls by a host, a safety layer or a validator, not chosen by a workflow (§5.21) |
+| **Schema dialect** | The JSON Schema keywords, plus `type: any`, `a\|b`, `$ref` and `nullable`, in which capability contracts are written (§4.1.2) |
+| **Entity id** | `<class>:<namespace>/<local_id>`, the identifier of an entity of the world state (§7.1) |
 | **Runs before** | Step A runs before step B when A comes earlier in the step list and is not in B's parallel group (§4.3) |
 | **Tool-calling host** | A runtime in which a model chooses each tool call and its arguments, and no workflow's step list determines the next action (§5.18) |
 | **Call** | One invocation of one tool on a tool-calling host |
@@ -112,6 +117,10 @@ Every transformation MUST be either:
   `mutate`, `send` and `generate` (`precedes`: ordering only, V102). A
   `constrain` before `execute`, `mutate` and `send` is recommended (W601)
 - A workflow cannot weaken a capability's safety flags (§5.2.1)
+- A domain profile only tightens flags, checks, evidence, confidence and
+  destination rules: applied to a run or a call, it can raise a step's flags
+  and add checks, never lower them or remove one (§5.21). Its trust weights
+  replace source weights, in either direction (§8.3)
 - On a tool-calling host, a safety layer applies the same effective flags,
   `requires` edges, checkpoint rule and approval to each call (§5.18)
 
@@ -129,6 +138,10 @@ Every transformation MUST be either:
 
 ## 4. Capability Ontology
 
+This Standard is published with capability ontology 2.2.0
+(`schemas/capability_ontology.yaml`); §11.6 says how the ontology is
+versioned.
+
 ### 4.1 Capability Definition
 
 A capability MUST define:
@@ -138,8 +151,8 @@ A capability MUST define:
 | `id` | string | Yes | Unique identifier (lowercase, hyphens allowed) |
 | `layer` | enum | Yes | Classification layer |
 | `description` | string | Yes | Human-readable purpose |
-| `input_schema` | object | Yes | JSON Schema for inputs |
-| `output_schema` | object | Yes | JSON Schema for outputs |
+| `input_schema` | object | Yes | The inputs a step may bind, in the schema dialect (§4.1.2) |
+| `output_schema` | object | Yes | The output a host returns, in the schema dialect (§4.1.2) |
 | `risk` | enum | No | `low` (default), `medium`, `high` |
 | `mutation` | boolean | No | Whether the capability changes persistent state (default false) |
 | `requires_checkpoint` | boolean | No | A checkpoint must precede each use (default false) |
@@ -155,7 +168,50 @@ ontology's `edges` array as `{from, to, type, rationale?}`.
 
 #### 4.1.2 Schema Dialect
 
-<!-- owner: S6; text: S6.md part 2.6 -->
+A capability's `input_schema` and `output_schema`, and the definitions in the
+canonical and supporting schemas (§6.1) that a contract reaches through
+`$ref`, are written in the **schema dialect**. A workflow's `inputs`
+declarations and the files they and `output_conforms_to` reference (§5.1,
+§5.2) SHOULD be written in it too; a validator reads a keyword outside it as
+an annotation.
+
+These keywords have their JSON Schema Draft 2020-12 meaning: `type` (one
+type name or a list of them), `enum`, `const`, `properties`, `required`,
+`additionalProperties` (a boolean or a schema), `items` (one schema),
+`minimum`, `maximum`, `minLength`, `maxLength`, `pattern`, `format`,
+`minItems`, `maxItems`, `uniqueItems`, `oneOf`, `anyOf`, `allOf`,
+`description`, `title`, `default` and `examples`. No other Draft 2020-12
+keyword is used. The dialect adds:
+
+| Form | Meaning |
+|------|---------|
+| `type: any` | Every JSON value. It MAY stand only beside `description`, `title`, `default`, `examples`, `nullable` and `x-` keys. For §5.4 it is missing type metadata: a reference to it needs an annotation (B204), and paths below it are open |
+| `type: "a\|b"` | Two or more distinct type names other than `null`, joined by `\|`: the same as `type: [a, b]` |
+| `$ref: "<path>#<pointer>"`, `$ref: "#<pointer>"` | The schema the JSON Pointer (RFC 6901) names in the file at `<path>`, a path relative to the schema root (the repository root) that does not leave it, or in the same file. The keywords beside `$ref` replace the target's keywords of the same name |
+| `nullable: true` | The value MAY also be `null`. Type inference (§5.4) does not read it |
+| keys starting with `x-` | Annotations, never assertions. Keys starting with `x-acs-` are this Standard's (Appendix B) |
+
+A `$ref` is resolved before any other rule reads the schema. A `$ref` that
+names nothing, a `$ref` that reaches itself again (a cycle: the dialect has
+no recursive types), and a chain of `$ref`s deeper than an implementation's
+limit are outside the dialect. An implementation refuses an ontology whose
+contract holds one when it loads the ontology. In a workflow's `inputs`
+declarations, a reference that names nothing is S302.
+
+**Rendering.** A schema of the dialect is rendered in Draft 2020-12 by:
+replacing `"a|b"` with the list `["a", "b"]`; replacing `type: any` with no
+`type` and the annotation `"x-acs-type": "any"`, which keeps it apart from a
+schema that states no type; replacing a `$ref` with the rendering of its
+target with the keywords beside it merged as above; adding `"null"` to the
+`type` of a schema with `nullable: true` (to its list, or making a list of a
+single name; nothing where it has no `type`) and dropping `nullable`; and
+keeping every other keyword. A schema and its rendering accept the same
+values. They need not give §5.4 the same types: §5.4 reads `"null"` in a
+`type` list but not `nullable`, so a reference to a member with `nullable:
+true` is nullable in the rendering only (W610 can differ).
+`schemas/generated/capability_contracts.schema.json` is the rendering of
+every contract of the ontology, `$defs` `<capability>.input` and
+`<capability>.output`; it is generated, and the ontology stays the source.
 
 ### 4.2 Layers
 
@@ -265,7 +321,8 @@ A workflow MAY define:
 | `spec_version` | string | Standard version targeted (§11.5) |
 | `workflow_extensions` | object | Extension declarations (§5.9) |
 | `triggers` | array | How runs start (§5.10) |
-| `domain`, `profile`, `risk_propagation`, `data_flow` | — | Recognised descriptive fields |
+| `domain`, `risk_propagation`, `data_flow` | — | Recognised descriptive fields |
+| `profile` | string | Descriptive: the domain profile the workflow is written for, by its `domain` or a path. It applies nothing: a host applies profiles (§5.21) |
 
 A missing required field is S304; `goal`, `risk`, `success` or
 `description` of another type is S303. An unrecognised field is W604 and is
@@ -329,6 +386,11 @@ flags. A declaration stricter than the ontology (e.g. `requires_approval: true` 
 `requires_checkpoint` is true needs a `checkpoint` step running before it
 (§4.3), else F501 — reported as V102 instead where the ontology's
 `requires` edge from `checkpoint` already demands it.
+
+Domain profiles applied to a run, or to a safety layer's calls, raise
+effective flags further (§5.21): with profiles, a step's effective flags are
+those above with the profiles' raises applied, and every rule that reads
+effective flags reads those.
 
 #### 5.2.2 Checkpoint Use
 
@@ -416,7 +478,7 @@ otherwise (an unclosed `[`, an index such as `[01]` or `[-1]`, a missing
 2. An annotation MUST be compatible with the schema node's type, else B203.
 3. Annotations are REQUIRED where inference is ambiguous (B204):
    - Union schemas (`oneOf`, `anyOf`, type lists)
-   - Missing type metadata
+   - Missing type metadata, including `type: any` (§4.1.2)
    - Unknown array item types
    - `additionalProperties: true` with no constraints
 
@@ -1641,23 +1703,159 @@ required.
 
 ### 5.21 Domain Profiles
 
-<!-- owner: S6; text: S6.md part 2.11 -->
+A **domain profile** states, for one domain, rules that tighten what this
+Standard requires of steps and calls: which need a checkpoint, which need
+approval and from whom, what counts as evidence, how confident an output
+must be, where a `send` may go and how sources are weighed. A profile is a
+YAML or JSON document of the shape `schemas/profiles/profile_schema.yaml`
+gives. The profiles under `schemas/profiles/` are examples.
 
 #### 5.21.1 Applying Profiles
 
-<!-- owner: S6; text: S6.md part 2.11 -->
+A profile has effect only where it is **applied**:
+
+- A host applies profiles to a run by giving them when it starts the run
+  (§5.19.2). They apply to every step of the run, the steps of its nested runs
+  included (§5.12), and stay with the run when it is saved and restored
+  (§5.19.4). They do not apply to the runs of the agents it delegates to
+  (§5.15), which those agents' hosts govern.
+- A safety layer (§5.18) applies the profiles its configuration names to
+  every call it covers.
+- A validator MAY be given profiles. It then validates each workflow with the
+  effective flags of §5.21.3, so that F501, W606 and W608 see what a run under
+  those profiles would; nothing else changes. Without profiles it validates as
+  if none were applied.
+
+A workflow does not select a profile. Its `profile` field (§5.1) records the
+profile it was written for and applies nothing; a host MAY use it to choose
+the profiles it applies. A workflow that needs a checkpoint or an approval
+wherever it runs declares the flag itself (§5.2.1). Whether a step may carry
+an `approval` field (§5.14) does not depend on profiles: declare
+`requires_approval: true` on a step whose approval only a profile would
+require, to say how it is asked.
+
+Several profiles MAY be applied together. Each applies on its own: a step or
+call meets every one, so the strictest result holds. For flags, checks,
+evidence, confidence and destinations a profile only tightens: it never
+lowers a flag, never removes a check and never changes a step's `risk` or
+`mutation`. Its `trust_weights` are different: they replace weights, higher
+or lower, as §8.3 says, bounded by §8.3's rule that evidence with both a
+source type and a trust class weighs the lower of the two; with several
+profiles, the lowest weight given to a key applies.
 
 #### 5.21.2 Loading a Profile
 
-<!-- owner: S6; text: S6.md part 2.11 -->
+An implementation checks a profile before it applies it, and refuses a
+profile with an error: an executor does not start the run, a safety layer
+does not load its configuration, a validator reports the errors. A
+diagnostic about a profile has `location.profile` (its `domain`, or `#<i>`,
+its zero-based position among the profiles given, when it has no valid
+`domain`) and `location.field` (the path to the member, such as
+`risk_thresholds.block_autonomous[1]`).
+
+| Member | Required | Value |
+|--------|----------|-------|
+| `domain` | Yes | Lower-case letters and digits, in words joined by single `-` |
+| `version` | Yes | The profile's own version, `MAJOR.MINOR.PATCH` |
+| `standard`, `ontology` | No | The Standard and ontology versions the profile is written for (§11.6) |
+| `trust_weights` | No | A mapping of keys to numbers from 0 to 1: `trust_class:<class>`, where `<class>` is a trust class of `agent_identity_schema.yaml`, or a source key: a lower-case letter, then lower-case letters, digits, `_`, `.` or `-` |
+| `risk_thresholds` | No | A mapping of exactly these members, each optional: `auto_approve` (`none`, `low`, `medium` or `high`), `require_review` and `require_human` (the same four), `block_autonomous` (a list of capability ids) |
+| `checkpoint_policy` | No | A mapping of `*`, or a capability id other than `checkpoint`, to `always`, `high_risk`, `medium_risk` or `never` |
+| `evidence_policy` | No | A mapping of exactly these members, each optional: `required_anchor_types` (a non-empty list of distinct anchor kinds, §6.5), `minimum_confidence` (a number from 0 to 1), `require_grounding` (a list of distinct capability ids) |
+| `allowed_destinations` | No | A destination policy (§4.4.2) |
+| `description`, `domain_sources`, `workflows`, `trust_model_reviewed`, `trust_model_reviewed_at`, `compliance` | No | Informative; no effect |
+
+- A profile that is not a mapping, and a member of the wrong type or outside
+  its grammar (a `trust_class:` key whose class is not a trust class, a kind
+  outside §6.5, an invalid destination pattern, the `checkpoint_policy` key
+  `checkpoint`), is S303; so is a member of `risk_thresholds` or
+  `evidence_policy` that the table does not list, whatever its name: both
+  mappings are closed. A missing `domain` or `version` is S304.
+- A capability id the ontology does not define, in `block_autonomous`, in
+  `require_grounding` or as a `checkpoint_policy` key other than `*`, is
+  V101.
+- A `standard` the implementation does not support, or an `ontology` whose
+  major differs from its ontology's, is V109 (§11.6).
+- A top-level member the table does not list is W604 and is ignored, except
+  a member whose name starts with `x-`, which is never reported.
+- `never` for a capability whose ontology requires a checkpoint is W602: it
+  has no effect.
+- `critical` as `require_review` or `require_human` is W603 and is read as
+  `none`; it is deprecated.
 
 #### 5.21.3 Effect on Steps and Calls
 
-<!-- owner: S6; text: S6.md part 2.11 -->
+For a step, or a call classified by §5.18.3, let C be its capability and R
+its effective risk (§5.2.1, before profiles). A threshold covers a set of
+risk levels: `auto_approve: L` covers L and the levels below it,
+`require_review: L` and `require_human: L` cover L and the levels above it,
+and `none` covers no level (`low` < `medium` < `high`). Each applied profile
+raises:
+
+| Member | Raises |
+|--------|--------|
+| `risk_thresholds.auto_approve` | `requires_approval` when R is not covered |
+| `risk_thresholds.require_review` | `requires_approval` when R is covered |
+| `risk_thresholds.require_human` | `requires_approval`, and requires **a person**, when R is covered |
+| `risk_thresholds.block_autonomous` | `requires_approval`, and requires a person, when C is listed |
+| `checkpoint_policy` | `requires_checkpoint` when C is not `checkpoint` and the value for C or for `*` is `always`, is `high_risk` and R is `high`, or is `medium_risk` and R is `medium` or `high` |
+
+An absent member raises nothing. The raised flags are effective flags
+(§5.2.1): a step whose `requires_checkpoint` a profile raised needs a
+`checkpoint` running before it (F501) and uses a valid checkpoint before it
+runs (§4.4.1); one whose `requires_approval` a profile raised is asked for
+approval (§5.14), and counts as a step that acts in §5.14's deferral rules.
+A `checkpoint` step is never given `requires_checkpoint` by a profile: it
+would need a checkpoint before itself.
+
+**A person.** A step that a profile requires a person for is asked as a step
+that uses an always-ask item is asked (§5.17): the request names a `human`
+approver, with `always_ask: true` and no `mandate_ref`, whatever its
+`approver` declares; a standing mandate does not cover it, and the decision
+is recorded with no `mandate_ref`; in an unattended run it is not asked, and
+its `when_unattended` applies (W606 where an unattended trigger reaches it
+without one, §9.7). The requirement belongs to that step alone. It is not a
+mark (§5.17): it does not pass to the step's output or to the steps that
+read it, to the nested runs the step starts, or to context injected for
+recovery (§5.12), each of which a profile governs by its own capability and
+risk. The step's action records carry `person_required: true`
+(`ActionRecord`, `world_state_schema.yaml`); they carry `always_ask: true`
+only if the step also uses an always-ask item. A safety layer accepts for
+such a call only a decision a person made for it.
+
+Each applied profile also puts in force:
+
+- **Evidence.** `require_grounding`, with `required_anchor_types` as its
+  `kinds`, is a grounding policy (§5.20) applied as a host's: an output of a
+  step whose capability it lists must pass it. `required_anchor_types`
+  without `require_grounding` has no effect.
+- **Minimum confidence.** When a minimum applies and an output a host
+  returns for a step has a `confidence` member, that member MUST be a number
+  from 0 to 1: one that is not (a string, `null`, a boolean, a number outside
+  the range) fails the step with F504 and the reason `invalid_confidence`;
+  one below `minimum_confidence` fails it with F504 and the reason
+  `below_minimum_confidence` (§5.19.7). An output without a `confidence`
+  member is not checked: a capability whose contract requires one already
+  fails such an output (R402), and one whose contract does not require it
+  reports no confidence to compare. The check comes after the grounding check
+  and before the step's after-gates; outputs the executor builds itself are
+  not checked (§5.20). With several profiles, the highest minimum applies.
+- **Destinations.** `allowed_destinations` (optional): a destination policy
+  (§4.4.2). A profile applied to a run, or to a safety layer, puts it in force
+  beside the host's own policies, so a send must be allowed by each. An empty
+  list allows no send. A profile whose list holds an invalid pattern is
+  refused when it is loaded.
+- **Trust weights.** Where a host computes trust scores for the run's
+  evidence (§8), `trust_weights` overrides weights as §8.3 says.
+
+A safety layer that applies a profile applies these to the outputs of the
+calls it covers, as §5.20 says for hosts outside a workflow.
 
 #### 5.21.4 Conformance
 
-<!-- owner: S6; text: S6.md part 2.11 -->
+An implementation that applies profiles (an executor, a safety layer, or a
+validator given them) MUST report each profile vector's diagnostics and
+compute each one's effective flags and rules (§10.3).
 
 ---
 
@@ -2150,6 +2348,9 @@ An implementation is conformant at a given level if it:
 - Uses coercion registry for type conversions
 - Generates diff patches on request
 
+**Profiles.** An implementation of any level or class that applies domain
+profiles loads them as §5.21.2 says and applies them as §5.21.3 says.
+
 ### 10.3 Conformance Testing
 
 Conformance tests MUST include:
@@ -2172,6 +2373,17 @@ informative for implementations that execute workflows.
 Binding fixtures (`tests/conformance/bindings/*.json`) and call-sequence
 fixtures (`tests/conformance/calls/*.json`) are normative for class SL
 (§10.4).
+
+Trust vectors (`tests/conformance/trust/decay.json`, `weight.json`,
+`score.json` and `resolve.json`) state §8's arithmetic: an implementation that
+computes trust scores or resolves conflicts MUST give each vector's result
+within the file's `tolerance`, and refuse what a vector expects refused.
+Profile vectors (`tests/conformance/profiles/load.json` and
+`effective.json`) state §5.21: an implementation that applies profiles MUST
+report each `load` vector's diagnostics (code and field) and compute each
+`effective` vector's flags and rules. Entity id vectors
+(`tests/conformance/entities/ids.json`) state §7.1's grammar. These vectors are
+normative.
 
 ### 10.4 Safety-Layer Conformance
 
@@ -2304,39 +2516,112 @@ output is now a union, so one without an annotation is B204 (§5.4), in a
 
 ### 11.5 Version Declaration
 
-<!-- owner: S6; replaced by S6.md part 2.18 (W616 as reconciled, RECONCILIATION C12) -->
-
 A workflow declares the standard version it targets with `spec_version`
-(`"1.1"`, optionally with a patch: `"1.1.0"`), or a catalog file declares it
+(`"1.2"`, optionally with a patch: `"1.2.0"`), or a catalog file declares it
 for all its workflows with a header among its leading comment lines (a BOM,
 blank lines, `%` directives and a `---` marker may precede it):
 
 ```yaml
-# Standard version: 1.1.0
+# Standard version: 1.2.0
 workflow_name:
   goal: ...
 ```
 
 `spec_version` takes precedence over the header. A version is
-`digits.digits[.digits]`; `spec_version` MUST be a string (quote it in
-YAML). Neither present → W605. A version the validator does not support →
-V109. A validator for this version MUST support 1.0 and 1.1.
+`digits.digits[.digits]`; `spec_version` MUST be a string (quote it in YAML).
+Neither present → W605. A version the validator does not support → V109. A
+validator for this version MUST support 1.0, 1.1 and 1.2.
 
-A workflow that targets 1.0 is validated and run under this standard, but
-a 1.0 consumer does not know the features 1.1 added. Using one of them
-there is W616, once per feature at its first use:
-`workflow_extensions.requires` (and so every extension; the advisory
-`supports_*` flags are 1.0), gate `phase`, gate `action: end`, the `in`
-operator, and failure-mode `when` and `on_error`. Declaring `"1.1"` clears
+The header is a comment, so it is gone once a catalog is parsed. The start
+operation (§5.19.2) therefore takes it as an explicit value: the version the
+catalog's header declares, or none for a catalog without one. A host that
+loaded the catalog from a file MUST pass the version the file's header
+declares, and a binding MUST NOT let a host leave the value out by omission
+(none is stated, not assumed). The executor validates and runs the catalog
+with that value, exactly as a validator reading the file would, and keeps it
+in the run's saved state (§5.19.4).
+
+The version a workflow declares is its **target**. A workflow of any target
+is validated and run under this Standard. Rules this Standard applies only to
+workflows that target 1.2 or later apply to a workflow only when it declares
+such a version; a workflow that declares none gets none of them.
+
+A consumer of an earlier version does not know the features later versions
+added. A workflow that targets an earlier version than a feature's and uses
+the feature gets W616, once per feature at its first use:
+
+| New in | Features |
+|--------|----------|
+| 1.1 | `workflow_extensions.requires` (and so every extension; the advisory `supports_*` flags are 1.0), gate `phase`, gate `action: end`, the `in` operator, failure-mode `when` and `on_error` |
+| 1.2 | approver `sender_check` and `accept_trust_classes` (§5.14, §5.17); the `delegate` input `continues` (§5.15.3); an `invoke` target that is a qualified id (§5.1.1) and a catalog manifest (§5.1.1, reported at the manifest when the file's header targets an earlier version); the extension `grounding@1` and the workflow field `grounding` (§5.20); F505 in a failure mode's `on_error` (§5.12); the `audit` input `require_record` (§6.4); the `persist` and `recall` input `scope` (§4.5) |
+
+Declaring the version a feature is new in, or a later one, clears it. A
+feature is new in a version when a consumer of the version before would
+refuse a workflow that uses it or run it differently: a workflow or step
+field, a value of a field, an extension, or an input that the executor itself
+reads. An input of the ontology that only a host reads is not: an older
+consumer reports it as W604 and still passes it on (§5.5), and §11.6 governs
 it.
+
+Some features are allowed only in a workflow that targets the version that
+added them, so that an older consumer refuses the workflow (V109) instead of
+ignoring them: the workflow field `agents` (§5.15.2) is S303 in a workflow
+that targets 1.0 or 1.1 or declares no version.
 
 ### 11.6 Ontology Versions
 
-<!-- owner: S6; text: S6.md part 2.19 -->
+The capability ontology (`schemas/capability_ontology.yaml`) has its own
+Semantic Version, `meta.version`:
+
+| Change to the ontology | Version |
+|------------------------|---------|
+| Remove or rename a capability, a layer or an edge type; move a capability to another layer; change a capability's `risk`, `mutation`, `requires_checkpoint`, `requires_approval` or `mutation_overridable`; add a required input or a required output field; remove an input or an output field, or stop requiring an output field; change a field's type (§11.4); add a constraint to an existing input or to a member it already names, or tighten one it has (a `pattern`, a bound, a narrower `enum`, a type for items it left open); tighten a constraint an existing output field already has; add or remove a `requires`, `precedes` or `conflicts_with` edge | MAJOR |
+| Add a capability, an optional input, an optional member of an input or output object, an optional output field or an enum value; constrain the items or members of an existing output field where its contract left them open; remove or relax a constraint, other than its type, on an existing input; add or remove a `soft_requires`, `enables`, `alternative_to` or `specializes` edge | MINOR |
+| Change only descriptions, rationales and examples | PATCH |
+
+The constraint rows follow §11.4 and who bears a constraint. One on an input
+binds the workflows that bind it, so adding or tightening it is breaking. One
+on an output binds producers; where the contract said nothing about an
+output's items or members, describing them binds producers only for values
+the contract never described, and no implementation refuses an output on it
+(an executor checks an output's required fields, §5.19). Tightening what an
+output already promised is breaking for producers.
+
+Ontology 2.1.0 widened `transform.output` from `object` to `object|array`, a
+type change and so MAJOR by this table; it was published with Standard 1.1.0
+as a MINOR version before this rule existed, and §11.4 of Standard 1.1.0
+records it as the one breaking change of that release. This rule applies
+from ontology 2.2.0.
+
+An ontology MAJOR version is published only with a Standard MAJOR version:
+every Standard 1.x uses ontology 2.x. An ontology MINOR version is published
+with the Standard version that names it (§4, §11.7): Standard 1.2.0 with
+ontology 2.2.0. An ontology PATCH version MAY be published alone. An
+implementation of a Standard version uses the ontology version it names, or
+a later PATCH of that version.
+
+**Citing.** A document outside a workflow that names capabilities by id — a
+domain profile (§5.21), a tool binding record (§5.18.1), an agent or catalog
+manifest (§5.15.1, §5.1.1), an interoperability mapping — cites the versions
+it was written against as `standard` and `ontology`, each `MAJOR.MINOR` or
+`MAJOR.MINOR.PATCH`. Each format says where the two members sit (a domain
+profile's are top-level members; the repository's interoperability mappings
+keep them under `meta.agent_capability_standard`) and MAY make them optional
+(a domain profile's are). A consumer checks those present:
+
+- it refuses a document whose `ontology` has another major than its own
+  ontology's, or whose `standard` it does not support, with V109;
+- a document whose ontology MINOR is later than its own may name capabilities
+  it does not know: each such id is V101 where the document uses it.
+
+A workflow cites only the Standard version it targets (§11.5), which fixes the
+ontology's major.
 
 ### 11.7 Artifacts of This Version
 
-<!-- owner: S6 (text before the table: S6.md part 2.20); table: foundation (FOUNDATION.md E2) -->
+Standard 1.2.0 is this text and these files. A file's version is the one it
+declares (`meta.version` or `schema.version`); a file that declares none is
+the one published with this version.
 
 | Artifact | File | Version | Sections |
 |----------|------|---------|----------|
@@ -2715,7 +3000,44 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 <!-- owner: S5; entries: S5.md part 2.15 -->
 
 ### D.7 Profiles, trust, versioning and schema dialect (RFC-0010)
-<!-- owner: S6; entries: S6.md part 2.23 -->
+
+**Clarifications** (apply to workflows of every version):
+
+- Contract schemas: 1.1 called them "JSON Schema"; they are written in the
+  schema dialect, Draft 2020-12 keywords plus `type: any`, `a|b`, `$ref`
+  with merged siblings and `nullable`, with a Draft 2020-12 rendering
+  (§4.1.2). An ontology whose contract keeps a `$ref` that names nothing,
+  is cyclic or nests too deep is refused at load
+- Entity ids: 1.1's §7.1 printed `namespace:type:id` while the taxonomy
+  gave `<class>:<namespace>/<local_id>`; the taxonomy's form is the one
+  (§7.1)
+- Trust score: 1.1 listed the factors; the score is
+  `weight × confidence × decay`, with confidence 1 when none is reported,
+  an age below zero counting as zero, a `min_trust` above 0.5 applying, and
+  no score for evidence without a static weight (§8.1, §8.3)
+- Conflict resolution: 1.1 named the strategies; they are defined, with
+  the default `highest_score` and tie-breaking by the model's
+  `tie_breakers` (§8.2)
+- Version declaration: 1.0, 1.1 and 1.2 are supported; W616 covers any
+  feature newer than a workflow's target; rules for 1.2 targets apply only
+  to a workflow that declares one; the catalog header is an explicit value
+  of the start operation (§11.5)
+
+**New in 1.2.0:**
+
+- Domain profiles, applied by hosts, safety layers and validators, which
+  tighten flags, checks, evidence, confidence and destinations and replace
+  trust weights (§5.21); `profiles/profile_schema.yaml` 1.0.0 as a supporting
+  schema; `ActionRecord.person_required` (`world_state_schema.yaml` 1.2.0)
+- How the ontology is versioned and how documents cite it (§11.6); the
+  artifacts of a version (§11.7)
+- `entity_taxonomy.yaml` 1.1.0 (`id_convention.pattern`);
+  `authority_trust_model.yaml` 1.2.0 (`field_authority.fields`, descriptions)
+- The start operation's `header` member (§5.19.2, §11.5)
+- Normative trust, profile and entity id vectors (§10.3)
+- The prefix `x-acs-` reserved for this Standard (Appendix B)
+- The terms domain profile, schema dialect and entity id, and the trust
+  score defined by its formula (§2)
 
 ---
 

@@ -100,7 +100,6 @@ describe('exempt runs and scope', () => {
       '117-artifacts-of-this-version:c',
       '519-host-protocol:a',
       '520-grounding:a',
-      '521-domain-profiles:a',
     ]);
     expect(rows('/start/overview/')).toEqual([
       'why-this-matters:a',

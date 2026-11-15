@@ -9,7 +9,7 @@ included. On top, the repository's own rules for its shipped profiles:
 
 1) ``standard`` and ``ontology`` are present and name the current Standard
    (the newest ``spec/STANDARD-v*.md``) and ontology (``meta.version``)
-2) the file is named after the profile's ``domain`` (``-`` written ``_``)
+2) the file is named after the profile's ``domain`` (``-`` may be written ``_``)
 3) ``profile_schema.yaml`` loads and its ``schema.version`` is SemVer
 4) SEC-009: a warning (not a failure) when ``trust_model_reviewed`` is not
    true
@@ -81,7 +81,7 @@ def check_profile(
                 f"{profile.get(member)!r}"
             )
     domain = profile.get("domain")
-    if isinstance(domain, str) and domain.replace("-", "_") != name:
+    if isinstance(domain, str) and name not in (domain, domain.replace("-", "_")):
         errors.append(
             f"[{name}] the file is named after the domain: expected "
             f"{domain.replace('-', '_')}.yaml"

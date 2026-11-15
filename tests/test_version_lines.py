@@ -207,3 +207,54 @@ def test_oasf_coverage_report_states_the_mapping_files_versions(
         "standard": acs.group(1),
         "ontology": acs.group(2),
     } == oasf_meta["agent_capability_standard"]
+
+
+def artifact_table() -> list[tuple[str, str, str, str]]:
+    """The rows of §11.7 of the newest Standard: artifact, file, version,
+    sections."""
+    path, _ = current_standard()
+    text = path.read_text("utf-8")
+    section = text[text.index("### 11.7 Artifacts of This Version") :]
+    section = section[: section.index("\n## ")]
+    rows = []
+    for line in section.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 4 and cells[1].startswith("`"):
+            rows.append((cells[0], cells[1], cells[2], cells[3]))
+    assert rows, "§11.7 has no table"
+    return rows
+
+
+def test_standard_artifact_table() -> None:
+    """Standard 1.2 §11.7: every file the table names exists; a row with a
+    version names the version the file declares (`meta.version` or
+    `schema.version`); the ontology row is the ontology's version, which §4
+    opens by naming; every vector directory is under the conformance row."""
+    path, _ = current_standard()
+    text = path.read_text("utf-8")
+    listed: list[str] = []
+    for _, files, version, _ in artifact_table():
+        names = re.findall(r"`([^`]+)`", files)
+        listed += names
+        for name in names:
+            assert (ROOT / name).exists(), name
+        if version == "—":
+            continue
+        assert len(names) == 1, files
+        doc = yaml.safe_load((ROOT / names[0]).read_text("utf-8"))
+        stated = (doc.get("meta") or {}).get("version") or (
+            doc.get("schema") or {}
+        ).get("version")
+        assert str(stated) == version, names[0]
+    ontology_rows = [r for r in artifact_table() if "capability_ontology.yaml" in r[1]]
+    assert [r[2] for r in ontology_rows] == [ontology_version()]
+    opening = text[text.index("## 4. Capability Ontology") :][:400]
+    assert f"capability ontology {ontology_version()}" in opening
+    conformance = [n for n in listed if n.startswith("tests/conformance")]
+    assert conformance == ["tests/conformance/"]
+    vector_dirs = {
+        p.parent
+        for p in (ROOT / "tests" / "conformance").rglob("*.json")
+        if "schema" not in p.parent.parts
+    }
+    assert all(d.is_relative_to(ROOT / "tests" / "conformance") for d in vector_dirs)
