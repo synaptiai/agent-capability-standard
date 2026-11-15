@@ -1337,9 +1337,9 @@ recognise and whenever it fails. A classification it returns is a
 capability and declared flags, subject to §5.18.1: never weaker than that
 capability's ontology flags, though it may be weaker than the worst case.
 
-**Control-only tools.** A record with `control: true` has no member other
-than `tool`, `ontology`, `standard` and `x-` members (else S303). Its calls
-return no capability output and are never refused: no check of this
+**Control-only tools.** A record with `control: true` has no member but
+`tool`, `ontology`, `standard`, `control` and `x-` members (else S303). Its
+calls return no capability output and are never refused: no check of this
 section, no host policy such as a rate limit, applies to them, and a layer
 that cannot write the record of one reports the failure and does not refuse
 the call (§5.18.8). They are recorded. A tool that signals the host and also
