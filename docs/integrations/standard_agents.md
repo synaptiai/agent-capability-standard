@@ -176,7 +176,7 @@ requirement of the other.
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
 | `delegate`: assign a task to another agent | A subagent relationship and the injected `subagent_create` tool ([Subagents §5](https://standardagentspec.org/0.2.0/specification/subagents#5-lifecycle-tools)) | Partial | `subagent_create` is a `delegate`. It is injected by the runtime, so it has no `execute` to wrap |
-| A waiting delegate ([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events)) | `blocking: true` on a relationship | Partial | Equivalent; SA has no timeout on the wait |
+| A waiting delegate ([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events)) | `blocking: true` on a relationship | Partial | The same shape; SA has no timeout on the wait. A host can also wait on a non-blocking child: see [How a `delegate` step maps to a host](#how-a-delegate-step-maps-to-a-host) |
 | `fresh_context`, attested in `effective` | A child is its own thread, and persists: a later call may continue it | Partial | Fresh only when a new instance was created |
 | `read_only` delegation | No read-only mode for a child | ACS only | Cannot be attested. A grounded child enforces its own rules |
 | `invoke`: a nested run that shares the caller's checkpoints | Prompt tools, in the same thread | Partial | A prompt tool is classified by what it does, not as `invoke` |
@@ -681,6 +681,91 @@ A prompt that lists hooks of its own drops the agent's. The audit hook has to
 be listed on every prompt that lists hooks of its own, and on the agent for
 the prompts that list none.
 
+### How a `delegate` step maps to a host
+
+When the reference executor runs a workflow, a `delegate` step reaches the
+host as an `InvokeCapability` action, and what a delegation is on the host is
+the host's to decide. The Standard distinguishes a delegate that waits from
+one that does not
+([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events)) and has the
+host report what it did
+([§5.15](../../spec/STANDARD-v1.1.0.md#515-delegation)). The table gives the
+host's part in each case and where it lands on Standard Agents. Its statements
+come from rows `coord-01` to `coord-03`, `coord-05`, `coord-21` and `coord-22`
+of the
+[multi-agent mapping](../research/analysis/standard_agents_mapping/multi-agent.yaml)
+and rows `wf-16` and `wf-20` of the
+[workflow mapping](../research/analysis/standard_agents_mapping/workflow-execution.yaml).
+
+| In the workflow | What the host does | On Standard Agents |
+|---|---|---|
+| A waiting delegate: a `delegate` step with `wait` and a `timeout`, in a workflow that declares `wait@1`. It "first delegates (an ordinary capability call), then waits for that delegate's result" | Answers the call with `accepted: true` and a string `task_id` (without one the step is R402). The executor then issues `AwaitEvent`, and the host answers it with that delegation's result when it arrives. The result is something the host waits for; one `timeout` bounds the call and the wait | A non-blocking relationship: the host records the child's reference under the `task_id` and reads the result from the child's own thread. A `blocking: true` relationship also returns the result, as the return value of the call, but SA sets no bound on that wait and the host is inside the call when the deadline passes ([Subagents §3.3](https://standardagentspec.org/0.2.0/specification/subagents#33-blocking-and-create-or-continue)) |
+| A plain delegate: a `delegate` step without `wait` | Answers the call once the delegation is made. The step completes and the run goes on. A later `receive` step with `wait` and `correlate` can collect the result | A non-blocking child. Behind a blocking relationship the step would look instantaneous to the executor while the child ran, and checkpoints taken before it would stay valid across that time |
+| A delegation the host refuses, for example over an instance cap | Reports `accepted: false` in the output, or answers the call with an `Error` | `maxInstances` is the "Cap on simultaneous instances" of a relationship, and creation beyond it returns a tool error (a MUST in [Runtime §7.2](https://standardagentspec.org/0.2.0/infrastructure/runtime#72-lifecycle-tooling), a SHOULD in [Subagents §1](https://standardagentspec.org/0.2.0/specification/subagents#1-subagentrelationship)). The host turns that error into one of the two answers |
+
+What a refusal does depends on the form of the step.
+
+- **On a waiting delegate it fails the step.** "A delegation the host did not
+  accept (`accepted` not `true`) is R402." The step's retries and failure
+  modes then apply.
+- **On a plain delegate it fails nothing.** `accepted: false` is an ordinary
+  output: the step completes and the next step runs. The refusal has an effect
+  only where the workflow tests the value in a gate or a failure mode, as the
+  reference catalog's `multi_agent_orchestration` does with
+  `when: ${delegate_out.accepted} == false`. A host that wants the refusal to
+  fail the step answers `Error` instead; any code other than R401 is read as
+  R402 ([Running workflows](../guides/RUNNING_WORKFLOWS.md#actions-and-responses)).
+
+Two Standard Agents behaviours limit what the host may report.
+
+- **Create-or-continue is not a fresh context.** With `blocking: true` and
+  `maxInstances: 1`, `subagent_create` on an existing instance continues it
+  instead of creating one. A continued instance holds the history of its
+  earlier sessions, so the host reports `effective.fresh_context: true` only
+  for an instance it created for this call.
+- **A retry needs room under the cap.** A retry of a waiting delegate
+  "delegates again, and the new capability call names the delegation it
+  replaces (`replaces`, its `task_id`) so the host can cancel it". The host
+  terminates the old child and creates a new one. SA does not say whether a
+  terminated instance still counts toward `maxInstances`, so a relationship
+  whose delegations may be retried or replaced leaves it unset.
+
+**The step's flags do not follow the target.** The ontology gives `delegate`
+`risk: medium` and `mutation: false`, and neither `requires_checkpoint` nor
+`requires_approval`. A `delegate` step therefore validates and runs with no
+checkpoint and no approval, whatever the target agent does. Until the Standard
+relates the step's flags to its target (the change on what crosses a
+delegation, [proposed below](#changes-proposed-to-the-agent-capability-standard)),
+the workflow author raises them on a step whose target can change state: a
+declaration stricter than the ontology "is allowed and takes effect"
+([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)).
+
+```yaml
+- capability: checkpoint
+  purpose: Save a restore point before handing the change over.
+  store_as: checkpoint_out
+  input_bindings:
+    scope: service_config
+- capability: delegate
+  purpose: Hand the change to the deploy agent.
+  requires_checkpoint: true
+  requires_approval: true
+  store_as: delegate_out
+  input_bindings:
+    task: {apply: rotate_certificate}
+    agent: deployer
+```
+
+With `requires_approval: true` the executor asks for approval before it
+delegates, as the reference catalog's `multi_agent_orchestration` does. With
+`requires_checkpoint: true` the step needs a `checkpoint` step before it
+(F501 without one) and uses that checkpoint up. A target that must change
+nothing is bound `read_only: true` instead; the host attests it in
+`effective.read_only`, and the Standard "does not say how a host enforces
+`read_only`". The raised flags act in the delegating workflow only. Its
+checkpoint covers its own state, not what the child changes, as the first
+point under [Composing grounded agents](#composing-grounded-agents) says.
+
 ## Packaging and conformance
 
 A grounded agent is an ordinary Standard Agents package. The example's
@@ -816,7 +901,9 @@ gaps of its own.
    define, and the keys of `checkpoint_policy` are free-form. A binding
    therefore cannot state that it applies a profile. A normative section would
    say how a run selects one, that a profile only tightens effective flags, as
-   a step's declaration does in §5.2.1, and what each field changes.
+   a step's declaration does in §5.2.1, and what each field changes. Until
+   then the repository's documents present a profile as informative data
+   ([Status of Domain Profiles](../domains/README.md#status-of-domain-profiles)).
 8. **Give secrets a rule.** Neither the Standard nor SECURITY.md states a rule
    on secrets or redaction; the rules exist only as model instructions in
    skill text. §6.2 requires an event's `raw` to be "Original unmodified

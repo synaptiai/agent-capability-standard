@@ -20,7 +20,7 @@ The organization shall monitor and measure AIMS effectiveness using data from th
 | Monitoring Area | Data Source | Metric | Collection Method |
 |----------------|------------|--------|-------------------|
 | **Safety compliance** | `PreToolUse` hook logs | Checkpoint enforcement rate (target: 100%) | Automated — hook intercepts all Write/Edit calls |
-| **Audit completeness** | `.claude/audit.log` | Skill invocation logging rate (target: 100%) | Automated — PostToolUse hook |
+| **Audit completeness** | `.claude/audit.log` | Tool call logging rate (target: 100%) | Automated — PostToolUse hook |
 | **Evidence grounding** | EvidenceStore | Outputs with evidence anchors (target: 100%) | Schema validation results |
 | **Confidence thresholds** | EvidenceStore | Decisions meeting minimum confidence (target: per domain) | EvidenceStore queries |
 | **Human oversight** | Approval records | Mean time to approve high-risk actions | Approval timestamp analysis |

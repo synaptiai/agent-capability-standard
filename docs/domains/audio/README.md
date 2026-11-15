@@ -12,6 +12,8 @@ The audio domain profile is calibrated for environments where:
 
 This profile maps to [OASF Category 3 (Audio)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering audio classification, speech recognition, speaker identification, and audio synthesis.
 
+The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+
 ## Domain Profile
 
 **Profile location:** `schemas/profiles/audio.yaml`

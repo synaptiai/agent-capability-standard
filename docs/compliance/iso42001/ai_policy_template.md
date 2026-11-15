@@ -32,10 +32,10 @@ All AI agent actions shall be backed by evidence anchors. No capability output m
 
 ### 3.2 Auditability and Transparency
 
-All AI operations shall maintain complete audit trails. Every skill invocation is logged with timestamps. Every claim carries a `ProvenanceRecord` linking it to the agent, capability, and evidence that produced it.
+All AI operations shall maintain complete audit trails. Every tool call that runs is logged with a timestamp. Every claim carries a `ProvenanceRecord` linking it to the agent, capability, and evidence that produced it.
 
 **Framework enforcement:**
-- `PostToolUse` hook logs all skill invocations to `.claude/audit.log`
+- `PostToolUse` and `PostToolUseFailure` hooks log every tool call that runs to `.claude/audit.log`, with a SHA-256 digest in place of the tool input; a call that a hook or a permission rule refused did not run and is not logged
 - `EvidenceStore` captures tool executions as `EvidenceAnchor` objects
 - `ProvenanceRecord` schema links claims to agents, capabilities, and evidence
 
@@ -59,7 +59,8 @@ High-risk operations shall require checkpoints and approval before execution. Th
 - `PreToolUse` hook blocks `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `Bash` without checkpoint marker
 - High-risk capabilities (`mutate`, `send`) have `requires_checkpoint: true` and `requires_approval: true`
 - `execute` capability has `requires_approval: true`
-- Remaining medium-risk capabilities (`delegate`, `invoke`, `synchronize`, `rollback`) are controlled through domain profile `block_autonomous` lists
+- `rollback` needs a `checkpoint` before it, which the workflow validator checks
+- The other medium-risk capabilities (`delegate`, `invoke`, `synchronize`) carry no checkpoint or approval flag. A workflow step can raise `requires_approval` on them, and a domain profile may list them under `block_autonomous`, which is a declaration for the deployer's host to implement, not something a shipped component enforces
 
 ### 3.4 Reversibility
 
@@ -86,10 +87,15 @@ flowchart TB
 AI systems shall operate under appropriate human oversight, calibrated by domain. Operators can configure the level of human involvement from fully autonomous (low-risk operations) to mandatory human execution (high-risk domains like healthcare).
 
 **Framework enforcement:**
-- `require_review` threshold in domain profiles
-- `require_human` threshold in domain profiles
-- `block_autonomous` lists per domain
+- `requires_approval` on `execute`, `mutate` and `send`: the reference executor runs such a step only on an approval decision
 - `inquire` capability for human escalation
+
+**Declared in domain profiles, for the deployer's host to implement:**
+- `require_review` threshold
+- `require_human` threshold
+- `block_autonomous` lists per domain
+
+A domain profile is informative data. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. The level of human involvement an operator configures in a profile is in effect only where the host implements it or where it is written into the workflows. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ## 4. Leadership Responsibilities (Clause 5.1)
 
@@ -155,7 +161,7 @@ The organization shall establish measurable AI objectives that are:
 | Accuracy | Minimum confidence threshold met | Per domain profile | EvidenceStore confidence scores |
 | Transparency | Provenance coverage (claims with full provenance) | 100% | ProvenanceRecord completeness |
 | Human oversight | Approval response time for high-risk actions | < 15 minutes | Approval request timestamps |
-| Auditability | Audit log completeness | 100% of skill invocations | Audit hook verification |
+| Auditability | Audit log completeness | 100% of tool calls that run | Audit hook verification |
 | Improvement | Nonconformity resolution rate | > 95% within SLA | Corrective action records |
 
 ## 7. Communication

@@ -56,9 +56,11 @@ The Grounded Agency framework provides 36 atomic capabilities across 9 cognitive
 |-----------|-------|---------------|
 | Atomic capabilities | 36 | Typed I/O contracts, risk metadata, dependency edges |
 | Cognitive layers | 9 | PERCEIVE → UNDERSTAND → REASON → MODEL → SYNTHESIZE → EXECUTE → VERIFY → REMEMBER → COORDINATE |
-| Domain profiles | 7 | Trust weights, risk thresholds, checkpoint policies, compliance configuration |
+| Domain profiles | 7 | Trust weights, risk thresholds, checkpoint policies, compliance configuration, as informative data |
 | Workflow patterns | 12 | Composable capability sequences with safety gates |
 | Edge types | 7 | `requires`, `soft_requires`, `enables`, `precedes`, `conflicts_with`, `alternative_to`, `specializes` |
+
+**Domain profiles are informative.** A profile is data for hosts and workflow authors. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. `tools/validate_profiles.py` checks a profile's shape only. A setting such as `block_autonomous`, `require_human` or `minimum_confidence` takes effect only where the deployer's host implements it or where it is written into a workflow. The structural safety enforcement named above rests on the ontology's safety flags: the validator rejects a workflow in which `mutate`, `send` or `rollback` has no `checkpoint` before it, the reference executor runs a step that requires a checkpoint or approval only with one, and the plugin hook blocks Write, Edit, MultiEdit, NotebookEdit and Bash calls without a valid checkpoint marker. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ### 2.3 Risk Classification
 
@@ -100,6 +102,8 @@ Each NIST category is assessed using:
 | **Partial** | Framework provides structural support; deployer must configure or extend |
 | **Gap** | Framework does not address this requirement; deployer must implement independently |
 
+A row that cites a domain profile setting is rated on the setting being defined and documented. No shipped component loads or selects a profile (Section 2.2), so putting such a setting into effect is deployer action even where the row is rated Full.
+
 ```mermaid
 ---
 title: How coverage is decided
@@ -126,9 +130,9 @@ flowchart TB
 |-------------|--------------------------|----------|----------|
 | **GV-1.1** — Legal and regulatory requirements identified | EU AI Act conformity suite, ISO 42001 compliance suite, regulatory compliance analysis | `docs/compliance/eu-ai-act/`, `docs/compliance/iso42001/`, `analysis/10-regulatory-compliance.md` | Full |
 | **GV-1.2** — Trustworthy AI characteristics integrated | Grounded Agency principles: grounded, auditable, safe, composable | `spec/WHITEPAPER.md` (principles section), `docs/GROUNDED_AGENCY.md` | Full |
-| **GV-1.3** — Risk tolerances determined | Domain profiles define `min_confidence`, `block_autonomous`, `require_human` thresholds per deployment context | `schemas/profiles/*.yaml`, `schemas/profiles/profile_schema.yaml` | Full |
+| **GV-1.3** — Risk tolerances determined | Domain profiles record `minimum_confidence`, `block_autonomous` and `require_human` thresholds per deployment context; applying them is left to the deployer's host | `schemas/profiles/*.yaml`, `schemas/profiles/profile_schema.yaml` | Full |
 | **GV-1.4** — Risk management process established | Three-tier risk model structurally embedded in ontology; risk treatment plan documents controls per tier | `schemas/capability_ontology.yaml` (risk fields), `docs/compliance/iso42001/risk_treatment_plan.md` | Full |
-| **GV-1.5** — Processes for ongoing monitoring | EvidenceStore tracks tool executions; audit hooks log skill invocations; management review process defined | `grounded_agency/state/evidence_store.py`, `hooks/hooks.json`, `docs/compliance/iso42001/management_review.md` | Full |
+| **GV-1.5** — Processes for ongoing monitoring | EvidenceStore tracks tool executions; audit hooks log every tool call that runs; management review process defined | `grounded_agency/state/evidence_store.py`, `hooks/hooks.json`, `docs/compliance/iso42001/management_review.md` | Full |
 | **GV-1.6** — Mechanisms for inventory and documentation | Capability ontology serves as formal inventory; technical documentation covers all Annex IV elements | `schemas/capability_ontology.yaml`, `docs/compliance/eu-ai-act/annex_iv_technical_documentation.md` | Full |
 | **GV-1.7** — Processes for decommissioning | Gap — No formal AI system decommissioning procedure documented | — | Gap |
 
@@ -199,7 +203,7 @@ flowchart TB
 | **MP-1.2** — Interdependencies mapped | 7 edge types (requires, soft_requires, enables, precedes, conflicts_with, alternative_to, specializes) explicitly map capability dependencies | `schemas/capability_ontology.yaml` (edges section), `spec/EDGE_TYPES.md` | Full |
 | **MP-1.3** — Deployment context characterized | 7 domain profiles define operational context: trust weights, risk thresholds, compliance requirements, evidence policies | `schemas/profiles/healthcare.yaml`, `schemas/profiles/manufacturing.yaml`, `schemas/profiles/data_analysis.yaml`, `schemas/profiles/personal_assistant.yaml`, `schemas/profiles/vision.yaml`, `schemas/profiles/audio.yaml`, `schemas/profiles/multimodal.yaml` | Full |
 | **MP-1.4** — Assumptions documented | First-principles derivation methodology documents design assumptions; whitepaper states core principles | `docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md`, `spec/WHITEPAPER.md` | Full |
-| **MP-1.5** — User interactions characterized | `inquire` capability for human escalation; `require_human` flag in profiles; `block_autonomous` lists | `schemas/profiles/profile_schema.yaml`, `skills/inquire/SKILL.md` | Full |
+| **MP-1.5** — User interactions characterized | `inquire` capability for human escalation; `require_human` threshold and `block_autonomous` lists declared in profiles | `schemas/profiles/profile_schema.yaml`, `skills/inquire/SKILL.md` | Full |
 
 ### 5.2 MP-2: AI System Categorization
 
@@ -257,7 +261,7 @@ flowchart TB
 | Sub-Category | Framework Implementation | Evidence | Coverage |
 |-------------|--------------------------|----------|----------|
 | **ME-1.1** — Measurement approaches identified | Confidence scores required on all capability outputs; evidence anchors link claims to sources; 6 structural validators | `schemas/capability_ontology.yaml` (output schemas with `confidence` field), `tools/validate_*.py` | Full |
-| **ME-1.2** — Metrics selected for trustworthiness | Per-domain `min_confidence` thresholds (healthcare: 0.90, manufacturing: 0.85, data analysis: 0.80); trust weights per source type | `schemas/profiles/*.yaml`, `schemas/authority_trust_model.yaml` | Full |
+| **ME-1.2** — Metrics selected for trustworthiness | Per-domain `minimum_confidence` thresholds declared in profiles (healthcare: 0.90, manufacturing: 0.85, data analysis: 0.80), which no shipped component compares an output against; trust weights per source type | `schemas/profiles/*.yaml`, `schemas/authority_trust_model.yaml` | Full |
 | **ME-1.3** — Metrics documented and communicated | Output schemas formally define metric structure; evidence policies specify grounding requirements per domain | `schemas/capability_ontology.yaml` (output_schema), `schemas/profiles/profile_schema.yaml` (evidence_policy) | Full |
 
 ### 6.2 ME-2: AI Systems Evaluation
@@ -267,8 +271,8 @@ flowchart TB
 | Sub-Category | Framework Implementation | Evidence | Coverage |
 |-------------|--------------------------|----------|----------|
 | **ME-2.1** — Evaluation conducted | Conformance test suite validates structural properties; 6 validators check ontology, workflows, profiles, skill refs, transform refs, YAML sync | `scripts/run_conformance.py`, `tools/validate_ontology.py`, `tools/validate_workflows.py`, `tools/validate_profiles.py`, `tools/validate_skill_refs.py`, `tools/validate_transform_refs.py`, `tools/validate_yaml_util_sync.py` | Full |
-| **ME-2.2** — Evaluation results documented | EvidenceStore captures tool executions as evidence anchors; checkpoint tracker records state transitions; audit log records all skill invocations | `grounded_agency/state/evidence_store.py`, `grounded_agency/state/checkpoint_tracker.py`, `.claude/audit.log` | Partial — Evidence is captured structurally but aggregated reporting/dashboards are a gap |
-| **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P10D`); audit hooks capture all skill invocations in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are gaps |
+| **ME-2.2** — Evaluation results documented | EvidenceStore captures tool executions as evidence anchors; checkpoint tracker records state transitions; audit log records every tool call that runs | `grounded_agency/state/evidence_store.py`, `grounded_agency/state/checkpoint_tracker.py`, `.claude/audit.log` | Partial — Evidence is captured structurally but aggregated reporting/dashboards are a gap |
+| **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P10D`); audit hooks capture every tool call that runs, in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are gaps |
 
 ### 6.3 ME-3: Trustworthy AI Actor Competency
 
@@ -307,10 +311,10 @@ flowchart TB
 
 | Sub-Category | Framework Implementation | Evidence | Coverage |
 |-------------|--------------------------|----------|----------|
-| **MG-1.1** — Risk response plans developed | Checkpoint-before-mutation enforcement for all high-risk capabilities; rollback capability for state recovery; `block_autonomous` prevents unsupervised execution of dangerous operations | `hooks/hooks.json` (PreToolUse checkpoint gate), `skills/rollback/SKILL.md`, `schemas/profiles/*.yaml` (block_autonomous) | Full |
+| **MG-1.1** — Risk response plans developed | Checkpoint-before-mutation enforcement for all high-risk capabilities; rollback capability for state recovery; `requires_approval` on `execute`, `mutate` and `send`, which the reference executor enforces; `block_autonomous` lists in domain profiles declare which capabilities a domain does not want run unsupervised, for the deployer's host to implement | `hooks/hooks.json` (PreToolUse checkpoint gate), `skills/rollback/SKILL.md`, `schemas/profiles/*.yaml` (block_autonomous) | Full |
 | **MG-1.2** — Residual risk documented | Risk treatment plan documents residual risk per tier; nonconformity procedure tracks unresolved findings | `docs/compliance/iso42001/risk_treatment_plan.md`, `docs/compliance/iso42001/nonconformity_procedure.md` | Full |
-| **MG-1.3** — Risk response prioritized | Three-tier risk model assigns priority structurally — high-risk capabilities (mutate, send) get mandatory checkpoints and approval; medium-risk get approval; low-risk are unrestricted | `schemas/capability_ontology.yaml` (risk, requires_checkpoint, requires_approval fields) | Full |
-| **MG-1.4** — Risk response monitored | Audit hooks log all skill invocations; EvidenceStore tracks execution state; management review evaluates nonconformities quarterly. No automated incident detection. | `hooks/hooks.json`, `grounded_agency/state/evidence_store.py`, `docs/compliance/iso42001/management_review.md` | Partial — Automated incident detection is a gap |
+| **MG-1.3** — Risk response prioritized | Three-tier risk model assigns priority structurally — high-risk capabilities (mutate, send) get mandatory checkpoints and approval; of the medium-risk capabilities, `execute` gets approval and `rollback` needs a checkpoint before it, and a workflow step can raise either flag on the others; low-risk are unrestricted | `schemas/capability_ontology.yaml` (risk, requires_checkpoint, requires_approval fields) | Full |
+| **MG-1.4** — Risk response monitored | Audit hooks log every tool call that runs; EvidenceStore tracks execution state; management review evaluates nonconformities quarterly. No automated incident detection. | `hooks/hooks.json`, `grounded_agency/state/evidence_store.py`, `docs/compliance/iso42001/management_review.md` | Partial — Automated incident detection is a gap |
 
 ### 7.2 MG-2: Strategies for Minimizing Negative Impacts
 
@@ -320,7 +324,7 @@ flowchart TB
 |-------------|--------------------------|----------|----------|
 | **MG-2.1** — Response plans documented | Post-market monitoring plan defines escalation procedures and incident response; nonconformity procedure defines detection → containment → correction → verification workflow | `docs/compliance/eu-ai-act/post_market_monitoring.md`, `docs/compliance/iso42001/nonconformity_procedure.md` | Full |
 | **MG-2.2** — Response plans tested | Recovery loop limits (`max_loops`) prevent infinite retry; rollback restores prior checkpoints; `constrain` capability enforces operational bounds. Conformance test suite validates structural properties. | `schemas/capability_ontology.yaml` (max_loops), `skills/rollback/SKILL.md`, `skills/constrain/SKILL.md`, `scripts/run_conformance.py` | Partial — Tabletop exercises and scenario testing are not documented |
-| **MG-2.3** — Incident documentation maintained | Audit log records all skill invocations with timestamps; ProvenanceRecord chains track claim lineage; world state versioning preserves history with parent links | `.claude/audit.log`, `schemas/world_state_schema.yaml` (provenance), `grounded_agency/state/evidence_store.py` | Full |
+| **MG-2.3** — Incident documentation maintained | Audit log records every tool call that runs, with a timestamp; ProvenanceRecord chains track claim lineage; world state versioning preserves history with parent links | `.claude/audit.log`, `schemas/world_state_schema.yaml` (provenance), `grounded_agency/state/evidence_store.py` | Full |
 
 ### 7.3 MG-3: Third-Party Risk Management
 
@@ -521,9 +525,9 @@ This appendix provides a consolidated inventory of all framework files cited as 
 |------|-------------|----------------|
 | `schemas/capability_ontology.yaml` | 36 capability definitions, risk metadata, typed I/O contracts, edge types | MP-1, MP-2, MP-3, MP-4, ME-1, MG-1 |
 | `schemas/workflow_catalog.yaml` | 12 workflow composition patterns | MP-1, MP-3 |
-| `schemas/profiles/healthcare.yaml` | Healthcare domain profile (min_confidence: 0.90) | GV-1, MP-1, ME-1 |
-| `schemas/profiles/manufacturing.yaml` | Manufacturing domain profile (min_confidence: 0.85) | GV-1, MP-1, ME-1 |
-| `schemas/profiles/data_analysis.yaml` | Data analysis domain profile (min_confidence: 0.80) | GV-1, MP-1, ME-1 |
+| `schemas/profiles/healthcare.yaml` | Healthcare domain profile (minimum_confidence: 0.90) | GV-1, MP-1, ME-1 |
+| `schemas/profiles/manufacturing.yaml` | Manufacturing domain profile (minimum_confidence: 0.85) | GV-1, MP-1, ME-1 |
+| `schemas/profiles/data_analysis.yaml` | Data analysis domain profile (minimum_confidence: 0.80) | GV-1, MP-1, ME-1 |
 | `schemas/profiles/personal_assistant.yaml` | Personal assistant domain profile | GV-1, MP-1 |
 | `schemas/profiles/vision.yaml` | Vision modality profile | MP-1 |
 | `schemas/profiles/audio.yaml` | Audio modality profile | MP-1 |
@@ -544,7 +548,7 @@ This appendix provides a consolidated inventory of all framework files cited as 
 | File | Evidence For | NIST Categories |
 |------|-------------|----------------|
 | `hooks/hooks.json` | PreToolUse checkpoint gate, PostToolUse audit logging | GV-1, ME-2, MG-1 |
-| `.claude/audit.log` | Persistent audit trail of skill invocations | ME-2, MG-2 |
+| `.claude/audit.log` | Persistent audit trail of tool calls | ME-2, MG-2 |
 
 ### A.4 Validation Tools
 

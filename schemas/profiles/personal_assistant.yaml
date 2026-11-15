@@ -1,5 +1,9 @@
 # Personal Assistant Domain Profile
 # Calibrated for task management, scheduling, communication, and information research.
+#
+# Status: informative data for hosts and workflow authors. No shipped component
+# loads or selects this profile; see "Status of Domain Profiles" in
+# docs/domains/README.md.
 
 domain: personal-assistant
 version: "1.0.0"

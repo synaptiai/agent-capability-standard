@@ -10,6 +10,8 @@ The data analysis domain profile is calibrated for environments where:
 - **Statistics require rigor** — Uncertainty must be explicit
 - **Models need governance** — Drift detection and retraining
 
+The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+
 ## Domain Profile
 
 **Profile location:** `schemas/profiles/data_analysis.yaml`

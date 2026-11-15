@@ -2,6 +2,8 @@
 
 Key terms used in the Agent Capability Standard. Each term includes context on **why it matters** and **what problems it solves**.
 
+The definitions give the sense each term has in this standard. Some of the same words mean something else in the Standard Agent Specification: see [Terms Shared with the Standard Agent Specification](#terms-shared-with-the-standard-agent-specification).
+
 ---
 
 ## Core Concepts
@@ -34,7 +36,7 @@ A self-contained unit that implements a capability. Each skill has a `SKILL.md` 
 - Instructions for execution
 - Examples
 
-Skills are organized by layer in the `skills/` directory.
+Skills sit side by side in the `skills/` directory, one directory per skill (`skills/<name>/SKILL.md`). A capability's layer is stated in the ontology; a skill's frontmatter repeats it for some skills only (see [Skill Structure](../skills/README.md#skill-structure)).
 
 ```mermaid
 ---
@@ -421,6 +423,9 @@ The guaranteed structure of data a capability produces. Output schemas enable:
 - Contract verification
 - Documentation
 
+### Strict Contract Rendering
+The input and output schema of every capability as JSON Schema Draft 2020-12, in [`schemas/generated/capability_contracts.schema.json`](../schemas/generated/capability_contracts.schema.json): `$defs` holds `<capability>.input` and `<capability>.output`. The ontology writes its contracts with two values of `type` that the Draft 2020-12 metaschema does not allow, `any` and a union written `string|object`, so a tool that checks a schema against that metaschema refuses the contracts as the ontology writes them. [`scripts/gen_capability_json_schemas.py`](../scripts/gen_capability_json_schemas.py) generates the rendering from the ontology, which remains the source, and its `--check` option fails when the two differ. A union becomes a type list (`["string", "object"]`). `any` becomes a schema with no `type`, which accepts every value, and carries `"x-acs-type": "any"` so that it stays apart from a slot whose type the ontology does not state. Objects stay open: a contract lists the fields it requires and does not forbid others. Draft 2020-12 says a validator should treat a keyword it does not know as an annotation, so `x-acs-type` constrains nothing. A tool that refuses unknown keywords, as Ajv does in its default strict mode, has to be told about this one. In that mode Ajv also refuses the format `date-time`, which the ontology itself uses, until a format package is added or format validation is turned off.
+
 ### Type Coercion
 Converting data from one type to another. Coercion is used when:
 - Source and target types are compatible but different
@@ -570,6 +575,11 @@ A synchronized model of a real-world system. The standard includes workflows for
 - Synchronizing with incoming signals
 - Detecting drift
 - Executing safe corrective actions
+
+### Terms Shared with the Standard Agent Specification
+Capability, step, handler, hook, skill and invoke are also terms of the [Standard Agent Specification](https://standardagentspec.org), where each has a different sense. A capability there is a feature or limit of a model, a step is one model request and response, and a handler is a function that takes one side's turns in a conversation. This glossary defines the Agent Capability Standard's sense only.
+
+The table [Words the two standards use differently](integrations/standard_agents.md#words-the-two-standards-use-differently) in the Standard Agents interoperability document sets the two senses of each word side by side, and this standard's host beside that specification's runtime.
 
 ---
 

@@ -6,6 +6,10 @@
 # NOTE: The profile domain name 'audio' matches the capability domain parameter
 # convention (e.g., domain: audio.speech, domain: audio.event).
 # See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
+#
+# Status: informative data for hosts and workflow authors. No shipped component
+# loads or selects this profile; see "Status of Domain Profiles" in
+# docs/domains/README.md.
 
 domain: audio
 version: "1.0.0"

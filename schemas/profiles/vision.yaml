@@ -6,6 +6,10 @@
 # NOTE: The profile domain name 'vision' refers to the agent specialization.
 # Capability domain parameters use 'image.*' (e.g., domain: image.object).
 # See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
+#
+# Status: informative data for hosts and workflow authors. No shipped component
+# loads or selects this profile; see "Status of Domain Profiles" in
+# docs/domains/README.md.
 
 domain: vision
 version: "1.0.0"

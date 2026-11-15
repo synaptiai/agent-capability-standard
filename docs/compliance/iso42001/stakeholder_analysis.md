@@ -23,6 +23,8 @@ This document fulfills ISO/IEC 42001 Clause 4.2 (Understanding the needs and exp
 | Existing infrastructure | CI/CD, monitoring, deployment pipelines | Integration with hooks, audit logs, evidence stores |
 | Culture | Safety-first, evidence-based decision making | Aligns with Grounded Agency core principles |
 
+Domain profiles record these settings as informative data. No shipped component loads or selects a profile, and none applies its `risk_thresholds`, so a setting is in effect only where the organization's host implements it or where it is written into a workflow. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+
 ### 2.2 External Factors
 
 | Factor | Description | Framework Relevance |
@@ -124,7 +126,7 @@ The organization shall establish, implement, maintain, and continually improve a
 |---------------|---------------|-------------------|
 | Processes needed | Capability workflows, approval flows, review cycles | `schemas/workflow_catalog.yaml` |
 | Process interactions | Capability edges (requires, enables, precedes) | `schemas/capability_ontology.yaml` edges section |
-| Criteria and methods for control | Risk thresholds, checkpoint policies, evidence requirements | Domain profiles, hooks |
+| Criteria and methods for control | Risk thresholds, checkpoint policies, evidence requirements | Domain profiles (the criteria, as declarations), hooks and the reference executor (the enforcement of the ontology's flags) |
 | Resources needed | Personnel competencies, tooling, infrastructure | Competency framework (Clause 7) |
 | Responsibilities and authorities | Role definitions per AI policy | AI policy template (Clause 5) |
 | Risks and opportunities | Risk treatment plan | Risk treatment plan (Clause 6) |

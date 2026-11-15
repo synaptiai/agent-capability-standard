@@ -46,6 +46,8 @@ The three-tier model provides a consistent risk evaluation:
 
 ## 3. Risk Treatment Plan — By Risk Tier
 
+**Domain profile settings are declarations.** A domain profile is informative data for hosts and workflow authors. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. A treatment below that rests on a profile setting (`block_autonomous`, `require_review`, `require_human`, `require_grounding`, required anchor types) is in effect only where the deployer's host implements the setting or where it is written into a workflow. The treatments that rest on the ontology's flags are enforced by the validator, the reference executor and the plugin hook. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+
 ### 3.1 Low-Risk Capabilities (29 capabilities)
 
 **Risk Profile:** No mutation, read-only or analytical. Failure mode is primarily incorrect output (wrong classification, failed retrieval, inaccurate prediction).
@@ -54,37 +56,37 @@ The three-tier model provides a consistent risk evaluation:
 |------|-----------|---------|---------------|
 | Incorrect output | Accept + Detect | Evidence grounding | Output schemas require `evidence_anchors` and `confidence` |
 | Stale data | Mitigate | Temporal decay | Trust model halves trust every 10 days; min trust floor 0.25 |
-| Hallucination | Mitigate | Grounding requirement | `ground` capability anchors claims to evidence; `require_grounding` in evidence policy |
+| Hallucination | Mitigate | Grounding requirement | `ground` capability anchors claims to evidence; `require_grounding` in a profile's evidence policy lists the capabilities a domain wants grounded (declared, not checked by a shipped component) |
 | Bias in classification | Detect + Escalate | Critique loop | `critique` capability for self-assessment; `inquire` for human escalation |
 | Resource exhaustion | Mitigate | Loop limits | `max_loops` on recovery loops prevents infinite retry |
 
-**Domain Override:** Domain profiles can elevate low-risk capabilities to require review. Healthcare sets `require_review: low`, meaning even low-risk capabilities undergo human review.
+**Domain Override (declared):** A domain profile can state that low-risk capabilities need review. Healthcare sets `require_review: low`. No shipped component applies the threshold: low-risk capabilities undergo human review only where the deployer's host implements it, or where the workflows raise `requires_approval` on those steps.
 
 **Controls Summary:**
 - Structural: Output schema validation (mandatory evidence + confidence)
 - Operational: Trust model temporal decay
 - Detective: EvidenceStore monitoring
-- Domain: Profile-level threshold overrides
+- Domain: Profile-level thresholds, where the deployer's host implements them
 
 ### 3.2 Medium-Risk Capabilities (5 capabilities)
 
-**Risk Profile:** These capabilities affect execution flow, delegate authority, or restore state. Failure modes include unauthorized execution, improper delegation, and failed rollback. The `execute` capability carries `requires_approval: true` in the ontology; the remaining medium-risk capabilities are controlled through domain profile `block_autonomous` lists and workflow-level access controls.
+**Risk Profile:** These capabilities affect execution flow, delegate authority, or restore state. Failure modes include unauthorized execution, improper delegation, and failed rollback. The `execute` capability carries `requires_approval: true` in the ontology. The remaining medium-risk capabilities carry no approval flag: `rollback` needs a `checkpoint` before it, and a workflow step can raise `requires_approval` on any of them. A domain profile may list them under `block_autonomous`, which is a declaration that no shipped component enforces.
 
 | Capability | Specific Risk | Treatment | Control | Implementation |
 |-----------|--------------|-----------|---------|---------------|
-| `execute` | Unintended code execution | Mitigate | Pre-execution approval | `requires_approval: true` (ontology-enforced); domain profiles can block via `block_autonomous` |
+| `execute` | Unintended code execution | Mitigate | Pre-execution approval | `requires_approval: true` in the ontology, enforced by the reference executor; a domain profile may list `execute` under `block_autonomous` (declared, host-implemented) |
 | `rollback` | Data loss from incorrect restoration | Mitigate | Checkpoint validation | Checkpoint scope verification before rollback; `conflicts_with: [persist, mutate]` |
-| `delegate` | Authority escalation | Mitigate | Domain blocking + audit | Domain `block_autonomous` lists; delegation logged in audit trail |
-| `synchronize` | Consistency violation | Mitigate | Domain blocking + verification | Domain `block_autonomous` lists; state agreement verification |
-| `invoke` | Unauthorized workflow execution | Mitigate | Domain blocking + access control | Domain `block_autonomous` lists; workflow-level access control |
+| `delegate` | Authority escalation | Mitigate | Raised step flags, domain blocking (declared) + audit | The ontology gives `delegate` no checkpoint or approval flag, so the workflow author raises `requires_approval` on the step when the target can change state; a domain profile may list `delegate` under `block_autonomous` (declared, host-implemented); delegation logged in audit trail |
+| `synchronize` | Consistency violation | Mitigate | Domain blocking (declared) + verification | A domain profile may list `synchronize` under `block_autonomous` (declared, host-implemented); state agreement verification |
+| `invoke` | Unauthorized workflow execution | Mitigate | Domain blocking (declared) + access control | A domain profile may list `invoke` under `block_autonomous` (declared, host-implemented); workflow-level access control |
 
-**Domain Override:** Manufacturing and healthcare profiles block several medium-risk capabilities from autonomous execution entirely.
+**Domain Override (declared):** The healthcare profile lists two medium-risk capabilities, `execute` and `delegate`, under `block_autonomous`; the other shipped profiles list none. The list is a declaration for the deployer's host to implement.
 
 **Controls Summary:**
 - Structural: `requires_approval: true` on `execute`
-- Operational: Domain-specific `block_autonomous` lists
-- Detective: Audit hook logging of all skill invocations
-- Corrective: `rollback` capability for state recovery (itself gated by approval)
+- Operational: Domain-specific `block_autonomous` lists, where the deployer's host implements them
+- Detective: Audit hook logging of every tool call that runs
+- Corrective: `rollback` capability for state recovery (it needs a `checkpoint` before it; the ontology gives it no approval flag)
 
 ### 3.3 High-Risk Capabilities (2 capabilities)
 
@@ -97,7 +99,7 @@ The three-tier model provides a consistent risk evaluation:
 | `mutate` | Unauthorized change | Mitigate | Approval gate | Human or system approval required before execution |
 | `send` | Data exfiltration | Mitigate | Checkpoint + approval | `requires_checkpoint: true`, `requires_approval: true` |
 | `send` | Incorrect transmission | Mitigate | State preservation | Checkpoint enables post-transmission investigation and recovery |
-| `send` | Compliance violation | Mitigate | Domain constraints | Healthcare blocks `send` via `block_autonomous`; evidence policy mandates `clinician_verification` |
+| `send` | Compliance violation | Mitigate | Domain constraints (declared) | Healthcare lists `send` under `block_autonomous` and `clinician_verification` as a required anchor type; both are declarations for the deployer's host to implement |
 
 **Structural Enforcement (not bypassable):**
 
@@ -108,14 +110,14 @@ The three-tier model provides a consistent risk evaluation:
    - `persist` conflicts with `rollback` — cannot persist during rollback
    These are enforced by the workflow validator at design time.
 
-3. **Domain Profile Blocking:** Domain profiles can add `mutate` and `send` to `block_autonomous`, preventing any autonomous execution regardless of approval status.
+**Domain Profile Blocking (declared, not enforced):** Domain profiles can add `mutate` and `send` to `block_autonomous`, to say that they are never to run autonomously, whatever their approval status. No shipped component enforces the list, so it prevents nothing by itself; the deployer's host has to implement it.
 
 **Controls Summary:**
 - Structural: PreToolUse hook gate (runtime enforcement), conflict edges (design-time enforcement)
 - Operational: Mandatory checkpoint before mutation, dual approval (checkpoint + explicit)
 - Detective: Full provenance chain (EvidenceStore + ProvenanceRecord + audit log)
 - Corrective: Rollback to pre-mutation checkpoint
-- Domain: `block_autonomous` for high-risk domains
+- Domain: `block_autonomous` for high-risk domains, where the deployer's host implements it
 
 ## 4. Risk Treatment Options Reference
 
@@ -123,19 +125,21 @@ Per ISO 31000 risk treatment framework:
 
 | Option | Definition | Framework Application |
 |--------|-----------|----------------------|
-| **Avoid** | Eliminate the activity | `block_autonomous` removes capability from autonomous execution |
+| **Avoid** | Eliminate the activity | `block_autonomous` in a domain profile names the capabilities to keep out of autonomous execution; the deployer's host has to implement it |
 | **Mitigate** | Reduce likelihood or impact | Checkpoints, approvals, evidence grounding, confidence thresholds |
 | **Transfer** | Share risk with another party | `delegate` to human operator; `inquire` for escalation |
 | **Accept** | Acknowledge with monitoring | Low-risk capabilities with evidence grounding and audit |
 
 ## 5. Cross-Domain Risk Treatment Matrix
 
+The matrix lists what each profile declares. No shipped component applies these treatments (Section 3).
+
 | Domain Profile | Low-Risk Treatment | Medium-Risk Treatment | High-Risk Treatment |
 |---------------|-------------------|---------------------|-------------------|
 | **Healthcare** | Require review (all capabilities) | Block autonomous (execute, delegate) | Block autonomous (mutate, send); clinician verification required |
 | **Manufacturing** | Auto-approve low | Require review | Block autonomous (mutate, send); before_process_change checkpoint |
 | **Data Analysis** | Auto-approve low | Require review | Require human approval; data lineage mandatory |
-| **Personal Assistant** | Auto-approve low | Auto-approve with logging | Require human approval |
+| **Personal Assistant** | Auto-approve low | Require review | Require human approval |
 
 ## 6. AI Objectives and Planning (Clause 6.2)
 
@@ -144,7 +148,7 @@ Per ISO 31000 risk treatment framework:
 | Objective | Metric | Target | Measurement | Owner |
 |-----------|--------|--------|-------------|-------|
 | Zero uncontrolled mutations | % of mutations preceded by checkpoint | 100% | Audit log cross-reference | AI Safety Officer |
-| Full audit coverage | % of skill invocations logged | 100% | Audit hook verification | AI System Operator |
+| Full audit coverage | % of tool calls that ran logged | 100% | Audit hook verification | AI System Operator |
 | Evidence grounding compliance | % of outputs with evidence anchors | 100% | Schema validation results | AI System Owner |
 | Confidence threshold adherence | % of decisions meeting domain minimum confidence | 100% | EvidenceStore analysis | Domain Expert |
 | Timely human oversight | Mean time to approval for high-risk actions | < SLA | Approval timestamp analysis | AI System Operator |
@@ -155,7 +159,7 @@ Per ISO 31000 risk treatment framework:
 | Action | Resources | Timeline | Responsible | Evidence of Completion |
 |--------|-----------|----------|-------------|----------------------|
 | Deploy checkpoint enforcement hooks | Engineering team | Per deployment | AI System Operator | Hook configuration verified in production |
-| Configure domain profiles | Domain experts + operators | Per domain | AI System Owner | Profile validation passing |
+| Configure domain profiles | Domain experts + operators | Per domain | AI System Owner | Profile validation passing; the host or the workflows implement the profile settings the deployment relies on |
 | Establish audit log monitoring | Operations team | [Timeline] | AI System Operator | Monitoring dashboard operational |
 | Train operators on AIMS | Training facilitator | [Timeline] | AI Safety Officer | Competency records (Clause 7) |
 | Conduct initial risk assessment | AI Safety Officer + domain experts | [Timeline] | AI Safety Officer | This document, reviewed and approved |
@@ -168,7 +172,7 @@ After applying all treatments:
 |-----------|--------------|------------------------|---------------|-------------|
 | Low | Low | High (structural evidence grounding) | Very Low | Yes |
 | Medium | Medium | High (approval gates + audit) | Low | Yes |
-| High | High | Very High (structural checkpoint + approval + domain blocking) | Low | Yes, with monitoring |
+| High | High | Very High (structural checkpoint + approval; domain blocking where the host implements it) | Low | Yes, with monitoring |
 
 **Residual Risk Acceptance:** The AI System Owner shall formally accept residual risks by signing this risk treatment plan. Residual risks shall be reviewed at each management review cycle (see Clause 9 document).
 

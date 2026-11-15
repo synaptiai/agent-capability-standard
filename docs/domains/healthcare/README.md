@@ -12,6 +12,8 @@ The healthcare domain profile is calibrated for environments where:
 - **Regulatory compliance is required** — HIPAA, FDA, HL7 standards apply
 - **Audit trails are critical** — 7-year retention for medical records
 
+The profile is informative data. Its `block_autonomous` list (`mutate`, `send`, `execute`, `delegate`) and its `require_human: low` threshold state the rule above; no shipped component loads the profile or enforces them, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+
 ## Domain Profile
 
 **Profile location:** `schemas/profiles/healthcare.yaml`
