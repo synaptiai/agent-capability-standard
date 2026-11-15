@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { annotationRecord, checkBindings, parseDuration, parseRecord } from '../src/binding.js';
 import { effectiveFlagsOf } from '../src/flags.js';
+import { parseJsonExact } from '../src/ijson.js';
 import { prerequisitesOf } from '../src/ontology.js';
 
 interface Fixture {
@@ -22,18 +23,23 @@ interface Fixture {
   };
 }
 
-const FIXTURES = import.meta.glob<Fixture>('../../../tests/conformance/bindings/*.json', {
+// Read as text and parsed exactly, so that an integer literal beyond 2^53
+// reaches the loader as the fixture states it, not rounded by JSON.parse.
+const FIXTURES = import.meta.glob<string>('../../../tests/conformance/bindings/*.json', {
   eager: true,
+  query: '?raw',
   import: 'default',
 });
-const CASES = Object.entries(FIXTURES).map(([path, fixture]) => [path.split('/').pop()!.replace('.json', ''), fixture] as const);
+const CASES = Object.entries(FIXTURES).map(
+  ([path, text]) => [path.split('/').pop()!.replace('.json', ''), parseJsonExact(text) as Fixture] as const,
+);
 
 const pairs = (list: { code: string; location?: { tool: string }; tool?: string }[]) =>
   list.map((d) => `${d.code} ${d.location?.tool ?? d.tool}`).sort();
 
 describe('binding fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(26);
+    expect(CASES).toHaveLength(33);
   });
 
   it.each(CASES)('%s', (_name, fixture) => {

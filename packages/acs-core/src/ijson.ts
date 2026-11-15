@@ -54,6 +54,12 @@ export function iJsonProblem(value: unknown, options: IJsonOptions = {}, path = 
       if (integers && Number.isInteger(v) && Math.abs(v) > INT_LIMIT && Math.abs(v) < 1e21) {
         return `holds the integer ${v} at ${at}, outside ±2^53, which has no exact I-JSON form`;
       }
+    } else if (typeof v === 'bigint') {
+      // What `parseJsonExact` reads an integer literal beyond ±2^53 as.
+      const beyond = v > BigInt(INT_LIMIT) || v < -BigInt(INT_LIMIT);
+      return beyond
+        ? `holds the integer ${v} at ${at}, outside ±2^53, which has no exact I-JSON form`
+        : `holds a bigint at ${at}, not JSON`;
     } else if (typeof v === 'string') {
       if (UNPAIRED_SURROGATE.test(v)) return `holds a string with a lone surrogate at ${at}`;
     } else if (Array.isArray(v)) {
@@ -71,4 +77,33 @@ export function iJsonProblem(value: unknown, options: IJsonOptions = {}, path = 
     }
   }
   return null;
+}
+
+/** An integer literal: no fraction, no exponent. */
+const INTEGER_LITERAL = /^-?\d+$/;
+
+/**
+ * Parse JSON text without losing what an I-JSON check must see: an integer
+ * literal of magnitude above 2^53, which `JSON.parse` would round to a
+ * number a check accepts (9007199254740993 to 2^53), is read as a `bigint`
+ * instead, which `iJsonProblem` refuses. Every other value is what
+ * `JSON.parse` reads. Read JSON text this way wherever its values are then
+ * checked as I-JSON (§5.14), as a fixture runner does; a value that arrives
+ * already parsed has lost the literal, and is checked as it is.
+ *
+ * @throws SyntaxError when `text` is not JSON, and an Error when the runtime
+ *   gives a reviver no source text (`JSON.parse` source text access) and the
+ *   text holds such a literal.
+ */
+export function parseJsonExact(text: string): unknown {
+  return JSON.parse(text, function (this: unknown, _key: string, value: unknown, context?: { source?: string }) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || Math.abs(value) < INT_LIMIT) return value;
+    const source = context?.source;
+    if (source === undefined) {
+      throw new Error('parseJsonExact: this runtime gives no source text to a JSON.parse reviver');
+    }
+    return INTEGER_LITERAL.test(source) && (BigInt(source) > BigInt(INT_LIMIT) || BigInt(source) < -BigInt(INT_LIMIT))
+      ? BigInt(source)
+      : value;
+  });
 }

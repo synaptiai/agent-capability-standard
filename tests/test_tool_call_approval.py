@@ -594,6 +594,11 @@ class TestHookApprovalRule:
             "x\ud83d",  # a lone surrogate
             2**60,  # an integer beyond ±2^53
             -(2**53) - 1,
+            2**53 + 1,
+            # canonical JSON writes these as integer literals beyond ±2^53
+            1.8e16,
+            -1.8e16,
+            float(2**53 + 2),
         ],
     )
     async def test_arguments_that_are_not_i_json_are_f502(
@@ -635,6 +640,26 @@ class TestHookApprovalRule:
             {
                 "tool_name": "Write",
                 "tool_input": {"file_path": "a.txt", "content": 2**53},
+                "permission_mode": "default",
+            },
+            "c1",
+            None,
+        )
+        assert _decision(result) == "ask"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", [float(2**53), 1e21, 1.5e300, 0.5])
+    async def test_floats_canonical_json_writes_exactly_are_i_json(
+        self, asking_adapter: GroundedAgentAdapter, content: float
+    ) -> None:
+        """2^53 itself, 1e21 and above (written in exponent form) and any
+        number with a fraction have an exact I-JSON form."""
+        asking_adapter.create_checkpoint(["*"], "Test")
+        hook = asking_adapter._make_pretooluse_safety_hook()
+        result = await hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "a.txt", "content": content},
                 "permission_mode": "default",
             },
             "c1",

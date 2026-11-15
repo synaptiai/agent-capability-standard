@@ -298,9 +298,14 @@ class CheckpointTracker:
 
     def _valid(self, checkpoint: Checkpoint, now: datetime) -> bool:
         """Whether ``checkpoint`` can authorise a call at ``now``: valid by
-        its own record, and taken no longer ago than the maximum age."""
-        return checkpoint.is_valid(now) and now <= checkpoint.created_at + timedelta(
-            minutes=self._max_age_minutes
+        its own record, taken no later than ``now`` and no longer ago than
+        the maximum age. A checkpoint dated after ``now`` (a crafted state
+        file, or a clock that stepped back) authorises nothing: the maximum
+        age could not bound it."""
+        return (
+            checkpoint.is_valid(now)
+            and checkpoint.created_at <= now
+            and now <= checkpoint.created_at + timedelta(minutes=self._max_age_minutes)
         )
 
     # ------------------------------------------------------------------
@@ -412,6 +417,7 @@ class CheckpointTracker:
                     return
                 raw = f.read()
             state = json.loads(raw)
+            loaded_at = self._now()
             if state.get("active"):
                 self._active_checkpoint = Checkpoint.from_dict(state["active"])
             # Cap loaded history to _max_history to prevent unbounded growth
@@ -420,8 +426,27 @@ class CheckpointTracker:
                 Checkpoint.from_dict(entry)
                 for entry in state.get("history", [])[: self._max_history]
             ]
+            # A checkpoint dated after the load was not taken by this layer
+            # as the clock now reads (a crafted file, or a clock that stepped
+            # back): it authorises nothing, counts as no checkpoint taken and
+            # names no restore point, so it is dropped (section 5.18.6).
+            future = [c.id for c in self._all() if c.created_at > loaded_at]
+            if future:
+                logger.warning(
+                    "Dropping %d checkpoint(s) dated after the load time: %s",
+                    len(future),
+                    ", ".join(future),
+                )
+                if (
+                    self._active_checkpoint is not None
+                    and self._active_checkpoint.created_at > loaded_at
+                ):
+                    self._active_checkpoint = None
+                self._checkpoint_history = [
+                    c for c in self._checkpoint_history if c.created_at <= loaded_at
+                ]
             last = state.get("last_taken_at")
-            if isinstance(last, str):
+            if isinstance(last, str) and datetime.fromisoformat(last) <= loaded_at:
                 self._last_taken_at = datetime.fromisoformat(last)
             else:
                 created = [c.created_at for c in self._all()]
@@ -610,23 +635,29 @@ class CheckpointTracker:
 
     def has_commit(self, commit: str, since: datetime | None = None) -> bool:
         """Whether a checkpoint taken at or after ``since`` (any time when
-        omitted), valid or not, recorded ``commit`` as its restore point
+        omitted) and not after now, valid or not, recorded ``commit`` as its
+        restore point
         (``metadata["commit"]``, as ``git stash create`` printed it): what
         lets ``git stash pop|apply <commit>`` count as a rollback (section
         5.18.3). A checkpoint pruned from the history is not found."""
         with self._lock:
+            now = self._now()
             return any(
                 c.metadata.get("commit") == commit
                 and (since is None or c.created_at >= since)
+                and c.created_at <= now
                 for c in self._all()
             )
 
     def has_taken_since(self, when: datetime) -> bool:
-        """Whether a checkpoint was taken at or after ``when``: what a
-        ``checkpoint`` prerequisite reads (section 5.18.5). History pruning
-        does not hide one."""
+        """Whether a checkpoint was taken at or after ``when``, and not
+        after now: what a ``checkpoint`` prerequisite reads (section
+        5.18.5). History pruning does not hide one."""
         with self._lock:
-            return self._last_taken_at is not None and self._last_taken_at >= when
+            return (
+                self._last_taken_at is not None
+                and when <= self._last_taken_at <= self._now()
+            )
 
     def _prune_history_if_needed(self) -> None:
         """Prune oldest checkpoints if history exceeds max_history.

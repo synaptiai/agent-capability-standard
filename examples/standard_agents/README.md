@@ -8,8 +8,9 @@ needs a restore point and an approval recorded through an authenticated
 endpoint.
 
 The binding is a safety layer on a tool-calling host under Standard 1.2.0
-([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)), and claims
-its conformance class, SL: its statement is
+([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)), and meets
+its conformance class, SL, except the §5.18.10 checks its statement lists as
+not applied; it claims the class once those are applied. Its statement is
 [`standard_agents_binding.json`](../../tests/conformance/calls/statements/standard_agents_binding.json).
 [Standard Agents interoperability](../../docs/integrations/standard_agents.md)
 explains the design, what it guarantees and what it cannot.

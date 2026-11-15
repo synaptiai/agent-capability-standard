@@ -49,7 +49,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `adapter.checkpoint_tracker.create_checkpoint()` with a longer
     `expiry_minutes` is stored with the maximum age as its expiry, and one
     read back from a state file stops authorising a call at its
-    `created_at` plus the maximum age.
+    `created_at` plus the maximum age. A checkpoint dated after the clock
+    (a crafted state file, a clock that stepped back) authorises nothing,
+    counts as no checkpoint taken and names no restore point; one found
+    dated after the load is dropped from the state.
   - `CheckpointTracker`: `can_reserve()` and `release_reservation_in_scope()`
     are removed. `resolve_holds_in_scope(scope)` replaces the latter, and
     counts the holds it ends as used instead of releasing them.
@@ -102,17 +105,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - Tool binding records: a record with a member that has no I-JSON form
     (an `x-` member holding an integer beyond 2^53, a lone surrogate or an
     object that is not JSON) is S303 and not loaded, and its tool stays
-    unbound. `approval.min_approvers` written as `1.0` loads. A diagnostic's
-    `location.field` is the member's path with keys joined by a dot
-    (`approval.min_approvers`, `flags.risk`); W602 names `flags.<flag>`.
+    unbound. A float that canonical JSON writes as an integer beyond ±2^53
+    (1.8e16) has no I-JSON form either: in a record it is S303, and in the
+    arguments of a call that requires approval F502, as in the TypeScript
+    package (`grounded_agency.capabilities.bindings.i_json_problem`).
+    `approval.min_approvers` written as `1.0` loads; `approval.role: null`
+    is S303, and `approval.expires` longer than 2^53 - 1 ms is S303. A
+    diagnostic's `location.field` is the member's path with keys joined by
+    a dot (`approval.min_approvers`, `flags.risk`); W602 names
+    `flags.<flag>`.
+  - `adapter.recorded_by["config_sha256"]` also digests the rate limits
+    (`config.rate_limit`), which decide F504 refusals, so its value differs
+    from one computed without them.
 - Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
   Claude Code's JSON payload and needs `jq`; anything else is blocked with
   R407, as is a failure of the hook. The checkpoint marker is used up by the
   gated call it authorises, so each such call needs its own; a successful
-  `git stash create` writes the marker and the new Stop hook removes it when
-  the turn ends. A read-only Bash command and `git stash list|show` need no
-  marker, and `git stash pop|apply <commit>` needs none when a marker
-  recorded `<commit>`; any other restore needs a marker like any write. The
+  `git stash create` writes the marker and the new Stop hook ends its
+  validity when the turn ends. A marker whose validity ended unused (it
+  expired, its turn ended, a newer one replaced it) is filed under
+  `.claude/checkpoints/ended/`, as a used one is under `used/`. A read-only
+  Bash command and `git stash list|show` need no marker, and `git stash
+  pop|apply <commit>` needs none when a marker, live or filed, recorded
+  `<commit>`; any other restore needs a marker like any write. The rollback
+  skill's command hook refuses (F503) a `git stash pop|apply` that does not
+  name such a commit, whatever `git stash list` holds; before, it refused a
+  restore only when `git stash list` was empty. The rollback and send skills'
+  command hooks open a refusal with its code and name (`F503
+  ROLLBACK_FAILED:`, `F504 CONSTRAINT_VIOLATED:`, `R407
+  SAFETY_CHECK_FAILED:`) in place of `BLOCK:`. The
   marker's `created_at` and `expires_at` must be whole seconds of at most 12
   digits, the first not in the future and the second at most 1800 seconds
   after it; otherwise the call is blocked with F501 and the marker removed. A
@@ -136,15 +157,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   invocation outside the list is refused (F504). A call that needs approval
   whose arguments are not I-JSON is refused with F502 before anything is
   asked or used. An approval policy's `min_approvers` is at most
-  `MAX_APPROVERS` (1000).
+  `MAX_APPROVERS` (1000). A grounded tool's `recorded_by.config_sha256`
+  digests `{annotation, settings: {checkpoint_max_age_ms}}`, not the
+  annotation alone.
 - TypeScript package: `decodeCapabilityOutput` accepts a number written in
   exponent form (1.8e16, 1e300), which it used to refuse, and checks integer
   literals in the text itself; `encodeCapabilityOutput` accepts a value it
   writes in exponent form (1e21 and above) and refuses one it would write as
   an integer literal beyond ±2^53 (1.8e16). A tool binding record's
-  `location.field` follows the Python loader's dotted paths.
+  `location.field` follows the Python loader's dotted paths. `iJsonProblem`
+  refuses a `bigint`, and the new `parseJsonExact` reads JSON text with an
+  integer literal beyond ±2^53 as a `bigint` instead of rounding it (JSON.parse
+  reads 9007199254740993 as 2^53): read text that is then checked as I-JSON
+  with it.
 - Conformance statement schema: `approval.expires` is a duration or null;
-  the new `not_applied` lists the §5.18.10 checks a layer does not apply.
+  the new `not_applied` lists the §5.18.10 checks a layer does not apply,
+  and a layer that lists any does not conform to class SL until it applies
+  them. The Python SDK adapter and the Standard Agents binding list theirs
+  (secrets and redaction, §6.7; the destination policy, §4.4.2; for the
+  adapter, the output contract of a tool's result): they meet class SL
+  except those checks, and claim it once they apply them.
 
 ### Added
 - [Standard Agents interoperability](docs/integrations/standard_agents.md):
@@ -203,8 +235,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   §9.8 diagnostics, records that name the layer, and capability outputs on a
   text-only channel; §5.2.2 states the executor's checkpoint use for steps.
   §10.4 adds the safety-layer conformance class SL.
-- Safety-layer conformance fixtures: 26 binding fixtures in
-  `tests/conformance/bindings/` and 21 call-sequence fixtures in
+- Safety-layer conformance fixtures: 33 binding fixtures in
+  `tests/conformance/bindings/` and 23 call-sequence fixtures in
   `tests/conformance/calls/`, with their schemas and the statements of the
   two reference layers, generated by `scripts/gen_call_fixtures.py`
   (`--check` in CI). The Python SDK adapter and the Standard Agents binding

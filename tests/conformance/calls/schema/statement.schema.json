@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/synaptiai/agent-capability-standard/tests/conformance/calls/schema/statement.schema.json",
   "title": "Safety-layer conformance statement (Agent Capability Standard 1.2.0, section 10.4)",
-  "description": "What a safety layer that claims class SL states about itself: what it covers, its scope and boundaries, how it obtains approval and makes a check atomic, the fixture features it supports, its host gaps, and any check of section 5.18.10 it does not apply.",
+  "description": "What a safety layer states about itself for class SL (section 10.4): what it covers, its scope and boundaries, how it obtains approval and makes a check atomic, the fixture features it supports, its host gaps, and any check of section 5.18.10 it does not apply.",
   "type": "object",
   "required": [
     "layer",

@@ -1,0 +1,26 @@
+{
+  "description": "approval.expires of 2^53 - 1 milliseconds, the longest a binding can state, loads.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate",
+      "approval": {
+        "expires": "PT9007199254740.991S"
+      }
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "write": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}

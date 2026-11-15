@@ -31,8 +31,9 @@ was checked and what was not.
   is a working reference: a tool is classified by an ontology capability, and
   the capability's rules are enforced inside the tool. The example compiles
   against the published SA types and its rules are tested. The binding is a
-  safety layer under Standard 1.2.0 §5.18 and claims its conformance class,
-  SL ([Conformance](#conformance-class-sl)).
+  safety layer under Standard 1.2.0 §5.18 and meets its conformance class,
+  SL, except the §5.18.10 checks its statement lists as not applied
+  ([Conformance](#conformance-class-sl)).
 - **Enforcement is cooperative, not imposed.** SA has no hook that can refuse
   a tool call before it runs, so a safety rule holds only for tools written
   with the binding. A tool written without it is not covered, and no hook
@@ -437,8 +438,8 @@ The rules, and where each comes from:
 | A refused call uses nothing ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)) | Nothing is used up until every check has passed |
 | A capability output carried as a string is the I-JSON text of the output object, with every required field ([§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)) | The return type of `execute` is the capability's output contract. At run time the wrapper checks that every required field is present, that `evidence_anchors` is an array, that a required `confidence` is a number from 0 to 1, and that the output is I-JSON; it returns the text, or R402 |
 | A binding cannot weaken a capability's flags (W602) | The `requires_*` flags can only be declared `true`; a weaker `risk` or `mutation` fails the definition |
-| The arguments of a call that requires approval are I-JSON ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)) | A call that needs approval whose arguments are not I-JSON (a lone surrogate, a number written as an integer beyond ±2^53) is refused with F502 before anything is asked or used: no decision can bind to them |
-| A layer that cannot complete its checks refuses the call, and every call is recorded with the layer that decided it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)) | A store write that fails, or the arguments of a call that needs no approval with no canonical JSON, refuse the call with R407. A call that ran but whose record cannot be completed returns R407 in place of its result. Each entry a grounded or control tool writes, refusals and the layer's own failures included, names the layer (`recorded_by`: the binding's name, the Standard version and a digest of the tool's annotation); only the audit hook's entry for a call no grounded tool recorded has none |
+| The arguments of a call that requires approval are I-JSON ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)) | A call that needs approval whose arguments are not I-JSON (a lone surrogate, a number written as an integer beyond ±2^53) is refused with F502 before anything is asked or used: no decision can bind to them. The runtime parses a call's arguments before the tool sees them, so an integer literal beyond 2^53 arrives rounded and is checked, digested and run as rounded (a host gap the statement names) |
+| A layer that cannot complete its checks refuses the call, and every call is recorded with the layer that decided it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)) | A store write that fails, or the arguments of a call that needs no approval with no canonical JSON, refuse the call with R407. A call that ran but whose record cannot be completed returns R407 in place of its result. Each entry a grounded or control tool writes, refusals and the layer's own failures included, names the layer (`recorded_by`: the binding's name, the Standard version and a digest of the tool's annotation and checkpoint maximum age); only the audit hook's entry for a call no grounded tool recorded has none |
 
 As [§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency) states, `precedes` and
 `conflicts_with` edges are not enforced over calls. `precedes` orders the
@@ -701,8 +702,10 @@ in a Standard Agents runtime.
 
 ### Conformance (class SL)
 
-The binding claims the safety-layer conformance class of
-[Standard 1.2.0 §10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance). Its statement,
+The binding meets the safety-layer conformance class of
+[Standard 1.2.0 §10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)
+except the §5.18.10 checks its statement lists as not applied, and claims
+the class once those are applied. Its statement,
 [`standard_agents_binding.json`](../../tests/conformance/calls/statements/standard_agents_binding.json),
 says what it covers (calls of tools defined with `groundedTool` or
 `controlTool`) and what it cannot see (tools defined with plain `defineTool`,
@@ -713,11 +716,13 @@ through the endpoint) and how it keeps a check and its use atomic (the
 runtime's order, and `serially` within a realm). It lists its host gaps, the
 rows of the table above that rest on SA behaviour the text does not state, and
 the checks of §5.18.10 it does not apply yet: the secret checks of `persist`
-and `audit` and the destination policy of `send`.
+and `audit`, the redaction of the records and evidence it writes (an
+output's `evidence_anchors` are copied into the trace as they are) and of a
+`transform` output it records (§6.7), and the destination policy of `send`.
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 26 binding fixtures in the package's `test/bindings.test.ts`, and the 21
+the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 23
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). The one fixture it skips needs a call of an unbound
@@ -930,10 +935,11 @@ Three things a consumer of such a package cannot yet do:
   definitions, behind loaders. `package.json` names a package's entry agents,
   effects, endpoints and required parent hooks, and says nothing about its
   tools.
-- **Claim conformance for the agent.** The binding claims the safety-layer
-  class of Standard 1.2.0 ([Conformance](#conformance-class-sl)), which covers
-  its tools' calls. Nothing in either standard says what it means for an
-  agent, or a runtime, to be grounded.
+- **Claim conformance for the agent.** The safety-layer class of Standard
+  1.2.0, which the binding meets except the checks its statement lists as not
+  applied ([Conformance](#conformance-class-sl)), covers its tools' calls.
+  Nothing in either standard says what it means for an agent, or a runtime,
+  to be grounded.
 - **Rely on a version pair.** The specification is 0.2.0; the types package
   that an agent compiles against is 0.45.10 and declares
   `SPEC_VERSION = "0.2.0"`. The two version independently, and the types

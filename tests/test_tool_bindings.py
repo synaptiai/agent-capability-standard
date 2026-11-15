@@ -7,11 +7,12 @@ metadata carrier, the mapper's registration and the static mappings.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from grounded_agency import GroundedAgentAdapter
+from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.capabilities.bindings import (
     ToolBinding,
     check_offered,
@@ -25,6 +26,7 @@ from grounded_agency.capabilities.mapper import (
 )
 from grounded_agency.capabilities.registry import CapabilityRegistry
 from grounded_agency.mcp import _record
+from grounded_agency.state.rate_limiter import RateLimitConfig
 
 
 @pytest.fixture
@@ -147,9 +149,42 @@ class TestParseRecord:
                 "S303",
                 "approval.expires",
             ),
+            # The longest decision a binding can state is 2^53 - 1 ms, which
+            # every loader holds exactly (binding fixtures
+            # approval_expires_beyond_limit, approval_expires_at_limit).
+            (
+                _rec(capability="mutate", approval={"expires": "PT9007199254740.992S"}),
+                "S303",
+                "approval.expires",
+            ),
+            (
+                _rec(capability="mutate", approval={"expires": "P99999999999D"}),
+                "S303",
+                "approval.expires",
+            ),
+            (
+                _rec(capability="mutate", approval={"expires": 600}),
+                "S303",
+                "approval.expires",
+            ),
+            # Present, a role is a non-empty string: null is not absent.
+            (
+                _rec(capability="mutate", approval={"role": None}),
+                "S303",
+                "approval.role",
+            ),
+            (
+                _rec(capability="mutate", approval={"role": ""}),
+                "S303",
+                "approval.role",
+            ),
             # A member with no I-JSON form (STANDARD 1.2.0 §5.14), vendor
             # data included: the record could not be recorded or digested.
             (_rec(capability="search", **{"x-build": 2**60}), "S303", "x-build"),
+            (_rec(capability="search", **{"x-build": 2**53 + 1}), "S303", "x-build"),
+            # Canonical JSON writes these floats as integers beyond ±2^53.
+            (_rec(capability="search", **{"x-build": 1.8e16}), "S303", "x-build"),
+            (_rec(capability="search", **{"x-b": [{"n": -1.8e16}]}), "S303", "x-b"),
             (_rec(capability="search", **{"x-note": "a\ud800"}), "S303", "x-note"),
             (_rec(capability="search", **{"x-obj": object()}), "S303", "x-obj"),
             (_rec(capability="search", tool="t\udc00"), "S303", "tool"),
@@ -163,6 +198,22 @@ class TestParseRecord:
         binding, errors = parse_record(record)
         assert binding is None
         assert (code, field) in [(e.code_str, e.location["field"]) for e in errors]
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"x-build": 2**53},
+            {"x-build": float(2**53)},
+            {"x-build": 1e21},
+            {"x-build": 0.5},
+            {"approval": {"expires": "PT9007199254740.991S"}},
+            {"approval": {"role": "ops"}},
+        ],
+    )
+    def test_values_at_the_limits_read(self, extra: dict[str, Any]) -> None:
+        binding, errors = parse_record(_rec(capability="mutate", **extra))
+        assert errors == []
+        assert binding is not None
 
     def test_min_approvers_written_as_a_whole_float_reads(self) -> None:
         # JSON Schema's `integer` accepts 1.0, and so does every loader
@@ -425,6 +476,37 @@ class TestRecordedBy:
         assert len(before["config_sha256"]) == 64
         adapter.mapper.register_mcp_tool("mcp__s__t", capability_id="observe")
         assert adapter.recorded_by["config_sha256"] != before["config_sha256"]
+
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            {"rate_limit": RateLimitConfig(high_rpm=11)},
+            {"rate_limit": RateLimitConfig(medium_rpm=31)},
+            {"rate_limit": RateLimitConfig(low_rpm=121)},
+            {"rate_limit": RateLimitConfig(burst_multiplier=2.0)},
+            {"expiry_minutes": 20},
+            {"checkpoint_reservation_seconds": 60},
+            {"approval": "off"},
+            {"strict_mode": False},
+        ],
+    )
+    def test_the_digest_follows_every_setting_that_decides_calls(
+        self, ontology_path: str, tmp_path: Path, setting: dict[str, Any]
+    ) -> None:
+        """Two adapters that would decide a call differently record different
+        configurations (section 5.18.8): the rate limits behind F504 too."""
+
+        def digest(**overrides: Any) -> str:
+            adapter = GroundedAgentAdapter(
+                GroundedAgentConfig(
+                    ontology_path=ontology_path,
+                    checkpoint_dir=str(tmp_path / ".cp"),
+                    **overrides,
+                )
+            )
+            return str(adapter.recorded_by["config_sha256"])
+
+        assert digest(**setting) != digest()
 
     def test_the_digest_is_computed_once_per_change(
         self, adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch

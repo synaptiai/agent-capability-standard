@@ -12,8 +12,8 @@ validator and executor implement §4, §5 and §9–§11 and claim class EX
 (§10.5); they check §3.1's grounding where a grounding policy applies
 (§5.20, F505) and apply domain profiles (§5.21), as the Python adapter does;
 the Python SDK adapter and the Standard Agents binding implement §5.18 and
-claim class SL (§10.4), except the secret and destination checks of
-§5.18.10, which their conformance statements list as not applied; `grounded_agency` implements §7.1's entity ids and
+meet §10.4 except the §5.18.10 rows their conformance statements list as not
+applied, and claim class SL once those are applied; `grounded_agency` implements §7.1's entity ids and
 §8's arithmetic; §7.2 and §7.3 are not implemented
 **Date:** 2026-11-15
 **Supersedes:** [STANDARD-v1.1.0](STANDARD-v1.1.0.md) (still supported; see §11.5)
@@ -1251,7 +1251,7 @@ A **tool binding** is a record (`schemas/interop/tool_binding.schema.json`):
 | `additional_capabilities` | array | No | Other capabilities the same call performs (§5.18.3) |
 | `classifier` | string | No | Names the classifier a layer applies to each call (§5.18.3) |
 | `invokes` | array | No | Names of the bindings the tool may call while it runs (§5.18.4) |
-| `approval` | object | No | `min_approvers` (integer ≥ 1, default 1), `role`, `expires` (a duration, §5.10.1) for calls that require approval (§5.18.7) |
+| `approval` | object | No | `min_approvers` (integer ≥ 1, default 1), `role` (a non-empty string), `expires` (a duration, §5.10.1, of at most 2^53 − 1 ms) for calls that require approval (§5.18.7) |
 | `control` | boolean | No | `true`: the tool only signals the host (§5.18.3) |
 | `destination` | string | No | For a tool that performs `send`: an RFC 6901 pointer to the argument that holds the destination, which a layer checks against the destination policies in force (§4.4.2) |
 
@@ -2150,6 +2150,8 @@ from the call, from several approvers), and, for binding fixtures,
 `offered_tools` (it checks the tools a host offers, §5.18.2). A layer that
 lacks one says so in its statement and skips those fixtures; no expectation
 depends on the order in which a layer checks approval and the checkpoint.
+A runner gives the layer a fixture's values as its JSON text writes them:
+an integer literal beyond 2^53 is not rounded on the way.
 
 Not testable by fixture, and stated instead: that a prompt shows what runs
 (§5.18.7), that the layer sees every call it claims to cover, and its host

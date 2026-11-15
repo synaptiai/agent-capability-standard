@@ -50,6 +50,7 @@ __all__ = [
     "ToolBinding",
     "check_offered",
     "duration_seconds",
+    "i_json_problem",
     "load_bindings",
     "parse_record",
 ]
@@ -84,6 +85,12 @@ _NOT_WITH_CONTROL: tuple[str, ...] = (
     "destination",
 )
 _VERSION = re.compile(r"^\d+\.\d+(\.\d+)?$")
+# The largest integer magnitude with an exact I-JSON form (section 5.14).
+_INT_LIMIT = 2**53
+# The longest `approval.expires`, in milliseconds: the largest whole number
+# every implementation holds exactly (2^53 - 1, JavaScript's
+# Number.MAX_SAFE_INTEGER), so that the TypeScript loader reads the same.
+_MAX_EXPIRES_MS = 2**53 - 1
 _POINTER = re.compile(r"^(/([^~/]|~[01])*)*$")
 
 
@@ -120,6 +127,39 @@ class ToolBinding:
         if self.capability is None:
             return ()
         return (self.capability, *self.additional_capabilities)
+
+
+def i_json_problem(value: Any) -> str | None:
+    """What gives ``value`` no I-JSON form (section 5.14), or None when it
+    has one.
+
+    The core's canonical JSON (RFC 8785) refuses an integer beyond ±2^53, a
+    number that is not finite, a lone surrogate and anything that is not
+    JSON. It writes a float with no fractional part below 1e21 as an integer
+    literal (1.8e16 as ``18000000000000000``), which every reader takes for
+    an integer beyond ±2^53: such a float is refused too, as the TypeScript
+    package's ``iJsonProblem`` refuses the same number.
+    """
+    from .. import _core
+
+    try:
+        _core.canonical_json(value)
+    except (ValueError, TypeError) as e:
+        return str(e)
+    stack: list[tuple[Any, str]] = [(value, "$")]
+    while stack:
+        v, at = stack.pop()
+        if isinstance(v, float):
+            if v.is_integer() and _INT_LIMIT < abs(v) < 1e21:
+                return (
+                    f"holds the number {v!r} at {at}, which canonical JSON "
+                    f"writes as the integer {int(v)}, outside ±2^53"
+                )
+        elif isinstance(v, Mapping):
+            stack.extend((x, f"{at}.{k}") for k, x in v.items())
+        elif isinstance(v, list):
+            stack.extend((x, f"{at}[{i}]") for i, x in enumerate(v))
+    return None
 
 
 def duration_seconds(text: str) -> float:
@@ -200,12 +240,11 @@ def parse_record(
         # A record is JSON data: a member with no I-JSON form (section 5.14),
         # such as an integer beyond 2^53 under an `x-` key, could not be
         # recorded or digested, so the record does not load.
-        try:
-            _core.canonical_json({key: record[key]})
-        except (ValueError, TypeError) as e:
+        problem = i_json_problem({key: record[key]})
+        if problem is not None:
             # The name itself may hold the lone surrogate: report it escaped.
             name = key.encode("utf-8", "backslashreplace").decode("utf-8")
-            reason = str(e).encode("utf-8", "backslashreplace").decode("utf-8")
+            reason = problem.encode("utf-8", "backslashreplace").decode("utf-8")
             wrong(name, f"'{name}' is not I-JSON (STANDARD 1.2.0 §5.14): {reason}")
 
     if "tool" not in record:
@@ -311,24 +350,31 @@ def parse_record(
                     "'approval.min_approvers' must be an integer of at least 1",
                 )
                 ok = False
+            # Present, a role is a non-empty string; null is not absent.
             role = value.get("role")
-            if role is not None and (not isinstance(role, str) or not role):
+            if "role" in value and (not isinstance(role, str) or not role):
                 wrong("approval.role", "'approval.role' must be a non-empty string")
                 ok = False
             expires: float | None = None
             if "expires" in value:
+                text = value["expires"]
                 try:
-                    expires = duration_seconds(value["expires"])
+                    if not isinstance(text, str):
+                        raise ValueError(f"{text!r} is not a duration")
+                    ms = int(_core.duration_ms(text))
                 except ValueError as e:
                     wrong("approval.expires", f"'approval.expires': {e}")
                     ok = False
                 else:
-                    if expires <= 0:
+                    if not 0 < ms <= _MAX_EXPIRES_MS:
                         wrong(
                             "approval.expires",
-                            "'approval.expires' must be a duration longer than zero",
+                            "'approval.expires' must be a duration longer than "
+                            "zero and at most 2^53 - 1 milliseconds",
                         )
                         ok = False
+                    else:
+                        expires = ms / 1000.0
             if ok and min_approvers is not None:
                 approval = ApprovalPolicy(
                     min_approvers=min_approvers, role=role, expires_seconds=expires

@@ -17,8 +17,10 @@
 # `git stash create` prints the commit that saved the tracked state, or
 # nothing when the tree is clean, in which case HEAD is the restore point.
 # MAX_AGE is ACS_CHECKPOINT_MAX_AGE when it is an integer from 1 to 1800,
-# else 1800 seconds (30 minutes, the Standard's cap). A failed call reaches
-# PostToolUseFailure, where this hook is not registered.
+# else 1800 seconds (30 minutes, the Standard's cap). A marker the new one
+# replaces is filed under .claude/checkpoints/ended/ first, so its commit can
+# still be restored. A failed call reaches PostToolUseFailure, where this
+# hook is not registered.
 #
 # It always exits 0: the call has already run, and this hook only records.
 set -uo pipefail
@@ -79,6 +81,14 @@ if jq -c -n \
   --argjson created "$now" \
   --argjson expires "$((now + 10#$max_age))" \
   '{checkpoint_id: $id, commit: $commit, created_at: $created, expires_at: $expires, source: "git stash create"}' > "$tmp"; then
+  # The marker this one replaces ends unused: keep its record (ended/).
+  if [ -f "$marker" ] && [ ! -L "$marker" ]; then
+    ended_dir="${claude_dir}/checkpoints/ended"
+    mkdir -p "$ended_dir" 2>/dev/null || true
+    if ended=$(mktemp "${ended_dir}/replaced.XXXXXX" 2>/dev/null); then
+      mv -f "$marker" "$ended" 2>/dev/null || rm -f "$ended"
+    fi
+  fi
   mv -f "$tmp" "$marker" || rm -f "$tmp"
 else
   rm -f "$tmp"

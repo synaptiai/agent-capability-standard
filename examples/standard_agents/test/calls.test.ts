@@ -11,7 +11,7 @@
  * whose `needs` the binding's conformance statement lacks are skipped.
  */
 import type { ThreadState, ToolResult } from '@standardagents/spec';
-import { CAPABILITIES, type CapabilityId, parseDuration } from '@synaptiai/acs-core';
+import { CAPABILITIES, type CapabilityId, NotCanonicalizableError, parseDuration, parseJsonExact } from '@synaptiai/acs-core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -57,8 +57,16 @@ interface Fixture {
   sequence: Step[];
 }
 
-const FIXTURES = import.meta.glob<Fixture>('../../../tests/conformance/calls/*.json', { eager: true, import: 'default' });
-const CASES = Object.entries(FIXTURES).map(([path, f]) => [path.split('/').pop()!.replace('.json', ''), f] as const);
+// Read as text and parsed exactly, so that an argument beyond 2^53 reaches
+// the tool as the fixture states it, not rounded by JSON.parse.
+const FIXTURES = import.meta.glob<string>('../../../tests/conformance/calls/*.json', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+});
+const CASES = Object.entries(FIXTURES).map(
+  ([path, text]) => [path.split('/').pop()!.replace('.json', ''), parseJsonExact(text) as Fixture] as const,
+);
 const FEATURES = new Set<string>(statement.features);
 const TEN_MINUTES = 10 * 60 * 1000;
 
@@ -130,7 +138,16 @@ class Runner {
     const binding = this.bindings.get(step.call)!;
     if (!step.approve && !step.reject) return;
     const shown = [{ action: step.call, capability: binding.capability!, args: (step.args ?? {}) as never }];
-    const request = await requestApproval(this.t.state, shown, policyOf(binding), this.clock);
+    let request: Awaited<ReturnType<typeof requestApproval>>;
+    try {
+      request = await requestApproval(this.t.state, shown, policyOf(binding), this.clock);
+    } catch (error) {
+      // Arguments with no canonical JSON (an integer literal beyond 2^53,
+      // which parseJsonExact reads as a bigint): no decision can bind to
+      // them (§5.18.7), so none is recorded, and the call meets F502.
+      if (error instanceof NotCanonicalizableError) return;
+      throw error;
+    }
     for (const [who, decision] of [
       ...(step.approve ?? []).map((w) => [w, 'approved'] as const),
       ...(step.reject ?? []).map((w) => [w, 'rejected'] as const),
@@ -179,7 +196,7 @@ describe("the binding's conformance statement", () => {
 
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(21);
+    expect(CASES).toHaveLength(23);
   });
 
   it.for(CASES)('%s', async ([_name, fixture], { skip }) => {

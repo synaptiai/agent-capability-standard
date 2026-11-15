@@ -4,6 +4,7 @@ unresolved holds, and the adapter's one scope (STANDARD 1.2.0 sections
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -279,6 +280,119 @@ class TestMaximumAge:
         )
         fake_clock.advance(minutes=6)
         assert later.validate_and_reserve("A") == (False, None)
+
+    def test_a_future_dated_state_file_authorises_nothing(
+        self, tmp_path: Path, fake_clock: FakeClock
+    ) -> None:
+        """A state file whose checkpoints are dated after the load (crafted,
+        or written before the clock stepped back) gives no valid checkpoint,
+        no checkpoint taken in the scope and no restore point: the maximum
+        age could not bound them (section 5.18.6)."""
+        import json
+
+        sha = "a" * 40
+
+        def entry(n: int) -> dict[str, Any]:
+            return {
+                "id": f"chk_future_{n}",
+                "scope": ["*"],
+                "reason": "crafted",
+                "created_at": "2099-01-01T00:00:00+00:00",
+                "expires_at": None,
+                "metadata": {"commit": sha},
+            }
+
+        (tmp_path / "tracker_state.json").write_text(
+            json.dumps(
+                {
+                    "active": entry(0),
+                    "history": [entry(n) for n in range(1, 6)],
+                    "reservations": [],
+                    "last_taken_at": "2099-01-01T00:00:00+00:00",
+                }
+            )
+        )
+        started = fake_clock()
+        tracker = CheckpointTracker(
+            checkpoint_dir=str(tmp_path), clock=fake_clock, max_age_minutes=30
+        )
+        assert not tracker.has_valid_checkpoint()
+        assert tracker.valid_checkpoint_id() is None
+        assert tracker.validate_and_reserve("A") == (False, None)
+        assert not tracker.has_taken_since(started)
+        assert not tracker.has_commit(sha)
+        assert not tracker.has_commit(sha, since=started)
+        # Nothing of the file survives to authorise a call later either.
+        fake_clock.advance(days=365 * 80)
+        assert not tracker.has_valid_checkpoint()
+
+    def test_a_clock_that_steps_back_ends_what_was_taken_after_it(
+        self, tmp_path: Path, fake_clock: FakeClock
+    ) -> None:
+        """A checkpoint dated after the clock's current reading authorises
+        nothing and counts as no checkpoint taken, until the clock passes it
+        again."""
+        sha = "b" * 40
+        tracker = CheckpointTracker(checkpoint_dir=str(tmp_path), clock=fake_clock)
+        earlier = fake_clock()
+        tracker.create_checkpoint(["*"], "taken", metadata={"commit": sha})
+        fake_clock.advance(hours=-1)
+        assert not tracker.has_valid_checkpoint()
+        assert tracker.validate_and_reserve("A") == (False, None)
+        assert not tracker.has_taken_since(earlier - timedelta(hours=2))
+        assert not tracker.has_commit(sha)
+        fake_clock.advance(hours=1)
+        assert tracker.has_valid_checkpoint()
+        assert tracker.has_taken_since(earlier)
+        assert tracker.has_commit(sha, since=earlier)
+
+    @pytest.mark.asyncio
+    async def test_a_future_dated_commit_is_not_a_rollback(
+        self, ontology_path: str, tmp_path: Path, fake_clock: FakeClock
+    ) -> None:
+        """Through the adapter: ``git stash apply`` of a commit only a
+        future-dated checkpoint names is a gated ``mutate``, not an ungated
+        rollback."""
+        import json
+
+        sha = "c" * 40
+        cp_dir = tmp_path / ".cp"
+        cp_dir.mkdir()
+        (cp_dir / "tracker_state.json").write_text(
+            json.dumps(
+                {
+                    "active": None,
+                    "history": [
+                        {
+                            "id": "chk_future",
+                            "scope": ["*"],
+                            "reason": "crafted",
+                            "created_at": "2099-01-01T00:00:00+00:00",
+                            "expires_at": None,
+                            "metadata": {"commit": sha},
+                        }
+                    ],
+                    "reservations": [],
+                    "last_taken_at": "2099-01-01T00:00:00+00:00",
+                }
+            )
+        )
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(cp_dir),
+                approval="off",
+            ),
+            clock=fake_clock,
+        )
+        hook = adapter._make_pretooluse_safety_hook()
+        result = await hook(
+            {"tool_name": "Bash", "tool_input": {"command": f"git stash apply {sha}"}},
+            "r1",
+            None,
+        )
+        assert _decision(result) == "deny"
+        assert _reason(result).startswith("F501 CHECKPOINT_REQUIRED: ")
 
     @pytest.mark.parametrize("minutes", [0, -1, 31, True, "5"])
     def test_a_maximum_age_beyond_the_cap_is_refused(

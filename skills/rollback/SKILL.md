@@ -48,17 +48,34 @@ hooks:
           once: false
         - type: command
           command: |
-            # Verify checkpoint exists before rollback. Claude Code passes the tool
+            # A restore in this skill restores a checkpoint taken in the project
+            # (STANDARD 1.2.0 §5.18.6, F503): each `git stash pop` or `git stash
+            # apply` must name, as its one argument, the full id of a commit a
+            # checkpoint marker recorded (.claude/checkpoint.ok, or one filed under
+            # .claude/checkpoints/used/ or ended/), as the plugin's pre-tool-use
+            # hook reads it; valid or not, used or not. Claude Code passes the tool
             # call as JSON on stdin; exit 2 blocks the call and the reason on stderr
-            # is shown to Claude. A call that cannot be read is blocked.
-            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "BLOCK: cannot read the tool call (jq is required)" >&2; exit 2; }
-            if printf '%s\n' "$CMD" | grep -qE "git stash (pop|apply)"; then
-              # Check if there are stashes to pop
-              if ! git stash list 2>/dev/null | head -1 | grep -q .; then
-                echo "BLOCK: No git stash found to restore" >&2
+            # is shown to Claude. A call that cannot be read is blocked (R407).
+            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then DIR="$CLAUDE_PROJECT_DIR/.claude"
+            elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DIR="$CLAUDE_PLUGIN_ROOT/.claude"
+            else DIR="$(pwd)/.claude"; fi
+            while IFS= read -r RESTORE; do
+              [ -n "$RESTORE" ] || continue
+              ARG="$(printf '%s\n' "$RESTORE" | sed -E 's/^git[[:space:]]+stash[[:space:]]+(pop|apply)//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+              FOUND=""
+              if printf '%s\n' "$ARG" | grep -qE '^([0-9a-f]{40}|[0-9a-f]{64})$'; then
+                for F in "$DIR/checkpoint.ok" "$DIR"/checkpoints/used/* "$DIR"/checkpoints/ended/*; do
+                  if [ -f "$F" ] && [ ! -L "$F" ] && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$F" 2>/dev/null)" = "$ARG" ]; then FOUND=1; break; fi
+                done
+              fi
+              if [ -z "$FOUND" ]; then
+                printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded.\n" "$RESTORE" >&2
                 exit 2
               fi
-            fi
+            done <<EOF
+            $(printf '%s\n' "$CMD" | grep -oE 'git[[:space:]]+stash[[:space:]]+(pop|apply)([[:space:]][^;&|<>()]*)?' || true)
+            EOF
             exit 0
   PostToolUse:
     - matcher: "Bash"
@@ -110,7 +127,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Document changes that will be undone
 
 3) **Execute restoration**: Apply the restore command
-   - For git_stash: `git stash pop` or `git stash apply`
+   - For a git checkpoint: `git stash apply <sha>`, with the full commit id the checkpoint recorded; a bare `git stash pop` or `git stash apply`, or any other revision, restores no checkpoint and is refused (F503)
    - For file_backup: Copy from `.checkpoints/<id>/` to original locations
    - For state_snapshot: Restore state variables
    - Handle any conflicts or errors gracefully

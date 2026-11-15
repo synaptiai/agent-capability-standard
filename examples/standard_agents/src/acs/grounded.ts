@@ -444,9 +444,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     ...flags,
   };
 
+  // What decides this tool's calls (§5.18.8): its binding record and the
+  // checkpoint maximum age, which the annotation does not state.
+  const configuration = { annotation, settings: { checkpoint_max_age_ms: maxAge } };
   let layer: Promise<RecordedBy> | undefined;
   const recordedBy = (): Promise<RecordedBy> =>
-    (layer ??= digestOf(annotation as unknown as Json).then((config_sha256) => ({
+    (layer ??= digestOf(configuration as unknown as Json).then((config_sha256) => ({
       name: LAYER_NAME,
       version: STANDARD_VERSION,
       config_sha256,

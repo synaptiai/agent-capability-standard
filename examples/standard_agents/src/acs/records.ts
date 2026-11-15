@@ -78,7 +78,9 @@ export interface Diagnostic {
 /**
  * The layer and the configuration that decided a call (STANDARD 1.2.0
  * §5.18.8): the binding, its version, and the SHA-256 of the canonical JSON
- * of the tool's annotation.
+ * of what decides the tool's calls: `{annotation, settings:
+ * {checkpoint_max_age_ms}}` for a grounded tool, the annotation for a
+ * control tool.
  */
 export interface RecordedBy {
   name: string;

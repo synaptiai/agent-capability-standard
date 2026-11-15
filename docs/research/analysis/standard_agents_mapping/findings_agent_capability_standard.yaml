@@ -34,17 +34,20 @@ findings:
     spec/CONFORMANCE.md lines 71-82. Ran the greps listed under searched.
   status: fixed
   resolution: 'Standard 1.2.0 §5.18 (Tool-Calling Hosts), accepted from RFC-0005. §2 defines
-    tool-calling host, call, tool binding, safety layer, layer scope and execution boundary. §5.18.5 fixes the
-    scope, applies `requires` to a call sequence (F501, F503 for `rollback`, otherwise V102), leaves
-    `soft_requires` a warning at most and `precedes` and `conflicts_with` unenforced and unreported,
-    with reasons, and makes check-and-use atomic. §5.18.8 makes a layer fail closed (R407). §10.4 adds
-    the safety-layer class SL, which requires §5.18.5–§5.18.10 and whose statement names the calls a
-    layer covers and any §5.18.10 check it does not apply yet. Fixtures:
-    tests/conformance/bindings/ (26) and tests/conformance/calls/ (21), from
-    scripts/gen_call_fixtures.py, with the statements in tests/conformance/calls/statements/; the Python
-    adapter runs them in tests/test_binding_fixtures.py and tests/test_call_fixtures.py, the Standard
-    Agents binding in packages/acs-core/test/bindings.test.ts and
-    examples/standard_agents/test/calls.test.ts.'
+    tool-calling host, call, tool binding, safety layer, layer scope and execution boundary. §5.18.5
+    fixes the scope, applies `requires` to a call sequence (F501, F503 for `rollback`, otherwise V102),
+    leaves `soft_requires` a warning at most and `precedes` and `conflicts_with` unenforced and
+    unreported, with reasons, and makes check-and-use atomic. §5.18.8 makes a layer fail closed (R407).
+    §10.4 adds the safety-layer class SL, which requires §5.18.5–§5.18.10 and whose statement names the
+    calls a layer covers and any §5.18.10 check it does not apply yet; the two reference layers meet the
+    class except the rows their statements list (the secret checks and redaction of §6.7, the
+    destination policy of §4.4.2 and, for the Python adapter, the output contract of a tool result), and
+    claim it once those are applied. Fixtures: tests/conformance/bindings/ (33) and
+    tests/conformance/calls/ (23), from scripts/gen_call_fixtures.py, with the statements in
+    tests/conformance/calls/statements/; the Python adapter runs them in tests/test_binding_fixtures.py
+    and tests/test_call_fixtures.py, the Standard Agents binding in
+    packages/acs-core/test/bindings.test.ts and examples/standard_agents/test/calls.test.ts, which read
+    the fixture text exactly (parseJsonExact).'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -90,13 +93,16 @@ findings:
     executor has its host take one and a layer refuses (F501); a rollback needs a checkpoint taken
     earlier and uses none (F503). grounded_agency/state/checkpoint_tracker.py (holds, consume_if_valid,
     end_validity, the cap, a maximum age applied to every checkpoint) and grounded_agency/adapter.py
-    follow it; the plugin''s hooks use the marker
-    up per gated call, take it on a successful `git stash create`, end it at Stop and refuse a rollback
-    with no history; skills/rollback/SKILL.md restores an expired or used checkpoint. Tests:
-    tests/test_checkpoint_holds.py, tests/test_hook_checkpoint_lifecycle.py and the call fixtures
-    checkpoint_single_use, two_checkpoints_two_calls, refused_call_keeps_checkpoint,
-    failed_call_uses_checkpoint, checkpoint_stale_after_boundary, checkpoint_stale_after_max_age,
-    rollback_needs_checkpoint and rollback_after_use.'
+    follow it; a checkpoint dated after the clock reads (a crafted state file, a clock stepped back)
+    authorises nothing. The plugin''s hooks use the marker up per gated call, take it on a successful
+    `git stash create`, end it at Stop, and keep every marker whose validity ended (used, expired, ended
+    with its turn, replaced) under .claude/checkpoints/, so `git stash pop|apply <commit>` of a recorded
+    commit is a rollback that uses none; the rollback skill''s command hook refuses a restore that names
+    no recorded checkpoint (F503). Tests: tests/test_checkpoint_holds.py,
+    tests/test_hook_checkpoint_lifecycle.py and the call fixtures checkpoint_single_use,
+    two_checkpoints_two_calls, refused_call_keeps_checkpoint, failed_call_uses_checkpoint,
+    checkpoint_stale_after_boundary, checkpoint_stale_after_max_age, rollback_needs_checkpoint and
+    rollback_after_use.'
   concerns:
   - safety-enforcement
   - checkpoint-rollback-state
@@ -138,14 +144,16 @@ findings:
     with the §5.14 digest; one decision per call, used up when the call is allowed; `min_approvers` and
     expiry from the binding''s `approval`; a host prompt that shows the call and decides it alone is a
     one-approver decision, relied on only where it reaches a person (F502 otherwise); changed arguments
-    are classified again; with no one to ask, or arguments that are not I-JSON, F502 (both layers, and
-    the call fixture approval_args_not_i_json). The Python adapter records the digest, asks only in
-    the permission modes default, acceptEdits and plan, refuses `min_approvers` above 1 and `role`, and
-    re-classifies changed arguments (tests/test_permission_modes.py, tests/test_permission_callback.py);
-    the plugin hook answers `ask` with an F502 reason in those modes and blocks F502 in the others
-    unless ACS_HOOK_APPROVAL=off; the send skill''s prompt hook no longer judges approval. Vectors: the
-    `tool_call` kinds in tests/conformance/approval/digests.json; fixtures decision_single_use,
-    decision_expires, refused_call_keeps_decision, rejection_wins and two_approvers.'
+    are classified again; with no one to ask, or arguments that are not I-JSON, F502 (both layers, by
+    one I-JSON number rule, and the call fixtures approval_args_not_i_json,
+    approval_args_beyond_limit_by_one and approval_args_integral_float). The Python adapter records the
+    digest, asks only in the permission modes default, acceptEdits and plan, refuses `min_approvers`
+    above 1 and `role`, and re-classifies changed arguments (tests/test_permission_modes.py,
+    tests/test_permission_callback.py); the plugin hook answers `ask` with an F502 reason in those modes
+    and blocks F502 in the others unless ACS_HOOK_APPROVAL=off; the send skill''s prompt hook no longer
+    judges approval. Vectors: the `tool_call` kinds in tests/conformance/approval/digests.json; fixtures
+    decision_single_use, decision_expires, refused_call_keeps_decision, rejection_wins and
+    two_approvers.'
   concerns:
   - published-api-extension-points
   - safety-enforcement
@@ -1461,9 +1469,12 @@ findings:
     capability the six skills'' hooks cover, with the rule that a required check is decided by code and
     a model''s judgement may only add a refusal; a host that loads a skill''s text without its hooks
     applies the checks by other means or does not cover those calls. spec/SECURITY.md §5.4 maps every
-    condition of the six skills'' hooks to a §5.18.10 or §5.18.8 row or to a model-judged addition. The
-    send and rollback prompt hooks no longer judge approval, checkpoints, rate limits or expiry; the
-    remaining prompt conditions are labelled model-judged additions. Tests: tests/test_skill_hooks.py.'
+    condition of the six skills'' hooks to a §5.18.10 or §5.18.8 row or to a model-judged addition; the
+    rollback skill''s command hook makes the rollback row''s check in the plugin''s form (a restore must
+    name a commit a checkpoint marker recorded, F503 otherwise), and the `transform` and `persist`
+    secret rows are code where a layer applies §6.7. The send and rollback prompt hooks no longer judge
+    approval, checkpoints, rate limits or expiry; the remaining prompt conditions are labelled
+    model-judged additions. Tests: tests/test_skill_hooks.py.'
   concerns:
   - safety-enforcement
   - models-context-memory-security
@@ -1551,15 +1562,20 @@ findings:
     with the jsonschema package: accepted.'
   status: fixed
   resolution: 'Standard 1.2.0 §5.18.1 and schemas/interop/tool_binding.schema.json: one host-neutral
-    record (`tool`, `ontology`, `capability`, `domain`, `flags`, `additional_capabilities`,
-    `classifier`, `invokes`, `approval`, `control`, `x-` members), with V101, V109, V110 and W602, and
+    record (`tool`, `ontology`, `standard`, `capability`, `domain`, `flags`, `additional_capabilities`,
+    `classifier`, `invokes`, `approval`, `control`, `destination`, `x-` members), with V101, V109
+    (another ontology major, or a cited Standard the layer does not support), V110 and W602, and
     carriers that may hold informative copies a layer ignores. Loaders:
     grounded_agency/capabilities/bindings.py (`load_bindings`, the MCP `metadata` carrier in
     grounded_agency/mcp.py) and packages/acs-core/src/binding.ts (`checkBindings`, the `acs`
     annotation). The generated schemas/interop/standard_agents_annotation.schema.json makes the
-    annotation a carrier and refuses a copy inconsistent with the capability. A record with a member that
-    has no I-JSON form is S303; diagnostics name members by dotted path. Fixtures: the 26 in
-    tests/conformance/bindings/; tests/test_tool_bindings.py and tests/test_standard_agents_binding.py.'
+    annotation a carrier and refuses a copy inconsistent with the capability. A record with a member
+    that has no I-JSON form is S303, by one number rule in both loaders (an integer beyond ±2^53, or a
+    float canonical JSON writes as one, such as 1.8e16); `approval.role`, when present, is a non-empty
+    string, and `approval.expires` at most 2^53 − 1 ms; diagnostics name members by dotted path.
+    Fixtures: the 33 in tests/conformance/bindings/ (unsupported_standard, the vendor_member and
+    approval limits), which both runners read exactly; tests/test_tool_bindings.py,
+    packages/acs-core/test/ijson.test.ts and tests/test_standard_agents_binding.py.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -2189,11 +2205,12 @@ findings:
     without the layer''s decision, and a missing, failing or silent layer means refusal (R407); every
     record names the layer and its configuration (`recorded_by`). §5.18.10 makes the checks a skill''s
     hooks implement requirements of the capability on every host. §5.18.5 makes check-and-use atomic,
-    and each statement says how. `create_grounded_mcp_server()` (`require_layer=True` by default)
-    serves tools that refuse a call the adapter''s layer did not allow (R407), a control-only tool
-    excepted; adapter records (digest computed once per change of settings or bindings, every loaded
-    binding I-JSON), the plugin''s audit lines (`recorded_by` with the digest of hooks/hooks.json and the
-    effective settings) and every entry a grounded or control tool writes in the binding''s trace,
+    and each statement says how. `create_grounded_mcp_server()` (`require_layer=True` by default) serves
+    tools that refuse a call the adapter''s layer did not allow (R407), a control-only tool excepted;
+    adapter records (digest of the settings, rate limits included, and bindings, computed once per
+    change, every loaded binding I-JSON), the plugin''s audit lines (`recorded_by` with the digest of
+    hooks/hooks.json and the effective settings) and every entry a grounded or control tool writes in
+    the binding''s trace (a grounded tool''s digest covers its annotation and checkpoint maximum age),
     refusals and the layer''s own failures included, carry `recorded_by`; one adapter is one scope.
     Tests: tests/test_mcp_integration.py, tests/test_tool_bindings.py (TestRecordedBy),
     tests/test_verify_audit_log.py, tests/test_toctou_race.py,

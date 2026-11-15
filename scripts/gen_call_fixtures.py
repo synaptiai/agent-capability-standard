@@ -16,7 +16,10 @@ left alone. Every fixture is checked against its schema
 (tests/conformance/{bindings,calls}/schema/fixture.schema.json) before
 anything is written. The runners read the fixtures in place:
 tests/test_binding_fixtures.py and tests/test_call_fixtures.py (Python), and
-examples/standard_agents/test/{bindings,calls}.test.ts (TypeScript).
+packages/acs-core/test/bindings.test.ts and
+examples/standard_agents/test/calls.test.ts (TypeScript), which read the
+JSON text exactly (parseJsonExact), so an integer literal beyond 2^53 is not
+rounded on the way in.
 """
 
 from __future__ import annotations
@@ -212,6 +215,12 @@ binding(
     errors=[diag("V109", "x")],
 )
 binding(
+    "unsupported_standard",
+    "A record that cites a Standard version the layer does not support is V109, and is not loaded.",
+    [rec("look", "observe", standard="1.9")],
+    errors=[diag("V109", "look")],
+)
+binding(
     "control_with_capability",
     "A control-only record names no capability: S303, and the record is not loaded.",
     [rec("done", "observe", control=True)],
@@ -240,6 +249,42 @@ binding(
     "A member with no I-JSON form (section 5.14), here an integer beyond 2^53 under an x- key, is S303: the record could not be recorded or digested, and is not loaded.",
     [rec("look", "observe", **{"x-build": 2**60})],
     errors=[diag("S303", "look")],
+)
+binding(
+    "vendor_member_beyond_limit_by_one",
+    "The integer literal 2^53 + 1 has no I-JSON form, though a binary64 reader rounds it to 2^53: S303, and the record is not loaded.",
+    [rec("look", "observe", **{"x-build": 2**53 + 1})],
+    errors=[diag("S303", "look")],
+)
+binding(
+    "vendor_member_integral_float",
+    "1.8e16 is a number canonical JSON writes as the integer 18000000000000000, beyond 2^53: S303, and the record is not loaded.",
+    [rec("look", "observe", **{"x-build": 1.8e16})],
+    errors=[diag("S303", "look")],
+)
+binding(
+    "vendor_member_at_limit",
+    "2^53 itself, and 1e21, which canonical JSON writes in exponent form, are I-JSON: the record loads.",
+    [rec("look", "observe", **{"x-build": 2**53, "x-scale": 1e21})],
+    effective={"look": LOW},
+)
+binding(
+    "approval_role_null",
+    "approval.role, when present, is a non-empty string: null is S303, and the record is not loaded.",
+    [rec("write", "mutate", approval={"role": None})],
+    errors=[diag("S303", "write")],
+)
+binding(
+    "approval_expires_at_limit",
+    "approval.expires of 2^53 - 1 milliseconds, the longest a binding can state, loads.",
+    [rec("write", "mutate", approval={"expires": "PT9007199254740.991S"})],
+    effective={"write": GATED},
+)
+binding(
+    "approval_expires_beyond_limit",
+    "approval.expires longer than 2^53 - 1 milliseconds is S303, and the record is not loaded.",
+    [rec("write", "mutate", approval={"expires": "PT9007199254740.992S"})],
+    errors=[diag("S303", "write")],
 )
 binding(
     "offered_unbound",
@@ -467,6 +512,24 @@ calls(
         call("save", RUN),
         call("write", refuse("F502"), {"path": "a", "n": 2**60}, approve=ALICE),
         call("write", RUN, A, approve=ALICE),
+    ],
+)
+calls(
+    "approval_args_beyond_limit_by_one",
+    "Arguments holding the integer literal 2^53 + 1, which a binary64 reader rounds to 2^53, are not I-JSON: F502, and the call uses nothing.",
+    [
+        call("save", RUN),
+        call("write", refuse("F502"), {"path": "a", "n": 2**53 + 1}, approve=ALICE),
+        call("write", RUN, {"path": "a", "n": 2**53}, approve=ALICE),
+    ],
+)
+calls(
+    "approval_args_integral_float",
+    "Arguments holding 1.8e16, which canonical JSON writes as an integer beyond 2^53, are not I-JSON: F502, and the call uses nothing.",
+    [
+        call("save", RUN),
+        call("write", refuse("F502"), {"path": "a", "n": 1.8e16}, approve=ALICE),
+        call("write", RUN, {"path": "a", "n": 1e21}, approve=ALICE),
     ],
 )
 calls(

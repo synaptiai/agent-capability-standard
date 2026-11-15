@@ -477,6 +477,13 @@ class GroundedAgentAdapter:
             "approval": self.config.approval,
             "expiry_minutes": self.config.expiry_minutes,
             "checkpoint_reservation_seconds": self.config.checkpoint_reservation_seconds,
+            # The host policy behind F504 refusals (section 5.18.8).
+            "rate_limit": {
+                "high_rpm": self.config.rate_limit.high_rpm,
+                "medium_rpm": self.config.rate_limit.medium_rpm,
+                "low_rpm": self.config.rate_limit.low_rpm,
+                "burst_multiplier": self.config.rate_limit.burst_multiplier,
+            },
             "ontology_version": self.registry.version,
             "prompting_modes": sorted(PROMPTING_PERMISSION_MODES),
         }
@@ -567,10 +574,16 @@ class GroundedAgentAdapter:
         (section 5.18.7): ``[{"action", "capability", "args"}]``.
 
         Raises:
-            ValueError: If the arguments are not I-JSON.
+            ValueError: If the arguments are not I-JSON (section 5.14), a
+                float that canonical JSON writes as an integer beyond ±2^53
+                included.
         """
         from . import _core
+        from .capabilities.bindings import i_json_problem
 
+        problem = i_json_problem(args)
+        if problem is not None:
+            raise ValueError(f"the value {problem}")
         capability = (
             None
             if mapping is UNCLASSIFIED_TOOL or not mapping.capability_id

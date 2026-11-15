@@ -98,6 +98,26 @@ describe('the annotation is the tool binding record', () => {
     expect(entry.recorded_by).toMatchObject({ name: LAYER_NAME, version: STANDARD_VERSION });
     expect(entry.recorded_by?.config_sha256).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  it('digests the checkpoint maximum age, which decides F501, with the annotation', async () => {
+    const digestWith = async (checkpoint_max_age_ms?: number) => {
+      const tool = groundedTool({
+        name: 'look',
+        capability: 'observe',
+        description: 'x',
+        args,
+        ...(checkpoint_max_age_ms !== undefined ? { checkpoint_max_age_ms } : {}),
+        execute: async () => ({ observation: true, evidence_anchors: [], confidence: 1 }),
+      });
+      const t = memoryThread();
+      await tool.execute(t.state, {});
+      return (await readTrace(t.state)).at(-1)!.recorded_by?.config_sha256;
+    };
+    const fiveMinutes = await digestWith(5 * 60 * 1000);
+    expect(fiveMinutes).toMatch(/^[0-9a-f]{64}$/);
+    expect(fiveMinutes).not.toBe(await digestWith());
+    expect(await digestWith()).toBe(await digestWith(10 * 60 * 1000));
+  });
 });
 
 describe('failure of the layer', () => {

@@ -266,14 +266,14 @@ Deployments SHOULD:
 title: Where the hooks run
 ---
 flowchart TB
-  accDescr: Before a tool runs, pretooluse_require_checkpoint classifies the call, blocks a gated call without a checkpoint, uses the checkpoint up and asks for approval; after it runs, posttooluse_log_tool adds to the audit trail and posttooluse_take_checkpoint writes the marker after a successful git stash create; when a turn ends, stop_end_checkpoints removes the marker.
+  accDescr: Before a tool runs, pretooluse_require_checkpoint classifies the call, blocks a gated call without a checkpoint, uses the checkpoint up and asks for approval; after it runs, posttooluse_log_tool adds to the audit trail and posttooluse_take_checkpoint writes the marker after a successful git stash create; when a turn ends, stop_end_checkpoints ends the marker's validity and files it with the history a rollback reads.
   call[Tool call] --> hook[pretooluse_require_checkpoint]
   hook --> pre{"Gated, and no valid checkpoint?"}
   pre -->|yes| block["Blocked: F501"]
   pre -->|no| ask["Marker used up; ask: F502"]
   ask --> run[Tool runs]
   run --> post["PostToolUse: posttooluse_log_tool logs the call; posttooluse_take_checkpoint writes the marker after git stash create"]
-  post --> stop["Stop, when the turn ends: stop_end_checkpoints removes the marker"]
+  post --> stop["Stop, when the turn ends: stop_end_checkpoints files the marker under ended/"]
 ```
 
 ### 5.1 Pre-Tool Use Hooks
@@ -282,7 +282,7 @@ flowchart TB
 |------|-------------------|
 | `pretooluse_require_checkpoint.sh` | Classifies the call; one checkpoint per gated call; approval; rollback history |
 
-The hook reads Claude Code's JSON payload only: a payload that is not a JSON object with a tool name, or a system without `jq`, is blocked with `R407 SAFETY_CHECK_FAILED:`. It classifies the call by its effect (STANDARD 1.2.0 §5.18.3): `Write`, `Edit`, `MultiEdit` and `NotebookEdit` are `mutate`; a `Bash` command is read as one simple command, and a command on a read-only list that is a subset of the SDK mapper's needs nothing, `git stash create` takes a checkpoint, `git stash list` and `git stash show` only read, `git stash pop <commit>` and `git stash apply <commit>` are `rollback` when `<commit>` is the full id of a commit a checkpoint marker recorded (git applies any merge commit as if it were a stash, so any other restore is `mutate`), and anything else, a line of several commands included, is `mutate`. A `mutate` call needs a valid checkpoint marker (`.claude/checkpoint.ok`, F501: whole-second times of at most 12 digits, taken no later than now and valid for at most 30 minutes) and uses it up: one rename moves it into `.claude/checkpoints/used/`, so each gated call needs its own. It is then asked for approval (`permissionDecision: "ask"` with an `F502 APPROVAL_REQUIRED:` reason) in the permission modes `default`, `acceptEdits` and `plan`, and blocked with F502 in the others, with the marker left in place; `ACS_HOOK_APPROVAL=off` leaves approval to Claude Code's permission rules. A `rollback` call restores a checkpoint the project recorded, so one was taken, and uses none. A failure of the hook itself blocks the call with R407. The reason always opens with the code and name of the refusal. The §5.3 example keeps exit code 2.
+The hook reads Claude Code's JSON payload only: a payload that is not a JSON object with a tool name, or a system without `jq`, is blocked with `R407 SAFETY_CHECK_FAILED:`. It classifies the call by its effect (STANDARD 1.2.0 §5.18.3): `Write`, `Edit`, `MultiEdit` and `NotebookEdit` are `mutate`; a `Bash` command is read as one simple command, and a command on a read-only list that is a subset of the SDK mapper's needs nothing, `git stash create` takes a checkpoint, `git stash list` and `git stash show` only read, `git stash pop <commit>` and `git stash apply <commit>` are `rollback` when `<commit>` is the full id of a commit a checkpoint marker recorded (git applies any merge commit as if it were a stash, so any other restore is `mutate`), and anything else, a line of several commands included, is `mutate`. A `mutate` call needs a valid checkpoint marker (`.claude/checkpoint.ok`, F501: whole-second times of at most 12 digits, taken no later than now and valid for at most 30 minutes) and uses it up: one rename moves it into `.claude/checkpoints/used/`, so each gated call needs its own. It is then asked for approval (`permissionDecision: "ask"` with an `F502 APPROVAL_REQUIRED:` reason) in the permission modes `default`, `acceptEdits` and `plan`, and blocked with F502 in the others, with the marker left in place; `ACS_HOOK_APPROVAL=off` leaves approval to Claude Code's permission rules. A `rollback` call restores a checkpoint the project recorded (the marker, or one filed under `.claude/checkpoints/used/` or `ended/`), so one was taken, and uses none. A failure of the hook itself blocks the call with R407. The reason always opens with the code and name of the refusal. The §5.3 example keeps exit code 2.
 
 ### 5.2 Post-Tool Use Hooks
 
@@ -290,11 +290,11 @@ The hook reads Claude Code's JSON payload only: a payload that is not a JSON obj
 |------|-------------------|
 | `posttooluse_log_tool.sh` | Logs every tool call to the audit trail |
 | `posttooluse_take_checkpoint.sh` | Writes the checkpoint marker after a successful `git stash create` |
-| `stop_end_checkpoints.sh` (Stop) | Removes the marker when a turn ends: an execution boundary |
+| `stop_end_checkpoints.sh` (Stop) | Ends the marker's validity when a turn ends (an execution boundary), filing it under `.claude/checkpoints/ended/` |
 
 The log hook runs after every tool call, whether the call succeeded (`PostToolUse`) or failed (`PostToolUseFailure`), and appends one line to `.claude/audit.log`: the time, the event, the tool name, the skill name on a `Skill` call, a SHA-256 digest of the tool input, and `recorded_by`, the layer and its configuration (STANDARD 1.2.0 §5.18.8): the plugin's version, `config_sha256` (the SHA-256 of `hooks/hooks.json`) and `settings`, the effective values of the two environment settings that change the hooks' decisions (`approval`: `ask`, or `off` with `ACS_HOOK_APPROVAL=off`; `checkpoint_max_age_s`: `ACS_CHECKPOINT_MAX_AGE`, at most 1800). The tool input itself is not written, because a command, a file's content or a skill's arguments can hold a credential; a reader who holds an input can confirm it against the digest. A call that a pre-tool-use hook or a permission rule refused did not run and has no line. The lines form an HMAC chain that `tools/verify_audit_log.py` checks.
 
-The checkpoint hook writes `.claude/checkpoint.ok` after a `git stash create` that succeeded: the call that saves the state takes the checkpoint (§5.18.6). Its expiry is `ACS_CHECKPOINT_MAX_AGE` seconds, at most 1800 (30 minutes, the Standard's cap). The Stop hook removes the marker when a turn ends and keeps `.claude/checkpoints/used/`, the history a rollback reads.
+The checkpoint hook writes `.claude/checkpoint.ok` after a `git stash create` that succeeded: the call that saves the state takes the checkpoint (§5.18.6). Its expiry is `ACS_CHECKPOINT_MAX_AGE` seconds, at most 1800 (30 minutes, the Standard's cap). A newer marker replaces it, and the Stop hook ends its validity when a turn ends; either way it is filed under `.claude/checkpoints/ended/`, and an expired marker the pre-tool-use hook meets is filed there too. With `.claude/checkpoints/used/`, which holds the markers calls used, that is the history a rollback reads: a checkpoint can be restored valid or not (§5.18.6).
 
 ### 5.3 Adding Security Hooks
 
@@ -342,15 +342,15 @@ The Standard states the checks of the capabilities host-neutrally (STANDARD 1.2.
 | `skills/persist/SKILL.md`, PostToolUse command hook on `Edit` | Log the call | §5.18.8 records | Code: records |
 | `skills/rollback/SKILL.md`, prompt hook on `Bash` | Checkpoint exists and is valid; not expired | Removed from the prompt: §5.18.10 `rollback` row (F503); an expired or used checkpoint can be restored (§5.2.2) | Code: the safety layer |
 | `skills/rollback/SKILL.md`, prompt hook on `Bash` | Current state captured; scope matches; no conflicting operation; integrity verified; no loss beyond scope; uncommitted changes not overwritten | Model-judged addition, not required | A model judges |
-| `skills/rollback/SKILL.md`, command hook on `Bash` | `git stash pop` or `git stash apply` when the repository has no stash | §5.18.10 `rollback` row (F503), host-specific form | Code: blocks the call |
+| `skills/rollback/SKILL.md`, command hook on `Bash` | A `git stash pop` or `git stash apply` whose one argument is not the full id of a commit a checkpoint marker of the project recorded (the marker, or one under `.claude/checkpoints/used/` or `ended/`) | §5.18.10 `rollback` row (F503), host-specific form: in this skill a restore must be of a checkpoint taken in the project, valid or not; the plugin's pre-tool-use hook counts the same restore as `rollback` and any other as a gated `mutate` | Code: blocks the call with `F503 ROLLBACK_FAILED:` |
 | `skills/rollback/SKILL.md`, PostToolUse command hook on `Bash` | Log the call | §5.18.8 records | Code: records |
 | `skills/send/SKILL.md`, prompt hook on `Bash` | Destination on the allowlist | §5.18.10 `send` destination row (§4.4.2, F504) where a policy is in force; a model-judged addition only where none is | Code (policy), else a model |
 | `skills/send/SKILL.md`, prompt hook on `Bash` | No sensitive data in the payload | Model-judged addition, not required | A model judges |
 | `skills/send/SKILL.md`, prompt hook on `Bash` | User approved; checkpoint exists; rate limits | Removed from the prompt: §5.18.10 `mutate`, `send` row (F502, F501) and a host policy (F504, §5.18.8) | Code: the safety layer |
-| `skills/send/SKILL.md`, command hook on `Bash` | A `curl`, `wget` or `http` command names as a host `localhost` (in any case), `127.0.0.1` or a private IPv4 address (`10.x.x.x`, `172.16.x.x` to `172.31.x.x`, `192.168.x.x`) | §5.18.10 `send` destination row, host-specific narrowing | Code: blocks the call |
+| `skills/send/SKILL.md`, command hook on `Bash` | A `curl`, `wget` or `http` command names as a host `localhost` (in any case), `127.0.0.1` or a private IPv4 address (`10.x.x.x`, `172.16.x.x` to `172.31.x.x`, `192.168.x.x`) | §5.18.10 `send` destination row, host-specific narrowing | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
 | `skills/send/SKILL.md`, PostToolUse command hook on `Bash` | Log the call | §5.18.8 records | Code: records |
 | `skills/transform/SKILL.md`, prompt hook on `Read` (removed after its first successful run) | Source exists, is readable, format understood | Model-judged addition, not required | A model judges |
-| `skills/transform/SKILL.md`, prompt hook on `Read` | No sensitive data exposed by the transformation | §5.18.10 `transform` row (a secret is redacted where the output is recorded, §6.7); personal data: a model-judged addition | Code (redaction), plus a model |
+| `skills/transform/SKILL.md`, prompt hook on `Read` | No sensitive data exposed by the transformation | §5.18.10 `transform` row (a secret is redacted where the output is recorded, §6.7): a check the Standard requires of code, which a layer applying §6.7 makes; personal data: a model-judged addition | A model judges; code where a layer applies §6.7 |
 | `skills/transform/SKILL.md`, prompt hook on `Read` | The transformation is logged | §5.18.8 records | Code: the layer records every call |
 | `skills/transform/SKILL.md`, PostToolUse command hook on `Read` | Log the call | §5.18.8 records | Code: records |
 
@@ -362,8 +362,8 @@ The plugin's own hooks implement these rows for the calls they see:
 | `hooks/pretooluse_require_checkpoint.sh` | Approval asked in modes that reach a person; blocked in others | §5.18.7 (F502) | Code: asks or blocks |
 | `hooks/pretooluse_require_checkpoint.sh` | A rollback restores a checkpoint a marker of the project recorded; any other restore is a `mutate` | §5.18.3, §5.18.6 | Code: classifies the call |
 | `hooks/pretooluse_require_checkpoint.sh` | A failure of the hook blocks the call | §5.18.8 (R407) | Code: blocks the call |
-| `hooks/posttooluse_take_checkpoint.sh` | The marker is written by a successful `git stash create` | §5.18.6 | Code: records |
-| `hooks/stop_end_checkpoints.sh` | The marker is removed when a turn ends | §5.18.6 (execution boundary) | Code: records |
+| `hooks/posttooluse_take_checkpoint.sh` | The marker is written by a successful `git stash create`; a marker it replaces is filed under `.claude/checkpoints/ended/` | §5.18.6 | Code: records |
+| `hooks/stop_end_checkpoints.sh` | The marker's validity ends when a turn ends: it is filed under `.claude/checkpoints/ended/`, where a rollback can still restore its commit | §5.18.6 (execution boundary) | Code: records |
 | `hooks/posttooluse_log_tool.sh` | Every tool call that ran is logged, with a digest in place of its input and the configuration that decided it | §5.18.8 records | Code: records, cannot block |
 
 Three consequences follow:
@@ -383,7 +383,7 @@ The plugin's hooks apply the rules of STANDARD 1.2.0 §5.18 where Claude Code le
 - Only five tools are routed to the pre-tool-use hook (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`); every other tool, MCP tools included, is not checked.
 - The main agent and its subagents share one marker.
 
-The Python SDK adapter (`grounded_agency.GroundedAgentAdapter`) and the Standard Agents binding (`examples/standard_agents/`) claim class SL. Their conformance statements are `tests/conformance/calls/statements/grounded_agency_adapter.json` and `tests/conformance/calls/statements/standard_agents_binding.json`, and they pass the binding and call-sequence fixtures their statements' features cover ([CONFORMANCE.md](CONFORMANCE.md#safety-layer-conformance-class-sl)).
+The Python SDK adapter (`grounded_agency.GroundedAgentAdapter`) and the Standard Agents binding (`examples/standard_agents/`) implement §5.18 and meet §10.4 except the §5.18.10 rows their conformance statements list as not applied (the secret checks and redaction of §6.7, the destination policy of §4.4.2 and, for the adapter, the output contract of a tool's result); they claim class SL once those are applied. Their conformance statements are `tests/conformance/calls/statements/grounded_agency_adapter.json` and `tests/conformance/calls/statements/standard_agents_binding.json`, and they pass the binding and call-sequence fixtures their statements' features cover ([CONFORMANCE.md](CONFORMANCE.md#safety-layer-conformance-class-sl)).
 
 ---
 

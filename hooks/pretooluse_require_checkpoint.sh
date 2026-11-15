@@ -27,10 +27,11 @@
 #       - git stash create: checkpoint (allowed; posttooluse_take_checkpoint.sh
 #         writes the marker once it succeeded); git stash list|show: observe;
 #         git stash pop|apply <commit>: rollback when <commit> is the full id
-#         of a commit a checkpoint marker recorded (the marker, or one under
-#         .claude/checkpoints/used/); any other pop or apply, a bare one
-#         included, is mutate, since git applies any merge commit as if it
-#         were a stash; any other git stash form: mutate;
+#         of a commit a checkpoint marker recorded (the marker, or one filed
+#         under .claude/checkpoints/used/ or .claude/checkpoints/ended/); any
+#         other pop or apply, a bare one included, is mutate, since git
+#         applies any merge commit as if it were a stash; any other git stash
+#         form: mutate;
 #       - a command on READ_ONLY: observe (allowed, nothing used);
 #       - anything else: mutate.
 #
@@ -43,7 +44,9 @@
 #     have times that are whole seconds of at most 12 digits, a created_at
 #     not in the future and an expires_at at most 1800 seconds (30 minutes,
 #     the Standard's cap) after it, and not have expired (F501
-#     CHECKPOINT_REQUIRED). Unless ACS_HOOK_APPROVAL is
+#     CHECKPOINT_REQUIRED; an expired marker is filed under
+#     .claude/checkpoints/ended/, so its commit can still be restored, and a
+#     malformed one is removed). Unless ACS_HOOK_APPROVAL is
 #     "off", the permission mode must be one that puts the call to a person,
 #     default, acceptEdits or plan (F502 APPROVAL_REQUIRED otherwise, with the
 #     marker left in place). Then the call takes the marker: it is renamed
@@ -179,12 +182,16 @@ else
 fi
 marker="${claude_dir}/checkpoint.ok"
 used_dir="${claude_dir}/checkpoints/used"
+# Markers whose validity ended unused (expired, the turn ended, or a newer
+# checkpoint replaced them): history a rollback reads, like used/.
+ended_dir="${claude_dir}/checkpoints/ended"
 
-# Whether a checkpoint marker of this project, the current one or one under
-# used/, recorded the commit $1 as its restore point (its "commit").
+# Whether a checkpoint marker of this project, the current one or one filed
+# under used/ or ended/, recorded the commit $1 as its restore point (its
+# "commit"). A checkpoint can be restored valid or not (§5.18.6).
 recorded_commit() {
   local file
-  for file in "$marker" "$used_dir"/*; do
+  for file in "$marker" "$used_dir"/* "$ended_dir"/*; do
     if [ -f "$file" ] && [ ! -L "$file" ] \
       && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$file" 2>/dev/null)" = "$1" ]; then
       return 0
@@ -256,7 +263,12 @@ if ((created_at > now || expires_at > created_at + 1800)); then
   f501 "checkpoint marker's times are not possible: taken in the future, or valid for more than 30 minutes (STANDARD 1.2.0 §5.18.6). Take a new checkpoint."
 fi
 if ((now > expires_at)); then
-  rm -f "$marker"
+  # Its validity has ended, not its record: file it under ended/, so that a
+  # rollback can still restore its commit. Removed only if that fails.
+  mkdir -p "$ended_dir" 2>/dev/null || true
+  if ! { ended=$(mktemp "${ended_dir}/expired.XXXXXX" 2>/dev/null) && mv -f "$marker" "$ended" 2>/dev/null; }; then
+    rm -f "$marker" "${ended:-}" 2>/dev/null || true
+  fi
   f501 "checkpoint has expired. Take a new checkpoint."
 fi
 

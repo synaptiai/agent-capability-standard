@@ -68,7 +68,7 @@ def test_the_statement_matches_the_adapter() -> None:
 
 
 def test_there_are_fixtures() -> None:
-    assert len(CASES) == 21
+    assert len(CASES) == 23
 
 
 class _Runner:

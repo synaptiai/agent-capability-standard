@@ -8,17 +8,19 @@ These hooks directly implement capabilities defined in the standard's VERIFY lay
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `pretooluse_require_checkpoint.sh` | PreToolUse (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) | Classify the call; one checkpoint marker per gated call; ask for approval; refuse a rollback with no checkpoint history |
-| `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Write the checkpoint marker after a successful `git stash create` |
-| `stop_end_checkpoints.sh` | Stop | Remove the marker: the end of a turn is an execution boundary |
+| `pretooluse_require_checkpoint.sh` | PreToolUse (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) | Classify the call; one checkpoint marker per gated call; ask for approval; let a restore of a recorded checkpoint run as a rollback |
+| `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Write the checkpoint marker after a successful `git stash create`, filing a marker it replaces under `.claude/checkpoints/ended/` |
+| `stop_end_checkpoints.sh` | Stop | End the marker's validity, filing it under `.claude/checkpoints/ended/`: the end of a turn is an execution boundary |
 | `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure (every tool) | Log every tool call for audit trail and provenance, with the configuration that decided it |
 
 The hooks apply the rules of
 [STANDARD 1.2.0 §5.18](../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)
 where Claude Code lets them, and do not claim the safety-layer class SL
 ([SECURITY.md §5.5](../spec/SECURITY.md#55-hooks-and-the-safety-layer-class)
-says why). The Python SDK adapter and the Standard Agents binding claim it,
-with the conformance statements in `tests/conformance/calls/statements/`.
+says why). The Python SDK adapter and the Standard Agents binding meet it
+except the §5.18.10 checks their conformance statements
+(`tests/conformance/calls/statements/`) list as not applied, and claim it
+once those are applied.
 
 ## How Hooks Work
 
@@ -162,16 +164,18 @@ table equal to it):
 Then:
 
 - **Rollback** (`git stash pop|apply <commit>`): allowed when the marker,
-  or a marker filed under `.claude/checkpoints/used/`, recorded `<commit>` as
-  its `commit`, so the checkpoint was taken in the project. It uses no
-  checkpoint: an expired or used one can still be restored. Restoring
-  anything else is a `mutate`.
+  or a marker filed under `.claude/checkpoints/used/` or
+  `.claude/checkpoints/ended/`, recorded `<commit>` as its `commit`, so the
+  checkpoint was taken in the project. It uses no checkpoint: one that was
+  used, expired, ended with its turn or was replaced can still be restored.
+  Restoring anything else is a `mutate`.
 - **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
   file (not a symlink, SEC-006), be a JSON object with a `checkpoint_id`, a
   `created_at` and an `expires_at` in whole seconds of at most 12 digits, the
   first not in the future and the second at most 1800 seconds (30 minutes)
   after it, and not have expired (SEC-001); otherwise the call is blocked
-  with `F501 CHECKPOINT_REQUIRED:` and the marker is removed. Unless `ACS_HOOK_APPROVAL=off`,
+  with `F501 CHECKPOINT_REQUIRED:`, an expired marker is filed under
+  `.claude/checkpoints/ended/` and a malformed one is removed. Unless `ACS_HOOK_APPROVAL=off`,
   the permission mode must put the call to a person (`default`,
   `acceptEdits` or `plan`); in any other mode the call is blocked with `F502
   APPROVAL_REQUIRED:` and the marker is left in place. The call then **uses
@@ -189,15 +193,18 @@ create` that succeeded (the call that saves the state takes the checkpoint,
 §5.18.6), and by `CheckpointTracker(marker_dir=".claude")` in the Python SDK.
 Its expiry is `ACS_CHECKPOINT_MAX_AGE` seconds when that is an integer from 1
 to 1800, else 1800 (the Standard caps a checkpoint's maximum age at 30
-minutes). `stop_end_checkpoints.sh` removes it when a turn ends: the end of a
-turn is an execution boundary. Each gated call needs its own checkpoint.
+minutes). A new marker replaces the old one, which is filed under
+`.claude/checkpoints/ended/`. `stop_end_checkpoints.sh` files the marker
+there when a turn ends: the end of a turn is an execution boundary. Each
+gated call needs its own checkpoint; every marker filed under `used/` or
+`ended/` stays the record of a checkpoint taken, which a rollback reads.
 
 ```mermaid
 ---
 title: One checkpoint per gated call
 ---
 flowchart TB
-  accDescr: A successful git stash create writes the marker; a gated call that finds a valid marker in a mode that reaches a person moves it into the used directory and asks for approval; without a valid marker it is blocked with F501; the end of a turn removes the marker.
+  accDescr: A successful git stash create writes the marker; a gated call that finds a valid marker in a mode that reaches a person moves it into the used directory and asks for approval; without a valid marker it is blocked with F501; the end of a turn files the marker under the ended directory, where a rollback can still restore its commit.
   s["git stash create succeeds"] -->|writes| m[".claude/checkpoint.ok"]
   c["A gated call"] --> q{"Valid marker?"}
   m -.-> q
@@ -206,7 +213,7 @@ flowchart TB
   mode -->|no| f502["Blocked: F502"]
   mode -->|yes| used["Marker moved to used/"]
   used --> ask["ask: the person decides"]
-  stop["The turn ends"] -->|removes| m
+  stop["The turn ends"] -->|"files under ended/"| m
 ```
 
 The marker file holds a JSON object. `checkpoint_id`, `created_at` and
@@ -291,7 +298,10 @@ Standard requires (approval, the checkpoint, rollback history, the
 destination policy, secrets) is decided by code (STANDARD 1.2.0 §5.18.10).
 [SECURITY.md §5.4](../spec/SECURITY.md#54-checks-enforced-by-code-and-checks-a-model-judges)
 maps every condition of the skills' hooks to the Standard's checks or marks
-it a model-judged addition.
+it a model-judged addition. The rollback skill's command hook reads the
+same markers as the hook here: a `git stash pop` or `git stash apply` that
+does not name a commit a marker recorded (the marker, `used/` or `ended/`)
+restores no checkpoint and is blocked with `F503 ROLLBACK_FAILED:`.
 
 ## Relationship to Spec
 
